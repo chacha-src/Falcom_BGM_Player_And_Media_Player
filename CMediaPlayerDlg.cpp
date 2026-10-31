@@ -14177,19 +14177,19 @@ void CMpCheatSheetDlg::OnPaint()
 	y += titleLh;
 	muted(L, y, LL14(
 		L"らいら向け再生画面。バナー・リスト・歌詞・連携ツールの全体像です。キャプション右の ? からも開けます。",
-		L"Laira playback screen. Overview of banner, list, lyrics, linked tools. Also from caption ?.",
-		L"Écran Laira. Aperçu bannière, liste, paroles, outils. Aussi via ? de la légende.",
-		L"Schermata Laira. Panoramica banner, lista, testi, strumenti. Anche da ? didascalia.",
-		L"Pantalla Laira. Resumen banner, lista, letras, herramientas. También desde ? del título.",
+		L"Raira playback screen. Overview of banner, list, lyrics, linked tools. Also from caption ?.",
+		L"Écran Raira. Aperçu bannière, liste, paroles, outils. Aussi via ? de la légende.",
+		L"Schermata Raira. Panoramica banner, lista, testi, strumenti. Anche da ? didascalia.",
+		L"Pantalla Raira. Resumen banner, lista, letras, herramientas. También desde ? del título.",
 		L"라이라 재생 화면. 배너·목록·가사·연동 도구 개요. 캡션 ? 로도 열립니다.",
-		L"面向らいら的播放界面。横幅、列表、歌词与联动工具总览。也可从标题栏 ? 打开。",
-		L"شاشة Laira. نظرة على البانر والقائمة والكلمات والأدوات. أيضاً من ? الشريط.",
-		L"Экран Laira. Обзор баннера, списка, текста и окон. Также с ? в заголовке.",
-		L"Laira-Fenster. Ueberblick Banner, Liste, Text, Tools. Auch per ? in der Titelleiste.",
-		L"Tela Laira. Visão de banner, lista, letras e ferramentas. Também pelo ? da legenda.",
-		L"Laira-scherm. Overzicht banner, lijst, tekst, tools. Ook via ? in de titel.",
-		L"Ekran Laira. Przegląd banera, listy, tekstu i narzędzi. Też z ? na belce.",
-		L"Laira ekranı. Banner, liste, söz ve araçların özeti. Başlıktaki ? ile de açılır."));
+		L"面向莱拉的播放界面。横幅、列表、歌词与联动工具总览。也可从标题栏 ? 打开。",
+		L"شاشة رايرا. نظرة على البانر والقائمة والكلمات والأدوات. أيضاً من ? الشريط.",
+		L"Экран Райра. Обзор баннера, списка, текста и окон. Также с ? в заголовке.",
+		L"Raira-Fenster. Überblick Banner, Liste, Text, Tools. Auch per ? in der Titelleiste.",
+		L"Tela Raira. Visão de banner, lista, letras e ferramentas. Também pelo ? da legenda.",
+		L"Raira-scherm. Overzicht banner, lijst, tekst, tools. Ook via ? in de titel.",
+		L"Ekran Raira. Przegląd banera, listy, tekstu i narzędzi. Też z ? na belce.",
+		L"Raira ekranı. Banner, liste, söz ve araçların özeti. Başlıktaki ? ile de açılır."));
 	y += lh + 3;
 	y = CCC_GdiHelpDrawSoftDemoPair(dc, L, y, rc.Width() - L * 2, min(140, max(112, rc.Height() / 5)),
 		CCC_HELPDEMO_KSPECTRUM);

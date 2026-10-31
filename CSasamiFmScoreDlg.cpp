@@ -341,7 +341,7 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	m_ch.SetCurSel(0);
 	m_edVel.SetWindowText(L"100");
 	m_status.SetWindowText(LL14(
-		L"FM譜面: 音符で入力。Voice=@neiro/@CVn/カスタム。Tone行に音色表示。",
+		L"音符で入力。1〜7で長さ。Spaceで再生。音色はTone行。",
 		L"FM score: Notes tool to enter. Voice=@neiro/@CVn/custom. Tone row shows timbre.",
 		L"Partition FM: crayon. Voice=@neiro/perso. Ligne Tone = timbre.",
 		L"Partitura FM: matita. Voice=@neiro/custom. Riga Tone = timbro.",
@@ -539,6 +539,26 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
+		return;
+	}
+	if (!ctrl && ScStaffTryDurationKey(&m_ui, nChar)) {
+		m_placeRest = m_ui.placeRest;
+		UpdateNoteCursor();
+		UpdateHelpBar();
+		wchar_t st[96];
+		ScStaffFormatDurationStatus(st, 96, &m_ui);
+		m_status.SetWindowText(st);
+		InvalidateRect(m_gridRc, FALSE);
+		return;
+	}
+	if (!ctrl && (nChar == VK_LEFT || nChar == VK_RIGHT || nChar == VK_UP || nChar == VK_DOWN)) {
+		const int px = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+		if (nChar == VK_LEFT) m_ui.scrollX -= px;
+		else if (nChar == VK_RIGHT) m_ui.scrollX += px;
+		else if (nChar == VK_UP) m_ui.scrollY -= 48;
+		else m_ui.scrollY += 48;
+		UpdateScrollBars();
+		InvalidateRect(m_bodyRc, FALSE);
 		return;
 	}
 	if (!ctrl && (nChar == 'Q' || nChar == 'q')) {
@@ -758,7 +778,8 @@ BOOL CSasamiFmScoreDlg::PreTranslateMessage(MSG* pMsg)
 			|| pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT);
 		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME
 			|| (!ctrlNow && (pMsg->wParam == 'Q' || pMsg->wParam == 'q'))
-			|| (ctrlNow && arrow)) {
+			|| (ctrlNow && arrow)
+			|| ScStaffWantsScoreKey((UINT)pMsg->wParam, ctrlNow)) {
 			CWnd* f = GetFocus();
 			wchar_t cls[16] = {};
 			if (f) ::GetClassNameW(f->GetSafeHwnd(), cls, 16);
@@ -1170,21 +1191,21 @@ void CSasamiFmScoreDlg::OnPaint()
 		CRect er; m_edNote.GetWindowRect(&er); ScreenToClient(&er);
 		{
 			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
-			dc.DrawText(L"音", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.DrawText(LL14(L"音", L"Note", L"Note", L"Nota", L"Nota", L"음", L"音", L"نغمة", L"Нота", L"Note", L"Nota", L"Noot", L"Nuta", L"Nota"), lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
 	}
 	if (m_edGt.GetSafeHwnd()) {
 		CRect er; m_edGt.GetWindowRect(&er); ScreenToClient(&er);
 		{
 			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
-			dc.DrawText(L"長さ", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.DrawText(LL14(L"長さ", L"Gate", L"Durée", L"Durata", L"Duración", L"길이", L"长度", L"مدة", L"Длина", L"Länge", L"Duração", L"Duur", L"Długość", L"Süre"), lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
 	}
 	if (m_edVel.GetSafeHwnd()) {
 		CRect er; m_edVel.GetWindowRect(&er); ScreenToClient(&er);
 		{
 			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
-			dc.DrawText(L"音量", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.DrawText(LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol", L"음량", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Głośn.", L"Ses"), lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
 	}
 	dc.SelectObject(oldLab);
@@ -3091,21 +3112,22 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 				const int ei = delMarks[di];
 				if (ei < 0 || ei >= m_doc.evCount) continue;
 				const ScEvent& e = m_doc.ev[ei];
+				const wchar_t* del = LL14(L"削除", L"Delete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Apagar", L"Verwijderen", L"Usuń", L"Sil");
 				CString lab;
 				if (e.kind == SC_EV_FM_LOOP_START)
-					lab.Format(L"削除 |:%u", (unsigned)(e.a ? e.a : 2));
+					lab.Format(L"%s |:%u", del, (unsigned)(e.a ? e.a : 2));
 				else if (e.kind == SC_EV_FM_LOOP_END)
-					lab = L"削除 :|";
+					lab.Format(L"%s :|", del);
 				else if (e.kind == SC_EV_OTTAVA)
-					lab.Format(L"削除 %s", ScStaffOttavaLabel((int)(int8_t)e.a));
+					lab.Format(L"%s %s", del, ScStaffOttavaLabel((int)(int8_t)e.a));
 				else if (e.kind == SC_EV_OTTAVA_END)
-					lab = L"削除 loco";
+					lab.Format(L"%s loco", del);
 				else if (e.kind == SC_EV_JUMP_MARK)
-					lab = L"削除 Q";
+					lab.Format(L"%s Q", del);
 				else if (e.kind == SC_EV_FM_JUMP)
-					lab = L"削除 J";
+					lab.Format(L"%s J", del);
 				else
-					lab.Format(L"削除 #%d", di + 1);
+					lab.Format(L"%s #%d", del, di + 1);
 				menu.AddCommand(9100 + di, lab);
 			}
 			menu.AddCommand(9120, LL14(

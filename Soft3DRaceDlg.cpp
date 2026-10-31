@@ -2,6 +2,7 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DRaceDlg.h"
+#include "UpdateCheck.h"
 #include "Soft3DMazeDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "CCustomPopupMenu.h"
@@ -8840,6 +8841,7 @@ void OpenSoft3DRaceModeless(CWnd* p)
 {
 	CloseSoft3DMazeIfOpen();
 	if (g_s3r && g_s3r->GetSafeHwnd()) { g_s3r->SetForegroundWindow(); return; }
+	if (!EnsureBonusImages(1)) return;
 	g_s3r = new CSoft3DRaceDlg(p);
 	if (!g_s3r->Create(IDD_SOFT3DRACE, p)) { delete g_s3r; g_s3r = NULL; return; }
 	g_s3r->ShowWindow(SW_SHOW);

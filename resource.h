@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
 #define IDOK2                           2
@@ -2369,6 +2369,26 @@
 #define IDR_CSO_TAC_CSSOFTW             4957
 #define IDR_CSO_TAC_CSHAIR              4958
 #define IDR_CSO_TAC_CSHAIRW             4959
+#define IDR_TAC_PH0                     4970
+#define IDR_TAC_PH1                     4971
+#define IDR_TAC_PH2                     4972
+#define IDR_TAC_PH3                     4973
+#define IDR_TAC_PH4                     4974
+#define IDR_TAC_PH5                     4975
+#define IDR_TAC_PH6                     4976
+#define IDR_TAC_PH7                     4977
+#define IDR_TAC_PH8                     4978
+#define IDR_TAC_PH9                     4979
+#define IDR_TAC_PH10                    4980
+#define IDR_TAC_PH11                    4981
+#define IDR_TAC_PH12                    4982
+#define IDR_TAC_PH13                    4983
+#define IDR_TAC_PH14                    4984
+#define IDR_TAC_PH15                    4985
+#define IDR_TAC_PH16                    4986
+#define IDR_TAC_PH17                    4987
+#define IDR_TAC_PH18                    4988
+#define IDR_TAC_PH19                    4989
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED

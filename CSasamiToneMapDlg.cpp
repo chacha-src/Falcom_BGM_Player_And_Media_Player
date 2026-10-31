@@ -102,10 +102,10 @@ END_MESSAGE_MAP()
 BOOL CSasamiToneMapDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
-	SetWindowText(L"トーンマップ");
-	m_ok.SetWindowText(L"決定");
-	m_cancel.SetWindowText(L"キャンセル");
-	m_editor.SetWindowText(L"設定画面");
+	SetWindowText(LL14(L"トーンマップ", L"Tone map", L"Table de sons", L"Mappa timbri", L"Mapa de tonos", L"톤 맵", L"音色表", L"خريطة النغمات", L"Карта тембров", L"Klangzuordnung", L"Mapa de timbres", L"Toonkaart", L"Mapa brzmień", L"Ton haritası"));
+	m_ok.SetWindowText(LL14(L"決定", L"OK", L"OK", L"OK", L"Aceptar", L"결정", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
+	m_cancel.SetWindowText(LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
+	m_editor.SetWindowText(LL14(L"設定画面", L"Settings", L"Réglages", L"Impostazioni", L"Ajustes", L"설정 화면", L"设置画面", L"الإعدادات", L"Настройки", L"Einstellungen", L"Ajustes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
 	m_vst3.SetWindowText(L"VST3…");
 	m_lblMap.SetWindowText(L"Map");
 	m_lblMsb.SetWindowText(L"MSB");
@@ -178,8 +178,36 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 	RebuildGrid();
 	CString h;
 	h.Format(m_isDrum
-		? L"パート %d（ドラム）\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。"
-		: L"パート %d\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。", m_part);
+		? LL14(
+			L"パート %d（ドラム）\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。",
+			L"Part %d (drums)\nClick to preview, double-click to apply. VST3… for a dedicated instrument.",
+			L"Partie %d (batterie)\nClic pour écouter, double-clic pour valider. VST3… pour un instrument dédié.",
+			L"Parte %d (batteria)\nClic per ascoltare, doppio clic per confermare. VST3… per uno strumento dedicato.",
+			L"Parte %d (batería)\nClic para oír, doble clic para aceptar. VST3… para un instrumento propio.",
+			L"파트 %d (드럼)\n클릭으로 미리듣기, 더블클릭으로 결정. VST3…로 전용 음원.",
+			L"声部 %d（鼓）\n单击试听，双击确定。VST3… 用于专用音源。",
+			L"الجزء %d (طبول)\nنقرة للمعاينة، نقرة مزدوجة للتأكيد. VST3… لآلة مخصصة.",
+			L"Партия %d (ударные)\nЩелчок — прослушать, двойной — принять. VST3… для своего инструмента.",
+			L"Part %d (Schlagzeug)\nKlick zum Hören, Doppelklick zum Übernehmen. VST3… für ein eigenes Instrument.",
+			L"Parte %d (bateria)\nClique para ouvir, duplo clique para aceitar. VST3… para um instrumento próprio.",
+			L"Deel %d (drums)\nKlik om te horen, dubbelklik om te kiezen. VST3… voor een eigen instrument.",
+			L"Partia %d (perkusja)\nKlik — odsłuch, podwójny — zatwierdź. VST3… dla własnego instrumentu.",
+			L"Parti %d (davul)\nTıkla dinle, çift tıkla onayla. VST3… özel çalgı için.")
+		: LL14(
+			L"パート %d\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。",
+			L"Part %d\nClick to preview, double-click to apply. VST3… for a dedicated instrument.",
+			L"Partie %d\nClic pour écouter, double-clic pour valider. VST3… pour un instrument dédié.",
+			L"Parte %d\nClic per ascoltare, doppio clic per confermare. VST3… per uno strumento dedicato.",
+			L"Parte %d\nClic para oír, doble clic para aceptar. VST3… para un instrumento propio.",
+			L"파트 %d\n클릭으로 미리듣기, 더블클릭으로 결정. VST3…로 전용 음원.",
+			L"声部 %d\n单击试听，双击确定。VST3… 用于专用音源。",
+			L"الجزء %d\nنقرة للمعاينة، نقرة مزدوجة للتأكيد. VST3… لآلة مخصصة.",
+			L"Партия %d\nЩелчок — прослушать, двойной — принять. VST3… для своего инструмента.",
+			L"Part %d\nKlick zum Hören, Doppelklick zum Übernehmen. VST3… für ein eigenes Instrument.",
+			L"Parte %d\nClique para ouvir, duplo clique para aceitar. VST3… para um instrumento próprio.",
+			L"Deel %d\nKlik om te horen, dubbelklik om te kiezen. VST3… voor een eigen instrument.",
+			L"Partia %d\nKlik — odsłuch, podwójny — zatwierdź. VST3… dla własnego instrumentu.",
+			L"Parti %d\nTıkla dinle, çift tıkla onayla. VST3… özel çalgı için."), m_part);
 	m_hint.SetWindowText(h);
 	CCC_BringDialogToForeground(this);
 	return TRUE;
@@ -485,8 +513,21 @@ void CSasamiToneMapDlg::OnBnClickedEditor()
 	VstLiveAuditionStop();
 	VstLiveEditorOpenAsync(m_part);
 	if (m_hint.GetSafeHwnd())
-		m_hint.SetWindowText(
-			L"エディタ内 MediaBay で音色選択 → 閉じて保存（一覧APIは使いません）");
+		m_hint.SetWindowText(LL14(
+			L"エディタ内 MediaBay で音色選択 → 閉じて保存（一覧APIは使いません）",
+			L"Pick a sound in the editor's MediaBay, then close to save (the list API is not used).",
+			L"Choisissez un son dans le MediaBay de l'éditeur, puis fermez pour enregistrer (pas d'API de liste).",
+			L"Scegli un suono nel MediaBay dell'editor, poi chiudi per salvare (niente API elenco).",
+			L"Elija un sonido en el MediaBay del editor y cierre para guardar (sin API de lista).",
+			L"편집기 MediaBay에서 음색을 고른 뒤 닫으면 저장됩니다(목록 API는 쓰지 않습니다).",
+			L"在编辑器的 MediaBay 里选音色，关闭即保存（不用列表 API）。",
+			L"اختر صوتاً في MediaBay داخل المحرر ثم أغلق للحفظ (بدون واجهة القائمة).",
+			L"Выберите тембр в MediaBay редактора и закройте, чтобы сохранить (API списка не используется).",
+			L"Klang im MediaBay des Editors wählen, dann schließen zum Speichern (keine Listen-API).",
+			L"Escolha um som no MediaBay do editor e feche para gravar (sem API de lista).",
+			L"Kies een klank in de MediaBay van de editor en sluit om op te slaan (geen lijst-API).",
+			L"Wybierz brzmienie w MediaBay edytora i zamknij, aby zapisać (bez API listy).",
+			L"Düzenleyicinin MediaBay'inde sesi seçin, kapatınca kaydolur (liste API'si yok)."));
 }
 
 void CSasamiToneMapDlg::OnBnClickedVst3()

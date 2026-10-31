@@ -707,6 +707,11 @@ int StoneCount() { return g_craft.stones; }
 void StoneAdd(int d) { g_craft.stones = Clampi(g_craft.stones + d, 0, kStoneMax); }
 bool BeadHave(int index) { return index >= 0 && index < CRAFT_N && g_craft.beadN[index] > 0; }
 int BeadCount(int index) { return (index < 0 || index >= CRAFT_N) ? 0 : g_craft.beadN[index]; }
+int BeadFree(int index)
+{
+	if (index < 0 || index >= CRAFT_N) return 0;
+	return max(0, (int)g_craft.beadN[index] - BeadInUse(index, NULL, -1));
+}
 // 通常は CP で 1〜4。奥義は解放順に 4 から増える。0 は通常。
 int CraftStoneCost(int index)
 {
@@ -761,13 +766,6 @@ bool BeadBuy(const SaveData& s, int index)
 bool BeadSell(int index)
 {
 	if (index < 0 || index >= CRAFT_N || g_craft.beadN[index] < 1) return false;
-	if (g_craft.beadN[index] <= BeadInUse(index, NULL, -1)) {
-		for (int i = 0; i < 128; i++) {
-			CraftRec& r = g_craft.rec[i];
-			if (!r.uid) continue;
-			for (int k = 0; k < CRAFT_SLOT_N; k++) if (r.bead[k] == (unsigned short)(index + 1)) { r.bead[k] = 0; i = 128; break; }
-		}
-	}
 	if (g_craft.beadN[index] <= BeadInUse(index, NULL, -1)) return false;
 	g_craft.beadN[index]--;
 	StoneAdd(max(1, CraftStoneCost(index) / 2));
@@ -777,6 +775,18 @@ bool BeadSell(int index)
 // ---------------- 装飾品 ----------------
 int AccCount() { return kAccN; }
 int AccHave(int index) { return (index < 0 || index >= kAccN) ? 0 : (int)g_craft.accN[index]; }
+int AccFree(int index)
+{
+	if (index < 0 || index >= kAccN) return 0;
+	return max(0, (int)g_craft.accN[index] - AccInUse(index, NULL, -1));
+}
+bool AccSell(int index)
+{
+	if (index < 0 || index >= kAccN || g_craft.accN[index] < 1) return false;
+	if (g_craft.accN[index] <= AccInUse(index, NULL, -1)) return false;
+	g_craft.accN[index]--;
+	return true;
+}
 const wchar_t* AccName(int id)
 {
 	if (id < 1 || id > kAccN) return TT(TX_PT_NONE);
@@ -861,6 +871,11 @@ int PasSpare(const CharData& c, int slot, int index)
 	const CraftRec* r = FindRec(c.uid, false);
 	if (r && r->pas[slot ^ 1] == (unsigned char)(index + 1)) return 0;
 	return max(0, (int)g_craft.pasN[index] - PasInUse(index, r, slot));
+}
+int PasFree(int index)
+{
+	if (index < 0 || index >= kPasN) return 0;
+	return max(0, (int)g_craft.pasN[index] - PasInUse(index, NULL, -1));
 }
 bool EquipPasId(CharData& c, int slot, int id)
 {
@@ -1130,6 +1145,11 @@ int SummonSpare(const CharData& c, int slot, int index)
 	if (i >= 0 && slot == 0 && g_craft.sumEq[i][1] == (unsigned char)(index + 1)) return 0;
 	if (i >= 0 && slot == 1 && g_craft.sumEq[i][0] == (unsigned char)(index + 1)) return 0;
 	return max(0, (int)g_craft.sumN[index] - SummonInUse(index, r, slot));
+}
+int SummonFree(int index)
+{
+	if (index < 0 || index >= SUMMON_N) return 0;
+	return max(0, (int)g_craft.sumN[index] - SummonInUse(index, NULL, -1));
 }
 bool EquipSummonId(CharData& c, int slot, int id)
 {

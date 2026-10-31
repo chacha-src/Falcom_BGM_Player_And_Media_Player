@@ -62,6 +62,7 @@ protected:
 
 	void LayoutView();
 	void StoreWindowRect();
+	void ApplyWinMode();
 	void PollPad(float dt);
 
 	CTacView m_view;
@@ -70,5 +71,8 @@ protected:
 	BOOL m_destroying = FALSE;
 	BOOL m_swapShown = FALSE;
 	LARGE_INTEGER m_qpf = {}, m_last = {};
+	double m_paceNext = 0;
+	int m_paceHz = 0;
+	int m_winApplied = -1;
 	int m_viewW = 0, m_viewH = 0;
 };

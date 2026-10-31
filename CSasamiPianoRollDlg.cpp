@@ -318,7 +318,7 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	if (pdc) ReleaseDC(pdc);
 	int toolBottom = rowBottom;
 	m_toolbarRc = CRect(0, cap, rc.right, toolBottom);
-	const int helpH = 36, statusH = 18;
+	const int helpH = 64, statusH = 18;
 	const int sbW = ScStaffScrollGutterW();
 	const int sbH = ScStaffScrollGutterH();
 	const int stripH = (m_ui && m_ui->stripCount > 0) ? max(48, ScStaffStripTotalH(m_ui)) : 0;
@@ -411,7 +411,7 @@ void CSasamiPianoRollDlg::ApplyLang()
 	set(m_btnPencil, LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas", L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
 	set(m_btnErase, LL14(L"消しゴム", L"Erase", L"Gomme", L"Gomma", L"Borrar", L"지우개", L"橡皮", L"ممحاة", L"Ластик", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
 	set(m_btnSel, LL14(L"選択", L"Select", L"Sélection", L"Selezione", L"Seleccionar", L"선택", L"选择", L"تحديد", L"Выбор", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Seç"));
-	set(m_btnPal, LL14(L"音符", L"Notes", L"Notes", L"Note", L"Notas", L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Nota"));
+	set(m_btnPal, LL14(L"音価", L"Length", L"Durée", L"Durata", L"Duración", L"음가", L"时值", L"مدة", L"Длина", L"Dauer", L"Duração", L"Duur", L"Wartość", L"Süre"));
 	set(m_btnTempo, LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"إيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo"));
 	set(m_btnText, LL14(L"テキスト", L"Text", L"Texte", L"Testo", L"Texto", L"텍스트", L"文本", L"نص", L"Текст", L"Text", L"Texto", L"Tekst", L"Tekst", L"Metin"));
 	set(m_btnLayout, LL14(L"譜表", L"Layout", L"Portée", L"Impaginazione", L"Diseño", L"보표", L"谱表", L"تخطيط", L"Партитура", L"Notation", L"Layout", L"Layout", L"Układ", L"Düzen"));
@@ -432,7 +432,8 @@ void CSasamiPianoRollDlg::SetupTooltips()
 	tip(m_btnOpen, LL14(L"ファイルを開く", L"Open file", L"Ouvrir", L"Apri", L"Abrir", L"파일 열기", L"打开文件", L"فتح ملف", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç"));
 	tip(m_btnSave, LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	tip(m_btnPlay, LL14(L"マーカーからプレビュー", L"Preview from marker", L"Aperçu", L"Anteprima", L"Vista previa", L"미리듣기", L"预览", L"معاينة", L"Превью", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
-	tip(m_btnPencil, LL14(L"鉛筆 — グリッドに音符配置", L"Pencil — place notes on grid", L"Crayon", L"Matita", L"Lápiz", L"연필", L"铅笔", L"قلم", L"Карандаш", L"Stift", L"Lápis", L"Potlood", L"Ołówek", L"Kalem"));
+	tip(m_btnPencil, LL14(L"音符 — グリッドに配置。1〜7で長さ", L"Notes — place on the grid. 1-7 sets length", L"Notes — 1-7 durée", L"Note — 1-7 durata", L"Notas — 1-7 duración", L"음표 — 1-7 음길이", L"音符 — 1-7 时值", L"نغمات — 1-7", L"Ноты — 1-7", L"Noten — 1-7", L"Notas — 1-7", L"Noten — 1-7", L"Nuty — 1-7", L"Nota — 1-7"));
+	tip(m_btnPal, LL14(L"音価パレット。数字キー 1〜7 でも同じ", L"Length palette. Number keys 1-7 do the same", L"Palette de durées. Touches 1-7", L"Tavolozza durate. Tasti 1-7", L"Paleta de duraciones. Teclas 1-7", L"음가 팔레트. 숫자 1-7", L"时值调色板。数字键 1-7", L"لوحة المدة. مفاتيح 1-7", L"Палитра длительности. 1-7", L"Dauerpalette. Tasten 1-7", L"Paleta de durações. Teclas 1-7", L"Duurpalet. Toetsen 1-7", L"Paleta wartości. Klawisze 1-7", L"Süre paleti. 1-7"));
 	tip(m_btnErase, LL14(L"消しゴム", L"Eraser", L"Gomme", L"Gomma", L"Borrar", L"지우개", L"橡皮", L"ممحاة", L"Ластик", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
 	tip(m_btnSel, LL14(L"選択・移動・範囲", L"Select / move / range", L"Sélection", L"Selezione", L"Seleccionar", L"선택", L"选择", L"تحديد", L"Выбор", L"Auswahl", L"Selecionar", L"Selecteren", L"Zaznacz", L"Seç"));
 	tip(m_btnScore, LL14(L"譜面ウィンドウを表示", L"Show score window", L"Afficher partition", L"Mostra partitura", L"Mostrar partitura", L"악보 창 표시", L"显示乐谱窗口", L"إظهار النوتة", L"Показать партитуру", L"Partitur zeigen", L"Mostrar partitura", L"Partituur tonen", L"Pokaż partyturę", L"Skoru göster"));
@@ -446,20 +447,20 @@ void CSasamiPianoRollDlg::UpdateHelpBar()
 	wchar_t buf[768];
 	ScStaffFormatHelpBar(buf, 512, m_ui, m_isFm, m_curPart ? *m_curPart : 0);
 	wcsncat_s(buf, LL14(
-		L"  Shift+ホイール=鍵盤高さ  Ctrl+ホイール=横  鍵盤クリック=試聴  Ctrl+鍵盤=赤バー配置",
-		L"  Shift+wheel=key height  Ctrl+wheel=horizontal  click keys=audition  Ctrl+key=place at marker",
-		L"  Shift+molette=hauteur  Ctrl+molette=horiz.  clic clavier=audition",
-		L"  Shift+rotella=altezza  Ctrl+rotella=oriz.  clic tasti=audizione",
-		L"  Shift+rueda=altura  Ctrl+rueda=horiz.  clic teclas=audicion",
-		L"  Shift+휠=건반높이  Ctrl+휠=가로  건반클릭=시청  Ctrl+건반=적바 배치",
-		L"  Shift+滚轮=琴键高度  Ctrl+滚轮=横向  点击琴键=试听  Ctrl+琴键=红条放置",
-		L"  Shift+wheel=key height  Ctrl+wheel=h-scroll",
-		L"  Shift+колесо=высота  Ctrl+колесо=гориз.",
-		L"  Shift+Rad=Tastenhoehe  Strg+Rad=horizontal",
-		L"  Shift+roda=altura  Ctrl+roda=horiz.",
-		L"  Shift+wiel=toetshoogte  Ctrl+wiel=horiz.",
-		L"  Shift+kolo=wysokosc  Ctrl+kolo=poziomo",
-		L"  Shift+teker=tus yuksekligi  Ctrl+teker=yatay"), _TRUNCATE);
+		L"  ←→赤バー  ↑↓鍵盤  鍵盤クリック=試聴",
+		L"  Left/Right = red bar  Up/Down = keys  click a key = audition",
+		L"  Gauche/Droite = barre  Haut/Bas = clavier  clic = audition",
+		L"  Sinistra/Destra = barra  Su/Giù = tasti  clic = audizione",
+		L"  Izq/Der = barra  Arriba/Abajo = teclas  clic = audición",
+		L"  ←→ 빨간 바  ↑↓ 건반  건반 클릭=시청",
+		L"  ←→红条  ↑↓琴键  点击琴键=试听",
+		L"  يسار/يمين = الشريط  أعلى/أسفل = المفاتيح",
+		L"  Влево/Вправо = метка  Вверх/Вниз = клавиши",
+		L"  Links/Rechts = Markierung  Hoch/Runter = Tasten",
+		L"  Esq/Dir = barra  Cima/Baixo = teclas",
+		L"  Links/Rechts = balk  Omhoog/Omlaag = toetsen",
+		L"  Lewo/Prawo = pasek  Góra/Dół = klawisze",
+		L"  Sol/Sağ = çubuk  Yukarı/Aşağı = tuşlar"), _TRUNCATE);
 	m_helpBar.SetWindowText(buf);
 }
 
@@ -1519,6 +1520,44 @@ void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
 	const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+	if (!ctrl && m_ui && ScStaffTryDurationKey(m_ui, nChar)) {
+		wchar_t st[96];
+		ScStaffFormatDurationStatus(st, 96, m_ui);
+		if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+		UpdateHelpBar();
+		Refresh();
+		return;
+	}
+	if (!ctrl && m_ui && (nChar == VK_LEFT || nChar == VK_RIGHT)) {
+		int step = ScStaffPlaceQuant(m_ui);
+		if (step < 1) step = 1;
+		if (shift) step *= 4;
+		if (nChar == VK_LEFT) {
+			if (m_ui->markerTick > (uint32_t)step) m_ui->markerTick -= (uint32_t)step;
+			else m_ui->markerTick = 0;
+		} else {
+			m_ui->markerTick += (uint32_t)step;
+		}
+		const int pxBeat = m_ui->pxBeat > 0 ? m_ui->pxBeat : SC_PX_BEAT_DEFAULT;
+		const int mx = (int)(((unsigned __int64)m_ui->markerTick * (unsigned)pxBeat) / SC_PPQN);
+		const int page = ScPianoRollTimePageW(m_gridRc);
+		if (mx < m_ui->scrollX + 8) m_ui->scrollX = max(0, mx - 8);
+		else if (page > 32 && mx > m_ui->scrollX + page - 24) m_ui->scrollX = mx - page + 24;
+		UpdateScrollBars();
+		Refresh();
+		if (m_midiScore) m_midiScore->Invalidate(FALSE);
+		if (m_fmScore) m_fmScore->Invalidate(FALSE);
+		return;
+	}
+	if (!ctrl && (nChar == VK_UP || nChar == VK_DOWN)) {
+		int row = m_roll.rowH > 0 ? m_roll.rowH : 14;
+		if (shift) row *= 4;
+		if (nChar == VK_UP) m_roll.scrollY -= row;
+		else m_roll.scrollY += row;
+		UpdateScrollBars();
+		Refresh();
+		return;
+	}
 	if (nChar == VK_ESCAPE && m_ui) { ScStaffEnterSelectTool(m_ui); UpdateHelpBar(); Refresh(); return; }
 	if (nChar == VK_DELETE || nChar == VK_BACK) {
 		if (m_ev && m_evCount && m_ui && (m_ui->nSel > 0 || m_ui->selEv >= 0)) {
@@ -1606,8 +1645,8 @@ BOOL CSasamiPianoRollDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
 		CWnd* f = GetFocus();
-		const BOOL inEdit = (f && f->IsKindOf(RUNTIME_CLASS(CEdit)));
-		if (!inEdit) {
+		const BOOL typing = f && (f->IsKindOf(RUNTIME_CLASS(CEdit)) || f->IsKindOf(RUNTIME_CLASS(CComboBox)));
+		if (!typing) {
 			OnKeyDown((UINT)pMsg->wParam, 1, 0);
 			return TRUE;
 		}

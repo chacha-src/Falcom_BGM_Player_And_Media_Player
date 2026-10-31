@@ -2955,5 +2955,65 @@
     <Image Include="res\tactics\tac_detail.png" />
     <Image Include="res\tactics\tac_hair.png" />
     <Image Include="res\tactics\tac_mat.png" />
+    <Image Include="res\tactics\terrain\ph0_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph1_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph2_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph3_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph4_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph5_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph6_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph7_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph8_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph9_a.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph0_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph1_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph2_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph3_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph4_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph5_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph6_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph7_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph8_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\tactics\terrain\ph9_n.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
   </ItemGroup>
 </Project>

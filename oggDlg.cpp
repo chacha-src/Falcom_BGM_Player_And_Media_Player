@@ -4017,19 +4017,19 @@ void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode)
 	ZeroMemory(b, sizeof(b));
 	b[0].hIcon = ::AfxGetApp()->LoadIcon(IDI_T1); b[0].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
 	b[0].dwFlags = THBF_ENABLED; b[0].iId = 0;
-	wcscpy(b[0].szTip, L"再演奏");
+	wcscpy_s(b[0].szTip, LL14(L"再演奏", L"Replay", L"Rejouer", L"Ripeti", L"Repetir", L"다시 재생", L"重新播放", L"إعادة التشغيل", L"Повтор", L"Erneut abspielen", L"Repetir", L"Opnieuw afspelen", L"Odtwórz ponownie", L"Tekrar çal"));
 	b[1].hIcon = ::AfxGetApp()->LoadIcon(IDI_T2); b[1].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
 	b[1].dwFlags = THBF_ENABLED; b[1].iId = 1;
-	wcscpy(b[1].szTip, L"一時停止");
+	wcscpy_s(b[1].szTip, LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 	b[2].hIcon = ::AfxGetApp()->LoadIcon(IDI_T3); b[2].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
 	b[2].dwFlags = THBF_ENABLED; b[2].iId = 2;
-	wcscpy(b[2].szTip, L"停止");
+	wcscpy_s(b[2].szTip, LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	b[3].hIcon = ::AfxGetApp()->LoadIcon(IDI_T4); b[3].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
 	b[3].dwFlags = THBF_ENABLED; b[3].iId = 3;
 	if (mediaPlayerMode)
-		wcscpy(b[3].szTip, L"次の曲");
+		wcscpy_s(b[3].szTip, LL14(L"次の曲", L"Next track", L"Piste suivante", L"Traccia successiva", L"Pista siguiente", L"다음 곡", L"下一曲", L"التالي", L"Следующий", L"Nächster", L"Próxima", L"Volgende", L"Następny", L"Sonraki"));
 	else
-		wcscpy(b[3].szTip, L"プレイリスト開閉");
+		wcscpy_s(b[3].szTip, LL14(L"プレイリスト開閉", L"Toggle playlist", L"Ouvrir/fermer la liste", L"Apri/chiudi lista", L"Abrir/cerrar lista", L"재생목록 열기/닫기", L"打开/关闭播放列表", L"فتح/إغلاق القائمة", L"Список вкл/выкл", L"Playlist ein/aus", L"Abrir/fechar lista", L"Afspeellijst aan/uit", L"Otwórz/zamknij listę", L"Listeyi aç/kapat"));
 
 	if (*pHas)
 		ptl->ThumbBarUpdateButtons(hwnd, 4, b);
@@ -4107,9 +4107,9 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 		psl = NULL;
 	};
 
-	addLink(_T("*1"), _T("再演奏"));
-	addLink(_T("*2"), _T("一時停止"));
-	addLink(_T("*3"), _T("停止"));
+	addLink(_T("*1"), LL14(L"再演奏", L"Replay", L"Rejouer", L"Ripeti", L"Repetir", L"다시 재생", L"重新播放", L"إعادة التشغيل", L"Повтор", L"Erneut abspielen", L"Repetir", L"Opnieuw afspelen", L"Odtwórz ponownie", L"Tekrar çal"));
+	addLink(_T("*2"), LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
+	addLink(_T("*3"), LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	addSep();
 	if (mediaPlayerMode) {
 		addLink(_T("*7"), LL14(L"次の曲", L"Next track", L"Piste suivante", L"Traccia succ.", L"Pista sig.", L"다음 곡", L"下一曲", L"التالي", L"Следующий", L"Naechster", L"Proxima", L"Volgende", L"Nastepny", L"Sonraki"));
@@ -4119,11 +4119,11 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 		addLink(_T("*A"), LL14(L"ジャケット", L"Jacket art", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Hoes", L"Okładka", L"Kapak"));
 	}
 	else {
-		addLink(_T("*4"), _T("プレイリスト開閉"));
+		addLink(_T("*4"), LL14(L"プレイリスト開閉", L"Toggle playlist", L"Ouvrir/fermer la liste", L"Apri/chiudi lista", L"Abrir/cerrar lista", L"재생목록 열기/닫기", L"打开/关闭播放列表", L"فتح/إغلاق القائمة", L"Список вкл/выкл", L"Playlist ein/aus", L"Abrir/fechar lista", L"Afspeellijst aan/uit", L"Otwórz/zamknij listę", L"Listeyi aç/kapat"));
 	}
 	addSep();
-	addLink(_T("*5"), _T("レンダリング設定"));
-	addLink(_T("*6"), _T("フォルダ設定"));
+	addLink(_T("*5"), LL14(L"レンダリング設定", L"Rendering settings", L"Paramètres de rendu", L"Impostazioni di rendering", L"Ajustes de renderizado", L"렌더링 설정", L"渲染设置", L"إعدادات العرض", L"Настройки рендеринга", L"Rendering-Einstellungen", L"Configurações de renderização", L"Rendering-instellingen", L"Ustawienia renderowania", L"İşleme ayarları"));
+	addLink(_T("*6"), LL14(L"フォルダ設定", L"Folder settings", L"Paramètres de dossier", L"Impostazioni cartella", L"Ajustes de carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Configurações de pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasör ayarları"));
 
 	IObjectArray* poa = NULL;
 	if (SUCCEEDED(pocNew->QueryInterface(IID_PPV_ARGS(&poa)))) {

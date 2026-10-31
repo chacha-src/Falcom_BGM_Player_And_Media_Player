@@ -3,6 +3,7 @@
 #include "OmakeTacticsData.h"
 #include "resource.h"
 #include "oggDlg.h"
+#include "Soft3DTexRes.h"
 #include <vorbis/vorbisfile.h>
 #include <dsound.h>
 #include <math.h>
@@ -614,9 +615,9 @@ static short* MmlMix(const char* src, int& frames, float gain)
 		if (a > pk) pk = a;
 		if (b > pk) pk = b;
 	}
-	if (gain < 0.04f) gain = 0.04f;
+	if (gain < 0.22f) gain = 0.22f;
 	if (gain > 1.60f) gain = 1.60f;
-	float sc = (gain * 17000.f) / pk;
+	float sc = (gain * 19000.f) / pk;
 	// 打撃は尖りが強く、頭を揃えると中身が痩せる。12000 を超える分だけ柔らかく潰して 15500 に収める。
 	const float knee = 12000.f, top = 15500.f;
 	for (int i = 0; i < total; i++) {
@@ -828,17 +829,24 @@ static int HitId(int element, int style)
 static void TacLoadPack()
 {
 	memset(s_clip, 0, sizeof(s_clip));
-	HMODULE mod = GetModuleHandle(NULL);
-	HRSRC hr = FindResource(mod, MAKEINTRESOURCE(IDR_TAC_SFX), RT_RCDATA);
-	if (!hr) return;
-	HGLOBAL hg = LoadResource(mod, hr);
-	if (!hg) return;
-	const unsigned char* p = (const unsigned char*)LockResource(hg);
-	DWORD sz = SizeofResource(mod, hr);
-	if (!p || sz < 16) return;
-	if (memcmp(p, "TSFX", 4) != 0) return;
+	BYTE* owned = NULL;
+	DWORD ownedN = 0;
+	const unsigned char* p = NULL;
+	DWORD sz = 0;
+	if (BonusImageRead(IDR_TAC_SFX, &owned, &ownedN)) { p = owned; sz = ownedN; }
+	else {
+		HMODULE mod = GetModuleHandle(NULL);
+		HRSRC hr = FindResource(mod, MAKEINTRESOURCE(IDR_TAC_SFX), RT_RCDATA);
+		if (!hr) return;
+		HGLOBAL hg = LoadResource(mod, hr);
+		if (!hg) return;
+		p = (const unsigned char*)LockResource(hg);
+		sz = SizeofResource(mod, hr);
+	}
+	if (!p || sz < 16) { free(owned); return; }
+	if (memcmp(p, "TSFX", 4) != 0) { free(owned); return; }
 	unsigned n = *(const unsigned*)(p + 4);
-	if (n > 64 || 8 + n * 8 > sz) return;
+	if (n > 64 || 8 + n * 8 > sz) { free(owned); return; }
 	unsigned use = n < (unsigned)TS_N ? n : (unsigned)TS_N;
 	for (unsigned i = 0; i < use; i++) {
 		unsigned off = *(const unsigned*)(p + 8 + i * 8);
@@ -847,6 +855,7 @@ static void TacLoadPack()
 		TacDecodeMem(p + off, len, s_clip[i]);
 		TacBake((int)i);
 	}
+	free(owned);
 }
 
 static void TacBake(int id)

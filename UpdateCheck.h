@@ -17,6 +17,9 @@ void EnsureOggHost32Available();
 /* exe 横の tacticsbgm の tactics*.ogg を、サーバ単体ファイルの更新日時が新しければ取得する（失敗しても起動は続ける） */
 void EnsureTacticsOggAvailable();
 
+/* 0=迷路 1=レース 2=タクティクス。画像 7z を tacticsbgm\resource へ。UTC の更新日時が新しければ取り直す。 */
+bool EnsureBonusImages(int kind);
+
 // メイン画面表示後の定期更新チェックスレッドを開始
 void StartUpdateCheckThread(HWND hNotifyWnd);
 

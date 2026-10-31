@@ -431,6 +431,7 @@ private:
 	void ReleaseTargets();
 	BOOL ApplyPost();
 	BOOL CreateProcTextures();
+	void PollStageLook();
 	BOOL LoadPngTex(const BYTE* data, UINT len, int slot);
 	TextSprite* GetText(const wchar_t* s, float px, int bold, int shadow, int box, float boxW, float boxH);
 	void FlushHud();
@@ -471,6 +472,7 @@ private:
 	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
 	int m_w, m_h;
 	int m_quality;
+	int m_gpu; // 0不明 1NVIDIA 2AMD 3Intel
 	BOOL m_allowTess;
 	int m_msaa;
 	HRESULT m_lastHr;
@@ -544,6 +546,13 @@ private:
 	ID3D11PixelShader* m_psOverride;
 	ID3D11Texture2D* m_groundTex;
 	ID3D11ShaderResourceView* m_groundSrv;
+	ID3D11Texture2D* m_photoTex;
+	ID3D11ShaderResourceView* m_photoSrv;
+	ID3D11Texture2D* m_sphereTex;
+	ID3D11ShaderResourceView* m_sphereSrv;
+	ID3D11Texture2D* m_envTex;
+	ID3D11ShaderResourceView* m_envSrv;
+	int m_envTheme, m_envBucket, m_photoSide, m_photoLive;
 	ID3D11Texture2D* m_matTex;
 	ID3D11ShaderResourceView* m_matSrv;
 	ID3D11ComputeShader* m_csSkin;

@@ -82,11 +82,11 @@ END_MESSAGE_MAP()
 
 void CSasamiInsertFxDlg::ApplyLang()
 {
-	SetWindowText(L"インサートFX");
-	m_pick.SetWindowText(L"選ぶ…");
-	m_bypass.SetWindowText(L"バイパス");
-	m_editor.SetWindowText(L"設定画面");
-	m_close.SetWindowText(L"閉じる");
+	SetWindowText(LL14(L"インサートFX", L"Insert FX", L"Effet d'insert", L"FX di insert", L"FX de inserción", L"인서트 FX", L"插入效果", L"تأثير إدراج", L"Вставной FX", L"Insert-FX", L"FX de inserção", L"Insert-FX", L"FX wstawiany", L"Ekleme FX"));
+	m_pick.SetWindowText(LL14(L"選ぶ…", L"Choose…", L"Choisir…", L"Scegli…", L"Elegir…", L"선택…", L"选择…", L"اختر…", L"Выбрать…", L"Wählen…", L"Escolher…", L"Kiezen…", L"Wybierz…", L"Seç…"));
+	m_bypass.SetWindowText(LL14(L"バイパス", L"Bypass", L"Contournement", L"Bypass", L"Omitir", L"바이패스", L"旁通", L"تجاوز", L"Обход", L"Bypass", L"Bypass", L"Bypass", L"Bypass", L"Baypas"));
+	m_editor.SetWindowText(LL14(L"設定画面", L"Settings", L"Réglages", L"Impostazioni", L"Ajustes", L"설정 화면", L"设置画面", L"الإعدادات", L"Настройки", L"Einstellungen", L"Ajustes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 }
 
 BOOL CSasamiInsertFxDlg::OnInitDialog()
@@ -224,7 +224,21 @@ void CSasamiInsertFxDlg::OnPaint()
 	if (shown <= 0 && m_bodyRc.Width() > 0) {
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor(RGB(210, 218, 232));
-		dc.DrawText(L"Pick an insert effect (effects only). Wheel = next/prev param page.",
+		dc.DrawText(LL14(
+			L"インサート効果を選んでください（効果のみ）。ホイールでパラメータページ。",
+			L"Pick an insert effect (effects only). Wheel = next/prev param page.",
+			L"Choisissez un effet d'insert (effets seulement). Molette = page de paramètres.",
+			L"Scegli un effetto di insert (solo effetti). Rotella = pagina parametri.",
+			L"Elija un efecto de inserción (solo efectos). Rueda = página de parámetros.",
+			L"인서트 효과를 고르세요(효과만). 휠로 파라미터 페이지.",
+			L"请选择插入效果（仅效果）。滚轮切换参数页。",
+			L"اختر تأثير إدراج (تأثيرات فقط). العجلة = صفحة المعاملات.",
+			L"Выберите вставной эффект (только эффекты). Колесо — страница параметров.",
+			L"Insert-Effekt wählen (nur Effekte). Rad = Parameterseite.",
+			L"Escolha um efeito de inserção (só efeitos). Roda = página de parâmetros.",
+			L"Kies een insert-effect (alleen effecten). Wiel = parameterpagina.",
+			L"Wybierz efekt wstawiany (tylko efekty). Kółko = strona parametrów.",
+			L"Bir ekleme efekti seçin (yalnız efekt). Tekerlek = parametre sayfası."),
 			m_bodyRc, DT_CENTER | DT_VCENTER | DT_WORDBREAK);
 	}
 	dc.SelectObject(old);
@@ -244,9 +258,24 @@ void CSasamiInsertFxDlg::RefreshHint()
 	int to = m_paramPage * 12 + 12;
 	if (to > total) to = total;
 	CString s;
-	s.Format(L"MIDI part %d, FX slot %d: %s%s — params %d–%d / %d (wheel = page)",
-		m_part, slot + 1, path[0] ? base : L"(empty)",
-		VstLiveFxGetBypass(m_part, slot) ? L" [bypassed]" : L"",
+	s.Format(LL14(
+		L"MIDIパート %d、FXスロット %d: %s%s — パラメータ %d–%d / %d（ホイールでページ）",
+		L"MIDI part %d, FX slot %d: %s%s — params %d–%d / %d (wheel = page)",
+		L"Partie MIDI %d, slot FX %d : %s%s — paramètres %d–%d / %d (molette = page)",
+		L"Parte MIDI %d, slot FX %d: %s%s — parametri %d–%d / %d (rotella = pagina)",
+		L"Parte MIDI %d, ranura FX %d: %s%s — parámetros %d–%d / %d (rueda = página)",
+		L"MIDI 파트 %d, FX 슬롯 %d: %s%s — 파라미터 %d–%d / %d (휠로 페이지)",
+		L"MIDI 声部 %d，FX 槽 %d：%s%s — 参数 %d–%d / %d（滚轮翻页）",
+		L"جزء MIDI %d، خانة FX %d: %s%s — معاملات %d–%d / %d (العجلة = صفحة)",
+		L"MIDI-партия %d, слот FX %d: %s%s — параметры %d–%d / %d (колесо — страница)",
+		L"MIDI-Part %d, FX-Slot %d: %s%s — Parameter %d–%d / %d (Rad = Seite)",
+		L"Parte MIDI %d, slot FX %d: %s%s — parâmetros %d–%d / %d (roda = página)",
+		L"MIDI-deel %d, FX-slot %d: %s%s — parameters %d–%d / %d (wiel = pagina)",
+		L"Partia MIDI %d, slot FX %d: %s%s — parametry %d–%d / %d (kółko = strona)",
+		L"MIDI parti %d, FX yuvası %d: %s%s — parametre %d–%d / %d (tekerlek = sayfa)"),
+		m_part, slot + 1,
+		path[0] ? base : LL14(L"（なし）", L"(empty)", L"(vide)", L"(vuoto)", L"(vacío)", L"(없음)", L"（空）", L"(فارغ)", L"(пусто)", L"(leer)", L"(vazio)", L"(leeg)", L"(pusto)", L"(boş)"),
+		VstLiveFxGetBypass(m_part, slot) ? LL14(L" ［バイパス］", L" [bypassed]", L" [contourné]", L" [bypass]", L" [omitido]", L" [바이패스]", L" ［旁通］", L" [متجاوز]", L" [обход]", L" [Bypass]", L" [bypass]", L" [bypass]", L" [bypass]", L" [baypas]") : L"",
 		from, to, total);
 	m_hint.SetWindowText(s);
 	InvalidateRect(m_bodyRc, FALSE);
@@ -290,7 +319,21 @@ void CSasamiInsertFxDlg::OnBnClickedPick()
 	if (CSasamiVstPickDlg::PickEffect(this, path, 520, &is3) != IDOK || !path[0]) {
 		/* Fallback: raw file dialog if scan has no effects yet */
 		CFileDialog dlg(TRUE, NULL, NULL, OFN_FILEMUSTEXIST,
-			L"VST Effects (*.dll;*.vst3)|*.dll;*.vst3|All files (*.*)|*.*||", this);
+			LL14(
+				L"VST効果 (*.dll;*.vst3)|*.dll;*.vst3|すべてのファイル (*.*)|*.*||",
+				L"VST Effects (*.dll;*.vst3)|*.dll;*.vst3|All files (*.*)|*.*||",
+				L"Effets VST (*.dll;*.vst3)|*.dll;*.vst3|Tous les fichiers (*.*)|*.*||",
+				L"Effetti VST (*.dll;*.vst3)|*.dll;*.vst3|Tutti i file (*.*)|*.*||",
+				L"Efectos VST (*.dll;*.vst3)|*.dll;*.vst3|Todos los archivos (*.*)|*.*||",
+				L"VST 효과 (*.dll;*.vst3)|*.dll;*.vst3|모든 파일 (*.*)|*.*||",
+				L"VST 效果 (*.dll;*.vst3)|*.dll;*.vst3|所有文件 (*.*)|*.*||",
+				L"تأثيرات VST (*.dll;*.vst3)|*.dll;*.vst3|كل الملفات (*.*)|*.*||",
+				L"Эффекты VST (*.dll;*.vst3)|*.dll;*.vst3|Все файлы (*.*)|*.*||",
+				L"VST-Effekte (*.dll;*.vst3)|*.dll;*.vst3|Alle Dateien (*.*)|*.*||",
+				L"Efeitos VST (*.dll;*.vst3)|*.dll;*.vst3|Todos os arquivos (*.*)|*.*||",
+				L"VST-effecten (*.dll;*.vst3)|*.dll;*.vst3|Alle bestanden (*.*)|*.*||",
+				L"Efekty VST (*.dll;*.vst3)|*.dll;*.vst3|Wszystkie pliki (*.*)|*.*||",
+				L"VST efektleri (*.dll;*.vst3)|*.dll;*.vst3|Tüm dosyalar (*.*)|*.*||"), this);
 		if (dlg.DoModal() != IDOK) return;
 		wcsncpy_s(path, dlg.GetPathName(), _TRUNCATE);
 		const size_t n = wcslen(path);
@@ -308,7 +351,21 @@ void CSasamiInsertFxDlg::OnBnClickedPick()
 		NotifyChanged();
 		RefreshHint();
 	} else {
-		m_hint.SetWindowText(L"Could not load FX plug-in.");
+		m_hint.SetWindowText(LL14(
+			L"FXプラグインを読み込めませんでした。",
+			L"Could not load the FX plug-in.",
+			L"Impossible de charger le plug-in d'effet.",
+			L"Impossibile caricare il plug-in FX.",
+			L"No se pudo cargar el complemento de FX.",
+			L"FX 플러그인을 불러오지 못했습니다.",
+			L"无法加载 FX 插件。",
+			L"تعذر تحميل إضافة التأثير.",
+			L"Не удалось загрузить плагин FX.",
+			L"FX-Plug-in konnte nicht geladen werden.",
+			L"Não foi possível carregar o plug-in de FX.",
+			L"De FX-plug-in kon niet worden geladen.",
+			L"Nie udało się wczytać wtyczki FX.",
+			L"FX eklentisi yüklenemedi."));
 	}
 }
 
@@ -326,7 +383,21 @@ void CSasamiInsertFxDlg::OnBnClickedEditor()
 {
 	const int rc = VstLiveFxEditorOpen(m_part, CurSlot());
 	if (rc != 0)
-		m_hint.SetWindowText(L"FX editor is not available for this slot.");
+		m_hint.SetWindowText(LL14(
+			L"このスロットにはFXの設定画面がありません。",
+			L"This slot has no FX editor.",
+			L"Ce slot n'a pas d'éditeur d'effet.",
+			L"Questo slot non ha un editor FX.",
+			L"Esta ranura no tiene editor de FX.",
+			L"이 슬롯에는 FX 설정 화면이 없습니다.",
+			L"此槽没有 FX 设置画面。",
+			L"هذه الخانة بلا محرر تأثير.",
+			L"У этого слота нет редактора FX.",
+			L"Dieser Slot hat keinen FX-Editor.",
+			L"Este slot não tem editor de FX.",
+			L"Dit slot heeft geen FX-editor.",
+			L"Ten slot nie ma edytora FX.",
+			L"Bu yuvanın FX düzenleyicisi yok."));
 }
 
 void CSasamiInsertFxDlg::OnLButtonDown(UINT nFlags, CPoint point)

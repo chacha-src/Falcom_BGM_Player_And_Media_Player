@@ -5,6 +5,7 @@
 #include "OmakeTactics.h"
 #include "OmakeTacticsAudio.h"
 #include "oggDlg.h"
+#include "UpdateCheck.h"
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #pragma comment(lib, "dinput8.lib")
@@ -332,9 +333,33 @@ void COmakeTacticsDlg::LayoutView()
 	}
 }
 
+void COmakeTacticsDlg::ApplyWinMode()
+{
+	if (!m_gameOk || !GetSafeHwnd()) return;
+	int mode = otac::TacWinMode(m_game.Save());
+	if (m_winApplied == mode) return;
+	int prev = m_winApplied;
+	m_winApplied = mode;
+	if (prev < 0 && mode == 0) return;
+	if (mode) {
+		HMONITOR mon = MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+		MONITORINFO mi = { sizeof(mi) };
+		if (GetMonitorInfo(mon, &mi)) {
+			SetWindowPos(NULL, mi.rcMonitor.left, mi.rcMonitor.top,
+				mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+				SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+	} else {
+		otac::SaveData& s = m_game.Save();
+		if (s.winW >= 200 && s.winH >= 150)
+			SetWindowPos(NULL, s.winX, s.winY, s.winW, s.winH, SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+}
+
 void COmakeTacticsDlg::StoreWindowRect()
 {
 	if (!GetSafeHwnd()) return;
+	if (m_gameOk && otac::TacWinMode(m_game.Save())) return;
 	WINDOWPLACEMENT wp = { sizeof(wp) };
 	if (!GetWindowPlacement(&wp)) return;
 	const CRect r(wp.rcNormalPosition);
@@ -359,13 +384,25 @@ void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 	if (m_destroying || !m_gameOk) return;
 	LARGE_INTEGER now;
 	QueryPerformanceCounter(&now);
+	double nows = m_qpf.QuadPart ? (double)now.QuadPart / (double)m_qpf.QuadPart : 0;
+	int hz = m_gameOk ? otac::TacVsyncHz(m_game.Save()) : 60;
+	if (hz < 30) hz = 30;
+	double period = 1.0 / (double)hz;
+	if (m_paceNext > 0 && nows + 0.0004 < m_paceNext) return;
 	float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_last.QuadPart) / (double)m_qpf.QuadPart) : .016f;
 	m_last = now;
 	if (dt < 0) dt = 0;
+	if (dt > 0.1f) dt = 0.1f;
+	if (hz != m_paceHz) {
+		m_paceHz = hz;
+		SetTimer(TAC_TIMER, hz >= 120 ? 1 : 8, NULL);
+	}
 	if (!TacAudioOnThread()) TacAudioPump();
 	if (IsIconic()) return;
 	PollPad(dt);
 	m_game.Tick(dt);
+	m_paceNext = nows + period;
+	ApplyWinMode();
 	if (m_game.WantsClose()) {
 		m_game.ClearClose();
 		PostMessage(WM_CLOSE);
@@ -526,6 +563,7 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	extern void CloseSoft3DMazeIfOpen();
 	CloseSoft3DRaceIfOpen();
 	CloseSoft3DMazeIfOpen();
+	if (!EnsureBonusImages(2)) return;
 	g_tac = new COmakeTacticsDlg(p);
 	if (!g_tac->Create(IDD_OMAKE_TACTICS, p)) {
 		delete g_tac;

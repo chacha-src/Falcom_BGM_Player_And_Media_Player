@@ -493,6 +493,11 @@ const wchar_t* ScStaffStripLanesLabel(int lanes); /* 0..SC_STRIP_LANES_MAX */
 const wchar_t* ScStaffToolName(int tool);
 /* Fill bottom help bar from topic + current tool/strip state. */
 void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, int curPart);
+/* 1-7 length, period dotted, R rest, or bare arrows. Ctrl keys are not included. */
+int ScStaffWantsScoreKey(UINT nChar, int ctrl);
+/* Applies a duration key. Returns 1 when the key was consumed. */
+int ScStaffTryDurationKey(ScStaffUi* u, UINT nChar);
+void ScStaffFormatDurationStatus(wchar_t* out, int cch, const ScStaffUi* u);
 /* Flat toolbar button: icon + label must both fit or the label is dropped. */
 int ScChromeButtonWidth(CWnd* w, int minW, int maxW);
 void ScStaffSavePartStrip(ScStaffUi* u, int part);

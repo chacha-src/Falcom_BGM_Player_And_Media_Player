@@ -1845,6 +1845,71 @@ static void ScWrapStaticText(wchar_t* s, int cch, int maxCjk)
 	wcsncpy_s(s, (size_t)cch, tmp, _TRUNCATE);
 }
 
+int ScStaffWantsScoreKey(UINT nChar, int ctrl)
+{
+	if (ctrl) return 0;
+	if (nChar == VK_LEFT || nChar == VK_RIGHT || nChar == VK_UP || nChar == VK_DOWN)
+		return 1;
+	if ((nChar >= '1' && nChar <= '7') || (nChar >= VK_NUMPAD1 && nChar <= VK_NUMPAD7))
+		return 1;
+	if (nChar == 'R' || nChar == 'r' || nChar == VK_OEM_PERIOD || nChar == VK_DECIMAL)
+		return 1;
+	return 0;
+}
+
+static const wchar_t* ScDurBaseName(int base)
+{
+	if (base == SC_PPQN * 4) return LL14(L"全音符", L"Whole", L"Ronde", L"Semibreve", L"Redonda", L"온음표", L"全音符", L"مستديرة", L"Целая", L"Ganze", L"Semibreve", L"Hele", L"Cała", L"Birlik");
+	if (base == SC_PPQN * 2) return LL14(L"2分", L"Half", L"Blanche", L"Minima", L"Blanca", L"2분", L"二分", L"بيضاء", L"1/2", L"Halbe", L"Mínima", L"Halve", L"Półnuta", L"İkilik");
+	if (base == SC_PPQN) return LL14(L"4分", L"Quarter", L"Noire", L"Semiminima", L"Negra", L"4분", L"四分", L"سوداء", L"1/4", L"Viertel", L"Semínima", L"Kwart", L"Ćwierć", L"Dörtlük");
+	if (base == SC_PPQN / 2) return LL14(L"8分", L"Eighth", L"Croche", L"Croma", L"Corchea", L"8분", L"八分", L"ثمن", L"1/8", L"Achtel", L"Colcheia", L"Achtste", L"Ósemka", L"Sekizlik");
+	if (base == SC_PPQN / 4) return LL14(L"16分", L"16th", L"Double", L"Semicroma", L"Semicorchea", L"16분", L"十六分", L"1/16", L"1/16", L"16tel", L"16", L"16e", L"16", L"16");
+	if (base == SC_PPQN / 8) return LL14(L"32分", L"32nd", L"Triple", L"Biscroma", L"Fusa", L"32분", L"三十二分", L"1/32", L"1/32", L"32tel", L"32", L"32e", L"32", L"32");
+	if (base == SC_PPQN / 16) return LL14(L"64分", L"64th", L"64e", L"64", L"64", L"64분", L"六十四分", L"1/64", L"1/64", L"64tel", L"64", L"64e", L"64", L"64");
+	return LL14(L"音", L"Note", L"Note", L"Nota", L"Nota", L"음", L"音", L"نغمة", L"Нота", L"Note", L"Nota", L"Noot", L"Nuta", L"Nota");
+}
+
+int ScStaffTryDurationKey(ScStaffUi* u, UINT nChar)
+{
+	if (!u) return 0;
+	int base = 0;
+	if (nChar == '1' || nChar == VK_NUMPAD1) base = SC_PPQN * 4;
+	else if (nChar == '2' || nChar == VK_NUMPAD2) base = SC_PPQN * 2;
+	else if (nChar == '3' || nChar == VK_NUMPAD3) base = SC_PPQN;
+	else if (nChar == '4' || nChar == VK_NUMPAD4) base = SC_PPQN / 2;
+	else if (nChar == '5' || nChar == VK_NUMPAD5) base = SC_PPQN / 4;
+	else if (nChar == '6' || nChar == VK_NUMPAD6) base = SC_PPQN / 8;
+	else if (nChar == '7' || nChar == VK_NUMPAD7) base = SC_PPQN / 16;
+	else if (nChar == VK_OEM_PERIOD || nChar == VK_DECIMAL) {
+		u->dotted = u->dotted ? 0 : 1;
+		ScStaffRecomputePlaceDur(u);
+		u->helpTopic = u->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+		return 1;
+	} else if (nChar == 'R' || nChar == 'r') {
+		u->placeRest = u->placeRest ? 0 : 1;
+		u->helpTopic = u->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+		return 1;
+	} else {
+		return 0;
+	}
+	if (base < 1) base = 1;
+	u->baseDur = base;
+	ScStaffRecomputePlaceDur(u);
+	u->helpTopic = u->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	return 1;
+}
+
+void ScStaffFormatDurationStatus(wchar_t* out, int cch, const ScStaffUi* u)
+{
+	if (!out || cch <= 0) return;
+	out[0] = 0;
+	if (!u) return;
+	_snwprintf_s(out, cch, _TRUNCATE, L"%s%s%s",
+		ScDurBaseName(u->baseDur > 0 ? u->baseDur : SC_PPQN),
+		u->dotted ? LL14(L"・付点", L" · dotted", L" · point", L" · punto", L" · puntillo", L" · 점", L" · 附点", L" · نقطة", L" · точка", L" · Punkt", L" · ponto", L" · punt", L" · kropka", L" · nokta") : L"",
+		u->placeRest ? LL14(L"・休符", L" · rest", L" · silence", L" · pausa", L" · silencio", L" · 쉼표", L" · 休止", L" · سكتة", L" · пауза", L" · Pause", L" · pausa", L" · rust", L" · pauza", L" · es") : L"");
+}
+
 void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, int curPart)
 {
 	if (!out || cch <= 0) return;
@@ -1867,21 +1932,7 @@ void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, i
 			wcsncat_s(stripInfo, bit, _TRUNCATE);
 		}
 	} else {
-		wcscpy_s(stripInfo, LL14(
-			L" ストリップなし（レーン×1〜で Exp/Vol/Pan/Pitch/Gate をパート別に表示）",
-			L" No strip (set Lanes ×1–3 for Exp/Vol/Pan/Pitch/Gate per part)",
-			L" Pas de piste (×1–3 pour Exp/Vol/Pan/Pitch/Gate par partie)",
-			L" Nessuna corsia (×1–3 Exp/Vol/Pan/Pitch/Gate per parte)",
-			L" Sin pistas (×1–3 Exp/Vol/Pan/Pitch/Gate por parte)",
-			L" 스트립 없음 (레인×1–3로 파트별 Exp/Vol/Pan/Pitch/Gate)",
-			L" 无条带（车道×1–3 按声部显示 Exp/Vol/Pan/Pitch/Gate）",
-			L" بلا شريط (ممرات ×1–3 لـ Exp/Vol/Pan/Pitch/Gate لكل جزء)",
-			L" Нет полосы (×1–3 Exp/Vol/Pan/Pitch/Gate по партии)",
-			L" Kein Strip (Spuren ×1–3 für Exp/Vol/Pan/Pitch/Gate je Part)",
-			L" Sem faixa (×1–3 Exp/Vol/Pan/Pitch/Gate por parte)",
-			L" Geen strook (banen ×1–3 Exp/Vol/Pan/Pitch/Gate per partij)",
-			L" Brak pasa (tory ×1–3 Exp/Vol/Pan/Pitch/Gate na partię)",
-			L" Şerit yok (×1–3 Exp/Vol/Pan/Pitch/Gate parti başına)"));
+		stripInfo[0] = 0;
 	}
 
 	switch (topic) {
@@ -2365,20 +2416,20 @@ void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, i
 		break;
 	default:
 		_snwprintf_s(out, cch, _TRUNCATE, LL14(
-			L"操作: %s | パート ch%d | Space=赤バーから再生 / Home=先頭 | パレットの|: :| 8va Ped.は赤バーに配置、消しゴム中なら削除。%s マークは選択→Deleteでも消えます。下のストリップで Exp/Vol/Pan/Pitch/Gate をパート別に描けます。",
-			L"Tool: %s | Part ch%d | Space=play from red bar / Home=start | Palette |: :| 8va Ped. insert at red bar (Eraser deletes).%s Marks also via Select→Delete. Draw Exp/Vol/Pan/Pitch/Gate per part in the strip below.",
-			L"Outil: %s | Partie ch%d | Espace=lecture / Home=début | Palette |: :| 8va Ped. sur barre rouge (Gomme = supprimer).%s Marques aussi Sélection→Suppr. Dessinez Exp/Vol/Pan/Pitch/Gate par partie sous la portée.",
-			L"Strumento: %s | Parte ch%d | Spazio=play / Home=inizio | Tavolozza |: :| 8va Ped. sulla barra rossa (Gomma = elimina).%s Segni anche Seleziona→Canc. Disegna Exp/Vol/Pan/Pitch/Gate per parte sotto.",
-			L"Herramienta: %s | Parte ch%d | Espacio=play / Inicio=principio | Paleta |: :| 8va Ped. en barra roja (Borrar = borrar).%s Marcas también Seleccionar→Supr. Dibuje Exp/Vol/Pan/Pitch/Gate por parte abajo.",
-			L"도구: %s | 파트 ch%d | Space=빨간 바부터 재생 / Home=맨앞 | 팔레트 |: :| 8va Ped.는 빨간 바에(지우개면 삭제).%s 마크는 선택→Delete도 가능. 아래 스트립에서 파트별 Exp/Vol/Pan/Pitch/Gate.",
-			L"工具: %s | 声部 ch%d | Space=从红条播放 / Home=开头 | 调色板|: :| 8va Ped.按红条插入（橡皮则删除）。%s 标记也可选择→Delete。下方条带按声部绘制 Exp/Vol/Pan/Pitch/Gate。",
-			L"أداة: %s | جزء ch%d | Space=تشغيل من الشريط الأحمر / Home=بداية | لوحة |: :| 8va Ped. عند الشريط الأحمر (الممحاة تحذف).%s العلامات أيضاً تحديد→Delete. ارسم Exp/Vol/Pan/Pitch/Gate لكل جزء في الشريط أسفل.",
-			L"Инструмент: %s | Партия ch%d | Space=с красной метки / Home=начало | Палитра |: :| 8va Ped. на метке (ластик удаляет).%s Знаки также Выбор→Delete. Рисуйте Exp/Vol/Pan/Pitch/Gate по партии в полосе ниже.",
-			L"Werkzeug: %s | Part ch%d | Leertaste=ab Markierung / Pos1=Anfang | Palette |: :| 8va Ped. an roter Markierung (Radierer löscht).%s Zeichen auch Auswahl→Entf. Zeichnen Sie Exp/Vol/Pan/Pitch/Gate je Part im Strip unten.",
-			L"Ferramenta: %s | Parte ch%d | Espaço=play / Home=início | Paleta |: :| 8va Ped. na barra vermelha (Borracha apaga).%s Marcas também Selecionar→Del. Desenhe Exp/Vol/Pan/Pitch/Gate por parte na faixa abaixo.",
-			L"Gereedschap: %s | Partij ch%d | Spatie=afspelen / Home=begin | Palet |: :| 8va Ped. op rode balk (Gum wist).%s Markeringen ook Selecteren→Del. Teken Exp/Vol/Pan/Pitch/Gate per partij in de strook onder.",
-			L"Narzędzie: %s | Partia ch%d | Spacja=odtwarzaj / Home=początek | Paleta |: :| 8va Ped. na czerwonym pasku (Gumka usuwa).%s Znaki też Zaznacz→Del. Rysuj Exp/Vol/Pan/Pitch/Gate per partię na pasie poniżej.",
-			L"Araç: %s | Parti ch%d | Space=kırmızı çubuktan çal / Home=baş | Palet |: :| 8va Ped. kırmızı çubuğa (Silgi siler).%s İşaretler Seç→Del ile de. Alt şeritte parti başına Exp/Vol/Pan/Pitch/Gate çizin."),
+			L"%s | ch%d | 1〜7で長さ（全〜64分）。. 付点、R 休符。Space 再生、Home 先頭、矢印で送る。%s",
+			L"%s | ch%d | 1-7 sets length (whole-64th). . dotted, R rest. Space plays, Home starts, arrows scroll.%s",
+			L"%s | ch%d | 1-7 durée (ronde-64e). . pointée, R silence. Espace lecture, Home début, flèches défilent.%s",
+			L"%s | ch%d | 1-7 durata (semibreve-64). . punto, R pausa. Spazio play, Home inizio, frecce scorrono.%s",
+			L"%s | ch%d | 1-7 duración (redonda-64). . puntillo, R silencio. Espacio play, Inicio principio, flechas desplazan.%s",
+			L"%s | ch%d | 1-7 음길이(온음-64분). . 점음, R 쉼표. Space 재생, Home 맨앞, 화살표로 이동.%s",
+			L"%s | ch%d | 1-7 时值（全音符-64分）。. 附点，R 休止。Space 播放，Home 开头，方向键滚动。%s",
+			L"%s | ch%d | 1-7 المدة. . نقطة، R سكتة. Space تشغيل، Home البداية، الأسهم تمرير.%s",
+			L"%s | ch%d | 1-7 длина (целая-1/64). . точка, R пауза. Space игра, Home начало, стрелки прокрутка.%s",
+			L"%s | ch%d | 1-7 Länge (Ganze-64stel). . Punkt, R Pause. Leertaste Play, Pos1 Anfang, Pfeile scrollen.%s",
+			L"%s | ch%d | 1-7 duração (semibreve-64). . ponto, R pausa. Espaço play, Home início, setas rolam.%s",
+			L"%s | ch%d | 1-7 duur (hele-64ste). . punt, R rust. Spatie play, Home begin, pijlen scrollen.%s",
+			L"%s | ch%d | 1-7 wartość (cała-1/64). . kropka, R pauza. Spacja play, Home początek, strzałki przewijają.%s",
+			L"%s | ch%d | 1-7 süre (birlik-64). . nokta, R es. Space çal, Home baş, oklar kaydırır.%s"),
 			tool, curPart + 1, stripInfo);
 		break;
 	}
@@ -3224,9 +3275,9 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			dc.SetTextColor(toneCfg ? RGB(24, 90, 50) : RGB(120, 90, 50));
 			wchar_t tone[96];
 			if (u->vstLabel[i][0])
-				_snwprintf_s(tone, _TRUNCATE, L"音色  %s", u->vstLabel[i]);
+				_snwprintf_s(tone, _TRUNCATE, LL14(L"音色  %s", L"Tone  %s", L"Timbre  %s", L"Timbro  %s", L"Timbre  %s", L"음색  %s", L"音色  %s", L"طابع  %s", L"Тембр  %s", L"Klang  %s", L"Timbre  %s", L"Klank  %s", L"Barwa  %s", L"Tını  %s"), u->vstLabel[i]);
 			else
-				_snwprintf_s(tone, _TRUNCATE, L"音色  —  クリックで設定");
+				_snwprintf_s(tone, _TRUNCATE, L"%s", LL14(L"音色  —  クリックで設定", L"Tone  —  click to set", L"Timbre  —  cliquer pour régler", L"Timbro  —  clic per impostare", L"Timbre  —  clic para ajustar", L"음색  —  클릭하여 설정", L"音色  —  点击设置", L"طابع  —  انقر للضبط", L"Тембр  —  щелкните, чтобы задать", L"Klang  —  klicken zum Setzen", L"Timbre  —  clique para definir", L"Klank  —  klik om in te stellen", L"Barwa  —  kliknij, aby ustawić", L"Tını  —  ayarlamak için tıkla"));
 			dc.DrawText(tone, toneBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
 			const int excTop = toneTop + SC_CTRL_LANE_H;
@@ -3234,7 +3285,7 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			dc.FillSolidRect(excBox, excBg);
 			dc.Draw3dRect(excBox, excEdge, excEdge);
 			dc.SetTextColor(excUsed ? RGB(40, 70, 110) : RGB(90, 110, 140));
-			dc.DrawText(L"制御  RPN / SysEx", excBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+			dc.DrawText(LL14(L"制御  RPN / SysEx", L"Ctrl  RPN / SysEx", L"Contrôle  RPN / SysEx", L"Controllo  RPN / SysEx", L"Control  RPN / SysEx", L"제어  RPN / SysEx", L"控制  RPN / SysEx", L"تحكم  RPN / SysEx", L"Упр.  RPN / SysEx", L"Steuerung  RPN / SysEx", L"Controle  RPN / SysEx", L"Besturing  RPN / SysEx", L"Sterowanie  RPN / SysEx", L"Kontrol  RPN / SysEx"), excBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 		}
 		y += rowH;
 	}

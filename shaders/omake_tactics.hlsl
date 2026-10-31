@@ -53,8 +53,12 @@ Texture2D Tex : register(t0);
 Texture2D ShadowMap : register(t1);
 Texture2DArray Ground : register(t3); // 0..7 地面アルベド(a=AO) 8..15 法線。スロット表の外。
 Texture2DArray Mat : register(t4);    // 樹皮・葉・岩・木材。各アルベドと法線。
+Texture2DArray Photo : register(t5);  // 0..9 実写アルベド(a>0.5で有効) 10..19 法線
+Texture2D SphereMap : register(t6);   // 反射ベクトルの球体マップ
+TextureCube EnvMap : register(t7);    // ステージの環境キューブ
 SamplerState SL : register(s0);
 SamplerComparisonState SC : register(s1);
+SamplerState CL : register(s2);
 
 struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv : TEXCOORD0; float4 c : COLOR0; };
 struct VKIn { float3 p : POSITION; float3 n : NORMAL; float2 uv : TEXCOORD0; uint4 bi : BLENDINDICES; float4 bw : BLENDWEIGHT; };
@@ -480,6 +484,59 @@ GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
 	return Emit(float4(FogAt(body, i.w), a), i.w);
 }
 
+float StageTier()
+{
+	if (Q.x > 3.5 && Q.x < 4.5) return 0;
+	if (Q.x < 0.5) return 1;
+	if (Q.x < 1.5) return 2;
+	if (Q.x < 2.5) return 3;
+	if (Q.x < 3.5) return 4;
+	if (Q.x < 5.5) return 5;
+	return 6;
+}
+
+float ThemeWet(float theme)
+{
+	if (theme < 0.5) return 0.12;
+	if (theme < 1.5) return 0.24;
+	if (theme < 2.5) return 0.09;
+	if (theme < 3.5) return 0.58;
+	if (theme < 4.5) return 0.16;
+	if (theme < 5.5) return 0.30;
+	if (theme < 6.5) return 0.46;
+	if (theme < 7.5) return 0.32;
+	if (theme < 8.5) return 0.72;
+	return 0.64;
+}
+
+float3 SphereLookup(float3 r)
+{
+	float m = 2.0 * sqrt(max(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0), 1e-5));
+	return SphereMap.SampleLevel(CL, r.xy / m + 0.5, 0).rgb;
+}
+
+// 軽量は球体マップだけ。標準から環境キューブを混ぜ、上の段ほどフレネルを立てる。
+float3 StageReflect(float3 n, float3 v, float rough, float theme, float wetMul)
+{
+	float tier = StageTier();
+	if (tier < 0.5) return 0;
+	n = normalize(n);
+	float3 r = reflect(-v, n);
+	float3 env = SphereLookup(r);
+	if (tier > 1.5) {
+		float mip = saturate(rough) * (tier > 5.5 ? 5.5 : (tier > 3.5 ? 4.2 : 2.4));
+		float3 cube = EnvMap.SampleLevel(CL, r, mip).rgb;
+		float k = (tier < 2.5) ? 0.42 : ((tier < 3.5) ? 0.72 : 0.9);
+		env = lerp(env, cube, k);
+	}
+	float fres = pow(1.0 - saturate(dot(n, v)), 5.0);
+	float wet = saturate(ThemeWet(theme) * wetMul);
+	float gain = (tier < 1.5) ? 0.55 : ((tier < 2.5) ? 0.8 : ((tier < 3.5) ? 1.0 : 1.2));
+	if (tier > 4.5) gain = 1.35;
+	if (tier > 5.5) gain = 1.55;
+	return env * wet * gain * lerp(0.18, 1.0, fres);
+}
+
 GOut PSWater(PSIn i)
 {
 	float3 v = normalize(Eye.xyz - i.w);
@@ -521,6 +578,7 @@ GOut PSWater(PSIn i)
 	else if (Q.x > 2.5) specK = 1.4;
 	else if (Q.x > 1.5) specK = 1.15;
 	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9) * specK;
+	col += StageReflect(wn, v, 0.05, thw, 3.2);
 	col = lerp(col, float3(0.9, 0.95, 0.98), crest * (thw > 5.5 && thw < 6.5 ? 0.15 : 0.42));
 	float2 c1 = i.w.xz * 0.8 + t * float2(0.15, 0.05);
 	float2 c2 = i.w.xz * 1.3 - t * float2(0.07, 0.12);
@@ -594,6 +652,7 @@ GOut PSLava(PSIn i)
 	float2 rdh;
 	float rh = RippleH(i.w.xz, t, rdh);
 	col += float3(1, 0.55, 0.08) * saturate(abs(rh) * 28.0);
+	col += StageReflect(float3(0, 1, 0), v, 0.35, FogColor.a, 0.85);
 	return Emit(float4(col, 1), i.w);
 }
 
@@ -714,6 +773,43 @@ GOut GroundPS(PSIn i, float theme)
 		glow += float3(0.7, 0.88, 1) * sheet * 0.12;
 		albedo = lerp(albedo, float3(0.75, 0.86, 0.92), spray * 0.16);
 	}
+	float tier = StageTier();
+	if (tier > 0.5) {
+		float2 puv = i.w.xz * (cliff > 0.5 ? 0.22 : 0.15);
+		float4 ph = Photo.Sample(SL, float3(puv, theme));
+		if (ph.a > 0.5) {
+			float3 alb = ph.rgb;
+			if (tier > 1.5 && cliff > 0.5) {
+				float3 w = abs(n);
+				w /= max(w.x + w.y + w.z, 1e-3);
+				float3 sx = Photo.Sample(SL, float3(i.w.zy * 0.22, theme)).rgb;
+				float3 sz = Photo.Sample(SL, float3(i.w.xy * 0.22, theme)).rgb;
+				alb = sx * w.x + alb * w.y + sz * w.z;
+			}
+			if (tier > 3.5) {
+				float3 far = Photo.Sample(SL, float3(puv * 0.23, theme)).rgb;
+				alb = lerp(alb, far, 0.26);
+			}
+			if (tier > 4.5) {
+				float3 grit = Photo.Sample(SL, float3(i.w.xz * 0.46, theme)).rgb;
+				alb = lerp(alb, grit, 0.2);
+			}
+			float photoMix = tier < 1.5 ? 0.58 : (tier < 2.5 ? 0.74 : (tier < 3.5 ? 0.86 : 0.93));
+			albedo = lerp(albedo, alb, photoMix);
+			if (theme > 7.5 && theme < 8.5) albedo *= lerp(float3(1, 1, 1), float3(0.45, 0.78, 1.05), 0.62);
+			else if (theme > 8.5) albedo *= lerp(float3(1, 1, 1), float3(0.78, 0.92, 0.88), 0.28);
+			else if (theme > 5.5 && theme < 6.5) albedo *= lerp(float3(1, 1, 1), float3(0.7, 0.88, 0.62), 0.24);
+			else if (theme > 4.5 && theme < 5.5) albedo *= lerp(float3(1, 1, 1), float3(0.9, 0.62, 0.5), 0.34);
+			if (tier > 2.5) {
+				float3 pn = Photo.Sample(SL, float3(puv, theme + 10)).rgb;
+				if (tier > 4.5) {
+					float3 pn2 = Photo.Sample(SL, float3(i.w.xz * 0.46, theme + 10)).rgb;
+					pn = lerp(pn, pn2, 0.35);
+				}
+				nLit = DetailN(Bump(n, pn), i.w);
+			}
+		}
+	}
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
 	col += glow;
@@ -740,6 +836,7 @@ GOut GroundPS(PSIn i, float theme)
 		float micro = fbm2(i.w.xz * (Q.x > 5.5 ? 14. : 8.));
 		col *= 0.94 + micro * (Q.x > 5.5 ? 0.12 : 0.07);
 	}
+	col += StageReflect(nLit, v, rough, theme, 1);
 	return Emit(float4(FogAt(col, i.w), 1), i.w);
 }
 
@@ -1029,6 +1126,17 @@ float4 PSGrade(QOut i) : SV_Target
 	float y = dot(col, float3(0.2126, 0.7152, 0.0722));
 	col = lerp(y.xxx, col, 1.06);
 	col *= grade;
+	{
+		float dream = saturate(Q.x / 6.0);
+		float2 asp2 = float2(Screen.x * Screen.w, 1);
+		float edge = saturate(length((i.uv - 0.5) * asp2) * 1.35);
+		float skyD = saturate((0.42 - i.uv.y) * 2.2);
+		float prism = 0.5 + 0.5 * sin(i.uv.x * 16.0 + gt * 0.65 + i.uv.y * 5.0);
+		float3 dreamCol = lerp(float3(0.62, 0.82, 1.0), float3(1.0, 0.74, 0.95), prism);
+		col = lerp(col, col * dreamCol, dream * (skyD * 0.18 + edge * 0.06));
+		float scan = 0.5 + 0.5 * sin(i.uv.y * Screen.y * 0.35 + gt * 1.6);
+		col += float3(0.25, 0.45, 0.7) * scan * skyD * dream * 0.035;
+	}
 	// 標準は輪郭を少し立てる。高画質は弱く、超綺麗は色ずれを足す。軽量はこの分岐に入らない。
 	if (Q.x > 0.5 && Q.x < 3.5) {
 		float k = (Q.x < 1.5) ? 0.16 : ((Q.x < 2.5) ? 0.08 : 0.04);

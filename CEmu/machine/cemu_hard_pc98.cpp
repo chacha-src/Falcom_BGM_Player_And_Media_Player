@@ -50,6 +50,8 @@ static int s_beatBoard = 0;
 static int s_imadokiBoard = 0;
 static int s_fukujinBoard = 0;
 static int s_rolwBoard = 0;
+static int s_fukujin3Board = 0;
+static int s_greatUserTmr = 0;
 /* IWADRV F.COM カナリア: OUT 18Ah / IN が ymfm ReadData() だと 1 が戻らず INT14 を飛ばす。 */
 static int s_iwaBusHold = 0;
 /* FMX 3.10 はワンショット INT08 を植えたあと CS:[3B84] でスピン。IRQ0 は CALL FAR [3B6C]（まだ 0000:0000）。待ちオペコードが CS:IP の最初に非 0 カウントを poke。 */
@@ -1936,6 +1938,9 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	s_imadokiBoard = (ge->archive && _stricmp(ge->archive, "imadoki_98") == 0) ? 1 : 0;
 	s_fukujinBoard = (ge->archive && _stricmp(ge->archive, "fukujin1_98") == 0) ? 1 : 0;
 	s_rolwBoard = (ge->archive && _stricmp(ge->archive, "rolw1_98") == 0) ? 1 : 0;
+	s_fukujin3Board = (ge->archive && _stricmp(ge->archive, "fukujin3_98") == 0) ? 1 : 0;
+	s_greatUserTmr = (ge->archive && (_stricmp(ge->archive, "dokicl_98") == 0
+		|| _stricmp(ge->archive, "kpastel_98") == 0)) ? 1 : 0;
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
 	if (!opnaMode && ge->subtype
 		&& (_stricmp(ge->subtype, "86") == 0
@@ -5454,6 +5459,19 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 
 	PlantPc98BiosMap(mem);
 	PlantPc98BiosTimer(mem);
+	/* DOKI / ぱすてるは INT 1Ch AH=02 を tick のたびに掛け直す。BIOS が INT 80h の直後にフラグを消すと再登録が落ち、最初の tick で止まる。 */
+	if (s_greatUserTmr) {
+		s_abikoRepeating = 1;
+		uint8_t* isr = mem + (0x00C0u << 4);
+		for (unsigned i = 0; i + 6u < 0x40u; i++) {
+			if (isr[i] == 0x2E && isr[i + 1] == 0xC6 && isr[i + 2] == 0x06
+				&& isr[i + 3] == 0x40 && isr[i + 4] == 0x00
+				&& isr[i + 5] == 0x00) {
+				memset(isr + i, 0x90, 6);
+				break;
+			}
+		}
+	}
 	if (fmd98_) {
 		/* FMD は BIOS 501 bit7=0 でリロード 5120 を書く。8253 入力は
 		   14.7456 MHz/6 = 2.4576 MHz（CPU/4 の 1.9968 ではない）。
@@ -9788,6 +9806,19 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	int ok = isExe ? dos_.LoadExe(mem, image, imageSize, pspTail)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
+	if (s_fukujin3Board && isExe && imageSize == 7428u) {
+		/* 既存 INT43 の seg:001D がトランポリン上で非 0 だと 4C01。ゼロ段落を指して導入させる。 */
+		memset(mem + 0x90000u, 0, 0x40);
+		mem[0x43u * 4u + 0] = 0;
+		mem[0x43u * 4u + 1] = 0;
+		mem[0x43u * 4u + 2] = 0x00;
+		mem[0x43u * 4u + 3] = 0x90;
+		/* ポート照合が 4 回外れると FM 初期化を飛ばし INT43 が IRET になる。常に FM 側へ。 */
+		const uint16_t loadSeg = (uint16_t)(dos_.PspSeg() + 0x10);
+		const unsigned at = ((unsigned)loadSeg << 4) + 0x18EAu;
+		if (at + 2u < 0x200000u && mem[at] == 0x3Cu && mem[at + 1] == 0x04u)
+			mem[at + 1] = 0xFF;
+	}
 	if (s_fmxCalibAssist && !isExe && imageSize == 14984u) {
 		const uint16_t psp = dos_.PspSeg();
 		const unsigned base = (unsigned)psp << 4;
@@ -14073,6 +14104,11 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 			uint32_t phys = ((uint32_t)cs << 4) + ip;
 			if (phys < 0x200000 && mem[phys] == 0xF4) /* HLT */
 				break;
+		}
+		/* DOKI / ぱすてるの INT 1Ch AH=02 は再生コマンドの待ち中に出る。ここを素通りすると BIOS 登録が IRET に落ち、INT 80h が空のまま。 */
+		if (s_greatUserTmr && Pc98TakeTimerApi(mem)) {
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
+			continue;
 		}
 		const int32_t cyc = np2_step();
 		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;

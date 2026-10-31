@@ -144,7 +144,7 @@ void CSasamiTextDlg::ApplyLang()
 			L"SASAMI 텍스트 [MIDI/MICP]", L"SASAMI 文本 [MIDI/MICP]", L"نص SASAMI [MIDI/MICP]", L"Текст SASAMI [MIDI/MICP]", L"SASAMI Text [MIDI/MICP]",
 			L"Texto SASAMI [MIDI/MICP]", L"SASAMI-tekst [MIDI/MICP]", L"Tekst SASAMI [MIDI/MICP]", L"SASAMI Metin [MIDI/MICP]"));
 	SetWindowText(title);
-	m_btnCompile.SetWindowText(LL14(L"コンパイル", L"Compile", L"Compiler", L"Compila", L"Compilar", L"컴파일", L"编译", L"تجميع", L"Собрать", L"Kompilieren", L"Compilar", L"Compileren", L"Kompiluj", L"Derle"));
+	m_btnCompile.SetWindowText(LL14(L"反映", L"Apply", L"Appliquer", L"Applica", L"Aplicar", L"반영", L"反映", L"تطبيق", L"Применить", L"Übernehmen", L"Aplicar", L"Toepassen", L"Zastosuj", L"Uygula"));
 	m_btnSave.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	m_btnOpen.SetWindowText(LL14(L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç"));
 	if (m_btnNew.GetSafeHwnd())
@@ -190,7 +190,7 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	m_b64Expanded = 1;
 	ApplyB64ViewToEdit();
 	m_status.SetWindowText(LL14(
-		L"MIDIは #チャンネル / tテンポ / 音符。\nFMは先頭に OPNA。", L"MIDI: #ch / tBPM / notes.\nFM: start with OPNA.",
+		L"Ctrl+Enter で譜面へ反映。F5 で再生。\nMIDIは #ch / tテンポ / 音符。FMは先頭に OPNA。", L"Ctrl+Enter updates the score. F5 plays.\nMIDI: #ch / tBPM / notes. FM: start with OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM。FM: OPNA。", L"MIDI: #ch / tBPM. FM: OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.",
@@ -315,25 +315,51 @@ void CSasamiTextDlg::SetupTooltips()
 {
 	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX)) return;
 	auto tip = [&](CWnd& w, LPCWSTR s) { if (w.GetSafeHwnd()) m_tooltip.AddTool(&w, s); };
-	tip(m_btnOpen, L"Open MML/DAT/text");
-	tip(m_btnSave, L"Save As MML/text (binary = Export)");
-	tip(m_btnNew, L"New — clear text / score session");
-	tip(m_btnCompile, L"Compile to temp .fpy/.mpy/.mpw2/.mpsmv (see 共通 tab in Help)");
-	tip(m_btnPlay, L"Compile and add preview file to playlist");
-	tip(m_btnVst, L"FM: voice editor. MIDI: insert @VST/@PROG/@BANK block");
-	tip(m_btnExport, L"Export audio from compiled binary");
-	tip(m_btnHelp, L"コマンド説明（MIDI/FM/共通/譜面タブ）。Copyで一覧コピー。");
-	tip(m_btnScore, L"Open staff score editor for current mode");
-	tip(m_btnMode, L"Toggle MIDI/MICP ↔ FM/OPNA (;MIDI / OPNA also auto-detect)");
-	tip(m_btnB64Fold, L"Fold/unfold long @VSTSTATEB64 / @VSTCTRLB64 lines");
-	tip(m_status, L"Compile errors (L#: msg), mode, output path");
+	tip(m_btnOpen, LL14(L"MML / テキストを開く", L"Open MML / text", L"Ouvrir MML", L"Apri MML", L"Abrir MML", L"MML 열기", L"打开 MML", L"فتح MML", L"Открыть MML", L"MML öffnen", L"Abrir MML", L"MML openen", L"Otwórz MML", L"MML aç"));
+	tip(m_btnSave, LL14(L"MMLとして保存（音は書き出し）", L"Save as MML (audio is Export)", L"Enregistrer MML", L"Salva MML", L"Guardar MML", L"MML 저장", L"保存为 MML", L"حفظ MML", L"Сохранить MML", L"Als MML speichern", L"Salvar MML", L"Opslaan als MML", L"Zapisz MML", L"MML kaydet"));
+	tip(m_btnNew, LL14(L"新規 — テキストと譜面を空に", L"New — clear text and score", L"Nouveau", L"Nuovo", L"Nuevo", L"새로", L"新建", L"جديد", L"Новый", L"Neu", L"Novo", L"Nieuw", L"Nowy", L"Yeni"));
+	tip(m_btnCompile, LL14(L"譜面へ反映（Ctrl+Enter）。失敗した行を選択", L"Update the score (Ctrl+Enter). Selects the error line", L"Mettre à jour (Ctrl+Entrée)", L"Aggiorna (Ctrl+Invio)", L"Actualizar (Ctrl+Intro)", L"악보 반영 (Ctrl+Enter)", L"反映到谱面（Ctrl+Enter）", L"تحديث (Ctrl+Enter)", L"Обновить (Ctrl+Enter)", L"Aktualisieren (Strg+Enter)", L"Atualizar (Ctrl+Enter)", L"Bijwerken (Ctrl+Enter)", L"Aktualizuj (Ctrl+Enter)", L"Güncelle (Ctrl+Enter)"));
+	tip(m_btnPlay, LL14(L"コンパイルして再生（F5）。一覧には載せない", L"Compile and play (F5). Not added to the playlist", L"Compiler et lire (F5)", L"Compila e riproduci (F5)", L"Compilar y reproducir (F5)", L"컴파일 후 재생 (F5)", L"编译并播放（F5）", L"تجميع وتشغيل (F5)", L"Собрать и играть (F5)", L"Kompilieren und spielen (F5)", L"Compilar e tocar (F5)", L"Compileren en afspelen (F5)", L"Kompiluj i odtwórz (F5)", L"Derle ve çal (F5)"));
+	tip(m_btnVst, LL14(L"FMは音色編集。MIDIは @VST を挿入", L"FM: voice editor. MIDI: insert @VST", L"FM: timbre. MIDI: @VST", L"FM: voce. MIDI: @VST", L"FM: voz. MIDI: @VST", L"FM 음색 / MIDI @VST", L"FM 音色 / MIDI @VST", L"FM: صوت. MIDI: @VST", L"FM: голос. MIDI: @VST", L"FM: Stimme. MIDI: @VST", L"FM: voz. MIDI: @VST", L"FM: stem. MIDI: @VST", L"FM: głos. MIDI: @VST", L"FM: ses. MIDI: @VST"));
+	tip(m_btnExport, LL14(L"コンパイル結果から音声を書き出す", L"Export audio from the compile", L"Exporter l'audio", L"Esporta audio", L"Exportar audio", L"오디오 내보내기", L"导出音频", L"تصدير الصوت", L"Экспорт аудио", L"Audio exportieren", L"Exportar áudio", L"Audio exporteren", L"Eksport audio", L"Ses dışa aktar"));
+	tip(m_btnHelp, LL14(L"コマンド説明。Copyで一覧をコピー", L"Command help. Copy copies the list", L"Aide. Copy copie la liste", L"Guida. Copy copia l'elenco", L"Ayuda. Copy copia la lista", L"명령 설명. Copy로 복사", L"命令说明。Copy 复制列表", L"مساعدة", L"Справка", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
+	tip(m_btnScore, LL14(L"今のモードの譜面を開く", L"Open the score for this mode", L"Ouvrir la partition", L"Apri la partitura", L"Abrir la partitura", L"악보 열기", L"打开谱面", L"فتح النوتة", L"Открыть партитуру", L"Partitur öffnen", L"Abrir partitura", L"Partituur openen", L"Otwórz partyturę", L"Skoru aç"));
+	tip(m_btnMode, LL14(L"MIDI と FM を切り替える", L"Switch MIDI and FM", L"Basculer MIDI / FM", L"Passa MIDI / FM", L"Cambiar MIDI / FM", L"MIDI와 FM 전환", L"切换 MIDI / FM", L"تبديل MIDI / FM", L"Переключить MIDI / FM", L"MIDI / FM umschalten", L"Alternar MIDI / FM", L"MIDI / FM wisselen", L"Przełącz MIDI / FM", L"MIDI / FM değiştir"));
+	tip(m_btnB64Fold, LL14(L"長い @VSTSTATEB64 を折る / 開く", L"Fold or expand long @VSTSTATEB64 lines", L"Plier / ouvrir B64", L"Piega / apri B64", L"Plegar / abrir B64", L"B64 접기 / 펼치기", L"折叠 / 展开 B64", L"طي / فتح B64", L"Свернуть / развернуть B64", L"B64 falten / öffnen", L"Dobrar / abrir B64", L"B64 vouwen / openen", L"Zwiń / rozwiń B64", L"B64 katla / aç"));
+	tip(m_status, LL14(L"エラーは「行: 内容」。Ctrl+Enter でその行へ", L"Errors show as line: message. Ctrl+Enter jumps there", L"Erreurs: ligne: message", L"Errori: riga: messaggio", L"Errores: línea: mensaje", L"오류는 행: 내용", L"错误为 行: 内容", L"الأخطاء: سطر", L"Ошибки: строка", L"Fehler: Zeile", L"Erros: linha", L"Fouten: regel", L"Błędy: wiersz", L"Hatalar: satır"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
+}
+
+void CSasamiTextDlg::RevealErrorLine(int errLine)
+{
+	if (errLine < 1 || !m_edit.GetSafeHwnd()) return;
+	int line = errLine - 1;
+	const int n = m_edit.GetLineCount();
+	if (n > 0 && line >= n) line = n - 1;
+	if (line < 0) return;
+	const int idx = m_edit.LineIndex(line);
+	if (idx < 0) return;
+	int len = m_edit.LineLength(idx);
+	if (len < 0) len = 0;
+	m_edit.SetSel(idx, idx + len);
+	m_edit.SetFocus();
 }
 
 BOOL CSasamiTextDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
+	if (pMsg->message == WM_KEYDOWN) {
+		const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		if (pMsg->wParam == VK_F5) {
+			OnBnClickedPlay();
+			return TRUE;
+		}
+		if (ctrl && pMsg->wParam == VK_RETURN) {
+			OnBnClickedCompile();
+			return TRUE;
+		}
+	}
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
@@ -472,8 +498,9 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 	if (m_modeFm) {
 		if (!ScCompileFmText(text, &m_fm, &errLine, err, 256)) {
 			CString s;
-			s.Format(L"L%d: %s", errLine, err);
+			s.Format(LL14(L"%d行: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"%d행: %s", L"%d行: %s", L"L%d: %s", L"L%d: %s", L"Z%d: %s", L"L%d: %s", L"R%d: %s", L"W%d: %s", L"S%d: %s"), errLine, err);
 			m_status.SetWindowText(s);
+			RevealErrorLine(errLine);
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
@@ -496,8 +523,9 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 	} else {
 		if (!ScCompileMidiMml(text, &m_midi, &errLine, err, 256)) {
 			CString s;
-			s.Format(L"L%d: %s", errLine, err);
+			s.Format(LL14(L"%d行: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"%d행: %s", L"%d行: %s", L"L%d: %s", L"L%d: %s", L"Z%d: %s", L"L%d: %s", L"R%d: %s", L"W%d: %s", L"S%d: %s"), errLine, err);
 			m_status.SetWindowText(s);
+			RevealErrorLine(errLine);
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
@@ -588,7 +616,7 @@ void CSasamiTextDlg::OnBnClickedCompile()
 {
 	wchar_t path[MAX_PATH];
 	int isFm = 0;
-	if (CompileAndBuild(path, MAX_PATH, &isFm) && !isFm) {
+	if (CompileAndBuild(path, MAX_PATH, &isFm)) {
 		m_textDirty = 1; /* force text→score even if mirror was clean */
 		PushTextToScore();
 		PersistSession();
@@ -776,7 +804,7 @@ void CSasamiTextDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
-	menu.AddCommand(IDC_SASAMI_TEXT_COMPILE, LL14(L"コンパイル", L"Compile", L"Compiler", L"Compila", L"Compilar", L"컴파일", L"编译", L"تجميع", L"Собрать", L"Kompilieren", L"Compilar", L"Compileren", L"Kompiluj", L"Derle"));
+	menu.AddCommand(IDC_SASAMI_TEXT_COMPILE, LL14(L"反映", L"Apply", L"Appliquer", L"Applica", L"Aplicar", L"반영", L"反映", L"تطبيق", L"Применить", L"Übernehmen", L"Aplicar", L"Toepassen", L"Zastosuj", L"Uygula"));
 	menu.AddCommand(IDC_SASAMI_TEXT_EXPORT, LL14(L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…", L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio export…", L"Exportar audio…", L"Audio exporteren…", L"Eksport audio…", L"Ses disa aktar…"));
 	CCustomPopupMenu* sub = menu.AddSubMenu(LL14(L"挿入", L"Insert", L"Insérer", L"Inserisci", L"Insertar", L"삽입", L"插入", L"إدراج", L"Вставка", L"Einfügen", L"Inserir", L"Invoegen", L"Wstaw", L"Ekle"), L"");
 	if (sub)
@@ -1011,13 +1039,9 @@ void CSasamiTextDlg::PushTextToScore()
 		wchar_t err[128];
 		int errLine = 0;
 		if (!CompileFmCache(&errLine, err, 128)) {
-			if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
-				if (::IsWindow(sc->GetSafeHwnd())) {
-					CString s;
-					s.Format(L"Text→score sync failed L%d: %s", errLine, err);
-					m_status.SetWindowText(s);
-				}
-			}
+			CString s;
+			s.Format(LL14(L"%d行: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"%d행: %s", L"%d行: %s", L"L%d: %s", L"L%d: %s", L"Z%d: %s", L"L%d: %s", L"R%d: %s", L"W%d: %s", L"S%d: %s"), errLine, err);
+			m_status.SetWindowText(s);
 			return;
 		}
 		if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
@@ -1025,7 +1049,7 @@ void CSasamiTextDlg::PushTextToScore()
 				sc->LoadFromDoc(m_fm);
 				MarkTextSyncedToScore();
 				CString st;
-				st.Format(L"FM score synced from text (%d events)", m_fm.evCount);
+				st.Format(LL14(L"テキストを譜面へ反映（%d）", L"Score updated from text (%d)", L"Partition mise à jour (%d)", L"Partitura aggiornata (%d)", L"Partitura actualizada (%d)", L"악보에 반영 (%d)", L"已反映到谱面（%d）", L"تم تحديث النوتة (%d)", L"Партитура обновлена (%d)", L"Partitur aktualisiert (%d)", L"Partitura atualizada (%d)", L"Partituur bijgewerkt (%d)", L"Partytura zaktualizowana (%d)", L"Skor güncellendi (%d)"), m_fm.evCount);
 				m_status.SetWindowText(st);
 			}
 		}
@@ -1039,13 +1063,9 @@ void CSasamiTextDlg::PushTextToScore()
 	int errLine = 0;
 	if (!ScCompileMidiMml(text, doc, &errLine, err, 128)) {
 		HeapFree(GetProcessHeap(), 0, doc);
-		if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
-			if (::IsWindow(sc->GetSafeHwnd())) {
-				CString s;
-				s.Format(L"Text→score sync failed L%d: %s", errLine, err);
-				m_status.SetWindowText(s);
-			}
-		}
+		CString s;
+		s.Format(LL14(L"%d行: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"L%d: %s", L"%d행: %s", L"%d行: %s", L"L%d: %s", L"L%d: %s", L"Z%d: %s", L"L%d: %s", L"R%d: %s", L"W%d: %s", L"S%d: %s"), errLine, err);
+		m_status.SetWindowText(s);
 		return;
 	}
 	if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
@@ -1061,7 +1081,7 @@ void CSasamiTextDlg::PushTextToScore()
 		if (::IsWindow(sc->GetSafeHwnd())) {
 			sc->LoadFromDoc(m_midi);
 			m_textDirty = 0;
-			m_status.SetWindowText(L"Score synced from text");
+			m_status.SetWindowText(LL14(L"テキストを譜面へ反映しました", L"Score updated from text", L"Partition mise à jour", L"Partitura aggiornata", L"Partitura actualizada", L"악보에 반영했습니다", L"已反映到谱面", L"تم تحديث النوتة", L"Партитура обновлена", L"Partitur aktualisiert", L"Partitura atualizada", L"Partituur bijgewerkt", L"Partytura zaktualizowana", L"Skor güncellendi"));
 		}
 	}
 }

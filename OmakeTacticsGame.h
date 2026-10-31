@@ -24,12 +24,25 @@ struct PadState {
 
 struct UiBtn { int id; float x, y, w, h; int enabled; int sel; };
 
+// メッセージの出方。種類ごとに固定で、順には回さない。
+enum {
+	MSG_BLUR = 0, // ぼかしから砕けて散る。クリティカル、撃破、突進
+	MSG_DEPTH,    // 奥から迫って引く。勝利、進化、見出し、増援
+	MSG_ORBIT,    // 周回して集まる。混乱、睡眠、スタン、ワープ
+	MSG_SLAB,     // 三枚が合わさって割れる。技名、扉、押し、段差
+	MSG_FACE,     // こちらを向くまで回る。手番、告知、バフ
+	MSG_RISE,     // 地面から空へ。回復、経験、お金、入手
+	MSG_BURST,    // 一点から弾ける。ダメージ、毒、溶岩
+	MSG_DROP      // 残像を引いて落ちる。回避、失敗、敗北、落下
+};
+
 struct Popup {
 	V3 p;
 	wchar_t s[48];
 	DWORD col;
 	float t, life, size, delay;
 	int style;     // 0=数値 1=文字 2=クリティカル
+	int pat;       // MSG_*
 };
 
 struct Banner {
@@ -38,6 +51,7 @@ struct Banner {
 	float t, life;
 	DWORD col;
 	int style;     // 0=帯 1=大見出し 2=小さめ通知
+	int pat;       // MSG_*
 };
 
 // 戦闘アクションの再生
@@ -124,8 +138,8 @@ private:
 	void NavBack();
 	void DrawBanners(float dt);
 	void DrawPopups(float dt);
-	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life);
-	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay = 0, float life = 0);
+	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life, int pat);
+	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, int pat, float delay = 0, float life = 0);
 	void AddLog(const wchar_t* s, DWORD col);
 	void DrawBattleLog(float x, float y, float w, float h);
 	void DrawHelpOverlay();
@@ -208,6 +222,7 @@ private:
 	void UpdateBattle(float dt);
 	void DrawBattle3D();
 	void DrawBattleUi();
+	void PlaceBattleHud();
 	void BattleClick(int x, int y);
 	void BattleCancel();
 	void BattleConfirmCursor();
@@ -412,6 +427,7 @@ private:
 	int m_shopFitPage;
 	int m_shopHold;
 	int m_shopWho;
+	int m_sellAsk, m_sellKind, m_sellId, m_sellN, m_sellMax, m_sellFresh, m_sellGo;
 	int m_partyBack;
 	int m_baseOpt;
 	int m_slotUi;                         // 0=閉 1=一覧 2=削除1 3=削除2 4=コピー先 5=コピー確認 6=読込確認 7=書出元 8=読込先
@@ -441,6 +457,8 @@ private:
 	int m_showStage;
 	int m_showTheme;
 	int m_themeSel;
+	int m_mapLook;   // 1=ホームの地図を自分で見渡す
+	int m_homeUi;    // 0=ホームのUIを全部隠す
 	DWORD m_mapSeed;
 	int m_mapSeedStage;
 	Actor m_showAct[MAX_PARTY];
@@ -540,6 +558,14 @@ private:
 	TacLog m_log[24];
 	int m_logN;
 	float m_orderBottom;
+	struct HudLay {
+		float col;
+		float orderX, orderW, orderMaxB;
+		float panelTop, panelH, logTop, logH;
+		float stageR, stageB;
+		float partyT, partyR, partyB;
+		float margin;
+	} m_hud;
 	int m_ordSnap[8];
 	int m_ordFrom[8];
 	int m_ordSnapN;

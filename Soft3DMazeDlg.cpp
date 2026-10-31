@@ -3,6 +3,7 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DMazeDlg.h"
+#include "UpdateCheck.h"
 #include "CMediaPlayerDlg.h"
 #include "CCustomPopupMenu.h"
 #include "oggDlg.h"
@@ -9176,6 +9177,7 @@ void OpenSoft3DMazeModeless(CWnd* p)
 		g_s3m->SetForegroundWindow();
 		return;
 	}
+	if (!EnsureBonusImages(0)) return;
 	g_s3m = new CSoft3DMazeDlg(p);
 	if (!g_s3m->Create(IDD_SOFT3DMAZE, p)) {
 		delete g_s3m;

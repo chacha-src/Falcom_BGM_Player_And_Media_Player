@@ -659,6 +659,19 @@ bool LineOfSight(const Map& m, int ax, int az, int bx, int bz);
 bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, int tz, bool needLos);
 bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos);
 int  Dist(int ax, int az, int bx, int bz);
+// 層差の距離。2層以上は届かない。1つ上は重い、1つ下は軽い。届かないとき -1。
+inline int LayerRangeCost(int fromL, int toL)
+{
+	if (fromL < 0) fromL = 0;
+	if (fromL > 2) fromL = 2;
+	if (toL < 0) toL = 0;
+	if (toL > 2) toL = 2;
+	int up = toL - fromL;
+	if (up >= 2 || up <= -2) return -1;
+	if (up > 0) return 4;
+	if (up < 0) return 1;
+	return 0;
+}
 float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
 
 // ---------------- 戦闘計算 ----------------
@@ -772,7 +785,7 @@ struct AiPlan {
 	int castX, castZ;
 	int wild;         // 0=通常 1=混乱（敵味方問わず） 2=自分を攻撃
 };
-void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r);
+void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level = 2);
 void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------
@@ -830,6 +843,57 @@ struct SaveData {
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
+// showGrid の空き。bit9 が立つまで敵の頭は普通、同期は 1/60、画面はウィンドウ。
+inline void TacEnsureOpt(SaveData& s)
+{
+	if (s.showGrid & (1 << 9)) return;
+	s.showGrid = (s.showGrid & 3) | (2 << 2) | (1 << 5) | (1 << 9);
+}
+inline int TacAi(const SaveData& s)
+{
+	if ((s.showGrid & (1 << 9)) == 0) return 2;
+	int a = (s.showGrid >> 2) & 7;
+	return (a > 5) ? 2 : a;
+}
+inline void TacSetAi(SaveData& s, int a)
+{
+	TacEnsureOpt(s);
+	a %= 6;
+	if (a < 0) a += 6;
+	s.showGrid = (s.showGrid & ~(7 << 2)) | (a << 2);
+}
+inline int TacVsync(const SaveData& s)
+{
+	if ((s.showGrid & (1 << 9)) == 0) return 1;
+	int v = (s.showGrid >> 5) & 7;
+	return (v > 4) ? 1 : v;
+}
+inline void TacSetVsync(SaveData& s, int v)
+{
+	TacEnsureOpt(s);
+	v %= 5;
+	if (v < 0) v += 5;
+	s.showGrid = (s.showGrid & ~(7 << 5)) | (v << 5);
+}
+inline int TacVsyncHz(const SaveData& s)
+{
+	static const int hz[5] = { 30, 60, 120, 144, 240 };
+	return hz[TacVsync(s)];
+}
+inline int TacWinMode(const SaveData& s) { return ((s.showGrid & (1 << 9)) != 0 && (s.showGrid & (1 << 8)) != 0) ? 1 : 0; }
+inline void TacSetWinMode(SaveData& s, int m)
+{
+	TacEnsureOpt(s);
+	if (m) s.showGrid |= (1 << 8);
+	else s.showGrid &= ~(1 << 8);
+}
+inline int TacAiTx(int a)
+{
+	static const int tx[6] = { TX_AI0, TX_AI1, TX_AI2, TX_AI3, TX_AI4, TX_AI5 };
+	if (a < 0 || a > 5) a = 2;
+	return tx[a];
+}
+inline int TacWinTx(int m) { return m ? TX_WIN_FULL : TX_WIN_BOX; }
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);
 bool SaveWrite(const SaveData& s);
@@ -907,12 +971,15 @@ int StoneCount();
 void StoneAdd(int d);
 bool BeadHave(int index);
 int BeadCount(int index);
+int BeadFree(int index);
 int CraftStoneCost(int index);
 int CraftSuperNeed(int index);
 bool BeadBuy(const SaveData& s, int index);
 bool BeadSell(int index);
 int AccCount();
 int AccHave(int index);
+int AccFree(int index);
+bool AccSell(int index);
 const wchar_t* AccName(int id);
 int AccPrice(int index);
 int AccStat(int id, int stat);
@@ -944,6 +1011,7 @@ const wchar_t* PasName(int id);
 const wchar_t* PasDesc(int id);
 int PasPrice(int index);
 int PasHave(int index);
+int PasFree(int index);
 bool PasBuy(SaveData& s, int index);
 bool PasSell(int index);
 int EquippedPasId(const CharData& c, int slot);
@@ -960,7 +1028,9 @@ int SummonPrice(int index);
 int SummonFx(int index);
 int SummonMesh(int index);
 int SummonHpCost(const Unit& u, int skill);
+int SummonCpCost(const Unit& u, int skill);
 int SummonHave(int index);
+int SummonFree(int index);
 bool SummonBuy(SaveData& s, int index);
 bool SummonSell(int index);
 int EquippedSummonId(const CharData& c, int slot);

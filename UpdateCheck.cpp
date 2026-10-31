@@ -2474,3 +2474,272 @@ void EnsureOggHost32Available()
 		return;
 	exit(0);
 }
+
+static bool BonusMkDir(const CString& path)
+{
+	if (path.IsEmpty()) return false;
+	DWORD a = GetFileAttributes(path);
+	if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return true;
+	int p = path.ReverseFind(_T('\\'));
+	if (p > 2) BonusMkDir(path.Left(p));
+	return CreateDirectory(path, NULL) != FALSE || GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+static __int64 BonusReadUtc(const CString& path)
+{
+	FILE* f = NULL;
+	if (_tfopen_s(&f, path, _T("rb")) != 0 || !f) return 0;
+	char buf[64] = {};
+	size_t n = fread(buf, 1, 63, f);
+	fclose(f);
+	if (!n) return 0;
+	return _atoi64(buf);
+}
+
+static void BonusWriteUtc(const CString& path, __int64 utc)
+{
+	FILE* f = NULL;
+	if (_tfopen_s(&f, path, _T("wb")) != 0 || !f) return;
+	fprintf(f, "%lld\n", (long long)utc);
+	fclose(f);
+}
+
+static bool BonusDownload(const CString& url, const CString& localPath, const CString& title)
+{
+	DeleteFile(localPath);
+	HINTERNET hInternet = InternetOpen(_T("oggYSEDbgm-bonus/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!hInternet) return false;
+	DWORD timeout = 180000;
+	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE
+		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI
+		| INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
+	CString noCache;
+	noCache.Format(_T("%s?t=%lld"), (LPCTSTR)url, (long long)time(NULL));
+	HINTERNET hConnect = InternetOpenUrl(hInternet, noCache, NULL, 0, flags, 0);
+	if (!hConnect) { InternetCloseHandle(hInternet); return false; }
+	DWORD statusCode = 0, statusLen = sizeof(statusCode);
+	if (!HttpQueryInfo(hConnect, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL) || statusCode != 200) {
+		InternetCloseHandle(hConnect); InternetCloseHandle(hInternet); return false;
+	}
+	ULONGLONG contentLen = 0;
+	char lenBuf[64] = {};
+	DWORD lenBufLen = sizeof(lenBuf);
+	if (HttpQueryInfoA(hConnect, HTTP_QUERY_CONTENT_LENGTH, lenBuf, &lenBufLen, NULL))
+		contentLen = (ULONGLONG)_atoi64(lenBuf);
+	CFile f;
+	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+		InternetCloseHandle(hConnect); InternetCloseHandle(hInternet); return false;
+	}
+	char buf[65536];
+	DWORD bytesRead = 0;
+	ULONGLONG total = 0;
+	BOOL readOk = TRUE;
+	while ((readOk = InternetReadFile(hConnect, buf, sizeof(buf), &bytesRead)) != FALSE && bytesRead > 0) {
+		try { f.Write(buf, (UINT)bytesRead); }
+		catch (CFileException* e) { e->Delete(); readOk = FALSE; break; }
+		total += bytesRead;
+		int pct = (contentLen > 0) ? (int)((total * 100ULL) / contentLen) : 0;
+		if (pct > 100) pct = 100;
+		CString t;
+		t.Format(LL14(
+			L"%sを受け取っています…\n%d%%",
+			L"Receiving %s…\n%d%%",
+			L"Réception de %s…\n%d%%",
+			L"Ricezione di %s…\n%d%%",
+			L"Recibiendo %s…\n%d%%",
+			L"%s 받는 중…\n%d%%",
+			L"正在接收%s…\n%d%%",
+			L"جارٍ استلام %s…\n%d%%",
+			L"Получение «%s»…\n%d%%",
+			L"%s wird empfangen…\n%d%%",
+			L"A receber %s…\n%d%%",
+			L"%s ontvangen…\n%d%%",
+			L"Odbieranie: %s…\n%d%%",
+			L"%s alınıyor…\n%d%%"), (LPCTSTR)title, pct);
+		UpdateBusyShow(t, pct);
+	}
+	f.Close();
+	InternetCloseHandle(hConnect);
+	InternetCloseHandle(hInternet);
+	if (!readOk || total < 1024 || (contentLen > 0 && total != contentLen)) { DeleteFile(localPath); return false; }
+	return true;
+}
+
+static bool BonusSafeRel(const wchar_t* name)
+{
+	if (!name || !name[0]) return false;
+	if (name[0] == L'\\' || name[0] == L'/') return false;
+	if (name[1] == L':') return false;
+	for (const wchar_t* p = name; *p; ++p) {
+		if (p[0] == L'.' && p[1] == L'.' && (p[2] == L'\\' || p[2] == L'/' || p[2] == 0)) return false;
+	}
+	return true;
+}
+
+static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, const CString& title)
+{
+	SevenZipArc a;
+	if (!SevenZipOpenW(&a, arcPath)) return false;
+	bool any = false;
+	UInt32 n = a.db.NumFiles;
+	for (UInt32 i = 0; i < n; i++) {
+		if (SzArEx_IsDir(&a.db, i)) continue;
+		wchar_t name[1024] = {};
+		if (!SevenZipFileNameW(&a, i, name, 1024) || !BonusSafeRel(name)) continue;
+		const Byte* data = NULL;
+		size_t sz = 0;
+		if (!SevenZipExtractIndex(&a, i, &data, &sz) || !data) { SevenZipClose(&a); return false; }
+		CString out = destRoot + _T("\\") + CString(name);
+		int sl = out.ReverseFind(_T('\\'));
+		if (sl > 0) BonusMkDir(out.Left(sl));
+		CFile f;
+		if (!f.Open(out, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) { SevenZipClose(&a); return false; }
+		bool ok = true;
+		try { if (sz) f.Write(data, (UINT)sz); }
+		catch (CFileException* e) { e->Delete(); ok = false; }
+		f.Close();
+		if (!ok) { DeleteFile(out); SevenZipClose(&a); return false; }
+		any = true;
+		int pct = n ? (int)(((i + 1) * 100) / n) : 100;
+		CString t;
+		t.Format(LL14(
+			L"%sを展開しています…\n%d%%",
+			L"Extracting %s…\n%d%%",
+			L"Extraction de %s…\n%d%%",
+			L"Estrazione di %s…\n%d%%",
+			L"Extrayendo %s…\n%d%%",
+			L"%s 푸는 중…\n%d%%",
+			L"正在解压%s…\n%d%%",
+			L"جارٍ استخراج %s…\n%d%%",
+			L"Распаковка «%s»…\n%d%%",
+			L"%s wird entpackt…\n%d%%",
+			L"A extrair %s…\n%d%%",
+			L"%s uitpakken…\n%d%%",
+			L"Rozpakowywanie: %s…\n%d%%",
+			L"%s açılıyor…\n%d%%"), (LPCTSTR)title, pct);
+		UpdateBusyShow(t, pct);
+	}
+	SevenZipClose(&a);
+	return any;
+}
+
+bool EnsureBonusImages(int kind)
+{
+	static const TCHAR* kZip[3] = { _T("oggmeiro.7z"), _T("oggrace.7z"), _T("oggtactics.7z") };
+	static const TCHAR* kUtc[3] = { _T("meiro.utc"), _T("race.utc"), _T("tactics.utc") };
+	static const TCHAR* kKey[3] = { _T("meiro\\m_wall0.png"), _T("race\\r_forest.png"), _T("tactics\\tac_detail.png") };
+	if (kind < 0 || kind > 2) return false;
+	TCHAR exeBuf[MAX_PATH] = {};
+	GetModuleFileName(NULL, exeBuf, MAX_PATH);
+	CString exe = exeBuf;
+	int slash = exe.ReverseFind(_T('\\'));
+	if (slash >= 0) exe = exe.Left(slash);
+	CString root = exe + _T("\\tacticsbgm\\resource");
+	if (!BonusMkDir(root)) {
+		AfxMessageBox(LL14(
+			L"画像フォルダを作れませんでした。",
+			L"Could not create the image folder.",
+			L"Impossible de créer le dossier d'images.",
+			L"Impossibile creare la cartella delle immagini.",
+			L"No se pudo crear la carpeta de imágenes.",
+			L"이미지 폴더를 만들 수 없습니다.",
+			L"无法创建图片文件夹。",
+			L"تعذر إنشاء مجلد الصور.",
+			L"Не удалось создать папку картинок.",
+			L"Der Bildordner konnte nicht erstellt werden.",
+			L"Não foi possível criar a pasta de imagens.",
+			L"De afbeeldingenmap kon niet worden gemaakt.",
+			L"Nie udało się utworzyć folderu obrazów.",
+			L"Görsel klasörü oluşturulamadı."));
+		return false;
+	}
+	CString key = root + _T("\\") + kKey[kind];
+	CString utcPath = root + _T("\\") + kUtc[kind];
+	CString url = CString(_T("https://ppp.oohara.jp/download/")) + kZip[kind];
+	const wchar_t* title = LL14(
+		L"迷路のデータ", L"Maze data", L"Images du labyrinthe", L"Immagini del labirinto", L"Imágenes del laberinto",
+		L"미로 이미지", L"迷宫图片", L"صور المتاهة", L"Картинки лабиринта", L"Labyrinth-Bilder",
+		L"Imagens do labirinto", L"Doolhofafbeeldingen", L"Obrazy labiryntu", L"Labirent görselleri");
+	if (kind == 1)
+		title = LL14(
+			L"レースのデータ", L"Race data", L"Images de la course", L"Immagini della gara", L"Imágenes de la carrera",
+			L"레이스 이미지", L"竞速图片", L"صور السباق", L"Картинки гонки", L"Renn-Bilder",
+			L"Imagens da corrida", L"Race-afbeeldingen", L"Obrazy wyścigu", L"Yarış görselleri");
+	else if (kind == 2)
+		title = LL14(
+			L"タクティクスのデータ", L"Tactics data", L"Images de tactique", L"Immagini di tattica", L"Imágenes de táctica",
+			L"택틱스 이미지", L"战术图片", L"صور التكتيك", L"Картинки тактики", L"Taktik-Bilder",
+			L"Imagens de tática", L"Tactiek-afbeeldingen", L"Obrazy taktyki", L"Taktik görselleri");
+	const bool have = GetFileAttributes(key) != INVALID_FILE_ATTRIBUTES;
+	const __int64 remote = (__int64)HttpGetLastModified(url);
+	const __int64 saved = BonusReadUtc(utcPath);
+	if (remote <= 0) {
+		UpdateBusyClose();
+		CString msg;
+		msg.Format(LL14(
+			L"%sの更新を確認できません。ネット接続を確認してください。",
+			L"Could not check %s for updates. Check your network connection.",
+			L"Impossible de vérifier %s. Vérifiez la connexion réseau.",
+			L"Impossibile controllare %s. Controlla la connessione di rete.",
+			L"No se pudo comprobar %s. Compruebe la conexión de red.",
+			L"%s의 업데이트를 확인할 수 없습니다. 네트워크 연결을 확인하세요.",
+			L"无法检查%s的更新。请检查网络连接。",
+			L"تعذر التحقق من تحديث %s. تحقق من اتصال الشبكة.",
+			L"Не удалось проверить обновление «%s». Проверьте сеть.",
+			L"Update für %s nicht prüfbar. Netzwerkverbindung prüfen.",
+			L"Não foi possível verificar %s. Verifique a ligação de rede.",
+			L"Kan %s niet op updates controleren. Controleer de netwerkverbinding.",
+			L"Nie można sprawdzić aktualizacji: %s. Sprawdź połączenie sieciowe.",
+			L"%s güncellemesi denetlenemedi. Ağ bağlantısını kontrol edin."), title);
+		AfxMessageBox(msg);
+		return false;
+	}
+	if (have && saved > 0 && remote <= saved) return true;
+	CString tmp = root + _T("\\_fetch.7z");
+	CString start;
+	start.Format(LL14(
+		L"%sを受け取っています…\n0%%",
+		L"Receiving %s…\n0%%",
+		L"Réception de %s…\n0%%",
+		L"Ricezione di %s…\n0%%",
+		L"Recibiendo %s…\n0%%",
+		L"%s 받는 중…\n0%%",
+		L"正在接收%s…\n0%%",
+		L"جارٍ استلام %s…\n0%%",
+		L"Получение «%s»…\n0%%",
+		L"%s wird empfangen…\n0%%",
+		L"A receber %s…\n0%%",
+		L"%s ontvangen…\n0%%",
+		L"Odbieranie: %s…\n0%%",
+		L"%s alınıyor…\n0%%"), title);
+	UpdateBusyShow(start, 0);
+	bool ok = BonusDownload(url, tmp, title);
+	if (ok) ok = BonusExtract7z(tmp, root, title);
+	DeleteFile(tmp);
+	UpdateBusyClose();
+	if (!ok || GetFileAttributes(key) == INVALID_FILE_ATTRIBUTES) {
+		CString msg;
+		msg.Format(LL14(
+			L"%sを受け取れませんでした。",
+			L"Could not receive %s.",
+			L"Impossible de recevoir %s.",
+			L"Impossibile ricevere %s.",
+			L"No se pudo recibir %s.",
+			L"%s를 받지 못했습니다.",
+			L"未能接收%s。",
+			L"تعذر استلام %s.",
+			L"Не удалось получить «%s».",
+			L"%s konnte nicht empfangen werden.",
+			L"Não foi possível receber %s.",
+			L"%s kon niet worden ontvangen.",
+			L"Nie odebrano: %s.",
+			L"%s alınamadı."), title);
+		AfxMessageBox(msg);
+		return false;
+	}
+	BonusWriteUtc(utcPath, remote);
+	return true;
+}

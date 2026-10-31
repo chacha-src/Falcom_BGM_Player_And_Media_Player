@@ -113,12 +113,26 @@ END_MESSAGE_MAP()
 
 void CSasamiExcRpnDlg::ApplyLang()
 {
-	SetWindowText(L"SASAMI Exc / RPN");
-	m_btnRpn.SetWindowText(L"Insert RPN");
-	m_btnNrpn.SetWindowText(L"Insert NRPN");
-	m_btnSysex.SetWindowText(L"Insert SysEx");
-	m_btnClose.SetWindowText(L"Close");
-	RefreshHint(L"Preset → fill fields. RPN presets use Insert RPN. SysEx presets use Insert SysEx.");
+	SetWindowText(LL14(L"SASAMI 制御 / RPN", L"SASAMI Exc / RPN", L"SASAMI contrôle / RPN", L"SASAMI controllo / RPN", L"SASAMI control / RPN", L"SASAMI 제어 / RPN", L"SASAMI 控制 / RPN", L"SASAMI تحكم / RPN", L"SASAMI упр. / RPN", L"SASAMI Steuerung / RPN", L"SASAMI controle / RPN", L"SASAMI besturing / RPN", L"SASAMI sterowanie / RPN", L"SASAMI kontrol / RPN"));
+	m_btnRpn.SetWindowText(LL14(L"RPNを入れる", L"Insert RPN", L"Insérer RPN", L"Inserisci RPN", L"Insertar RPN", L"RPN 넣기", L"插入 RPN", L"إدراج RPN", L"Вставить RPN", L"RPN einfügen", L"Inserir RPN", L"RPN invoegen", L"Wstaw RPN", L"RPN ekle"));
+	m_btnNrpn.SetWindowText(LL14(L"NRPNを入れる", L"Insert NRPN", L"Insérer NRPN", L"Inserisci NRPN", L"Insertar NRPN", L"NRPN 넣기", L"插入 NRPN", L"إدراج NRPN", L"Вставить NRPN", L"NRPN einfügen", L"Inserir NRPN", L"NRPN invoegen", L"Wstaw NRPN", L"NRPN ekle"));
+	m_btnSysex.SetWindowText(LL14(L"SysExを入れる", L"Insert SysEx", L"Insérer SysEx", L"Inserisci SysEx", L"Insertar SysEx", L"SysEx 넣기", L"插入 SysEx", L"إدراج SysEx", L"Вставить SysEx", L"SysEx einfügen", L"Inserir SysEx", L"SysEx invoegen", L"Wstaw SysEx", L"SysEx ekle"));
+	m_btnClose.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	RefreshHint(LL14(
+		L"プリセットで欄を埋めます。RPNは「RPNを入れる」、SysExは「SysExを入れる」。",
+		L"Preset fills the fields. RPN presets use Insert RPN. SysEx presets use Insert SysEx.",
+		L"Le préréglage remplit les champs. RPN : Insérer RPN. SysEx : Insérer SysEx.",
+		L"Il preset riempie i campi. RPN: Inserisci RPN. SysEx: Inserisci SysEx.",
+		L"El preajuste llena los campos. RPN: Insertar RPN. SysEx: Insertar SysEx.",
+		L"프리셋이 칸을 채웁니다. RPN은 「RPN 넣기」, SysEx는 「SysEx 넣기」.",
+		L"预设会填入栏位。RPN 用「插入 RPN」，SysEx 用「插入 SysEx」。",
+		L"الإعداد المسبق يملأ الحقول. RPN: إدراج RPN. SysEx: إدراج SysEx.",
+		L"Пресет заполняет поля. RPN — «Вставить RPN», SysEx — «Вставить SysEx».",
+		L"Preset füllt die Felder. RPN: RPN einfügen. SysEx: SysEx einfügen.",
+		L"O preset preenche os campos. RPN: Inserir RPN. SysEx: Inserir SysEx.",
+		L"De preset vult de velden. RPN: RPN invoegen. SysEx: SysEx invoegen.",
+		L"Preset wypełnia pola. RPN: Wstaw RPN. SysEx: Wstaw SysEx.",
+		L"Önayar alanları doldurur. RPN: RPN ekle. SysEx: SysEx ekle."));
 }
 
 BOOL CSasamiExcRpnDlg::OnInitDialog()
@@ -225,7 +239,7 @@ void CSasamiExcRpnDlg::OnCbnPreset()
 	const SasamiExcPreset& p = kPresets[sel];
 	if (p.bytes && p.len > 0) {
 		BytesToHex(p.bytes, p.len, m_hex);
-		RefreshHint(L"SysEx preset ready — press Insert SysEx.");
+		RefreshHint(LL14(L"SysExプリセットの準備ができました。「SysExを入れる」を押してください。", L"SysEx preset ready — press Insert SysEx.", L"Préréglage SysEx prêt — appuyez sur Insérer SysEx.", L"Preset SysEx pronto — premi Inserisci SysEx.", L"Preajuste SysEx listo — pulse Insertar SysEx.", L"SysEx 프리셋 준비됨. 「SysEx 넣기」를 누르세요.", L"SysEx 预设已就绪。请按「插入 SysEx」。", L"إعداد SysEx جاهز — اضغط إدراج SysEx.", L"Пресет SysEx готов — нажмите «Вставить SysEx».", L"SysEx-Preset bereit — SysEx einfügen drücken.", L"Preset SysEx pronto — pressione Inserir SysEx.", L"SysEx-preset klaar — druk op SysEx invoegen.", L"Preset SysEx gotowy — naciśnij Wstaw SysEx.", L"SysEx önayarı hazır — SysEx ekle'ye basın."));
 	} else {
 		m_hex.SetWindowText(L"");
 	}
@@ -234,7 +248,7 @@ void CSasamiExcRpnDlg::OnCbnPreset()
 		s.Format(L"%d", p.rpnA); m_msb.SetWindowText(s);
 		s.Format(L"%d", p.rpnB); m_lsb.SetWindowText(s);
 		s.Format(L"%d", p.rpnC); m_data.SetWindowText(s);
-		RefreshHint(L"RPN preset ready — press Insert RPN (not SysEx).");
+		RefreshHint(LL14(L"RPNプリセットの準備ができました。「RPNを入れる」を押してください（SysExではない）。", L"RPN preset ready — press Insert RPN (not SysEx).", L"Préréglage RPN prêt — appuyez sur Insérer RPN (pas SysEx).", L"Preset RPN pronto — premi Inserisci RPN (non SysEx).", L"Preajuste RPN listo — pulse Insertar RPN (no SysEx).", L"RPN 프리셋 준비됨. 「RPN 넣기」를 누르세요(SysEx 아님).", L"RPN 预设已就绪。请按「插入 RPN」（不是 SysEx）。", L"إعداد RPN جاهز — اضغط إدراج RPN (ليس SysEx).", L"Пресет RPN готов — нажмите «Вставить RPN» (не SysEx).", L"RPN-Preset bereit — RPN einfügen drücken (nicht SysEx).", L"Preset RPN pronto — pressione Inserir RPN (não SysEx).", L"RPN-preset klaar — druk op RPN invoegen (niet SysEx).", L"Preset RPN gotowy — naciśnij Wstaw RPN (nie SysEx).", L"RPN önayarı hazır — RPN ekle'ye basın (SysEx değil)."));
 	}
 }
 
@@ -242,7 +256,21 @@ void CSasamiExcRpnDlg::RefreshHint(const wchar_t* msg)
 {
 	if (!m_hint.GetSafeHwnd()) return;
 	CString s;
-	s.Format(L"%s\r\nTarget: MIDI %d, tick %u. SysEx uses SASAMI cmd36 body bytes.",
+	s.Format(LL14(
+		L"%s\r\n対象: MIDI %d、tick %u。SysExは SASAMI cmd36 の本体バイト。",
+		L"%s\r\nTarget: MIDI %d, tick %u. SysEx uses SASAMI cmd36 body bytes.",
+		L"%s\r\nCible : MIDI %d, tick %u. SysEx utilise les octets du corps cmd36 SASAMI.",
+		L"%s\r\nDestinazione: MIDI %d, tick %u. SysEx usa i byte del corpo cmd36 SASAMI.",
+		L"%s\r\nDestino: MIDI %d, tick %u. SysEx usa los bytes del cuerpo cmd36 de SASAMI.",
+		L"%s\r\n대상: MIDI %d, tick %u. SysEx는 SASAMI cmd36 본문 바이트.",
+		L"%s\r\n对象：MIDI %d，tick %u。SysEx 使用 SASAMI cmd36 的本体字节。",
+		L"%s\r\nالهدف: MIDI %d، tick %u. SysEx يستخدم بايتات جسم cmd36 في SASAMI.",
+		L"%s\r\nЦель: MIDI %d, tick %u. SysEx — байты тела cmd36 SASAMI.",
+		L"%s\r\nZiel: MIDI %d, Tick %u. SysEx nutzt die Körperbytes von SASAMI cmd36.",
+		L"%s\r\nAlvo: MIDI %d, tick %u. SysEx usa os bytes do corpo cmd36 SASAMI.",
+		L"%s\r\nDoel: MIDI %d, tick %u. SysEx gebruikt de bodybytes van SASAMI cmd36.",
+		L"%s\r\nCel: MIDI %d, tick %u. SysEx używa bajtów treści cmd36 SASAMI.",
+		L"%s\r\nHedef: MIDI %d, tick %u. SysEx, SASAMI cmd36 gövde baytlarını kullanır."),
 		msg ? msg : L"", m_ch + 1, (unsigned)m_tick);
 	m_hint.SetWindowText(s);
 }
@@ -297,9 +325,9 @@ void CSasamiExcRpnDlg::OnBnClickedRpn()
 		ExcPreviewShort(m_ch, 0xB0, 0x65, a);
 		ExcPreviewShort(m_ch, 0xB0, 0x64, b);
 		ExcPreviewShort(m_ch, 0xB0, 0x06, c);
-		RefreshHint(L"Inserted RPN.");
+		RefreshHint(LL14(L"RPNを入れました。", L"Inserted RPN.", L"RPN inséré.", L"RPN inserito.", L"RPN insertado.", L"RPN을 넣었습니다.", L"已插入 RPN。", L"تم إدراج RPN.", L"RPN вставлен.", L"RPN eingefügt.", L"RPN inserido.", L"RPN ingevoegd.", L"Wstawiono RPN.", L"RPN eklendi."));
 		NotifyChanged();
-	} else RefreshHint(L"RPN insert failed.");
+	} else RefreshHint(LL14(L"RPNを入れられませんでした。", L"Could not insert RPN.", L"Impossible d'insérer le RPN.", L"Impossibile inserire l'RPN.", L"No se pudo insertar el RPN.", L"RPN을 넣지 못했습니다.", L"无法插入 RPN。", L"تعذر إدراج RPN.", L"Не удалось вставить RPN.", L"RPN konnte nicht eingefügt werden.", L"Não foi possível inserir o RPN.", L"RPN kon niet worden ingevoegd.", L"Nie udało się wstawić RPN.", L"RPN eklenemedi."));
 }
 
 void CSasamiExcRpnDlg::OnBnClickedNrpn()
@@ -310,9 +338,9 @@ void CSasamiExcRpnDlg::OnBnClickedNrpn()
 		ExcPreviewShort(m_ch, 0xB0, 0x63, a);
 		ExcPreviewShort(m_ch, 0xB0, 0x62, b);
 		ExcPreviewShort(m_ch, 0xB0, 0x06, c);
-		RefreshHint(L"Inserted NRPN.");
+		RefreshHint(LL14(L"NRPNを入れました。", L"Inserted NRPN.", L"NRPN inséré.", L"NRPN inserito.", L"NRPN insertado.", L"NRPN을 넣었습니다.", L"已插入 NRPN。", L"تم إدراج NRPN.", L"NRPN вставлен.", L"NRPN eingefügt.", L"NRPN inserido.", L"NRPN ingevoegd.", L"Wstawiono NRPN.", L"NRPN eklendi."));
 		NotifyChanged();
-	} else RefreshHint(L"NRPN insert failed.");
+	} else RefreshHint(LL14(L"NRPNを入れられませんでした。", L"Could not insert NRPN.", L"Impossible d'insérer le NRPN.", L"Impossibile inserire l'NRPN.", L"No se pudo insertar el NRPN.", L"NRPN을 넣지 못했습니다.", L"无法插入 NRPN。", L"تعذر إدراج NRPN.", L"Не удалось вставить NRPN.", L"NRPN konnte nicht eingefügt werden.", L"Não foi possível inserir o NRPN.", L"NRPN kon niet worden ingevoegd.", L"Nie udało się wstawić NRPN.", L"NRPN eklenemedi."));
 }
 
 void CSasamiExcRpnDlg::OnBnClickedSysex()
@@ -320,14 +348,28 @@ void CSasamiExcRpnDlg::OnBnClickedSysex()
 	uint8_t b[ScMidiDoc::SC_SYSEX_BYTES];
 	int n = ReadHex(b, ScMidiDoc::SC_SYSEX_BYTES);
 	if (n <= 0) {
-		RefreshHint(L"SysEx insert failed — Hex/body is empty. Pick a GM/GS/XG preset first, or paste hex.");
+		RefreshHint(LL14(
+			L"SysExを入れられません。中身が空です。先に GM/GS/XG プリセットを選ぶか、16進を貼ってください。",
+			L"Could not insert SysEx — the body is empty. Pick a GM/GS/XG preset first, or paste hex.",
+			L"SysEx impossible : corps vide. Choisissez un préréglage GM/GS/XG, ou collez l'hexa.",
+			L"SysEx impossibile: corpo vuoto. Scegli prima un preset GM/GS/XG, o incolla l'hex.",
+			L"SysEx imposible: cuerpo vacío. Elija antes un preajuste GM/GS/XG, o pegue el hex.",
+			L"SysEx를 넣지 못했습니다. 내용이 비어 있습니다. GM/GS/XG 프리셋을 고르거나 16진을 붙이세요.",
+			L"无法插入 SysEx，内容为空。请先选 GM/GS/XG 预设，或粘贴十六进制。",
+			L"تعذر إدراج SysEx — الجسم فارغ. اختر إعداد GM/GS/XG أو الصق ست عشري.",
+			L"Не удалось вставить SysEx — тело пусто. Сначала пресет GM/GS/XG или вставьте hex.",
+			L"SysEx nicht eingefügt — Körper leer. Zuerst GM/GS/XG-Preset wählen oder Hex einfügen.",
+			L"Não foi possível inserir SysEx — corpo vazio. Escolha um preset GM/GS/XG ou cole o hex.",
+			L"SysEx niet ingevoegd — body leeg. Kies eerst een GM/GS/XG-preset of plak hex.",
+			L"Nie wstawiono SysEx — treść pusta. Najpierw preset GM/GS/XG albo wklej hex.",
+			L"SysEx eklenemedi — gövde boş. Önce bir GM/GS/XG önayarı seçin veya hex yapıştırın."));
 		return;
 	}
 	if (ScMidiAddSysex(m_doc, m_tick, m_ch, b, n)) {
 		VstLiveMidiSysex(0, b, n);
-		RefreshHint(L"Inserted SysEx.");
+		RefreshHint(LL14(L"SysExを入れました。", L"Inserted SysEx.", L"SysEx inséré.", L"SysEx inserito.", L"SysEx insertado.", L"SysEx를 넣었습니다.", L"已插入 SysEx。", L"تم إدراج SysEx.", L"SysEx вставлен.", L"SysEx eingefügt.", L"SysEx inserido.", L"SysEx ingevoegd.", L"Wstawiono SysEx.", L"SysEx eklendi."));
 		NotifyChanged();
-	} else RefreshHint(L"SysEx insert failed.");
+	} else RefreshHint(LL14(L"SysExを入れられませんでした。", L"Could not insert SysEx.", L"Impossible d'insérer le SysEx.", L"Impossibile inserire il SysEx.", L"No se pudo insertar el SysEx.", L"SysEx를 넣지 못했습니다.", L"无法插入 SysEx。", L"تعذر إدراج SysEx.", L"Не удалось вставить SysEx.", L"SysEx konnte nicht eingefügt werden.", L"Não foi possível inserir o SysEx.", L"SysEx kon niet worden ingevoegd.", L"Nie udało się wstawić SysEx.", L"SysEx eklenemedi."));
 }
 
 void CSasamiExcRpnDlg::OnBnClickedClose() { DestroyWindow(); }

@@ -79,8 +79,24 @@ END_MESSAGE_MAP()
 void CSasamiVstPickDlg::ApplyLang()
 {
 	if (m_effectsOnly) {
-		SetWindowText(L"Select VST Insert FX");
-		m_hint.SetWindowText(L"Scanned effects only (not instruments). Double-click to choose.");
+		SetWindowText(LL14(L"インサートFXを選択", L"Select VST Insert FX", L"Choisir un effet VST", L"Scegli FX VST", L"Elegir FX VST",
+			L"인서트 FX 선택", L"选择 VST 插入效果", L"اختر تأثير VST", L"Выбор вставного FX", L"VST-Insert wählen",
+			L"Escolher FX VST", L"VST-insert kiezen", L"Wybierz FX VST", L"VST ekleme efekti seç"));
+		m_hint.SetWindowText(LL14(
+			L"スキャン済みの効果だけ（音源ではない）。ダブルクリックで決定。",
+			L"Scanned effects only (not instruments). Double-click to choose.",
+			L"Effets déjà analysés seulement (pas d'instruments). Double-clic pour choisir.",
+			L"Solo effetti già analizzati (non strumenti). Doppio clic per scegliere.",
+			L"Solo efectos ya analizados (no instrumentos). Doble clic para elegir.",
+			L"스캔된 효과만 (음원 아님). 더블클릭으로 결정.",
+			L"仅已扫描的效果（不是音源）。双击确定。",
+			L"تأثيرات ممسوحة فقط (ليست آلات). نقرة مزدوجة للاختيار.",
+			L"Только просканированные эффекты (не инструменты). Двойной щелчок.",
+			L"Nur gescannte Effekte (keine Instrumente). Doppelklick zum Wählen.",
+			L"Só efeitos já analisados (não instrumentos). Duplo clique para escolher.",
+			L"Alleen gescande effecten (geen instrumenten). Dubbelklik om te kiezen.",
+			L"Tylko zeskanowane efekty (nie instrumenty). Podwójne kliknięcie.",
+			L"Yalnız taranmış efektler (çalgı değil). Seçmek için çift tık."));
 	} else if (m_vst2Only) {
 		SetWindowText(LL14(L"VST2音色を選択", L"Select VST2", L"Choisir VST2", L"Scegli VST2", L"Elegir VST2",
 			L"VST2 선택", L"选择 VST2", L"اختر VST2", L"Выбор VST2", L"VST2 wählen",
@@ -89,10 +105,18 @@ void CSasamiVstPickDlg::ApplyLang()
 		h.Format(LL14(
 			L"パート %d — VST2（.dll）だけ。ダブルクリックで決定",
 			L"Part %d — VST2 (.dll) only. Double-click to choose",
-			L"Partie %d — VST2 seulement", L"Parte %d — solo VST2", L"Parte %d — solo VST2",
-			L"파트 %d — VST2만", L"声部 %d — 仅 VST2", L"الجزء %d — VST2 فقط", L"Партия %d — только VST2",
-			L"Part %d — nur VST2", L"Parte %d — só VST2", L"Deel %d — alleen VST2",
-			L"Partia %d — tylko VST2", L"Parti %d — yalnız VST2"), m_part);
+			L"Partie %d — VST2 (.dll) seulement. Double-clic pour choisir",
+			L"Parte %d — solo VST2 (.dll). Doppio clic per scegliere",
+			L"Parte %d — solo VST2 (.dll). Doble clic para elegir",
+			L"파트 %d — VST2(.dll)만. 더블클릭으로 결정",
+			L"声部 %d — 仅 VST2（.dll）。双击确定",
+			L"الجزء %d — VST2 ‏(.dll) فقط. نقرة مزدوجة للاختيار",
+			L"Партия %d — только VST2 (.dll). Двойной щелчок",
+			L"Part %d — nur VST2 (.dll). Doppelklick zum Wählen",
+			L"Parte %d — só VST2 (.dll). Duplo clique para escolher",
+			L"Deel %d — alleen VST2 (.dll). Dubbelklik om te kiezen",
+			L"Partia %d — tylko VST2 (.dll). Podwójne kliknięcie",
+			L"Parti %d — yalnız VST2 (.dll). Seçmek için çift tık"), m_part);
 		m_hint.SetWindowText(h);
 	} else {
 		SetWindowText(LL14(L"VST音色を選択", L"Select VST", L"Choisir VST", L"Scegli VST", L"Elegir VST",
@@ -102,13 +126,25 @@ void CSasamiVstPickDlg::ApplyLang()
 		h.Format(LL14(
 			L"パート %d — スキャン済み音源（ダブルクリックで決定）。HALion等の音色数0は正常（MediaBayは設定画面内）",
 			L"Part %d — scanned instruments (double-click). HALion 0 programs is normal (MediaBay in editor)",
-			L"Partie %d", L"Parte %d", L"Parte %d", L"파트 %d", L"声部 %d", L"الجزء %d", L"Партия %d", L"Part %d", L"Parte %d", L"Deel %d", L"Partia %d", L"Parti %d"), m_part);
+			L"Partie %d — instruments analysés (double-clic). 0 programme HALion est normal (MediaBay dans l'éditeur)",
+			L"Parte %d — strumenti analizzati (doppio clic). 0 programmi HALion è normale (MediaBay nell'editor)",
+			L"Parte %d — instrumentos analizados (doble clic). 0 programas HALion es normal (MediaBay en el editor)",
+			L"파트 %d — 스캔된 음원(더블클릭). HALion 프로그램 0은 정상(MediaBay는 설정 화면)",
+			L"声部 %d — 已扫描音源（双击）。HALion 音色数为 0 是正常的（MediaBay 在设置画面）",
+			L"الجزء %d — آلات ممسوحة (نقرة مزدوجة). صفر برامج HALion طبيعي (MediaBay في المحرر)",
+			L"Партия %d — просканированные инструменты (двойной щелчок). 0 программ HALion — норма (MediaBay в редакторе)",
+			L"Part %d — gescannte Instrumente (Doppelklick). 0 HALion-Programme ist normal (MediaBay im Editor)",
+			L"Parte %d — instrumentos analisados (duplo clique). 0 programas HALion é normal (MediaBay no editor)",
+			L"Deel %d — gescande instrumenten (dubbelklik). 0 HALion-programma's is normaal (MediaBay in de editor)",
+			L"Partia %d — zeskanowane instrumenty (podwójne kliknięcie). 0 programów HALion jest normalne (MediaBay w edytorze)",
+			L"Parti %d — taranmış çalgılar (çift tık). HALion'da 0 program normaldir (MediaBay düzenleyicide)"), m_part);
 		m_hint.SetWindowText(h);
 	}
-	m_ok.SetWindowText(L"OK");
+	m_ok.SetWindowText(LL14(L"決定", L"OK", L"OK", L"OK", L"Aceptar", L"결정", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	m_cancel.SetWindowText(LL14(L"取消", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
-	m_rescan.SetWindowText(LL14(L"再スキャン", L"Rescan", L"Rescan", L"Rescan", L"Rescan",
-		L"재스캔", L"重新扫描", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan", L"Rescan"));
+	m_rescan.SetWindowText(LL14(L"再スキャン", L"Rescan", L"Nouvelle analyse", L"Nuova scansione", L"Volver a explorar",
+		L"다시 스캔", L"重新扫描", L"إعادة المسح", L"Сканировать снова", L"Neu scannen",
+		L"Analisar de novo", L"Opnieuw scannen", L"Skanuj ponownie", L"Yeniden tara"));
 }
 
 void CSasamiVstPickDlg::RebuildList()

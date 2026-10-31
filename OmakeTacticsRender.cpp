@@ -41,7 +41,7 @@ Renderer::Renderer()
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_fadeAbove = -1;
 	m_fadeX = m_fadeZ = -1;
-	m_w = m_h = 0; m_quality = 1; m_allowTess = TRUE; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
+	m_w = m_h = 0; m_quality = 1; m_gpu = 0; m_allowTess = TRUE; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_sceneTex = NULL; m_sceneRtv = NULL; m_sceneSrv = NULL;
 	m_blA = m_blB = NULL; m_blARtv = m_blBRtv = NULL; m_blASrv = m_blBSrv = NULL; m_blW = m_blH = 0;
@@ -56,6 +56,9 @@ Renderer::Renderer()
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
 	for (int gi = 0; gi < TH_COUNT; gi++) m_psGround[gi] = NULL;
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
+	m_photoTex = NULL; m_photoSrv = NULL; m_sphereTex = NULL; m_sphereSrv = NULL;
+	m_envTex = NULL; m_envSrv = NULL;
+	m_envTheme = -1; m_envBucket = -1; m_photoSide = 0; m_photoLive = 0;
 	m_csSkin = NULL; m_cbSkinBone = m_cbSkinParm = m_cbHairCloth = m_faceDummy = NULL; m_faceDummySRV = NULL;
 	m_csCloth[0] = m_csCloth[1] = m_csCloth[2] = NULL; m_cbCloth = NULL;
 	m_csSoft[0] = m_csSoft[1] = NULL; m_cbSoft = NULL;
@@ -154,6 +157,8 @@ void Renderer::Release()
 	for (int gi = 0; gi < TH_COUNT; gi++) TAC_REL(m_psGround[gi]);
 	m_psOverride = NULL;
 	TAC_REL(m_groundSrv); TAC_REL(m_groundTex); TAC_REL(m_matSrv); TAC_REL(m_matTex);
+	TAC_REL(m_photoSrv); TAC_REL(m_photoTex); TAC_REL(m_sphereSrv); TAC_REL(m_sphereTex); TAC_REL(m_envSrv); TAC_REL(m_envTex);
+	m_envTheme = -1; m_envBucket = -1; m_photoSide = 0; m_photoLive = 0;
 	TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TAC_REL(m_cbHairCloth); TAC_REL(m_faceDummySRV); TAC_REL(m_faceDummy);
 	for (int ci = 0; ci < 3; ci++) TAC_REL(m_csCloth[ci]);
 	TAC_REL(m_cbCloth);
@@ -194,6 +199,14 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	IDXGIDevice* xd = NULL; IDXGIAdapter* xa = NULL; IDXGIFactory2* f2 = NULL;
 	if (FAILED(hr = m_dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&xd)) || FAILED(hr = xd->GetAdapter(&xa))) {
 		TAC_REL(xd); m_lastHr = hr; return FALSE;
+	}
+	{
+		DXGI_ADAPTER_DESC ad = {};
+		if (SUCCEEDED(xa->GetDesc(&ad))) {
+			if (ad.VendorId == 0x10DE) m_gpu = 1;
+			else if (ad.VendorId == 0x1002) m_gpu = 2;
+			else if (ad.VendorId == 0x8086) m_gpu = 3;
+		}
 	}
 	xa->GetParent(__uuidof(IDXGIFactory2), (void**)&f2);
 	RECT rc; ::GetClientRect(hwnd, &rc);
@@ -243,6 +256,8 @@ void Renderer::SetQuality(int q)
 		TAC_REL(m_sLin);
 		D3D11_SAMPLER_DESC ss = {};
 		int an = (m_quality == 4) ? 1 : (TacQRich(m_quality) ? 16 : 8);
+		if (m_gpu == 3) an = min(an, m_quality >= 5 ? 8 : 4);
+		else if (m_gpu == 2 && an > 8) an = 8;
 		ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
 		ss.MaxAnisotropy = an;
 		ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -592,6 +607,8 @@ BOOL Renderer::CreateStates()
 
 	D3D11_SAMPLER_DESC ss = {};
 	int an = (m_quality == 4) ? 1 : (TacQRich(m_quality) ? 16 : 8);
+	if (m_gpu == 3) an = min(an, m_quality >= 5 ? 8 : 4);
+	else if (m_gpu == 2 && an > 8) an = 8;
 	ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
 	ss.MaxAnisotropy = an;
 	ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP; ss.MaxLOD = D3D11_FLOAT32_MAX;
@@ -817,14 +834,20 @@ static BOOL LoadStrip(ID3D11Device* dev, int rid, int slices, ID3D11Texture2D** 
 {
 	*tex = NULL; *srv = NULL;
 	if (slices < 1 || slices > 16) return FALSE;
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA); }
-	if (!rs) return FALSE;
-	HGLOBAL hg = LoadResource(hm, rs);
-	DWORD len = SizeofResource(hm, rs);
-	const BYTE* data = (const BYTE*)LockResource(hg);
-	if (!data || len < 32) return FALSE;
+	BYTE* owned = NULL;
+	DWORD len = 0;
+	const BYTE* data = NULL;
+	if (BonusImageRead(rid, &owned, &len)) data = owned;
+	if (!data) {
+		HMODULE hm = AfxGetResourceHandle();
+		HRSRC rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA);
+		if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA); }
+		if (!rs) return FALSE;
+		HGLOBAL hg = LoadResource(hm, rs);
+		len = SizeofResource(hm, rs);
+		data = (const BYTE*)LockResource(hg);
+	}
+	if (!data || len < 32) { free(owned); return FALSE; }
 	IWICImagingFactory* f = NULL;
 	HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
 	if (FAILED(hr) || !f) return FALSE;
@@ -863,8 +886,315 @@ static BOOL LoadStrip(ID3D11Device* dev, int rid, int slices, ID3D11Texture2D** 
 	}
 	if (!ok) { TAC_REL(*srv); TAC_REL(*tex); }
 	TAC_REL(cv); TAC_REL(fr); TAC_REL(dec); TAC_REL(st); TAC_REL(f);
+	free(owned);
 	return ok;
 }
+// 平原〜滝。実写は tacticsbgm\resource\tactics の画像。画質で解像度と反射の段を変える。
+static int StageTierQ(int q)
+{
+	if (q == 4) return 0;
+	if (q <= 0) return 1;
+	if (q == 1) return 2;
+	if (q == 2) return 3;
+	if (q == 3) return 4;
+	if (q == 5) return 5;
+	return 6;
+}
+static int PhotoSideFor(int q)
+{
+	int t = StageTierQ(q);
+	if (t <= 0) return 0;
+	if (t == 1) return 256;
+	if (t == 2) return 512;
+	return 1024;
+}
+static int EnvFaceFor(int t)
+{
+	if (t <= 0) return 8;
+	if (t == 1) return 16;
+	if (t == 2) return 32;
+	return 64;
+}
+static int SphereSideFor(int t)
+{
+	if (t <= 0) return 32;
+	if (t == 1) return 64;
+	if (t == 2) return 128;
+	return 256;
+}
+
+static BOOL LockRc(int rid, const BYTE** data, DWORD* len)
+{
+	*data = NULL; *len = 0;
+	static BYTE* hold = NULL;
+	free(hold); hold = NULL;
+	if (BonusImageRead(rid, &hold, len)) { *data = hold; return TRUE; }
+	HMODULE hm = AfxGetResourceHandle();
+	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA);
+	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA); }
+	if (!rs) return FALSE;
+	HGLOBAL hg = LoadResource(hm, rs);
+	DWORD n = SizeofResource(hm, rs);
+	const BYTE* p = (const BYTE*)LockResource(hg);
+	if (!p || n < 32) return FALSE;
+	*data = p; *len = n;
+	return TRUE;
+}
+
+static BOOL LockPack(int rid, const BYTE** data, DWORD* len)
+{
+	*data = NULL; *len = 0;
+	struct Slot { int id; BYTE* p; DWORD n; };
+	static Slot slot[8];
+	static int nslot = 0;
+	for (int i = 0; i < nslot; i++) if (slot[i].id == rid) {
+		*data = slot[i].p; *len = slot[i].n; return TRUE;
+	}
+	BYTE* owned = NULL; DWORD n = 0;
+	if (BonusImageRead(rid, &owned, &n) && owned) {
+		if (nslot < 8) { slot[nslot].id = rid; slot[nslot].p = owned; slot[nslot].n = n; nslot++; }
+		*data = owned; *len = n;
+		return TRUE;
+	}
+	free(owned);
+	HMODULE hm = AfxGetResourceHandle();
+	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA);
+	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(rid), RT_RCDATA); }
+	if (!rs) return FALSE;
+	HGLOBAL hg = LoadResource(hm, rs);
+	const BYTE* p = hg ? (const BYTE*)LockResource(hg) : NULL;
+	DWORD sz = rs ? SizeofResource(hm, rs) : 0;
+	if (!p || sz < 8) return FALSE;
+	*data = p; *len = sz;
+	return TRUE;
+}
+
+static BOOL DecodeScaled(const BYTE* data, int len, int side, DWORD* dst)
+{
+	IWICImagingFactory* f = NULL;
+	if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) || !f) return FALSE;
+	IWICStream* st = NULL; IWICBitmapDecoder* dec = NULL; IWICBitmapFrameDecode* fr = NULL;
+	IWICBitmapScaler* sc = NULL; IWICFormatConverter* cv = NULL;
+	BOOL ok = FALSE;
+	if (SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE*)data, (DWORD)len))
+		&& SUCCEEDED(f->CreateDecoderFromStream(st, NULL, WICDecodeMetadataCacheOnLoad, &dec))
+		&& SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(f->CreateBitmapScaler(&sc))
+		&& SUCCEEDED(sc->Initialize(fr, (UINT)side, (UINT)side, WICBitmapInterpolationModeFant))
+		&& SUCCEEDED(f->CreateFormatConverter(&cv))
+		&& SUCCEEDED(cv->Initialize(sc, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, NULL, 0, WICBitmapPaletteTypeCustom))) {
+		ok = SUCCEEDED(cv->CopyPixels(NULL, (UINT)side * 4, (UINT)side * (UINT)side * 4, (BYTE*)dst));
+	}
+	if (ok) {
+		int n = side * side;
+		for (int i = 0; i < n; i++) dst[i] |= 0xFF000000u;
+	}
+	TAC_REL(cv); TAC_REL(sc); TAC_REL(fr); TAC_REL(dec); TAC_REL(st); TAC_REL(f);
+	return ok;
+}
+
+static BOOL MakeGpuArray(ID3D11Device* dev, ID3D11DeviceContext* ctx, int side, int slices, const DWORD* px, BOOL cube,
+	ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
+{
+	*tex = NULL; *srv = NULL;
+	D3D11_TEXTURE2D_DESC td = {};
+	td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 0; td.ArraySize = (UINT)slices;
+	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
+	td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+	if (cube) td.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+	if (FAILED(dev->CreateTexture2D(&td, NULL, tex)) || !*tex) return FALSE;
+	(*tex)->GetDesc(&td);
+	for (int s = 0; s < slices; s++) {
+		UINT sub = D3D11CalcSubresource(0, (UINT)s, td.MipLevels);
+		ctx->UpdateSubresource(*tex, sub, NULL, px + (size_t)s * side * side, (UINT)side * 4, 0);
+	}
+	D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+	sv.Format = td.Format;
+	if (cube) {
+		sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+		sv.TextureCube.MipLevels = td.MipLevels;
+	} else {
+		sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		sv.Texture2DArray.MipLevels = td.MipLevels;
+		sv.Texture2DArray.ArraySize = (UINT)slices;
+	}
+	if (FAILED(dev->CreateShaderResourceView(*tex, &sv, srv)) || !*srv) {
+		TAC_REL(*srv); TAC_REL(*tex); return FALSE;
+	}
+	ctx->GenerateMips(*srv);
+	return TRUE;
+}
+
+static void CubeDir(int face, float u, float v, float& x, float& y, float& z)
+{
+	float su = u * 2.f - 1.f, sv = v * 2.f - 1.f;
+	switch (face) {
+	case 0: x = 1.f; y = -sv; z = -su; break;
+	case 1: x = -1.f; y = -sv; z = su; break;
+	case 2: x = su; y = 1.f; z = sv; break;
+	case 3: x = su; y = -1.f; z = -sv; break;
+	case 4: x = su; y = -sv; z = 1.f; break;
+	default: x = -su; y = -sv; z = -1.f; break;
+	}
+}
+
+static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, float& b)
+{
+	static const BYTE kTop[TH_COUNT][3] = {
+		{ 84, 146, 228 }, { 112, 146, 214 }, { 66, 128, 172 }, { 128, 160, 214 }, { 98, 162, 232 },
+		{ 40, 24, 34 }, { 70, 92, 82 }, { 58, 56, 120 }, { 36, 110, 150 }, { 150, 188, 214 }
+	};
+	static const BYTE kHor[TH_COUNT][3] = {
+		{ 206, 228, 246 }, { 246, 206, 164 }, { 176, 214, 194 }, { 232, 238, 248 }, { 252, 228, 176 },
+		{ 170, 66, 40 }, { 156, 166, 132 }, { 206, 170, 204 }, { 140, 206, 214 }, { 226, 232, 236 }
+	};
+	static const BYTE kGnd[TH_COUNT][3] = {
+		{ 110, 170, 80 }, { 170, 120, 80 }, { 70, 120, 60 }, { 230, 236, 246 }, { 220, 194, 140 },
+		{ 80, 70, 68 }, { 80, 96, 60 }, { 160, 156, 140 }, { 48, 110, 100 }, { 90, 140, 80 }
+	};
+	static const float kSun[TH_COUNT][3] = {
+		{ .45f, .82f, .35f }, { .55f, .7f, .3f }, { .35f, .85f, .4f }, { .4f, .7f, .5f }, { .5f, .85f, .2f },
+		{ .3f, .75f, .55f }, { .35f, .8f, .45f }, { .6f, .6f, .35f }, { .4f, .62f, .28f }, { .4f, .8f, .3f }
+	};
+	theme = Clampi(theme, 0, TH_COUNT - 1);
+	float len = sqrtf(x * x + y * y + z * z);
+	if (len < 1e-4f) len = 1.f;
+	x /= len; y /= len; z /= len;
+	if (theme == TH_SEABED) {
+		float up = Clampf(y * 0.5f + 0.5f, 0, 1);
+		r = Lerpf(0.02f, 0.20f, up); g = Lerpf(0.10f, 0.48f, up); b = Lerpf(0.16f, 0.55f, up);
+		float cau = 0.5f + 0.5f * sinf(x * 18.f + z * 9.f) * sinf(z * 14.f - x * 4.f);
+		r += cau * cau * 0.08f; g += cau * 0.12f; b += cau * 0.16f;
+		return;
+	}
+	float up = Clampf(y * 0.5f + 0.55f, 0, 1);
+	up = up * up * (3.f - 2.f * up);
+	r = Lerpf(kHor[theme][0] / 255.f, kTop[theme][0] / 255.f, up);
+	g = Lerpf(kHor[theme][1] / 255.f, kTop[theme][1] / 255.f, up);
+	b = Lerpf(kHor[theme][2] / 255.f, kTop[theme][2] / 255.f, up);
+	float hor = powf(1.f - fabsf(y), 4.f);
+	r = Lerpf(r, kHor[theme][0] / 255.f, hor * 0.45f);
+	g = Lerpf(g, kHor[theme][1] / 255.f, hor * 0.45f);
+	b = Lerpf(b, kHor[theme][2] / 255.f, hor * 0.45f);
+	if (y < 0) {
+		float k = Clampf(-y * 1.3f, 0, 1);
+		r = Lerpf(r, kGnd[theme][0] / 255.f, k);
+		g = Lerpf(g, kGnd[theme][1] / 255.f, k);
+		b = Lerpf(b, kGnd[theme][2] / 255.f, k);
+	}
+	float sx = kSun[theme][0], sy = kSun[theme][1], sz = kSun[theme][2];
+	float sl = sqrtf(sx * sx + sy * sy + sz * sz);
+	sx /= sl; sy /= sl; sz /= sl;
+	float d = x * sx + y * sy + z * sz;
+	float disk = expf((d - 1.f) * (theme == TH_VOLCANO ? 10.f : 28.f));
+	float glow = expf((d - 1.f) * 5.5f);
+	float sr = 1.f, sg = 0.94f, sb = 0.78f;
+	if (theme == TH_VOLCANO) { sr = 1.f; sg = 0.35f; sb = 0.08f; }
+	else if (theme == TH_SNOW) { sg = 0.97f; sb = 1.f; }
+	else if (theme == TH_FALLS) { sg = 0.98f; sb = 1.f; }
+	r += sr * (disk * 1.4f + glow * 0.28f);
+	g += sg * (disk * 1.4f + glow * 0.28f);
+	b += sb * (disk * 1.4f + glow * 0.28f);
+	if (theme != TH_VOLCANO && y > 0.05f) {
+		float cl = TNoise(theme * 19 + 4, x * 3.4f + 8.f, z * 3.4f);
+		if (cl > 0.62f) {
+			float a = (cl - 0.62f) * 1.8f * Clampf(y * 2.f, 0, 1);
+			r = Lerpf(r, 0.96f, a); g = Lerpf(g, 0.97f, a); b = Lerpf(b, 1.f, a);
+		}
+	}
+	if (theme == TH_VOLCANO && y > 0.15f && TNoise(9, x * 40.f, z * 40.f) > 0.96f) { r += 0.8f; g += 0.75f; b += 0.6f; }
+	if (theme == TH_FALLS && fabsf(y) < 0.18f) { r = Lerpf(r, 0.92f, 0.35f); g = Lerpf(g, 0.95f, 0.35f); b = Lerpf(b, 1.f, 0.35f); }
+	if (theme == TH_RUINS && y > 0.35f && TNoise(3, x * 30.f, z * 30.f) > 0.97f) { r += 0.45f; g += 0.45f; b += 0.7f; }
+}
+
+static void FillCube(int theme, int face, DWORD* dst)
+{
+	int n = face * face;
+	for (int i = 0; i < 6; i++) {
+		DWORD* f = dst + (size_t)i * n;
+		for (int y = 0; y < face; y++) for (int x = 0; x < face; x++) {
+			float dx, dy, dz, r, g, b;
+			CubeDir(i, (x + 0.5f) / face, (y + 0.5f) / face, dx, dy, dz);
+			ShadeEnv(theme, dx, dy, dz, r, g, b);
+			f[y * face + x] = BGRA((int)(Clampf(r, 0, 1) * 255.f), (int)(Clampf(g, 0, 1) * 255.f), (int)(Clampf(b, 0, 1) * 255.f));
+		}
+	}
+}
+
+static void FillSphere(int theme, int side, DWORD* dst)
+{
+	for (int y = 0; y < side; y++) for (int x = 0; x < side; x++) {
+		float mx = ((x + 0.5f) / side) * 2.f - 1.f;
+		float my = ((y + 0.5f) / side) * 2.f - 1.f;
+		float r2 = mx * mx + my * my;
+		float dx, dy, dz, r, g, b;
+		if (r2 > 1.f) {
+			dx = mx; dy = 0; dz = 0.15f;
+		} else {
+			float nz = sqrtf(1.f - r2);
+			dx = 2.f * nz * mx; dy = 2.f * nz * my; dz = 2.f * nz * nz - 1.f;
+		}
+		ShadeEnv(theme, dx, dy, dz, r, g, b);
+		dst[y * side + x] = BGRA((int)(Clampf(r, 0, 1) * 255.f), (int)(Clampf(g, 0, 1) * 255.f), (int)(Clampf(b, 0, 1) * 255.f));
+	}
+}
+
+void Renderer::PollStageLook()
+{
+	if (!m_dev || !m_ctx) return;
+	if (!m_photoSrv) {
+		DWORD blank[20];
+		for (int i = 0; i < 20; i++) blank[i] = 0;
+		ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
+		if (MakeGpuArray(m_dev, m_ctx, 1, 20, blank, FALSE, &t, &s)) { m_photoTex = t; m_photoSrv = s; }
+	}
+	int tier = StageTierQ(m_quality);
+	if (m_envTheme != m_theme || m_envBucket != tier || !m_envSrv || !m_sphereSrv) {
+		int face = EnvFaceFor(tier), ss = SphereSideFor(tier);
+		DWORD* cube = (DWORD*)malloc(sizeof(DWORD) * (size_t)face * face * 6);
+		DWORD* sph = (DWORD*)malloc(sizeof(DWORD) * (size_t)ss * ss);
+		ID3D11Texture2D* ct = NULL, *st = NULL;
+		ID3D11ShaderResourceView* cs = NULL, *ssrv = NULL;
+		BOOL ok = cube && sph;
+		if (ok) { FillCube(m_theme, face, cube); FillSphere(m_theme, ss, sph); }
+		ok = ok && MakeGpuArray(m_dev, m_ctx, face, 6, cube, TRUE, &ct, &cs);
+		ok = ok && MakeTex(m_dev, m_ctx, sph, ss, ss, TRUE, &st, &ssrv);
+		free(cube); free(sph);
+		if (ok) {
+			TAC_REL(m_envSrv); TAC_REL(m_envTex); TAC_REL(m_sphereSrv); TAC_REL(m_sphereTex);
+			m_envTex = ct; m_envSrv = cs; m_sphereTex = st; m_sphereSrv = ssrv;
+			m_envTheme = m_theme; m_envBucket = tier;
+		} else {
+			TAC_REL(cs); TAC_REL(ct); TAC_REL(ssrv); TAC_REL(st);
+		}
+	}
+	int want = PhotoSideFor(m_quality);
+	if (want > 0 && want != m_photoSide) {
+		size_t pix = (size_t)want * want;
+		DWORD* px = (DWORD*)calloc(pix * 20, sizeof(DWORD));
+		if (px) {
+			int live = 0;
+			for (int theme = 0; theme < TH_COUNT; theme++) {
+				for (int nrm = 0; nrm < 2; nrm++) {
+					const BYTE* data = NULL; DWORD n = 0;
+					DWORD* dst = px + (size_t)(theme + nrm * 10) * pix;
+					if (LockRc(IDR_TAC_PH0 + theme + nrm * 10, &data, &n) && DecodeScaled(data, (int)n, want, dst)) {
+						if (!nrm) live++;
+					} else memset(dst, 0, pix * sizeof(DWORD));
+				}
+			}
+			ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
+			if (live > 0 && MakeGpuArray(m_dev, m_ctx, want, 20, px, FALSE, &t, &s)) {
+				TAC_REL(m_photoSrv); TAC_REL(m_photoTex);
+				m_photoTex = t; m_photoSrv = s;
+				m_photoSide = want;
+				m_photoLive = live;
+			}
+			free(px);
+		}
+	}
+}
+
 BOOL Renderer::CreateProcTextures()
 {
 	{
@@ -895,6 +1225,7 @@ BOOL Renderer::CreateProcTextures()
 	}
 	if (!LoadStrip(m_dev, IDR_TAC_DETAIL, 16, &m_groundTex, &m_groundSrv)) return FALSE;
 	if (!LoadStrip(m_dev, IDR_TAC_MAT, 8, &m_matTex, &m_matSrv)) return FALSE;
+	PollStageLook();
 	return TRUE;
 }
 
@@ -1011,13 +1342,9 @@ static int g_avaNeedReset = 0;
 BOOL Renderer::LoadAssets()
 {
 	if (m_assetsOk) return TRUE;
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_ASSETS), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_ASSETS), RT_RCDATA); }
-	if (!rs) return FALSE;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_ASSETS, &data, &size)) return FALSE;
 	if (!data || size < 32 || memcmp(data, "TAC1", 4) != 0) return FALSE;
 	Reader rd(data + 4, size - 4);
 	UINT ver = rd.U32(), nTex = rd.U32(), nRig = rd.U32(), nMod = rd.U32(), nAtt = rd.U32(), nSt = rd.U32();
@@ -2069,13 +2396,9 @@ void Renderer::LoadCreaturePack()
 	for (auto& s : m_skins) ReleaseSkinGpu(s);
 	m_skins.clear();
 	ReleaseAvatarCache();
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA); }
-	if (!rs) return;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_MON, &data, &size)) return;
 	if (!data || size < 8) return;
 	if (memcmp(data, "TACK", 4) == 0) {
 		Reader rd(data + 4, size - 4);
@@ -2872,13 +3195,9 @@ void Renderer::LoadGearPack()
 	for (auto& c : m_gear) c.Release();
 	m_gear.clear();
 	m_gearGrip.clear();
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_GEAR), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_GEAR), RT_RCDATA); }
-	if (!rs) return;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_GEAR, &data, &size)) return;
 	if (!data || size < 8) return;
 	const int packed = memcmp(data, "TACQ", 4) == 0;
 	if (!packed && memcmp(data, "TACG", 4) != 0) return;
@@ -2916,13 +3235,9 @@ void Renderer::LoadGearPack()
 void Renderer::LoadFacePack()
 {
 	for (int g = 0; g < 2; g++) m_faces[g] = FaceSet();
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_FACE), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_FACE), RT_RCDATA); }
-	if (!rs) return;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_FACE, &data, &size)) return;
 	if (!data || size < 8 || memcmp(data, "TACF", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT ng = rd.U32();
@@ -3099,13 +3414,9 @@ void Renderer::LoadAvatarPack()
 	m_avaCos.clear();
 	m_avaModels.clear();
 	for (int g = 0; g < 2; g++) m_avaBody[g] = AvaBody();
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_AVA), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_AVA), RT_RCDATA); }
-	if (!rs) return;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_AVA, &data, &size)) return;
 	if (!data || size < 8 || memcmp(data, "TACV", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT ns = rd.U32();
@@ -6937,13 +7248,9 @@ void Renderer::LoadHairPack()
 {
 	ReleaseHair();
 	if (!m_dev) return;
-	HMODULE hm = AfxGetResourceHandle();
-	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIR), RT_RCDATA);
-	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIR), RT_RCDATA); }
-	if (!rs) return;
-	HGLOBAL hg = LoadResource(hm, rs);
-	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
-	DWORD size = SizeofResource(hm, rs);
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_HAIR, &data, &size)) return;
 	if (!data || size < 16 || memcmp(data, "TACH", 4) != 0) return;
 	UINT nv = 0, ni = 0, ns = 0;
 	memcpy(&nv, data + 4, 4);
@@ -7054,12 +7361,20 @@ void Renderer::LoadHairPack()
 	m_hairDraw.stride = 36;
 	m_hairDraw.i32 = 0;
 	m_hairDraw.tex = -2;
-	HRSRC rt = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIRTEX), RT_RCDATA);
-	if (!rt) { hm = GetModuleHandle(NULL); rt = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIRTEX), RT_RCDATA); }
-	if (rt) {
-		HGLOBAL ht = LoadResource(hm, rt);
-		const BYTE* td = ht ? (const BYTE*)LockResource(ht) : NULL;
-		DWORD tl = SizeofResource(hm, rt);
+	BYTE* hairOwn = NULL;
+	DWORD hairN = 0;
+	const BYTE* hairMem = NULL;
+	if (BonusImageRead(IDR_TAC_HAIRTEX, &hairOwn, &hairN)) hairMem = hairOwn;
+	HRSRC rt = NULL;
+	HMODULE hm = AfxGetResourceHandle();
+	if (!hairMem) {
+		rt = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIRTEX), RT_RCDATA);
+		if (!rt) { hm = GetModuleHandle(NULL); rt = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_HAIRTEX), RT_RCDATA); }
+	}
+	if (hairMem || rt) {
+		HGLOBAL ht = rt ? LoadResource(hm, rt) : NULL;
+		const BYTE* td = hairMem ? hairMem : (ht ? (const BYTE*)LockResource(ht) : NULL);
+		DWORD tl = hairMem ? hairN : (rt ? SizeofResource(hm, rt) : 0);
 		if (td && tl > 32) {
 			IWICImagingFactory* f = NULL;
 			if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) && f) {
@@ -7088,6 +7403,7 @@ void Renderer::LoadHairPack()
 			}
 		}
 	}
+	free(hairOwn);
 	if (!m_hairSrv) { ReleaseHair(); return; }
 	{
 		struct HairGpuG { float p[4]; };
@@ -7728,8 +8044,8 @@ void Renderer::BeginFrame()
 	m_ctx->PSSetConstantBuffers(1, 1, &m_cbObj);
 	m_ctx->HSSetConstantBuffers(1, 1, &m_cbObj);
 	m_ctx->DSSetConstantBuffers(1, 1, &m_cbObj);
-	ID3D11SamplerState* ss[2] = { m_sLin, m_sCmp };
-	m_ctx->PSSetSamplers(0, 2, ss);
+	ID3D11SamplerState* ss[3] = { m_sLin, m_sCmp, m_sClamp };
+	m_ctx->PSSetSamplers(0, 3, ss);
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h; m_fcb.screen[2] = 1.f / m_w; m_fcb.screen[3] = 1.f / m_h;
 	SetLiquidRipples(NULL);
 }
@@ -7794,6 +8110,7 @@ void Renderer::BeginShadowPass()
 
 void Renderer::BeginMainPass()
 {
+	PollStageLook();
 	m_pass = m_inPortrait ? PASS_PORTRAIT : PASS_MAIN;
 	if (m_inPortrait) {
 		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
@@ -7830,6 +8147,9 @@ void Renderer::BeginMainPass()
 	m_ctx->PSSetShaderResources(1, 1, &sh);
 	if (m_groundSrv) m_ctx->PSSetShaderResources(3, 1, &m_groundSrv);
 	if (m_matSrv) m_ctx->PSSetShaderResources(4, 1, &m_matSrv);
+	if (m_photoSrv) m_ctx->PSSetShaderResources(5, 1, &m_photoSrv);
+	if (m_sphereSrv) m_ctx->PSSetShaderResources(6, 1, &m_sphereSrv);
+	if (m_envSrv) m_ctx->PSSetShaderResources(7, 1, &m_envSrv);
 }
 
 void Renderer::ClearDepth()
@@ -8660,14 +8980,16 @@ BOOL Renderer::BuildTerrain(const Map& m)
 				geo.Quad(v3(ex0, yt, ez0), v3(ex1, yt, ez1), v3(ex1, yb, ez1), v3(ex0, yb, ez0), n, 0, v0, 1, v1, -1, sc);
 				yt = yb; seg++;
 			}
-			// 川が高い側にある段差は、どの地形でも滝の面にする。海底の溝は落とさない。
-			if (m.theme != TH_SEABED && c.t == T_WATER && Map::In(nx, nz) && m.At(nx, nz).t != T_VOID && y - ny > 0.9f) {
+			// 端が奈落・谷なら滝。高い水が低い地面へ落ちるときも滝。海底の溝は落とさない。
+			BOOL offMap = !Map::In(nx, nz) || m.At(nx, nz).t == T_VOID;
+			BOOL drop = Map::In(nx, nz) && m.At(nx, nz).t != T_VOID && y - ny > 0.9f;
+			if (m.theme != TH_SEABED && c.t == T_WATER && (offMap || drop)) {
 				float ox = n.x * 0.06f, oz = n.z * 0.06f;
-				float fallBot = ny + 0.15f;
-				if (m.theme == TH_FALLS && m.At(nx, nz).t == T_CHASM) fallBot = -9.f;
+				float fallBot = offMap ? -9.f : ny + 0.15f;
+				if (Map::In(nx, nz) && (m.At(nx, nz).t == T_CHASM || m.At(nx, nz).t == T_VOID)) fallBot = -9.f;
 				wb.Quad(v3(ex0 + ox, y, ez0 + oz), v3(ex1 + ox, y, ez1 + oz),
 					v3(ex1 + ox, fallBot, ez1 + oz), v3(ex0 + ox, fallBot, ez0 + oz),
-					n, 0, 0, 1, 1, -1, 0xFFFFFFFF);
+					n, 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_WATER));
 				AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (y + fallBot) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
 			}
 		}
@@ -8872,10 +9194,23 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 		else if (m.theme == TH_FALLS) { r = 90; g = 150; b = 80; }
 		else { r = 105; g = 165; b = 80; }
 		break;
-	case T_FOREST: r = 40; g = 100; b = 45; break;
+	case T_FOREST:
+		if (m.theme == TH_SNOW) { r = 120; g = 150; b = 160; }
+		else if (m.theme == TH_VOLCANO) { r = 70; g = 48; b = 36; }
+		else if (m.theme == TH_DESERT) { r = 70; g = 110; b = 50; }
+		else { r = 28; g = 118; b = 42; }
+		break;
 	case T_HILL: r = 140; g = 160; b = 90; break;
 	case T_MOUNTAIN: r = 120; g = 112; b = 105; break;
-	case T_WATER: r = 60; g = 120; b = 200; break;
+	case T_WATER:
+		if (m.theme == TH_SNOW) { r = 210; g = 230; b = 248; }
+		else if (m.theme == TH_SWAMP) { r = 48; g = 78; b = 42; }
+		else if (m.theme == TH_VOLCANO) { r = 40; g = 70; b = 100; }
+		else if (m.theme == TH_FALLS) { r = 150; g = 220; b = 245; }
+		else if (m.theme == TH_SEABED) { r = 16; g = 80; b = 130; }
+		else if (m.theme == TH_DESERT) { r = 36; g = 150; b = 170; }
+		else { r = 40; g = 130; b = 220; }
+		break;
 	case T_CHASM: r = 20; g = 18; b = 22; break;
 	case T_LAVA: r = 240; g = 100; b = 30; break;
 	case T_SAND: r = 225; g = 200; b = 140; break;
@@ -8902,15 +9237,17 @@ void Renderer::BuildMinimap(const Map& m)
 		if (n > m_miniN) m_miniN = n;
 	}
 	if (m_miniN > 3) m_miniN = 3;
+	enum { MINI_S = MAPN * 4 };
 	static Buf<DWORD> px;
-	px.resize(MAPN * MAPN);
+	px.resize((size_t)MINI_S * MINI_S);
 	for (int L = 0; L < m_miniN; L++) {
 		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 			const Cell& c = m.At(x, z);
 			int r = 12, g = 14, b = 22;
 			float sh = 1.f;
+			int tr = T_VOID;
 			if (LayerOn(c, L) && c.t != T_VOID) {
-				int tr = LayerTr(c, L);
+				tr = LayerTr(c, L);
 				MiniRgb(m, tr, L == 0 && BridgeFloor(c), r, g, b);
 				if (L == 1) { r = (r * 3 + 210) / 4; g = (g * 3 + 180) / 4; b = (b * 3 + 90) / 4; }
 				else if (L == 2) { r = (r * 3 + 210) / 4; g = (g * 3 + 120) / 4; b = (b * 3 + 170) / 4; }
@@ -8921,9 +9258,15 @@ void Renderer::BuildMinimap(const Map& m)
 				else if (c.gimm == GM_CHEST) { r = 230; g = 180; b = 50; sh = 1.f; }
 				else if (tr == T_DOOR) { r = 150; g = 100; b = 50; sh = 1.f; }
 			}
-			px[(size_t)z * MAPN + x] = BGRA((int)(r * sh), (int)(g * sh), (int)(b * sh));
+			int rr = (int)(r * sh), gg = (int)(g * sh), bb = (int)(b * sh);
+			for (int oy = 0; oy < 4; oy++) for (int ox = 0; ox < 4; ox++) {
+				int pr = rr, pg = gg, pb = bb;
+				if (ox == 0 || oy == 0) { pr = pr * 3 / 4; pg = pg * 3 / 4; pb = pb * 3 / 4; }
+				if (tr == T_WATER && ((ox + oy) & 1)) { pr = min(255, pr + 28); pg = min(255, pg + 24); pb = min(255, pb + 18); }
+				px[(size_t)(z * 4 + oy) * MINI_S + (x * 4 + ox)] = BGRA(pr, pg, pb);
+			}
 		}
-		MakeTex(m_dev, m_ctx, px.data(), MAPN, MAPN, FALSE, &m_texMiniL[L], &m_srvMiniL[L]);
+		MakeTex(m_dev, m_ctx, px.data(), MINI_S, MINI_S, FALSE, &m_texMiniL[L], &m_srvMiniL[L]);
 	}
 }
 
@@ -9050,6 +9393,7 @@ BOOL Renderer::ApplyPost()
 	else if (m_quality == 3) nblur = 3;
 	else if (m_quality == 5) nblur = 4;
 	else if (m_quality == 6) nblur = 5;
+	if (m_gpu == 3 && m_quality < 5) nblur = min(nblur, 2);
 	if (nblur > 0) {
 	DrawParams ex;
 		ex.mode = 0.92f;

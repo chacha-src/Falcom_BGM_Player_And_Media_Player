@@ -2154,18 +2154,18 @@ static const SkillDef kWide[] = {
 };
 static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_AREAHEAL0 - (SKL_RAISE + 1), "wide skill table");
 static const SkillDef kForm[] = {
-	{ TX_SK_WING, TX_SKD_WING, SK_PHYS, 6, 145, 1, 1, 0, EL_NONE, 1, 0, EF_NONE, 0, SH_RADIUS, FM_WING },
-	{ TX_SK_CROSS, TX_SKD_CROSS, SK_PHYS, 8, 180, 1, 1, 0, EL_NONE, 1, 5, EF_NONE, 0, SH_RADIUS, FM_CROSS },
-	{ TX_SK_WALL, TX_SKD_WALL, SK_PHYS, 10, 110, 1, 1, 2, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN, FM_WALL },
-	{ TX_SK_BACK, TX_SKD_BACK, SK_PHYS, 8, 140, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE, FM_BACK },
-	{ TX_SK_TRI, TX_SKD_TRI, SK_PHYS, 10, 120, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN, FM_TRI },
-	{ TX_SK_CHAIN, TX_SKD_CHAIN, SK_PHYS, 14, 240, 1, 1, 0, EL_NONE, 1, 10, EF_NONE, 0, SH_RADIUS, FM_CHAIN },
-	{ TX_SK_DIA, TX_SKD_DIA, SK_PHYS, 10, 125, 1, 1, 2, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN, FM_DIA },
-	{ TX_SK_SQUARE, TX_SKD_SQUARE, SK_PHYS, 12, 140, 0, 0, 1, EL_EARTH, 1, 0, EF_NONE, 0, SH_RADIUS, FM_SQUARE },
-	{ TX_SK_ECHELON, TX_SKD_ECHELON, SK_PHYS, 12, 155, 2, 5, 5, EL_WIND, 2, 0, EF_NONE, 0, SH_LINE, FM_ECHELON },
-	{ TX_SK_CIRCLE, TX_SKD_CIRCLE, SK_MAGIC, 16, 18, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_CIRCLE },
-	{ TX_SK_PAIR, TX_SKD_PAIR, SK_HEAL, 8, 22, 0, 0, 1, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_PAIR },
-	{ TX_SK_PINCER, TX_SKD_PINCER, SK_PHYS, 10, 200, -1, -1, 0, EL_NONE, 1, 20, EF_NONE, 0, SH_RADIUS, FM_PINCER },
+	{ TX_SK_WING, TX_SKD_WING, SK_PHYS, 6, 260, 1, 1, 0, EL_NONE, 1, 8, EF_NONE, 0, SH_RADIUS, FM_WING },
+	{ TX_SK_CROSS, TX_SKD_CROSS, SK_PHYS, 8, 340, 1, 1, 0, EL_NONE, 1, 12, EF_NONE, 0, SH_RADIUS, FM_CROSS },
+	{ TX_SK_WALL, TX_SKD_WALL, SK_PHYS, 10, 240, 1, 1, 2, EL_NONE, 1, 8, EF_NONE, 0, SH_FAN, FM_WALL },
+	{ TX_SK_BACK, TX_SKD_BACK, SK_PHYS, 8, 260, 1, 1, 4, EL_WIND, 1, 8, EF_NONE, 0, SH_LINE, FM_BACK },
+	{ TX_SK_TRI, TX_SKD_TRI, SK_PHYS, 10, 260, 1, 1, 3, EL_NONE, 1, 8, EF_NONE, 0, SH_FAN, FM_TRI },
+	{ TX_SK_CHAIN, TX_SKD_CHAIN, SK_PHYS, 14, 380, 1, 1, 0, EL_NONE, 1, 16, EF_NONE, 0, SH_RADIUS, FM_CHAIN },
+	{ TX_SK_DIA, TX_SKD_DIA, SK_PHYS, 10, 250, 1, 1, 2, EL_HOLY, 1, 8, EF_NONE, 0, SH_FAN, FM_DIA },
+	{ TX_SK_SQUARE, TX_SKD_SQUARE, SK_PHYS, 12, 280, 0, 0, 1, EL_EARTH, 1, 8, EF_NONE, 0, SH_RADIUS, FM_SQUARE },
+	{ TX_SK_ECHELON, TX_SKD_ECHELON, SK_PHYS, 12, 230, 2, 5, 5, EL_WIND, 2, 8, EF_NONE, 0, SH_LINE, FM_ECHELON },
+	{ TX_SK_CIRCLE, TX_SKD_CIRCLE, SK_MAGIC, 16, 36, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_CIRCLE },
+	{ TX_SK_PAIR, TX_SKD_PAIR, SK_HEAL, 8, 42, 0, 0, 1, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_PAIR },
+	{ TX_SK_PINCER, TX_SKD_PINCER, SK_PHYS, 10, 360, -1, -1, 0, EL_NONE, 1, 28, EF_NONE, 0, SH_RADIUS, FM_PINCER },
 };
 static_assert(sizeof(kForm) / sizeof(kForm[0]) == SKL_FORMN - SKL_FORM0, "form skill table");
 
@@ -3968,13 +3968,15 @@ bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int
 	int sa = UnitSpan(a), st = UnitSpan(t);
 	int aL = LayerOn(b.map.At(a.x, a.z), a.deck) ? a.deck : 0;
 	int tL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
+	int layerAdd = LayerRangeCost(aL, tL);
+	if (layerAdd < 0) return false;
 	int ah = LayerHt(b.map.At(a.x, a.z), aL);
 	int tht = LayerHt(b.map.At(t.x, t.z), tL);
 	for (int az1 = 0; az1 < sa; az1++) for (int ax1 = 0; ax1 < sa; ax1++)
 		for (int tz = 0; tz < st; tz++) for (int tx = 0; tx < st; tx++) {
 			int x = ax + ax1, z = az + az1, cx = t.x + tx, cz = t.z + tz;
-			if (!InAttackRange(b, x, z, rMin, rMax, cx, cz, false)) continue;
-			if (Dist(x, z, cx, cz) <= 1 && abs(ah - tht) > 4) continue;
+			int d = Dist(x, z, cx, cz) + layerAdd;
+			if (d < rMin || d > rMax) continue;
 			if (needLos && !LineOfSightY(b.map, x, z, ah * kHStep + .6f, cx, cz, tht * kHStep + .6f)) continue;
 			return true;
 		}
@@ -4207,6 +4209,7 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 	return n;
 }
 
+static float FormAllyMul(const Battle& b, const Unit& a, int skill, int tx, int tz);
 static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill, int& dmg, int& hit, int& crit)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
@@ -4217,6 +4220,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		int atk = UnitStat(a, S_MAG) + (sd ? 0 : UnitWeaponPow(a));
 		if (UnitHasSkill(a, SKL_P_SPELL)) atk = atk * 115 / 100;
 		float mult = sd ? (150 + sd->power * 5) / 100.f : 1.f;
+		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
 		dm = atk * mult - df * .8f;
 		if (sd && IsSummonId(skill)) {
@@ -4240,6 +4244,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (!sd && (WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1))
 			atk = atk * 6 / 5;
 		float mult = sd ? sd->power / 100.f : 1.f;
+		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
 		if (sd && sd->effect == EF_IGNDEF) df *= .5f;
 		{
@@ -4612,6 +4617,20 @@ int FormMembers(const Battle& b, int ui, int skill, int tx, int tz, int* out, in
 	return n;
 }
 
+static float FormAllyMul(const Battle& b, const Unit& a, int skill, int tx, int tz)
+{
+	if (!IsFormSkill(skill)) return 1.f;
+	int ui = -1;
+	for (int i = 0; i < b.nUnits; i++) if (&b.u[i] == &a) { ui = i; break; }
+	if (ui < 0) return 1.f;
+	int mem[8];
+	int n = FormMembers(b, ui, skill, tx, tz, mem, 8);
+	int extra = n - FormNeed(FormOf(skill));
+	if (extra < 0) extra = 0;
+	if (extra > 3) extra = 3;
+	return 1.f + extra * 0.2f;
+}
+
 bool FormFits(const Battle& b, int ui, int skill, int tx, int tz)
 {
 	if (!IsFormSkill(skill) || ui < 0 || ui >= b.nUnits) return false;
@@ -4689,6 +4708,7 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 		if (!have) return false;
 		const SkillDef& s = SkillInfo(skill);
 		if (u.mp < s.mp) return false;
+		if (u.cp < SummonCpCost(u, skill)) return false;
 		return u.hp > SummonHpCost(u, skill);
 	}
 	if (IsCraftId(skill)) {
@@ -4791,6 +4811,14 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		if (!t.alive) continue;
 		bool ally = (t.team == c.team);
 		if (friendly != ally) continue;
+		{
+			int fromL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
+			int toL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
+			int add = LayerRangeCost(fromL, toL);
+			if (add < 0) continue;
+			int reach = (s.rMax == 0) ? max(0, s.area) : SkillCastRangeMax(c, skill);
+			if (FootDist(c.x, c.z, UnitSpan(c), t.x, t.z, UnitSpan(t)) + add > reach) continue;
+		}
 		if (!UnitOnShape(s, c, cx, cz, t)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
 		out[n++] = i;
@@ -4940,7 +4968,10 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			else a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
 		}
 		else a.mp = max(0, a.mp - sd->mp);
-		if (IsSummonId(skill)) a.hp = max(1, a.hp - SummonHpCost(a, skill));
+		if (IsSummonId(skill)) {
+			a.hp = max(1, a.hp - SummonHpCost(a, skill));
+			a.cp = max(0, a.cp - SummonCpCost(a, skill));
+		}
 		if (IsFormSkill(skill) && FormOf(skill) == FM_SQUARE) {
 			int mem[8];
 			int nm = FormMembers(b, ai, skill, a.x, a.z, mem, 8);
@@ -4982,6 +5013,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				} else {
 					// 回復は命中判定をしない。
 					int amt = HealAmount(a, d, *sd, skill);
+					if (IsFormSkill(skill)) amt = (int)(amt * FormAllyMul(b, a, skill, a.x, a.z));
 					amt = amt * FormBoostPct(b, ai, skill, cx0, cz0) / 100;
 					int before = d.hp;
 					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
@@ -6095,20 +6127,77 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 	}
 }
 
-void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
+void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 {
 	const Unit& u = b.u[ui];
 	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 0;
 	if (u.sleep > 0 || u.stun > 0) return;
 	if (u.confuse > 0) { ConfusePlan(b, ui, p, r); return; }
+	if (level < 0) level = 0;
+	if (level > 5) level = 5;
 	static Reach rc;
 	ComputeReach(b, ui, rc);
+	if (level <= 0) {
+		int bag[192], nc = 0;
+		for (int z = 0; z < MAPN && nc < 192; z++) for (int x = 0; x < MAPN && nc < 192; x++) {
+			if (!ReachCanStop(rc, x, z)) continue;
+			bag[nc++] = z * MAPN + x;
+		}
+		if (nc > 0) {
+			int pick = bag[r.Range(0, nc - 1)];
+			p.moveX = pick % MAPN;
+			p.moveZ = pick / MAPN;
+		}
+		Battle& bb = const_cast<Battle&>(b);
+		Unit& um = bb.u[ui];
+		int ox = u.x, oz = u.z;
+		um.x = p.moveX; um.z = p.moveZ;
+		int foes[32], nf = 0;
+		for (int i = 0; i < b.nUnits && nf < 32; i++) {
+			const Unit& t = b.u[i];
+			if (!t.alive || t.team == u.team) continue;
+			int ax = t.x, az = t.z;
+			if (AimFoot(b, u, p.moveX, p.moveZ, UnitRangeMin(u), UnitRangeMax(u), t, true, ax, az)) foes[nf++] = i;
+		}
+		if (nf > 0 && (r.Next() % 100) < 70) {
+			int i = foes[r.Range(0, nf - 1)];
+			p.target = i;
+			p.castX = b.u[i].x;
+			p.castZ = b.u[i].z;
+			if ((r.Next() % 100) < 16) {
+				for (int s = 0; s < SKL_COUNT; s++) {
+					if (!SkillUsable(b, ui, s)) continue;
+					if ((r.Next() % 7) == 0) { p.skill = s; break; }
+				}
+			}
+		}
+		um.x = ox; um.z = oz;
+		return;
+	}
 	float best = -1e9f;
-	BOOL tryArt = (r.Next() % 100) < 36;
-	BOOL tryOugi = (r.Next() % 100) < 14;
+	BOOL tryArt = level >= 4 || (r.Next() % 100) < (level <= 1 ? 12 : (level == 3 ? 68 : 36));
+	BOOL tryOugi = level >= 4 || (r.Next() % 100) < (level <= 1 ? 4 : (level == 3 ? 34 : 14));
+	BOOL allowSkill = level >= 2 || (r.Next() % 100) < 18;
+	float noise = level <= 1 ? 2.8f : (level == 2 ? 1.f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
 	const int ox = u.x, oz = u.z;
+	int focus = -1;
+	if (level >= 5) {
+		float bf = -1e9f;
+		for (int i = 0; i < b.nUnits; i++) {
+			const Unit& t = b.u[i];
+			if (!t.alive || t.team == u.team) continue;
+			float sc = (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 60.f + t.ch.lv * .4f;
+			int nAdj = 0;
+			for (int k = 0; k < b.nUnits; k++) {
+				if (k == ui || !b.u[k].alive || b.u[k].team != u.team) continue;
+				if (FootDist(b.u[k].x, b.u[k].z, UnitSpan(b.u[k]), t.x, t.z, UnitSpan(t)) <= 4) nAdj++;
+			}
+			sc += nAdj * 12.f;
+			if (sc > bf) { bf = sc; focus = i; }
+		}
+	}
 	// 体力半分以下のボスは、踏み込むより距離を取る。射撃が届く位置を優先し、防御を上げる技があれば先に使う。
 	const int cornered = u.boss && u.hp * 2 <= max(1, u.ch.stat[S_HP]);
 	static short nearD[MAPN][MAPN];
@@ -6135,6 +6224,15 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 		float place = TerrainInfo(standT).defPct * .25f - ReachBestCost(rc, x, z) * .05f;
 		if (standT == T_LAVA) place -= 30.f;
 		else if (standT == T_WATER) place -= 2.f;
+		if (level >= 4) {
+			int threat = 0;
+			for (int i = 0; i < b.nUnits; i++) {
+				const Unit& t = b.u[i];
+				if (!t.alive || t.team == u.team) continue;
+				if (FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)) <= 2) threat++;
+			}
+			place -= threat * (level >= 5 ? 7.f : 3.f);
+		}
 		if (b.map.At(x, z).gimm == GM_DROP) place -= 8.f;
 		const int tileNear = cornered ? (int)nearD[z][x] : 0;
 		if (cornered) {
@@ -6145,7 +6243,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 				else if (tileNear > rmax) flee -= (tileNear - rmax) * 3.f;
 			}
 			if (room && tileNear <= 1) flee -= 36.f;
-			flee += r.F(0, 3.f);
+			flee += r.F(0, 3.f * noise);
 			if (flee > best) { best = flee; p.moveX = x; p.moveZ = z; p.target = -1; p.skill = -1; p.castX = x; p.castZ = z; }
 		}
 		// 通常攻撃
@@ -6173,11 +6271,13 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 				if (kill && !suicide) sc += 110.f;
 				if (suicide) sc -= 50.f;
 			}
-			sc += place + r.F(0, 14.f);
+			if (level >= 5 && focus >= 0) sc += (i == focus) ? 48.f : -10.f;
+			sc += place + r.F(0, 14.f * noise);
 			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
 		// スキル
 		for (int s = 0; s < SKL_COUNT; s++) {
+			if (!allowSkill) break;
 			if (!SkillUsable(b, ui, s)) continue;
 			const SkillDef& sd = SkillInfo(s);
 			int rmin = SkillCastRangeMin(u, s), rmax = SkillCastRangeMax(u, s);
@@ -6197,7 +6297,11 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					for (int k = 0; k < nt; k++) {
 						const Unit& q = b.u[targets[k]];
 						int miss = q.ch.stat[S_HP] - q.hp;
-						if (q.hp * 100 / max(1, q.ch.stat[S_HP]) < 65) h += min(miss, HealAmount(u, q, sd, s));
+						if (q.hp * 100 / max(1, q.ch.stat[S_HP]) < 65) {
+							int heal = HealAmount(u, q, sd, s);
+							if (IsFormSkill(s)) heal = (int)(heal * FormAllyMul(b, u, s, u.x, u.z));
+							h += min(miss, heal);
+						}
 						if (sd.effect == EF_CLEANSE && (q.poison > 0 || q.sleep > 0 || q.confuse > 0 || q.stun > 0 || q.slow > 0 || q.defDown > 0)) h += 48;
 					}
 					if (h <= 0) continue;
@@ -6235,7 +6339,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 						if (kill) sc += 110.f;
 					}
 				}
-				sc += r.F(0, 10.f);
+				if (level >= 5 && focus >= 0 && sd.kind != SK_HEAL && sd.kind != SK_BUFF) sc += (i == focus) ? 36.f : -8.f;
+				sc += r.F(0, 10.f * noise);
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
 			}
 		}
@@ -6287,7 +6392,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 						else if (gap >= 2) sc += 36.f;
 						if (f.dmg * f.hits >= t.hp && !(f.canCounter && f.cdmg * f.chits >= u.hp)) sc += 110.f;
 					}
-					sc += r.F(0, 10.f);
+					if (level >= 5 && focus >= 0) sc += (i == focus) ? 28.f : -6.f;
+					sc += r.F(0, 10.f * noise);
 				}
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
@@ -6311,7 +6417,11 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 		if (!ReachCanStop(rc, x, z)) continue;
 		int d = df[z][x];
 		if (d >= 30000) continue;
-		float sc = -d * 10.f + TerrainInfo(b.map.At(x, z).t).defPct * .2f + r.F(0, .5f);
+		float sc = -d * 10.f + TerrainInfo(b.map.At(x, z).t).defPct * .2f + r.F(0, .5f * noise);
+		if (level >= 5 && focus >= 0) {
+			const Unit& ft = b.u[focus];
+			sc -= FootDist(x, z, UnitSpan(u), ft.x, ft.z, UnitSpan(ft)) * 4.f;
+		}
 		if (UnitRangeMax(u) >= 2 && d <= 1) sc -= 15.f;
 		if (sc > bs) { bs = sc; p.moveX = x; p.moveZ = z; }
 	}

@@ -55,6 +55,7 @@ protected:
 
 	void LayoutChrome();
 	void ApplyLang();
+	void RevealErrorLine(int errLine);
 	void RefreshChromeOpaque();
 	int CompileAndBuild(wchar_t* outPath, int outCch, int* isFm);
 	void ColorizeEdit();
