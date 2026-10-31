@@ -6,7 +6,9 @@
 
 #include <string.h>
 
-
+/* zupapa: 短い曲だけ同じコマンドを戻す。0 は無効。曲ごとに世代を進める。 */
+static int sNeoRep = 0;
+static int sNeoGen = 0;
 
 /* Neo Geo ドライバ */
 CDriverNeo::CDriverNeo()
@@ -444,6 +446,17 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
+	sNeoRep = 0;
+	if (ge->archive[0] && _stricmp(ge->archive, "zupapa") == 0) {
+		const uint8_t c = songCmd_;
+		if (c == 0x02u) sNeoRep = 7;
+		else if (c == 0x7fu) sNeoRep = 1;
+		else if (c == 0x26u) sNeoRep = 8;
+		else if (c == 0x3eu) sNeoRep = 1;
+		else if (c == 0x37u) sNeoRep = 5;
+	}
+	sNeoGen++;
+
 	if (songCmdHi_)
 
 		SendZ80Command(songCmdHi_, 120);
@@ -731,6 +744,18 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 			reinjected_ = 1;
 
+		}
+
+		if (sNeoRep) {
+			static int seen = -1;
+			static uint64_t next = 0;
+			if (seen != sNeoGen) {
+				seen = sNeoGen;
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sNeoRep;
+			} else if (now >= next) {
+				hw_->SetSoundCommand(songCmd_);
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sNeoRep;
+			}
 		}
 
 		cpuAcc_ += (int64_t)cpuHz_;

@@ -92,7 +92,7 @@ float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int cl
 float ActorWindup(const Actor& a, const Renderer& r, int clip);
 BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r);
 void ActorPose(Actor& a, const Library& lib, const Renderer& r);
-void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time);
+BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time);
 M4 ActorWorld(const Actor& a, V3 pos, float face);
 V3 ActorJointWorld(const Actor& a, const M4& world, int which);   // 0=頭 1=右手 2=胸
 

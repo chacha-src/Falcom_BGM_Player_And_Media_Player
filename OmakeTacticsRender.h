@@ -286,6 +286,11 @@ public:
 	};
 	char m_avaSeg[64][24];
 	int m_avaSegN;
+	int m_avaHide;
+	int m_avaLoading;
+	// 衣装ごとに、最初に頼んだフレーム。別のキャラが待ちを消さない。
+	struct AvaWait { int model, cos, cup, frame; };
+	AvaWait m_avaWait[32];
 	AvaBody m_avaBody[2];
 	Fix<AvaCos, 256> m_avaCos;
 	Fix<AvaModel, 64> m_avaModels;
@@ -296,6 +301,10 @@ public:
 	// avatar は性別ごとに 1 から。作れないときは FALSE（呼び手が元の体を描く）。
 	// cup は 0=A〜BUST_N-1=H。owner は布の揺れを持つキャラ（NULL なら体に沿わせたまま）。
 	BOOL DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner = NULL);
+	// 直前の DrawAvatar が、裸の体を出さず次のフレームで着せるとき TRUE。
+	BOOL AvatarHide() const { return m_avaHide; }
+	// 衣装の作り直しや arena の開放で、このフレームは時間がかかると分かっている。
+	BOOL AvatarLoading() const { return m_avaLoading; }
 	// 着ている衣装の、その高さでの背中の外面（モデル空間の +Z）。無ければ -1e9。
 	float AvatarClothBack(int model, int avatar, float y);
 	BOOL DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar, const void* owner = NULL);
@@ -336,6 +345,7 @@ public:
 	void SetCamera(const M4& view, const M4& proj, V3 eye, float time);
 	void SetLight(V3 dirToLight, V3 focus, float radius);
 	void SetFog(float start, float end, float heightFog, DWORD color);
+	void SetTheme(int theme) { m_theme = theme; }
 	void SetAmbient(DWORD sky, DWORD ground, float strength, float hard);
 	void BeginShadowPass();
 	void BeginMainPass();
@@ -353,7 +363,9 @@ public:
 	void DrawTerrain();
 	void SetFadeAbove(int layer, int x = -1, int z = -1) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; }
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
+	void SetDepthTest(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsOff, 0); }
 	void DrawWater();
+	void SetLiquidRipples(const float rip[4][4]);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n);
 	void DrawRibbon(const Buf<VtxP>& v);
@@ -361,7 +373,11 @@ public:
 	// 地形
 	BOOL BuildTerrain(const Map& m);
 	void BuildMinimap(const Map& m);
-	ID3D11ShaderResourceView* MinimapSrv() { return m_srvMini; }
+	ID3D11ShaderResourceView* MinimapSrv(int layer = 0) {
+		if (layer < 0 || layer >= 3) layer = 0;
+		return m_srvMiniL[layer] ? m_srvMiniL[layer] : m_srvMiniL[0];
+	}
+	int MinimapLayers() const { return m_miniN < 1 ? 1 : m_miniN; }
 	struct SceneryPuff { float x, y, z; int kind; };
 	int SceneryPuffCount() const { return m_puffN; }
 	SceneryPuff SceneryPuffAt(int i) const
@@ -578,6 +594,7 @@ private:
 	ID3D11InputLayout* m_ilH;
 	ID3D11InputLayout* m_ilP;
 	ID3D11Buffer* m_cbFrame;
+	ID3D11Buffer* m_cbRipple;
 	ID3D11Buffer* m_cbObj;
 	ID3D11Buffer* m_cbBones;
 	ID3D11Buffer* m_vbHud;
@@ -610,8 +627,9 @@ public:
 	static void PaletteUV(int idx, float& u, float& v);  // 16x16 パレット
 	static DWORD PaletteColor(int idx);
 private:
-	ID3D11Texture2D* m_texMini;
-	ID3D11ShaderResourceView* m_srvMini;
+	ID3D11Texture2D* m_texMiniL[3];
+	ID3D11ShaderResourceView* m_srvMiniL[3];
+	int m_miniN;
 
 	// 地形
 	GpuMesh m_terrain;

@@ -68,6 +68,8 @@ static unsigned CEmuAcOptionValue(const CEmuGameEntry* ge, const char* name, uns
 static mc6809__t* NamcoCpuRaw(struct mc6809* p) { return (mc6809__t*)p; }
 /* SYS2: $7200 後の双子メールボックス（assault/dirtfox/finallap/mirninja） */
 static uint8_t s_acSys2TwinMail = 0;
+/* arknoid2 の C000 起動応答。メンバにすると他 obj とクラスサイズがずれる。 */
+static int sArkMcuLeft = 0;
 
 CHardAc::CHardAc()
 	: board_(CEMU_AC_BOARD_UNKNOWN)
@@ -2612,6 +2614,11 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 				|| _stricmp(ge->archive, "arknoidu") == 0
 				|| _stricmp(ge->archive, "arknoidj") == 0
 				|| _stricmp(ge->archive, "arkbl2") == 0)))) ? 1 : 0;
+		/* arknoid2 は旧 TNZS サブ Z80（ROM 0000-7FFF + バンク 8000、YM2203 @B000、MCU @C000）。map 0 だとチェックサムが 8000 を見て E000=10 で停止する。 */
+		const int arknoid2 = (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "arkanoid2") == 0)
+			|| (ge->archive[0] && (_stricmp(ge->archive, "arknoid2") == 0
+				|| _stricmp(ge->archive, "arknoid2j") == 0
+				|| _stricmp(ge->archive, "arknoid2u") == 0)))) ? 1 : 0;
 		const int kabukiz = CEmuAcIsKabukiz(ge);
 		const int streetf = CEmuAcIsStreetFighter(ge);
 		taitoOpmMap_ = ashnojoe ? 8 : (daisenpu ? 9 : (cadashFam ? 10 : (lomakai ? 11 : (darius ? 1 : (kikikai ? 2 : (tokio ? 3 : (bublbobl ? 4
@@ -2621,6 +2628,7 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		else if (taitoL1) taitoOpmMap_ = 14;
 		else if (volfied) taitoOpmMap_ = 15;
 		else if (arkanoid) taitoOpmMap_ = 16;
+		else if (arknoid2) taitoOpmMap_ = 7;
 		else if (kabukiz) taitoOpmMap_ = 17;
 		else if (streetf) taitoOpmMap_ = 18;
 		/* 0 rastan/asuka OPM、1 darius OPN×2、2 kikikai/kicknrun YM2203 @C000 共有 RAM、3 tokio、4 bublbobl YM2203+YM3526、5 lsasquad YM2203+AY、6 lkage YM2203×2（bublbobl マップ、YM2203 @A000）、7 旧 TNZS YM2203 @B000（PC060HA 無し）、8 ashnojoe YM2203 I/O、9 twinhawk/daisenpu YM2151 @E000 PC060HA @E200 RAM@C000、10 cadash/earthjkr/galmedes/topspeed（asuka マップ、ISR は Timer A bit0）、11 lomakai Mega System 1-Z YM2203 I/O、12 fhawk YM2203 @F000 PC060HA @E000、13 kurikint YM2203 @E800 DPRAM @E000、14 Taito L 1cpu YM2203 @A000 TC0090LVC、15 volfied YM2203 @9000 PC060HA @8800 RAM 8000-87FF、16 arkanoid Z80+YM2149 @D000 MCU stub D018、67AE、E995 は MCU 解除、17 kabukiz 第3 Z80 YM2203 I/O 00-01 ラッチ 02、18 Street Fighter 1 YM2151 @E000 ラッチ C800 NMI。 */
@@ -2644,6 +2652,11 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		if (taitoOpmMap_ == 18) {
 			cpuHz_ = 3579545;
 			opmHz_ = 3579545;
+		}
+		if (ge->archive[0] && _stricmp(ge->archive, "gladiatr") == 0) {
+			/* Z80 と YM2203 は 12MHz/8。map 0 共通の 6MHz だとテンポが 4 倍。 */
+			cpuHz_ = 1500000;
+			opmHz_ = 1500000;
 		}
 		if (taitoOpmMap_ == 16) {
 			/* MAME arkanoid: YM2149 12/4=3 MHz、pin26 Low は CEmuChipAy の clock/2。 */
@@ -5615,6 +5628,19 @@ void CHardAc::GxHostInject(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3)
 }
 
 /* メイン CPU からのサウンドコマンドをラッチする */
+/* gladiatr: 0000=JP $0080、ISR 0038、00E4=EI、00DD=IM 1、08E0=IN $21、1076=OUT $00。
+   087F は書いた値を port 1 から読み戻す。ymfm の ReadData は status なのでここに控える。 */
+static uint8_t sGladYmReg[256];
+static int AcGladiatrRom(const uint8_t* m)
+{
+	return m
+		&& m[0] == 0xc3 && m[1] == 0x80 && m[2] == 0x00
+		&& m[0x38] == 0xf3 && m[0xe4] == 0xfb
+		&& m[0xdd] == 0xed && m[0xde] == 0x56
+		&& m[0x08e0] == 0xdb && m[0x08e1] == 0x21
+		&& m[0x1076] == 0xd3 && m[0x1077] == 0x00;
+}
+
 void CHardAc::SetSoundCommand(uint8_t cmd)
 {
 	if (board_ == CEMU_AC_BOARD_GNG && (gngCommandoMap_ == 2 || gngCommandoMap_ == 3 || gngCommandoMap_ == 5)) {
@@ -5904,6 +5930,9 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 	if (board_ == CEMU_AC_BOARD_TAITO_YM2610 || board_ == CEMU_AC_BOARD_TAITO_OPM) {
 		soundCmd_ = cmd;
 		soundCmdPending_ = 1;
+		/* gladiatr は 8741（IN $20）がコマンド。PC060HA の NMI は 0066 を壊す。 */
+		if (taitoOpmMap_ == 0 && AcGladiatrRom(mem_))
+			return;
 		/* kikikai に PC060HA は無い — メイン Z80 が共有 RAM 9FFF に曲を植え、音源 CPU が 0xFF でなくなるまで poll。 */
 		if (taitoOpmMap_ == 16) {
 			/* MAME arkanoid: 曲は CALL $67AE（E980 リング）。C7F0 の EI;JR $ で
@@ -6047,6 +6076,24 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		}
 		if (taitoOpmMap_ == 7) {
 			/* 旧 TNZS: サウンドラッチ無し。サブ CPU が共有 RAM を poll。tnzsjo EF10（FF=アイドル）、chukatai 16 バイトキュー E005、kageki E03E。 */
+			if (mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[3] == 0x00
+				&& mem_[6] == 0x84 && mem_[7] == 0x0a) {
+				/* arknoid2: 46BB が曲を DF80 リングへ。E600 消去と EF10 は使わない。 */
+				soundCmd_ = cmd;
+				soundCmdPending_ = 1;
+				mem_[0xdfa1] = 1; /* 2D8B は (DFA1)==0 だと曲を捨てる。46E4 が 0 にする。 */
+				{
+					uint8_t rd = (uint8_t)(mem_[0xdf81] & 0x0f);
+					uint8_t wr = (uint8_t)((mem_[0xdf80] + 1) & 0x0f);
+					if (wr == rd)
+						rd = (uint8_t)((rd + 1) & 0x0f);
+					mem_[0xdf80] = wr;
+					mem_[0xdf81] = rd;
+					mem_[0xdf82 + wr] = cmd;
+				}
+				irqPulse_ = 1;
+				return;
+			}
 			soundCmd_ = cmd;
 			soundCmdPending_ = 1;
 			if (mem_[3] == 0xc3 && mem_[4] == 0xa1 && mem_[5] == 0x01) {
@@ -6832,6 +6879,22 @@ uint8_t CHardAc::PortIn(uint16_t port)
 			return 0x00;
 		return 0xff;
 	case CEMU_AC_BOARD_TAITO_OPM:
+		if (AcGladiatrRom(mem_)) {
+			/* 08C4 は port 0 bit7 が落ちるまで待つ。port 1 はレジスタの読み戻し。 */
+			if (p == 0x00)
+				return 0x00;
+			if (p == 0x01)
+				return sGladYmReg[ymAddr_];
+			/* bit0=1 で 04B5 の出力待ちが抜ける。bit1/bit2 は 0（04A0 / 0ACE）。 */
+			if (p == 0x21)
+				return 0x01;
+			if (p == 0x20)
+				return soundCmd_;
+			/* 80/81 と 60/61 は別の 8741。上位ニブルが立っていると 094E/09B3 が失敗扱いにする。 */
+			if (p == 0x60 || p == 0x61 || p == 0x80 || p == 0x81)
+				return 0x00;
+			return 0xff;
+		}
 		if (taitoOpmMap_ == 17) {
 			if (p == 0x00)
 				return chip_ ? (uint8_t)(chip_->ReadStatus() & 0x7fu) : 0x00;
@@ -7643,6 +7706,24 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 	if (!chip_) return;
 	switch (board_) {
 	case CEMU_AC_BOARD_TAITO_OPM:
+		if (AcGladiatrRom(mem_)) {
+			/* YM2203 は I/O 00=address / 01=data。20/21 は 8741。 */
+			if (p == 0x00) {
+				ymAddr_ = data;
+				if (chip_) chip_->Write(0, data);
+				return;
+			}
+			if (p == 0x01) {
+				sGladYmReg[ymAddr_] = data;
+				if (chip_) {
+					chip_->Write(1, data);
+					if (ymAddr_ != 0x0e && ymAddr_ != 0x0f)
+						opmWrites_++;
+				}
+				return;
+			}
+			return;
+		}
 		if (taitoOpmMap_ != 8 && taitoOpmMap_ != 11 && taitoOpmMap_ != 17)
 			return;
 		if (p == 0x00) {
@@ -11557,6 +11638,22 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 				return mem_[addr];
 			return 0xff;
 		} else if (taitoOpmMap_ == 7) {
+			if ((addr == 0xc000 || addr == 0xc001 || addr == 0xc002)
+				&& mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[3] == 0x00
+				&& mem_[6] == 0x84 && mem_[7] == 0x0a) {
+				/* arknoid2: 起動は C000 を 55, AA, 5A の順。C001 bit0=データ有、bit1=0 で書込可。 */
+				if (addr == 0xc000) {
+					if (sArkMcuLeft > 0) {
+						static const uint8_t kStart[3] = { 0x55, 0xaa, 0x5a };
+						const int i = 3 - sArkMcuLeft;
+						sArkMcuLeft--;
+						if (i >= 0 && i < 3)
+							return kStart[i];
+					}
+					return 0x00;
+				}
+				return 0x01;
+			}
 			if (addr == 0xb000 || addr == 0xb001) {
 				if (addr & 1) {
 					if (ymAddr_ == 0x0e || ymAddr_ == 0x0f)
@@ -13314,6 +13411,34 @@ void CHardAc::DecoWrite8(uint32_t phys, uint8_t v)
 
 extern "C" uint8_t status;
 
+/* vindctr2 だけ YM2151 が $1810/$1811。marble 系は $1800 で、リセット $5AAB がこの待ちではない。 */
+static int AcVindctr2Rom(const uint8_t* rom, unsigned sz)
+{
+	return rom && sz >= 0x10000u
+		&& rom[0x4000] == 0x78 && rom[0x5aab] == 0xad
+		&& rom[0x5aac] == 0x30 && rom[0x5aad] == 0x10
+		&& rom[0x5ab4] == 0x4c && rom[0x5ab5] == 0x00
+		&& rom[0x5ab6] == 0x40;
+}
+
+/* gauntlet: 4000 は STA $78FF から。リセット $599E は vindctr2 と同じ ($1030 & $C0)==$80 待ち。 */
+static int AcGauntletRom(const uint8_t* rom, unsigned sz)
+{
+	return rom && sz >= 0x10000u
+		&& rom[0x4000] == 0x8d && rom[0x4001] == 0xff && rom[0x4002] == 0x78
+		&& rom[0x599e] == 0xad && rom[0x599f] == 0x30 && rom[0x59a0] == 0x10
+		&& rom[0x59a7] == 0x4c && rom[0x59a8] == 0x02 && rom[0x59a9] == 0x40;
+}
+
+static int AcJsaPairRom(const uint8_t* rom, unsigned sz)
+{
+	return AcVindctr2Rom(rom, sz) || AcGauntletRom(rom, sz);
+}
+
+/* $1020 は曲進行タイマ。YM2151 のタイマは使わない。 */
+static int sViTimerOn = 0;
+static uint64_t sViNextIrq = 0;
+
 /* IRQ 配送 */
 void CHardAc::DecoSyncIrqs()
 {
@@ -13405,6 +13530,15 @@ void CHardAc::DecoSyncIrqs()
 		/* MAME dec8: YM2203 と YM3812/YM3526 の IRQ を input_merger ANY_HIGH → 6502 IRQ */
 		if (!ymIrq && chip2_ && chip2_->Irq())
 			ymIrq = 1;
+		/* vindctr2: 曲進行は $1020 タイマ。YM のタイマ旗は立たない。marble 系はここを通らない。 */
+		if (!ymIrq && decoCpuKind_ == 5 && sViTimerOn
+			&& AcJsaPairRom(decoRom_, decoRomSize_) && cpuHz_ > 0) {
+			const uint64_t period = (uint64_t)cpuHz_ / 240u;
+			if (period && cpuCycles_ >= sViNextIrq) {
+				ymIrq = 1;
+				sViNextIrq = cpuCycles_ + period;
+			}
+		}
 		M6502SetInputLine(m6502_, M6502_LINE_IRQ,
 			ymIrq ? M6502_ASSERT_LINE : M6502_CLEAR_LINE);
 		if (!soundCmdPending_)
@@ -13503,6 +13637,9 @@ uint8_t CHardAc::DecoM6502Read8(uint16_t addr)
 				return decoRam_ ? decoRam_[io] : 0;
 			if (io >= 0x1800u && io <= 0x1801u)
 				return chip_ ? chip_->ReadStatus() : 0;
+			/* vindctr2 はアドレスポートが $1810。ここをラッチにするとレジスタ書きが消える。 */
+			if (AcJsaPairRom(decoRom_, decoRomSize_) && io >= 0x1810u && io <= 0x1811u)
+				return chip_ ? chip_->ReadStatus() : 0;
 			if (io == 0x1810u) {
 				decoLatchReads_++;
 				soundCmdPending_ = 0;
@@ -13517,6 +13654,17 @@ uint8_t CHardAc::DecoM6502Read8(uint16_t addr)
 			}
 			if (io >= 0x1870u && io <= 0x187fu)
 				return 0;
+			/* vindctr2: リセット $5AAB は ($1030 & $C0)==$80 まで回り、NMI は BIT $1030 の bit6 でも回る。
+			   曲バイトは $1010。 */
+			if (AcJsaPairRom(decoRom_, decoRomSize_)) {
+				if (io == 0x1030u)
+					return 0x80;
+				if (io == 0x1010u) {
+					decoLatchReads_++;
+					soundCmdPending_ = 0;
+					return soundCmd_;
+				}
+			}
 			return 0xff;
 		}
 		return (decoRom_ && (unsigned)addr < decoRomSize_) ? decoRom_[addr] : 0xff;
@@ -13652,6 +13800,17 @@ void CHardAc::DecoM6502Write8(uint16_t addr, uint8_t v)
 				if (decoRam_) decoRam_[io] = v;
 				return;
 			}
+			/* vindctr2: $1800–$180F はレジスタ直書き（$1808=78 がキーオン）。
+			   $1810/$1811 はアドレス／データでオペレータを書く。$1830 は IRQ 応答。
+			   marble 系は $1800/$1801 の対だけで、この窓には入らない。 */
+			if (AcJsaPairRom(decoRom_, decoRomSize_)
+				&& io >= 0x1800u && io <= 0x180fu) {
+				if (!chip_) return;
+				chip_->Write(0, (uint8_t)(io - 0x1800u));
+				chip_->Write(1, v);
+				opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+				return;
+			}
 			if (io >= 0x1800u && io <= 0x1801u) {
 				if (!chip_) return;
 				if (!(io & 1u)) { decoYm2151Addr_ = v; chip_->Write(0, v); }
@@ -13659,6 +13818,26 @@ void CHardAc::DecoM6502Write8(uint16_t addr, uint8_t v)
 					chip_->Write(1, v);
 					opmWrites_ = CEmuChipYm2151WriteCount(chip_);
 				}
+				return;
+			}
+			/* オペレータは $1810 アドレス / $1811 データ。$1800 窓のキーオンとは別。 */
+			if (AcJsaPairRom(decoRom_, decoRomSize_) && (io == 0x1810u || io == 0x1811u)) {
+				if (!chip_) return;
+				if (io == 0x1810u) { decoYm2151Addr_ = v; chip_->Write(0, v); }
+				else {
+					chip_->Write(1, v);
+					opmWrites_ = CEmuChipYm2151WriteCount(chip_);
+				}
+				return;
+			}
+			if (AcJsaPairRom(decoRom_, decoRomSize_) && io == 0x1020u) {
+				/* 0 は停止。初期化は $1F を書く。 */
+				sViTimerOn = v ? 1 : 0;
+				if (!sViTimerOn) sViNextIrq = cpuCycles_;
+				return;
+			}
+			if (AcJsaPairRom(decoRom_, decoRomSize_) && io == 0x1830u) {
+				if (chip_) chip_->AckIrq();
 				return;
 			}
 			if (io == 0x1820u || io == 0x2a04u) {
@@ -14035,6 +14214,8 @@ int CHardAc::LoadRomsAtariSys1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	cpuCycles_ = 0;
 	decoLatchReads_ = 0;
 	if (chip_) chip_->Reset();
+	sViTimerOn = 0;
+	sViNextIrq = 0;
 
 	M6502SetBus(m6502_, this, DecoM6502BusRead, DecoM6502BusWrite);
 	M6502Reset(m6502_);
@@ -17637,6 +17818,12 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					pick = i;
 					break;
 				}
+				/* arknoid2j: 64K F3 ED 56 00 00 C3 84 0A。チェックサムは 0000-9F7F。 */
+				if (sz == 0x10000u && d[0] == 0xf3 && d[1] == 0xed && d[2] == 0x56
+					&& d[3] == 0x00 && d[6] == 0x84 && d[7] == 0x0a) {
+					pick = i;
+					break;
+				}
 				if (pick < 0 && sz == 0x8000u && d[0] == 0xf3 && d[1] == 0xed && d[2] == 0x56)
 					pick = i;
 			}
@@ -19576,6 +19763,9 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		}
 		memset(mem_ + 0xd000, 0, 0x1000);
 		memset(mem_ + 0xe000, 0, 0x1000);
+		if (mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[3] == 0x00
+			&& mem_[6] == 0x84 && mem_[7] == 0x0a)
+			sArkMcuLeft = 3;
 		if (mem_[3] == 0x31 && mem_[5] == 0xd7) {
 			mem_[0xe03e] = 0xff;
 			mem_[0xe0fc] = 0;

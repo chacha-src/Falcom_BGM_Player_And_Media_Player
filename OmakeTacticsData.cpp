@@ -318,8 +318,8 @@ static const ThemeParam kTheme[TH_COUNT] = {
 	{ 5.0f, .055f, 3, T_PLAIN, .80f, 2, 3, 6, 0, 0 },
 	{ 2.0f, .060f, 2, T_PLAIN, .58f, 3, 1, 2, 0, 1 },
 	{ 3.0f, .050f, 2, T_PLAIN, .70f, 1, 2, 3, 1, 0 },
-	{ 3.2f, .050f, 2, T_PLAIN, .70f, 0, 1, 2, 1, 0 },
-	{ 3.2f, .050f, 2, T_PLAIN, .72f, 0, 2, 3, 1, 0 },
+	{ 3.4f, .048f, 2, T_SAND, .78f, 0, 1, 4, 1, 0 },
+	{ 5.5f, .052f, 3, T_PLAIN, .66f, 0, 2, 3, 1, 0 },
 };
 
 static bool FootPassable(int t) { return TerrainInfo(t).costFoot < 99; }
@@ -988,6 +988,35 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 		};
 		if (i0 >= 2) ramp(0, 1, i0);
 		if (n - i1 >= 2) ramp(n - 1, n - 2, i1 - 1);
+		if (gotSky) {
+			auto climbSky = [&](int skyIdx, int dir) {
+				for (int side = 0; side < 2; side++) {
+					int cx = xs[skyIdx] + ox * side, cz = zs[skyIdx] + oz * side;
+					if (!Map::In(cx, cz) || m.c[cz][cx].nLay < 3) continue;
+					int h2 = (int)m.c[cz][cx].h2;
+					auto at = [&](int idx) -> Cell* {
+						if (idx < i0 || idx >= i1) return 0;
+						int x = xs[idx] + ox * side, z = zs[idx] + oz * side;
+						if (!Map::In(x, z) || m.c[z][x].nLay != 2) return 0;
+						return &m.c[z][x];
+					};
+					Cell* a = at(skyIdx + dir);
+					Cell* b = at(skyIdx + dir * 2);
+					if (a && b) {
+						if ((int)b->h1 < h2 - 4) b->h1 = (BYTE)(h2 - 4);
+						if ((int)a->h1 < h2 - 2) a->h1 = (BYTE)(h2 - 2);
+					} else if (a) {
+						int step = (int)a->h1 + 2;
+						if (step < h2 - 2) {
+							a->h1 = (BYTE)step;
+							if ((int)m.c[cz][cx].h2 > step + 2) m.c[cz][cx].h2 = (BYTE)(step + 2);
+						}
+					}
+				}
+			};
+			climbSky(n / 5 + 1, -1);
+			climbSky((n * 4) / 5 - 1, 1);
+		}
 		pickV[made] = vert;
 		pickL[made] = lane;
 		made++;
@@ -1013,11 +1042,7 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 	int pax = MAPN / 2, paz = MAPN / 2, span = 28;
 	int eax = pax, eaz = paz;
 	int vertical = 0, spiralEndX = pax, spiralEndZ = paz;
-	if (th == TH_SEABED || th == TH_FALLS) {
-		span = StampFixedStage(m, th, pax, paz);
-		eax = pax;
-		eaz = paz;
-	} else if ((seed % 8u) <= 1u) {
+	if ((seed % 8u) <= 1u) {
 		vertical = 1;
 		span = StampVertical(m, r, tp, (seed % 8u) == 0u, pax, paz, spiralEndX, spiralEndZ);
 		eax = spiralEndX;
@@ -1568,7 +1593,7 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 			nDrop++;
 		}
 	}
-	if (th != TH_SEABED && th != TH_FALLS) {
+	{
 		int roll = (int)(m.seed % 5u);
 		if (roll != 0)
 			StampCaves(m, r, tp, pax, paz, roll <= 2);
@@ -3649,23 +3674,65 @@ static int EnterCost(const Map& m, int x, int z, int moveType)
 	return cost;
 }
 
-// 跳躍の届く層のうち、今いる層を優先する。階段は今の層が続いていないマスだけ。
+// 1回の動きで変われる高さ。歩行は2、飛行は4。
+// 層1は地面から+2を3段、層2はその先でさらに+2を3段。±1あっても、一段で層の上には飛ばない。
+static int StepRise(int moveType)
+{
+	return moveType == MV_FLY ? 4 : 2;
+}
+
+static int LayerOpen(const Cell& to, int L, int moveType)
+{
+	if (!LayerOn(to, L)) return 0;
+	int tr = LayerTr(to, L);
+	if (moveType == MV_FLY) return TerrainInfo(tr).flyOk != 0;
+	return TerrainInfo(tr).costFoot < 99;
+}
+
+static int LayerLegal(const Cell& to, int L, int fromH, int fromLayer, int moveType)
+{
+	if (!LayerOpen(to, L, moveType)) return 0;
+	if (abs(LayerHt(to, L) - fromH) > StepRise(moveType)) return 0;
+	(void)fromLayer;
+	return 1;
+}
+
 static int ChooseLayer(const Cell& to, int fromH, int fromLayer, int jump, int moveType)
 {
+	(void)jump;
 	int n = CellLayN(to);
-	if (moveType == MV_FLY) {
-		for (int L = n - 1; L >= 0; L--) if (TerrainInfo(LayerTr(to, L)).flyOk) return L;
-		return -1;
-	}
 	int best = -1, bestScore = 9999;
 	for (int L = 0; L < n; L++) {
-		if (TerrainInfo(LayerTr(to, L)).costFoot >= 99) continue;
+		if (!LayerLegal(to, L, fromH, fromLayer, moveType)) continue;
 		int dh = abs(LayerHt(to, L) - fromH);
-		if (dh > jump) continue;
 		int score = dh * 10 + (L == fromLayer ? 0 : 3);
 		if (score < bestScore) { bestScore = score; best = L; }
 	}
 	return best;
+}
+
+// いまいる高さから、隣の各層へ届くかを見る。近い層だけに潰さない。
+static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int fromLayer, int toLayer, int* climbsOut)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int mt = UnitMoveType(u);
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
+		if (!Map::In(sx, sz) || !Map::In(tx, tz)) return false;
+		const Cell& f = b.map.At(sx, sz);
+		const Cell& t = b.map.At(tx, tz);
+		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
+		if (!LayerLegal(t, toLayer, LayerHt(f, fromL), fromL, mt)) return false;
+		for (int L = 0; L < LAY_N; L++) {
+			int o = b.UnitAt(tx, tz, L);
+			if (o < 0 || o == ui || !b.u[o].alive) continue;
+			if (b.u[o].team != u.team) return false;
+			if (s > 1 && L == toLayer) return false;
+		}
+	}
+	if (climbsOut) *climbsOut = 1;
+	return true;
 }
 
 // 原点を (x,z) から (nx,nz) へ 1 マス動かす。同じ層にいる相手だけが道を塞ぐ。
@@ -3685,10 +3752,12 @@ static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 		if (lay < 0) return false;
 		if (ix == 0 && iz == 0) layer = lay;
 		else if (lay != layer) return false;
-		int o = b.UnitAt(tx, tz, lay);
-		if (o < 0 || o == ui) continue;
-		if (b.u[o].team != u.team) return false;
-		if (s > 1) return false;
+		for (int L = 0; L < LAY_N; L++) {
+			int o = b.UnitAt(tx, tz, L);
+			if (o < 0 || o == ui || !b.u[o].alive) continue;
+			if (b.u[o].team != u.team) return false;
+			if (s > 1 && L == lay) return false;
+		}
 	}
 	if (toLayer) *toLayer = layer;
 	return true;
@@ -3787,21 +3856,23 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 		int c0 = ReachCostAt(out, layer, x, z);
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
-			int toL = 0;
-			if (!FootStep(b, ui, x, z, nx, nz, layer, &toL)) continue;
-			int nc = c0 + FootCost(b, ui, nx, nz, toL);
-			if (nc > mv) continue;
-			short& cst = ReachCostRef(out, toL, nx, nz);
-			if (cst >= 0 && cst <= nc) continue;
-			int inq = cst >= 0;
-			cst = (short)nc;
-			ReachFromRef(out, toL, nx, nz) = (short)PackCell(x, z, layer);
-			if (qn + 1 >= MAPN * MAPN * LAY_N) continue;
-			if (!inq) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
-			else {
-				int found = 0;
-				for (int i = 0; i < qn; i++) if (qx[i] == nx && qz[i] == nz && qd[i] == toL) found = 1;
-				if (!found) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
+			if (!Map::In(nx, nz)) continue;
+			for (int toL = 0; toL < LAY_N; toL++) {
+				if (!FootLand(b, ui, x, z, nx, nz, layer, toL, 0)) continue;
+				int nc = c0 + FootCost(b, ui, nx, nz, toL);
+				if (nc > mv) continue;
+				short& cst = ReachCostRef(out, toL, nx, nz);
+				if (cst >= 0 && cst <= nc) continue;
+				int inq = cst >= 0;
+				cst = (short)nc;
+				ReachFromRef(out, toL, nx, nz) = (short)PackCell(x, z, layer);
+				if (qn + 1 >= MAPN * MAPN * LAY_N) continue;
+				if (!inq) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
+				else {
+					int found = 0;
+					for (int i = 0; i < qn; i++) if (qx[i] == nx && qz[i] == nz && qd[i] == toL) found = 1;
+					if (!found) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
+				}
 			}
 		}
 	}
@@ -3938,6 +4009,105 @@ static bool FootClear(const Battle& b, const Unit& t)
 	int s = UnitSpan(t);
 	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
 		if (b.UnitAt(t.x + dx, t.z + dz) >= 0) return false;
+	return true;
+}
+
+// 味方出撃と敵拠点の中間より敵拠点側。配置が取れない地図では制限しない。
+static bool EnemyHalf(const Map& m, int x, int z)
+{
+	int np = m.nP < 15 ? m.nP : 15;
+	int ne = m.nE < 10 ? m.nE : 10;
+	if (np < 1 || ne < 1) return false;
+	double px = 0, pz = 0, ex = 0, ez = 0;
+	for (int i = 0; i < np; i++) { px += m.pStartX[i]; pz += m.pStartZ[i]; }
+	for (int i = 0; i < ne; i++) { ex += m.eStartX[i]; ez += m.eStartZ[i]; }
+	px /= np; pz /= np; ex /= ne; ez /= ne;
+	double dx = ex - px, dz = ez - pz;
+	if (dx * dx + dz * dz < 1.0) return false;
+	double mx = (px + ex) * 0.5, mz = (pz + ez) * 0.5;
+	return (x + 0.5 - mx) * dx + (z + 0.5 - mz) * dz > 0.0;
+}
+
+static int AllySideScore(const Map& m, int x, int z)
+{
+	int np = m.nP < 15 ? m.nP : 15;
+	int ne = m.nE < 10 ? m.nE : 10;
+	if (np < 1 || ne < 1) return 0;
+	double px = 0, pz = 0, ex = 0, ez = 0;
+	for (int i = 0; i < np; i++) { px += m.pStartX[i]; pz += m.pStartZ[i]; }
+	for (int i = 0; i < ne; i++) { ex += m.eStartX[i]; ez += m.eStartZ[i]; }
+	px /= np; pz /= np; ex /= ne; ez /= ne;
+	double dx = ex - px, dz = ez - pz;
+	return (int)((x + 0.5 - px) * dx + (z + 0.5 - pz) * dz);
+}
+
+static bool RaiseFootOpen(const Battle& b, const Unit& who, int x, int z)
+{
+	int s = UnitSpan(who);
+	int mv = UnitMoveType(who);
+	int jump = UnitJump(who);
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int tx = x + dx, tz = z + dz;
+		if (!Map::In(tx, tz)) return false;
+		if (b.UnitAt(tx, tz) >= 0) return false;
+		if (EnemyHalf(b.map, tx, tz)) return false;
+		if (!CanStep(b.map, who.x, who.z, tx, tz, mv, jump)) return false;
+	}
+	return true;
+}
+
+bool FindRaiseTile(const Battle& b, const Unit& corpse, int& ox, int& oz)
+{
+	int bestD = 9999, bestSide = 0x7fffffff;
+	int bx = 0, bz = 0;
+	bool found = false;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = Dist(corpse.x, corpse.z, x, z);
+		if (d < 1 || d > bestD) continue;
+		if (!RaiseFootOpen(b, corpse, x, z)) continue;
+		int side = AllySideScore(b.map, x, z);
+		if (!found || d < bestD || (d == bestD && side < bestSide)) {
+			found = true;
+			bestD = d;
+			bestSide = side;
+			bx = x;
+			bz = z;
+		}
+	}
+	if (!found) return false;
+	ox = bx;
+	oz = bz;
+	return true;
+}
+
+static bool RaiseHereOk(const Battle& b, const Unit& corpse)
+{
+	if (!FootClear(b, corpse)) return false;
+	int s = UnitSpan(corpse);
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+		if (EnemyHalf(b.map, corpse.x + dx, corpse.z + dz)) return false;
+	return true;
+}
+
+bool RaisePlaceable(const Battle& b, const Unit& corpse)
+{
+	if (RaiseHereOk(b, corpse)) return true;
+	int x, z;
+	return FindRaiseTile(b, corpse, x, z);
+}
+
+bool SettleRaised(Battle& b, Unit& d)
+{
+	if (RaiseHereOk(b, d)) return true;
+	int x, z;
+	if (!FindRaiseTile(b, d, x, z)) return false;
+	d.x = x;
+	d.z = z;
+	if (d.deck < 0 || d.deck >= LAY_N || !LayerOn(b.map.At(x, z), d.deck)) d.deck = 0;
+	int s = UnitSpan(d);
+	d.px = (float)d.x + s * 0.5f;
+	d.pz = (float)d.z + s * 0.5f;
+	d.py = b.map.WalkY(d.x, d.z, d.deck);
 	return true;
 }
 
@@ -4538,6 +4708,39 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 	return UnitHasSkill(u, skill) && u.mp >= s.mp;
 }
 
+bool SkillWorth(const Battle& b, int ui, int skill)
+{
+	if (ui < 0 || ui >= b.nUnits || !SkillUsable(b, ui, skill)) return false;
+	const Unit& u = b.u[ui];
+	const SkillDef& s = SkillInfo(skill);
+	int rmin = SkillCastRangeMin(u, skill);
+	int rmax = SkillCastRangeMax(u, skill);
+	auto cell = [&](int cx, int cz) -> bool {
+		if (!Map::In(cx, cz)) return false;
+		int tg[64];
+		int n = SkillTargets(b, ui, skill, cx, cz, tg, 64);
+		if (n < 1) return false;
+		if (s.kind != SK_HEAL) return true;
+		for (int i = 0; i < n; i++) {
+			const Unit& t = b.u[tg[i]];
+			if (s.effect == EF_RAISE) return true;
+			BOOL hurt = t.hp < t.ch.stat[S_HP];
+			BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0;
+			if (s.effect == EF_CLEANSE) { if (hurt || ail) return true; }
+			else if (hurt) return true;
+		}
+		return false;
+	};
+	if (s.rMax == 0) return cell(u.x, u.z);
+	for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
+		int d = abs(dx) + abs(dz);
+		if (d < rmin || d > rmax) continue;
+		if (cell(u.x + dx, u.z + dz)) return true;
+	}
+	if (s.effect == EF_RAISE && cell(u.x, u.z)) return true;
+	return false;
+}
+
 bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int tz)
 {
 	if (shape != SH_LINE && shape != SH_FAN)
@@ -4581,7 +4784,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		if (s.effect == EF_RAISE) {
 			if (t.alive || !t.killed || t.team != c.team) continue;
 			if (FootDist(cx, cz, 1, t.x, t.z, UnitSpan(t)) > max(0, s.area)) continue;
-			if (!FootClear(b, t)) continue;
+			if (!RaisePlaceable(b, t)) continue;
 			out[n++] = i;
 			continue;
 		}
@@ -4767,6 +4970,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			s.attacker = ai; s.defender = targets[k]; s.skill = skill; s.volley = wave;
 			if (sd->kind == SK_HEAL) {
 				if (sd->effect == EF_RAISE) {
+					if (!SettleRaised(b, d)) continue;
 					d.alive = 1;
 					d.killed = 0;
 					d.hp = max(1, d.ch.stat[S_HP] * 45 / 100);
@@ -4774,6 +4978,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					d.ct = max(d.ct, 200);
 					s.dmg = -d.hp;
 					s.hit = 1;
+					b.RebuildOcc();
 				} else {
 					// 回復は命中判定をしない。
 					int amt = HealAmount(a, d, *sd, skill);
@@ -6224,17 +6429,50 @@ int ItemExtraGet(const SaveData& s, int i)
 	unsigned v = (unsigned)s.reserved[i >> 1];
 	return (int)((v >> ((i & 1) * 16)) & 0xFFFF);
 }
-void ItemExtraAdd(SaveData& s, int i, int d)
+static int ExtraSell(int extra);
+int ItemExtraAdd(SaveData& s, int i, int d)
 {
-	if (i < 0 || i >= IX_N) return;
+	if (i < 0 || i >= IX_N) return 0;
 	int c = ItemExtraGet(s, i) + d;
 	if (c < 0) c = 0;
-	if (c > 60000) c = 60000;
+	int over = 0;
+	if (c > TAC_HOLD_WIDE) { over = c - TAC_HOLD_WIDE; c = TAC_HOLD_WIDE; }
 	unsigned shift = (unsigned)((i & 1) * 16);
 	unsigned mask = 0xFFFFu << shift;
 	unsigned v = (unsigned)s.reserved[i >> 1];
 	v = (v & ~mask) | ((unsigned)c << shift);
 	s.reserved[i >> 1] = (int)v;
+	int gold = over > 0 ? over * ExtraSell(i) : 0;
+	if (gold > 0) s.gold += gold;
+	return gold;
+}
+static int MatSell(int it)
+{
+	switch (it) {
+	case IT_ORE: return 12;
+	case IT_HERB: return 10;
+	case IT_CRYSTAL: return 24;
+	case IT_SHARD: return 36;
+	case IT_ELIXIR: return 20;
+	case IT_MIGHT: return 35;
+	case IT_DELAY: return 27;
+	case IT_RAISE: return 80;
+	default: return 8;
+	}
+}
+int GainItemN(SaveData& s, int item, int n)
+{
+	if (item < 0 || item >= 8 || n == 0) return 0;
+	int have = s.itemN[item];
+	if (n < 0) { s.itemN[item] = max(0, have + n); return 0; }
+	int room = TAC_HOLD_WIDE - have;
+	if (room < 0) room = 0;
+	int keep = n < room ? n : room;
+	s.itemN[item] = have + keep;
+	int over = n - keep;
+	int gold = over > 0 ? over * MatSell(item) : 0;
+	if (gold > 0) s.gold += gold;
+	return gold;
 }
 int ConsumableCount(const SaveData& s)
 {
@@ -6390,20 +6628,34 @@ bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name, int nameN)
 	int line = MonsterDropLine(monster);
 	int tx = TX_IT_ELIXIR;
 	switch (line) {
-	case 0: s.itemN[IT_MIGHT]++; tx = TX_IT_MIGHT; break;
-	case 1: ItemExtraAdd(s, IX_ATK, 1); tx = TX_IT_ATK; break;
-	case 2: s.itemN[IT_DELAY]++; tx = TX_IT_DELAY; break;
-	case 3: s.itemN[IT_RAISE]++; tx = TX_IT_RAISE; break;
-	case 4: ItemExtraAdd(s, IX_ETHER, 1); tx = TX_IT_ETHER; break;
-	default: s.itemN[IT_ELIXIR]++; break;
+	case 0: tx = TX_IT_MIGHT; break;
+	case 1: tx = TX_IT_ATK; break;
+	case 2: tx = TX_IT_DELAY; break;
+	case 3: tx = TX_IT_RAISE; break;
+	case 4: tx = TX_IT_ETHER; break;
+	default: break;
+	}
+	int cashed = 0;
+	switch (line) {
+	case 0: cashed += GainItemN(s, IT_MIGHT, 1); break;
+	case 1: cashed += ItemExtraAdd(s, IX_ATK, 1); break;
+	case 2: cashed += GainItemN(s, IT_DELAY, 1); break;
+	case 3: cashed += GainItemN(s, IT_RAISE, 1); break;
+	case 4: cashed += ItemExtraAdd(s, IX_ETHER, 1); break;
+	default: cashed += GainItemN(s, IT_ELIXIR, 1); break;
 	}
 	wchar_t buf[96];
 	wcscpy_s(buf, TT(tx));
 	if (r.Chance(45)) {
 		int k = r.Range(0, IX_N - 1);
-		ItemExtraAdd(s, k, 1);
+		cashed += ItemExtraAdd(s, k, 1);
 		wcscat_s(buf, L"  ");
 		wcscat_s(buf, TT(TX_IT_FULL + k));
+	}
+	if (cashed > 0) {
+		wchar_t g[32];
+		swprintf_s(g, L" +%dG", cashed);
+		wcscat_s(buf, g);
 	}
 	if (name && nameN > 0) wcsncpy_s(name, nameN, buf, _TRUNCATE);
 	return true;
@@ -6444,10 +6696,25 @@ int GoodHave(const SaveData& s, int i)
 	if (g->extra >= 100) return CraftGoodGet(g->extra - 100);
 	return ItemExtraGet(s, g->extra);
 }
+int GoodHoldMax(int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g) return TAC_HOLD_WIDE;
+	if (g->extra >= 100) return TAC_HOLD_BYTE;
+	return TAC_HOLD_WIDE;
+}
+static int ExtraSell(int extra)
+{
+	for (int i = 0; i < GoodCount(); i++) {
+		const GoodDef* g = GoodAt(i);
+		if (g && g->extra == extra && g->price > 0) return max(1, g->price / 2);
+	}
+	return 8;
+}
 bool GoodBuy(SaveData& s, int i)
 {
 	const GoodDef* g = GoodAt(i);
-	if (!g || s.gold < g->price || GoodHave(s, i) >= 99) return false;
+	if (!g || s.gold < g->price || GoodHave(s, i) >= GoodHoldMax(i)) return false;
 	s.gold -= g->price;
 	if (g->item >= 0) s.itemN[g->item]++;
 	else if (g->extra >= 100) CraftGoodAdd(g->extra - 100, 1);

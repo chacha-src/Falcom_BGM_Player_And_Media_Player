@@ -2135,11 +2135,11 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	}
 }
 
-void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
+BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
 	if (a.proc == 3) {
 		if (!a.poseValid) ActorPose(a, lib, r);
-		if (!a.poseValid) return;
+		if (!a.poseValid) return TRUE;
 		DrawParams d = dp;
 		BOOL hum = a.model >= 0 && a.model < (int)r.models.size() && strncmp(r.models[a.model].name, "Hum", 3) == 0;
 		if (hum) {
@@ -2180,6 +2180,8 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (hum && avaId > 0) {
 			d.clothTint = a.avaTint;
 			ava = r.DrawAvatar(a.model, avaId, a.bust, a.pose, world, d, &a);
+			// 衣装ができるまで体を出さない。裸が一瞬見えるのを避ける。
+			if (!ava && r.AvatarHide()) return FALSE;
 		}
 		if (!ava) {
 			d.clothTint = 0;
@@ -2295,7 +2297,8 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], wGear), da);
 		}
 		const BOOL whiteBase = digitBody && humM && humM->name[4] == '0';
-		if (hum && humM && humM->headJ >= 0 && (a.hair > 0 || whiteBase)) {
+		// 標準(0)は地毛。白人だけでなく、地毛の無いアジア・黒人の頭にも同じ笠を被せる。
+		if (hum && humM && humM->headJ >= 0 && (a.hair > 0 || digitBody)) {
 			DrawParams dh0 = dp;
 			dh0.rim = 0.04f;
 			dh0.hue = 0;
@@ -2311,7 +2314,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				int hb = lit(((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255);
 				dh0.tint = RGBA8(hr, hg, hb, al);
 			}
-			// 白人の素体は地肌が頭なので、髪型「標準」(0) でも髪色の地毛を被せる。
+			// 髪型「標準」(0) は髪色の地毛。どの頭も同じ。
 			int hairStyle = a.hair > 0 ? Clampi(a.hair, 1, HAIR_STYLES - 1) : 0;
 			if (!r.DrawHumanHair(a.model, hairStyle, humM->headJ, a.pose, wGear, dh0, a.avatar, &a) && a.hair > 0 && !digitBody) {
 			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
@@ -2416,18 +2419,18 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 		}
 		DrawActorWings(r, lib, a, wGear, dp, time, TRUE);
-		return;
+		return TRUE;
 	}
 	if (a.proc == 2) {
 		M4 w = MMul(LocoXform(a, time), world);
 		DrawParams d = dp;
 		d.tint = dp.tint;
 		r.DrawCreature(a.model, w, d);
-		return;
+		return TRUE;
 	}
-	if (a.model < 0 || a.model >= (int)r.models.size()) return;
+	if (a.model < 0 || a.model >= (int)r.models.size()) return TRUE;
 	if (!a.poseValid) ActorPose(a, lib, r);
-	if (!a.poseValid) return;
+	if (!a.poseValid) return TRUE;
 	const Model& m = r.models[a.model];
 	M4 drawW = world;
 	if ((a.clip == CL_WALK || a.clip == CL_RUN) && (a.rig < 0 || a.rig >= 4 || lib.clipMap[a.rig][a.clip] < 0 || lib.clipMap[a.rig][a.clip] == lib.clipMap[a.rig][CL_IDLE]))
@@ -2460,6 +2463,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 	}
 	DrawActorWings(r, lib, a, drawW, dp, time, FALSE);
+	return TRUE;
 }
 
 } // namespace otac

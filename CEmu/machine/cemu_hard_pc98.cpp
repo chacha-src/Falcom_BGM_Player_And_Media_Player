@@ -45,6 +45,11 @@ static int s_dsongsChecked = 0;
 static int s_dsongsKeep = 0;
 /* PMD86 の INT0B は IN A468h bit4 が立つ間 FIFO 処理へ戻る。このプロセスは曲ごとに機械を作り直すがフラグは静的なので Init で毎回下ろす。 */
 static int s_pmd86Board = 0;
+static int s_visionBoard = 0;
+static int s_beatBoard = 0;
+static int s_imadokiBoard = 0;
+static int s_fukujinBoard = 0;
+static int s_rolwBoard = 0;
 /* IWADRV F.COM カナリア: OUT 18Ah / IN が ymfm ReadData() だと 1 が戻らず INT14 を飛ばす。 */
 static int s_iwaBusHold = 0;
 /* FMX 3.10 はワンショット INT08 を植えたあと CS:[3B84] でスピン。IRQ0 は CALL FAR [3B6C]（まだ 0000:0000）。待ちオペコードが CS:IP の最初に非 0 カウントを poke。 */
@@ -1926,6 +1931,11 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	/* type=86 は PC-9801-86 基板だが、カタログ 86 リップの多く（flixmix / kolin2）は A460 無しで YM2203 として既に PLAYS。全体で入れると無音になった。要 YM2608 + ID 0x40 なのは emit_* FMDRV86 と、PMD86 が A460==FF で基板無しと見て INT0B を植えないパック（imd_1）。 */
 	s_pmd86Board = 0;
+	s_visionBoard = (ge->archive && _stricmp(ge->archive, "vision_98") == 0) ? 1 : 0;
+	s_beatBoard = (ge->archive && _stricmp(ge->archive, "beatvice") == 0) ? 1 : 0;
+	s_imadokiBoard = (ge->archive && _stricmp(ge->archive, "imadoki_98") == 0) ? 1 : 0;
+	s_fukujinBoard = (ge->archive && _stricmp(ge->archive, "fukujin1_98") == 0) ? 1 : 0;
+	s_rolwBoard = (ge->archive && _stricmp(ge->archive, "rolw1_98") == 0) ? 1 : 0;
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
 	if (!opnaMode && ge->subtype
 		&& (_stricmp(ge->subtype, "86") == 0
@@ -4001,6 +4011,16 @@ int CHardPc98::DeliverIrqs()
 			}
 		}
 		} /* !pmdOpnIrq_ — PMD は INT0B のまま */
+		/* vision の PMD は再生でシーケンサを INT14（COM+0179）に置き、スレーブ bit4 を開ける。 */
+		if (s_visionBoard && mem && IvtHooked(0x14, isDos_)) {
+			const unsigned o14 = (unsigned)mem[0x14 * 4]
+				| ((unsigned)mem[0x14 * 4 + 1] << 8);
+			if (o14 == 0x0179u) {
+				vec = 0x14;
+				picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+				slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
+			}
+		}
 		if (mem && g_mmdLoadSeg
 			&& MmdIsSound(mem, (unsigned)g_mmdLoadSeg << 4)) {
 			vec = PC98_OPN_IRQ_VEC;
@@ -5485,6 +5505,12 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		mem[0x536] = (uint8_t)(mem[0x536] | 0x04);
 		if (0xA0000u + 0x3FEEu < 0x200000u)
 			mem[0xA0000u + 0x3FEEu] = (uint8_t)(mem[0xA0000u + 0x3FEEu] | 0x09);
+	}
+	/* 福神 / ロードスは DOS を通らず、CEE0:0000=01 が無いと FM 初期化を飛ばす。 */
+	if (s_fukujinBoard || s_rolwBoard) {
+		mem[0xCEE00u] = 1;
+		mem[0xCEE04u] = 0xD2;
+		mem[0xCEE05u] = 0;
 	}
 
 	np2_reset();
@@ -9746,6 +9772,14 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		return 0;
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
+	if ((s_visionBoard && _stricmp(name, "pmd") == 0)
+		|| (s_beatBoard && _stricmp(name, "opndrv") == 0)
+		|| (s_imadokiBoard && _stricmp(name, "musdrv") == 0)) {
+		/* CEE0:0004=D2 が無いと OPNDRV / MUSDRV は基板無しで抜ける。vision の PMD は +0=01 / +5=00 も要る。 */
+		mem[0xCEE00u] = 1;
+		mem[0xCEE04u] = 0xD2;
+		mem[0xCEE05u] = 0;
+	}
 	char pspTail[162];
 	if (tail[0])
 		_snprintf_s(pspTail, _TRUNCATE, " %s", tail);
@@ -10886,6 +10920,31 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 				picMask_ = (uint8_t)(picMask_ & ~((1u << 2) | (1u << 3)));
 				slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
 				s_sddArmCyc = cpuCycles_;
+			}
+		}
+		/* MY EYES: IRQ はフック済みで期間レジスタも書いているのに 27h が 0 のままで、MY02 だけシーケンサが歩かない。制御ビットが空のときだけ足す。 */
+		if (chip_ && mem && opnTimerCount_ > 16 && (g_lastTimerCtrl & 0x0Cu) == 0) {
+			const unsigned oEye = (unsigned)mem[PC98_OPN_IRQ_VEC * 4]
+				| ((unsigned)mem[PC98_OPN_IRQ_VEC * 4 + 1] << 8);
+			const unsigned sEye = (unsigned)mem[PC98_OPN_IRQ_VEC * 4 + 2]
+				| ((unsigned)mem[PC98_OPN_IRQ_VEC * 4 + 3] << 8);
+			const unsigned linEye = (sEye << 4) + oEye;
+			static const uint8_t kEyeIsr[] = {
+				0xFA, 0x50, 0xE4, 0x0A, 0x0C, 0x10, 0xEB, 0x00,
+				0xE6, 0x0A, 0x2E, 0x8C, 0x16, 0x1A, 0x5B, 0x2E
+			};
+			if (sEye && linEye + sizeof(kEyeIsr) < 0x200000u
+				&& memcmp(mem + linEye, kEyeIsr, sizeof(kEyeIsr)) == 0) {
+				static uint64_t s_eyeArm;
+				if (cpuHz_ > 20
+					&& (cpuCycles_ - s_eyeArm) > ((uint64_t)cpuHz_ / 30ull)) {
+					s_eyeArm = cpuCycles_;
+					chip_->Write(0, 0x27);
+					chip_->Write(1, 0x3F);
+					opnLatchedAddr_ = 0x27;
+					g_lastTimerCtrl = 0x3F;
+					picMask_ = (uint8_t)(picMask_ & ~((1u << 2) | (1u << 3) | (1u << 4)));
+				}
 			}
 		}
 		if (g_muse2Seg && g_muse2Intr && mem) {
@@ -13223,8 +13282,15 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 
 	int loaded = 0;
 	/* Ys/Ys2 Falcom 糊はバンク毎に cmd0 内（HostService 0x10）で dataAddr_ を置く — 前タイトルの古いアドレスに対して先読みしない。 */
-	if (dataAddr_ > 0 && bootCs_ != 0x0160)
-		loaded = LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0);
+	/* addressing=1 の dataaddr は上位16=seg、下位16=off。2MB を超える値（福神 0x10000000）を平坦物理のまま渡すと先読みが落ち、ドライバは 1000:0000 のゼロを読む。 */
+	int songDest = dataAddr_;
+	if (addressing_ && (unsigned)dataAddr_ >= 0x200000u) {
+		const unsigned seg = ((unsigned)dataAddr_ >> 16) & 0xffffu;
+		const unsigned off = (unsigned)dataAddr_ & 0xffffu;
+		songDest = (int)((seg << 4) + off);
+	}
+	if (songDest > 0 && bootCs_ != 0x0160)
+		loaded = LoadSongToAddr(song & 0xff, songDest, fileSize_, 0);
 	if (data2Addr_ > 0)
 		LoadSongToAddr(song & 0xff, data2Addr_, file2Size_, 1);
 

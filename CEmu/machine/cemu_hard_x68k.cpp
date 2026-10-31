@@ -933,6 +933,22 @@ static void CEmuX68kFixAliceOpmScan(uint8_t* rom, unsigned n)
 	}
 }
 
+/* ザインソフト rein68snd: d1<2（オープニング／エンディング）は $E16400 へコピーせずその場で jsr する。OPM ドライバはコピー済み BGM と同じ呼び出しなのに IRQ6 をマスクしたままキーオンしない。cmp.w #2,d1 / bcs を潰して BGM と同じコピー経路に乗せる。 */
+static void CEmuX68kFixReinfInPlace(uint8_t* rom, unsigned n)
+{
+	if (!rom || n < 0x5D0u) return;
+	static const uint8_t kPat[] = {
+		0xB2, 0x7C, 0x00, 0x02, 0x65, 0x18, 0x45, 0xF9, 0x00, 0xE1, 0x64, 0x00
+	};
+	const unsigned hi = (n < 0x800u) ? n : 0x800u;
+	for (unsigned a = 0x400u; a + sizeof(kPat) < hi; a += 2u) {
+		if (memcmp(rom + a, kPat, sizeof(kPat)) != 0) continue;
+		rom[a + 4] = 0x4E;
+		rom[a + 5] = 0x71;
+		return;
+	}
+}
+
 /* KOEI MML（MUS*.opm）は (i) で始まりノートが続き、ボイスは TEST.OPM / EWMX.OPM。グルー WRITE は (i)、次いでボイスバンク、次いで曲を送るので、曲自身の (i) がノートコンパイル前にバンクを消す。先頭 512 バイトで (v…) が続かない先頭 init を落とす。 */
 static void CEmuX68kSkipBareOpmInit(const unsigned char** pdata, unsigned* psz)
 {
@@ -1606,6 +1622,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	if (!loaded) return 0;
 	CEmuX68kFixOpmdrvBinInit(rom_, 0x100000u);
 	CEmuX68kFixAliceOpmScan(rom_, 0x100000u);
+	CEmuX68kFixReinfInPlace(rom_, 0x100000u);
 	CEmuX68kFixOpxTrackHeap(rom_, 0x20000u, heap_, (unsigned)kHeapBytes);
 	CEmuX68kFixOpxCompileBoot(rom_, 0x20000u, heap_, (unsigned)kHeapBytes);
 

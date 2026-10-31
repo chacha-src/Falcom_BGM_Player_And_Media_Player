@@ -549,8 +549,9 @@ AVATARS_F = [
     ("maid", [("elvs_frilled_party_dress", None), ("elvs_ladies_apron", "white"), ("toigo_ballet_flats", "black")]),
     ("qipao", [("elvs_fashion_stylized_qipoa", None), ("toigo_ballet_flats", "black")]),
     ("goddess", [("elvs_goddess_dress1", None), ("toigo_ballet_flats", "white")]),
-    # MistressSaeko, CC-BY。セーラーの襟とプリーツスカート。テクスチャは配布に残っていなかったので色で塗る。
-    ("sailor", [("saeko_sailor_top", "white"), ("saeko_sailor_skirt", (0.10, 0.13, 0.32)), ("toigo_ballet_flats", "black")]),
+    # ブラウスは MistressSaeko CC-BY。襟と胸リボンは CC0 の単体、スカートは MTKnife のプリーツ。
+    ("sailor", [("saeko_sailor_top", "white"), ("ogg_sailor_collar", None), ("ogg_sailor_ribbon", None),
+                ("mtknife_pleated_mini_skirt", (0.10, 0.13, 0.32)), ("toigo_ballet_flats", "black")]),
     # 白いセーターと青のプリーツチェック。穴の開いたニットは裾が欠けるので使わない。
     ("jk", [("janexx_old_female_sweater", "white"), ("elvs_pleated_plaid_mini_skirt", None), ("toigo_ballet_flats", "black")]),
     # ブレザーのジャケットはパックに無い。学校の上着に見えるニットとカーディガンを 4 種。
@@ -737,7 +738,8 @@ def build_costume(gb, parts):
         dele.update(int(x) for x in c.delete)
         # 隠す頂点が書かれていない服は、布から 3.5cm 以内の素体を消す。開いたカーディガンは胸を残す。
         if len(c.delete) == 0 and item in (
-                "saeko_sailor_top", "saeko_sailor_skirt", "elvs_pencil_skirt", "elvs_gored_midi_skirt",
+                "saeko_sailor_top", "saeko_sailor_skirt", "mtknife_pleated_mini_skirt",
+                "elvs_pencil_skirt", "elvs_gored_midi_skirt",
                 "punkduck_black_mini_skirt", "punkduck_off-shoulder_long-sleeve_top", "janexx_old_female_sweater",
                 "namuhekam_male_polo_shirt", "elvs_male_athletic_tank1", "elvs_male_tankshirt1",
                 "toigo_stiletto_booties"):
@@ -821,8 +823,74 @@ def build_costume(gb, parts):
             bp[idx, 0] = cx + dvb[:, 0] * k
             bp[idx, 2] = cz + dvb[:, 1] * k
             Pall[b0:b1] = bp
-    P = Pall; T = np.concatenate(T)
-    out = dict(pos=P, col=np.concatenate(C), tri=T, W=np.concatenate(W), nrm=vnormals(P, T))
+    P = Pall
+    Wall = np.concatenate(W)
+    # 袖の位置なのに胸ウェイトだと、腕を上げたとき袖が肩に残り素体が飛び出す。
+    sj_c, sw_c = seg_weights(Wall, gb.names)
+    cdom = sj_c[np.arange(len(P)), np.argmax(sw_c, 1)]
+    sj_b, sw_b = seg_weights(gb.WB, gb.names)
+    bdom = sj_b[np.arange(len(gb.pos)), np.argmax(sw_b, 1)]
+    arm_si = [SEGS.index(n) for n in SEGS if n.startswith(("UpperArm", "LowerArm", "Hand", "Shoulder"))]
+    src_si = [SEGS.index(n) for n in SEGS if n.startswith(("UpperArm", "LowerArm", "Hand"))]
+    arm_body = np.flatnonzero(np.isin(bdom, src_si))
+    if len(arm_body):
+        from scipy.spatial import cKDTree
+        atree = cKDTree(gb.pos[arm_body])
+        arm_w = np.zeros(len(P))
+        for k in range(sw_c.shape[1]):
+            arm_w += sw_c[:, k] * np.isin(sj_c[:, k], arm_si)
+        weak = (np.abs(P[:, 0]) > 0.20) & (P[:, 1] > 0.92) & (P[:, 1] < 1.48) & (arm_w < 0.45)
+        if weak.any():
+            dist, nn = atree.query(P[weak], distance_upper_bound=0.022)
+            hit = np.isfinite(dist)
+            wi = np.flatnonzero(weak)[hit]
+            src = arm_body[nn[hit]]
+            Wall[wi] = gb.WB[src]
+            Wall[wi] /= np.maximum(Wall[wi].sum(1, keepdims=True), 1e-9)
+            sj_c, sw_c = seg_weights(Wall, gb.names)
+            cdom = sj_c[np.arange(len(P)), np.argmax(sw_c, 1)]
+    def _axis_r(Q, A, B):
+        ab = B - A
+        L2 = float(ab @ ab)
+        if L2 < 1e-10:
+            return np.full(len(Q), 1e9), np.zeros(len(Q))
+        t = np.clip((Q - A) @ ab / L2, 0.0, 1.0)
+        d = Q - (A + np.outer(t, ab))
+        return np.linalg.norm(d, axis=1), t
+    for side in ("L", "R"):
+        ids = [SEGS.index("UpperArm." + side), SEGS.index("LowerArm." + side), SEGS.index("Hand." + side)]
+        pts = []
+        for si in ids:
+            m = bdom == si
+            pts.append(gb.pos[m].mean(0) if m.any() else None)
+        if any(q is None for q in pts):
+            continue
+        for si, A, B in ((ids[0], pts[0], pts[1]), (ids[1], pts[1], pts[2])):
+            bm = bdom == si
+            cm = cdom == si
+            if not bm.any() or not cm.any():
+                continue
+            br, bt = _axis_r(gb.pos[bm], A, B)
+            okb = br < 0.062
+            if okb.sum() < 8:
+                continue
+            br, bt = br[okb], bt[okb]
+            rl, tt = _axis_r(P[cm], A, B)
+            r_loc = np.empty(len(rl))
+            for i in range(len(rl)):
+                same = np.abs(bt - tt[i]) < 0.14
+                sample = br[same] if same.sum() >= 4 else br
+                r_loc[i] = float(np.percentile(sample, 50))
+            want = r_loc + 0.008
+            fix = rl < r_loc + 0.003
+            if not fix.any():
+                continue
+            ax = A + np.outer(tt, B - A)
+            rad = np.maximum(rl, 1e-5)
+            sc = np.where(fix, want / rad, 1.0)
+            P[cm] = ax + (P[cm] - ax) * sc[:, None]
+    T = np.concatenate(T)
+    out = dict(pos=P, col=np.concatenate(C), tri=T, W=Wall, nrm=vnormals(P, T))
     if gb.female:
         out["dmax"] = np.concatenate(DX); out["dmin"] = np.concatenate(DN)
     dl = np.zeros(len(gb.v), bool)

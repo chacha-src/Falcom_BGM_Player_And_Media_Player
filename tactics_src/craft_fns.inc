@@ -306,7 +306,8 @@ void CraftReset()
 {
 	memset(&g_craft, 0, sizeof(g_craft));
 }
-static const int kCraftItemMax = 99;
+static const int kCraftItemMax = 255;
+static const int kWideMax = 999;
 static const int kStoneMax = 999;
 
 static int RemapCraftV1(int old)
@@ -491,6 +492,7 @@ void CraftLoad()
 		}
 	}
 	for (int i = 0; i < SUMMON_N && i < 48; i++) if (g_craft.sumN[i] > kCraftItemMax) g_craft.sumN[i] = (unsigned char)kCraftItemMax;
+	for (int i = 0; i < kAccN && i < 1024; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
 	CraftFixBeads();
 }
 void CraftSave()
@@ -698,7 +700,7 @@ void CraftGoodAdd(int i, int d)
 	if (i < 0 || i >= (int)sizeof(g_craft.goodN)) return;
 	int c = (int)g_craft.goodN[i] + d;
 	if (c < 0) c = 0;
-	if (c > 99) c = 99;
+	if (c > kCraftItemMax) c = kCraftItemMax;
 	g_craft.goodN[i] = (unsigned char)c;
 }
 int StoneCount() { return g_craft.stones; }
@@ -774,6 +776,7 @@ bool BeadSell(int index)
 
 // ---------------- 装飾品 ----------------
 int AccCount() { return kAccN; }
+int AccHave(int index) { return (index < 0 || index >= kAccN) ? 0 : (int)g_craft.accN[index]; }
 const wchar_t* AccName(int id)
 {
 	if (id < 1 || id > kAccN) return TT(TX_PT_NONE);
@@ -791,7 +794,7 @@ int AccStat(int id, int stat)
 bool AccBuy(SaveData& s, int index)
 {
 	if (index < 0 || index >= kAccN) return false;
-	if (s.gold < kAccRow[index].price || g_craft.accN[index] >= kCraftItemMax) return false;
+	if (s.gold < kAccRow[index].price || g_craft.accN[index] >= kWideMax) return false;
 	s.gold -= kAccRow[index].price;
 	g_craft.accN[index]++;
 	return true;
@@ -915,30 +918,45 @@ bool UnitResistsEffect(const Unit& u, int effect)
 
 // ---------------- 敵ドロップ ----------------
 // 魔石: 雑魚 12%/1 個、ボス 65%/2 個。装飾: そのステージで買える値段まで。追加分も含む。
-bool DropCraftLoot(int monster, int boss, int stage, Rng& r, wchar_t* name, int nameN)
+bool DropCraftLoot(SaveData& s, int monster, int boss, int stage, Rng& r, wchar_t* name, int nameN)
 {
 	(void)monster;
 	if (name && nameN > 0) name[0] = 0;
 	if (stage < 1) stage = 1;
 	bool got = false;
+	auto noteGold = [&](int gold) {
+		if (gold < 1) return;
+		s.gold += gold;
+		if (name && nameN > 0) {
+			wchar_t bit[32];
+			swprintf_s(bit, L"+%dG", gold);
+			size_t len = wcslen(name);
+			if (len == 0) wcsncpy_s(name, nameN, bit, _TRUNCATE);
+			else swprintf_s(name + len, nameN - len, L"  %s", bit);
+		}
+		got = true;
+	};
 	if (r.Chance(boss ? 65 : 12)) {
 		int n = boss ? 2 : 1;
+		int before = StoneCount();
 		StoneAdd(n);
-		if (name && nameN > 0) swprintf_s(name, nameN, L"%s x%d", TT(TX_STONE), n);
-		got = true;
+		int kept = StoneCount() - before;
+		if (kept > 0 && name && nameN > 0) swprintf_s(name, nameN, L"%s x%d", TT(TX_STONE), kept);
+		if (kept > 0) got = true;
+		noteGold((n - kept) * 125);
 	}
 	if (r.Chance(boss ? 30 : 12)) {
 		int budget = boss ? (600 + stage * 220) : (200 + stage * 70);
-		int pool[1024], n = 0;
+		int pool[1024], n = 0, fullPrice = 0;
 		for (int i = 0; i < kAccN && n < 1024; i++) {
 			int price = kAccRow[i].price;
 			if (price < 1 || price > budget) continue;
-			if (g_craft.accN[i] >= kCraftItemMax) continue;
+			if (g_craft.accN[i] >= kWideMax) { if (price > fullPrice) fullPrice = price; continue; }
 			pool[n++] = i;
 		}
-		if (n < 1) {
+		if (n < 1 && fullPrice < 1) {
 			int lim = kAccN < 12 ? kAccN : 12;
-			for (int i = 0; i < lim; i++) if (g_craft.accN[i] < kCraftItemMax) pool[n++] = i;
+			for (int i = 0; i < lim; i++) if (g_craft.accN[i] < kWideMax) pool[n++] = i;
 		}
 		if (n > 0) {
 			int ix = pool[r.Range(0, n - 1)];
@@ -948,13 +966,13 @@ bool DropCraftLoot(int monster, int boss, int stage, Rng& r, wchar_t* name, int 
 				swprintf_s(name + len, nameN - len, L"%s%s", len ? L"  " : L"", AccName(ix + 1));
 			}
 			got = true;
-		}
+		} else if (fullPrice > 0) noteGold(max(1, fullPrice / 2));
 	}
 	return got;
 }
 
 // 技珠・パッシブ・召喚。呼び出し側が確率を決める。出せるものが無ければ false。
-bool DropExtraLoot(const SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int nameN)
+bool DropExtraLoot(SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int nameN)
 {
 	if (name && nameN > 0) name[0] = 0;
 	if (stage < 1) stage = 1;
@@ -969,39 +987,51 @@ bool DropExtraLoot(const SaveData& s, int stage, int boss, Rng& r, wchar_t* name
 	for (int o = 0; o < 3; o++) {
 		if (order[o] == 0) {
 			int pool[CRAFT_N];
-			int nFresh = 0, nOld = 0;
+			int nFresh = 0, nOld = 0, fullCost = 0;
 			int open = CraftSuperUnlockedBest(s);
 			for (int i = 0; i < CRAFT_N; i++) {
-				if (g_craft.beadN[i] >= kCraftItemMax) continue;
 				if (CraftSuperNeed(i) > open) continue;
 				if (CraftStoneCost(i) > costCap) continue;
+				if (g_craft.beadN[i] >= kCraftItemMax) { fullCost = max(fullCost, CraftStoneCost(i)); continue; }
 				if (i >= CRAFT_LEGACY * 2) pool[nFresh++] = i;
 			}
 			for (int i = 0; i < CRAFT_N; i++) {
 				if (i >= CRAFT_LEGACY * 2) continue;
-				if (g_craft.beadN[i] >= kCraftItemMax) continue;
 				if (CraftSuperNeed(i) > open) continue;
 				if (CraftStoneCost(i) > costCap) continue;
+				if (g_craft.beadN[i] >= kCraftItemMax) { fullCost = max(fullCost, CraftStoneCost(i)); continue; }
 				pool[nFresh + nOld] = i;
 				nOld++;
 			}
 			int pick = -1;
 			if (nFresh > 0 && (nOld < 1 || r.Chance(65))) pick = pool[r.Range(0, nFresh - 1)];
 			else if (nOld > 0) pick = pool[nFresh + r.Range(0, nOld - 1)];
-			if (pick < 0) continue;
+			if (pick < 0) {
+				if (fullCost < 1) continue;
+				int g = max(1, fullCost * 125);
+				s.gold += g;
+				if (name && nameN > 0) swprintf_s(name, nameN, L"+%dG", g);
+				return true;
+			}
 			g_craft.beadN[pick]++;
 			if (name && nameN > 0) wcsncpy_s(name, nameN, CraftName(pick), _TRUNCATE);
 			return true;
 		}
 		if (order[o] == 1) {
-			int pool[64], n = 0;
+			int pool[64], n = 0, fullPrice = 0;
 			int lim = kPasN < 64 ? kPasN : 64;
 			for (int i = 0; i < lim; i++) {
 				if (kPasRow[i].price < 1 || kPasRow[i].price > budget) continue;
-				if (g_craft.pasN[i] >= kCraftItemMax) continue;
+				if (g_craft.pasN[i] >= kCraftItemMax) { if (kPasRow[i].price > fullPrice) fullPrice = kPasRow[i].price; continue; }
 				pool[n++] = i;
 			}
-			if (n < 1) continue;
+			if (n < 1) {
+				if (fullPrice < 1) continue;
+				int g = max(1, fullPrice / 2);
+				s.gold += g;
+				if (name && nameN > 0) swprintf_s(name, nameN, L"+%dG", g);
+				return true;
+			}
 			int ix = pool[r.Range(0, n - 1)];
 			g_craft.pasN[ix]++;
 			if (name && nameN > 0) wcsncpy_s(name, nameN, PasName(ix + 1), _TRUNCATE);
@@ -1009,15 +1039,21 @@ bool DropExtraLoot(const SaveData& s, int stage, int boss, Rng& r, wchar_t* name
 		}
 		if (order[o] == 2) {
 			int sumBudget = boss ? (budget * 3 / 2) : budget;
-			int pool[48], n = 0;
+			int pool[48], n = 0, fullPrice = 0;
 			int lim = SUMMON_N < 48 ? SUMMON_N : 48;
 			for (int i = 0; i < lim; i++) {
 				int price = SummonPrice(i);
 				if (price < 1 || price > sumBudget) continue;
-				if (g_craft.sumN[i] >= kCraftItemMax) continue;
+				if (g_craft.sumN[i] >= kCraftItemMax) { if (price > fullPrice) fullPrice = price; continue; }
 				pool[n++] = i;
 			}
-			if (n < 1) continue;
+			if (n < 1) {
+				if (fullPrice < 1) continue;
+				int g = max(1, fullPrice / 2);
+				s.gold += g;
+				if (name && nameN > 0) swprintf_s(name, nameN, L"+%dG", g);
+				return true;
+			}
 			int ix = pool[r.Range(0, n - 1)];
 			g_craft.sumN[ix]++;
 			if (name && nameN > 0) wcsncpy_s(name, nameN, SummonName(ix + 1), _TRUNCATE);

@@ -109,7 +109,8 @@ def complete_pose(rec):
 
 def main():
     gbs = [M.build_body(False), M.build_body(True)]
-    with open(OUT, "wb") as fo:
+    tmp = OUT + ".tmp"
+    with open(tmp, "wb") as fo:
         fo.write(b"TACV")
         fo.write(struct.pack("<I", len(M.SEGS)))
         for s in M.SEGS:
@@ -176,6 +177,7 @@ def main():
             fo.write(c["tri"].astype("<u2").tobytes())
             fo.write(np.packbits(c["body_keep"].astype(np.uint8), bitorder="little").tobytes())
             print("avatar", "F" if g else "M", key, "v", len(c["pos"]), "tri", len(c["tri"]))
+    os.replace(tmp, OUT)
     print("bytes", os.path.getsize(OUT))
 
 

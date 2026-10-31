@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4702; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4714; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -154,6 +154,15 @@
                   + para_98 (OPN; Paracelsus songs 14 / 15 / 16 stay audible for 8s, beep rows are SC device switches)
                   + strush_98 (OPN; STRUSH / OFFICE / SCHOOL stay audible for 8s, MT-32 rows are catalogued as beep)
                   + kumi_98 (OPN; BGM 01 / 02 / 03 stay audible after the opening 2s)
+                  + zupapa (NeoGeo; logo, credit, world clear, cheers and game over requeue the same command, 29/29)
+                  + myeyes_98 (OPN; MY01 / MY02 / MY03 stay audible for 8s)
+                  + vision_98 (OPN; VISM1 / VISM2 / VISM3 stay audible for 8s)
+                  + beatvice (OPN; BV21.MD / BV21.MD / BV22.MD stay audible for 8s)
+                  + imadoki_98 (OPN; SOUND 00 / 01 / 02 stay audible for 8s)
+                  + fukujin1_98 (OPN; 1B / 1C / 1D stay audible for 8s)
+                  + rolw1_98 (OPN; prg 60 / 61 / 62 stay audible for 8s)
+                  + meltdn98 (OPN; STAGE 1 / 2 / 3 stay audible for 8s)
+                  + h3sv98 (OPN; The Space Memories / Theme of Production / Fairyland stay audible for 8s)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -411,6 +420,7 @@ static const char* const kSupported[] = {
 	"arkanoid98",
 	"arkarea",
 	"arknoid268snd",
+	"arknoid2j",
 	"arkretrn",
 	"armedf",
 	"armist_98",
@@ -527,6 +537,7 @@ static const char* const kSupported[] = {
 	"beast68snd",
 	"beast_98",
 	"beast_b_98",
+	"beatvice",
 	"beautybeast_at",
 	"belsavn168snd",
 	"belsavn1_98",
@@ -1602,6 +1613,7 @@ static const char* const kSupported[] = {
 	"fstory_msx",
 	"fukeivx_98",
 	"fuktusai_98",
+	"fukujin1_98",
 	"fukujin1_msx",
 	"fukujin2_98",
 	"fukujin68snd",
@@ -1852,6 +1864,7 @@ static const char* const kSupported[] = {
 	"gyro_88",
 	"gyruss",
 	"h-plus_98",
+	"h3sv98",
 	"h_kioku1_21",
 	"h_kioku1_98",
 	"h_kioku2_98",
@@ -2023,6 +2036,7 @@ static const char* const kSupported[] = {
 	"illumina",
 	"illumina_98",
 	"illumina_msx",
+	"imadoki_98",
 	"image1_98",
 	"image2_98",
 	"image68snd",
@@ -2657,6 +2671,7 @@ static const char* const kSupported[] = {
 	"meisou_at",
 	"melroon",
 	"melroon_98",
+	"meltdn98",
 	"meltdown",
 	"memoref_98",
 	"memories_98",
@@ -2700,6 +2715,7 @@ static const char* const kSupported[] = {
 	"micromachines_at",
 	"midgarts",
 	"midgarts88_2hd",
+	"midres",
 	"miexchng",
 	"mig29f_at",
 	"mig29sf_at",
@@ -2875,6 +2891,7 @@ static const char* const kSupported[] = {
 	"myadock_msx",
 	"myangel3",
 	"myeyes68snd",
+	"myeyes_98",
 	"myhero",
 	"myhomed2_98",
 	"myhomedr_98",
@@ -3493,6 +3510,7 @@ static const char* const kSupported[] = {
 	"rollerg",
 	"rolling",
 	"rolling95",
+	"rolw1_98",
 	"rolw1_msx",
 	"rolw68snd",
 	"romancia_msx",
@@ -3766,6 +3784,7 @@ static const char* const kSupported[] = {
 	"sh_98",
 	"shaburi_98",
 	"shackled",
+	"shadowld",
 	"shadoww",
 	"shake1_98",
 	"shake2_98",
@@ -4484,6 +4503,7 @@ static const char* const kSupported[] = {
 	"viofight",
 	"virgin_d_98",
 	"vision2_98",
+	"vision_98",
 	"visitte_98",
 	"viz_at",
 	"vkiss_98",
@@ -4865,6 +4885,7 @@ static const char* const kSupported[] = {
 	"zowawrld_msx",
 	"ztgkolym_msx",
 	"zukkoke_msx",
+	"zupapa",
 	"zyojus_98"
 };
 

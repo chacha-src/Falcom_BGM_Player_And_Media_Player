@@ -101,7 +101,7 @@ private:
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
-	void RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0);
+	BOOL RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0);
 	void InvalidatePortraits();
 	void DrawPortrait(int slot, float x, float y, float s, DWORD frame);
 	int RosterPortrait(int roster) const;
@@ -114,7 +114,7 @@ private:
 	BOOL Btn(int id, float x, float y, float w, float h, const wchar_t* label, BOOL enabled = TRUE, BOOL selected = FALSE, float px = 0, DWORD tint = 0);
 	float FitTextPx(const wchar_t* s, float maxW, float px, int bold = 0);
 	void UiOk();
-	int Sel(int id, float x, float y, float w, float h, const wchar_t* label, const wchar_t* value);
+	int Sel(int id, float x, float y, float w, float h, const wchar_t* label, const wchar_t* value, int on = 1);
 	BOOL Hit(float x, float y, float w, float h) const;
 	BOOL ClickIn(float x, float y, float w, float h);
 	void Panel(float x, float y, float w, float h, float alpha = 1.f);
@@ -161,7 +161,7 @@ private:
 	void RunSlotFile(int job);
 	void ImportConfirmed();
 	void DrawShop();
-	float DrawSoundOpts(float x, float y, float w, float k);
+	float DrawSoundOpts(float x, float y, float w, float k, int* tip = 0, float* tipY = 0);
 	void ApplyAudio();
 	void DrawCodex();
 	void DrawMonCodex();
@@ -216,7 +216,7 @@ private:
 	void CycleLayer(int dir);
 	void SyncCursorLayer();
 	void UpdateHover();
-	BOOL PickCell(float sx, float sy, int& cx, int& cz) const;
+	BOOL PickCell(float sx, float sy, int& cx, int& cz, int* layer = 0) const;
 	V3 CellCenter(int x, int z) const;
 	V3 UnitGroundPos(const Unit& u) const;
 	void BeginTurn();
@@ -225,6 +225,8 @@ private:
 	void UpdateMove(float dt);
 	void OpenCommand();
 	BOOL HasAttackTarget(int ui) const;
+	BOOL ChestInRange(int ui, int x, int z) const;
+	BOOL OpenChestAt(int ui, int x, int z);
 	BOOL CanTarget(int ui, int target, int skill) const;
 	void BeginAttack(int ui, int target, int skill, int cx, int cz);
 	void UpdateSeq(float dt);
@@ -246,7 +248,7 @@ private:
 	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big);
 	void DrawForecast();
 	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
-	void DrawMinimap(float x, float y, float s);
+	void DrawMinimap(float x, float y, float s, int layer = 0);
 	void DrawShowMinimap(float x, float y, float s);
 	void DrawCommandMenu();
 	void DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, float avoidW, float avoidH);
@@ -495,6 +497,9 @@ private:
 	int m_moved;
 	int m_cx, m_cz;      // カーソル
 	int m_cLayer;        // 見ている層。0=下 1=中 2=上
+	int m_layerLock;     // ホイールで層を固定しているあいだ 1
+	float m_miniX[3], m_miniY[3], m_miniS[3];
+	int m_miniHitN;
 	BOOL m_cursorValid;
 	int m_hoverUnit;
 	int m_cmdSkill;      // 選択中スキル（-1=通常）
