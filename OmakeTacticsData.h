@@ -199,7 +199,35 @@ enum PropKind {
 };
 
 enum Gimmick { GM_NONE = 0, GM_HEAL = 1, GM_MIGHT = 2, GM_WARP = 3, GM_CHEST = 4, GM_LEVER = 5, GM_FENCE = 6, GM_DROP = 7 };
-enum Weather { WX_CLEAR = 0, WX_RAIN = 1, WX_SNOW = 2, WX_ASH = 3 };
+enum Weather { WX_CLEAR = 0, WX_RAIN = 1, WX_SNOW = 2, WX_ASH = 3, WX_FOG = 4, WX_STORM = 5, WX_SAND = 6, WX_HAIL = 7, WX_PETAL = 8, WX_HEAT = 9 };
+enum Hour {
+	HR_NOON = 0, HR_DAWN, HR_MORNING, HR_DUSK, HR_NIGHT, HR_DEEP,
+	HR_ECLIPSE, HR_DREAM, HR_STAR, HR_MOON
+};
+inline int TacWx(int sky) { return sky & 15; }
+inline int TacHour(int sky) { return (sky >> 8) & 15; }
+inline int TacPackSky(int wx, int hour) { return (wx & 15) | ((hour & 15) << 8); }
+inline int TacSightTiles(int sky)
+{
+	int s = 0;
+	switch (TacHour(sky)) {
+	case HR_DAWN: s = 26; break;
+	case HR_MORNING: s = 34; break;
+	case HR_DUSK: s = 18; break;
+	case HR_NIGHT: s = 12; break;
+	case HR_DEEP: s = 9; break;
+	case HR_ECLIPSE: s = 14; break;
+	case HR_DREAM: s = 16; break;
+	case HR_STAR: s = 18; break;
+	case HR_MOON: s = 15; break;
+	default: s = 0; break;
+	}
+	int wx = TacWx(sky);
+	if (wx == WX_FOG) s = s > 0 ? max(6, s * 2 / 3) : 14;
+	else if (wx == WX_SAND) s = s > 0 ? max(7, s - 3) : 16;
+	else if (wx == WX_STORM && s > 0) s = max(7, s - 2);
+	return s;
+}
 
 struct Cell {
 	BYTE t;      // Terrain
@@ -754,17 +782,31 @@ struct Battle {
 	int stampedeLine;         // 生存している敵がこの数以下で次の波
 	int stampedeShow;         // 1=湧きを見せているあいだ、次の手番を少し待つ
 	int bgmWin;               // 1=今フレームは勝利目前。索敵が増えると戻す
-	int sweep;                // 1=掃討。ボスなし。全員倒すと勝ち
+	int sweep;                // TAC_VAR_*。0通常 1掃討 2残党 3ボスのみ 4傷追い
 	int NextActor();          // CT を進めて次の行動者を返す
 	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
 };
 
+enum {
+	TAC_VAR_NONE = 0,
+	TAC_VAR_SWEEP = 1,
+	TAC_VAR_REMNANT = 2,
+	TAC_VAR_BOSS = 3,
+	TAC_VAR_SCAR = 4,
+	TAC_VAR_MIST = 5,
+	TAC_VAR_RAID = 6,
+	TAC_VAR_AMBUSH = 7,
+	TAC_VAR_TWIN = 8,
+	TAC_VAR_VAULT = 9,
+	TAC_VAR_BLESS = 10
+};
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
 int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
 void WakeGroup(Battle& b, int grp);
+void JoinTurnClock(Battle& b, int ui);
 int WakeNearPlayers(Battle& b, int rad, int immediate = 0);
 int LavaHurt(Battle& b, int ui);
 int UnitFacing(const Unit& attacker, const Unit& defender);

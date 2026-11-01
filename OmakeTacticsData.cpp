@@ -3566,7 +3566,14 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	for (int s = 0; s < S_COUNT; s++) {
 		int g = md.grow[s];
 		int v = md.base[s];
-		if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
+		if (s == S_AGI) {
+			// 味方の期待成長は成長率の2倍で、およそ 0.8 / Lv。敵はその6割前後。
+			// 据え置きだと手番が来ず、兵士並みだと群れが手番を埋める。
+			int gAgi = g * 6 / 5;
+			if (gAgi < 44) gAgi = 44;
+			if (gAgi > 64) gAgi = 64;
+			v += gAgi * (u.ch.lv - 1) / 100;
+		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
 		// 味方のこれから先の成長が倍になった。敵はHPだけ同じ倍率にする。攻撃力は上げない。
 		if (s == S_HP) v *= 2;
@@ -4286,17 +4293,24 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 	{
 		bool bow = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1;
 		int elw = sd ? sd->element : EL_NONE;
-		if (b.weather == WX_RAIN) {
-			if (elw == EL_FIRE) dm *= 0.75f;
-			else if (elw == EL_THUNDER) dm *= 1.10f;
-			if (bow) hit -= 12;
-		} else if (b.weather == WX_SNOW) {
-			if (elw == EL_ICE) dm *= 1.15f;
+		int wx = TacWx(b.weather);
+		if (wx == WX_RAIN || wx == WX_STORM) {
+			if (elw == EL_FIRE) dm *= wx == WX_STORM ? 0.70f : 0.75f;
+			else if (elw == EL_THUNDER) dm *= wx == WX_STORM ? 1.16f : 1.10f;
+			if (bow) hit -= wx == WX_STORM ? 16 : 12;
+		} else if (wx == WX_SNOW || wx == WX_HAIL) {
+			if (elw == EL_ICE) dm *= wx == WX_HAIL ? 1.12f : 1.15f;
 			else if (elw == EL_FIRE) dm *= 0.85f;
-			if (bow) hit -= 8;
-		} else if (b.weather == WX_ASH) {
-			if (elw == EL_FIRE) dm *= 1.12f;
-			if (bow) hit -= 14;
+			if (bow) hit -= wx == WX_HAIL ? 10 : 8;
+		} else if (wx == WX_ASH || wx == WX_HEAT) {
+			if (elw == EL_FIRE) dm *= wx == WX_HEAT ? 1.08f : 1.12f;
+			else if (wx == WX_HEAT && elw == EL_ICE) dm *= 0.88f;
+			if (bow && wx == WX_ASH) hit -= 14;
+		} else if (wx == WX_SAND) {
+			if (bow) hit -= 18;
+		} else if (wx == WX_FOG) {
+			if (bow) hit -= 10;
+			else hit -= 4;
 		}
 	}
 	hit = Clampi(hit, magic ? 62 : 48, magic ? 100 : 99);
@@ -5470,13 +5484,44 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	stage = Clampi(stage, 1, TAC_STAGE_MAX);
 	b.stage = stage;
 	GenerateMap(b.map, stage, seed, theme);
-	b.weather = WX_CLEAR;
+	int wx = WX_CLEAR;
+	int hour = HR_NOON;
 	{
 		int th = b.map.theme;
-		if (th == TH_SNOW) b.weather = (seed % 5u) ? WX_SNOW : WX_CLEAR;
-		else if (th == TH_VOLCANO) b.weather = (seed % 4u) ? WX_ASH : WX_CLEAR;
-		else if (th != TH_DESERT && (seed % 3u) == 0) b.weather = WX_RAIN;
+		unsigned w = seed % 20u;
+		if (th == TH_SNOW) {
+			if (w < 11) wx = WX_SNOW;
+			else if (w < 14) wx = WX_HAIL;
+			else if (w < 16) wx = WX_FOG;
+		} else if (th == TH_VOLCANO) {
+			if (w < 10) wx = WX_ASH;
+			else if (w < 13) wx = WX_HEAT;
+		} else if (th == TH_DESERT) {
+			if (w < 8) wx = WX_SAND;
+			else if (w < 11) wx = WX_HEAT;
+		} else if (th == TH_FOREST || th == TH_PLAINS) {
+			if (w < 4) wx = WX_RAIN;
+			else if (w < 6) wx = WX_STORM;
+			else if (w < 8) wx = WX_PETAL;
+			else if (w < 10) wx = WX_FOG;
+		} else if (th == TH_SWAMP) {
+			if (w < 6) wx = WX_FOG;
+			else if (w < 9) wx = WX_RAIN;
+		} else if (w < 4) wx = WX_RAIN;
+		else if (w < 6) wx = WX_STORM;
+		else if (w < 8) wx = WX_FOG;
+		unsigned hs = (seed / 20u) % 20u;
+		if (hs == 0) hour = HR_DAWN;
+		else if (hs == 1) hour = HR_MORNING;
+		else if (hs == 2) hour = HR_DUSK;
+		else if (hs == 3) hour = HR_NIGHT;
+		else if (hs == 4) hour = HR_DEEP;
+		else if (hs == 5) hour = HR_ECLIPSE;
+		else if (hs == 6) hour = HR_DREAM;
+		else if (hs == 7) hour = HR_STAR;
+		else if (hs == 8) hour = HR_MOON;
 	}
+	b.weather = TacPackSky(wx, hour);
 	Rng r(seed ^ 0xA5A5A5A5u);
 	int n = 0;
 	const float faceToE = atan2f((float)(b.map.eStartX[0] - b.map.pStartX[0]), (float)(b.map.eStartZ[0] - b.map.pStartZ[0]));
@@ -5505,10 +5550,83 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.nUnits = n;
 	b.RebuildOcc();
-	b.sweep = ((seed % 16u) == 7u) ? 1 : 0;
-	if (b.sweep) {
-		for (int g = 0; g < b.map.nGrp; g++) b.map.grp[g].boss = 0;
+	int kind = TAC_VAR_NONE;
+	{
+		unsigned r64 = seed % 64u;
+		if ((seed % 16u) == 7u) kind = TAC_VAR_SWEEP;
+		else if (r64 == 11u) kind = TAC_VAR_REMNANT;
+		else if (r64 == 21u) kind = TAC_VAR_BOSS;
+		else if (r64 == 29u) kind = TAC_VAR_SCAR;
+		else if (r64 == 13u) kind = TAC_VAR_MIST;
+		else if (r64 == 37u) kind = TAC_VAR_RAID;
+		else if (r64 == 45u) kind = TAC_VAR_AMBUSH;
+		else if (r64 == 53u) kind = TAC_VAR_TWIN;
+		else if (r64 == 57u) kind = TAC_VAR_VAULT;
+		else if (r64 == 61u) kind = TAC_VAR_BLESS;
 	}
+	if (b.map.nGrp <= 0) kind = TAC_VAR_NONE;
+	if (kind == TAC_VAR_BOSS) {
+		int has = 0;
+		for (int g = 0; g < b.map.nGrp; g++) if (b.map.grp[g].boss && b.map.grp[g].n > 0) has = 1;
+		if (!has) kind = TAC_VAR_NONE;
+	}
+	if (kind == TAC_VAR_SWEEP) {
+		for (int g = 0; g < b.map.nGrp; g++) b.map.grp[g].boss = 0;
+	} else if (kind == TAC_VAR_REMNANT) {
+		int kept = 0;
+		for (int g = 0; g < b.map.nGrp; g++) {
+			MapGroup& grp = b.map.grp[g];
+			if (grp.n <= 0) continue;
+			if (grp.boss) {
+				grp.n = grp.n > 4 ? 2 : 1;
+				kept++;
+				continue;
+			}
+			if (((seed + (unsigned)g * 17u) % 3u) != 0u) { grp.n = 0; continue; }
+			grp.n = 1;
+			kept++;
+		}
+		if (kept <= 0 && b.map.nGrp > 0) b.map.grp[0].n = 1;
+	} else if (kind == TAC_VAR_BOSS) {
+		for (int g = 0; g < b.map.nGrp; g++) {
+			MapGroup& grp = b.map.grp[g];
+			grp.n = (grp.boss && grp.n > 0) ? 1 : 0;
+		}
+	} else if (kind == TAC_VAR_TWIN) {
+		int bosses = 0, best = -1, bestN = 0;
+		for (int g = 0; g < b.map.nGrp; g++) {
+			MapGroup& grp = b.map.grp[g];
+			if (grp.boss && grp.n > 0) bosses++;
+			else if (grp.n > bestN) { bestN = grp.n; best = g; }
+		}
+		if (bosses >= 1 && best >= 0) b.map.grp[best].boss = 1;
+		else kind = TAC_VAR_NONE;
+	}
+	if (kind == TAC_VAR_MIST) b.weather = TacPackSky(WX_FOG, TacHour(b.weather));
+	else if (kind == TAC_VAR_RAID) b.weather = TacPackSky(TacWx(b.weather), HR_NIGHT);
+	if (kind == TAC_VAR_BLESS) {
+		for (int i = 0; i < n; i++) {
+			b.u[i].buffDef = 4;
+			b.u[i].buffAgi = 3;
+		}
+	}
+	if (kind == TAC_VAR_VAULT) {
+		int added = 0;
+		for (int z = 2; z < MAPN - 2 && added < 4; z++) for (int x = 2; x < MAPN - 2 && added < 4; x++) {
+			Cell& c = b.map.At(x, z);
+			if (c.gimm || c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM) continue;
+			if (((unsigned)(x * 13 + z * 7) + seed) % 37u) continue;
+			int closeBy = 0;
+			for (int p = 0; p < nParty && p < MAX_PARTY; p++)
+				if (Dist(x, z, b.map.pStartX[p], b.map.pStartZ[p]) < 6) closeBy = 1;
+			if (closeBy) continue;
+			c.gimm = GM_CHEST;
+			c.gparam = (BYTE)((x + z) % 3);
+			c.prop = PK_CRATE;
+			added++;
+		}
+	}
+	b.sweep = kind;
 	int baseLv = StageEnemyLevel(stage);
 	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
 		const MapGroup& grp = b.map.grp[g];
@@ -5521,7 +5639,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			int use = k == 0 ? mon : PickMonster(stage, r);
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
 			u.face = faceToE + 3.14159f;
-			u.ct = r.Range(0, 280) + UnitStat(u, S_AGI) * 6;
+			u.ct = r.Range(0, 240) + UnitStat(u, S_AGI) * 6;
 			u.hpShow = (float)u.hp;
 			u.grp = g;
 			u.alert = 0;
@@ -5542,6 +5660,27 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.nUnits = n;
 	b.RebuildOcc();
 	RescueStuckFeet(b);
+	if (b.sweep == TAC_VAR_SCAR) {
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || u.hp <= 1) continue;
+			u.hp = max(1, u.hp / 2);
+			u.hpShow = (float)u.hp;
+		}
+	}
+	if (b.sweep == TAC_VAR_AMBUSH || b.sweep == TAC_VAR_RAID) {
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || u.team != TEAM_ENEMY) continue;
+			if (b.sweep == TAC_VAR_AMBUSH) { u.alert = 1; continue; }
+			int closeBy = 0;
+			for (int p = 0; p < b.nUnits; p++) {
+				if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
+				if (Dist(u.x, u.z, b.u[p].x, b.u[p].z) <= 22) closeBy = 1;
+			}
+			if (closeBy) u.alert = 1;
+		}
+	}
 	WakeNearPlayers(b, 16, 1);
 	b.stampede = 0;
 	b.stampedeLeft = 0;
@@ -5549,7 +5688,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.stampedeShow = 0;
 	int foes = b.AliveCount(TEAM_ENEMY);
 	// 以前は 8 回に 1 で、波が 1 か 2。続くと重いので 16 回に 1、波は 1。
-	if (foes >= 8 && (seed % 16u) == 3u) {
+	if (b.sweep == TAC_VAR_NONE && foes >= 8 && (seed % 16u) == 3u) {
 		int line = foes / 4;
 		if (line < 2) line = 2;
 		if (line < foes) {
@@ -5709,11 +5848,34 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 	return 0;
 }
 
+void JoinTurnClock(Battle& b, int ui)
+{
+	if (ui < 0 || ui >= b.nUnits) return;
+	Unit& u = b.u[ui];
+	if (!u.alive || u.alert != 1) return;
+	int top = 0, n = 0;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (i == ui || !b.u[i].alive || b.u[i].alert != 1) continue;
+		if (b.u[i].ct > top) top = b.u[i].ct;
+		n++;
+	}
+	if (n <= 0) return;
+	int spd = 10 + UnitStat(u, S_AGI);
+	int goal = top - spd * 8;
+	if (goal < 0) goal = 0;
+	if (goal > 640) goal = 640;
+	if (u.ct < goal) u.ct = goal;
+}
+
 void WakeGroup(Battle& b, int grp)
 {
 	if (grp < 0) return;
-	for (int i = 0; i < b.nUnits; i++)
-		if (b.u[i].alive && b.u[i].grp == grp) b.u[i].alert = 1;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!b.u[i].alive || b.u[i].grp != grp) continue;
+		int wake = b.u[i].alert != 1;
+		b.u[i].alert = 1;
+		if (wake) JoinTurnClock(b, i);
+	}
 }
 
 static void MarkGroup(Battle& b, int grp, int immediate, int& newly)

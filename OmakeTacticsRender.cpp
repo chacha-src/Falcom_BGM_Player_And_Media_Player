@@ -83,6 +83,8 @@ Renderer::Renderer()
 	for (int i = 0; i < 3; i++) { m_texMiniL[i] = NULL; m_srvMiniL[i] = NULL; }
 	m_waterColor = RGBA8(60, 130, 190);
 	m_theme = 0;
+	m_wx = 0;
+	m_hour = 0;
 	m_puffN = 0;
 	m_monN = 0; m_monBytes = NULL; m_monBytesN = 0;
 	m_keepModels = m_keepRigs = m_keepCreatures = 0;
@@ -2767,23 +2769,22 @@ void Renderer::UpdateFaceSynth(CreatureSkin& src, int face)
 	struct GpuFaceIn { float d[4], n[4]; };
 	static_assert(sizeof(GpuFaceIn) == 32, "GpuFaceIn");
 	const int n = src.faceN;
-	if (face < 1 || face > 5 || n <= 0) return;
+	if (face < 0 || face > 5 || n <= 0) return;
 	static Buf<GpuFaceIn> rec;
 	rec.resize(n);
 	if (!rec.data() || rec.size() < n) return;
 	memset(rec.data(), 0, sizeof(GpuFaceIn) * (size_t)n);
 	const BOOL fem = src.faceSet == 1;
-	DWORD iris;
-	if (fem) {
-		static const DWORD c[5] = { RGBA8(51, 31, 20), RGBA8(92, 112, 140), RGBA8(140, 96, 48), RGBA8(56, 140, 78), RGBA8(176, 100, 28) };
-		iris = c[face - 1];
-	} else {
-		static const DWORD c[5] = { RGBA8(40, 24, 16), RGBA8(86, 107, 133), RGBA8(56, 128, 72), RGBA8(92, 56, 26), RGBA8(158, 102, 30) };
-		iris = c[face - 1];
+	static const DWORD irisF[5] = { RGBA8(51, 31, 20), RGBA8(92, 112, 140), RGBA8(140, 96, 48), RGBA8(56, 140, 78), RGBA8(176, 100, 28) };
+	static const DWORD irisM[5] = { RGBA8(40, 24, 16), RGBA8(86, 107, 133), RGBA8(56, 128, 72), RGBA8(92, 56, 26), RGBA8(158, 102, 30) };
+	int fi = face >= 1 && face <= 5 ? face - 1 : 0;
+	DWORD iris = fem ? irisF[fi] : irisM[fi];
+	// 0 は形を変えず唇だけ。1 以降は 0 丸い大眼 1 細い眼 2 やわらか 3 尖った耳 4 大きい眼と広い口
+	int kind = -1;
+	if (face >= 1 && face <= 5) {
+		kind = face - 1;
+		if (!fem) { static const int mk[5] = { 1, 2, 3, 0, 4 }; kind = mk[kind]; }
 	}
-	// 0 丸い大眼 1 細い眼 2 やわらか 3 尖った耳 4 大きい眼と広い口
-	int kind = face - 1;
-	if (!fem) { static const int mk[5] = { 1, 2, 3, 0, 4 }; kind = mk[face - 1]; }
 	const int headJ = (src.model >= 0 && src.model < (int)models.size()) ? models[src.model].headJ : -1;
 	const float* EL = src.faceEye[0];
 	const float* ER = src.faceEye[1];
@@ -2866,7 +2867,7 @@ void Renderer::UpdateFaceSynth(CreatureSkin& src, int face)
 			float t = 1.f - fabsf(y - mid) / ((nose[1] - chin[1]) * 0.5f + 0.001f);
 			if (t > 0 && ax > 0.004f) ox += (x >= cx ? 0.008f : -0.008f) * t;
 		}
-		if (fem && !paint && lum > 0.22f) {
+		if (!paint && lum > 0.22f) {
 			const float mouthY = nose[1] * 0.40f + chin[1] * 0.60f;
 			const float dy = y - mouthY, lipH = 0.011f, lipX = kind == 4 ? half * 0.34f : half * 0.30f;
 			if (ax < lipX && z < nose[2] + 0.016f && z > chin[2] - 0.012f && dy > -lipH && dy < lipH * 0.75f) {
@@ -2876,7 +2877,9 @@ void Renderer::UpdateFaceSynth(CreatureSkin& src, int face)
 					const float a = 0.52f * lw;
 					const float sr = (b.c & 255) / 255.f, sg = ((b.c >> 8) & 255) / 255.f, sbv = ((b.c >> 16) & 255) / 255.f;
 					auto q8 = [](float v) { int i = (int)(v * 255.f + .5f); return i < 0 ? 0 : (i > 255 ? 255 : i); };
-					eyeCol = RGBA8(q8(sr * (1.f - a) + 0.62f * a), q8(sg * (1.f - a) + 0.28f * a), q8(sbv * (1.f - a) + 0.34f * a));
+					float lr = fem ? 0.62f : 0.55f, lg = fem ? 0.28f : 0.30f, lb = fem ? 0.34f : 0.32f;
+					float amt = fem ? a : a * 0.72f;
+					eyeCol = RGBA8(q8(sr * (1.f - amt) + lr * amt), q8(sg * (1.f - amt) + lg * amt), q8(sbv * (1.f - amt) + lb * amt));
 					paint = 1;
 				}
 			}
@@ -2916,7 +2919,7 @@ void Renderer::UpdateFaceSynth(CreatureSkin& src, int face)
 void Renderer::UpdateFaceGpu(CreatureSkin& src, int face)
 {
 	if (src.faceGot == face && src.faceSRV) return;
-	if (src.faceN <= 0 || src.faceSet < 0 || src.faceSet > 1 || face <= 0) return;
+	if (src.faceN <= 0 || src.faceSet < 0 || src.faceSet > 1 || face < 0) return;
 	if (src.faceSynth) { UpdateFaceSynth(src, face); return; }
 	const FaceSet& fs = m_faces[src.faceSet];
 	if (face >= fs.nFace || fs.nv <= 0) return;
@@ -2970,7 +2973,8 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 {
 	if (!m_csSkin || !m_cbSkinBone || !m_cbSkinParm || !m_faceDummySRV || !base.ib) return FALSE;
 	if (!EnsureSkinGpu(src, jig)) return FALSE;
-	const BOOL faceOn = dp.face > 0 && src.faceSet >= 0 && src.faceSet <= 1 && dp.face < m_faces[src.faceSet].nFace && src.faceN > 0;
+	const BOOL facePack = dp.face > 0 && src.faceSet >= 0 && src.faceSet <= 1 && dp.face < m_faces[src.faceSet].nFace;
+	const BOOL faceOn = src.faceN > 0 && src.faceSet >= 0 && src.faceSet <= 1 && (src.faceSynth ? dp.face >= 0 : facePack);
 	if (faceOn) UpdateFaceGpu(src, dp.face);
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
@@ -3021,6 +3025,19 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		prm.jig[0] = src.bustLag[0]; prm.jig[1] = src.bustLag[1]; prm.jig[2] = src.bustLag[2];
 	}
 	prm.jig[3] = (float)dp.skinTone;
+	if (dp.blink > 0.001f && src.faceN > 0) {
+		float ex = src.faceEye[0][0], ey = src.faceEye[0][1], ez = src.faceEye[0][2];
+		float rx = src.faceEye[1][0], ry = src.faceEye[1][1], rz = src.faceEye[1][2];
+		float el = ex * ex + ey * ey + ez * ez;
+		float er = rx * rx + ry * ry + rz * rz;
+		if (el > 1e-4f && er > 1e-4f) {
+			float rad = src.faceHalf > 0.02f ? src.faceHalf * 0.28f : 0.016f;
+			if (rad < 0.012f) rad = 0.012f;
+			if (rad > 0.028f) rad = 0.028f;
+			prm.nip0[0] = ex; prm.nip0[1] = ey; prm.nip0[2] = ez; prm.nip0[3] = dp.blink;
+			prm.nip1[0] = rx; prm.nip1[1] = ry; prm.nip1[2] = rz; prm.nip1[3] = rad;
+		}
+	}
 	prm.bust[0] = jig ? 1.f : amt;
 	prm.bust[1] = jig ? Clampf(amt / 7.f, 0.f, 1.f) : 0.f;
 	prm.bust[2] = dp.clothHue;
@@ -5590,6 +5607,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			}
 		}
 		const BOOL graft = own && !mhFace && nAdd > 30 && nvA + nAdd <= 64000;
+		int faceBase = 0;
 		if (graft) {
 			mhHead.fill(nb, 0);
 			for (size_t k = 0; k < nb && k < mhHead.size(); k++) {
@@ -5630,6 +5648,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					if (!sk.cloth[k] && (k >= mhHead.size() || !mhHead[k])) sk.bind[k].c = skinC;
 			}
 			const int base = (int)sk.bind.size();
+			faceBase = base;
 			sk.bind.resize(base + nAdd);
 			sk.cloth.resize(base + nAdd);
 			sk.meshHair.fill(base + nAdd, 0);
@@ -6684,6 +6703,8 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		}
 		if (TacAvaBad()) { g_avaNeedReset = 1; return holdBare(); }
 		if (idx.size() < 3 || sk.bind.size() > 65535) return FALSE;
+		// 頭を載せてから骨の倍率で頂点が動く。目印を先に取ると、唇も瞬きも空を撫でる。
+		if (graft) BindFaceSynth(sk, faceBase, nAdd);
 		if (!graft) for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
 			sk.faceSet = hs.faceSet;
 			sk.faceStart = 0;
@@ -8031,6 +8052,8 @@ void Renderer::BeginFrame()
 	m_fcb.q[1] = tess;
 	m_fcb.q[2] = disp;
 	m_fcb.q[3] = dof;
+	m_fcb.sight[0] = m_fcb.sight[1] = m_fcb.sight[2] = m_fcb.sight[3] = 0;
+	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
 	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
 	if (m_cbRipple) {
@@ -8081,6 +8104,23 @@ void Renderer::SetFog(float start, float end, float hf, DWORD c)
 {
 	m_fcb.fog[0] = start; m_fcb.fog[1] = end; m_fcb.fog[2] = hf;
 	m_fcb.fogColor[0] = (c & 255) / 255.f; m_fcb.fogColor[1] = ((c >> 8) & 255) / 255.f; m_fcb.fogColor[2] = ((c >> 16) & 255) / 255.f; m_fcb.fogColor[3] = (float)m_theme;
+}
+
+void Renderer::SetSight(const float* xz, int n, float radius)
+{
+	if (n < 0) n = 0;
+	if (n > 16) n = 16;
+	m_fcb.sight[0] = radius;
+	m_fcb.sight[1] = 0;
+	m_fcb.sight[2] = (float)n;
+	m_fcb.sight[3] = (radius > 0.5f && n > 0 && xz) ? 1.f : 0.f;
+	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
+	if (!xz || m_fcb.sight[3] < 0.5f) return;
+	for (int i = 0; i < n; i++) {
+		m_fcb.ally[i][0] = xz[i * 2];
+		m_fcb.ally[i][1] = xz[i * 2 + 1];
+		m_fcb.ally[i][2] = 1.f;
+	}
 }
 
 void Renderer::SetAmbient(DWORD sky, DWORD gnd, float strength, float hard)
@@ -9413,6 +9453,8 @@ BOOL Renderer::ApplyPost()
 	ProjectSun(m_vp, m_eye, m_fcb.light, su, sv, svis);
 	DrawParams gr;
 	gr.mode = 0.62f; gr.emissive = su; gr.hue = sv; gr.rim = 1.f; gr.sway = svis;
+	gr.dissolve = (float)m_wx;
+	gr.flash = (float)m_hour;
 	ID3D11PixelShader* grade = (m_quality == 4 && m_psGradeTiny) ? m_psGradeTiny : m_psGrade;
 	fs(grade, src, m_blASrv, m_bbRtv, m_w, m_h, gr, 0);
 	m_ctx->PSSetShaderResources(0, 2, unb);

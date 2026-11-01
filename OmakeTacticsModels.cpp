@@ -1183,6 +1183,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	}
 	a.hue = OutfitHue(CharOutfit(c));
 	a.face = CharFace(c);
+	a.blinkSeed = HumanBlinkSeed(CharModel(c), a.face, c.gender, CharBust(c));
 	a.avatar = CharAvatar(c);
 	if (a.proc != 3 || a.avatar > r.AvatarCount(a.female ? 1 : 0)) a.avatar = 0;
 	a.bust = a.female ? CharBust(c) : 2;
@@ -1245,7 +1246,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0);
 		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1);
 	}
-	if (c.cls == C_SKYKNIGHT || CharHasPas(c, PAS_FLY)) a.wings = 1;
+	if (cd.moveType == MV_FLY || CharHasPas(c, PAS_FLY) || c.cls == C_SKYKNIGHT) a.wings = 1;
 	if (c.cls == C_DRAGONLORD) a.wings = 2;
 	if (cd.tier >= 3) a.scale *= 1.06f;
 	const Model& m = r.models[a.model];
@@ -1485,6 +1486,34 @@ void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int
 		a.t = ActorClipLen(a, lib, r, clip) * ActorWindup(a, r, clip);
 		a.animSpeed = 0.f;
 	}
+}
+
+float HumanBlinkSeed(int model, int face, int gender, int bust)
+{
+	return (float)(model * 13 + face * 5 + gender * 29 + bust * 3 + 1) * 0.0137f;
+}
+
+float HumanBlink(float time, float seed)
+{
+	if (seed <= 0.f) return 0.f;
+	float cycle = 26.f;
+	float t = fmodf(time + seed * 9.4f, cycle);
+	if (t < 0.f) t += cycle;
+	unsigned s = (unsigned)(seed * 4096.f + 19.f);
+	if (!s) s = 1u;
+	float cursor = 0.8f + (s % 180) * 0.005f;
+	for (int i = 0; i < 6; i++) {
+		s = s * 1664525u + 1013904223u;
+		float gap = 2.6f + (s % 1000) * (4.6f / 1000.f);
+		cursor += gap;
+		if (cursor >= cycle) break;
+		float dt = t - cursor;
+		if (dt < 0.f || dt > 0.26f) continue;
+		if (dt < 0.07f) return dt / 0.07f;
+		if (dt < 0.13f) return 1.f;
+		return 1.f - (dt - 0.13f) / 0.13f;
+	}
+	return 0.f;
 }
 
 void ActorUpdate(Actor& a, float dt)
@@ -2150,6 +2179,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			d.hue = 0;
 			d.clothHue = a.hue;
 			d.face = a.face;
+			d.blink = HumanBlink(time, a.blinkSeed);
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 		}

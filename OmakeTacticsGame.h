@@ -115,7 +115,7 @@ private:
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
-	BOOL RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0);
+	BOOL RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0, BOOL live = FALSE);
 	void InvalidatePortraits();
 	void DrawPortrait(int slot, float x, float y, float s, DWORD frame);
 	int RosterPortrait(int roster) const;
@@ -307,6 +307,7 @@ private:
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void UpdateParticles(float dt);
+	void WeatherTread(const Unit& u, int x, int z);
 	void Shake(float s) { m_shake = max(m_shake, s); }
 
 	// 結果
@@ -394,6 +395,10 @@ private:
 	V3 m_camPan;
 	float m_shake;
 	float m_sceneAcc;
+	float m_wxAcc;
+	float m_wxMeshWait;
+	int m_wxMesh;
+	unsigned char m_cover[MAPN * MAPN];
 	V3 m_eye;
 
 	// 共通演出

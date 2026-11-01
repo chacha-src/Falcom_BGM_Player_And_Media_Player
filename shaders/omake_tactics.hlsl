@@ -13,6 +13,8 @@ cbuffer Frame : register(b0)
 	float4 SkyAmb;   // rgb=空の環境光 w=強さ
 	float4 GndAmb;   // rgb=地面の環境光 w=トゥーン段階の硬さ
 	float4 Q;        // x=段(0軽 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破) y=テッセ係数 z=変位 w=被写界
+	float4 Sight;    // x=明瞭な半径 y=そこから消える幅 z=人数 w=有効
+	float4 Ally[16]; // xy=味方のワールドxz z=有効
 };
 cbuffer Obj : register(b1)
 {
@@ -353,12 +355,30 @@ float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, 
 	return c;
 }
 
+float SightAmt(float3 w)
+{
+	if (Sight.w < 0.5) return 0;
+	float best = 1e4;
+	[unroll] for (int i = 0; i < 16; i++) {
+		float2 d = abs(w.xz - Ally[i].xy);
+		float man = d.x + d.y;
+		best = min(best, lerp(1e4, man, step(0.5, Ally[i].z)));
+	}
+	float r1 = max(Sight.x, 1);
+	float r0 = r1 * 0.72;
+	return smoothstep(r0, r1, best);
+}
+
 float3 FogAt(float3 col, float3 w)
 {
 	float d = length(Eye.xyz - w);
 	float fg = saturate((d - Fog.x) / max(0.01, Fog.y - Fog.x));
 	fg = saturate(fg + saturate(-w.y * Fog.z));
-	return lerp(col, FogColor.rgb, fg * fg * 0.9);
+	col = lerp(col, FogColor.rgb, fg * fg * 0.9);
+	float sh = SightAmt(w);
+	float3 dim = lerp(FogColor.rgb, float3(0.05, 0.06, 0.09), 0.82);
+	col = lerp(col, dim, sh * 0.84);
+	return col;
 }
 
 struct GOut { float4 c : SV_Target0; float z : SV_Target1; };
@@ -596,9 +616,9 @@ GOut PSWater(PSIn i)
 		col = lerp(col, float3(0.9, 0.97, 1), rush * 0.45);
 		see = 0.26;
 	} else if (thw > 7.5 && thw < 8.5) {
-		col = lerp(col, float3(0.04, 0.22, 0.32), 0.5);
-		col += float3(0.45, 0.85, 1) * pow(caus, 2) * 0.4;
-		see = 0.58;
+		col = lerp(col, float3(0.04, 0.22, 0.32), 0.35);
+		col += float3(0.45, 0.85, 1) * pow(caus, 2) * 0.12;
+		see = 0.42;
 	} else if (thw > 6.5) { col = lerp(col, SkyAmb.rgb, fr * 0.22); see = 0.38; }
 	if (rush > 0.28) {
 		float streak = pow(saturate(sin(dot(i.w.xz, flow) * 10.5 - t * spd * 7.2) * 0.5 + 0.5), 2.4);
@@ -759,10 +779,10 @@ GOut GroundPS(PSIn i, float theme)
 		float2 c1 = i.w.xz * 0.55 + Eye.w * float2(0.08, 0.03);
 		float2 c2 = i.w.xz * 0.9 - Eye.w * float2(0.04, 0.07);
 		float caus = saturate(sin(c1.x * 8.2) * sin(c1.y * 7.1) + sin(c2.x * 5.6) * sin(c2.y * 6.4));
-		glow += float3(0.35, 0.85, 1) * pow(caus, 2) * 0.35 * saturate(n.y);
+		glow += float3(0.35, 0.85, 1) * pow(caus, 2) * 0.12 * saturate(n.y);
 		float ray = pow(saturate(0.5 + 0.5 * sin(i.w.x * 0.35 + i.w.z * 0.12 + Eye.w * 0.35)), 5);
 		ray *= pow(saturate(0.5 + 0.5 * sin(i.w.z * 0.22 - Eye.w * 0.18)), 3);
-		glow += float3(0.45, 0.85, 1) * ray * saturate(n.y) * 0.42;
+		glow += float3(0.45, 0.85, 1) * ray * saturate(n.y) * 0.08;
 	} else {
 		rough = 0.42;
 		f0 = float3(0.06, 0.065, 0.07);
@@ -1023,6 +1043,11 @@ GOut PSSKY(QOut i)
 	return EmitZ(float4(c, 1), 1);
 }
 
+float3 WeatherSample(float2 uv, float2 ofs, float3 col)
+{
+	return Tex.Sample(SL, saturate(uv + ofs)).rgb;
+}
+
 float Mote(float2 uv, float t, float2 vel, float density, float cutoff, float rad)
 {
 	float2 g = uv * density + t * vel;
@@ -1030,6 +1055,52 @@ float Mote(float2 uv, float t, float2 vel, float density, float cutoff, float ra
 	float2 f = frac(g) - 0.5;
 	float2 j = hash22(cell) - 0.5;
 	return smoothstep(rad, 0, length(f - j * 0.55)) * step(cutoff, hash21(cell));
+}
+
+void HourFx(inout float3 col, float2 uv, float hour, float t)
+{
+	if (hour < 0.5) return;
+	if (hour < 1.5) col = lerp(col, col * float3(1.06, 0.9, 0.74), 0.16);
+	else if (hour < 2.5) col = lerp(col, col * float3(1.03, 0.98, 0.9), 0.08);
+	else if (hour < 3.5) col = lerp(col, col * float3(1.08, 0.8, 0.58), 0.18);
+	else if (hour < 4.5) col = lerp(col, col * float3(0.92, 0.95, 1.04), 0.1);
+	else if (hour < 5.5) col = lerp(col, col * float3(0.9, 0.93, 1.03), 0.12);
+	else if (hour < 6.5) col = lerp(col, col * float3(0.9, 0.93, 1.02), 0.1);
+	else if (hour < 7.5) {
+		col = lerp(col, col * float3(0.86, 0.9, 1.08), 0.18);
+	} else if (hour < 8.5) {
+		col = lerp(col, col * float3(0.82, 0.88, 1.06), 0.16);
+		float star = step(0.996, hash21(floor(uv * float2(160, 90)) + floor(t * 0.2)));
+		col += star * float3(0.85, 0.9, 1) * saturate(0.4 - uv.y) * 0.8;
+	} else col = lerp(col, col * float3(0.84, 0.9, 1.06), 0.18);
+}
+
+void WeatherFx(inout float3 col, float2 uv, float wx, float t)
+{
+	// 粒そのものはワールド側。ここは色味と、レンズに付いた水滴と、稲妻だけ。
+	if (wx < 0.5) return;
+	float wet = (wx > 0.5 && wx < 1.5) ? 1.0 : ((wx > 4.5 && wx < 5.5) ? 1.0 : 0.0);
+	if (wet > 0.0) {
+		col = lerp(col, col * float3(0.9, 0.94, 1.0), 0.08);
+		float2 grid = float2(14, 8);
+		float2 cell = floor(uv * grid);
+		float2 f = frac(uv * grid);
+		float h = hash21(cell + 3.1);
+		float2 ctr = 0.5 + (hash22(cell) - 0.5) * 0.45;
+		float d = length(f - ctr);
+		float drop = smoothstep(0.16, 0.04, d) * step(0.78, h);
+		float2 nrm = (f - ctr) / max(d, 1e-3);
+		float3 bent = WeatherSample(uv, nrm * drop * 0.012, col);
+		col = lerp(col, bent, drop * 0.45);
+		if (wx > 4.5 && frac(t * 0.17) > 0.97) col += float3(0.45, 0.5, 0.62) * 0.35;
+	} else if (wx < 2.5) col = lerp(col, col * float3(0.94, 0.96, 1), 0.06);
+	else if (wx < 3.5) col = lerp(col, col * float3(0.9, 0.78, 0.66), 0.06);
+	else if (wx < 4.5) {
+		float fog = smoothstep(0.42, 0.0, uv.y) * (0.25 + 0.1 * sin(uv.x * 8.0 + t * 0.2));
+		col = lerp(col, float3(0.78, 0.82, 0.86), saturate(fog) * 0.12);
+	} else if (wx < 6.5) col = lerp(col, col * float3(0.98, 0.9, 0.72), 0.06);
+	else if (wx < 7.5) col = lerp(col, col * float3(0.94, 0.96, 1), 0.05);
+	else if (wx > 8.5) col = lerp(col, col * float3(1.03, 0.98, 0.9), 0.05);
 }
 
 // HUD の前。明るいところを抜き、ぼかして、太陽方向へ筋を足す。
@@ -1160,6 +1231,8 @@ float4 PSGrade(QOut i) : SV_Target
 		}
 		col += (col - nb * 0.125) * (Q.x > 5.5 ? 0.22 : 0.14);
 	}
+	WeatherFx(col, i.uv, Extra.x, gt);
+	HourFx(col, i.uv, Extra.y, gt);
 	return float4(saturate(col), 1);
 }
 
@@ -1170,6 +1243,8 @@ float4 PSGradeTiny(QOut i) : SV_Target
 	scene = lerp(y.xxx, scene, 1.04);
 	float2 q = (i.uv - 0.5) * float2(Screen.x * Screen.w, 1);
 	scene *= 1. - saturate(dot(q, q) * 0.35) * 0.08;
+	WeatherFx(scene, i.uv, Extra.x, Eye.w);
+	HourFx(scene, i.uv, Extra.y, Eye.w);
 	return float4(saturate(scene), 1);
 }
 

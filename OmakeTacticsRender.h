@@ -131,7 +131,8 @@ struct DrawParams {
 	float bodyScale;     // 身長。CS がスキン後の位置へ掛ける
 	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
 	int skinTone;        // 0無し 1白人 2アジア人 3黒人 4ラテン系 5中東系 6南アジア系 7ポリネシア系。服と髪は変えない
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0) {}
+	float blink;         // 0開 1閉。人間のまぶた
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -154,6 +155,8 @@ struct Particle {
 	float grav;
 	float stretch;      // 速度方向に伸ばす
 	float drag;
+	int wxHit;          // 0=床と判定しない。1雨 2豪雨 3雪 4灰 5雹 6砂 7花
+	int nHit;
 };
 
 class Renderer {
@@ -345,7 +348,9 @@ public:
 	void SetCamera(const M4& view, const M4& proj, V3 eye, float time);
 	void SetLight(V3 dirToLight, V3 focus, float radius);
 	void SetFog(float start, float end, float heightFog, DWORD color);
+	void SetSight(const float* xz, int n, float radius);
 	void SetTheme(int theme) { m_theme = theme; }
+	void SetSky(int wx, int hour) { m_wx = wx; m_hour = hour; }
 	void SetAmbient(DWORD sky, DWORD ground, float strength, float hard);
 	void BeginShadowPass();
 	void BeginMainPass();
@@ -651,6 +656,8 @@ private:
 	Fix<PropBatch, 16> m_props;
 	DWORD m_waterColor;
 	int m_theme;
+	int m_wx;
+	int m_hour;
 	SceneryPuff m_puff[16];
 	int m_puffN;
 
@@ -658,6 +665,8 @@ private:
 	struct FrameCB {
 		M4 vp, lvp;
 		float eye[4], light[4], fog[4], fogColor[4], screen[4], skyAmb[4], gndAmb[4], q[4];
+		float sight[4];
+		float ally[16][4];
 	} m_fcb;
 	M4 m_lightVP;
 

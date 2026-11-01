@@ -68,6 +68,7 @@ struct Actor {
 	float animSpeed;
 	float idleOfs;      // 待機の開始位置（秒）。全員が同じ拍で動かないようにする
 	float idleSeed;     // 次の待機の種類を決める
+	float blinkSeed;    // 瞬きの間隔。0 は瞬かない
 	float recoil;       // 被ダメの仰け反り 0..1
 	float recoilX, recoilZ;
 	int skillPose;      // 再生中のスキル。人体はスキル別の型を引く。0 未満は通常攻撃
@@ -87,6 +88,8 @@ void ActorPlay(Actor& a, int clip, int loop, float blendTime = .15f);
 // giveWings は人型だけ。飛行メッシュに翼を足すと体が二重になる。restart は同じループを頭からやり直す。
 void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart = FALSE);
 void ActorUpdate(Actor& a, float dt);
+float HumanBlinkSeed(int model, int face, int gender, int bust);
+float HumanBlink(float time, float seed);
 float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int clip);
 // 構えで止める割合。人体のスキル別の型はその型の構えの時刻。
 float ActorWindup(const Actor& a, const Renderer& r, int clip);

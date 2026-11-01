@@ -3081,7 +3081,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1614
+ FILEVERSION 0,9,1,1615
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3099,8 +3099,8 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.01 v1614"
-            VALUE "FileVersion", "0.9.1.1614"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.01 v1615"
+            VALUE "FileVersion", "0.9.1.1615"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.10.31"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
