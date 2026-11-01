@@ -187,11 +187,11 @@ int ThemeNameTx(int th);
 enum { MAPN = 64, MAXH = 12 };
 const float kHStep = 0.4f;
 // 経路の1点に「橋の上」を載せる。マス番号は 0..4095 なので 8192 とは重ならない。
-enum { LAY_N = 3, TAC_CELL_MASK = 8191 };
-inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 3) << 13); }
+enum { LAY_N = 5, TAC_CELL_MASK = 8191 };
+inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 7) << 13); }
 inline int PackX(int c) { int i = c & TAC_CELL_MASK; return i % MAPN; }
 inline int PackZ(int c) { int i = c & TAC_CELL_MASK; return i / MAPN; }
-inline int PackDeck(int c) { return (c >> 13) & 3; }
+inline int PackDeck(int c) { return (c >> 13) & 7; }
 
 enum PropKind {
 	PK_NONE, PK_TREE, PK_TREES, PK_PINE, PK_DEAD, PK_ROCK, PK_MOUNT, PK_LILY, PK_PILLAR,
@@ -236,9 +236,11 @@ struct Cell {
 	BYTE var;    // 小物のバリエーション／回転
 	BYTE gimm;   // Gimmick
 	BYTE gparam; // ワープ組番号。橋でギミックなしのとき、下を通れる床の高さ（0=床なし）
-	BYTE nLay;   // 0 か 1=このマスは下だけ。2=中層あり。3=上まで
-	BYTE t1, h1; // 中層。洞窟の天井や橋の上
-	BYTE t2, h2; // 上層。天井のさらに上
+	BYTE nLay;   // 1=下だけ。最大 LAY_N（5）
+	BYTE t1, h1;
+	BYTE t2, h2;
+	BYTE t3, h3;
+	BYTE t4, h4;
 };
 
 // 橋の下の床。0 なら橋板だけ（川に架かる普通の橋）。
@@ -266,14 +268,18 @@ inline int LayerHt(const Cell& c, int L)
 	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? (int)c.gparam : (int)c.h;
 	if (L <= 0) return (int)c.h;
 	if (L == 1) return (int)c.h1;
-	return (int)c.h2;
+	if (L == 2) return (int)c.h2;
+	if (L == 3) return (int)c.h3;
+	return (int)c.h4;
 }
 inline int LayerTr(const Cell& c, int L)
 {
 	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? T_ROAD : T_BRIDGE;
 	if (L <= 0) return (int)c.t;
 	if (L == 1) return (int)c.t1;
-	return (int)c.t2;
+	if (L == 2) return (int)c.t2;
+	if (L == 3) return (int)c.t3;
+	return (int)c.t4;
 }
 
 enum { MAX_GROUPS = 200, GRP_CAP = 15 };
@@ -303,6 +309,9 @@ struct Map {
 	float StandY(int x, int z) const;    // ユニットの足元（橋は橋板）
 	float WalkY(int x, int z, int deck) const; // deck=0 で橋の下
 };
+// 見た目の高さ。kind 0 は地面（水は水底）、1 は水面・溶岩（layer が地形種）、2 は階層。
+// マス中心は歩き高さのまま、隣との差は直線ではなく曲線でつなぐ。
+float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int layer);
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
 
@@ -641,19 +650,27 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r);
 // ---------------- 経路 ----------------
 struct Reach {
 	short cost[MAPN][MAPN];   // -1=到達不可。層0
-	short from[MAPN][MAPN];   // 前セル。上位2ビットが前の層
+	int   from[MAPN][MAPN];   // PackCell。層はビット13から
 	BYTE  canStop[MAPN][MAPN];
 	short costHi[MAPN][MAPN]; // 層1
-	short fromHi[MAPN][MAPN];
+	int   fromHi[MAPN][MAPN];
 	BYTE  canStopHi[MAPN][MAPN];
 	short cost2[MAPN][MAPN];  // 層2
-	short from2[MAPN][MAPN];
+	int   from2[MAPN][MAPN];
 	BYTE  canStop2[MAPN][MAPN];
+	short cost3[MAPN][MAPN];
+	int   from3[MAPN][MAPN];
+	BYTE  canStop3[MAPN][MAPN];
+	short cost4[MAPN][MAPN];
+	int   from4[MAPN][MAPN];
+	BYTE  canStop4[MAPN][MAPN];
 };
 inline int ReachCostAt(const Reach& r, int layer, int x, int z)
 {
 	if (layer == 1) return r.costHi[z][x];
 	if (layer == 2) return r.cost2[z][x];
+	if (layer == 3) return r.cost3[z][x];
+	if (layer == 4) return r.cost4[z][x];
 	return r.cost[z][x];
 }
 inline int ReachBestCost(const Reach& r, int x, int z)
@@ -671,12 +688,16 @@ inline int ReachCanStop(const Reach& r, int x, int z)
 	if (r.cost[z][x] >= 0 && r.canStop[z][x]) return 1;
 	if (r.costHi[z][x] >= 0 && r.canStopHi[z][x]) return 1;
 	if (r.cost2[z][x] >= 0 && r.canStop2[z][x]) return 1;
+	if (r.cost3[z][x] >= 0 && r.canStop3[z][x]) return 1;
+	if (r.cost4[z][x] >= 0 && r.canStop4[z][x]) return 1;
 	return 0;
 }
 inline int ReachCanStopLayer(const Reach& r, int x, int z, int layer)
 {
 	if (layer == 1) return r.costHi[z][x] >= 0 && r.canStopHi[z][x];
 	if (layer == 2) return r.cost2[z][x] >= 0 && r.canStop2[z][x];
+	if (layer == 3) return r.cost3[z][x] >= 0 && r.canStop3[z][x];
+	if (layer == 4) return r.cost4[z][x] >= 0 && r.canStop4[z][x];
 	return r.cost[z][x] >= 0 && r.canStop[z][x];
 }
 struct Battle;

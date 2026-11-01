@@ -70,6 +70,23 @@ static mc6809__t* NamcoCpuRaw(struct mc6809* p) { return (mc6809__t*)p; }
 static uint8_t s_acSys2TwinMail = 0;
 /* arknoid2 の C000 起動応答。メンバにすると他 obj とクラスサイズがずれる。 */
 static int sArkMcuLeft = 0;
+/* blandia の POST が読み戻す窓。メンバにすると他 obj とクラスサイズがずれる。
+   700400 / 900000 / B00000 / B80000 の 5555 検査が落ちると、VBLANK が起動カウンタを毎回消す。 */
+static uint8_t sBlandiaVram[0x10000];
+static uint8_t sBlandia900[0x2000];
+static uint8_t sBlandiaB00[0x2000];
+static uint8_t sBlandiaB80[0x2000];
+static int sBlandiaVramOn = 0;
+
+static uint8_t* BlandiaExtra(unsigned addr)
+{
+	if (!sBlandiaVramOn) return 0;
+	if (addr >= 0x700000u && addr < 0x710000u) return sBlandiaVram + (addr - 0x700000u);
+	if (addr >= 0x900000u && addr < 0x902000u) return sBlandia900 + (addr - 0x900000u);
+	if (addr >= 0xB00000u && addr < 0xB02000u) return sBlandiaB00 + (addr - 0xB00000u);
+	if (addr >= 0xB80000u && addr < 0xB82000u) return sBlandiaB80 + (addr - 0xB80000u);
+	return 0;
+}
 
 CHardAc::CHardAc()
 	: board_(CEMU_AC_BOARD_UNKNOWN)
@@ -784,7 +801,8 @@ struct CEmuAcM68kPcmSpec {
 
 static const CEmuAcM68kPcmSpec kAcM68kPcmSpecs[] = {
 	/* --- Seta / Allumer の X1-010 --- */
-	{ "blandia",  1, 0xc00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
+	/* 作業 RAM は 300000。リセットが SP=310000 を置き、4000 ロングの 5555/AAAA 検査が 300000 から。200000 はスプライト側で、そこを作業にすると検査が落ちて音楽に届かない。 */
+	{ "blandia",  1, 0xc00000u, 0x4000u, 0x300000u, 0x10000u,  0 },
 	{ "daioh",    1, 0xc00000u, 0x4000u, 0x100000u, 0x10000u,  0 },
 	{ "drgnunit", 1, 0x100000u, 0x4000u, 0xf00000u, 0x10000u,  0 },
 	{ "madshark", 1, 0xd00000u, 0x4000u, 0x200000u, 0x10000u,  0 },
@@ -960,7 +978,7 @@ static void CEmuAcNmk112Bank(unsigned* t, unsigned sz, unsigned banknum, uint8_t
 
    本表は主連鎖が UNKNOWN を返したあとだけ参照するので、既に扱う基板から型を奪わない。
 
-   音源区画に CEmu 未実装コアが要る型は意図的に不在: Seta X1-010（blandia/daioh/grdians/metafox/myangel/atehate/stg/madshark）、Cave YMZ280B（ddonpach/guwange/uopoko/korokoro）、Taito F3 ES5505（asurabld）、Sega UFO/Print Club セット。どこへでもマップすると無音がノイズに代わるだけ。daikaiju は X1-010 ではなく Taito lsasquad 系 YM2203+AY（map 5）。wingforc は Kaneko Z80+YM2151（blazeon と同じポート）。
+   Seta X1-010 と Cave YMZ280B は M68K_PCM（下の表と kAcM68kPcmSpecs）。Taito F3 ES5505（asurabld）と Sega UFO/Print Club は意図的に不在。daikaiju は X1-010 ではなく Taito lsasquad 系 YM2203+AY（map 5）。wingforc は Kaneko Z80+YM2151（blazeon と同じポート）。
    ------------------------------------------------------------------------ */
 struct CEmuAcAliasEntry {
 	const char* sub;
@@ -3746,6 +3764,15 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			m68kRamAddr_ = sp->ramAddr;
 			m68kRamSize_ = sp->ramSize;
 			m68kIrqAddr_ = sp->irqAddr;
+			/* blandia だけ。korokoro も作業 RAM が 300000 だが YMZ で、この窓は要らない。 */
+			sBlandiaVramOn = (sp->kind == 1 && sp->ramAddr == 0x300000u
+				&& sp->chipAddr == 0xc00000u) ? 1 : 0;
+			if (sBlandiaVramOn) {
+				memset(sBlandiaVram, 0, sizeof(sBlandiaVram));
+				memset(sBlandia900, 0, sizeof(sBlandia900));
+				memset(sBlandiaB00, 0, sizeof(sBlandiaB00));
+				memset(sBlandiaB80, 0, sizeof(sBlandiaB80));
+			}
 			cpuHz_ = 16000000;
 			if (sp->kind == 2) {
 				opmHz_ = 16934400;
@@ -5169,6 +5196,8 @@ unsigned CHardAc::M68kPcmRead8(unsigned addr)
 	if (ms1Rom_ && addr < ms1RomSize_) return ms1Rom_[addr];
 	if (m68kRamSize_ && addr - m68kRamAddr_ < m68kRamSize_)
 		return ms1Ram_ ? ms1Ram_[addr - m68kRamAddr_] : 0xff;
+	if (uint8_t* extra = BlandiaExtra(addr))
+		return *extra;
 	return 0xff;
 }
 
@@ -5198,6 +5227,10 @@ void CHardAc::M68kPcmWrite8(unsigned addr, uint8_t v)
 	if (ms1Rom_ && addr < ms1RomSize_) return;
 	if (m68kRamSize_ && addr - m68kRamAddr_ < m68kRamSize_) {
 		if (ms1Ram_) ms1Ram_[addr - m68kRamAddr_] = v;
+		return;
+	}
+	if (uint8_t* extra = BlandiaExtra(addr)) {
+		*extra = v;
 		return;
 	}
 }
@@ -14455,6 +14488,9 @@ int CHardAc::LoadRomsAtariSys1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 
 	M6502SetBus(m6502_, this, DecoM6502BusRead, DecoM6502BusWrite);
 	M6502Reset(m6502_);
+	/* gauntlet/vindctr2 の曲進行は $1020 タイマ。初期化前は 0 のまま IRQ が来ない。 */
+	if (AcJsaPairRom(decoRom_, decoRomSize_))
+		sViTimerOn = 1;
 	return 1;
 }
 

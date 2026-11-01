@@ -333,6 +333,13 @@ void COmakeTacticsDlg::LayoutView()
 	}
 }
 
+static void TacPulseFront(HWND hwnd)
+{
+	if (!hwnd) return;
+	::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	::SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void COmakeTacticsDlg::ApplyWinMode()
 {
 	if (!m_gameOk || !GetSafeHwnd()) return;
@@ -347,7 +354,8 @@ void COmakeTacticsDlg::ApplyWinMode()
 		if (GetMonitorInfo(mon, &mi)) {
 			SetWindowPos(NULL, mi.rcMonitor.left, mi.rcMonitor.top,
 				mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-				SWP_NOZORDER | SWP_NOACTIVATE);
+				SWP_NOZORDER | SWP_SHOWWINDOW);
+			TacPulseFront(m_hWnd);
 		}
 	} else {
 		otac::SaveData& s = m_game.Save();
@@ -447,6 +455,8 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 		m_game.RefreshSurface();
 	}
 	if (nState != WA_INACTIVE && m_view.GetSafeHwnd()) m_view.SetFocus();
+	if (nState != WA_INACTIVE && !bMinimized && m_gameOk && otac::TacWinMode(m_game.Save()))
+		TacPulseFront(m_hWnd);
 	if (nState == WA_INACTIVE && m_gameOk) {
 		static const int keys[] = { VK_SHIFT, VK_CONTROL, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, 'W', 'A', 'S', 'D' };
 		for (int k : keys) m_game.OnKey(k, FALSE);

@@ -280,6 +280,106 @@ float Map::WalkY(int x, int z, int layer) const
 	return h * kHStep;
 }
 
+static float Curve01(float t)
+{
+	if (t <= 0.f) return 0.f;
+	if (t >= 1.f) return 1.f;
+	return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
+}
+
+static float VisGroundY(const Map& m, int x, int z)
+{
+	const Cell& c = m.At(x, z);
+	if (c.t == T_VOID || c.t == T_CHASM) return -3.2f;
+	float y = c.h * kHStep;
+	if (c.t == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4) {
+		float bed = y - c.gparam * kHStep;
+		if (bed < 0.15f) bed = 0.15f;
+		return bed;
+	}
+	return y;
+}
+
+static int VisGroundOk(const Map& m, int x, int z)
+{
+	if (!Map::In(x, z)) return 0;
+	int t = m.At(x, z).t;
+	return t != T_VOID && t != T_BRIDGE;
+}
+
+static float VisDeckY(const Map& m, int x, int z, int layer)
+{
+	const Cell& c = m.At(x, z);
+	int h = LayerHt(c, layer);
+	int t = LayerTr(c, layer);
+	if (t == T_CHASM) return 0.f;
+	if (t == T_WATER) return h * kHStep + 0.3f;
+	if (t == T_LAVA) return h * kHStep + 0.25f;
+	return h * kHStep;
+}
+
+static int VisOk(const Map& m, int sx, int sz, int kind, int layer)
+{
+	if (!Map::In(sx, sz)) return 0;
+	if (kind == 2) return (int)m.At(sx, sz).nLay >= layer + 1;
+	if (kind == 1) return m.At(sx, sz).t == layer;
+	return VisGroundOk(m, sx, sz);
+}
+
+static float TopStandY(const Map& m, int x, int z)
+{
+	if (!Map::In(x, z)) return -3.2f;
+	const Cell& c = m.At(x, z);
+	if (c.t == T_VOID) return -3.2f;
+	float y = VisGroundY(m, x, z);
+	int n = c.nLay;
+	if (n < 1) n = 1;
+	if (n > LAY_N) n = LAY_N;
+	for (int L = 1; L < n; L++) {
+		float d = VisDeckY(m, x, z, L);
+		if (d > y) y = d;
+	}
+	return y;
+}
+
+static float VisRaw(const Map& m, int sx, int sz, int kind, int layer)
+{
+	if (kind == 2) return VisDeckY(m, sx, sz, layer);
+	if (kind == 1) return m.StandY(sx, sz);
+	return VisGroundY(m, sx, sz);
+}
+
+float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int layer)
+{
+	if (!Map::In(cx, cz)) return 0.f;
+	float u = px - 0.5f, v = pz - 0.5f;
+	int i = (int)floorf(u), j = (int)floorf(v);
+	float fu = Curve01(u - (float)i), fv = Curve01(v - (float)j);
+	int sx[4] = { i, i + 1, i, i + 1 };
+	int sz[4] = { j, j, j + 1, j + 1 };
+	float ys[4], acc = 0.f;
+	int ok[4], hold[4], n = 0;
+	for (int k = 0; k < 4; k++) {
+		ok[k] = VisOk(m, sx[k], sz[k], kind, layer);
+		hold[k] = 0;
+		if (ok[k]) {
+			ys[k] = VisRaw(m, sx[k], sz[k], kind, layer);
+			acc += ys[k];
+			n++;
+		} else if (kind == 2 && Map::In(sx[k], sz[k]) && m.At(sx[k], sz[k]).t != T_VOID) {
+			ys[k] = TopStandY(m, sx[k], sz[k]);
+		} else hold[k] = 1;
+	}
+	if (!n) {
+		if (kind == 2) return VisDeckY(m, cx, cz, layer);
+		if (kind == 1) return m.StandY(cx, cz);
+		return VisGroundY(m, cx, cz);
+	}
+	float fill = acc / (float)n;
+	for (int k = 0; k < 4; k++) if (hold[k]) ys[k] = fill;
+	return Lerpf(Lerpf(ys[0], ys[1], fu), Lerpf(ys[2], ys[3], fu), fv);
+}
+
 // ---- 値ノイズ
 static float HashF(DWORD seed, int x, int z)
 {
@@ -639,6 +739,36 @@ static bool ShapeInside(int kind, float x, float y)
 	case 13: { // 爪。開いた側からしか入れない
 		return r2 < 1.f && r2 > 0.30f && x < 0.42f;
 	}
+	case 15: return fabsf(x) < 0.28f || fabsf(y) < 0.22f || fabsf(x - y) < 0.2f || fabsf(x + y) < 0.2f;
+	case 16: return fabsf(x) < 1.02f && fabsf(y) < 0.22f;
+	case 17: return fabsf(y) < 1.02f && fabsf(x) < 0.22f;
+	case 18: return (fabsf(x) < 0.22f && fabsf(y) < 1.02f) || (y > 0.15f && y < 0.95f && fabsf(x) < 0.85f);
+	case 19: return (fabsf(y) < 0.22f && fabsf(x) < 1.02f) || (x > 0.15f && x < 0.95f && fabsf(y) < 0.85f);
+	case 20: return fabsf(x) < 0.95f && fabsf(y - 0.35f * sinf(x * 6.f)) < 0.28f;
+	case 21: return fabsf(y) < 0.95f && fabsf(x - 0.35f * sinf(y * 6.f)) < 0.28f;
+	case 22: { float a = atan2f(y, x); return r2 < 1.f && r2 > 0.18f && sinf(a * 3.f) > -0.15f; }
+	case 23: return r2 < 1.f && (fabsf(x) > 0.28f || y > 0.f);
+	case 24: return fabsf(x) < 0.9f && fabsf(y) < 0.9f && (fabsf(x) > 0.35f || fabsf(y) > 0.35f);
+	case 25: return y < 0.2f && y > -1.02f && fabsf(x) < (y + 1.15f) * 0.85f;
+	case 26: return y > -0.2f && y < 1.02f && fabsf(x) < (1.15f - y) * 0.85f;
+	case 27: return fabsf(x + 0.35f) < 0.28f && fabsf(y) < 1.f || fabsf(x - 0.4f) < 0.28f && fabsf(y) < 0.7f;
+	case 28: return fabsf(y + 0.3f) < 0.24f && fabsf(x) < 1.f || fabsf(y - 0.4f) < 0.24f && fabsf(x) < 0.65f;
+	case 29: { float d1 = (x + 0.45f) * (x + 0.45f) + y * y; float d2 = (x - 0.45f) * (x - 0.45f) + y * y; return d1 < 0.36f || d2 < 0.36f; }
+	case 30: return r2 < 0.95f && fabsf(y) > 0.12f;
+	case 31: return r2 < 0.95f && fabsf(x) > 0.12f;
+	case 32: return fabsf(x) < 1.f && fabsf(y) < 0.18f + 0.55f * fabsf(x);
+	case 33: return fabsf(y) < 1.f && fabsf(x) < 0.18f + 0.55f * fabsf(y);
+	case 34: return (x > -0.2f && x < 1.f && fabsf(y) < 0.22f) || (y > -0.2f && y < 1.f && fabsf(x) < 0.22f);
+	case 35: return (x < 0.2f && x > -1.f && fabsf(y) < 0.22f) || (y < 0.2f && y > -1.f && fabsf(x) < 0.22f);
+	case 36: return fabsf(fmodf(x + 1.5f, 0.7f) - 0.35f) < 0.16f && fabsf(y) < 1.f;
+	case 37: return fabsf(fmodf(y + 1.5f, 0.7f) - 0.35f) < 0.16f && fabsf(x) < 1.f;
+	case 38: return r2 < 1.f && fabsf(atan2f(y, x)) < 1.15f;
+	case 39: return r2 < 1.f && fabsf(atan2f(y, x)) > 2.0f;
+	case 40: return fabsf(x) < 0.55f && fabsf(y) < 1.f || fabsf(y) < 0.28f && fabsf(x) < 1.f;
+	case 41: return y > -1.f && y < 0.15f && fabsf(x) < 0.9f || fabsf(x) < 0.22f && y < 1.f;
+	case 42: return x * x / 0.35f + y * y < 1.f || x * x + y * y / 0.35f < 1.f;
+	case 43: return fabsf(x - y) < 0.22f && fabsf(x) < 1.f || fabsf(x + y) < 0.22f && fabsf(x) < 0.7f;
+	case 44: return r2 < 1.f && (sinf(atan2f(y, x) * 4.f) > 0.f || r2 < 0.2f);
 	case 14: { // 三つの島。細い橋でつなぐ
 		auto blob = [](float px, float py, float cx, float cy, float rad) {
 			float dx = px - cx, dy = py - cy;
@@ -651,14 +781,124 @@ static bool ShapeInside(int kind, float x, float y)
 		bool bc = fabsf(x - 0.20f) < 0.13f && y < 0.02f && y > -0.32f;
 		return a || b || c || ab || bc;
 	}
-	default:
-		return r2 < 1.f;
+	default: {
+		if (kind < 45) return r2 < 1.f;
+		int id = kind - 45;
+		int fam = id % 16;
+		int var = id / 16;
+		float t = 0.18f + (var % 5) * 0.07f;
+		float n = 3.f + (float)(var % 7);
+		if (fam == 0) {
+			float rx = 0.55f + (var % 4) * 0.14f, ry = 0.35f + ((var / 4) % 4) * 0.16f;
+			return (x * x) / (rx * rx) + (y * y) / (ry * ry) < 1.f;
+		}
+		if (fam == 1) {
+			float ang = atan2f(y, x), rad = sqrtf(r2);
+			float slice = 3.14159265f / n;
+			float a = fabsf(fmodf(ang + slice, slice * 2.f) - slice);
+			return rad * cosf(a) < cosf(slice) * (0.72f + t);
+		}
+		if (fam == 2) {
+			float ang = atan2f(y, x), rad = sqrtf(r2);
+			float spike = (0.38f + t) + (0.45f + t * 0.3f) * fabsf(cosf(ang * n * 0.5f));
+			return rad < spike;
+		}
+		if (fam == 3) {
+			float inn = 0.18f + (var % 6) * 0.08f;
+			return r2 < 1.f && r2 > inn * inn;
+		}
+		if (fam == 4) {
+			float ax = fabsf(x), ay = fabsf(y);
+			return ax < 0.95f && ay < 0.42f + t || ay < 0.95f && ax < 0.42f + t;
+		}
+		if (fam == 5) return fabsf(x) + fabsf(y) < 0.95f + t * 0.4f;
+		if (fam == 6) {
+			float a = (x + 0.35f) * (x + 0.35f) + (y - 0.15f) * (y - 0.15f);
+			float b = (x - 0.4f) * (x - 0.4f) + (y + 0.2f) * (y + 0.2f);
+			float c = x * x + (y - 0.55f) * (y - 0.55f);
+			return a < 0.28f + t || b < 0.26f + t * 0.5f || c < 0.14f || (fabsf(y) < 0.16f && fabsf(x) < 0.7f);
+		}
+		if (fam == 7) {
+			float ang = atan2f(y, x);
+			float rad = sqrtf(r2);
+			float band = fabsf(rad - (0.35f + t + 0.08f * ang));
+			return fabsf(ang) < 2.4f && band < 0.16f + (var % 3) * 0.04f && rad < 1.05f;
+		}
+		if (fam == 8) {
+			float w = 0.55f + t;
+			return fabsf(x) < w && fabsf(y - 0.22f * sinf(x * (4.f + n))) < 0.22f + t * 0.3f;
+		}
+		if (fam == 9) {
+			float ang = atan2f(y, x);
+			float rad = sqrtf(r2);
+			float petal = 0.45f + 0.5f * powf(fabsf(cosf(ang * n * 0.5f)), 0.6f);
+			return rad < petal;
+		}
+		if (fam == 10) {
+			bool shaft = fabsf(y) < 0.16f + t * 0.2f && x > -1.f && x < 0.2f;
+			bool head = x > -0.05f && x < 1.f && fabsf(y) < (1.05f - x) * (0.7f + t);
+			return shaft || head;
+		}
+		if (fam == 11) {
+			float ax = fabsf(x), ay = fabsf(y);
+			float m = ax > ay ? ax : ay;
+			return m < 0.92f && (ax > 0.55f || ay > 0.55f);
+		}
+		if (fam == 12) {
+			bool u = y < 0.15f && fabsf(x) < 0.85f && (fabsf(x) > 0.45f || y < -0.35f);
+			bool stem = fabsf(x) < 0.22f && y < 0.95f && y > -0.2f;
+			return u || stem;
+		}
+		if (fam == 13) {
+			float ang = atan2f(y, x);
+			float rad = sqrtf(r2);
+			float tooth = 0.72f + 0.22f * (0.5f + 0.5f * cosf(ang * n));
+			return rad < tooth && rad > 0.18f;
+		}
+		if (fam == 14) {
+			float nx = x * 2.1f + (var % 3) * 0.17f;
+			float ny = y * 2.1f + (var % 5) * 0.13f;
+			float h = sinf(nx * 1.7f) * cosf(ny * 1.3f) + 0.45f * sinf((nx + ny) * 2.2f);
+			return h > -0.15f + t * 0.4f && r2 < 1.05f;
+		}
+		float side = 0.35f + t;
+		return fabsf(x) < side && fabsf(y) < 1.f || fabsf(y) < side && fabsf(x) < 0.75f;
+	}
 	}
 }
 
 // 外形。螺旋と固定図は使わない。後段が角を埋め戻しても、最後にここへ戻す。
 static BYTE gShape[MAPN][MAPN];
 static int gShapeOn = 0;
+
+static void KeepLargestMask(BYTE mask[MAPN][MAPN])
+{
+	static int comp[MAPN][MAPN];
+	memset(comp, 0, sizeof(comp));
+	int bestId = 0, bestN = 0, id = 0;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!mask[z][x] || comp[z][x]) continue;
+		id++;
+		int qh = 0, qt = 0, n = 0;
+		qx[qt] = x; qz[qt] = z; qt++;
+		comp[z][x] = id;
+		while (qh < qt) {
+			int cx = qx[qh], cz = qz[qh]; qh++; n++;
+			for (int k = 0; k < 4; k++) {
+				int nx = cx + dx[k], nz = cz + dz[k];
+				if (!Map::In(nx, nz) || comp[nz][nx] || !mask[nz][nx]) continue;
+				comp[nz][nx] = id;
+				qx[qt] = nx; qz[qt] = nz; qt++;
+			}
+		}
+		if (n > bestN) { bestN = n; bestId = id; }
+	}
+	if (bestId <= 0) return;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
+		if (mask[z][x] && comp[z][x] != bestId) mask[z][x] = 0;
+}
 
 static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 {
@@ -667,7 +907,7 @@ static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 	float half = (float)span * 0.36f;
 	if (half < 12.f) half = 12.f;
 	if (half > 19.f) half = 19.f;
-	int kindMax = half >= 16.f ? 14 : (half >= 14.f ? 11 : 6);
+	int kindMax = half >= 16.f ? 236 : (half >= 14.f ? 160 : 90);
 	int kind = r.Range(0, kindMax);
 	float rot = r.F(0, 6.2831853f);
 	float cs = cosf(rot), sn = sinf(rot);
@@ -690,8 +930,9 @@ static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 		}
 		return n;
 	};
-	bool nibble = !(kind == 7 || kind == 8 || kind == 12 || kind == 13 || kind == 14);
+	bool nibble = !(kind == 7 || kind == 8 || kind == 12 || kind == 13 || kind == 14) && kind < 45;
 	if (build(kind, nibble) < 140) build(0, false);
+	KeepLargestMask(mask);
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (mask[z][x]) continue;
 		Cell& c = m.c[z][x];
@@ -778,7 +1019,80 @@ static void ReapplyShape(Map& m)
 		if (gShape[z][x]) continue;
 		Cell& c = m.c[z][x];
 		c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
-		c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0;
+		c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0; c.t3 = 0; c.h3 = 0; c.t4 = 0; c.h4 = 0;
+	}
+}
+
+static void WipeCell(Cell& c)
+{
+	c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
+	c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0; c.t3 = 0; c.h3 = 0; c.t4 = 0; c.h4 = 0;
+}
+
+static int GroundWalk(const Cell& c)
+{
+	if (c.t == T_VOID || c.t == T_CHASM || c.t == T_MOUNTAIN || c.t == T_ROCK || c.t == T_DOOR) return 0;
+	return TerrainInfo(c.t).costFoot < 99;
+}
+
+// 見た目で離れている島は、歩いて渡れない。開始地点の島だけ残す。
+static void CutLooseIslands(Map& m)
+{
+	static int comp[MAPN][MAPN];
+	memset(comp, 0, sizeof(comp));
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int bestId = 0, bestN = 0, id = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!GroundWalk(m.c[z][x]) || comp[z][x]) continue;
+		id++;
+		int qh = 0, qt = 0, n = 0;
+		qx[qt] = x; qz[qt] = z; qt++;
+		comp[z][x] = id;
+		while (qh < qt) {
+			int cx = qx[qh], cz = qz[qh]; qh++; n++;
+			for (int k = 0; k < 4; k++) {
+				int nx = cx + dx[k], nz = cz + dz[k];
+				if (!Map::In(nx, nz) || comp[nz][nx] || !GroundWalk(m.c[nz][nx])) continue;
+				comp[nz][nx] = id;
+				qx[qt] = nx; qz[qt] = nz; qt++;
+			}
+		}
+		if (n > bestN) { bestN = n; bestId = id; }
+	}
+	if (bestId <= 0) return;
+	static BYTE seen[MAPN][MAPN];
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) seen[z][x] = comp[z][x] == bestId ? 1 : 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (seen[z][x]) continue;
+		Cell& c = m.c[z][x];
+		if (GroundWalk(c) || ((c.t == T_VOID || c.t == T_CHASM) && c.nLay >= 2)) WipeCell(c);
+	}
+	for (int i = 0; i < m.nP; i++) {
+		int x = m.pStartX[i], z = m.pStartZ[i];
+		if (Map::In(x, z) && seen[z][x]) continue;
+		for (int r = 1; r < MAPN; r++) {
+			int found = 0;
+			for (int dz = -r; dz <= r && !found; dz++) for (int dx = -r; dx <= r; dx++) {
+				int nx = x + dx, nz = z + dz;
+				if (!Map::In(nx, nz) || seen[nz][nx] != 1) continue;
+				m.pStartX[i] = nx; m.pStartZ[i] = nz;
+				seen[nz][nx] = 2;
+				found = 1; break;
+			}
+			if (found) break;
+		}
+	}
+	for (int g = 0; g < m.nGrp; g++) {
+		MapGroup& grp = m.grp[g];
+		int w = 0;
+		for (int k = 0; k < grp.n && k < GRP_CAP; k++) {
+			int x = grp.x[k], z = grp.z[k];
+			if (!Map::In(x, z) || !seen[z][x]) continue;
+			grp.x[w] = grp.x[k]; grp.z[w] = grp.z[k]; w++;
+		}
+		grp.n = (BYTE)w;
+		if (w > 0) { grp.ax = grp.x[0]; grp.az = grp.z[0]; }
 	}
 }
 
@@ -1024,7 +1338,285 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 	}
 }
 
-void GenerateMap(Map& m, int stage, DWORD seed, int theme)
+static void LayDeck(Cell& c, int L, int t, int h)
+{
+	h = Clampi(h, 1, MAXH);
+	if (L <= 0) { c.t = (BYTE)t; c.h = (BYTE)h; }
+	else if (L == 1) { c.t1 = (BYTE)t; c.h1 = (BYTE)h; }
+	else if (L == 2) { c.t2 = (BYTE)t; c.h2 = (BYTE)h; }
+	else if (L == 3) { c.t3 = (BYTE)t; c.h3 = (BYTE)h; }
+	else { c.t4 = (BYTE)t; c.h4 = (BYTE)h; }
+	if ((int)c.nLay < L + 1) c.nLay = (BYTE)(L + 1);
+}
+
+static void StampDeckPreset(Map& m, Rng& r, int ground, int preset)
+{
+	int cx = MAPN / 2, cz = MAPN / 2;
+	for (int z = 8; z < MAPN - 8; z++) for (int x = 8; x < MAPN - 8; x++) {
+		if (Dist(x, z, cx, cz) > 16) continue;
+		if (m.c[z][x].t == T_VOID) { m.c[z][x].t = (BYTE)ground; m.c[z][x].h = 2; }
+	}
+	int down = (preset % 2) == 1;
+	int arms = 4 + (preset % 3);
+	float rad0 = 5.f + (float)(preset % 4);
+	int steps = 36 + (preset % 5) * 4;
+	int x = cx, z = cz;
+	int prevH = Map::In(x, z) && m.c[z][x].t != T_VOID ? (int)m.c[z][x].h : 2;
+	int prevL = 0;
+	for (int i = 0; i < steps; i++) {
+		int layer = i * (LAY_N - 1) / steps;
+		if (layer < 0) layer = 0;
+		if (layer > LAY_N - 1) layer = LAY_N - 1;
+		float ang = (down ? -1.f : 1.f) * (6.2831853f * (float)arms * (float)i / (float)steps) + preset * 0.4f;
+		float rad = rad0 + (float)(i % 8) * 0.15f;
+		int tx = Clampi(cx + (int)lroundf(cosf(ang) * rad), 1, MAPN - 2);
+		int tz = Clampi(cz + (int)lroundf(sinf(ang) * rad), 1, MAPN - 2);
+		int nx = x + ((tx > x) ? 1 : (tx < x) ? -1 : 0);
+		int nz = z + ((tz > z) ? 1 : (tz < z) ? -1 : 0);
+		if (nx != x && nz != z) {
+			if ((i & 1) == 0) nz = z;
+			else nx = x;
+		}
+		if (!Map::In(nx, nz) || (nx == x && nz == z)) continue;
+		x = nx; z = nz;
+		int h = prevH;
+		if (down) {
+			if (layer < prevL && h > 1) h = prevH - 1;
+		} else if (layer > prevL || (i % 4) == 0) {
+			if (h < MAXH) h = prevH + 1;
+		}
+		Cell& c = m.c[z][x];
+		if (c.t == T_VOID || c.t == T_CHASM) c.t = (BYTE)ground;
+		for (int L = 0; L <= layer; L++) {
+			int hh = h - (layer - L);
+			if (hh < 1) hh = 1;
+			LayDeck(c, L, ground, hh);
+		}
+		prevH = h;
+		prevL = layer;
+	}
+	(void)r;
+}
+
+static void StampLandmarks(Map& m, Rng& r, int th, BYTE taken[MAPN][MAPN])
+{
+	struct Fp { int w, d; };
+	static const Fp kFp[6] = { { 2, 2 }, { 3, 3 }, { 1, 3 }, { 3, 1 }, { 2, 3 }, { 2, 1 } };
+	int want = 5 + (m.stage % 4);
+	if (want > 10) want = 10;
+	int guard = 0, placed = 0;
+	while (placed < want && guard < 70) {
+		guard++;
+		Fp fp = kFp[r.Range(0, 5)];
+		if (fp.w + 2 >= MAPN || fp.d + 2 >= MAPN) continue;
+		int x0 = r.Range(2, MAPN - 2 - fp.w);
+		int z0 = r.Range(2, MAPN - 2 - fp.d);
+		int ok = 1, baseH = 99;
+		BYTE oldT[9], oldH[9], oldP[9];
+		int n = 0;
+		for (int dz = 0; dz < fp.d && ok; dz++) for (int dx = 0; dx < fp.w; dx++) {
+			int x = x0 + dx, z = z0 + dz;
+			if (taken[z][x]) { ok = 0; break; }
+			Cell& c = m.c[z][x];
+			if (c.gimm || c.nLay >= 2) { ok = 0; break; }
+			if (c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM || c.t == T_BRIDGE || c.t == T_DOOR || c.t == T_MOUNTAIN || c.t == T_ROCK) { ok = 0; break; }
+			if (!FootPassable(c.t)) { ok = 0; break; }
+			for (int p = 0; p < m.nP; p++) if (Dist(x, z, m.pStartX[p], m.pStartZ[p]) < 4) ok = 0;
+			if (!ok) break;
+			if ((int)c.h < baseH) baseH = c.h;
+			oldT[n] = c.t; oldH[n] = c.h; oldP[n] = c.prop; n++;
+		}
+		if (!ok || n != fp.w * fp.d) continue;
+		n = 0;
+		for (int dz = 0; dz < fp.d; dz++) for (int dx = 0; dx < fp.w; dx++) {
+			Cell& c = m.c[z0 + dz][x0 + dx];
+			int rim = (dx == 0 || dz == 0 || dx == fp.w - 1 || dz == fp.d - 1);
+			c.t = (BYTE)((th == TH_VOLCANO && !rim && fp.w >= 2 && fp.d >= 2) ? T_LAVA : T_MOUNTAIN);
+			c.h = (BYTE)Clampi(baseH + (rim ? 1 : 2), 1, MAXH);
+			c.prop = PK_NONE;
+			c.gparam = 0;
+			c.gimm = 0;
+			taken[z0 + dz][x0 + dx] = 1;
+			n++;
+		}
+		Cell& a = m.c[z0][x0];
+		a.prop = PK_MOUNT;
+		a.gparam = (BYTE)((fp.d << 4) | fp.w);
+		int linked = 1;
+		if (m.nP > 0 && m.nE > 0)
+			linked = FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0]) ? 1 : 0;
+		if (!linked) {
+			n = 0;
+			for (int dz = 0; dz < fp.d; dz++) for (int dx = 0; dx < fp.w; dx++) {
+				Cell& c = m.c[z0 + dz][x0 + dx];
+				c.t = oldT[n]; c.h = oldH[n]; c.prop = oldP[n]; c.gparam = 0;
+				taken[z0 + dz][x0 + dx] = 0;
+				n++;
+			}
+			continue;
+		}
+		placed++;
+		(void)th;
+	}
+}
+
+static int CellStand(const Cell& c, int L)
+{
+	if (!LayerOn(c, L)) return 0;
+	int tr = LayerTr(c, L);
+	if (tr == T_VOID || tr == T_CHASM) return 0;
+	return TerrainInfo(tr).costFoot < 99;
+}
+
+static void FeetOrigin(const Map& m, int& sx, int& sz, int& sL)
+{
+	sx = (m.nP > 0) ? m.pStartX[0] : MAPN / 2;
+	sz = (m.nP > 0) ? m.pStartZ[0] : MAPN / 2;
+	if (!Map::In(sx, sz)) { sx = MAPN / 2; sz = MAPN / 2; }
+	sL = -1;
+	for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[sz][sx], L)) { sL = L; break; }
+	if (sL >= 0) return;
+	for (int z = 0; z < MAPN && sL < 0; z++) for (int x = 0; x < MAPN && sL < 0; x++)
+		for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[z][x], L)) { sx = x; sz = z; sL = L; break; }
+}
+
+static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
+{
+	memset(seen, 0, sizeof(BYTE) * LAY_N * MAPN * MAPN);
+	int sx, sz, sL;
+	FeetOrigin(m, sx, sz, sL);
+	if (sL < 0) return 0;
+	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N];
+	int qh = 0, qt = 0, n = 0;
+	qx[qt] = sx; qz[qt] = sz; qL[qt] = sL; qt++;
+	seen[sL][sz][sx] = 1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		n++;
+		int h = LayerHt(m.c[z][x], L);
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			const Cell& t = m.c[nz][nx];
+			for (int NL = 0; NL < LAY_N; NL++) {
+				if (seen[NL][nz][nx] || !CellStand(t, NL)) continue;
+				if (abs(LayerHt(t, NL) - h) > 2) continue;
+				seen[NL][nz][nx] = 1;
+				qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qt++;
+			}
+		}
+	}
+	return n;
+}
+
+static int FeetLinked(const Map& m)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	int got = BfsFeet(m, seen);
+	int need = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
+		for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[z][x], L)) need++;
+	return need == 0 || got >= need;
+}
+
+static void PaintStair(Cell& c, int h)
+{
+	if (c.t == T_VOID || c.t == T_DOOR) return;
+	if (TerrainInfo(c.t).costFoot >= 99) c.t = T_HILL;
+	h = Clampi(h, 1, MAXH);
+	c.h = (BYTE)h;
+	if (c.nLay < 1) c.nLay = 1;
+}
+
+// 届かない足場の縁に、高さ1段ずつの階段を1本足す。移動力は見ない。
+static int StairOnce(Map& m)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	BfsFeet(m, seen);
+	int ux = -1, uz = 0, uL = 0, rx = 0, rz = 0, rL = 0, best = 1 << 29;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		for (int L = 0; L < LAY_N; L++) {
+			if (!CellStand(m.c[z][x], L) || seen[L][z][x]) continue;
+			int hU = LayerHt(m.c[z][x], L);
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (!Map::In(nx, nz)) continue;
+				for (int NL = 0; NL < LAY_N; NL++) {
+					if (!seen[NL][nz][nx]) continue;
+					int gap = abs(hU - LayerHt(m.c[nz][nx], NL));
+					if (gap < best) { best = gap; ux = x; uz = z; uL = L; rx = nx; rz = nz; rL = NL; }
+				}
+			}
+		}
+	}
+	if (ux < 0) {
+		for (int z = 0; z < MAPN && ux < 0; z++) for (int x = 0; x < MAPN && ux < 0; x++)
+			for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[z][x], L) && !seen[L][z][x]) { ux = x; uz = z; uL = L; break; }
+		if (ux < 0) return 1;
+		rx = -1;
+	}
+	int hU = LayerHt(m.c[uz][ux], uL);
+	int hR = (rx >= 0) ? LayerHt(m.c[rz][rx], rL) : hU;
+	int step = (hU >= hR) ? 1 : -1;
+	int cx = (rx >= 0) ? rx : ux;
+	int cz = (rx >= 0) ? rz : uz;
+	int h = hR;
+	int changed = 0;
+	static BYTE used[MAPN][MAPN];
+	memset(used, 0, sizeof(used));
+	if (rx >= 0) used[rz][rx] = 1;
+	used[uz][ux] = 1;
+	for (int guard = 0; guard < 64 && abs(hU - h) > 1; guard++) {
+		int pick = -1, alongBest = -1;
+		for (int pass = 0; pass < 2 && pick < 0; pass++) {
+			for (int k = 0; k < 4; k++) {
+				int nx = cx + dx[k], nz = cz + dz[k];
+				if (!Map::In(nx, nz) || used[nz][nx]) continue;
+				int t = m.c[nz][nx].t;
+				if (t == T_VOID || t == T_DOOR) continue;
+				if (nx == ux && nz == uz) continue;
+				int along = 0;
+				for (int k2 = 0; k2 < 4; k2++) {
+					int ax = nx + dx[k2], az = nz + dz[k2];
+					if (!Map::In(ax, az)) continue;
+					for (int L = 0; L < LAY_N; L++) {
+						if (!CellStand(m.c[az][ax], L) || seen[L][az][ax]) continue;
+						if (abs(LayerHt(m.c[az][ax], L) - hU) <= 2) along = 1;
+					}
+				}
+				if (pass == 0 && !along) continue;
+				pick = k;
+				alongBest = along;
+				break;
+			}
+		}
+		if (pick < 0) break;
+		int nx = cx + dx[pick], nz = cz + dz[pick];
+		int nh = Clampi(h + step, 1, MAXH);
+		Cell& c = m.c[nz][nx];
+		int beforeH = (int)c.h;
+		int beforeT = (int)c.t;
+		PaintStair(c, nh);
+		if ((int)c.h != beforeH || (int)c.t != beforeT) changed = 1;
+		used[nz][nx] = 1;
+		cx = nx; cz = nz;
+		h = (int)c.h;
+		if (alongBest && abs(hU - h) <= 1) break;
+	}
+	return changed;
+}
+
+static void ConnectFeet(Map& m)
+{
+	for (int i = 0; i < 512; i++) {
+		if (FeetLinked(m)) return;
+		if (!StairOnce(m)) return;
+	}
+}
+
+static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 {
 	memset(&m, 0, sizeof(m));
 	gShapeOn = 0;
@@ -1223,6 +1815,8 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 	}
 
 	}
+	if ((seed % 5u) == 0u)
+		StampDeckPreset(m, r, tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_PLAIN, (int)((seed / 5u) % 12u));
 	// 7) 味方配置と、地図全体の敵拠点（最大 200。1 拠点 3〜15）
 	static BYTE taken[MAPN][MAPN];
 	memset(taken, 0, sizeof(taken));
@@ -1246,13 +1840,32 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 		else if (stage <= 4) { maxGrp = 3; lo = 3; hi = 3; }
 		else if (stage <= 12) { maxGrp = 4; lo = 3; hi = 4; }
 		else if (stage < 40) { maxGrp = 5 + stage / 10; lo = 3; hi = 4 + stage / 15; }
-		else if (stage < 120) { maxGrp = 8 + stage / 12; lo = 3; hi = min(GRP_CAP, 5 + stage / 12); }
-		else { maxGrp = MAX_GROUPS; lo = 3; hi = Clampi(stage >= 200 ? 10 + (stage - 200) / 80 : 8, 4, GRP_CAP); }
-		const int gap = stage <= 4 ? 5 : (stage < 40 ? 6 : 7);
+		else {
+			// 46付近で約30体。9999で約200体。その間は段階に比例して増やす。
+			int cap = 26 + (stage - 40) * 2 / 3;
+			if (stage > 46)
+				cap = 30 + (int)((long long)(stage - 46) * 170 / (9999 - 46));
+			if (cap < 24) cap = 24;
+			if (cap > 200) cap = 200;
+			if (budget > cap) budget = cap;
+			hi = 5 + (stage - 46) / 700;
+			if (hi < 5) hi = 5;
+			if (hi > GRP_CAP) hi = GRP_CAP;
+			int avg = (lo + hi) / 2;
+			if (avg < 4) avg = 4;
+			maxGrp = cap / avg + 2;
+			if (maxGrp < 6) maxGrp = 6;
+			if (maxGrp > 36) maxGrp = 36;
+		}
+		int gap = stage <= 4 ? 5 : (stage < 40 ? 6 : 7);
+		if (stage >= 400) gap = 6;
+		if (stage >= 2000) gap = 5;
+		if (stage >= 6000) gap = 4;
 		static BYTE tried[MAPN][MAPN];
 		memset(tried, 0, sizeof(tried));
 		int guardPick = 0;
-		while (m.nGrp < maxGrp && m.nGrp < MAX_GROUPS && budget >= 3 && guardPick < 80) {
+		int guardCap = stage >= 200 ? 200 : 80;
+		while (m.nGrp < maxGrp && m.nGrp < MAX_GROUPS && budget >= 3 && guardPick < guardCap) {
 			guardPick++;
 			int target = 6 + m.nGrp * max(5, span / 3);
 			int bestI = -1, bestS = 999999;
@@ -1430,6 +2043,7 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 		default: break;
 		}
 	}
+	StampLandmarks(m, r, th, taken);
 	// 拠点の飾り（通行不可の小物は岩扱い）
 	{
 		int tx = Clampi(pax + 2, 1, MAPN - 2), tz = Clampi(paz - 2, 1, MAPN - 2);
@@ -1599,6 +2213,28 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 			StampCaves(m, r, tp, pax, paz, roll <= 2);
 	}
 	ReapplyShape(m);
+	for (int z = 1; z < MAPN - 1; z++) for (int x = 1; x < MAPN - 1; x++) {
+		Cell& c = m.c[z][x];
+		if (c.t != T_WATER || c.gimm) continue;
+		int shore = 0;
+		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || m.c[nz][nx].t != T_WATER) shore = 1;
+		}
+		c.gparam = shore ? 0 : (BYTE)(1 + ((x * 3 + z * 5 + (int)m.seed) & 3));
+		if (!shore && ((x / 3 + z / 3) & 1) == 0) c.gparam = 3;
+	}
+	CutLooseIslands(m);
+}
+
+void GenerateMap(Map& m, int stage, DWORD seed, int theme)
+{
+	for (int attempt = 0; attempt < 6; attempt++) {
+		GenerateMapBody(m, stage, seed + (DWORD)attempt * 9973u, theme);
+		ConnectFeet(m);
+		if (FeetLinked(m)) return;
+	}
 }
 
 // ============================================================ クラス
@@ -3530,6 +4166,7 @@ static float ClassicFoot(int look)
 }
 static int SpanFromHalf(float half)
 {
+	if (half > 3.15f) return 4;
 	if (half > 2.15f) return 3;
 	if (half > 1.05f) return 2;
 	return 1;
@@ -3820,18 +4457,24 @@ static short& ReachCostRef(Reach& r, int layer, int x, int z)
 {
 	if (layer == 1) return r.costHi[z][x];
 	if (layer == 2) return r.cost2[z][x];
+	if (layer == 3) return r.cost3[z][x];
+	if (layer == 4) return r.cost4[z][x];
 	return r.cost[z][x];
 }
-static short& ReachFromRef(Reach& r, int layer, int x, int z)
+static int& ReachFromRef(Reach& r, int layer, int x, int z)
 {
 	if (layer == 1) return r.fromHi[z][x];
 	if (layer == 2) return r.from2[z][x];
+	if (layer == 3) return r.from3[z][x];
+	if (layer == 4) return r.from4[z][x];
 	return r.from[z][x];
 }
-static short ReachFromAt(const Reach& r, int layer, int x, int z)
+static int ReachFromAt(const Reach& r, int layer, int x, int z)
 {
 	if (layer == 1) return r.fromHi[z][x];
 	if (layer == 2) return r.from2[z][x];
+	if (layer == 3) return r.from3[z][x];
+	if (layer == 4) return r.from4[z][x];
 	return r.from[z][x];
 }
 
@@ -3842,6 +4485,8 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 		out.cost[z][x] = -1; out.from[z][x] = -1; out.canStop[z][x] = 0;
 		out.costHi[z][x] = -1; out.fromHi[z][x] = -1; out.canStopHi[z][x] = 0;
 		out.cost2[z][x] = -1; out.from2[z][x] = -1; out.canStop2[z][x] = 0;
+		out.cost3[z][x] = -1; out.from3[z][x] = -1; out.canStop3[z][x] = 0;
+		out.cost4[z][x] = -1; out.from4[z][x] = -1; out.canStop4[z][x] = 0;
 	}
 	const int mv = UnitMove(u) * 2;
 	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qd[MAPN * MAPN * LAY_N];
@@ -3872,7 +4517,7 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 				if (cst >= 0 && cst <= nc) continue;
 				int inq = cst >= 0;
 				cst = (short)nc;
-				ReachFromRef(out, toL, nx, nz) = (short)PackCell(x, z, layer);
+				ReachFromRef(out, toL, nx, nz) = PackCell(x, z, layer);
 				if (qn + 1 >= MAPN * MAPN * LAY_N) continue;
 				if (!inq) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
 				else {
@@ -3887,6 +4532,8 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 		if (out.cost[z][x] >= 0) out.canStop[z][x] = FootCanStop(b, ui, x, z, 0) ? 1 : 0;
 		if (out.costHi[z][x] >= 0) out.canStopHi[z][x] = FootCanStop(b, ui, x, z, 1) ? 1 : 0;
 		if (out.cost2[z][x] >= 0) out.canStop2[z][x] = FootCanStop(b, ui, x, z, 2) ? 1 : 0;
+		if (out.cost3[z][x] >= 0) out.canStop3[z][x] = FootCanStop(b, ui, x, z, 3) ? 1 : 0;
+		if (out.cost4[z][x] >= 0) out.canStop4[z][x] = FootCanStop(b, ui, x, z, 4) ? 1 : 0;
 	}
 }
 

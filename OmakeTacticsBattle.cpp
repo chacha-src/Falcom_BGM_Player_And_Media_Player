@@ -273,9 +273,9 @@ struct TacSnap6 {
 	Battle6 b;
 };
 static TacSnap6 g_snapOld;
-static_assert(sizeof(Cell) == 11, "cell is 11 bytes");
+static_assert(sizeof(Cell) == 15, "cell is 15 bytes");
 static_assert(sizeof(Map6) % 4 == 0, "old map stays aligned");
-static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 5 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int), "snap grew by cells and layers");
+static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 9 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int), "snap grew by cells and layers");
 static int g_snapUse[SNAP_N];
 static TacSnap* g_qMid = NULL;
 static TacSnap* g_qAuto = NULL;
@@ -438,7 +438,7 @@ static void SnapLift(TacSnap& d, const TacSnap6& s)
 		const Cell6& c = s.b.map.c[z][x];
 		Cell& o = d.b.map.c[z][x];
 		o.t = c.t; o.h = c.h; o.prop = c.prop; o.var = c.var; o.gimm = c.gimm; o.gparam = c.gparam;
-		o.nLay = 0; o.t1 = o.h1 = o.t2 = o.h2 = 0;
+		o.nLay = 0; o.t1 = o.h1 = o.t2 = o.h2 = o.t3 = o.h3 = o.t4 = o.h4 = 0;
 	}
 	memcpy(d.b.map.pStartX, s.b.map.pStartX, sizeof(d.b.map.pStartX));
 	memcpy(d.b.map.pStartZ, s.b.map.pStartZ, sizeof(d.b.map.pStartZ));
@@ -1204,23 +1204,40 @@ void Game::BuildOverlayQuads()
 {
 	m_ovQuads.clear();
 	const Map& m = m_b.map;
-	auto quad = [&](int x, int z, DWORD c, float lift, float yAbs = -999.f) {
+	auto quad = [&](int x, int z, DWORD c, float lift, float yAbs = -999.f, int layer = -1, int segs = 1) {
 		const Cell& cc = m.At(x, z);
-		float y = yAbs > -900.f ? yAbs : ((cc.t == T_WATER || cc.t == T_LAVA) ? m.StandY(x, z) - .25f : m.TopY(x, z));
-		if (cc.t == T_CHASM) y = -3.15f;
-		y += lift;
-		float in = .03f;
-		V3 p[4] = { v3(x + in, y, z + in), v3(x + in, y, z + 1 - in), v3(x + 1 - in, y, z + 1 - in), v3(x + 1 - in, y, z + in) };
-		float uv[4][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 0 } };
-		static const int ord[6] = { 0, 1, 2, 0, 2, 3 };
-		for (int k = 0; k < 6; k++) {
-			VtxS v;
-			int i = ord[k];
-			v.p[0] = p[i].x; v.p[1] = p[i].y; v.p[2] = p[i].z;
-			v.n[0] = 0; v.n[1] = 1; v.n[2] = 0;
-			v.uv[0] = uv[i][0]; v.uv[1] = uv[i][1];
-			v.c = c;
-			m_ovQuads.push_back(v);
+		int kind = 0, ly = 0;
+		if (layer > 0) { kind = 2; ly = layer; }
+		else if (yAbs < -900.f && (cc.t == T_WATER || cc.t == T_LAVA)) { kind = 1; ly = (int)cc.t; }
+		float mid = TacVisY(m, x, z, x + 0.5f, z + 0.5f, kind, ly);
+		float base = yAbs > -900.f ? yAbs : mid;
+		if (kind == 1 && yAbs < -900.f) base = m.StandY(x, z) - 0.25f;
+		auto hy = [&](float px, float pz) {
+			return base + (TacVisY(m, x, z, px, pz, kind, ly) - mid) + lift + 0.1f;
+		};
+		if (segs < 1) segs = 1;
+		if (segs > 4) segs = 4;
+		float in = 0.012f;
+		for (int j = 0; j < segs; j++) for (int i = 0; i < segs; i++) {
+			if (m_ovQuads.size() + 6 > 65536) return;
+			float u0 = (float)i / (float)segs, u1 = (float)(i + 1) / (float)segs;
+			float v0 = (float)j / (float)segs, v1 = (float)(j + 1) / (float)segs;
+			auto px = [&](float u) { return (float)x + in + u * (1.f - in * 2.f); };
+			auto pz = [&](float v) { return (float)z + in + v * (1.f - in * 2.f); };
+			float xy[4] = { px(u0), px(u0), px(u1), px(u1) };
+			float zy[4] = { pz(v0), pz(v1), pz(v1), pz(v0) };
+			float uvx[4] = { u0, u0, u1, u1 };
+			float uvy[4] = { v0, v1, v1, v0 };
+			static const int ord[6] = { 0, 1, 2, 0, 2, 3 };
+			for (int k = 0; k < 6; k++) {
+				VtxS vt;
+				int s = ord[k];
+				vt.p[0] = xy[s]; vt.p[1] = hy(xy[s], zy[s]); vt.p[2] = zy[s];
+				vt.n[0] = 0; vt.n[1] = 1; vt.n[2] = 0;
+				vt.uv[0] = uvx[s]; vt.uv[1] = uvy[s];
+				vt.c = c;
+				m_ovQuads.push_back(vt);
+			}
 		}
 	};
 	static const DWORD kWarp[8] = {
@@ -1264,7 +1281,7 @@ void Game::BuildOverlayQuads()
 			for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
 				if (Map::In(eu.x + dx, eu.z + dz)) {
 					float ay = eu.deck > 0 ? m.WalkY(eu.x + dx, eu.z + dz, eu.deck) : -999.f;
-					quad(eu.x + dx, eu.z + dz, RGBA8(255, 150, 40, pulse), .045f, ay);
+					quad(eu.x + dx, eu.z + dz, RGBA8(255, 150, 40, pulse), .045f, ay, eu.deck > 0 ? eu.deck : -1);
 				}
 		}
 	}
@@ -1287,10 +1304,10 @@ void Game::BuildOverlayQuads()
 				if (!paintMove(x, z, L)) continue;
 				int a = (L == m_cLayer) ? 188 : 110;
 				DWORD moveCol = u.team == TEAM_PLAYER ? RGBA8(70, 150, 255, a) : RGBA8(255, 90, 150, a);
-				quad(x, z, moveCol, .03f, m.WalkY(x, z, L));
+				quad(x, z, moveCol, .03f, m.WalkY(x, z, L), L, 4);
 			}
 		}
-		if (m_ovAtk[z][x] == 6) quad(x, z, RGBA8(255, 210, 80, 210), .05f, layY(x, z));
+		if (m_ovAtk[z][x] == 6) quad(x, z, RGBA8(255, 210, 80, 210), .05f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
 		else if (!showMove && m_ovAtk[z][x]) {
 			DWORD c;
 			switch (m_ovAtk[z][x]) {
@@ -1301,7 +1318,7 @@ void Game::BuildOverlayQuads()
 			default: c = RGBA8(255, 80, 60, 125); break;
 			}
 			if (showMove && u.team != TEAM_PLAYER) c = RGBA8(255, 120, 60, 90);
-			quad(x, z, c, .033f, layY(x, z));
+			quad(x, z, c, .033f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
 		}
 	}
 	// 経路
@@ -1309,7 +1326,7 @@ void Game::BuildOverlayQuads()
 		for (int i = 1; i < m_pathN; i++) {
 			int p = m_path[i];
 			int px = PackX(p), pz = PackZ(p);
-			quad(px, pz, RGBA8(255, 240, 140, 200), .04f, m.WalkY(px, pz, PackDeck(p)));
+			quad(px, pz, RGBA8(255, 240, 140, 200), .04f, m.WalkY(px, pz, PackDeck(p)), PackDeck(p), 4);
 		}
 	}
 	if (m_phase == PH_P_SKILLS && m_skillPreview >= 0) {
@@ -1320,7 +1337,7 @@ void Game::BuildOverlayQuads()
 		if (sd.rMax == 0) {
 			int ar = sd.area > 0 ? sd.area : 0;
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
-				if (Dist(x, z, u.x, u.z) <= ar) quad(x, z, RGBA8(255, 210, 70, 160), .04f, layY(x, z));
+				if (Dist(x, z, u.x, u.z) <= ar) quad(x, z, RGBA8(255, 210, 70, 160), .04f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
 		} else {
 			for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
 				int d = abs(dx) + abs(dz);
@@ -1328,7 +1345,7 @@ void Game::BuildOverlayQuads()
 				int tx = u.x + dx, tz = u.z + dz;
 				if (!Map::In(tx, tz)) continue;
 				if (!friendly && !InAttackRange(m_b, u.x, u.z, rmin, rmax, tx, tz, true)) continue;
-				quad(tx, tz, aim, .033f, layY(tx, tz));
+				quad(tx, tz, aim, .033f, layY(tx, tz), layY(tx, tz) > -900.f ? m_cLayer : -1, 4);
 			}
 			int ax = u.x, az = u.z;
 			if (m_cursorValid) {
@@ -1338,7 +1355,7 @@ void Game::BuildOverlayQuads()
 			int len = sd.area > 0 ? sd.area : (sd.shape != SH_RADIUS ? 1 : 0);
 			if (len > 0 || sd.shape != SH_RADIUS) {
 				for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
-					if (ShapeCell(sd.shape, len, u.x, u.z, ax, az, x, z)) quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z));
+					if (ShapeCell(sd.shape, len, u.x, u.z, ax, az, x, z)) quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
 			}
 		}
 	}
@@ -1349,7 +1366,7 @@ void Game::BuildOverlayQuads()
 			int len = sd.area > 0 ? sd.area : 1;
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 				if (!ShapeCell(sd.shape, len, u.x, u.z, m_cx, m_cz, x, z)) continue;
-				quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z));
+				quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
 			}
 		}
 	}
@@ -1366,7 +1383,7 @@ void Game::BuildOverlayQuads()
 			if (!Map::In(ox, oz) || (ox == u.x && oz == u.z)) continue;
 			int who = m_b.UnitAt(ox, oz);
 			BOOL filled = who >= 0 && who != m_cur && m_b.u[who].alive && m_b.u[who].team == u.team;
-			quad(ox, oz, filled ? RGBA8(70, 210, 110, 200) : RGBA8(240, 190, 50, 170), .055f, layY(ox, oz));
+			quad(ox, oz, filled ? RGBA8(70, 210, 110, 200) : RGBA8(240, 190, 50, 170), .055f, layY(ox, oz), layY(ox, oz) > -900.f ? m_cLayer : -1, 4);
 		}
 	}
 	{
@@ -1399,7 +1416,7 @@ void Game::BuildOverlayQuads()
 			int tx = m_cx + dx, tz = m_cz + dz;
 			if (!Map::In(tx, tz) || m_ovMove[tz][tx] || m_ovAtk[tz][tx]) continue;
 			int a = 50 - (abs(dx) + abs(dz)) * 6;
-			if (a > 0) quad(tx, tz, RGBA8(255, 255, 255, a), .03f, layY(tx, tz));
+			if (a > 0) quad(tx, tz, RGBA8(255, 255, 255, a), .03f, layY(tx, tz), layY(tx, tz) > -900.f ? m_cLayer : -1, 4);
 		}
 	}
 }
@@ -1946,11 +1963,7 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_P_SKILLS:
-		if (m_skillTab == 0 && m_skillEl) { m_skillEl = 0; m_skillPage = 0; m_skillPreview = -1; }
-		else if (m_skillTab == 0 && m_skillShape) { m_skillShape = 0; m_skillPage = 0; m_skillPreview = -1; }
-		else {
-			m_phase = PH_P_CMD; m_focusId = ID_BT_SKILL; m_navMode = TRUE; m_skillPreview = -1;
-		}
+		m_phase = PH_P_CMD; m_focusId = ID_BT_SKILL; m_navMode = TRUE; m_skillPreview = -1;
 		sounded = 1;
 		break;
 	case PH_P_ITEM:
@@ -2165,6 +2178,17 @@ void Game::UpdateMove(float dt)
 		p.y = yl + sinf(f * PI) * hop;
 	} else if (fly) {
 		p.y = Lerpf(pa.y, pb.y, Smooth01(f)) + sinf(f * 6.2831853f * 2.f) * 0.045f;
+	}
+	if (!fly && PackDeck(a) == PackDeck(b)) {
+		int deck = PackDeck(a);
+		int kind = 0, ly = 0;
+		if (deck > 0) { kind = 2; ly = deck; }
+		else {
+			int ta = m_b.map.At(ax, az).t, tnb = m_b.map.At(bx, bz).t;
+			if ((ta == T_WATER || ta == T_LAVA) && ta == tnb) { kind = 1; ly = ta; }
+		}
+		float gy = TacVisY(m_b.map, ax, az, p.x, p.z, kind, ly);
+		if (p.y < gy + 0.02f) p.y = gy + 0.02f;
 	}
 	u.px = p.x; u.py = p.y; u.pz = p.z;
 	u.face = atan2f((float)(bx - ax), (float)(bz - az));
@@ -3558,25 +3582,37 @@ void Game::DrawBattle3D()
 			BOOL ok = m_cur >= 0 && (m_phase == PH_P_TARGET ? CanTarget(m_cur, t, -1) : (m_cmdSkill >= 0 && (SkillInfo(m_cmdSkill).rMax == 0 || CanTarget(m_cur, t, m_cmdSkill))));
 			cc = ok ? RGBA8(255, 210, 80, 255) : RGBA8(255, 70, 60, 230);
 		}
-		VtxS cq[6];
+		VtxS cq[96];
 		int cqn = 0;
 		const Map& m = m_b.map;
 		const Cell& c = m.At(m_cx, m_cz);
-		float y = m.WalkY(m_cx, m_cz, m_cLayer);
-		y += .06f;
+		int ly = m_cLayer;
+		int kind = ly > 0 ? 2 : 0;
+		if (kind == 0 && (c.t == T_WATER || c.t == T_LAVA)) { kind = 1; ly = (int)c.t; }
+		float mid = TacVisY(m, m_cx, m_cz, m_cx + 0.5f, m_cz + 0.5f, kind, ly);
+		float base = m.WalkY(m_cx, m_cz, m_cLayer);
 		float grow = .04f * sinf(m_time * 6.f);
-		float x0 = m_cx - grow, x1 = m_cx + 1 + grow, z0 = m_cz - grow, z1 = m_cz + 1 + grow;
-		V3 p[4] = { v3(x0, y, z0), v3(x0, y, z1), v3(x1, y, z1), v3(x1, y, z0) };
-		float uv[4][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 0 } };
+		float x0 = m_cx - grow, x1 = m_cx + 1.f + grow, z0 = m_cz - grow, z1 = m_cz + 1.f + grow;
+		const int N = 4;
 		static const int ord[6] = { 0, 1, 2, 0, 2, 3 };
-		for (int k = 0; k < 6; k++) {
-			VtxS v;
-			int i = ord[k];
-			v.p[0] = p[i].x; v.p[1] = p[i].y; v.p[2] = p[i].z;
-			v.n[0] = 0; v.n[1] = 1; v.n[2] = 0;
-			v.uv[0] = uv[i][0]; v.uv[1] = uv[i][1];
-			v.c = cc;
-			cq[cqn++] = v;
+		for (int j = 0; j < N; j++) for (int i = 0; i < N; i++) {
+			float u0 = (float)i / N, u1 = (float)(i + 1) / N;
+			float v0 = (float)j / N, v1 = (float)(j + 1) / N;
+			float xa[4] = { x0 + (x1 - x0) * u0, x0 + (x1 - x0) * u0, x0 + (x1 - x0) * u1, x0 + (x1 - x0) * u1 };
+			float za[4] = { z0 + (z1 - z0) * v0, z0 + (z1 - z0) * v1, z0 + (z1 - z0) * v1, z0 + (z1 - z0) * v0 };
+			float uvx[4] = { u0, u0, u1, u1 };
+			float uvy[4] = { v0, v1, v1, v0 };
+			for (int k = 0; k < 6; k++) {
+				int s = ord[k];
+				VtxS v;
+				v.p[0] = xa[s];
+				v.p[1] = base + (TacVisY(m, m_cx, m_cz, xa[s], za[s], kind, ly) - mid) + 0.1f;
+				v.p[2] = za[s];
+				v.n[0] = 0; v.n[1] = 1; v.n[2] = 0;
+				v.uv[0] = uvx[s]; v.uv[1] = uvy[s];
+				v.c = cc;
+				cq[cqn++] = v;
+			}
 		}
 		m_r.DrawOverlayQuads(cq, cqn, 1);
 	}
@@ -3601,19 +3637,12 @@ void Game::DrawBattle3D()
 		rp.tint = tc;
 		float s = active ? 1.f + .06f * sinf(m_time * 5.f) : .85f;
 		int sp = UnitSpan(u);
-		if (sp <= 1) {
-			V3 g = v3(u.px, u.py + .05f, u.pz);
-			m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(s, 1, s), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
-		} else {
-			float sc = s * 0.72f;
-			for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
-				int x = u.x + dx, z = u.z + dz;
-				if (!Map::In(x, z)) continue;
-				V3 g = CellCenter(x, z);
-				g.y += .05f;
-				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(sc, 1, sc), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
-			}
-		}
+		if (sp < 1) sp = 1;
+		if (sp > 4) sp = 4;
+		float sc = s * (float)sp * 0.92f;
+		V3 g = v3(u.x + sp * 0.5f, u.py + .05f, u.z + sp * 0.5f);
+		if (sp <= 1) g = v3(u.px, u.py + .05f, u.pz);
+		m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(sc, 1, sc), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
 		if (ghost) m_r.SetDepthTest(TRUE);
 	}
 	for (int pass = 0; pass < 2; pass++) for (int i = 0; i < m_b.nUnits; i++) {
@@ -4264,8 +4293,9 @@ void Game::DrawCutIn3D()
 			if (t < 0.f) t = 0.f;
 			float u = t / max(0.2f, SummonDepartNeed());
 			if (u > 1.f) u = 1.f;
-			if (u > 0.82f) look = Lerp(look, foeC, (u - 0.82f) / 0.18f * 0.35f);
-			eye = look + v3(sinf(ang + 1.15f) * 3.8f, high + 0.2f, cosf(ang + 1.15f) * 3.8f);
+			V3 who = m_sumFrom + v3(0, 0.95f, 0);
+			look = Lerp(look, who, Smooth01(min(1.f, u * 1.6f)));
+			eye = who + v3(sinf(ang + 0.9f) * 3.2f, 1.45f, cosf(ang + 0.9f) * 3.2f);
 		} else if (m_cutStage == 1) {
 			float u = m_cutStageT / max(.4f, CutIntroLen());
 			eye = look + v3(Lerpf(-2.6f, 1.9f, u), Lerpf(high + 0.8f, high, u), Lerpf(2.8f, -2.5f, u));
@@ -6683,9 +6713,7 @@ void Game::DrawCommandMenu()
 			if (Btn(ID_BT_SKNEXT, x + sw - U(64), yy, U(64), bh, L"▶")) m_skillPage = (m_skillPage + 1) % pages;
 			yy += bh + U(4);
 		}
-		const wchar_t* backWord = ((m_skillTab == 0 || m_skillTab == 1) && (m_skillEl || m_skillShape))
-			? LangPick14(L"絞り込みを外す", L"Clear filter", L"Retirer le filtre", L"Togli filtro", L"Quitar filtro", L"거르기 해제", L"取消筛选", L"إزالة التصفية", L"Снять фильтр", L"Filter aus", L"Limpar filtro", L"Filter uit", L"Usuń filtr", L"Süzgeci kaldır")
-			: TT(TX_CR_BACK);
+		const wchar_t* backWord = TT(TX_CR_BACK);
 		m_btnSfx = -2;
 		if (Btn(ID_BT_BACK, x, yy, sw, bh, backWord)) BattleCancel();
 		yy += bh + U(6);
@@ -7073,15 +7101,17 @@ static void DrawAilment(Renderer& r, int kind, float x, float y, float s, float 
 		}
 		r.HudText(L"?", x + sinf(t * 5.f) * s * 0.08f, y, s * 0.55f, RGBA8(150, 40, 150), 1, 1);
 	} else if (kind == 2) {
+		r.HudRect(x - s * .42f, y - s * .42f, s * .84f, s * .84f, RGBA8(40, 28, 8, 230));
 		for (int i = 0; i < 3; i++) {
-			float a = t * 5.2f + i * 2.094f;
-			float px = x + cosf(a) * s * 0.32f;
-			float py = y + sinf(a) * s * 0.16f;
-			float arm = s * 0.16f;
-			float th = max(1.4f, s * 0.07f);
-			r.HudRect(px - arm, py - th * .5f, arm * 2.f, th, RGBA8(255, 206, 50));
-			r.HudRect(px - th * .5f, py - arm, th, arm * 2.f, RGBA8(255, 186, 30));
+			float a = t * 4.2f + i * 2.094f;
+			float px = x + cosf(a) * s * 0.22f;
+			float py = y + sinf(a) * s * 0.12f;
+			float arm = s * 0.22f;
+			float th = max(2.f, s * 0.11f);
+			r.HudRect(px - arm, py - th * .5f, arm * 2.f, th, RGBA8(255, 220, 40));
+			r.HudRect(px - th * .5f, py - arm, th, arm * 2.f, RGBA8(255, 180, 20));
 		}
+		r.HudText(L"!", x, y, s * 0.42f, RGBA8(255, 244, 180), 1, 1);
 	} else if (kind == 3) {
 		for (int i = 0; i < 4; i++) {
 			float ph = fmodf(t * 0.9f + i * 0.25f, 1.f);
@@ -7377,10 +7407,10 @@ void Game::DrawBattleUi()
 			if (u.poison > 0) { kinds[nk] = 3; efs[nk++] = EF_POISON; }
 			if (u.slow > 0) { kinds[nk] = 4; efs[nk++] = EF_SLOW; }
 			if (u.defDown > 0) { kinds[nk] = 5; efs[nk++] = EF_DEFDOWN; }
-			float s = U(15);
-			float gap = s + U(3);
+			float s = U(26);
+			float gap = s + U(4);
 			float x0 = sx - (nk - 1) * gap * .5f;
-			float y0 = sy - U(28);
+			float y0 = sy - U(42);
 			for (int k = 0; k < nk; k++) {
 				float ix = x0 + k * gap;
 				DrawAilment(m_r, kinds[k], ix, y0, s, m_time + i * 0.13f + k);
@@ -7563,6 +7593,10 @@ void Game::DrawBattleUi()
 			swprintf_s(l, L"%s  %s  %s", TT(TX_BT_TERRAIN), TT(td.nameTx), gm);
 		else if (m_cur >= 0 && CanTerrace(m_b, m_cur, m_cx, m_cz))
 			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)c.h, TT(TX_BT_CLIMB));
+		else if (c.t == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4)
+			swprintf_s(l, L"%s  %s  %s %d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_BT_DEPTH), (int)c.gparam, c.h);
+		else if (c.prop == PK_MOUNT && (c.gparam & 15) >= 1 && (c.gparam & 15) <= 3)
+			swprintf_s(l, L"%s  %s  %dx%d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)(c.gparam & 15), (int)((c.gparam >> 4) & 15), c.h);
 		else if (c.t == T_LAVA)
 			swprintf_s(l, L"%s  %s  %s%d  HP-12%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(StatNameTx(S_MOV)), td.costFoot, c.h);
 		else if (td.costFoot < 99)

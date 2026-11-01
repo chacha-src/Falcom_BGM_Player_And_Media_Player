@@ -532,7 +532,7 @@ private:
 	BYTE m_ovMove[MAPN][MAPN];
 	BYTE m_ovAtk[MAPN][MAPN];
 	BYTE m_ovThreat[MAPN][MAPN];
-	Fix<VtxS, 12288> m_ovQuads;
+	Fix<VtxS, 65536> m_ovQuads;
 	BOOL m_ovDirty;
 	int m_path[MAPN * 4];
 	int m_pathN;

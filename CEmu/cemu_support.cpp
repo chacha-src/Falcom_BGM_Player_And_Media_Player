@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4725; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4733; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -168,6 +168,8 @@
                   + kpastel_98 (OPN; M1.DAT / M2.DAT / M3.DAT stay audible for 8s)
                   + wingforc (Kaneko Z80+YM2151+MSM6295; same ports as blazeon plus OKI at 0A, 16/16)
                   + cybertnk (Coreland Z80+Y8950x2 FM via YM3812; command mailbox at 9000, 8/8)
+                  + cos68snd/illumi68snd/kounai68snd/korosi368snd_fix (X68k tank IRQ6 stays on the glue $40C wrapper)
+                  + gktz68snd (X68k DOS INTVCS takes the vector and handler from the stack)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -861,6 +863,7 @@ static const char* const kSupported[] = {
 	"corn05",
 	"corncob_at",
 	"corpsept_98",
+	"cos68snd",
 	"cosmccop",
 	"cosmic_p",
 	"cosmic_p_98",
@@ -1687,6 +1690,7 @@ static const char* const kSupported[] = {
 	"gaudi",
 	"gaudi68snd",
 	"gaudi_msx",
+	"gauntlet",
 	"gazza2_at",
 	"gazzel_88",
 	"gazzel_98",
@@ -1760,6 +1764,7 @@ static const char* const kSupported[] = {
 	"gjk68snd",
 	"gkhan98",
 	"gking_98",
+	"gktz68snd",
 	"glass_98",
 	"glfgreat",
 	"glight68snd",
@@ -2042,6 +2047,7 @@ static const char* const kSupported[] = {
 	"ikochan_98",
 	"ikuikup_98",
 	"illlaser68snd",
+	"illumi68snd",
 	"illumina",
 	"illumina_98",
 	"illumina_msx",
@@ -2300,6 +2306,7 @@ static const char* const kSupported[] = {
 	"koroshi2_88",
 	"korosi2_98",
 	"korosi2_msx",
+	"korosi368snd_fix",
 	"korosi3_98",
 	"koseng_98",
 	"koshien",
@@ -2312,6 +2319,7 @@ static const char* const kSupported[] = {
 	"kounai1_98",
 	"kounai2_98",
 	"kounai3_98",
+	"kounai68snd",
 	"kouryu68snd",
 	"kouryu_98",
 	"kozure",
@@ -3891,6 +3899,7 @@ static const char* const kSupported[] = {
 	"slayers_98",
 	"slinker68snd",
 	"slinker_98",
+	"slipstrm",
 	"slmy68snd",
 	"slope_88",
 	"slope_98",
@@ -4515,6 +4524,7 @@ static const char* const kSupported[] = {
 	"viewpoin68snd",
 	"vigilant",
 	"vimana",
+	"vindctr2",
 	"viofight",
 	"virgin_d_98",
 	"vision2_98",

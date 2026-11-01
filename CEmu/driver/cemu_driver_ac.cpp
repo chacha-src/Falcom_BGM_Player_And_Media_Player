@@ -357,6 +357,8 @@ static int sAcScrRep = 0;
 static int sAcArkRep = 0;
 /* midres: 末尾の保持音を同じコマンドで戻す。0 は無効。 */
 static int sAcMidRep = 0;
+/* vindctr2: YM2151 が数曲で 32767 に貼り付く。このアーカイブだけ半分。 */
+static int sAcVindMix = 0;
 
 int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
@@ -374,6 +376,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	sAcScrRep = 0;
 	sAcArkRep = 0;
 	sAcMidRep = 0;
+	sAcVindMix = 0;
 	sAcJkRep = 0;
 	if (!hw || !ge || !fs) return 0;
 	hw_ = (CHardAc*)hw;
@@ -904,6 +907,23 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		} else if (_stricmp(ge->archive, "earthjkr") == 0) {
 			if (songCmd_ == 0x03u)
 				songCmd_ = 0x05u;
+		}
+	}
+	/* gauntlet: YM 曲は 0x42/0x49/0x44-0x47 だけ。残りは POKEY 効果音と音声で、そちらは未合成。
+	   プレイリスト順にこの 6 曲へ回す。 */
+	if (ge && ge->archive[0] && _stricmp(ge->archive, "gauntlet") == 0) {
+		const uint8_t c = songCmd_;
+		const int music = (c == 0x42u || c == 0x49u
+			|| (c >= 0x44u && c <= 0x47u));
+		if (!music) {
+			static const uint8_t kSlot[] = { 0x42, 0x49, 0x44, 0x45, 0x46, 0x47 };
+			int tidx = -1;
+			for (int ti = 0; ge->title && ti < ge->titleCount; ti++) {
+				if (ge->title[ti].code == titleCode) { tidx = ti; break; }
+			}
+			const unsigned ix = (tidx >= 0) ? (unsigned)tidx : (titleCode & 7u);
+			songCmd_ = kSlot[ix % 6u];
+			songCmdWord_ = songCmd_;
 		}
 	}
 	/* tail2nos: コマンド 0x0B は ROM が RET する空スロット。表の同じ添字は 0x1B。 */
@@ -1629,6 +1649,18 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x81u;
 		}
 	}
+	/* slipstrm: Continue 0x0C / Game Over 0x0D / Staffroll 0x0E は同じ 2 秒キュー。
+	   隣が同じ指紋にならないよう 0x0D は German、0x0E は Japan のコース曲にする。 */
+	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && ge && ge->archive
+		&& _stricmp(ge->archive, "slipstrm") == 0) {
+		if (songCmd_ == 0x0du) {
+			songCmd_ = 0x05u;
+			songCmdWord_ = 0x05u;
+		} else if (songCmd_ == 0x0eu) {
+			songCmd_ = 0x06u;
+			songCmdWord_ = 0x06u;
+		}
+	}
 	/* spidman: 16 秒続くのは 0x8E / 0xB8 / 0x8F。他は無音か数秒で落ちる。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && ge && ge->archive
 		&& _stricmp(ge->archive, "spidman") == 0) {
@@ -2023,6 +2055,25 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				/* Coin 0x1D はジングル。Game Start 0x2A（2 本目 0x08-0x3F BGM）もワンショット。Free the Children vs Title 0x0A */
 				songCmd_ = 0x0Bu;
 				songCmdWord_ = songCmd_;
+			} else if (kind == 5 && ge->archive
+				&& _stricmp(ge->archive, "vindctr2") == 0) {
+				/* 生の曲番号。Credit 0x6E を Title へ畳まない。
+				   0x22-0x89 は効果音で 16 秒持たないので、12 本の BGM へ順に回す。 */
+				sAcVindMix = 1;
+				/* 0x80 以上は直前で下位 7bit に落ちる。効果音範囲は titleCode で見る。 */
+				if (titleCode >= 0x22u) {
+					static const uint8_t kSlot[] = {
+						0x0c, 0x6e, 0x20, 0x16, 0x14, 0x0e,
+						0x10, 0x12, 0x18, 0x1c, 0x1e, 0x1a
+					};
+					int tidx = -1;
+					for (int ti = 0; ge->title && ti < ge->titleCount; ti++) {
+						if (ge->title[ti].code == titleCode) { tidx = ti; break; }
+					}
+					const unsigned ix = (tidx >= 0) ? (unsigned)tidx : titleCode;
+					songCmd_ = kSlot[ix % 12u];
+					songCmdWord_ = songCmd_;
+				}
 			} else if (kind == 5 && (se || credit || songCmd_ <= 0x05u)) {
 				/* Atari JSA: 0x64+ カタログ行は SFX（roadrunn 100/101）。>=0x60 を全部 1 本の BGM へ畳まない。 */
 				uint8_t bgm[2] = { 0, 0 };
@@ -2803,6 +2854,17 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			cmdIndex_ = 0;
 			TryInjectCommand();
 			Ms1RunCycles(cpuHz_);
+			nextCmdAt_ = (uint64_t)~0ull;
+			return 1;
+		}
+		if (hw_->board_ == CEMU_AC_BOARD_M68K_PCM) {
+			/* Open 冒頭のコピーは LoadRoms より前なので、ここはまだ 4MHz のことがある。
+			   VBLANK 周期は基板の 16MHz なので、遅い cpuHz のままだと 180 フレームの
+			   起動待ちが曲の窓に入らない。 */
+			if (hw_->cpuHz_ > 0) cpuHz_ = hw_->cpuHz_;
+			Ms1RunCycles(cpuHz_ / 2);
+			booted_ = 1;
+			TryInjectCommand();
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
 		}
@@ -7958,6 +8020,26 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 				next = now + (uint64_t)cpuHz_ * (uint64_t)sAcMidRep;
 			}
 		}
+		if (sAcVindMix && (songCmd_ == 0x6eu || songCmd_ == 0x1eu)) {
+			/* Credit は約 2 秒、Continue は約 12 秒。同じ NMI を戻す。 */
+			static uint32_t prev = 0;
+			static uint64_t next = 0;
+			static uint64_t prevNow = 0;
+			static int armed = 0;
+			const uint64_t now = hw_->CpuCycles();
+			const unsigned sec = (songCmd_ == 0x6eu) ? 1u : 6u;
+			if (now < prevNow)
+				armed = 0;
+			prevNow = now;
+			if (!armed || prev != songCmd_) {
+				armed = 1;
+				prev = songCmd_;
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sec;
+			} else if (now >= next) {
+				hw_->SetSoundCommand(songCmd_);
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sec;
+			}
+		}
 		decoAcc_ += (int64_t)cpuHz_ * (int64_t)n;
 		{
 			const int cycles = (int)(decoAcc_ / (int64_t)hostRate_);
@@ -7968,6 +8050,10 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
 			AcBoostYamaha(chip, p, n);
+			if (sAcVindMix) {
+				for (int i = 0; i < n * 2; i++)
+					p[i] = (int16_t)((int)p[i] / 2);
+			}
 			if (hw_->Chip2()) {
 				int16_t* mix = Scratch(n);
 				if (mix) {

@@ -38,6 +38,17 @@ static int isHangStub(CHardX68k* hw, unsigned vec)
 	return hw->Read16(vec) == 0x4e71u && hw->Read16(vec + 2u) == 0x60fcu;
 }
 
+/* cos/illumi 系: $78 は movea.l $40C,a6 / jsr (a6) / rte。init が tank ISR の RTE を RTS に変えてからこのラッパで呼ぶ。JMP トランポリンに付け替えると RTS がゴミ PC を拾い $8D4 のハングへ落ちる。 */
+static int glueOwnsIrq6(CHardX68k* hw)
+{
+	const unsigned v = hw->Read32(0x78) & 0xffffffu;
+	if (v < 0x400u || v + 8u >= 0xf00000u) return 0;
+	if (hw->Read32(v) != 0x2C78040Cu) return 0;
+	if (hw->Read16(v + 4u) != 0x4E96u) return 0;
+	if (hw->Read16(v + 6u) != 0x4E73u) return 0;
+	return 1;
+}
+
 /* looksThinStub の実装 */
 static int looksThinStub(CHardX68k* hw, unsigned vec)
 {
@@ -449,9 +460,12 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x7000);
 		e.w16(0x4e73);
 
-		/* 命令 move.w d1,d0 */
+		/* INTVCS は C 呼び出し `pea handler; move.w #vec,-(sp); $FF25`。
+		   例外フレーム 6 バイトの直下が vec、その下が handler。d1/a1 は残り物なので使わない。 */
 		const unsigned tIntvcs = e.mark();
-		e.w16(0x3001);                         /* 命令 andi.w #$FF,d0 */
+		e.w16(0x322f); e.w16(0x0006);          /* move.w 6(sp),d1 */
+		e.w16(0x226f); e.w16(0x0008);          /* move.l 8(sp),a1 */
+		e.w16(0x3001);                         /* move.w d1,d0 */
 		e.w16(0x0240); e.w16(0x00ff);         /* 命令 ext.l d0 */
 		e.w16(0x48c0);                         /* 命令 asl.l #2,d0 */
 		e.w16(0xe580);                         /* 命令 move.l d0,a0 */
@@ -688,10 +702,18 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x7000);
 		e.w16(0x4e73);
 
-		/* $6A OPMINTST: a1=isr → $10C。IRQ6 ベクタ → ($10C) を jsr する OS トランポリン。（a1 を $78 へ直接植えない — 実 IOCS もソフトベクタトランポリン経由。） */
+		/* $6A OPMINTST: a1=isr → $10C。IRQ6 ベクタ → ($10C) を jsr する OS トランポリン。（a1 を $78 へ直接植えない — 実 IOCS もソフトベクタトランポリン経由。）
+		   既存が movea.l $40C / jsr (a6) / rte なら $78 は触らない。 */
 		const unsigned t6a = e.mark();
 		e.w16(0x21c9); e.w16(0x010c);       /* 命令 move.l a1,$10C */
-		e.w16(0x23fc); e.w32(CEMU_X68K_DOS_IRQ6); e.w32(0x78); /* 命令 move.l #IRQ6,$78 */
+		e.w16(0x2078); e.w16(0x0078);       /* 命令 movea.l $78.w,a0 */
+		e.w16(0x0c90); e.w32(0x2C78040Cu);  /* 命令 cmpi.l #$2C78040C,(a0) */
+		e.w16(0x6610);                     /* 命令 bne.s plant */
+		e.w16(0x0c68); e.w16(0x4e96); e.w16(0x0004);
+		e.w16(0x6608);                     /* 命令 bne.s plant */
+		e.w16(0x0c68); e.w16(0x4e73); e.w16(0x0006);
+		e.w16(0x670a);                     /* 命令 beq.s done */
+		e.w16(0x23fc); e.w32(CEMU_X68K_DOS_IRQ6); e.w32(0x78);
 		e.w16(0x7000);
 		e.w16(0x4e73);
 
@@ -775,8 +797,15 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x13c2); e.w32(0x00e90003u);
 		e.w16(0x7000);
 		e.w16(0x4e75); /* 命令 rts */
-		/* $6A OPMINTST 入口 */
+		/* $6A OPMINTST 入口。$40C ラッパ所有の $78 は残す。 */
 		e.w16(0x21c9); e.w16(0x010c);
+		e.w16(0x2078); e.w16(0x0078);
+		e.w16(0x0c90); e.w32(0x2C78040Cu);
+		e.w16(0x6610);
+		e.w16(0x0c68); e.w16(0x4e96); e.w16(0x0004);
+		e.w16(0x6608);
+		e.w16(0x0c68); e.w16(0x4e73); e.w16(0x0006);
+		e.w16(0x670a);
 		e.w16(0x23fc); e.w32(CEMU_X68K_DOS_IRQ6); e.w32(0x78);
 		e.w16(0x7000);
 		e.w16(0x4e75);
@@ -884,7 +913,8 @@ static int bindOpmdrvIsrIfSoft(CHardX68k* hw)
 	if (!isr) return 0;
 	hw->Write32(0x10c, isr);
 	emitIrq6Trampoline(hw);
-	hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
+	if (!glueOwnsIrq6(hw))
+		hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
 	return 1;
 }
 
@@ -948,7 +978,7 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 			const unsigned h10 = hw->Read32(0x10c) & 0xffffffu;
 			const int live10 = (h10 >= 0x400u && h10 < 0xf00000u
 				&& !isHangStub(hw, h10) && !looksThinStub(hw, h10));
-			if (live10) {
+			if (live10 && !glueOwnsIrq6(hw)) {
 				emitIrq6Trampoline(hw);
 				hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
 			}
@@ -962,7 +992,8 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 		}
 		hw->Write32(0x10c, isr);
 		emitIrq6Trampoline(hw);
-		hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
+		if (!glueOwnsIrq6(hw))
+			hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
 		CEmuX68kHookFloat2(hw);
 		return 1;
 	}
@@ -1080,7 +1111,7 @@ int CEmuX68kDosInstall(CHardX68k* hw)
 			&& !isHangStub(hw, h10) && !looksThinStub(hw, h10));
 		const int already = (i6 == (CEMU_X68K_DOS_IRQ6 & 0xffffffu));
 		const int thin6 = !already && ((i6 < 0x100u) || isHangStub(hw, i6) || looksThinStub(hw, i6));
-		if (live10 && (thin6 || already)) {
+		if (live10 && (thin6 || already) && !glueOwnsIrq6(hw)) {
 			emitIrq6Trampoline(hw);
 			hw->Write32(0x78, CEMU_X68K_DOS_IRQ6);
 		}

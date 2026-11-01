@@ -697,6 +697,7 @@ void Game::SyncBgm()
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
 			if (bossAlive) nearWin = bossLow;
+			else if (m_b.bgmWin) nearWin = 1;
 			else nearWin = (eMx > 0 && eHp * 4 <= eMx) ? 1 : 0;
 		}
 		m_b.bgmWin = nearWin;
@@ -1806,9 +1807,9 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		if (posed) posedR = cr * fabsf(a.scale);
 		// バインド寸法は数センチのまま、描画は骨格の倍率で広がる。その寸法で枠を切るとカメラが体内に入る。
 		float h = a.height > 0.25f ? a.height : 1.2f;
-		if (posed && posedR > 0.15f && posedR < 12.f && posedR < h * 2.2f) {
+		if (posed && posedR > 0.15f && posedR < 12.f && posedR < h * 4.f) {
 			look = MXformPt(world, v3(cx, cy, cz));
-			rad = posedR * 0.78f;
+			rad = posedR * (posedR > h * 2.2f ? 0.95f : 0.78f);
 			body = TRUE;
 		} else {
 			look = v3(0, h * 0.55f, 0);
@@ -4843,9 +4844,9 @@ void Game::DrawBaseUi()
 	float helpY = y + ph - helpH - max(6.f, ph * .015f);
 	float top = y + titleH * 2.f + 14.f;
 	float midRoom = helpY - top - 4.f;
-	float midNeed = m_baseOpt ? U(980) : U(470);
+	float midNeed = U(470);
 	float k = midNeed > 1.f ? min(1.f, midRoom / midNeed) : 1.f;
-	if (k < .08f) k = .08f;
+	if (k < .5f) k = .5f;
 	auto Ku = [&](float px) { return U(px) * k; };
 	float by = top;
 	float bw = pw - max(16.f, pw * .1f), bh = Ku(44), bx = x + (pw - bw) * .5f;
@@ -4951,7 +4952,7 @@ void Game::DrawBaseUi()
 	if (m_baseOpt) {
 		const int nOpt = 10;
 		float room = helpY - 8.f - by;
-		if (room < nOpt * 16.f) room = nOpt * 16.f;
+		if (room < 8.f) room = 8.f;
 		float rowH = room / (float)nOpt;
 		float rowCap = Ku(36);
 		if (rowH > rowCap) rowH = rowCap;

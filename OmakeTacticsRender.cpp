@@ -80,7 +80,7 @@ Renderer::Renderer()
 	m_bsOpaque = m_bsAlpha = m_bsPremul = m_bsAdd = NULL;
 	for (int i = 0; i < TEX_MAX; i++) { m_tex[i] = NULL; m_srv[i] = NULL; }
 	m_miniN = 1;
-	for (int i = 0; i < 3; i++) { m_texMiniL[i] = NULL; m_srvMiniL[i] = NULL; }
+	for (int i = 0; i < LAY_N; i++) { m_texMiniL[i] = NULL; m_srvMiniL[i] = NULL; }
 	m_waterColor = RGBA8(60, 130, 190);
 	m_theme = 0;
 	m_wx = 0;
@@ -128,7 +128,7 @@ void Renderer::Release()
 	ClearMonPack();
 	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; }
 	m_terrain.Release();
-	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); }
+	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); m_cover3[i].Release(); m_cover4[i].Release(); }
 	m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
 	m_props.clear();
@@ -174,7 +174,7 @@ void Renderer::Release()
 	TAC_REL(m_dsWrite); TAC_REL(m_dsRead); TAC_REL(m_dsOff);
 	TAC_REL(m_bsOpaque); TAC_REL(m_bsAlpha); TAC_REL(m_bsPremul); TAC_REL(m_bsAdd);
 	for (int i = 0; i < TEX_MAX; i++) { TAC_REL(m_srv[i]); TAC_REL(m_tex[i]); }
-	for (int i = 0; i < 3; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
+	for (int i = 0; i < LAY_N; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
 	if (m_wait) { CloseHandle(m_wait); m_wait = NULL; }
 	TAC_REL(m_swap);
 	if (m_ctx) { m_ctx->ClearState(); m_ctx->Flush(); }
@@ -8370,9 +8370,10 @@ void Renderer::DrawTerrain()
 	if (m_terrain.vb) DrawStatic(m_terrain, MIdent(), dp);
 	int gx = -99, gz = -99;
 	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
-	for (int ci = 0; ci < 2; ci++) {
+	GpuMesh* coverSet[4] = { m_cover1, m_cover2, m_cover3, m_cover4 };
+	for (int ci = 0; ci < 4; ci++) {
 		for (int ch = 0; ch < 16; ch++) {
-			GpuMesh& cover = ci ? m_cover2[ch] : m_cover1[ch];
+			GpuMesh& cover = coverSet[ci][ch];
 			if (!cover.vb) continue;
 			int cx = ch & 3, cz = ch >> 2;
 			int above = gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && (ci + 1) > m_fadeAbove;
@@ -8942,32 +8943,100 @@ static DWORD LiquidFlow(const Map& m, int x, int z, int liquid)
 	return RGBA8(r, g, b, 255);
 }
 
+static int VisBent(const Map& m, int x, int z, int kind, int layer)
+{
+	float mid = TacVisY(m, x, z, x + 0.5f, z + 0.5f, kind, layer);
+	static const float px[8] = { 0, 1, 0, 1, 0.5f, 1, 0.5f, 0 };
+	static const float pz[8] = { 0, 0, 1, 1, 0, 0.5f, 1, 0.5f };
+	for (int i = 0; i < 8; i++) {
+		float y = TacVisY(m, x, z, x + px[i], z + pz[i], kind, layer);
+		if (fabsf(y - mid) > 0.015f) return 1;
+	}
+	return 0;
+}
+
+static void EmitCurved(MeshBuild& geo, const Map& m, int x, int z, int kind, int layer, DWORD col)
+{
+	int n = VisBent(m, x, z, kind, layer) ? 4 : 1;
+	float ys[5][5];
+	for (int j = 0; j <= n; j++) for (int i = 0; i <= n; i++) {
+		float px = (float)x + (float)i / (float)n;
+		float pz = (float)z + (float)j / (float)n;
+		float y = TacVisY(m, x, z, px, pz, kind, layer);
+		if (kind == 1) y -= 0.02f;
+		ys[j][i] = y;
+	}
+	for (int j = 0; j < n; j++) for (int i = 0; i < n; i++) {
+		float x0 = (float)x + (float)i / (float)n, x1 = (float)x + (float)(i + 1) / (float)n;
+		float z0 = (float)z + (float)j / (float)n, z1 = (float)z + (float)(j + 1) / (float)n;
+		V3 a = v3(x0, ys[j][i], z0);
+		V3 b = v3(x0, ys[j + 1][i], z1);
+		V3 c = v3(x1, ys[j + 1][i + 1], z1);
+		V3 d = v3(x1, ys[j][i + 1], z0);
+		V3 nrm = Norm(Cross(b - a, d - a));
+		if (nrm.y < 0.f) nrm = v3(-nrm.x, -nrm.y, -nrm.z);
+		geo.Quad(a, b, c, d, nrm, z0 - z, x0 - x, z1 - z, x1 - x, -1, col);
+	}
+}
+
+static void EdgePoint(int x, int z, int dir, float t, float& px, float& pz)
+{
+	if (dir == 0) { px = x + 1.f; pz = (float)z + t; }
+	else if (dir == 1) { px = (float)x; pz = (float)z + 1.f - t; }
+	else if (dir == 2) { px = (float)x + 1.f - t; pz = (float)z + 1.f; }
+	else { px = (float)x + t; pz = (float)z; }
+}
+
+static void EmitEdgeWall(MeshBuild& geo, const Map& m, int x, int z, int dir, int kind, int layer, float drop, float floorY, int useFloor, DWORD col)
+{
+	const int N = 4;
+	float px[5], pz[5], y[5];
+	for (int i = 0; i <= N; i++) {
+		EdgePoint(x, z, dir, (float)i / (float)N, px[i], pz[i]);
+		y[i] = TacVisY(m, x, z, px[i], pz[i], kind, layer);
+		if (kind == 1) y[i] -= 0.02f;
+	}
+	V3 nrm = dir == 0 ? v3(1, 0, 0) : dir == 1 ? v3(-1, 0, 0) : dir == 2 ? v3(0, 0, 1) : v3(0, 0, -1);
+	for (int i = 0; i < N; i++) {
+		float y0 = y[i], y1 = y[i + 1];
+		float b0 = useFloor ? floorY : y0 - drop;
+		float b1 = useFloor ? floorY : y1 - drop;
+		if (b0 > y0) b0 = y0;
+		if (b1 > y1) b1 = y1;
+		if (y0 <= b0 + 1e-3f && y1 <= b1 + 1e-3f) continue;
+		geo.Quad(v3(px[i], y0, pz[i]), v3(px[i + 1], y1, pz[i + 1]),
+			v3(px[i + 1], b1, pz[i + 1]), v3(px[i], b0, pz[i]), nrm, 0, 0, 1, 1, -1, col);
+	}
+}
+
 BOOL Renderer::BuildTerrain(const Map& m)
 {
 	m_theme = Clampi(m.theme, 0, TH_COUNT - 1);
 	m_terrain.Release();
-	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); }
+	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); m_cover3[i].Release(); m_cover4[i].Release(); }
 	m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
 	m_props.clear();
-	static MeshBuild tb, wb, lb, wood, sceneMb, cov1[16], cov2[16];
+	static MeshBuild tb, wb, lb, wood, sceneMb, cov1[16], cov2[16], cov3[16], cov4[16];
 	tb.v.clear(); tb.i.clear(); wb.v.clear(); wb.i.clear(); lb.v.clear(); lb.i.clear(); wood.v.clear(); wood.i.clear();
-	for (int i = 0; i < 16; i++) { cov1[i].v.clear(); cov1[i].i.clear(); cov2[i].v.clear(); cov2[i].i.clear(); }
+	for (int i = 0; i < 16; i++) {
+		cov1[i].v.clear(); cov1[i].i.clear(); cov2[i].v.clear(); cov2[i].i.clear();
+		cov3[i].v.clear(); cov3[i].i.clear(); cov4[i].v.clear(); cov4[i].i.clear();
+	}
 	sceneMb.v.clear(); sceneMb.i.clear();
 	m_puffN = 0;
-	tb.v.reserve(80000); tb.i.reserve(120000);
+	tb.v.reserve(160000); tb.i.reserve(240000);
 	const float bottom = -3.2f;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		const Cell& c = m.At(x, z);
 		if (c.t == T_VOID) continue;
 		MeshBuild& geo = tb;
-		float y = m.TopY(x, z);
 		DWORD col = (c.t == T_CHASM) ? RGBAf(.35f, .32f, .33f) : 0xFFFFFFFF;
 		if (c.t == T_WATER) col = 0xFEFFFFFF;
 		if (c.t != T_BRIDGE) {
-			geo.Quad(v3((float)x, y, (float)z), v3((float)x, y, (float)z + 1), v3((float)x + 1, y, (float)z + 1), v3((float)x + 1, y, (float)z), v3(0, 1, 0),
-				0, 0, 1, 1, -1, col);
+			EmitCurved(geo, m, x, z, 0, 0, col);
 		} else {
+			float y = m.TopY(x, z);
 			int fl = BridgeFloor(c);
 			if (fl) {
 				float uy = fl * kHStep;
@@ -9000,88 +9069,49 @@ BOOL Renderer::BuildTerrain(const Map& m)
 			}
 		}
 		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
-		for (int k = 0; k < 4; k++) {
-			if (BridgeFloor(c)) continue;
-			int nx = x + dx[k], nz = z + dz[k];
-			float ny = Map::In(nx, nz) ? m.TopY(nx, nz) : bottom;
-			if (ny >= y - 1e-3f) continue;
-			V3 n = v3((float)dx[k], 0, (float)dz[k]);
-			float ex0, ez0, ex1, ez1;
-			if (dx[k] == 1) { ex0 = x + 1.f; ez0 = (float)z; ex1 = x + 1.f; ez1 = z + 1.f; }
-			else if (dx[k] == -1) { ex0 = (float)x; ez0 = z + 1.f; ex1 = (float)x; ez1 = (float)z; }
-			else if (dz[k] == 1) { ex0 = x + 1.f; ez0 = z + 1.f; ex1 = (float)x; ez1 = z + 1.f; }
-			else { ex0 = (float)x; ez0 = (float)z; ex1 = x + 1.f; ez1 = (float)z; }
-			float yt = y;
-			int seg = 0;
-			while (yt > ny + 1e-3f && seg < 40) {
-				float yb = max(ny, yt - kHStep * 2.f);
-				DWORD sc = 0xFFFFFFFF;
-				float v0 = 0, v1 = (yt - yb) / (kHStep * 2.f);
-				geo.Quad(v3(ex0, yt, ez0), v3(ex1, yt, ez1), v3(ex1, yb, ez1), v3(ex0, yb, ez0), n, 0, v0, 1, v1, -1, sc);
-				yt = yb; seg++;
-			}
-			// 端が奈落・谷なら滝。高い水が低い地面へ落ちるときも滝。海底の溝は落とさない。
-			BOOL offMap = !Map::In(nx, nz) || m.At(nx, nz).t == T_VOID;
-			BOOL drop = Map::In(nx, nz) && m.At(nx, nz).t != T_VOID && y - ny > 0.9f;
-			if (m.theme != TH_SEABED && c.t == T_WATER && (offMap || drop)) {
-				float ox = n.x * 0.06f, oz = n.z * 0.06f;
-				float fallBot = offMap ? -9.f : ny + 0.15f;
-				if (Map::In(nx, nz) && (m.At(nx, nz).t == T_CHASM || m.At(nx, nz).t == T_VOID)) fallBot = -9.f;
-				wb.Quad(v3(ex0 + ox, y, ez0 + oz), v3(ex1 + ox, y, ez1 + oz),
-					v3(ex1 + ox, fallBot, ez1 + oz), v3(ex0 + ox, fallBot, ez0 + oz),
-					n, 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_WATER));
-				AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (y + fallBot) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
-			}
-		}
-		if (c.t == T_WATER) {
-			float wy = m.StandY(x, z) - .02f;
-			wb.Quad(v3((float)x, wy, (float)z), v3((float)x, wy, z + 1.f), v3(x + 1.f, wy, z + 1.f), v3(x + 1.f, wy, (float)z), v3(0, 1, 0), 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_WATER));
-		} else if (c.t == T_LAVA) {
-			float ly = m.StandY(x, z) - .02f;
-			lb.Quad(v3((float)x, ly, (float)z), v3((float)x, ly, z + 1.f), v3(x + 1.f, ly, z + 1.f), v3(x + 1.f, ly, (float)z), v3(0, 1, 0), 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_LAVA));
-		}
-		if (c.nLay >= 2) {
-			int ch = ((z >> 4) << 2) + (x >> 4);
-			MeshBuild& dk = cov1[ch];
-			float cy = c.h1 * kHStep;
-			dk.Quad(v3((float)x, cy, (float)z), v3((float)x, cy, (float)z + 1), v3((float)x + 1, cy, (float)z + 1), v3((float)x + 1, cy, (float)z), v3(0, 1, 0),
-				0, 0, 1, 1, -1, 0xFFFFFFFF);
-			float by = cy - 0.72f;
+		if (c.t != T_BRIDGE) {
 			for (int k = 0; k < 4; k++) {
 				int nx = x + dx[k], nz = z + dz[k];
-				if (Map::In(nx, nz)) {
-					const Cell& nb = m.At(nx, nz);
-					if (nb.nLay >= 2 && abs((int)nb.h1 - (int)c.h1) <= 1) continue;
+				int nbIn = Map::In(nx, nz);
+				int nbT = nbIn ? m.At(nx, nz).t : T_VOID;
+				int blends = nbIn && nbT != T_VOID && nbT != T_BRIDGE;
+				if (!blends) {
+					float floorY = bottom;
+					if (nbIn && nbT == T_BRIDGE) floorY = m.TopY(nx, nz);
+					EmitEdgeWall(geo, m, x, z, k, 0, 0, 0.f, floorY, 1, 0xFFFFFFFF);
 				}
-				V3 nrm = v3((float)dx[k], 0, (float)dz[k]);
-				float ex0, ez0, ex1, ez1;
-				if (dx[k] == 1) { ex0 = x + 1.f; ez0 = (float)z; ex1 = x + 1.f; ez1 = z + 1.f; }
-				else if (dx[k] == -1) { ex0 = (float)x; ez0 = z + 1.f; ex1 = (float)x; ez1 = (float)z; }
-				else if (dz[k] == 1) { ex0 = x + 1.f; ez0 = z + 1.f; ex1 = (float)x; ez1 = z + 1.f; }
-				else { ex0 = (float)x; ez0 = (float)z; ex1 = x + 1.f; ez1 = (float)z; }
-				dk.Quad(v3(ex0, cy, ez0), v3(ex1, cy, ez1), v3(ex1, by, ez1), v3(ex0, by, ez0), nrm, 0, 0, 1, 1, -1, 0xFFFFFFFF);
+				float surf = m.StandY(x, z);
+				float ny = nbIn ? m.TopY(nx, nz) : bottom;
+				BOOL offMap = !nbIn || nbT == T_VOID;
+				BOOL drop = nbIn && nbT != T_VOID && surf - ny > 0.9f;
+				if (m.theme != TH_SEABED && c.t == T_WATER && (offMap || drop)) {
+					float ex0, ez0, ex1, ez1;
+					EdgePoint(x, z, k, 0.f, ex0, ez0);
+					EdgePoint(x, z, k, 1.f, ex1, ez1);
+					V3 n = v3((float)dx[k], 0, (float)dz[k]);
+					float ox = n.x * 0.06f, oz = n.z * 0.06f;
+					float fallBot = offMap ? -9.f : ny + 0.15f;
+					if (nbIn && (nbT == T_CHASM || nbT == T_VOID)) fallBot = -9.f;
+					wb.Quad(v3(ex0 + ox, surf, ez0 + oz), v3(ex1 + ox, surf, ez1 + oz),
+						v3(ex1 + ox, fallBot, ez1 + oz), v3(ex0 + ox, fallBot, ez0 + oz),
+						n, 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_WATER));
+					AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (surf + fallBot) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
+				}
 			}
 		}
-		if (c.nLay >= 3) {
+		if (c.t == T_WATER)
+			EmitCurved(wb, m, x, z, 1, T_WATER, LiquidFlow(m, x, z, T_WATER));
+		else if (c.t == T_LAVA)
+			EmitCurved(lb, m, x, z, 1, T_LAVA, LiquidFlow(m, x, z, T_LAVA));
+		for (int L = 1; L <= 4; L++) {
+			if ((int)c.nLay < L + 1) continue;
 			int ch = ((z >> 4) << 2) + (x >> 4);
-			MeshBuild& dk = cov2[ch];
-			float cy = c.h2 * kHStep;
-			dk.Quad(v3((float)x, cy, (float)z), v3((float)x, cy, (float)z + 1), v3((float)x + 1, cy, (float)z + 1), v3((float)x + 1, cy, (float)z), v3(0, 1, 0),
-				0, 0, 1, 1, -1, 0xFFFFFFFF);
-			float by = cy - 0.72f;
+			MeshBuild& dk = L == 1 ? cov1[ch] : L == 2 ? cov2[ch] : L == 3 ? cov3[ch] : cov4[ch];
+			EmitCurved(dk, m, x, z, 2, L, 0xFFFFFFFF);
 			for (int k = 0; k < 4; k++) {
 				int nx = x + dx[k], nz = z + dz[k];
-				if (Map::In(nx, nz)) {
-					const Cell& nb = m.At(nx, nz);
-					if (nb.nLay >= 3 && abs((int)nb.h2 - (int)c.h2) <= 1) continue;
-				}
-				V3 nrm = v3((float)dx[k], 0, (float)dz[k]);
-				float ex0, ez0, ex1, ez1;
-				if (dx[k] == 1) { ex0 = x + 1.f; ez0 = (float)z; ex1 = x + 1.f; ez1 = z + 1.f; }
-				else if (dx[k] == -1) { ex0 = (float)x; ez0 = z + 1.f; ex1 = (float)x; ez1 = (float)z; }
-				else if (dz[k] == 1) { ex0 = x + 1.f; ez0 = z + 1.f; ex1 = (float)x; ez1 = z + 1.f; }
-				else { ex0 = (float)x; ez0 = (float)z; ex1 = x + 1.f; ez1 = (float)z; }
-				dk.Quad(v3(ex0, cy, ez0), v3(ex1, cy, ez1), v3(ex1, by, ez1), v3(ex0, by, ez0), nrm, 0, 0, 1, 1, -1, 0xFFFFFFFF);
+				if (Map::In(nx, nz) && m.At(nx, nz).t != T_VOID) continue;
+				EmitEdgeWall(dk, m, x, z, k, 2, L, 0.72f, 0.f, 0, 0xFFFFFFFF);
 			}
 		}
 	}
@@ -9109,6 +9139,8 @@ BOOL Renderer::BuildTerrain(const Map& m)
 	for (int i = 0; i < 16; i++) {
 		if (!cov1[i].v.empty()) { MakeMesh32(m_cover1[i], cov1[i].v.data(), sizeof(VtxS), (UINT)cov1[i].v.size(), cov1[i].i.data(), (UINT)cov1[i].i.size()); m_cover1[i].tex = TEX_ATLAS; }
 		if (!cov2[i].v.empty()) { MakeMesh32(m_cover2[i], cov2[i].v.data(), sizeof(VtxS), (UINT)cov2[i].v.size(), cov2[i].i.data(), (UINT)cov2[i].i.size()); m_cover2[i].tex = TEX_ATLAS; }
+		if (!cov3[i].v.empty()) { MakeMesh32(m_cover3[i], cov3[i].v.data(), sizeof(VtxS), (UINT)cov3[i].v.size(), cov3[i].i.data(), (UINT)cov3[i].i.size()); m_cover3[i].tex = TEX_ATLAS; }
+		if (!cov4[i].v.empty()) { MakeMesh32(m_cover4[i], cov4[i].v.data(), sizeof(VtxS), (UINT)cov4[i].v.size(), cov4[i].i.data(), (UINT)cov4[i].i.size()); m_cover4[i].tex = TEX_ATLAS; }
 	}
 	if (!wb.v.empty()) { MakeMesh32(m_water, wb.v.data(), sizeof(VtxS), (UINT)wb.v.size(), wb.i.data(), (UINT)wb.i.size()); m_water.tex = TEX_WHITE; }
 	if (!lb.v.empty()) { MakeMesh32(m_lava, lb.v.data(), sizeof(VtxS), (UINT)lb.v.size(), lb.i.data(), (UINT)lb.i.size()); m_lava.tex = TEX_WHITE; }
@@ -9183,8 +9215,18 @@ BOOL Renderer::BuildTerrain(const Map& m)
 				place(rockMb, si, cx, cy, cz, si == sRockA ? 3.2f : 2.6f, rot, tint, 0);
 				break; }
 			case PK_MOUNT: {
+				int fw = c.gparam & 15, fd = (c.gparam >> 4) & 15;
+				if (fw < 1 || fw > 3) fw = 1;
+				if (fd < 1 || fd > 3) fd = 1;
 				int si = (m.theme == TH_PLAINS || m.theme == TH_FOREST) && (c.var & 3) == 0 ? sMtG : ((c.var % 3 == 0) ? sMtA : (c.var % 3 == 1 ? sMtB : sMtC));
-				place(rockMb, si, cx, cy - .05f, cz, .62f + (c.var % 4) * .03f, rot, tint, 0);
+				if (m.theme == TH_VOLCANO) si = sMtC;
+				else if (m.theme == TH_SNOW) si = sMtA;
+				else if (m.theme == TH_DESERT) si = sMtB;
+				float span = (fw > fd ? (float)fw : (float)fd);
+				float sc = (0.62f + (c.var % 4) * .03f) * (fw == 1 && fd == 1 ? 1.f : span * 0.92f);
+				place(rockMb, si, cx + (fw - 1) * 0.5f, cy - .05f, cz + (fd - 1) * 0.5f, sc, rot, tint, 0);
+				if (m.theme == TH_VOLCANO && span >= 2.f)
+					AddPuff(m_puff, m_puffN, 0, cx + (fw - 1) * 0.5f, cy + sc * 0.35f, cz + (fd - 1) * 0.5f, 2.2f);
 				break; }
 			case PK_LILY:
 				place((c.var & 1) ? lilyMb : plantMb, (c.var & 1) ? sLily : sPlant, cx + jx * 3, m.StandY(x, z) - .01f, cz + jz * 3, 3.f, rot, tint, 0);
@@ -9270,13 +9312,13 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 
 void Renderer::BuildMinimap(const Map& m)
 {
-	for (int i = 0; i < 3; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
+	for (int i = 0; i < LAY_N; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
 	m_miniN = 1;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		int n = CellLayN(m.At(x, z));
 		if (n > m_miniN) m_miniN = n;
 	}
-	if (m_miniN > 3) m_miniN = 3;
+	if (m_miniN > LAY_N) m_miniN = LAY_N;
 	enum { MINI_S = MAPN * 4 };
 	static Buf<DWORD> px;
 	px.resize((size_t)MINI_S * MINI_S);
@@ -9286,11 +9328,13 @@ void Renderer::BuildMinimap(const Map& m)
 			int r = 12, g = 14, b = 22;
 			float sh = 1.f;
 			int tr = T_VOID;
-			if (LayerOn(c, L) && c.t != T_VOID) {
+			if (LayerOn(c, L) && LayerTr(c, L) != T_VOID) {
 				tr = LayerTr(c, L);
 				MiniRgb(m, tr, L == 0 && BridgeFloor(c), r, g, b);
 				if (L == 1) { r = (r * 3 + 210) / 4; g = (g * 3 + 180) / 4; b = (b * 3 + 90) / 4; }
 				else if (L == 2) { r = (r * 3 + 210) / 4; g = (g * 3 + 120) / 4; b = (b * 3 + 170) / 4; }
+				else if (L == 3) { r = (r * 3 + 120) / 4; g = (g * 3 + 210) / 4; b = (b * 3 + 160) / 4; }
+				else if (L >= 4) { r = (r * 3 + 160) / 4; g = (g * 3 + 140) / 4; b = (b * 3 + 220) / 4; }
 				sh = .82f + LayerHt(c, L) * .04f;
 				if (c.gimm == GM_HEAL) { r = 80; g = 230; b = 120; sh = 1.f; }
 				else if (c.gimm == GM_MIGHT) { r = 255; g = 200; b = 60; sh = 1.f; }
@@ -9303,6 +9347,10 @@ void Renderer::BuildMinimap(const Map& m)
 				int pr = rr, pg = gg, pb = bb;
 				if (ox == 0 || oy == 0) { pr = pr * 3 / 4; pg = pg * 3 / 4; pb = pb * 3 / 4; }
 				if (tr == T_WATER && ((ox + oy) & 1)) { pr = min(255, pr + 28); pg = min(255, pg + 24); pb = min(255, pb + 18); }
+				if (tr == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4) {
+					int dk = 14 * (int)c.gparam;
+					pr = max(0, pr - dk); pg = max(0, pg - dk); pb = max(0, pb - dk / 2);
+				}
 				px[(size_t)(z * 4 + oy) * MINI_S + (x * 4 + ox)] = BGRA(pr, pg, pb);
 			}
 		}
@@ -9456,7 +9504,11 @@ BOOL Renderer::ApplyPost()
 	gr.dissolve = (float)m_wx;
 	gr.flash = (float)m_hour;
 	ID3D11PixelShader* grade = (m_quality == 4 && m_psGradeTiny) ? m_psGradeTiny : m_psGrade;
+	ID3D11ShaderResourceView* zBind = (TacQFx(m_quality) && m_zSrv) ? m_zSrv : NULL;
+	m_ctx->PSSetShaderResources(2, 1, &zBind);
 	fs(grade, src, m_blASrv, m_bbRtv, m_w, m_h, gr, 0);
+	ID3D11ShaderResourceView* zOff = NULL;
+	m_ctx->PSSetShaderResources(2, 1, &zOff);
 	m_ctx->PSSetShaderResources(0, 2, unb);
 	ID3D11SamplerState* ss[2] = { m_sLin, m_sCmp };
 	m_ctx->PSSetSamplers(0, 2, ss);

@@ -641,14 +641,16 @@ public:
 	static void PaletteUV(int idx, float& u, float& v);  // 16x16 パレット
 	static DWORD PaletteColor(int idx);
 private:
-	ID3D11Texture2D* m_texMiniL[3];
-	ID3D11ShaderResourceView* m_srvMiniL[3];
+	ID3D11Texture2D* m_texMiniL[LAY_N];
+	ID3D11ShaderResourceView* m_srvMiniL[LAY_N];
 	int m_miniN;
 
 	// 地形
 	GpuMesh m_terrain;
 	GpuMesh m_cover1[16];
 	GpuMesh m_cover2[16];
+	GpuMesh m_cover3[16];
+	GpuMesh m_cover4[16];
 	int m_fadeAbove, m_fadeX, m_fadeZ;
 	GpuMesh m_water;
 	GpuMesh m_lava;
