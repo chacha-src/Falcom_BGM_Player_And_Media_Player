@@ -28,6 +28,7 @@ struct Library {
 	GpuMesh crown;
 	GpuMesh ring;
 	GpuMesh orb;
+	GpuMesh ice;
 	int ready;
 };
 
@@ -79,6 +80,8 @@ struct Actor {
 	Pose pose;
 	int poseValid;
 	const void* modelPtr;   // ActorPose 時に設定
+	int poseHold;           // 0なし 1座り 2寝 3凍結（動き止め）
+	float blinkSave;        // 0未満は未保存。凍結中は瞬きを止める
 };
 
 void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c);

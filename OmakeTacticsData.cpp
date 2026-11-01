@@ -2372,6 +2372,36 @@ static void RaiseStartBase(int* base)
 	base[S_LUK] += 2;
 }
 static int s_sheet = 0;
+static void FillMoreLearn(ClassDef& d, int salt)
+{
+	int off = 0;
+	if (d.group == G_SWIFT) off = 24;
+	else if (d.group == G_MAGIC) off = 48;
+	else if (d.group == G_HOLY) off = 72;
+	int tier = d.tier < 1 ? 1 : d.tier;
+	int arrive = tier <= 1 ? 1 : PromoteLevel(tier - 1);
+	int next = PromoteLevel(tier);
+	if (next >= 9999 || next <= arrive) next = arrive + 80;
+	int span = next - arrive;
+	int want = tier >= 8 ? 2 : 4;
+	int start = (salt * 5) % 24;
+	int placed = 0;
+	for (int i = 0; i < 24 && placed < want; i++) {
+		int sk = SKL_MORE0 + off + ((start + i) % 24);
+		int dup = 0;
+		for (int j = 0; j < LEARN_N; j++) if (d.learn[j].skill == sk) dup = 1;
+		if (dup) continue;
+		int slot = -1;
+		for (int j = 0; j < LEARN_N; j++) if (d.learn[j].skill < 0 || d.learn[j].lv <= 0) { slot = j; break; }
+		if (slot < 0) return;
+		int lv = arrive + span * (placed + 1) / (want + 1);
+		if (lv <= arrive) lv = arrive + 1;
+		if (lv >= next) lv = next - 1;
+		d.learn[slot].lv = lv;
+		d.learn[slot].skill = sk;
+		placed++;
+	}
+}
 static void EnsureSheets()
 {
 	if (s_sheet) return;
@@ -2446,9 +2476,11 @@ static void EnsureSheets()
 	put(C_SOLDIER, 7, 7, SKL_CLEANCUT);
 	put(C_PALADIN, 7, 24, SKL_CLEANCUT);
 	put(C_HERO, 9, 44, SKL_CLEANCUT);
-	for (int c = 0; c < C_PLAYER_COUNT; c++)
+	for (int c = 0; c < C_PLAYER_COUNT; c++) {
 		for (int s = 0; s < LEARN_N; s++)
 			if (kClass[c].learn[s].lv <= 0) kClass[c].learn[s].skill = -1;
+		FillMoreLearn(kClass[c], c);
+	}
 }
 static void BuildThird()
 {
@@ -2477,6 +2509,8 @@ static void BuildThird()
 	static const int skS[8] = { SKL_SHADOWSTEP, SKL_SMOKESCREEN, SKL_VITALSTAB, SKL_BACKCUT, SKL_NIGHTRUN, SKL_SILENTKILL, SKL_DAGGERRAIN, SKL_DEATHMARK };
 	fill(s_third[0], kClass[C_BERSERKER], TX_CL_GLADIATOR, TX_CLD_GLADIATOR, 12, bG, gG, lvG, skG);
 	fill(s_third[1], kClass[C_ASSASSIN], TX_CL_SHADOW, TX_CLD_SHADOW, 9, bS, gS, lvS, skS);
+	FillMoreLearn(s_third[0], 30);
+	FillMoreLearn(s_third[1], 37);
 	s_thirdOk = 1;
 }
 static void BuildExt()
@@ -2512,6 +2546,7 @@ static void BuildExt()
 			for (int i = 0; i < LEARN_N; i++) { d.learn[i].lv = 0; d.learn[i].skill = -1; }
 			d.learn[0].lv = lv;
 			d.learn[0].skill = kExtSkill[line][r];
+			FillMoreLearn(d, line * 7 + r + 3);
 		}
 	}
 	s_extOk = 1;
@@ -2577,6 +2612,7 @@ static void BuildJobs()
 			if (late >= next) late = next - 1;
 			d.learn[0].lv = late; d.learn[0].skill = skArt;
 		}
+		FillMoreLearn(d, i + 11);
 	}
 	s_jobOk = 1;
 }
@@ -2681,24 +2717,24 @@ bool IsUltimateSkill(int skill)
 // ============================================================ スキル
 // name, desc, kind, mp, power, rMin, rMax(-1=武器射程, 0=自分中心), area, element, hits, critBonus, effect, enemyOnly
 static const SkillDef kSkill[] = {
-	{ TX_SK_POWER, TX_SKD_POWER, SK_PHYS, 4, 100, -1, -1, 0, EL_NONE, 2, 0, EF_NONE, 0 },
+	{ TX_SK_POWER, TX_SKD_POWER, SK_PHYS, 4, 100, -1, -1, 0, EL_NONE, 4, 0, EF_NONE, 0 },
 	{ TX_SK_DOUBLE, TX_SKD_DOUBLE, SK_PHYS, 6, 80, -1, -1, 0, EL_NONE, 2, 0, EF_NONE, 0 },
 	{ TX_SK_WHIRL, TX_SKD_WHIRL, SK_PHYS, 8, 100, 0, 0, 1, EL_WIND, 1, 0, EF_NONE, 0 },
 	{ TX_SK_PIERCE, TX_SKD_PIERCE, SK_PHYS, 6, 90, -1, -1, 0, EL_NONE, 2, 0, EF_IGNDEF, 0 },
 	{ TX_SK_STITCH, TX_SKD_STITCH, SK_PHYS, 6, 80, -1, -1, 0, EL_DARK, 2, 0, EF_SLOW, 0 },
-	{ TX_SK_VITAL, TX_SKD_VITAL, SK_PHYS, 5, 90, -1, -1, 0, EL_NONE, 2, 40, EF_NONE, 0 },
+	{ TX_SK_VITAL, TX_SKD_VITAL, SK_PHYS, 5, 90, -1, -1, 0, EL_NONE, 3, 40, EF_NONE, 0 },
 	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 90, -1, -1, 0, EL_EARTH, 2, 0, EF_STUN, 0 },
 	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 140, -1, -1, 0, EL_FIRE, 2, 10, EF_NONE, 0 },
 	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 10, 90, 1, 2, 1, EL_HOLY, 2, 5, EF_NONE, 0 },
 	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 90, 2, 5, 1, EL_WIND, 2, 0, EF_NONE, 0 },
 	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 110, -1, -1, 0, EL_DARK, 2, 20, EF_POISON, 0 },
-	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 16, 140, -1, -1, 0, EL_HOLY, 2, 20, EF_NONE, 0 },
-	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 2, 0, EF_NONE, 0 },
-	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_SLEEP, 0 },
-	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 2, 0, EF_STUN, 0 },
-	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 14, 2, 6, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 16, 140, -1, -1, 0, EL_HOLY, 3, 20, EF_NONE, 0 },
+	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 2, 0, EF_BURN, 0 },
+	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_FREEZE, 0 },
+	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 4, 0, EF_STUN, 0 },
+	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 14, 2, 6, 3, EL_FIRE, 1, 0, EF_BURN, 0 },
 	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 2, 0, EF_NONE, 0 },
-	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 2, 0, EF_NONE, 0 },
+	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 3, 0, EF_NONE, 0 },
 	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 2, 0, EF_CONFUSE, 0 },
 	{ TX_SK_HEAL, TX_SKD_HEAL, SK_HEAL, 4, 12, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HIGHHEAL, TX_SKD_HIGHHEAL, SK_HEAL, 9, 26, 0, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
@@ -2714,7 +2750,7 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_P_REGEN, TX_SKD_P_REGEN, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_P_CRIT, TX_SKD_P_CRIT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_E_VENOM, TX_SKD_E_VENOM, SK_PHYS, 4, 120, 1, 1, 0, EL_POISON, 1, 0, EF_POISON, 1 },
-	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_NONE, 1 },
+	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_BURN, 1 },
 	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 0, 160, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_E_DRAIN, TX_SKD_E_DRAIN, SK_PHYS, 5, 100, 1, 1, 0, EL_DARK, 1, 0, EF_DRAIN, 1 },
 	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 0, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLEEP, 1 },
@@ -2730,7 +2766,7 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_RENEW, TX_SKD_RENEW, SK_HEAL, 12, 40, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 0, 1, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
 	{ TX_SK_GODSLASH, TX_SKD_GODSLASH, SK_PHYS, 22, 150, -1, -1, 0, EL_HOLY, 2, 20, EF_NONE, 0 },
-	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 18, 1, 4, 1, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 18, 1, 4, 1, EL_DARK, 1, 0, EF_BLIND, 0 },
 	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 16, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_TRANSMUTE, TX_SKD_TRANSMUTE, SK_BUFF, 4, 0, 0, 1, 0, EL_EARTH, 1, 0, EF_BUFF_ATK, 0 },
 };
@@ -2741,20 +2777,20 @@ static const SkillDef kWide[] = {
 	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 70, 2, 6, 4, EL_HOLY, 2, 0, EF_NONE, 0 },
 	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 100, 0, 0, 2, EL_WIND, 1, 0, EF_SLOW, 0 },
 	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_SLEEP, 0 },
+	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 1, 0, EF_BURN, 0 },
+	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_FREEZE, 0 },
 	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_STUN, 0 },
 	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 14, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
-	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_BLEED, 0, SH_LINE },
 	{ TX_SK_FANSLASH, TX_SKD_FANSLASH, SK_PHYS, 12, 80, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 90, 2, 6, 5, EL_WIND, 2, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 80, 2, 6, 3, EL_WIND, 2, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 1, 0, EF_NONE, 0, SH_LINE },
-	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_SLEEP, 0, SH_LINE },
+	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_FREEZE, 0, SH_LINE },
 	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_STUN, 0, SH_LINE },
 	{ TX_SK_HEALBEAM, TX_SKD_HEALBEAM, SK_HEAL, 12, 14, 1, 3, 4, EL_HOLY, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_HEALFAN, TX_SKD_HEALFAN, SK_HEAL, 14, 12, 1, 2, 3, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN },
-	{ TX_SK_RAMPAGE, TX_SKD_RAMPAGE, SK_PHYS, 8, 70, -1, -1, 0, EL_NONE, 3, 0, EF_NONE, 0 },
+	{ TX_SK_RAMPAGE, TX_SKD_RAMPAGE, SK_PHYS, 8, 70, -1, -1, 0, EL_NONE, 6, 0, EF_NONE, 0 },
 	{ TX_SK_EARTHREND, TX_SKD_EARTHREND, SK_PHYS, 10, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_BLOODAXE, TX_SKD_BLOODAXE, SK_PHYS, 8, 130, -1, -1, 0, EL_DARK, 1, 0, EF_DRAIN, 0 },
 	{ TX_SK_IRONHOWL, TX_SKD_IRONHOWL, SK_BUFF, 8, 0, 0, 0, 1, EL_NONE, 1, 0, EF_BUFF_DEF, 0 },
@@ -2767,7 +2803,7 @@ static const SkillDef kWide[] = {
 	{ TX_SK_BREAKKING, TX_SKD_BREAKKING, SK_PHYS, 16, 140, 1, 1, 3, EL_EARTH, 1, 0, EF_IGNDEF, 0, SH_FAN },
 	{ TX_SK_STEELGOD, TX_SKD_STEELGOD, SK_PHYS, 18, 160, 0, 0, 2, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_HEGEFIST, TX_SKD_HEGEFIST, SK_PHYS, 18, 160, -1, -1, 0, EL_NONE, 2, 10, EF_NONE, 0 },
-	{ TX_SK_PEERLESS, TX_SKD_PEERLESS, SK_PHYS, 22, 90, -1, -1, 0, EL_NONE, 4, 15, EF_NONE, 0 },
+	{ TX_SK_PEERLESS, TX_SKD_PEERLESS, SK_PHYS, 22, 90, -1, -1, 0, EL_NONE, 8, 15, EF_NONE, 0 },
 	{ TX_SK_ENDFIST, TX_SKD_ENDFIST, SK_PHYS, 28, 360, -1, -1, 0, EL_HOLY, 1, 25, EF_IGNDEF, 0 },
 	{ TX_SK_SHADOWSTEP, TX_SKD_SHADOWSTEP, SK_PHYS, 6, 140, -1, -1, 0, EL_WIND, 1, 30, EF_NONE, 0 },
 	{ TX_SK_SMOKESCREEN, TX_SKD_SMOKESCREEN, SK_BUFF, 8, 0, 0, 0, 1, EL_WIND, 1, 0, EF_BUFF_AGI, 0 },
@@ -2777,7 +2813,7 @@ static const SkillDef kWide[] = {
 	{ TX_SK_SILENTKILL, TX_SKD_SILENTKILL, SK_PHYS, 16, 280, -1, -1, 0, EL_DARK, 1, 35, EF_IGNDEF, 0 },
 	{ TX_SK_DAGGERRAIN, TX_SKD_DAGGERRAIN, SK_PHYS, 12, 110, 1, 3, 3, EL_WIND, 1, 10, EF_NONE, 0, SH_FAN },
 	{ TX_SK_DEATHMARK, TX_SKD_DEATHMARK, SK_PHYS, 8, 90, 1, 2, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
-	{ TX_SK_GHOSTHAND, TX_SKD_GHOSTHAND, SK_PHYS, 10, 110, -1, -1, 0, EL_WIND, 2, 20, EF_NONE, 0 },
+	{ TX_SK_GHOSTHAND, TX_SKD_GHOSTHAND, SK_PHYS, 10, 110, -1, -1, 0, EL_WIND, 5, 20, EF_NONE, 0 },
 	{ TX_SK_SHADEEMP, TX_SKD_SHADEEMP, SK_PHYS, 14, 130, 1, 2, 3, EL_DARK, 1, 10, EF_NONE, 0, SH_FAN },
 	{ TX_SK_TRACELESS, TX_SKD_TRACELESS, SK_BUFF, 10, 0, 0, 0, 2, EL_WIND, 1, 0, EF_BUFF_AGI, 0 },
 	{ TX_SK_NIGHTEMP, TX_SKD_NIGHTEMP, SK_PHYS, 16, 160, 1, 3, 5, EL_DARK, 1, 0, EF_POISON, 0, SH_LINE },
@@ -2831,7 +2867,7 @@ static void BuildArts()
 		d.effect = EF_NONE;
 		if (pat == 1) { d.area = 1; d.power = 7 + lv / 3; d.rMax = 4; }
 		else if (pat == 2) { d.kind = SK_PHYS; d.power = 120 + lv * 2; d.rMin = -1; d.rMax = -1; }
-		else if (pat == 3) { d.kind = SK_PHYS; d.power = 70 + lv; d.hits = 2; d.rMin = -1; d.rMax = -1; }
+		else if (pat == 3) { d.kind = SK_PHYS; d.power = 70 + lv; d.hits = lv >= 24 ? 10 : (lv >= 12 ? 6 : 4); d.rMin = -1; d.rMax = -1; }
 		else if (pat == 4) { d.kind = SK_HEAL; d.power = 12 + lv / 2; d.rMin = 0; d.rMax = 2; }
 		else if (pat == 5) { d.kind = SK_BUFF; d.power = 0; d.rMin = 0; d.rMax = 2; d.effect = EF_BUFF_DEF; }
 		else if (pat == 6) { d.area = 1; d.power = 6 + lv / 4; d.effect = EF_SLOW; }
@@ -2856,7 +2892,7 @@ static void BuildArts()
 			else if (role == 2) { d.kind = SK_MAGIC; d.mp = 14; d.power = 16; d.rMin = 2; d.rMax = 5; d.area = 2; }
 			else if (role == 3) { d.kind = SK_BUFF; d.mp = 8; d.rMin = 0; d.rMax = 0; d.area = 1; d.effect = EF_BUFF_AGI; d.element = EL_WIND; }
 			else if (role == 4) { d.kind = SK_MAGIC; d.mp = 12; d.power = 13; d.rMin = 1; d.rMax = 5; d.area = 5; d.shape = SH_LINE; }
-			else if (role == 5) { d.kind = SK_PHYS; d.mp = 12; d.power = 85; d.rMin = 1; d.rMax = 1; d.area = 3; d.hits = 2; d.critBonus = 10; d.shape = SH_FAN; }
+			else if (role == 5) { d.kind = SK_PHYS; d.mp = 12; d.power = 85; d.rMin = 1; d.rMax = 1; d.area = 3; d.hits = 4; d.critBonus = 10; d.shape = SH_FAN; }
 			else if (role == 6) { d.kind = SK_MAGIC; d.mp = 14; d.power = 11; d.rMin = 1; d.rMax = 4; d.area = 2; d.effect = EF_SLOW; }
 			else { d.kind = SK_MAGIC; d.mp = 22; d.power = 22; d.rMin = 0; d.rMax = 0; d.area = 3; d.effect = EF_STUN; }
 		}
@@ -2913,20 +2949,27 @@ const SkillDef& SkillInfo(int s)
 		return s_art[s - SKL_ART0];
 	}
 	if (s >= SKL_FORM0 && s < SKL_FORMN) return kForm[s - SKL_FORM0];
-	if (s >= SKL_GALE && s < SKL_COUNT) {
+	if (s >= SKL_MORE0 && s < SKL_COUNT) {
+		static const SkillDef kMore[] = {
+#include "tactics_src/skill_more_defs.inc"
+		};
+		static_assert(sizeof(kMore) / sizeof(kMore[0]) == (size_t)(SKL_COUNT - SKL_MORE0), "more skill table");
+		return kMore[s - SKL_MORE0];
+	}
+	if (s >= SKL_GALE && s < SKL_MORE0) {
 		static const SkillDef ex[] = {
 			{ TX_SK_GALE, TX_SKD_GALE, SK_MAGIC, 6, 12, 1, 3, 0, EL_WIND, 2, 0, EF_NONE, 0 },
 			{ TX_SK_MIASMA, TX_SKD_MIASMA, SK_MAGIC, 6, 12, 1, 3, 0, EL_POISON, 2, 0, EF_POISON, 0 },
-			{ TX_SK_ELFIRE, TX_SKD_ELFIRE, SK_PHYS, 6, 90, -1, -1, 0, EL_FIRE, 2, 0, EF_NONE, 0 },
-			{ TX_SK_ELICE, TX_SKD_ELICE, SK_PHYS, 6, 90, -1, -1, 0, EL_ICE, 2, 0, EF_NONE, 0 },
+			{ TX_SK_ELFIRE, TX_SKD_ELFIRE, SK_PHYS, 6, 90, -1, -1, 0, EL_FIRE, 2, 0, EF_BURN, 0 },
+			{ TX_SK_ELICE, TX_SKD_ELICE, SK_PHYS, 6, 90, -1, -1, 0, EL_ICE, 2, 0, EF_FREEZE, 0 },
 			{ TX_SK_ELTHUNDER, TX_SKD_ELTHUNDER, SK_PHYS, 6, 90, -1, -1, 0, EL_THUNDER, 2, 0, EF_NONE, 0 },
 			{ TX_SK_ELHOLY, TX_SKD_ELHOLY, SK_PHYS, 6, 90, -1, -1, 0, EL_HOLY, 2, 0, EF_NONE, 0 },
-			{ TX_SK_ELDARK, TX_SKD_ELDARK, SK_PHYS, 6, 90, -1, -1, 0, EL_DARK, 2, 0, EF_NONE, 0 },
+			{ TX_SK_ELDARK, TX_SKD_ELDARK, SK_PHYS, 6, 90, -1, -1, 0, EL_DARK, 2, 0, EF_SILENCE, 0 },
 			{ TX_SK_ELWIND, TX_SKD_ELWIND, SK_PHYS, 6, 90, -1, -1, 0, EL_WIND, 2, 0, EF_NONE, 0 },
 			{ TX_SK_ELEATH, TX_SKD_ELEATH, SK_PHYS, 6, 90, -1, -1, 0, EL_EARTH, 2, 0, EF_NONE, 0 },
 			{ TX_SK_ELPOISON, TX_SKD_ELPOISON, SK_PHYS, 6, 90, -1, -1, 0, EL_POISON, 2, 0, EF_POISON, 0 },
 		};
-		static_assert(sizeof(ex) / sizeof(ex[0]) == SKL_COUNT - SKL_GALE, "extra skill table");
+		static_assert(sizeof(ex) / sizeof(ex[0]) == SKL_MORE0 - SKL_GALE, "extra skill table");
 		return ex[s - SKL_GALE];
 	}
 	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0) {
@@ -3440,6 +3483,7 @@ void CharRecalcInit(CharData& c)
 	c.exp = 0;
 	c.skills = 0;
 	memset(c.reserved, 0, sizeof(c.reserved));
+	memset(c.skillBits, 0, sizeof(c.skillBits));
 	CharGrantReached(c);
 	JobPathClear(c);
 	if (c.cls >= 0) c.jobPath[0] = c.cls;
@@ -3479,19 +3523,29 @@ void CharRecalcProgress(CharData& c)
 
 void CharGiveSkill(CharData& c, int s)
 {
-	if (s < 0 || s >= 320) return;
-	if (s < 64) { c.skills |= 1ull << s; return; }
-	int i = s - 64;
-	int w = i >> 5;
-	if (w >= 0 && w < 6) c.reserved[w] |= (int)(1u << (i & 31));
+	if (s < 0 || s >= 24 * 32) return;
+	int w = s >> 5;
+	int b = s & 31;
+	if (w >= 0 && w < 24) c.skillBits[w] |= (int)(1u << b);
+	if (s < 64) c.skills |= 1ull << s;
+	else if (s < 256) {
+		int i = s - 64;
+		int rw = i >> 5;
+		if (rw >= 0 && rw < 6) c.reserved[rw] |= (int)(1u << (i & 31));
+	}
 }
 static void CharTakeSkill(CharData& c, int s)
 {
-	if (s < 0 || s >= 320) return;
-	if (s < 64) { c.skills &= ~(1ull << s); return; }
-	int i = s - 64;
-	int w = i >> 5;
-	if (w >= 0 && w < 6) c.reserved[w] &= ~(int)(1u << (i & 31));
+	if (s < 0 || s >= 24 * 32) return;
+	int w = s >> 5;
+	int b = s & 31;
+	if (w >= 0 && w < 24) c.skillBits[w] &= ~(int)(1u << b);
+	if (s < 64) c.skills &= ~(1ull << s);
+	else if (s < 256) {
+		int i = s - 64;
+		int rw = i >> 5;
+		if (rw >= 0 && rw < 6) c.reserved[rw] &= ~(int)(1u << (i & 31));
+	}
 }
 static int SupportAreaCap(const ClassDef& cd)
 {
@@ -3504,12 +3558,16 @@ static int SupportAreaCap(const ClassDef& cd)
 
 bool CharHasSkill(const CharData& c, int s)
 {
-	if (s < 0 || s >= 320) return false;
+	if (s < 0 || s >= 24 * 32) return false;
+	int w = s >> 5;
+	if (c.skillBits[w] & (int)(1u << (s & 31))) return true;
 	if (s < 64) return (c.skills & (1ull << s)) != 0;
-	int i = s - 64;
-	int w = i >> 5;
-	if (w < 0 || w >= 6) return false;
-	return (c.reserved[w] & (int)(1u << (i & 31))) != 0;
+	if (s < 256) {
+		int i = s - 64;
+		int rw = i >> 5;
+		if (rw >= 0 && rw < 6) return (c.reserved[rw] & (int)(1u << (i & 31))) != 0;
+	}
+	return false;
 }
 
 int CharLearnAt(const CharData& c, int lv)
@@ -3721,6 +3779,26 @@ int JobPathCount(const CharData& c)
 	for (; n < JOB_PATH_N; n++) if (c.jobPath[n] < 0) break;
 	return n;
 }
+void JobPathText(const CharData& c, wchar_t* out, int cap)
+{
+	if (!out || cap <= 0) return;
+	out[0] = 0;
+	int n = JobPathCount(c);
+	int cls[JOB_PATH_N];
+	int cn = 0;
+	for (int i = 0; i < n && cn < JOB_PATH_N; i++) cls[cn++] = c.jobPath[i];
+	if (cn == 0 || cls[cn - 1] != c.cls) {
+		if (cn < JOB_PATH_N) cls[cn++] = c.cls;
+	}
+	for (int i = 0; i < cn; i++) {
+		const wchar_t* nm = ClassTitle(cls[i]);
+		if (!nm || !nm[0]) nm = TT(ClassInfo(cls[i]).nameTx);
+		wchar_t bit[80];
+		swprintf_s(bit, TT(TX_JOB_NTH), i + 1, nm);
+		if (i && wcslen(out) + 3 < (size_t)cap) wcscat_s(out, cap, L" → ");
+		if (wcslen(out) + wcslen(bit) + 1 < (size_t)cap) wcscat_s(out, cap, bit);
+	}
+}
 int JobStepsForLevel(int lv)
 {
 	int steps = 1;
@@ -3862,6 +3940,7 @@ void JobRebook(CharData& c, const int* path, int n)
 	for (int i = 0; i < 6; i++) c.reserved[i] = 0;
 	c.reserved[6] = gearW;
 	c.reserved[7] = gearA;
+	memset(c.skillBits, 0, sizeof(c.skillBits));
 	JobPathClear(c);
 	for (int i = 0; i < n; i++) c.jobPath[i] = path[i];
 	c.jobDone = 1;
@@ -4890,6 +4969,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			dm *= 0.5f * 1.5f;
 		} else if (sd && sd->hits > 1) dm /= (float)sd->hits;
 		hit = 96 + UnitStat(a, S_DEX) / 2 - UnitStat(d, S_AGI) / 3 - tavo / 3 + (sd ? 6 : 0);
+		if (a.blind > 0) hit -= 28;
 		crit = 0;
 	} else {
 		int atk = UnitStat(a, S_STR) + UnitWeaponPow(a);
@@ -4909,6 +4989,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		dm = atk * mult - df;
 		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (UnitHasPas(d, PAS_EVADE2) ? 16 : 0);
 		hit = 90 + UnitStat(a, S_DEX) + UnitStat(a, S_LUK) / 4 - evade + (sd ? 6 : 0);
+		if (a.blind > 0) hit -= 28;
 		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
 			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT2) ? 18 : 0);
 		crit = Clampi(crit, 0, sd ? 80 : 50);
@@ -4977,6 +5058,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 	}
 	{
 		int el = sd ? sd->element : EL_NONE;
+		dm *= AilmentBreak(d, el);
 		if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE2)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE2))
 			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER2)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY2))
 			|| (el == EL_DARK && UnitHasPas(d, PAS_DARK2)))
@@ -4987,6 +5069,27 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			dm *= .7f;
 	}
 	dmg = max(1, (int)roundf(dm));
+}
+
+float AilmentBreak(const Unit& d, int el)
+{
+	if (el == EL_NONE) return 1.f;
+	// 炎と氷は互いに反対。炎上には氷、凍結には炎が倍。
+	if (d.burn > 0 && el == EL_ICE) return 2.f;
+	if (d.freeze > 0 && el == EL_FIRE) return 2.f;
+	// 雷・風・土。スタンは風、混乱は土、鈍足は雷。
+	if (d.stun > 0 && el == EL_WIND) return 2.f;
+	if (d.confuse > 0 && el == EL_EARTH) return 2.f;
+	if (d.slow > 0 && el == EL_THUNDER) return 2.f;
+	// 毒・聖・闇。毒は聖、盲目は毒、沈黙は闇。
+	if (d.poison > 0 && el == EL_HOLY) return 2.f;
+	if (d.blind > 0 && el == EL_POISON) return 2.f;
+	if (d.silence > 0 && el == EL_DARK) return 2.f;
+	// 裂傷・睡眠・防御低下。裂傷は風、睡眠は雷、防御低下は土。
+	if (d.bleed > 0 && el == EL_WIND) return 2.f;
+	if (d.sleep > 0 && el == EL_THUNDER) return 2.f;
+	if (d.defDown > 0 && el == EL_EARTH) return 2.f;
+	return 1.f;
 }
 
 static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
@@ -5358,6 +5461,7 @@ static bool FormReady(const Battle& b, int ui, int skill)
 bool SkillUsable(const Battle& b, int ui, int skill)
 {
 	const Unit& u = b.u[ui];
+	if (u.silence > 0 && (IsSummonId(skill) || SkillInfo(skill).kind == SK_MAGIC)) return false;
 	if (IsFormSkill(skill)) {
 		if (!UnitHasSkill(u, skill) || u.mp < SkillInfo(skill).mp) return false;
 		return FormReady(b, ui, skill);
@@ -5406,7 +5510,8 @@ bool SkillWorth(const Battle& b, int ui, int skill)
 			const Unit& t = b.u[tg[i]];
 			if (s.effect == EF_RAISE) return true;
 			BOOL hurt = t.hp < t.ch.stat[S_HP];
-			BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0;
+			BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
+				|| t.freeze > 0 || t.burn > 0 || t.bleed > 0 || t.blind > 0 || t.silence > 0;
 			if (s.effect == EF_CLEANSE) { if (hurt || ail) return true; }
 			else if (hurt) return true;
 		}
@@ -5517,7 +5622,12 @@ static int StageEnemyLevel(int stage)
 
 static bool TurnFx(int effect)
 {
-	return effect == EF_SLOW || effect == EF_SLEEP || effect == EF_STUN || effect == EF_CONFUSE;
+	return effect == EF_SLOW || effect == EF_SLEEP || effect == EF_STUN || effect == EF_CONFUSE || effect == EF_FREEZE;
+}
+static void ClearAilments(Unit& d)
+{
+	d.sleep = d.confuse = d.stun = d.poison = d.slow = d.defDown = 0;
+	d.freeze = d.burn = d.bleed = d.blind = d.silence = 0;
 }
 
 // すでに付いている異常は伸ばさない。鈍足・睡眠・スタン・混乱は、動けるようになるまで重ねない。
@@ -5551,9 +5661,30 @@ static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
 		if (UnitHasPas(d, PAS_NOSTUN) || UnitAilmentHeld(d)) return false;
 		d.stun = 1;
 		return true;
+	case EF_FREEZE:
+		if (UnitHasPas(d, PAS_NOSLEEP) || UnitAilmentHeld(d)) return false;
+		d.freeze = 2;
+		return true;
+	case EF_BURN:
+		if (d.burn > 0) return false;
+		d.burn = turns;
+		return true;
+	case EF_BLEED:
+		if (d.bleed > 0) return false;
+		d.bleed = turns;
+		return true;
+	case EF_BLIND:
+		if (d.blind > 0) return false;
+		d.blind = turns;
+		return true;
+	case EF_SILENCE:
+		if (d.silence > 0) return false;
+		d.silence = turns;
+		return true;
 	case EF_CLEANSE: {
-		bool had = d.poison > 0 || d.sleep > 0 || d.confuse > 0 || d.stun > 0 || d.slow > 0 || d.defDown > 0;
-		d.poison = d.sleep = d.confuse = d.stun = d.slow = d.defDown = 0;
+		bool had = d.poison > 0 || d.sleep > 0 || d.confuse > 0 || d.stun > 0 || d.slow > 0 || d.defDown > 0
+			|| d.freeze > 0 || d.burn > 0 || d.bleed > 0 || d.blind > 0 || d.silence > 0;
+		ClearAilments(d);
 		return had;
 	}
 	case EF_BUFF_DEF: d.buffDef = 3; return true;
@@ -5710,7 +5841,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					if (d.hp <= 0) {
 						if (!d.pasUsed && UnitHasPas(d, PAS_GUARD)) { d.hp = 1; d.pasUsed = 1; }
 						else if (GutsHold(d, a, r)) s.guts = 1;
-						else { d.hp = 0; d.sleep = d.confuse = d.stun = d.poison = d.slow = 0; s.kill = 1; }
+						else { d.hp = 0; ClearAilments(d); s.kill = 1; }
 					}
 					if (a.team != d.team && !held && !UnitHasPas(d, PAS_NOSLOW)) d.ct = max(0, d.ct - 500);
 				}
@@ -5769,7 +5900,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			if (y.hp <= 0) {
 				if (!y.pasUsed && UnitHasPas(y, PAS_GUARD)) { y.hp = 1; y.pasUsed = 1; }
 				else if (GutsHold(y, x, r)) s.guts = 1;
-				else { y.hp = 0; y.sleep = y.confuse = y.stun = y.poison = y.slow = 0; s.kill = 1; }
+				else { y.hp = 0; ClearAilments(y); s.kill = 1; }
 			}
 			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
 		}
@@ -6443,10 +6574,12 @@ void FinishAction(Battle& b, int ui, int moved, int acted)
 	b.turnCount++;
 }
 
-int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
+int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnOut, int* bleedOut)
 {
 	Unit& u = b.u[ui];
 	*healOut = 0; *poisonOut = 0;
+	if (burnOut) *burnOut = 0;
+	if (bleedOut) *bleedOut = 0;
 	int regenPct = 0;
 	if (UnitHasPas(u, PAS_REGEN2)) regenPct = 15;
 	else if (UnitHasSkill(u, SKL_P_REGEN)) regenPct = 10;
@@ -6471,13 +6604,14 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 		if (UnitHasPas(u, PAS_WAKE)) {
 			if (u.sleep > 0) u.sleep--;
 			if (u.stun > 0) u.stun--;
+			if (u.freeze > 0) u.freeze--;
 		}
 		if (mpr > 0 && u.ch.stat[S_MP] > 0) u.mp = min(u.ch.stat[S_MP], u.mp + mpr);
 	}
 	if (UnitHasPas(u, PAS_NOPOISON)) u.poison = 0;
 	if (UnitHasPas(u, PAS_NOSLOW)) u.slow = 0;
 	if (UnitHasPas(u, PAS_NODOWN)) u.defDown = 0;
-	if (UnitHasPas(u, PAS_NOSLEEP)) u.sleep = 0;
+	if (UnitHasPas(u, PAS_NOSLEEP)) { u.sleep = 0; u.freeze = 0; }
 	if (UnitHasPas(u, PAS_NOCONFUSE)) u.confuse = 0;
 	if (UnitHasPas(u, PAS_NOSTUN)) u.stun = 0;
 	if (u.poison > 0) {
@@ -6486,6 +6620,20 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 		*poisonOut = d;
 		u.poison--;
 	}
+	if (u.burn > 0) {
+		int d = max(1, u.ch.stat[S_HP] * 6 / 100);
+		u.hp = max(1, u.hp - d);
+		if (burnOut) *burnOut = d;
+		u.burn--;
+	}
+	if (u.bleed > 0) {
+		int d = max(1, u.ch.stat[S_HP] * 4 / 100);
+		u.hp = max(1, u.hp - d);
+		if (bleedOut) *bleedOut = d;
+		u.bleed--;
+	}
+	if (u.blind > 0) u.blind--;
+	if (u.silence > 0) u.silence--;
 	if (u.slow > 0) u.slow--;
 	if (u.buffDef > 0) u.buffDef--;
 	if (u.buffAgi > 0) u.buffAgi--;
@@ -7111,7 +7259,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 							if (IsFormSkill(s)) heal = (int)(heal * FormAllyMul(b, u, s, u.x, u.z));
 							h += min(miss, heal);
 						}
-						if (sd.effect == EF_CLEANSE && (q.poison > 0 || q.sleep > 0 || q.confuse > 0 || q.stun > 0 || q.slow > 0 || q.defDown > 0)) h += 48;
+						if (sd.effect == EF_CLEANSE && (q.poison > 0 || q.sleep > 0 || q.confuse > 0 || q.stun > 0 || q.slow > 0 || q.defDown > 0 || q.freeze > 0 || q.burn > 0 || q.bleed > 0 || q.blind > 0 || q.silence > 0)) h += 48;
 					}
 					if (h <= 0) continue;
 					sc += h * 1.2f;
@@ -7965,7 +8113,7 @@ bool SlotExportTo(int slot, const wchar_t* path)
 	BYTE b4[4];
 	TacPut32(b4, 0x50434154u);
 	bool fit = put(b4, 4);
-	TacPut32(b4, 1);
+	TacPut32(b4, 2);
 	fit = fit && put(b4, 4);
 	wchar_t nm[TAC_SLOT_NAME];
 	memset(nm, 0, sizeof(nm));
@@ -8040,7 +8188,7 @@ bool SlotImportFrom(int slot, const wchar_t* path)
 	size_t got = ZSTD_decompress(plain, (size_t)need, comp, csz);
 	delete[] comp;
 	if (ZSTD_isError(got) || got != (size_t)need) { delete[] plain; return false; }
-	if (TacGet32(plain) != 0x50434154u || TacGet32(plain + 4) != 1) { delete[] plain; return false; }
+	if (TacGet32(plain) != 0x50434154u || (TacGet32(plain + 4) != 1 && TacGet32(plain + 4) != 2)) { delete[] plain; return false; }
 	wchar_t nm[TAC_SLOT_NAME];
 	memcpy(nm, plain + 8, sizeof(nm));
 	nm[TAC_SLOT_NAME - 1] = 0;
@@ -8322,7 +8470,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 6;
+	s.version = 7;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -8452,14 +8600,52 @@ struct SaveV5 {
 static_assert(sizeof(SaveV4) == sizeof(SaveV3) + 5 * sizeof(int), "編成 15 は version 3 より 5 枠");
 static_assert(sizeof(CharV5) == sizeof(CharV4) + 2 * sizeof(int), "お試しは職とレベルの2欄");
 static_assert(sizeof(SaveV5) == sizeof(SaveV4) + MAX_ROSTER * 2 * sizeof(int), "version 5 は名簿全員にお試し欄");
-static_assert(sizeof(CharData) == sizeof(CharV5) + (JOB_PATH_N + 1) * sizeof(int), "version 6 は職履歴");
-static_assert(sizeof(SaveData) == sizeof(SaveV5) + MAX_ROSTER * (JOB_PATH_N + 1) * sizeof(int), "version 6");
+#pragma pack(push, 4)
+struct CharV6 {
+	wchar_t name[NAME_LEN];
+	int used;
+	int gender;
+	int cls;
+	int lv;
+	int exp;
+	int stat[S_COUNT];
+	unsigned __int64 skills;
+	int body, hair, hairColor, outfit, hat, cape;
+	int kills, battles;
+	DWORD uid;
+	int reserved[8];
+	int trialFrom;
+	int trialLv;
+	int jobPath[12];
+	int jobDone;
+};
+struct SaveV6 {
+	DWORD magic;
+	int version;
+	CharV6 roster[MAX_ROSTER];
+	int party[MAX_PARTY];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+	int partyCap, rosterCap;
+};
+#pragma pack(pop)
+static_assert(sizeof(CharData) == sizeof(CharV5) + (JOB_PATH_N + 1) * sizeof(int) + (24 + 16) * sizeof(int), "version 7 は技ビットと余り");
+static_assert(sizeof(SaveData) == sizeof(SaveV5) + MAX_ROSTER * ((JOB_PATH_N + 1) + 24 + 16) * sizeof(int) + 32 * sizeof(int), "version 7");
+static_assert(sizeof(CharV6) + (24 + 16) * sizeof(int) == sizeof(CharData), "v6 キャラに技欄を足す");
 
 static int TacPeekClearBytes(FILE* fp, long sz)
 {
 	if (!fp) return 0;
 	if (sz == (long)sizeof(SaveData)) {
 		SaveData peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV6)) {
+		SaveV6 peek;
 		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
 			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
 	} else if (sz == (long)sizeof(SaveV5)) {
@@ -8537,6 +8723,39 @@ static void CopyCharV5(CharData& d, const CharV5& o)
 	d.trialLv = o.trialLv;
 	JobPathClear(d);
 	d.jobDone = 0;
+}
+static void MigrateSkillBits(CharData& d)
+{
+	d.skillBits[0] |= (int)(d.skills & 0xffffffffu);
+	d.skillBits[1] |= (int)(d.skills >> 32);
+	for (int i = 0; i < 6; i++) d.skillBits[2 + i] |= d.reserved[i];
+}
+static void CopyCharV6(CharData& d, const CharV6& o)
+{
+	memset(&d, 0, sizeof(d));
+	wcsncpy_s(d.name, o.name, _TRUNCATE);
+	d.used = o.used;
+	d.gender = o.gender;
+	d.cls = o.cls;
+	d.lv = o.lv;
+	d.exp = o.exp;
+	for (int s = 0; s < S_COUNT; s++) d.stat[s] = o.stat[s];
+	d.skills = o.skills;
+	d.body = o.body;
+	d.hair = o.hair;
+	d.hairColor = o.hairColor;
+	d.outfit = o.outfit;
+	d.hat = o.hat;
+	d.cape = o.cape;
+	d.kills = o.kills;
+	d.battles = o.battles;
+	d.uid = o.uid;
+	for (int i = 0; i < 8; i++) d.reserved[i] = o.reserved[i];
+	d.trialFrom = o.trialFrom;
+	d.trialLv = o.trialLv;
+	for (int i = 0; i < JOB_PATH_N; i++) d.jobPath[i] = o.jobPath[i];
+	d.jobDone = o.jobDone;
+	MigrateSkillBits(d);
 }
 static void CopyChar10(CharData& d, const CharSave10& o)
 {
@@ -8713,16 +8932,27 @@ bool SaveLoad(SaveData& s)
 				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
 			got = TRUE;
 		}
+	} else if (sz == (long)sizeof(SaveV6)) {
+		SaveV6 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 6) {
+			s.magic = o.magic;
+			for (int i = 0; i < MAX_ROSTER; i++) CopyCharV6(s.roster[i], o.roster[i]);
+			for (int i = 0; i < MAX_PARTY; i++) s.party[i] = o.party[i];
+			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
+				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
+				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
+			got = TRUE;
+		}
 	} else if (sz == (long)sizeof(SaveData)) {
 		SaveData t;
-		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 6) {
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 7) {
 			s = t;
 			got = TRUE;
 		}
 	}
 	fclose(fp);
 	if (!got) return false;
-	s.version = 6;
+	s.version = 7;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
@@ -8834,6 +9064,11 @@ const wchar_t* EffectWord(int ef)
 	case EF_POISON: return LangPick14(L"毒", L"Poison", L"Poison", L"Veleno", L"Veneno", L"독", L"毒", L"سم", L"Яд", L"Gift", L"Veneno", L"Gif", L"Trucizna", L"Zehir");
 	case EF_SLOW: return LangPick14(L"鈍足", L"Slow", L"Lenteur", L"Lentezza", L"Lentitud", L"둔화", L"迟缓", L"بطء", L"Замедление", L"Langsam", L"Lentidão", L"Traag", L"Spowolnienie", L"Yavaş");
 	case EF_DEFDOWN: return LangPick14(L"防御低下", L"Def down", L"Déf. basse", L"Dif. bassa", L"Def. baja", L"방어 저하", L"防御下降", L"دفاع منخفض", L"Ослабление", L"Abwehr runter", L"Def. baixa", L"Ver. omlaag", L"Obrona w dół", L"Savunma düşüş");
+	case EF_FREEZE: return LangPick14(L"凍結", L"Freeze", L"Gel", L"Gelo", L"Hielo", L"동결", L"冻结", L"تجمد", L"Заморозка", L"Frost", L"Gelo", L"Vorst", L"Zamrożenie", L"Donma");
+	case EF_BURN: return LangPick14(L"炎上", L"Burn", L"Brûlure", L"Ustione", L"Quemadura", L"염상", L"炎上", L"احتراق", L"Ожог", L"Brand", L"Queima", L"Brand", L"Oparzenie", L"Yanma");
+	case EF_BLEED: return LangPick14(L"裂傷", L"Bleed", L"Saignement", L"Squarcio", L"Hemorragia", L"열상", L"裂伤", L"نزف", L"Кровотечение", L"Blutung", L"Sangria", L"Bloeding", L"Krwawienie", L"Kanama");
+	case EF_BLIND: return LangPick14(L"盲目", L"Blind", L"Cécité", L"Cecità", L"Ceguera", L"실명", L"盲目", L"عمى", L"Слепота", L"Blind", L"Cegueira", L"Blind", L"Ślepota", L"Körlük");
+	case EF_SILENCE: return LangPick14(L"沈黙", L"Silence", L"Silence", L"Silenzio", L"Silencio", L"침묵", L"沉默", L"صمت", L"Молчание", L"Stille", L"Silêncio", L"Stilte", L"Milczenie", L"Sessizlik");
 	case EF_CLEANSE: return LangPick14(L"状態回復", L"Cleanse", L"Purge", L"Purifica", L"Purifica", L"상태 회복", L"状态恢复", L"تطهير", L"Очищение", L"Läutern", L"Purificar", L"Zuiveren", L"Oczyszczenie", L"Arınma");
 	default: return NULL;
 	}
@@ -8872,6 +9107,10 @@ void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap)
 	if (sd.effect == EF_POISON) swprintf_s(ail, L"%s 1-3 HP5%%", EffectWord(EF_POISON));
 	else if (sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN) swprintf_s(ail, L"%s 1-3", EffectWord(sd.effect));
 	else if (sd.effect == EF_SLEEP || sd.effect == EF_STUN) swprintf_s(ail, L"%s 1", EffectWord(sd.effect));
+	else if (sd.effect == EF_FREEZE) swprintf_s(ail, L"%s 2", EffectWord(EF_FREEZE));
+	else if (sd.effect == EF_BURN) swprintf_s(ail, L"%s 1-3 HP6%%", EffectWord(EF_BURN));
+	else if (sd.effect == EF_BLEED) swprintf_s(ail, L"%s 1-3 HP4%%", EffectWord(EF_BLEED));
+	else if (sd.effect == EF_BLIND || sd.effect == EF_SILENCE) swprintf_s(ail, L"%s 1-3", EffectWord(sd.effect));
 	else if (sd.effect == EF_CONFUSE) swprintf_s(ail, L"%s 2", EffectWord(EF_CONFUSE));
 	const wchar_t* ew = ail[0] ? ail : EffectWord(sd.effect);
 	if (ew && n < 5) bits[n++] = ew;

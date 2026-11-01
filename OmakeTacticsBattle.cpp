@@ -61,6 +61,12 @@ static BOOL PoseKeep(const Actor& a, const Unit& u, float dieT)
 }
 
 // 既に倒れている体は、落下をもう一度再生せず終わりの姿勢で止める。
+static V3 AilmentPos(const Actor& a, V3 p)
+{
+	if (a.poseHold == 1) p.y -= a.height * 0.28f;
+	else if (a.poseHold == 2) p.y -= a.height * 0.42f;
+	return p;
+}
 static void HoldCorpse(Actor& a)
 {
 	ActorPlay(a, CL_DEATH, 0, 0.f);
@@ -895,16 +901,26 @@ void Game::BeginTurn()
 	m_cur = ui;
 	m_turnOpen = TRUE;
 	Unit& u = m_b.u[ui];
-	int heal = 0, poison = 0;
-	TurnStartEffects(m_b, ui, &heal, &poison);
+	int heal = 0, poison = 0, burn = 0, bleed = 0;
+	TurnStartEffects(m_b, ui, &heal, &poison, &burn, &bleed);
 	V3 hp = v3(u.px, u.py + m_act[ui].height + .2f, u.pz);
 	wchar_t s[48];
 	if (heal > 0) { swprintf_s(s, L"+%s", TacNum(heal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE); TacSfx(TS_HEAL); }
 	if (poison > 0) {
-		swprintf_s(s, L"-%s %s", TacNum(poison), TT(TX_BT_POISON));
+		swprintf_s(s, L"-%s %s", TacNum(poison), EffectWord(EF_POISON));
 		AddPopup(hp, s, RGBA8(190, 120, 255), 1, MSG_BURST);
 		Burst(v3(u.px, u.py + .4f, u.pz), 14, 1.2f, .14f, 1.f, .6f, .3f, .9f, 0, 1, -1.f, 0, .8f);
 		TacSfx(TS_POISON);
+	}
+	if (burn > 0) {
+		swprintf_s(s, L"-%s %s", TacNum(burn), EffectWord(EF_BURN));
+		AddPopup(hp, s, RGBA8(255, 120, 40), 1, MSG_BURST);
+		Burst(v3(u.px, u.py + .5f, u.pz), 10, 1.4f, .12f, .8f, 1.f, .35f, .05f, 0, 1, -0.4f, 0, 1.1f);
+	}
+	if (bleed > 0) {
+		swprintf_s(s, L"-%s %s", TacNum(bleed), EffectWord(EF_BLEED));
+		AddPopup(hp, s, RGBA8(220, 40, 50), 1, MSG_BURST);
+		Burst(v3(u.px, u.py + .3f, u.pz), 8, .6f, .08f, .7f, .75f, .05f, .05f, 0, 0, 1.2f, 0, .2f);
 	}
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
@@ -939,10 +955,14 @@ void Game::BeginTurn()
 		if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
 	}
 	TacSfx(u.team == TEAM_PLAYER ? TS_TURN_P : TS_TURN_E);
-	if (u.sleep > 0 || u.stun > 0) {
-		AddPopup(hp, TT(u.sleep > 0 ? TX_BT_ASLEEP : TX_BT_STUN), u.sleep > 0 ? RGBA8(170, 210, 255) : RGBA8(255, 220, 90), 1, MSG_ORBIT);
+	if (u.freeze > 0 || u.sleep > 0 || u.stun > 0) {
+		const wchar_t* word = u.freeze > 0 ? EffectWord(EF_FREEZE) : (u.sleep > 0 ? TT(TX_BT_ASLEEP) : TT(TX_BT_STUN));
+		DWORD col = u.freeze > 0 ? RGBA8(150, 210, 255) : (u.sleep > 0 ? RGBA8(170, 210, 255) : RGBA8(255, 220, 90));
+		AddPopup(hp, word, col, 1, MSG_ORBIT);
 		TacSfx(u.sleep > 0 ? TS_SLEEP : TS_STUN);
-		if (u.sleep > 0) u.sleep = 0; else u.stun = 0;
+		if (u.freeze > 0) u.freeze--;
+		else if (u.sleep > 0) u.sleep = 0;
+		else u.stun = 0;
 		m_moved = 1;
 		m_phaseT = 0;
 		QueueSuspend(2);
@@ -1294,8 +1314,6 @@ void Game::BuildOverlayQuads()
 	BOOL showMove = m_phase == PH_P_MOVE || m_phase == PH_E_SHOW || m_phase == PH_E_MOVE;
 	auto paintMove = [&](int x, int z, int L) -> BOOL {
 		if (ReachCostAt(m_reach, L, x, z) < 0 || !LayerOn(m.At(x, z), L)) return FALSE;
-		int o = m_b.UnitAt(x, z, L);
-		if (o >= 0 && o != m_cur && m_b.u[o].alive && m_b.u[o].team != u.team) return FALSE;
 		return TRUE;
 	};
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
@@ -1303,7 +1321,10 @@ void Game::BuildOverlayQuads()
 			for (int L = 0; L < LAY_N; L++) {
 				if (!paintMove(x, z, L)) continue;
 				int a = (L == m_cLayer) ? 188 : 110;
-				DWORD moveCol = u.team == TEAM_PLAYER ? RGBA8(70, 150, 255, a) : RGBA8(255, 90, 150, a);
+				int o = m_b.UnitAt(x, z, L);
+				BOOL living = o >= 0 && o != m_cur && m_b.u[o].alive;
+				DWORD moveCol = living ? RGBA8(220, 36, 36, a)
+					: (u.team == TEAM_PLAYER ? RGBA8(70, 150, 255, a) : RGBA8(255, 90, 150, a));
 				quad(x, z, moveCol, .03f, m.WalkY(x, z, L), L, 4);
 			}
 		}
@@ -3334,6 +3355,94 @@ void Game::UpdateUnitsVisual(float dt)
 		ActorUpdate(a, dt);
 		if (i == 0 && m_sumOn) ActorUpdate(m_sumAct, dt);
 		BOOL moving = (m_phase == PH_MOVING || m_phase == PH_E_MOVE) && m_moveUnit == i;
+		BOOL loco = a.clip == CL_IDLE || a.clip == CL_WALK || a.clip == CL_RUN || a.clip == CL_2H_IDLE
+			|| (a.clip >= CL_IDLE_GLANCE_L && a.clip <= CL_IDLE_CROSS);
+		if (u.alive && u.hp > 0 && !moving && a.clip != CL_DEATH && a.clip != CL_SPAWN && a.clip != CL_HIT_A && a.clip != CL_HIT_B) {
+			int hold = 0;
+			if (u.freeze > 0) hold = 3;
+			else if (u.sleep > 0) hold = 2;
+			else if (u.stun > 0) hold = 1;
+			if (hold == 3) {
+				a.poseHold = 3;
+				a.animSpeed = 0.f;
+				if (a.blinkSave < 0.f) { a.blinkSave = a.blinkSeed; a.blinkSeed = 0.f; }
+			} else if (hold && (loco || a.poseHold)) {
+				a.poseHold = hold;
+				a.animSpeed = hold == 2 ? 0.22f : 0.4f;
+				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
+				if (a.clip != CL_IDLE && a.clip != CL_2H_IDLE) ActorPlay(a, CL_IDLE, 1, .18f);
+			} else if (!hold && (loco || a.poseHold)) {
+				if (a.poseHold) ActorPlay(a, CL_IDLE, 1, .2f);
+				a.poseHold = 0;
+				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
+				if (u.slow > 0) a.animSpeed = 0.55f;
+				else if (u.confuse > 0) a.animSpeed = 1.35f;
+				else a.animSpeed = 1.f;
+			}
+		}
+		if (u.alive && u.hp > 0 && m_parts.size() < 2600) {
+			float h = a.height > 0.35f ? a.height : 1.1f;
+			float rad = max(0.42f, h * 0.42f);
+			int span = UnitSpan(u);
+			if (span > 1) rad *= (float)span * 0.65f;
+			auto mote = [&](float y, float ang, float out, int shape, float r, float g, float b, float up, float grav, float life, float sz, int add) {
+				if ((int)m_parts.size() >= 2800) return;
+				Particle q = {};
+				q.p = v3(u.px + cosf(ang) * rad * out, u.py + y, u.pz + sinf(ang) * rad * out);
+				q.v = v3(cosf(ang) * 0.12f, up, sinf(ang) * 0.12f);
+				q.life = q.max = life;
+				q.size = sz;
+				q.size1 = sz * 0.35f;
+				q.r = r; q.g = g; q.b = b; q.a = 1.f;
+				q.shape = shape; q.add = add; q.grav = grav; q.drag = 1.1f;
+				m_parts.push_back(q);
+			};
+			float tm = m_time + i * 0.37f;
+			float flame = 0.18f + h * 0.16f;
+			if (u.burn > 0) {
+				for (int k = 0; k < 8; k++) {
+					float ang = tm * 2.1f + k * 0.785f;
+					float y = fmodf(tm * 0.9f + k * 0.13f, 1.f) * h * 0.95f;
+					mote(y, ang, 0.9f, 5, 1.f, 0.28f + (k & 1) * 0.35f, 0.04f, 1.35f, -0.55f, 0.42f, flame, 1);
+				}
+			}
+			if (u.poison > 0) {
+				for (int k = 0; k < 5; k++)
+					mote(fmodf(tm * 0.45f + k * 0.2f, 1.f) * h, -tm * 1.1f + k * 1.256f, 0.95f, 0, 0.25f, 0.95f, 0.2f, 0.55f, -0.2f, 0.7f, flame * 0.85f, 1);
+			}
+			if (u.bleed > 0) {
+				for (int k = 0; k < 5; k++)
+					mote(h * (0.3f + (k % 3) * 0.2f), k * 1.25f, 0.5f, 0, 0.9f, 0.03f, 0.04f, 0.02f, 2.6f, 0.4f, 0.08f + h * 0.03f, 0);
+			}
+			if (u.blind > 0) {
+				for (int k = 0; k < 4; k++)
+					mote(h * 0.84f, tm * 0.6f + k * 1.57f, 0.75f, 0, 0.04f, 0.04f, 0.06f, 0.04f, 0.f, 0.5f, flame, 0);
+			}
+			if (u.silence > 0) {
+				for (int k = 0; k < 4; k++)
+					mote(h * 0.55f, tm * 1.4f + k * 1.57f, 1.05f, 7, 0.55f, 0.22f, 1.f, 0.12f, 0.f, 0.55f, flame * 0.65f, 1);
+			}
+			if (u.slow > 0) {
+				for (int k = 0; k < 3; k++)
+					mote(0.06f, tm * 0.35f + k * 2.1f, 0.85f, 0, 0.42f, 0.3f, 0.1f, 0.06f, 0.5f, 0.6f, flame * 0.75f, 0);
+			}
+			if (u.confuse > 0) {
+				for (int k = 0; k < 4; k++)
+					mote(h * 0.92f, tm * 3.f + k * 1.57f, 0.8f, 2, 0.9f, 0.15f, 0.95f, 0.18f, 0.f, 0.4f, flame * 0.5f, 1);
+			}
+			if (u.stun > 0) {
+				for (int k = 0; k < 3; k++)
+					mote(h * 0.95f, tm * 2.4f + k * 2.09f, 0.65f, 2, 1.f, 0.85f, 0.2f, 0.25f, 0.f, 0.35f, flame * 0.4f, 1);
+			}
+			if (u.sleep > 0) {
+				for (int k = 0; k < 3; k++)
+					mote(0.12f + k * 0.08f, tm * 0.5f + k * 2.1f, 0.7f, 0, 0.55f, 0.7f, 1.f, 0.12f, 0.f, 0.8f, flame * 0.7f, 1);
+			}
+			if (u.freeze > 0) {
+				for (int k = 0; k < 4; k++)
+					mote(h * (0.15f + k * 0.22f), k * 1.57f + 0.4f, 1.2f, 6, 0.9f, 0.97f, 1.f, 0.f, 0.f, 0.8f, 0.07f + h * 0.03f, 1);
+			}
+		}
 		if (!moving) {
 			V3 g = UnitGroundPos(u);
 			float k = Clampf(dt * 12.f, 0, 1);
@@ -3341,6 +3450,7 @@ void Game::UpdateUnitsVisual(float dt)
 		}
 		float baseHover = a.hover;
 		u.hover = baseHover > 0 ? baseHover + sinf(m_time * 2.2f + i) * .06f : 0;
+		if (a.poseHold == 1 || a.poseHold == 2) u.hover = 0;
 		m_faceShow[i] = AngLerp(m_faceShow[i], u.face, Clampf(dt * 10.f, 0, 1));
 		float targetHp = (m_phase == PH_ACTION) ? m_dispHp[i] : (float)u.hp;
 		u.hpShow = Lerpf(u.hpShow, targetHp, Clampf(dt * 5.f, 0, 1));
@@ -3539,7 +3649,7 @@ void Game::DrawBattle3D()
 		if (foeGone(i) || u.dissolve >= .5f || !nearCam(u)) continue;
 		DrawParams dp;
 		if (offLayer(i)) dp.tint = 0x78FFFFFF;
-		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], ActorPos(i), ActorFace(i)), dp, m_time);
+		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], AilmentPos(m_act[i], ActorPos(i)), ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
 	}
 	m_r.BeginMainPass();
 	{
@@ -3660,13 +3770,56 @@ void Game::DrawBattle3D()
 		if (m_hoverUnit == i && m_phase != PH_ACTION) dp.rim = .9f;
 		if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && CanTarget(m_cur, i, m_phase == PH_P_TARGET ? -1 : m_cmdSkill))
 			dp.flash = max(dp.flash, .25f + .2f * sinf(m_time * 7.f));
-		V3 drawPos = ActorPos(i);
+		if (u.alive) {
+			if (u.freeze > 0) {
+				dp.tint = RGBA8(225, 242, 255);
+				dp.flash = 0.84f;
+				dp.emissive = 0.65f;
+				dp.rim = 0.15f;
+			} else if (u.burn > 0) {
+				dp.tint = RGBA8(255, 110, 28);
+				dp.emissive = 1.25f;
+				dp.flash = max(dp.flash, 0.12f + 0.08f * sinf(m_time * 14.f));
+				dp.rim = 1.f;
+			} else if (u.poison > 0) {
+				dp.tint = RGBA8(150, 255, 90);
+				dp.emissive = 0.45f;
+				dp.rim = 0.7f;
+			} else if (u.bleed > 0) {
+				dp.tint = RGBA8(255, 70, 70);
+				dp.emissive = 0.35f;
+			} else if (u.silence > 0) {
+				dp.tint = RGBA8(190, 140, 255);
+				dp.emissive = 0.4f;
+			} else if (u.blind > 0) {
+				dp.tint = RGBA8(70, 70, 80);
+				dp.emissive = 0.05f;
+			} else if (u.slow > 0) {
+				dp.tint = RGBA8(170, 140, 90);
+			} else if (u.confuse > 0) {
+				dp.tint = RGBA8(230, 140, 255);
+				dp.emissive = 0.25f;
+			}
+		}
+		V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
 		if (!ghost && u.deck > 0) drawPos.y += 0.04f;
 		if (ghost) {
 			dp.tint = (dp.tint & 0x00FFFFFF) | 0xA0000000;
 			m_r.SetDepthTest(FALSE);
 		}
-		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_time);
+		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+		if (u.alive && u.freeze > 0 && m_lib.ice.vb) {
+			DrawParams ip;
+			ip.tint = RGBA8(236, 248, 255, 210);
+			ip.emissive = 0.75f;
+			ip.twoSided = 1;
+			ip.outline = 0.02f;
+			ip.outlineColor = RGBA8(255, 255, 255);
+			float h = m_act[i].height > 0.4f ? m_act[i].height : 1.3f;
+			int spn = UnitSpan(u);
+			float wide = max(h * 0.95f, (float)spn * 0.9f);
+			m_r.DrawStatic(m_lib.ice, MMul(MMul(MScale(wide, h * 1.15f, wide), MRotY(i * 0.35f)), MTrans(drawPos.x, drawPos.y, drawPos.z)), ip);
+		}
 		if (u.boss && u.alive) {
 			DrawParams cp;
 			cp.emissive = .6f;
@@ -4573,6 +4726,11 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 			if (u.sleep > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_SLEEP)); wcscat_s(st, bit); }
 			if (u.confuse > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_CONFUSE), u.confuse); wcscat_s(st, bit); }
 			if (u.stun > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_STUN)); wcscat_s(st, bit); }
+			if (u.freeze > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_FREEZE), u.freeze); wcscat_s(st, bit); }
+			if (u.burn > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BURN), u.burn); wcscat_s(st, bit); }
+			if (u.bleed > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLEED), u.bleed); wcscat_s(st, bit); }
+			if (u.blind > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLIND), u.blind); wcscat_s(st, bit); }
+			if (u.silence > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SILENCE), u.silence); wcscat_s(st, bit); }
 			if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
 			if (!u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		}
@@ -4753,6 +4911,11 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (u.sleep > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_SLEEP)); wcscat_s(st, bit); }
 		if (u.confuse > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_CONFUSE), u.confuse); wcscat_s(st, bit); }
 		if (u.stun > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_STUN)); wcscat_s(st, bit); }
+		if (u.freeze > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_FREEZE), u.freeze); wcscat_s(st, bit); }
+		if (u.burn > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BURN), u.burn); wcscat_s(st, bit); }
+		if (u.bleed > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLEED), u.bleed); wcscat_s(st, bit); }
+		if (u.blind > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLIND), u.blind); wcscat_s(st, bit); }
+		if (u.silence > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SILENCE), u.silence); wcscat_s(st, bit); }
 		if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		}
@@ -5394,6 +5557,11 @@ void Game::DrawForecast()
 	side(a, x + w * .25f, f.dmg, f.hit, f.crit, f.hits, TRUE, d.hp);
 	side(d, x + w * .75f, f.cdmg, f.chit, f.ccrit, f.chits, f.canCounter, a.hp);
 	m_r.HudText(L"VS", x + w * .5f, y + U(70), U(20), RGBA8(255, 226, 150), 1, 1);
+	{
+		int el = skill >= 0 ? SkillInfo(skill).element : EL_NONE;
+		if (AilmentBreak(d, el) > 1.5f)
+			m_r.HudText(L"×2", x + w * .5f, y + U(96), U(16), RGBA8(255, 80, 60), 1, 1);
+	}
 	int after = max(0, d.hp - f.dmg * f.hits);
 	wchar_t l[64];
 	swprintf_s(l, L"%s → %s", TacNum(d.hp), TacNum(after));
@@ -6776,18 +6944,10 @@ void Game::DrawPromoteOffer()
 	}
 	if (grace && u.ch.trialFrom != u.ch.cls) revert = u.ch.trialFrom;
 	wchar_t hist[640];
-	hist[0] = 0;
+	JobPathText(u.ch, hist, 640);
+	if (hist[0]) wcscat_s(hist, L" →");
 	int pn = JobPathCount(u.ch);
-	if (pn > 0) {
-		wcscpy_s(hist, TT(TX_JOB_HIST));
-		wcscat_s(hist, L"  ");
-		for (int pi = 0; pi < pn; pi++) {
-			wchar_t bit[80];
-			swprintf_s(bit, TT(TX_JOB_NTH), pi + 1, ClassName(u.ch.jobPath[pi]));
-			if (pi) wcscat_s(hist, L" → ");
-			wcscat_s(hist, bit);
-		}
-	}
+	if (pn < 1) pn = 1;
 	float histH = hist[0] ? (pn > 4 ? U(56.f) : U(36.f)) : 0.f;
 	int rows = nt + (revert >= 0 ? 1 : 0);
 	float w = min(U(760.f), (float)m_w - U(24));
@@ -6826,9 +6986,16 @@ void Game::DrawPromoteOffer()
 		TacSfx(TS_PROMOTE);
 		AdvanceLevelUp();
 	};
+	int step = JobPathCount(u.ch);
+	if (step < 1) step = max(1, ClassInfo(u.ch.cls).tier);
+	static const int gtx[G_COUNT] = { TX_G_MELEE, TX_G_SWIFT, TX_G_MAGIC, TX_G_HOLY };
 	for (int k = 0; k < nt; k++) {
 		m_btnSfx = -2;
-		if (Btn(ID_BT_PROMO0 + k, x + U(16), ty, w - U(32), U(34), ClassName(tgt[k]), TRUE, FALSE, U(16))) {
+		const ClassDef& cd = ClassInfo(tgt[k]);
+		wchar_t nth[96], lab[160];
+		swprintf_s(nth, TT(TX_JOB_NTH), step + 1, ClassName(tgt[k]));
+		swprintf_s(lab, L"%s   %s", nth, TT(gtx[Clampi(cd.group, 0, G_COUNT - 1)]));
+		if (Btn(ID_BT_PROMO0 + k, x + U(16), ty, w - U(32), U(34), lab, TRUE, FALSE, U(16))) {
 			take(tgt[k]);
 			return;
 		}
@@ -7126,10 +7293,35 @@ static void DrawAilment(Renderer& r, int kind, float x, float y, float s, float 
 		r.HudFrame(x - s * .28f, y - s * .28f, s * .56f, s * .56f, max(1.f, s * .06f), RGBA8(40, 70, 150));
 		float a = t * 2.4f;
 		r.HudRect(x + cosf(a) * s * 0.16f - s * .05f, y + sinf(a) * s * 0.16f - s * .05f, s * .1f, s * .1f, RGBA8(30, 60, 140));
-	} else {
+	} else if (kind == 5) {
 		float p = 0.7f + 0.3f * sinf(t * 4.f);
 		r.HudRect(x - s * .06f, y - s * .28f * p, s * .12f, s * .36f * p, RGBA8(180, 90, 40));
 		r.HudRect(x - s * .16f, y + s * .08f, s * .32f, s * .1f, RGBA8(180, 90, 40));
+	} else if (kind == 6) {
+		r.HudRect(x - s * .28f, y - s * .28f, s * .56f, s * .56f, RGBA8(170, 220, 255, 230));
+		r.HudFrame(x - s * .28f, y - s * .28f, s * .56f, s * .56f, max(1.f, s * .06f), RGBA8(230, 250, 255));
+		r.HudRect(x - s * .06f, y - s * .18f, s * .12f, s * .36f, RGBA8(255, 255, 255, 180));
+	} else if (kind == 7) {
+		for (int i = 0; i < 3; i++) {
+			float ph = fmodf(t * 1.4f + i * 0.33f, 1.f);
+			float fy = y + s * 0.2f - ph * s * 0.7f;
+			float fw = s * (0.16f + i * 0.05f);
+			r.HudRect(x - fw * .5f, fy, fw, s * 0.22f, RGBA8(255, (int)(80 + ph * 120), 20, (int)(220 * (1.f - ph))));
+		}
+	} else if (kind == 8) {
+		for (int i = 0; i < 3; i++) {
+			float ph = fmodf(t * 1.1f + i * 0.37f, 1.f);
+			float dy = y - s * 0.1f + ph * s * 0.45f;
+			float d = s * (0.08f + (1.f - ph) * 0.06f);
+			r.HudRect(x + (i - 1) * s * 0.16f - d, dy, d * 2.f, d * 2.4f, RGBA8(190, 20, 30, (int)(230 * (1.f - ph * 0.4f))));
+		}
+	} else if (kind == 9) {
+		r.HudRect(x - s * .3f, y - s * .12f, s * .6f, s * .24f, RGBA8(20, 20, 28, 230));
+		r.HudRect(x - s * .22f, y - s * .08f, s * .16f, s * .16f, RGBA8(80, 80, 90));
+		r.HudRect(x + s * .06f, y - s * .08f, s * .16f, s * .16f, RGBA8(80, 80, 90));
+	} else {
+		r.HudRect(x - s * .26f, y - s * .18f, s * .52f, s * .36f, RGBA8(40, 28, 70, 230));
+		r.HudRect(x - s * .16f, y - s * .04f, s * .32f, s * .08f, RGBA8(220, 210, 255));
 	}
 }
 
@@ -7399,14 +7591,19 @@ void Game::DrawBattleUi()
 			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), RGBA8(8, 8, 12, 200));
 			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50));
 		}
-		if (!(m_seqCut && m_cutStage == 0) && u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0)) {
-			int kinds[6], efs[6], nk = 0;
+		if (!(m_seqCut && m_cutStage == 0) && u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0 || u.freeze > 0 || u.burn > 0 || u.bleed > 0 || u.blind > 0 || u.silence > 0)) {
+			int kinds[12], efs[12], nk = 0;
 			if (u.sleep > 0) { kinds[nk] = 0; efs[nk++] = EF_SLEEP; }
 			if (u.confuse > 0) { kinds[nk] = 1; efs[nk++] = EF_CONFUSE; }
 			if (u.stun > 0) { kinds[nk] = 2; efs[nk++] = EF_STUN; }
 			if (u.poison > 0) { kinds[nk] = 3; efs[nk++] = EF_POISON; }
 			if (u.slow > 0) { kinds[nk] = 4; efs[nk++] = EF_SLOW; }
 			if (u.defDown > 0) { kinds[nk] = 5; efs[nk++] = EF_DEFDOWN; }
+			if (u.freeze > 0) { kinds[nk] = 6; efs[nk++] = EF_FREEZE; }
+			if (u.burn > 0) { kinds[nk] = 7; efs[nk++] = EF_BURN; }
+			if (u.bleed > 0) { kinds[nk] = 8; efs[nk++] = EF_BLEED; }
+			if (u.blind > 0) { kinds[nk] = 9; efs[nk++] = EF_BLIND; }
+			if (u.silence > 0) { kinds[nk] = 10; efs[nk++] = EF_SILENCE; }
 			float s = U(26);
 			float gap = s + U(4);
 			float x0 = sx - (nk - 1) * gap * .5f;

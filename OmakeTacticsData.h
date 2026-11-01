@@ -345,7 +345,7 @@ enum { C_GLADIATOR = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N, C_SHADOW = C_
 // 公開一覧の固有職。X of Y は使わない。ID は既存ランクの後ろ。
 enum { C_JOB0 = C_SHADOW + 1 };
 
-enum { LEARN_N = 10 };
+enum { LEARN_N = 14 };
 struct LearnDef { int lv; int skill; };
 struct ClassDef {
 	int nameTx;
@@ -421,7 +421,8 @@ enum SkillId {
 	SKL_GALE = SKL_FORMN,
 	SKL_MIASMA,
 	SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELHOLY, SKL_ELDARK, SKL_ELWIND, SKL_ELEATH, SKL_ELPOISON,
-	SKL_COUNT
+	SKL_MORE0,
+	SKL_COUNT = SKL_MORE0 + 96
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 enum FormKind {
@@ -446,7 +447,8 @@ struct SkillDef {
 };
 enum SkillEffect {
 	EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE,
-	EF_SLEEP, EF_CONFUSE, EF_STUN, EF_CLEANSE
+	EF_SLEEP, EF_CONFUSE, EF_STUN, EF_CLEANSE,
+	EF_FREEZE, EF_BURN, EF_BLEED, EF_BLIND, EF_SILENCE
 };
 const wchar_t* ElemWord(int el);
 const wchar_t* EffectWord(int ef);
@@ -481,6 +483,8 @@ struct CharData {
 	int trialLv;     // 転職したレベル。0 はお試しなし。このレベル+3 まで選び直せる
 	int jobPath[12]; // 1次職から順。-1 は空。version 6
 	int jobDone;     // 1=振り直し済み、または新規。0 は一度だけの案内が残っている
+	int skillBits[24]; // version 7。1語32技、0..767。reserved[6][7] は武具のまま
+	int skillPad[16];  // まだ未使用。次の拡張用
 };
 #pragma pack(pop)
 
@@ -538,6 +542,7 @@ void EvoApply(CharData& main, int target, const CharData* partners, int n);
 void EvoBrief(int cls, wchar_t* out, int cap);     // 進化先の説明。役割が分かる3行
 enum { JOB_PATH_N = 12 };
 int JobPathCount(const CharData& c);
+void JobPathText(const CharData& c, wchar_t* out, int cap);
 int JobStepsForLevel(int lv);
 void JobPathClear(CharData& c);
 void JobRebook(CharData& c, const int* path, int n);
@@ -599,6 +604,7 @@ struct Unit {
 	float face;          // 向き（ラジアン）
 	int buffDef, buffAgi, buffAtk, poison, slow, defDown;   // 残りターン。毒・鈍足・防御低下は1〜3
 	int sleep, confuse, stun;   // 睡眠は1、混乱は残り行動、スタンは1で次の手番を飛ばす
+	int freeze, burn, bleed, blind, silence; // 凍結は行動不能。炎上と裂傷は毎ターン。盲目は命中減。沈黙は魔法不可
 	int mulTurns;        // マス効果: この間ステータス倍
 	int alert;           // 1=行動順に入る（味方は常に 1。敵拠点は接近で起床）
 	int rush;            // 1=スタンピードの先制。手番が終わると通常の CT に戻す
@@ -630,6 +636,7 @@ inline int UnitSpan(const Unit& u)
 	return s;
 }
 int UnitStat(const Unit& u, int s);     // バフ込み
+float AilmentBreak(const Unit& d, int el); // 状態と属性の相性。弱点なら 2
 void CharFightBonus(const CharData& c, int out[S_COUNT]); // 装備・装飾・パッシブで増える分。戦闘の UnitStat と同じ
 int UnitMove(const Unit& u);
 int UnitJump(const Unit& u);
@@ -825,7 +832,7 @@ enum {
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
 int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
 void FinishAction(Battle& b, int ui, int moved, int acted);
-int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
+int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnOut, int* bleedOut);
 void WakeGroup(Battle& b, int grp);
 void JoinTurnClock(Battle& b, int ui);
 int WakeNearPlayers(Battle& b, int rad, int immediate = 0);
@@ -899,10 +906,12 @@ struct SaveData {
 	int reserved[4];
 	int partyCap;              // 5..15。店の編成拡張券。11体目以降はステージ制限
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
+	int spare[32];             // version 7。まだ未使用
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
 // version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。
-// version 6 は職の履歴（jobPath, jobDone）。読込は全部受け、書き出しは 6。
+// version 6 は職の履歴（jobPath, jobDone）。version 7 は skillBits（技 768 まで）と spare。
+// 読込は 1..7 を受け、書き出しは 7。
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
@@ -1103,7 +1112,7 @@ bool EquipSummonId(CharData& c, int slot, int id);
 bool UnitResistsEffect(const Unit& u, int effect);
 inline bool UnitAilmentHeld(const Unit& u)
 {
-	return u.slow > 0 || u.sleep > 0 || u.stun > 0 || u.confuse > 0;
+	return u.slow > 0 || u.sleep > 0 || u.stun > 0 || u.confuse > 0 || u.freeze > 0;
 }
 void CraftBindUnit(Unit& u);
 void CraftSaveUnit(const Unit& u);

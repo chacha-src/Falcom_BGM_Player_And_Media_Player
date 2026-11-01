@@ -923,7 +923,7 @@ bool UnitResistsEffect(const Unit& u, int effect)
 	switch (effect) {
 	case EF_POISON: return UnitHasPas(u, PAS_NOPOISON);
 	case EF_CONFUSE: return UnitHasPas(u, PAS_NOCONFUSE);
-	case EF_SLEEP: return UnitHasPas(u, PAS_NOSLEEP);
+	case EF_SLEEP: case EF_FREEZE: return UnitHasPas(u, PAS_NOSLEEP);
 	case EF_STUN: return UnitHasPas(u, PAS_NOSTUN);
 	case EF_SLOW: return UnitHasPas(u, PAS_NOSLOW);
 	case EF_DEFDOWN: return UnitHasPas(u, PAS_NODOWN);

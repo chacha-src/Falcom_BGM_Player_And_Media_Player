@@ -1012,6 +1012,41 @@ static void BuildOrb(Renderer& r, GpuMesh& out)
 	GeoToStatic(r, g, out);
 }
 
+static void BuildIce(Renderer& r, GpuMesh& out)
+{
+	Geo g;
+	g.curCol = RGBA8(255, 255, 255);
+	const float phi = 1.6180339887f;
+	V3 rv[12] = {
+		v3(-1, phi, 0), v3(1, phi, 0), v3(-1, -phi, 0), v3(1, -phi, 0),
+		v3(0, -1, phi), v3(0, 1, phi), v3(0, -1, -phi), v3(0, 1, -phi),
+		v3(phi, 0, -1), v3(phi, 0, 1), v3(-phi, 0, -1), v3(-phi, 0, 1)
+	};
+	V3 v[12];
+	for (int i = 0; i < 12; i++) {
+		V3 n = Norm(rv[i]);
+		v[i] = v3(n.x * 0.72f, n.y * 0.62f + 0.55f, n.z * 0.72f);
+	}
+	static const int f[20][3] = {
+		{ 0, 11, 5 }, { 0, 5, 1 }, { 0, 1, 7 }, { 0, 7, 10 }, { 0, 10, 11 },
+		{ 1, 5, 9 }, { 5, 11, 4 }, { 11, 10, 2 }, { 10, 7, 6 }, { 7, 1, 8 },
+		{ 3, 9, 4 }, { 3, 4, 2 }, { 3, 2, 6 }, { 3, 6, 8 }, { 3, 8, 9 },
+		{ 4, 9, 5 }, { 2, 4, 11 }, { 6, 2, 10 }, { 8, 6, 7 }, { 9, 8, 1 }
+	};
+	for (int i = 0; i < 20; i++) {
+		V3 a = v[f[i][0]], b = v[f[i][1]], c = v[f[i][2]];
+		V3 n = Norm(Cross(b - a, c - a));
+		int ia = g.V(a, n), ib = g.V(b, n), ic = g.V(c, n);
+		g.T(ia, ib, ic);
+		if ((i % 3) == 0) {
+			V3 mid = (a + b + c) * (1.f / 3.f);
+			V3 tip = mid + n * 0.22f;
+			g.Cone(mid, tip, 0.07f, 4);
+		}
+	}
+	GeoToStatic(r, g, out);
+}
+
 BOOL BuildLibrary(Renderer& r, Library& lib)
 {
 	ReleaseLibrary(lib);
@@ -1053,6 +1088,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	BuildCrown(r, lib.crown); step();
 	BuildRing(r, lib.ring); step();
 	BuildOrb(r, lib.orb); step();
+	BuildIce(r, lib.ice); step();
 	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
 	// 印の位置だと骨を差し替えられ、メッシュだけがタイルの赤丸から外れて巨大になる。
 	r.m_keepModels = (int)r.models.size();
@@ -1069,6 +1105,7 @@ void ReleaseLibrary(Library& lib)
 	lib.crown.Release();
 	lib.ring.Release();
 	lib.orb.Release();
+	lib.ice.Release();
 	lib.ready = 0;
 }
 
@@ -1116,6 +1153,8 @@ static void ActorInit(Actor& a)
 	a.animSpeed = 1;
 	a.skillPose = a.prevSkill = -1;
 	a.gripClip = -1;
+	a.poseHold = 0;
+	a.blinkSave = -1.f;
 }
 
 static void AddWeapons(Actor& a, const Renderer& r, int wl)
@@ -1616,6 +1655,48 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r)
 	return !a.loop && a.t >= ActorClipLen(a, lib, r, a.clip);
 }
 
+static void SpinJointBack(const Model& m, Pose& pose, int j, float pitch);
+static int HumanJoint(const Renderer& r, const Model& m, const char* a, const char* b);
+// スタンは膝を折って座らせ、睡眠は腰を倒して寝かせる。凍結は姿勢を変えず動きだけ止める。
+static void ApplyDownPose(Actor& a, const Renderer& r)
+{
+	if (!a.poseValid || (a.poseHold != 1 && a.poseHold != 2)) return;
+	if (a.model < 0 || a.model >= (int)r.models.size()) return;
+	const Model& m = r.models[a.model];
+	int ul = HumanJoint(r, m, "UpperLeg.L", "upperleg.l");
+	int ur = HumanJoint(r, m, "UpperLeg.R", "upperleg.r");
+	if (ul < 0 || ur < 0) return;
+	if (a.poseHold == 1) {
+		SpinJointBack(m, a.pose, ul, 1.15f);
+		SpinJointBack(m, a.pose, ur, 1.15f);
+		r.FinishPose(m, a.pose, &a.mods);
+		int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
+		int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+		SpinJointBack(m, a.pose, ll, -1.35f);
+		SpinJointBack(m, a.pose, lr, -1.35f);
+		r.FinishPose(m, a.pose, &a.mods);
+		int fl = HumanJoint(r, m, "Foot.L", "foot.l");
+		int fr = HumanJoint(r, m, "Foot.R", "foot.r");
+		SpinJointBack(m, a.pose, fl, 0.55f);
+		SpinJointBack(m, a.pose, fr, 0.55f);
+		int chest = HumanJoint(r, m, "Chest", "chest");
+		SpinJointBack(m, a.pose, chest, 0.22f);
+		r.FinishPose(m, a.pose, &a.mods);
+	} else {
+		int hips = HumanJoint(r, m, "Hips", "hips");
+		SpinJointBack(m, a.pose, hips, -1.2f);
+		r.FinishPose(m, a.pose, &a.mods);
+		SpinJointBack(m, a.pose, ul, 0.4f);
+		SpinJointBack(m, a.pose, ur, 0.4f);
+		r.FinishPose(m, a.pose, &a.mods);
+		int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
+		int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+		SpinJointBack(m, a.pose, ll, -0.5f);
+		SpinJointBack(m, a.pose, lr, -0.5f);
+		r.FinishPose(m, a.pose, &a.mods);
+	}
+}
+
 // 翼で飛んでいるあいだ、腰から下だけをモデルの +Z（背中）へ倒す。上半身のクリップはそのまま。
 // 回転は関節の原点まわり。左右で骨のローカル軸が鏡でも、同じ向きに流れる。
 static void SpinJointBack(const Model& m, Pose& pose, int j, float pitch)
@@ -1749,6 +1830,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		a.poseValid = 1;
 	}
 	ApplyFlyTrail(a, r);
+	ApplyDownPose(a, r);
 	if (a.poseValid && (a.clip == CL_DODGE || a.clip == CL_BLOCK) && a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size()) {
 		const Model& rm = r.models[a.model];
 		if (strncmp(rm.name, "Hum", 3) == 0) {

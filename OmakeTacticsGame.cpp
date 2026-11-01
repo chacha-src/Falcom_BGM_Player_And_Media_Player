@@ -6802,6 +6802,11 @@ void Game::DrawEvolveUi()
 		if (trial) swprintf_s(head, L"%s  Lv%d", TT(TX_EV_TRIAL), mc.trialLv + 3);
 		else wcscpy_s(head, TT(TX_EV_TARGET));
 		m_r.HudText(head, c1, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
+		wchar_t path[640];
+		JobPathText(mc, path, 640);
+		if (path[0]) wcscat_s(path, L" →");
+		float pathH = U(44);
+		if (path[0]) m_r.HudTextBox(path, c1, top + U(28), colW, pathH, U(13), RGBA8(210, 220, 235));
 		int tgt[5];
 		int nt = 0;
 		int revert = -1;
@@ -6822,11 +6827,15 @@ void Game::DrawEvolveUi()
 			}
 		}
 		int need = EvoPartnersNeeded(mc);
-		float ty = top + U(24);
+		int step = JobPathCount(mc);
+		if (step < 1) step = max(1, ClassInfo(mc.cls).tier);
+		static const int gtx[G_COUNT] = { TX_G_MELEE, TX_G_SWIFT, TX_G_MAGIC, TX_G_HOLY };
+		float ty = top + U(28) + (path[0] ? pathH + U(6) : 0.f);
 		for (int k = 0; k < nt; k++) {
-			static const int gtx[G_COUNT] = { TX_G_MELEE, TX_G_SWIFT, TX_G_MAGIC, TX_G_HOLY };
-			wchar_t l[128];
-			swprintf_s(l, L"%s", ClassName(tgt[k]));
+			const ClassDef& cd = ClassInfo(tgt[k]);
+			wchar_t nth[96], l[160];
+			swprintf_s(nth, TT(TX_JOB_NTH), step + 1, ClassName(tgt[k]));
+			swprintf_s(l, L"%s   %s", nth, TT(gtx[Clampi(cd.group, 0, G_COUNT - 1)]));
 			if (Btn(ID_EV_TGT0 + k, c1, ty, colW, rowH - U(6), l, TRUE, m_evTarget == tgt[k], U(16))) {
 				m_evTarget = tgt[k]; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 2;
 			}
