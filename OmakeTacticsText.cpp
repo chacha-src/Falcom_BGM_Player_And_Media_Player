@@ -1239,7 +1239,8 @@ R(TX_HELP_TEXT,
 	L"【育成】\n"
 	L"・攻撃・回復・補助で経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
 	L"・Lv15・35・55・78・105・140・180・230・290で転職できます。素材は不要です。戦闘でレベルアップした直後にも選べ、後回しにもできます。\n"
-	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。",
+	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。\n"
+	L"・出てくる敵は、ファンタジーとSFと夢の世界のモンスターです。生き物のほか、風呂桶のような物も混ざります。",
 	L"[Basics]\n"
 	L"- Turn order depends on agility and is shown in \"Turn Order\" at the top right. Fast units can cut in and act more often.\n"
 	L"- While moving, only tiles you can enter are marked. Red tiles appear when you choose an attack. An enemy's move range stays until that move ends.\n"
@@ -1252,7 +1253,8 @@ R(TX_HELP_TEXT,
 	L"[Growth]\n"
 	L"- Attacks, healing and buffs grant EXP and levels. Skills are learned at certain levels.\n"
 	L"- Change class at Lv15, 35, 55, 78, 105, 140, 180, 230 and 290. No partner is needed. You can also choose right after a battle level-up, or later.\n"
-	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.",
+	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.\n"
+	L"- The enemies are monsters from fantasy, science fiction and dream worlds. Living creatures appear alongside things such as bathtubs.",
 	L"[Bases]\n"
 	L"- L'ordre des tours dépend de l'agilité et s'affiche dans « Ordre des tours » en haut à droite. Les unités rapides s'intercalent et agissent plus souvent.\n"
 	L"- En déplacement, seules les cases accessibles sont marquées. Le rouge apparaît en choisissant une attaque. La portée ennemie reste jusqu'à la fin de son mouvement.\n"
@@ -1265,7 +1267,8 @@ R(TX_HELP_TEXT,
 	L"[Progression]\n"
 	L"- Attaques, soins et soutiens donnent de l'EXP et des niveaux. Des compétences s'apprennent à certains niveaux.\n"
 	L"- Changement de classe aux niv. 15, 35, 55, 78, 105, 140, 180, 230 et 290. Aucun partenaire. Aussi juste après un niveau, ou plus tard.\n"
-	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.",
+	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.\n"
+	L"- Les ennemis sont des monstres de fantasy, de science-fiction et de monde onirique. Des êtres vivants côtoient des objets, comme une baignoire.",
 	L"[Basi]\n"
 	L"- L'ordine dei turni dipende dall'agilità ed è mostrato in \"Ordine dei turni\" in alto a destra. Le unità veloci si inseriscono e agiscono più spesso.\n"
 	L"- In movimento si vedono solo le caselle raggiungibili. Il rosso compare scegliendo un attacco. Il movimento nemico resta fino alla fine dello spostamento.\n"
@@ -1278,7 +1281,8 @@ R(TX_HELP_TEXT,
 	L"[Crescita]\n"
 	L"- Attacchi, cure e supporti danno ESP e livelli. Le abilità si imparano a certi livelli.\n"
 	L"- Cambio classe a Lv15, 35, 55, 78, 105, 140, 180, 230 e 290. Nessun partner. Si può scegliere anche subito dopo un livello in battaglia, o più tardi.\n"
-	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.",
+	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.\n"
+	L"- I nemici sono mostri di fantasy, fantascienza e mondo onirico. Accanto alle creature compaiono anche oggetti, come una vasca da bagno.",
 	L"[Básico]\n"
 	L"- El orden de turnos depende de la agilidad y se muestra en «Orden de turnos» arriba a la derecha. Las unidades rápidas se adelantan y actúan más a menudo.\n"
 	L"- Al moverte solo se marcan las casillas accesibles. El rojo aparece al elegir un ataque. El movimiento enemigo sigue hasta que termina de moverse.\n"
@@ -1291,7 +1295,8 @@ R(TX_HELP_TEXT,
 	L"[Progreso]\n"
 	L"- Ataques, curaciones y mejoras dan EXP y niveles. Las habilidades se aprenden en ciertos niveles.\n"
 	L"- Cambio de clase en Nv15, 35, 55, 78, 105, 140, 180, 230 y 290. Sin compañero. También justo después de subir de nivel, o más tarde.\n"
-	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.",
+	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.\n"
+	L"- Los enemigos son monstruos de fantasía, ciencia ficción y mundo onírico. Junto a los seres vivos aparecen objetos, como una bañera.",
 	L"[기본]\n"
 	L"- 행동 순서는 민첩으로 정해지며 오른쪽 위의 '행동 순서'에 표시됩니다. 빠른 캐릭터는 끼어들어 더 자주 행동합니다.\n"
 	L"- 이동 중에는 갈 수 있는 칸만 표시됩니다. 빨간 칸은 공격을 고르면 나옵니다. 적의 이동 범위는 적이 이동을 끝낼 때까지 남습니다.\n"
@@ -1304,7 +1309,8 @@ R(TX_HELP_TEXT,
 	L"[육성]\n"
 	L"- 공격·회복·보조로 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
 	L"- Lv15·35·55·78·105·140·180·230·290에 전직합니다. 재료는 필요 없습니다. 전투 레벨업 직후에도 고르거나, 나중에 할 수 있습니다.\n"
-	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.",
+	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.\n"
+	L"- 나오는 적은 판타지와 SF와 꿈세계의 몬스터입니다. 생물 외에 욕조 같은 물건도 섞입니다.",
 	L"【基本】\n"
 	L"・行动顺序由敏捷决定，显示在右上角的“行动顺序”中。敏捷高的角色会插队，更频繁地行动。\n"
 	L"・移动时只标出能进入的格子。选择攻击后才出现红色射程。敌人的移动范围会留到移动结束。\n"
@@ -1317,7 +1323,8 @@ R(TX_HELP_TEXT,
 	L"【培养】\n"
 	L"・攻击、治疗和辅助都会获得经验值并升级。达到一定等级会习得技能。\n"
 	L"・Lv15、35、55、78、105、140、180、230、290可转职。不需要素材。战斗升级后立刻可选，也可以以后再选。\n"
-	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。",
+	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。\n"
+	L"・出现的敌人是奇幻、科幻和梦境世界的怪物。除了生物，也会混入浴缸之类的东西。",
 	L"[الأساسيات]\n"
 	L"- يتحدد ترتيب الأدوار بالرشاقة ويظهر في «ترتيب الأدوار» أعلى اليمين. الوحدات السريعة تتقدم وتتحرك أكثر.\n"
 	L"- أثناء الحركة تُعلَّم الخانات التي يمكن دخولها فقط. الأحمر يظهر عند اختيار هجوم. مدى حركة العدو يبقى حتى ينتهي تحركه.\n"
@@ -1330,7 +1337,8 @@ R(TX_HELP_TEXT,
 	L"[التطوير]\n"
 	L"- الهجوم والعلاج والدعم تمنح الخبرة والمستويات. تُتعلم المهارات عند مستويات معينة.\n"
 	L"- تغيير الفئة عند 15 و35 و55 و78 و105 و140 و180 و230 و290. بلا شريك. يمكن الاختيار بعد رفع المستوى في المعركة أو لاحقًا.\n"
-	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.",
+	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.\n"
+	L"- الأعداء وحوش من عوالم الخيال والخيال العلمي والحلم. تظهر الكائنات إلى جانب أشياء مثل حوض الاستحمام.",
 	L"[Основы]\n"
 	L"- Порядок ходов зависит от ловкости и показан в «Порядке ходов» справа вверху. Быстрые бойцы вклиниваются и ходят чаще.\n"
 	L"- При ходе отмечены только клетки, куда можно встать. Красные появляются при выборе атаки. Дальность врага держится до конца его хода.\n"
@@ -1343,7 +1351,8 @@ R(TX_HELP_TEXT,
 	L"[Развитие]\n"
 	L"- Атаки, лечение и поддержка дают опыт и уровни. Навыки изучаются на определённых уровнях.\n"
 	L"- Смена класса на ур. 15, 35, 55, 78, 105, 140, 180, 230 и 290. Материал не нужен. Можно выбрать сразу после уровня в бою или позже.\n"
-	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.",
+	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.\n"
+	L"- Враги — монстры фэнтези, научной фантастики и мира снов. Среди существ встречаются и вещи, например ванна.",
 	L"[Grundlagen]\n"
 	L"- Die Zugreihenfolge hängt von der Gewandtheit ab und wird oben rechts unter „Zugreihenfolge“ angezeigt. Schnelle Einheiten schieben sich dazwischen und handeln öfter.\n"
 	L"- Beim Bewegen sind nur betretbare Felder markiert. Rot erscheint bei der Angriffswahl. Die gegnerische Reichweite bleibt bis zum Ende der Bewegung.\n"
@@ -1356,7 +1365,8 @@ R(TX_HELP_TEXT,
 	L"[Entwicklung]\n"
 	L"- Angriffe, Heilung und Unterstützung geben EP und Stufen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
 	L"- Klassenwechsel bei Lv15, 35, 55, 78, 105, 140, 180, 230 und 290. Kein Partner. Auch direkt nach einem Levelaufstieg, oder später.\n"
-	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.",
+	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.\n"
+	L"- Die Feinde sind Monster aus Fantasy, Science-Fiction und Traumwelt. Neben Lebewesen erscheinen auch Dinge wie eine Badewanne.",
 	L"[Básico]\n"
 	L"- A ordem dos turnos depende da agilidade e aparece em \"Ordem dos turnos\" no canto superior direito. Unidades rápidas passam à frente e agem mais vezes.\n"
 	L"- Ao mover, só as casas acessíveis são marcadas. O vermelho aparece ao escolher um ataque. O movimento inimigo fica até ele terminar de andar.\n"
@@ -1369,7 +1379,8 @@ R(TX_HELP_TEXT,
 	L"[Evolução]\n"
 	L"- Ataques, curas e apoio dão EXP e níveis. Habilidades são aprendidas em certos níveis.\n"
 	L"- Mudança de classe nos Nv15, 35, 55, 78, 105, 140, 180, 230 e 290. Sem parceiro. Também logo após subir de nível, ou mais tarde.\n"
-	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.",
+	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.\n"
+	L"- Os inimigos são monstros de fantasia, ficção científica e mundo dos sonhos. Além dos seres, aparecem objetos como uma banheira.",
 	L"[Basis]\n"
 	L"- De beurtvolgorde hangt af van behendigheid en staat rechtsboven bij 'Beurtvolgorde'. Snelle eenheden dringen voor en handelen vaker.\n"
 	L"- Tijdens bewegen zijn alleen betreedbare vakken gemarkeerd. Rood verschijnt bij een aanval. Het vijandelijke bereik blijft tot de beweging klaar is.\n"
@@ -1382,7 +1393,8 @@ R(TX_HELP_TEXT,
 	L"[Groei]\n"
 	L"- Aanvallen, genezen en steun geven EP en levels. Vaardigheden leer je op bepaalde levels.\n"
 	L"- Klassewissel op Lv15, 35, 55, 78, 105, 140, 180, 230 en 290. Geen partner. Ook direct na een level, of later.\n"
-	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.",
+	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.\n"
+	L"- De vijanden zijn monsters uit fantasy, sciencefiction en droomwereld. Naast wezens verschijnen ook dingen zoals een badkuip.",
 	L"[Podstawy]\n"
 	L"- Kolejność tur zależy od zwinności i widać ją w „Kolejności tur” w prawym górnym rogu. Szybkie jednostki wskakują przed innych i działają częściej.\n"
 	L"- Przy ruchu widać tylko pola, na które można wejść. Czerwień pojawia się przy wyborze ataku. Zasięg wroga zostaje do końca jego ruchu.\n"
@@ -1395,7 +1407,8 @@ R(TX_HELP_TEXT,
 	L"[Rozwój]\n"
 	L"- Ataki, leczenie i wsparcie dają PD i poziomy. Umiejętności poznaje się na określonych poziomach.\n"
 	L"- Zmiana klasy na poz. 15, 35, 55, 78, 105, 140, 180, 230 i 290. Bez partnera. Także tuż po poziomie w walce albo później.\n"
-	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.",
+	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.\n"
+	L"- Wrogowie to potwory z fantasy, science fiction i świata snów. Oprócz istot pojawiają się też przedmioty, na przykład wanna.",
 	L"[Temel]\n"
 	L"- Sıra düzeni çevikliğe bağlıdır ve sağ üstteki \"Sıra düzeni\"nde gösterilir. Hızlı birimler araya girip daha sık hareket eder.\n"
 	L"- Hareket ederken yalnızca girilebilen kareler işaretlenir. Kırmızı, saldırı seçilince çıkar. Düşmanın menzili hareketi bitene kadar kalır.\n"
@@ -1408,7 +1421,8 @@ R(TX_HELP_TEXT,
 	L"[Gelişim]\n"
 	L"- Saldırı, iyileştirme ve destek TP ve seviye kazandırır. Yetenekler belirli seviyelerde öğrenilir.\n"
 	L"- Sv15, 35, 55, 78, 105, 140, 180, 230 ve 290'da sınıf değişir. Ortak gerekmez. Savaşta seviye sonrası da seçilir, sonra da bırakılabilir.\n"
-	L"- Bölümler 1'den 9999'a kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.")
+	L"- Bölümler 1'den 9999'a kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.\n"
+	L"- Düşmanlar fantezi, bilimkurgu ve düş dünyasının canavarlarıdır. Canlıların yanında küvet gibi nesneler de çıkar.")
 // ---------------------------------------------------------------- その他
 R(TX_MISC_LV, L"Lv", L"Lv", L"Niv.", L"Lv", L"Nv", L"Lv", L"Lv", L"مستوى", L"Ур.", L"Lv", L"Nv", L"Lv", L"Poz.", L"Sv")
 R(TX_MISC_EXP, L"EXP", L"EXP", L"EXP", L"ESP", L"EXP", L"EXP", L"EXP", L"خبرة", L"Опыт", L"EP", L"EXP", L"EP", L"PD", L"TP")

@@ -179,6 +179,7 @@ private:
 	void ApplyAudio();
 	void DrawCodex();
 	void DrawMonCodex();
+	int FoeList(int* out, int cap) const;
 	void DrawCodexTabs();
 	void DrawMonStage();
 	void EnsureMonPreview();
@@ -254,6 +255,7 @@ private:
 	BOOL CheckBattleOver();
 	void ComputeOverlays();
 	void BuildOverlayQuads();
+	void ClearRipples();
 	void UpdateCamera(float dt);
 	void UpdateUnitsVisual(float dt);
 	void FaceTowards(int ui, int tx, int tz);
@@ -358,6 +360,9 @@ private:
 	int m_codex;             // 0=閉 1=スキル 2=成長 3=錬金 4=敵
 	int m_codexPage;
 	int m_monSel;
+	int m_monBand;
+	int m_monSeenOnly;
+	wchar_t m_monFind[24];
 	float m_monYaw;
 	int m_monShown;
 	int m_monMot;            // 0待機 1歩き 2走り 3構え 4攻撃 5別技
@@ -403,6 +408,12 @@ private:
 
 	// 共通演出
 	Fix<Particle, 4096> m_parts;
+	// 水面に残る波紋。x, 発生時刻, z, 強さ。シェーダの Rip[48] と同じ数。
+	enum { TAC_RIPN = 48 };
+	float m_rip[TAC_RIPN][4];
+	int m_ripHead;
+	float m_ripSeen[MAX_UNITS][2];
+	float m_ripSeenT[MAX_UNITS];
 	Fix<Popup, 64> m_popups;
 	Fix<Banner, 12> m_banners;
 
@@ -450,6 +461,7 @@ private:
 	int m_statEqPage;
 	int m_itemAim;
 	int m_itemPage;
+	int m_aimPage;
 	int m_statTip;     // ホバー中の能力。-1 で無し
 	int m_skillTip;    // 編成のスキル説明。-1 無し、0 習得、1 戦技・奥義、2 パッシブ
 	int m_skillTipId;

@@ -14,36 +14,80 @@ FPS = 24.0
 MAX_F = 32
 
 
+_CC0_TEX = {}
+
+
+def cc0_image(kind):
+    """材質名にテクスチャが無いモデルへ貼る CC0 写真。"""
+    if kind in _CC0_TEX:
+        return _CC0_TEX[kind]
+    path = os.path.join(os.path.dirname(__file__), "_dl", "cc0_tex", kind + ".jpg")
+    img = None
+    if os.path.isfile(path):
+        img = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
+    _CC0_TEX[kind] = img
+    return img
+
+
+def cc0_kind(mat_name):
+    n = (mat_name or "").lower()
+    if any(k in n for k in ("wood", "bark", "amber", "leaf", "plank", "timber")):
+        return "wood"
+    if any(k in n for k in ("fur", "hair", "wool", "fleece", "ear")):
+        return "fur"
+    if any(k in n for k in ("chitin", "insect", "shell", "scale", "horn")):
+        return "chitin"
+    if any(k in n for k in ("skin", "face", "jaw", "flesh", "body")):
+        return "skin"
+    if any(k in n for k in ("metal", "iron", "steel", "armor")):
+        return "metal"
+    if any(k in n for k in ("stone", "rock", "geode", "bone")):
+        return "rock"
+    return "cloth"
+
+
+def sample_img(img, uv, nvert, factor):
+    h, w = img.shape[0], img.shape[1]
+    if uv is None or len(uv) != nvert:
+        return np.tile(np.clip(img.reshape(-1, 3).mean(0) * factor, 0, 1), (nvert, 1))
+    u = np.mod(uv[:, 0].astype(np.float32), 1.0)
+    v = np.mod(1.0 - uv[:, 1].astype(np.float32), 1.0)
+    x = np.clip((u * (w - 1)).astype(np.int32), 0, w - 1)
+    y = np.clip((v * (h - 1)).astype(np.int32), 0, h - 1)
+    return np.clip(img[y, x, :3] * factor, 0, 1)
+
+
 def albedo_rgb(g, mat, uv, nvert):
-    """ベースカラーテクスチャを頂点色へ焼く。無ければ材質色。"""
+    """ベースカラーテクスチャを頂点色へ焼く。無ければ材質色、白一色なら CC0 写真。"""
     pbr = (mat or {}).get("pbrMetallicRoughness") or {}
     factor = np.array((pbr.get("baseColorFactor") or [1, 1, 1, 1])[:3], np.float32)
     if float(np.max(factor)) < 1e-4:
         factor = np.array([0.75, 0.75, 0.75], np.float32)
     tex = pbr.get("baseColorTexture")
-    if not tex or uv is None or len(uv) != nvert:
-        return np.tile(factor, (nvert, 1))
-    try:
-        src = g.j["textures"][tex["index"]].get("source")
-        raw = g.image_bytes(src)
-        im = Image.open(BytesIO(raw)).convert("RGBA")
-        img = np.asarray(im).astype(np.float32) / 255.0
-        h, w = img.shape[0], img.shape[1]
-        u = np.mod(uv[:, 0].astype(np.float32), 1.0)
-        v = np.mod(1.0 - uv[:, 1].astype(np.float32), 1.0)
-        x = np.clip((u * (w - 1)).astype(np.int32), 0, w - 1)
-        y = np.clip((v * (h - 1)).astype(np.int32), 0, h - 1)
-        return np.clip(img[y, x, :3] * factor, 0, 1)
-    except Exception:
-        return np.tile(factor, (nvert, 1))
+    if tex and uv is not None and len(uv) == nvert:
+        try:
+            src = g.j["textures"][tex["index"]].get("source")
+            raw = g.image_bytes(src)
+            im = Image.open(BytesIO(raw)).convert("RGBA")
+            img = np.asarray(im).astype(np.float32) / 255.0
+            return sample_img(img, uv, nvert, factor)
+        except Exception:
+            pass
+    # テクスチャも頂点色も無く、材質が白のままの部位に CC0 写真を貼る。
+    if float(np.max(np.abs(factor - 1.0))) < 0.04:
+        img = cc0_image(cc0_kind((mat or {}).get("name")))
+        if img is not None:
+            return sample_img(img, uv, nvert, np.array([1, 1, 1], np.float32))
+    return np.tile(factor, (nvert, 1))
 
 
 def disp_name(fn):
     stem = os.path.splitext(fn)[0]
-    for pre in ("gob_", "q_", "ani_", "din_", "eas_", "fis_", "cut_", "zhum_"):
+    for pre in ("gob_", "zhum_", "qh_", "qa_", "qd_", "qe_", "qf_", "qc_", "qsp_", "qsh_", "qsv_", "qna_", "qcy_", "qpl_", "qit_", "qme_", "qin_", "q_", "ani_", "din_", "eas_", "fis_", "cut_"):
         if stem.startswith(pre):
             stem = stem[len(pre):]
             break
+    stem = stem.replace("-transformed", "")
     return stem.replace("_", " ")
 
 
@@ -52,7 +96,10 @@ def is_fly(fn, disp):
         return 1
     for k in ("Dragon", "Wyvern", "Wasp", "Ghost", "Birb", "Pigeon", "Hywirl",
               "Eagle", "Hawk", "Owl", "Bat", "Bee", "Moth", "Butterfly", "Dragonfly",
-              "Manta", "Gryphon", "Avian", "Crow", "Raven", "Gull", "Swallow", "Finch"):
+              "Manta", "Gryphon", "Avian", "Crow", "Raven", "Gull", "Swallow", "Finch",
+              "Budgie", "Razorbill", "Flamingo", "Penguin", "Toucan", "Macaw", "Parrot",
+              "Humming", "Seagull", "Kingfisher", "Pelican", "Hoopoe", "Peacock", "Fairy",
+              "Spaceship", "Rocket", "Drone", "Satellite", "Flying"):
         if k in disp:
             return 1
     return 0
@@ -150,11 +197,9 @@ def rigid_one(path):
                 R = np.linalg.inv(xf[:3, :3]).T
                 nrm = (nrm @ R.T).astype(np.float32)
             mat = j["materials"][pr.get("material", 0)] if j.get("materials") else {}
-            col = mat.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.75, 0.75, 0.75, 1])
-            rgb = np.array(col[:3], np.float32)
             P.append(pos.astype(np.float32))
             N.append(nrm.astype(np.float32))
-            C.append(np.tile(rgb, (len(pos), 1)))
+            C.append(albedo_rgb(g, mat, uv, len(pos)))
             I.append(idx.astype(np.uint32) + base)
             base += len(pos)
     if not P:
@@ -1742,17 +1787,38 @@ def write_one(fo, name, rec):
         fo.write(b"\0\0")
 
 
+def species_names():
+    import re
+    if not os.path.isfile(INC):
+        return []
+    text = open(INC, encoding="utf-8").read().split("kImportFly")[0]
+    return re.findall(r'L\"([^\"]+)\"', text)
+
+
 def main():
+    import re
     files = sorted(f for f in os.listdir(SRC) if f.lower().endswith(".glb") and "Horse_White" not in f)
-    # 追加の人体は末尾に足す。既存モンスターの並び（セーブのモデル番号）をずらさない。
-    digit = [f for f in files if len(f) >= 14 and f.startswith("zhum_Hum") and f[8] in "FM" and f[9].isdigit()]
-    order = ["zhum_HumF0.glb", "zhum_HumF1.glb", "zhum_HumF2.glb", "zhum_HumF3.glb",
-             "zhum_HumM0.glb", "zhum_HumM1.glb", "zhum_HumM2.glb", "zhum_HumM3.glb",
-             "zhum_HumF4.glb", "zhum_HumM4.glb", "zhum_HumF5.glb", "zhum_HumM5.glb", "zhum_HumF6.glb", "zhum_HumM6.glb"]
-    tail = [f for f in order if f in digit] + sorted(f for f in digit if f not in order)
-    # 召喚用 Quaternius は一番後ろ。既存のモデル番号を動かさない。
-    summon = sorted(f for f in files if f.startswith("q_Sum"))
-    files = [f for f in files if f not in tail and f not in summon] + tail + summon
+    by_name = {}
+    for fn in files:
+        by_name.setdefault(disp_name(fn), fn)
+    # 既存の種の並びはセーブのモデル番号。新しい種だけ末尾に足す。
+    ordered, used = [], set()
+    taken = set(species_names())
+    for name in species_names():
+        fn = by_name.get(name)
+        if fn and fn not in used:
+            ordered.append(fn)
+            used.add(fn)
+    rest = []
+    for fn in sorted(f for f in files if f not in used):
+        dn = disp_name(fn)
+        if dn in taken:
+            print("dup", fn, dn)
+            continue
+        taken.add(dn)
+        rest.append(fn)
+    files = ordered + rest
+    print("keep", len(ordered), "add", len(rest), "total", len(files))
     recs, names, srcn = [], [], []
     for fn in files:
         try:

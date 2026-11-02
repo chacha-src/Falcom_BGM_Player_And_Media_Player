@@ -21,6 +21,23 @@ inline DWORD RGBAf(float r, float g, float b, float a = 1.f)
 	return RGBA8((int)(r * 255.f + .5f), (int)(g * 255.f + .5f), (int)(b * 255.f + .5f), (int)(a * 255.f + .5f));
 }
 
+// 数秒に一度、1秒あまり。髪・服・木・粒子が同じ突風を見る。
+inline float TacBurst(float time)
+{
+	float burst = 0.f;
+	const float s = sinf(time * 0.85f);
+	if (s > 0.72f) {
+		const float u = (s - 0.72f) / 0.28f;
+		burst = u * u * (3.f - 2.f * u);
+	}
+	const float s2 = sinf(time * 0.37f + 2.1f);
+	if (s2 > 0.82f) {
+		const float u = (s2 - 0.82f) / 0.18f;
+		if (u > burst) burst = u;
+	}
+	return burst;
+}
+
 struct GpuMesh {
 	ID3D11Buffer* vb;
 	ID3D11Buffer* ib;
@@ -375,7 +392,8 @@ public:
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
 	void SetDepthTest(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsOff, 0); }
 	void DrawWater();
-	void SetLiquidRipples(const float rip[4][4]);
+	void SetLiquidRipples(const float* rip, int n);
+	void SetStageId(int stage);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n);
 	void DrawRibbon(const Buf<VtxP>& v);
@@ -672,6 +690,7 @@ private:
 	Fix<PropBatch, 16> m_props;
 	DWORD m_waterColor;
 	int m_theme;
+	int m_stageId;
 	int m_wx;
 	int m_hour;
 	SceneryPuff m_puff[16];

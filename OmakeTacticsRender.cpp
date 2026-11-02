@@ -84,6 +84,7 @@ Renderer::Renderer()
 	for (int i = 0; i < LAY_N; i++) { m_texMiniL[i] = NULL; m_srvMiniL[i] = NULL; }
 	m_waterColor = RGBA8(60, 130, 190);
 	m_theme = 0;
+	m_stageId = 0;
 	m_wx = 0;
 	m_hour = 0;
 	m_puffN = 0;
@@ -597,7 +598,7 @@ BOOL Renderer::CreateStates()
 	bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	bd.ByteWidth = (sizeof(FrameCB) + 15) & ~15;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbFrame))) return FALSE;
-	bd.ByteWidth = 64;
+	bd.ByteWidth = 48 * 16;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbRipple))) return FALSE;
 	bd.ByteWidth = 64 + 16 * 4;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbObj))) return FALSE;
@@ -6207,23 +6208,6 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 	return TRUE;
 }
 
-static float TacBurst(float time)
-{
-	// 数秒に一度、1秒あまり。立っているときもポートレートでも見える間隔。
-	float burst = 0.f;
-	const float s = sinf(time * 0.85f);
-	if (s > 0.72f) {
-		const float u = (s - 0.72f) / 0.28f;
-		burst = u * u * (3.f - 2.f * u);
-	}
-	const float s2 = sinf(time * 0.37f + 2.1f);
-	if (s2 > 0.82f) {
-		const float u = (s2 - 0.82f) / 0.18f;
-		if (u > burst) burst = u;
-	}
-	return burst;
-}
-
 static void TacVel(const M4& prev, const M4& now, float dt, float out[3])
 {
 	out[0] = out[1] = out[2] = 0.f;
@@ -7506,7 +7490,7 @@ void Renderer::BeginFrame()
 	ID3D11SamplerState* ss[3] = { m_sLin, m_sCmp, m_sClamp };
 	m_ctx->PSSetSamplers(0, 3, ss);
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h; m_fcb.screen[2] = 1.f / m_w; m_fcb.screen[3] = 1.f / m_h;
-	SetLiquidRipples(NULL);
+	SetLiquidRipples(NULL, 0);
 }
 
 void Renderer::SetCamera(const M4& view, const M4& proj, V3 eye, float time)
@@ -7547,7 +7531,7 @@ void Renderer::SetSight(const float* xz, int n, float radius)
 	if (n < 0) n = 0;
 	if (n > 16) n = 16;
 	m_fcb.sight[0] = radius;
-	m_fcb.sight[1] = 0;
+	m_fcb.sight[1] = (float)m_stageId;
 	m_fcb.sight[2] = (float)n;
 	m_fcb.sight[3] = (radius > 0.5f && n > 0 && xz) ? 1.f : 0.f;
 	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
@@ -7831,6 +7815,7 @@ void Renderer::DrawTerrain()
 	}
 	m_psOverride = m_psProp;
 	dp.twoSided = 1;
+	dp.sway = TacBurst(m_time) * 0.45f;
 	for (auto& b : m_props) {
 		dp.emissive = b.mat;
 		dp.hue = 0;
@@ -7847,14 +7832,25 @@ void Renderer::DrawTerrain()
 	m_psOverride = NULL;
 }
 
-void Renderer::SetLiquidRipples(const float rip[4][4])
+void Renderer::SetStageId(int stage)
+{
+	if (stage < 0) stage = 0;
+	m_stageId = stage;
+	m_fcb.sight[1] = (float)m_stageId;
+}
+
+void Renderer::SetLiquidRipples(const float* rip, int n)
 {
 	if (!m_cbRipple || !m_ctx) return;
-	float z[16] = {};
-	const void* src = rip ? (const void*)rip : (const void*)z;
+	float z[48 * 4];
+	memset(z, 0, sizeof(z));
+	if (rip && n > 0) {
+		if (n > 48) n = 48;
+		memcpy(z, rip, (size_t)n * 16u);
+	}
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbRipple, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, src, 64);
+	memcpy(ms.pData, z, sizeof(z));
 	m_ctx->Unmap(m_cbRipple, 0);
 }
 
@@ -8187,7 +8183,7 @@ static void ConeRing(MeshBuild& mb, float x, float y0, float z, float y1, float 
 static bool ScenicGround(int t)
 {
 	return t == T_PLAIN || t == T_HILL || t == T_SAND || t == T_SNOW || t == T_SWAMP
-		|| t == T_RUINS || t == T_ROCK || t == T_FOREST;
+		|| t == T_RUINS || t == T_ROCK || t == T_FOREST || t == T_ROAD;
 }
 
 static bool ScenicSkipProp(int prop)
@@ -8230,7 +8226,6 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 		float px = x + ox, pz = z + oz, py = m.StandY(x, z);
 		float yaw = (h & 255) / 255.f * 6.2831853f;
 		float u = (h & 65535) / 65535.f;
-		if (theme >= TH_SEABED) continue;
 		switch (theme) {
 		case TH_PLAINS:
 			if ((h % 3) != 0) break;
@@ -8312,23 +8307,27 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			}
 			if (wet && (h % 3) == 0) Tuft(mb, px, py, pz, 0.32f + u * 0.2f, 0.03f, yaw, RGBA8(40, 78, 36), RGBA8(150, 176, 72, 60));
 			else if ((h % 4) == 0) Tuft(mb, px, py, pz, 0.08f + u * 0.05f, 0.08f, yaw, RGBA8(36, 86, 38), RGBA8(90, 150, 64, 90));
+			if (wet && (h % 7) == 0) AddPuff(puff, puffN, 14, px, py + 0.35f, pz, 10.f);
 			break; }
 		case TH_ORBIT:
 			if ((h % 6) == 0) AddBox(mb, v3(px, py + 0.08f, pz), v3(0.18f + u * 0.12f, 0.05f, 0.1f), RGBA8(70, 78, 90), -1);
 			if ((h % 13) == 0) AddBox(mb, v3(px, py + 0.22f, pz), v3(0.16f, 0.16f, 0.16f), RGBA8(120, 150, 190), -1);
+			if ((h % 19) == 0) AddPuff(puff, puffN, 10, px, py + 1.2f, pz, 14.f);
 			break;
 		case TH_STATION:
 			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.2f, pz), v3(0.04f, 0.2f, 0.04f), RGBA8(140, 150, 160), -1);
 			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.42f, pz), v3(0.16f, 0.03f, 0.03f), (h & 8) ? RGBA8(255, 70, 40) : RGBA8(40, 180, 255), -1);
+			if ((h % 17) == 0) AddPuff(puff, puffN, 11, px, py + 0.5f, pz, 12.f);
 			break;
 		case TH_CITADEL:
 			if ((h % 7) == 0) AddBox(mb, v3(px, py + 0.35f, pz), v3(0.12f, 0.35f, 0.12f), RGBA8(186, 180, 196), -1);
 			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.72f, pz), v3(0.2f, 0.04f, 0.2f), RGBA8(90, 70, 110), -1);
+			if ((h % 19) == 0) AddPuff(puff, puffN, 12, px, py + 0.8f, pz, 14.f);
 			break;
 		case TH_LANTERN:
 			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.45f, pz), v3(0.02f, 0.4f, 0.02f), RGBA8(210, 200, 170), -1);
 			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.88f, pz), v3(0.07f, 0.05f, 0.07f), RGBA8(255, 210, 120), -1);
-			if ((h % 3) == 0) AddPuff(puff, puffN, 7, px, py + 0.2f, pz, 10.f);
+			if ((h % 3) == 0) AddPuff(puff, puffN, 13, px, py + 0.9f, pz, 10.f);
 			break;
 		default: break;
 		}
@@ -8769,7 +8768,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 					AddPuff(m_puff, m_puffN, 0, cx + (fw - 1) * 0.5f, cy + sc * 0.35f, cz + (fd - 1) * 0.5f, 2.2f);
 				break; }
 			case PK_LILY:
-				place((c.var & 1) ? lilyMb : plantMb, (c.var & 1) ? sLily : sPlant, cx + jx * 3, m.StandY(x, z) - .01f, cz + jz * 3, 3.f, rot, tint, 0);
+				place((c.var & 1) ? lilyMb : plantMb, (c.var & 1) ? sLily : sPlant, cx + jx * 3, m.StandY(x, z) - .01f, cz + jz * 3, 3.f, rot, tint, 0.9f);
 				break;
 			case PK_PILLAR: {
 				float hgt = .9f + (c.var % 5) * .18f;
@@ -8778,12 +8777,12 @@ BOOL Renderer::BuildTerrain(const Map& m)
 				if ((c.var & 3) != 0) AddBox(proc, v3(cx, cy + .12f + hgt + .06f, cz), v3(.32f, .06f, .32f), tint, -1);
 				break; }
 			case PK_GRAVE: place(rockMb, sGrave, cx, cy, cz, .42f, rot, tint, 0); break;
-			case PK_TENT: place(tentMb, sTent, cx, cy, cz, 1.9f, rot, tint, 0); break;
-			case PK_FLAG: place(flagMb, sFlag, cx, cy, cz, 3.f, rot, tint, .6f); break;
+			case PK_TENT: place(tentMb, sTent, cx, cy, cz, 1.9f, rot, tint, 0.55f); break;
+			case PK_FLAG: place(flagMb, sFlag, cx, cy, cz, 3.f, rot, tint, 1.f); break;
 			case PK_BARREL: place(wood, sBarrel, cx, cy, cz, 2.6f, rot, tint, 0); place(wood, sBarrel, cx + .25f, cy, cz - .2f, 2.2f, rot, tint, 0); break;
 			case PK_CRATE: place(wood, sCrate, cx, cy, cz, 2.6f, rot, tint, 0); break;
-			case PK_LANTERN: place(lantMb, sLant, cx + .3f, cy, cz + .3f, .6f, rot, tint, 0); break;
-			case PK_PUMPKIN: place(pumpMb, sPump, cx, cy, cz, .45f, rot, tint, 0); break;
+			case PK_LANTERN: place(lantMb, sLant, cx + .3f, cy, cz + .3f, .6f, rot, tint, 0.4f); break;
+			case PK_PUMPKIN: place(pumpMb, sPump, cx, cy, cz, .45f, rot, tint, 0.2f); break;
 			case PK_KIT: PlaceKit(kitMb, m.theme, c.var, cx, cy, cz, rot); break;
 			}
 		}

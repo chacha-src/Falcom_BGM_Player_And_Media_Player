@@ -18,6 +18,7 @@ enum {
 	ID_CDX_JOB = 164, ID_CDX_SORT,
 	ID_CDX_FAM = 168, ID_CDX_SHAPE0 = 1720, ID_CDX_EL0 = 1730, ID_CDX_JP0 = 1740, ID_CDX_JPREV = 1750, ID_CDX_JNEXT,
 	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM, ID_MON_TAB,
+	ID_MON_FIND = 1760, ID_MON_CLEAR, ID_MON_LVPREV, ID_MON_LVNEXT, ID_MON_SEEN,
 	ID_BASE_SHOP = 210, ID_SHOP_CLOSE, ID_SHOP_BUY0 = 220, ID_SHOP_SELL0 = 250,
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
 	ID_SHOP_TIER0 = 1120,
@@ -123,6 +124,9 @@ Game::Game()
 	m_codex = 0;
 	m_codexPage = 0;
 	m_monSel = 0;
+	m_monBand = 0;
+	m_monSeenOnly = 0;
+	m_monFind[0] = 0;
 	m_monYaw = 0;
 	m_monShown = -2;
 	m_monMot = 0;
@@ -185,6 +189,7 @@ Game::Game()
 	m_statEqPage = 0;
 	m_itemAim = -1;
 	m_itemPage = 0;
+	m_aimPage = 0;
 	m_statTip = -1;
 	m_skillTip = -1;
 	m_skillTipId = 0;
@@ -1068,6 +1073,14 @@ void Game::OnChar(wchar_t ch)
 		}
 		return;
 	}
+	if (m_textFocus == 4) {
+		size_t n = wcslen(m_monFind);
+		if (ch == 8) { if (n > 0) m_monFind[n - 1] = 0; m_codexPage = 0; return; }
+		if (ch == 13 || ch == 27 || ch == 9) { m_textFocus = 0; return; }
+		if (ch < 32) return;
+		if (n + 1 < 24) { m_monFind[n] = ch; m_monFind[n + 1] = 0; m_codexPage = 0; }
+		return;
+	}
 	if (m_textFocus == 2) {
 		size_t n = wcslen(m_slotEdit);
 		if (ch == 8) { if (n > 0) m_slotEdit[n - 1] = 0; return; }
@@ -1093,6 +1106,10 @@ void Game::OnKey(int vk, BOOL down)
 		if (vk == VK_ESCAPE) { m_sellAsk = 0; m_textFocus = 0; TacSfx(TS_CANCEL); }
 		else if (vk == VK_RETURN) m_sellGo = 1;
 		else if (vk == VK_BACK) { m_sellN /= 10; if (m_sellN < 1) m_sellN = 1; m_sellFresh = 0; }
+		return;
+	}
+	if (m_textFocus == 4) {
+		if (vk == VK_RETURN || vk == VK_ESCAPE) { m_textFocus = 0; TacSfx(TS_CANCEL); }
 		return;
 	}
 	if (m_textFocus == 2) {
@@ -1430,7 +1447,10 @@ void Game::NavBack()
 		if (m_sortieAsk) { m_sortieAsk = 0; TacSfx(TS_CANCEL); }
 		else if (m_mapLook) { m_mapLook = 0; m_showYaw = m_camYaw; TacSfx(TS_CANCEL); }
 		else if (!m_homeUi && !m_codex && !m_shop && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3 && !m_baseOpt) { m_homeUi = 1; TacSfx(TS_OPEN); }
-		else if (m_codex) { m_codex = 0; TacSfx(TS_CANCEL); }
+		else if (m_codex) {
+			if (m_textFocus == 4) { m_textFocus = 0; TacSfx(TS_CANCEL); }
+			else { m_codex = 0; TacSfx(TS_CANCEL); }
+		}
 		else if (m_shop && m_sellAsk) { m_sellAsk = 0; m_textFocus = 0; TacSfx(TS_CANCEL); }
 		else if (m_shop && m_shopFit == 13) { m_shopFit = 4; TacSfx(TS_CANCEL); }
 		else if (m_shop && (m_shopHold || m_shopFit)) { m_shopHold = 0; m_shopFit = 0; m_shopWho = -1; TacSfx(TS_CANCEL); }
@@ -2042,8 +2062,40 @@ void Game::WeatherTread(const Unit& u, int x, int z)
 	}
 }
 
+// 髪や服と同じ突風。地形に沿った渦を足して、粒がまっすぐ飛ばないようにする。
+static void WindField(float time, float x, float z, float& ox, float& oz, float& lift, int theme)
+{
+	float burst = TacBurst(time);
+	float ang = time * 0.23f;
+	float mag = 1.25f + burst * 6.2f;
+	if (theme == TH_DESERT || theme == TH_CANYON) mag *= 1.48f;
+	else if (theme == TH_PLAINS) mag *= 1.12f;
+	else if (theme == TH_SNOW) mag *= 0.68f;
+	else if (theme == TH_FOREST) mag *= 0.52f;
+	else if (theme == TH_SEABED) mag *= 0.32f;
+	else if (theme == TH_ORBIT) mag *= 0.18f;
+	else if (theme == TH_VOLCANO) mag *= 1.22f;
+	else if (theme == TH_FALLS) mag *= 0.82f;
+	else if (theme == TH_STATION) mag *= 0.4f;
+	else if (theme == TH_CITADEL) mag *= 0.7f;
+	else if (theme == TH_LANTERN) mag *= 0.55f;
+	ox = cosf(ang) * mag;
+	oz = sinf(ang) * mag;
+	float s = sinf(x * 0.41f + time * 0.55f) * cosf(z * 0.33f - time * 0.37f);
+	float c = cosf(x * 0.27f - time * 0.48f) * sinf(z * 0.36f + time * 0.29f);
+	ox += -c * (0.9f + burst * 2.2f);
+	oz += s * (0.9f + burst * 2.2f);
+	lift = burst * 2.4f + s * 0.45f;
+	if (theme == TH_VOLCANO) lift += 1.15f;
+	else if (theme == TH_SEABED) lift -= 0.35f;
+	else if (theme == TH_SWAMP) lift += 0.25f;
+	else if (theme == TH_ORBIT) { ox *= 0.45f; oz *= 0.45f; lift = sinf(time * 0.4f + x) * 0.22f; }
+	else if (theme == TH_FALLS) lift += 0.55f;
+}
+
 void Game::UpdateParticles(float dt)
 {
+	static float sVX = 1e9f, sVZ = 1e9f;
 	if (m_r.SceneryPuffCount() > 0 && m_parts.size() < 2800) {
 		m_sceneAcc += dt;
 		float step = (m_save.quality == 4) ? 0.3f : 0.12f;
@@ -2087,106 +2139,197 @@ void Game::UpdateParticles(float dt)
 					Burst(p, 3, 2.8f, 0.08f, 1.3f, 0.86f, 0.72f, 0.42f, 3, 1, 2.4f, 0.1f, 0.25f, 0.02f);
 				} else if (s.kind == 9) {
 					Burst(p, 1, 0.4f, 0.08f, 2.4f, 0.65f, 0.82f, 1.f, 1, 1, -0.7f, 0, 2.2f, 0.03f);
+				} else if (s.kind == 10) {
+					Burst(p, 2, 0.55f, 0.04f, 3.2f, 0.75f, 0.85f, 1.f, 1, 1, 0.f, 0, 0.2f, 0.02f);
+				} else if (s.kind == 11) {
+					Burst(p + v3(0, 0.2f, 0), 2, 0.35f, 0.05f, 2.4f, 0.7f, 0.88f, 1.f, 1, 1, -0.4f, 0, 1.6f, 0.7f);
+				} else if (s.kind == 12) {
+					Burst(p + v3(0, 0.5f, 0), 2, 0.28f, 0.045f, 3.0f, 0.55f, 0.48f, 0.7f, 0, 1, -0.12f, 0, 1.4f, 0.8f);
+				} else if (s.kind == 13) {
+					Burst(p + v3(0, 0.4f, 0), 1, 0.22f, 0.035f, 2.8f, 1.f, 0.82f, 0.42f, 1, 1, -0.08f, 0, 0.6f, 0.85f);
+				} else if (s.kind == 14) {
+					Burst(p, 3, 1.4f, 0.05f, 1.6f, 0.85f, 0.94f, 1.f, 1, 1, 2.8f, 0.02f, 2.2f, 0.03f);
 				}
 			}
 		}
 	}
-	if (m_screen == SC_BATTLE && m_save.quality != 4 && m_parts.size() < 520) {
-		static float airAcc = 0.f;
-		const Map& map = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
-		int theme = Clampi(map.theme, 0, TH_COUNT - 1);
-		int q = m_save.quality;
-		float step = (q <= 0) ? 0.14f : ((q >= 5) ? 0.06f : 0.09f);
-		int cap = (q <= 0) ? 4 : ((q == 1) ? 7 : ((q >= 5) ? 12 : 9));
-		airAcc += dt;
-		int ticks = 0;
-		while (airAcc >= step && ticks < 2 && (int)m_parts.size() < 520) {
-			airAcc -= step;
-			ticks++;
-			int cx = (int)floorf(m_camTarget.x), cz = (int)floorf(m_camTarget.z);
-			float gy = 0.f;
-			if (Map::In(cx, cz)) gy = map.TopY(cx, cz);
-			auto air = [&](V3 p, V3 v, float life, float sz, float sz1, float r, float g, float b, int shape, int add, float grav, float drag, float stretch) {
-				if ((int)m_parts.size() >= 640) return;
-				Particle q = {};
-				q.p = p; q.v = v; q.life = q.max = life;
-				q.size = sz; q.size1 = sz1;
-				q.r = r; q.g = g; q.b = b; q.a = 1;
-				q.shape = shape; q.add = add; q.grav = grav; q.drag = drag; q.stretch = stretch;
-				m_parts.push_back(q);
-			};
-			// 頭より上。顔の前に膜を作らない。
-			auto around = [&](float rad, float y0, float y1) -> V3 {
-				float ang = m_rng.F(0.f, 6.2831853f);
-				float rr = m_rng.F(1.5f, rad);
-				return v3(m_camTarget.x + cosf(ang) * rr, gy + m_rng.F(y0, y1), m_camTarget.z + sinf(ang) * rr);
-			};
-			for (int n = 0; n < cap; n++) {
-				switch (theme) {
-				case TH_PLAINS: {
-					float sp = m_rng.F(2.2f, 4.5f);
-					air(around(16.f, 2.2f, 6.f), v3(sp, m_rng.F(0.05f, 0.35f), sp * 0.2f), 2.f, 0.045f, 0.012f, 1.f, 0.94f, 0.55f, 1, 1, -0.04f, 0.35f, 0.03f);
-					break; }
-				case TH_CANYON: {
-					float spin = m_time * 1.4f + n;
-					air(around(12.f, 2.4f, 6.5f), v3(cosf(spin) * 0.8f, m_rng.F(0.3f, 0.9f), sinf(spin) * 0.8f), 2.2f, 0.06f, 0.02f, 0.78f, 0.55f, 0.32f, 0, 1, -0.08f, 0.4f, 0.f);
-					break; }
-				case TH_FOREST:
-					air(around(14.f, 3.2f, 7.5f), v3(m_rng.F(-0.25f, 0.25f), m_rng.F(-0.55f, -0.15f), m_rng.F(-0.25f, 0.25f)), 2.8f, 0.05f, 0.015f, 0.5f, 0.9f, 0.35f, 2, 1, 0.12f, 0.25f, 0.f);
-					break;
-				case TH_SNOW:
-					air(around(16.f, 4.5f, 9.f), v3(m_rng.F(-0.4f, 0.7f), m_rng.F(-1.6f, -0.6f), m_rng.F(-0.3f, 0.3f)), 2.8f, 0.04f, 0.012f, 0.96f, 0.98f, 1.f, 2, 1, 0.25f, 0.2f, 0.f);
-					break;
-				case TH_DESERT:
-					air(around(14.f, 1.8f, 4.5f), v3(m_rng.F(1.8f, 4.f), m_rng.F(0.05f, 0.3f), m_rng.F(-0.2f, 0.35f)), 1.6f, 0.035f, 0.01f, 0.98f, 0.82f, 0.45f, 3, 1, 0.15f, 0.4f, 0.08f);
-					break;
-				case TH_VOLCANO:
-					air(around(12.f, 2.2f, 7.f), v3(m_rng.F(-0.3f, 0.3f), m_rng.F(0.8f, 2.2f), m_rng.F(-0.3f, 0.3f)), 1.6f, 0.045f, 0.012f, 1.f, m_rng.F(0.28f, 0.5f), 0.05f, 5, 1, -0.15f, 0.45f, 0.02f);
-					break;
-				case TH_SWAMP:
-					air(around(14.f, 2.6f, 6.8f), v3(m_rng.F(-0.35f, 0.35f), m_rng.F(0.05f, 0.28f), m_rng.F(-0.25f, 0.25f)), 2.4f, 0.04f, 0.01f, 0.75f, 1.f, 0.35f, 1, 1, -0.04f, 0.35f, 0.f);
-					if ((n & 3) == 0) air(around(11.f, 0.2f, 0.55f), v3(m_rng.F(-0.1f, 0.1f), 0.45f, m_rng.F(-0.1f, 0.1f)), 1.8f, 0.035f, 0.012f, 0.65f, 0.9f, 0.5f, 1, 1, -0.2f, 0.3f, 0.f);
-					break;
-				case TH_RUINS:
-					air(around(12.f, 2.4f, 6.f), v3(m_rng.F(-0.15f, 0.15f), m_rng.F(0.15f, 0.45f), m_rng.F(-0.15f, 0.15f)), 2.6f, 0.04f, 0.012f, 0.55f, 0.72f, 1.f, 1, 1, -0.08f, 0.3f, 0.f);
-					break;
-				case TH_SEABED:
-					air(around(12.f, 1.6f, 5.5f), v3(m_rng.F(-0.1f, 0.2f), m_rng.F(0.35f, 0.9f), m_rng.F(-0.1f, 0.15f)), 2.8f, 0.04f, 0.015f, 0.6f, 0.88f, 1.f, 1, 1, -0.25f, 0.25f, 0.f);
-					break;
-				case TH_ORBIT:
-					air(around(18.f, 3.f, 10.f), v3(m_rng.F(-0.4f, 0.6f), m_rng.F(-0.15f, 0.2f), m_rng.F(-0.3f, 0.3f)), 3.2f, 0.03f, 0.01f, 0.85f, 0.9f, 1.f, 1, 1, 0.f, 0.15f, 0.f);
-					if ((n & 1) == 0) air(around(14.f, 2.2f, 6.f), v3(m_rng.F(0.4f, 1.6f), m_rng.F(-0.2f, 0.2f), m_rng.F(-0.4f, 0.4f)), 2.4f, 0.08f, 0.03f, 0.55f, 0.58f, 0.62f, 0, 0, 0.05f, 0.3f, 0.f);
-					break;
-				case TH_STATION:
-					air(around(12.f, 2.4f, 7.f), v3(m_rng.F(-0.2f, 0.35f), m_rng.F(0.05f, 0.4f), m_rng.F(-0.2f, 0.2f)), 2.2f, 0.035f, 0.012f, 0.45f, 0.85f, 1.f, 1, 1, -0.02f, 0.3f, 0.f);
-					if ((n & 2) == 0) air(around(10.f, 1.2f, 3.f), v3(0.f, 0.15f, 0.f), 1.4f, 0.06f, 0.02f, 1.f, 0.55f, 0.15f, 5, 1, -0.05f, 0.4f, 0.f);
-					break;
-				case TH_CITADEL:
-					air(around(14.f, 2.8f, 8.f), v3(m_rng.F(-1.4f, -0.4f), m_rng.F(-0.15f, 0.25f), m_rng.F(-0.35f, 0.35f)), 2.2f, 0.07f, 0.02f, 0.15f, 0.12f, 0.18f, 2, 0, 0.02f, 0.35f, 0.4f);
-					if ((n & 3) == 0) air(around(11.f, 3.5f, 6.f), v3(m_rng.F(-0.1f, 0.1f), 0.2f, m_rng.F(-0.1f, 0.1f)), 2.6f, 0.04f, 0.01f, 0.7f, 0.55f, 1.f, 1, 1, -0.05f, 0.3f, 0.f);
-					break;
-				case TH_LANTERN:
-					air(around(15.f, 2.6f, 8.f), v3(m_rng.F(-0.25f, 0.35f), m_rng.F(0.15f, 0.55f), m_rng.F(-0.2f, 0.2f)), 2.8f, 0.05f, 0.015f, 1.f, 0.9f, 0.65f, 1, 1, -0.08f, 0.25f, 0.f);
-					air(around(13.f, 1.2f, 3.5f), v3(m_rng.F(-0.15f, 0.2f), m_rng.F(0.05f, 0.25f), m_rng.F(-0.1f, 0.15f)), 2.4f, 0.08f, 0.03f, 0.9f, 0.92f, 1.f, 0, 1, -0.04f, 0.2f, 0.f);
-					break;
-				default:
-					air(around(12.f, 2.8f, 7.f), v3(m_rng.F(-0.2f, 0.25f), m_rng.F(0.1f, 0.45f), m_rng.F(-0.15f, 0.15f)), 1.8f, 0.05f, 0.015f, 0.9f, 0.96f, 1.f, 1, 1, -0.05f, 0.3f, 0.f);
-					break;
+	{
+		float wwx = 0.f, wwz = 0.f, wlift = 0.f;
+		int airTh = 0;
+		if (m_screen == SC_BATTLE) airTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+		else airTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
+		WindField(m_time, m_camTarget.x, m_camTarget.z, wwx, wwz, wlift, airTh);
+		if (sVX > 1e8f) { sVX = m_camTarget.x + 5.f; sVZ = m_camTarget.z; }
+		sVX += wwx * dt * 0.18f;
+		sVZ += wwz * dt * 0.18f;
+		float vdx = sVX - m_camTarget.x, vdz = sVZ - m_camTarget.z;
+		float vd = sqrtf(vdx * vdx + vdz * vdz);
+		if (vd > 16.f) { sVX = m_camTarget.x + vdx / vd * 7.f; sVZ = m_camTarget.z + vdz / vd * 7.f; }
+		BOOL mapView = m_screen == SC_BATTLE || ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt);
+		if (mapView && m_parts.size() < 3400) {
+			static float airAcc = 0.f;
+			const Map& map = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
+			int theme = Clampi(map.theme, 0, TH_COUNT - 1);
+			int q = m_save.quality;
+			float step = (q == 4) ? 0.22f : ((q <= 0) ? 0.12f : ((q >= 5) ? 0.05f : 0.08f));
+			int ambCap = (q == 4) ? 40 : ((q <= 0) ? 80 : ((q >= 5) ? 180 : 120));
+			int amb = 0;
+			for (int i = 0; i < m_parts.size(); i++) if (m_parts[i].wxHit == 8) amb++;
+			airAcc += dt;
+			int ticks = 0;
+			while (airAcc >= step && ticks < 2 && amb < ambCap && m_parts.size() < 3400) {
+				airAcc -= step;
+				ticks++;
+				auto born = [&](int mode, V3 p, V3 v, float life, float sz, float r, float g, float b, int shape, float grav, float drag) {
+					if ((int)m_parts.size() >= 3600 || amb >= ambCap) return;
+					Particle q = {};
+					q.p = p; q.v = v; q.life = q.max = life;
+					q.size = sz; q.size1 = sz * 0.35f;
+					q.r = r; q.g = g; q.b = b; q.a = 1;
+					q.shape = shape; q.add = 1; q.grav = grav; q.drag = drag;
+					q.wxHit = 8; q.nHit = mode;
+					m_parts.push_back(q);
+					amb++;
+				};
+				V3 camF = m_camTarget - m_eye;
+				float camFl = Len(camF);
+				camF = camFl > 0.2f ? camF * (1.f / camFl) : v3(0, 0, 1);
+				auto onLand = [&](float rad, float y0, float y1, V3& out) -> BOOL {
+					for (int t = 0; t < 6; t++) {
+						float ang = m_rng.F(0.f, 6.2831853f);
+						float rr = m_rng.F(3.2f, rad);
+						float x = m_camTarget.x + cosf(ang) * rr;
+						float z = m_camTarget.z + sinf(ang) * rr;
+						int ix = (int)floorf(x), iz = (int)floorf(z);
+						if (!Map::In(ix, iz)) continue;
+						const Cell& c = map.At(ix, iz);
+						if (c.t == T_VOID || c.t == T_CHASM) continue;
+						V3 cand = v3(x, map.TopY(ix, iz) + m_rng.F(y0, y1), z);
+						V3 to = cand - m_eye;
+						float along = to.x * camF.x + to.y * camF.y + to.z * camF.z;
+						float d2 = to.x * to.x + to.y * to.y + to.z * to.z;
+						if (d2 < 9.f && along > 0.2f) continue;
+						out = cand;
+						return TRUE;
+					}
+					return FALSE;
+				};
+				V3 at;
+				float wx = 0.f, wz = 0.f, lift = 0.f;
+				WindField(m_time, m_camTarget.x, m_camTarget.z, wx, wz, lift, theme);
+				int sheet = 0;
+				if (theme == TH_FOREST) sheet = 2;
+				else if (theme == TH_SNOW) sheet = 3;
+				else if (theme == TH_DESERT || theme == TH_CANYON) sheet = 4;
+				else if (theme == TH_VOLCANO) sheet = 5;
+				else if (theme == TH_SWAMP || theme == TH_SEABED) sheet = 6;
+				else if (theme == TH_ORBIT) sheet = 10;
+				else if (theme == TH_LANTERN) sheet = 13;
+				else if (theme == TH_FALLS) sheet = 7;
+				int nSpawn = (q == 4) ? 1 : ((q >= 5) ? 4 : 2);
+				for (int n = 0; n < nSpawn; n++) {
+					if (theme == TH_PLAINS) {
+						if ((n & 1) == 0) {
+							if (!onLand(16.f, 2.2f, 5.2f, at)) continue;
+							born(0, at, v3(wx * 0.35f, m_rng.F(0.15f, 0.7f), wz * 0.35f), 3.4f, 0.04f, 0.95f, 0.9f, 0.45f, 1, 0.35f, 0.9f);
+						} else {
+							if (!onLand(16.f, 0.06f, 0.28f, at)) continue;
+							born(4, at, v3(wx * 0.4f, 0.08f, wz * 0.4f), 1.8f, 0.022f, 0.82f, 0.72f, 0.4f, 3, 5.5f, 0.4f);
+						}
+					} else if (theme == TH_CANYON || theme == TH_DESERT) {
+						if (!onLand(16.f, 0.08f, 0.35f, at)) continue;
+						if ((n & 1) == 0) {
+							float rr = m_rng.F(0.4f, 2.4f);
+							float a = m_rng.F(0.f, 6.2831853f);
+							V3 q = v3(sVX + cosf(a) * rr, 0.f, sVZ + sinf(a) * rr);
+							int ix = (int)floorf(q.x), iz = (int)floorf(q.z);
+							float gy = Map::In(ix, iz) ? map.TopY(ix, iz) : at.y;
+							q.y = gy + m_rng.F(0.25f, 3.2f);
+							born(1, q, v3(-sinf(a) * 1.4f, 0.4f, cosf(a) * 1.4f), 2.6f, 0.05f, 0.82f, 0.62f, 0.38f, 0, 0.25f, 0.6f);
+						} else born(4, at, v3(wx * 0.5f, 0.15f, wz * 0.5f), 1.8f, 0.028f, 0.95f, 0.78f, 0.42f, 3, 6.f, 0.35f);
+					} else if (theme == TH_FOREST) {
+						if (!onLand(16.f, 0.2f, 0.8f, at)) continue;
+						at.y += m_rng.F(2.8f, 6.5f);
+						born(2, at, v3(wx * 0.15f, m_rng.F(-0.4f, 0.1f), wz * 0.15f), 3.4f, 0.055f, 0.45f, 0.75f, 0.28f, 2, 1.15f, 1.1f);
+					} else if (theme == TH_SNOW) {
+						if (!onLand(16.f, 0.2f, 0.8f, at)) continue;
+						at.y += m_rng.F(4.2f, 8.5f);
+						born(3, at, v3(wx * 0.12f, m_rng.F(-0.6f, -0.2f), wz * 0.12f), 3.6f, 0.038f, 0.96f, 0.98f, 1.f, 2, 0.55f, 1.6f);
+					} else if (theme == TH_VOLCANO) {
+						if (!onLand(16.f, 0.12f, 0.4f, at)) continue;
+						born(5, at, v3(m_rng.F(-0.3f, 0.3f), m_rng.F(1.2f, 2.6f), m_rng.F(-0.3f, 0.3f)), 2.2f, 0.04f, 1.f, m_rng.F(0.25f, 0.5f), 0.05f, 5, -1.5f, 0.45f);
+					} else if (theme == TH_SWAMP) {
+						if (!onLand(16.f, 0.04f, 0.18f, at)) continue;
+						born(6, at, v3(m_rng.F(-0.15f, 0.15f), 0.35f, m_rng.F(-0.1f, 0.1f)), 2.4f, 0.038f, 0.7f, 0.95f, 0.55f, 1, -0.9f, 0.5f);
+					} else if (theme == TH_RUINS) {
+						if (!onLand(16.f, 1.0f, 3.4f, at)) continue;
+						born(0, at, v3(wx * 0.1f, 0.15f, wz * 0.1f), 3.2f, 0.032f, 0.7f, 0.75f, 0.85f, 1, 0.2f, 1.2f);
+					} else if (theme == TH_SEABED) {
+						if (!onLand(16.f, 0.25f, 2.2f, at)) continue;
+						born((n & 1) ? 8 : 6, at, v3(m_rng.F(-0.1f, 0.15f), 0.25f, m_rng.F(-0.1f, 0.1f)), 3.4f, 0.038f, 0.55f, 0.82f, 1.f, 1, (n & 1) ? 0.15f : -0.7f, 0.7f);
+					} else if (theme == TH_FALLS) {
+						if ((n & 1) == 0) {
+							if (!onLand(16.f, 0.08f, 0.28f, at)) continue;
+							born(7, at, v3(wx * 0.08f, 0.08f, wz * 0.08f), 2.2f, 0.07f, 0.85f, 0.92f, 1.f, 0, 0.05f, 0.8f);
+						} else {
+							if (!onLand(16.f, 2.4f, 5.5f, at)) continue;
+							born(9, at, v3(wx * 0.05f, m_rng.F(-1.2f, -0.4f), wz * 0.05f), 1.8f, 0.04f, 0.88f, 0.95f, 1.f, 1, 4.2f, 0.35f);
+						}
+					} else if (theme == TH_ORBIT) {
+						if (!onLand(16.f, 1.2f, 4.5f, at)) continue;
+						born(10, at, v3(m_rng.F(-0.4f, 0.5f), m_rng.F(-0.1f, 0.15f), m_rng.F(-0.3f, 0.3f)), 4.f, 0.032f, 0.8f, 0.86f, 1.f, 1, 0.f, 0.25f);
+					} else if (theme == TH_STATION) {
+						if (!onLand(16.f, 0.5f, 2.2f, at)) continue;
+						born(11, at, v3(m_rng.F(-0.1f, 0.2f), 0.4f, m_rng.F(-0.1f, 0.1f)), 2.2f, 0.045f, 0.75f, 0.9f, 1.f, 1, -0.55f, 0.6f);
+					} else if (theme == TH_CITADEL) {
+						if (!onLand(16.f, 1.4f, 3.6f, at)) continue;
+						born(12, at, v3(wx * 0.4f, 0.05f, wz * 0.4f), 2.6f, 0.045f, 0.35f, 0.32f, 0.4f, 2, 0.15f, 0.5f);
+					} else if (theme == TH_LANTERN) {
+						if (!onLand(16.f, 0.9f, 2.6f, at)) continue;
+						born(13, at, v3(m_rng.F(-0.2f, 0.2f), 0.25f, m_rng.F(-0.15f, 0.15f)), 2.8f, 0.035f, 1.f, 0.82f, 0.45f, 1, -0.15f, 0.8f);
+					} else {
+						if (!onLand(16.f, 1.8f, 4.f, at)) continue;
+						born(0, at, v3(wx * 0.2f, 0.2f, wz * 0.2f), 2.4f, 0.038f, 0.9f, 0.92f, 1.f, 1, 0.3f, 0.8f);
+					}
 				}
-			}
-			if ((theme == TH_FALLS || theme == TH_VOLCANO) && Map::In(cx, cz)) {
-				int extra = 0;
-				for (int dz = -6; dz <= 6 && extra < 6; dz += 4) for (int dx = -6; dx <= 6 && extra < 6; dx += 4) {
-					int x = cx + dx, z = cz + dz;
-					if (!Map::In(x, z)) continue;
-					int t = map.At(x, z).t;
-					float y = map.StandY(x, z);
-					if (theme == TH_FALLS && t == T_WATER) {
-						air(v3(x + 0.5f, y + 1.4f, z + 0.5f), v3(m_rng.F(-0.2f, 0.35f), m_rng.F(0.4f, 1.1f), m_rng.F(-0.15f, 0.15f)), 1.3f, 0.05f, 0.02f, 0.9f, 0.96f, 1.f, 1, 1, -0.05f, 0.4f, 0.f);
-						extra++;
-					} else if (theme == TH_VOLCANO && t == T_LAVA) {
-						air(v3(x + m_rng.F(0.2f, 0.8f), y + 0.4f, z + m_rng.F(0.2f, 0.8f)), v3(m_rng.F(-0.25f, 0.25f), m_rng.F(1.f, 2.f), m_rng.F(-0.25f, 0.25f)), 1.1f, 0.04f, 0.012f, 1.f, 0.4f, 0.05f, 5, 1, -0.15f, 0.5f, 0.02f);
-						extra++;
+				float burst = TacBurst(m_time);
+				static int gustLatched = 0;
+				if (burst > 0.55f && !gustLatched) {
+					gustLatched = 1;
+					int sheetN = (q == 4) ? 6 : 16;
+					for (int i = 0; i < sheetN; i++) {
+						V3 p;
+						if (!onLand(18.f, 0.08f, 0.9f, p)) continue;
+						born(sheet, p, v3(wx * 0.25f, 0.3f + burst, wz * 0.25f), 2.2f, sheet == 4 ? 0.028f : 0.045f, 0.9f, 0.88f, 0.7f, sheet == 2 ? 2 : 1, sheet == 4 ? 5.f : 0.6f, 0.7f);
+					}
+				} else if (burst < 0.18f) gustLatched = 0;
+				if (theme == TH_FALLS || theme == TH_VOLCANO || theme == TH_SWAMP || theme == TH_SEABED || theme == TH_LANTERN || theme == TH_FOREST) {
+					int cx = (int)floorf(m_camTarget.x), cz = (int)floorf(m_camTarget.z);
+					int extra = 0;
+					for (int dz = -8; dz <= 8 && extra < 5; dz += 4) for (int dx = -8; dx <= 8 && extra < 5; dx += 4) {
+						int x = cx + dx, z = cz + dz;
+						if (!Map::In(x, z)) continue;
+						int t = map.At(x, z).t;
+						float y = map.StandY(x, z);
+						V3 ep = v3(x + m_rng.F(0.2f, 0.8f), y + 0.16f, z + m_rng.F(0.2f, 0.8f));
+						V3 to = ep - m_eye;
+						float along = to.x * camF.x + to.y * camF.y + to.z * camF.z;
+						if (along > 0.2f && (to.x * to.x + to.y * to.y + to.z * to.z) < 9.f) continue;
+						if ((theme == TH_FALLS || theme == TH_SWAMP || theme == TH_SEABED) && t == T_WATER) {
+							born(theme == TH_FALLS ? 9 : 6, ep, v3(wx * 0.05f, theme == TH_FALLS ? m_rng.F(1.4f, 2.8f) : 0.4f, wz * 0.05f), 1.6f, 0.04f, 0.85f, 0.94f, 1.f, 1, theme == TH_FALLS ? 3.5f : -0.8f, 0.4f);
+							extra++;
+						} else if (theme == TH_VOLCANO && t == T_LAVA) {
+							born(5, ep + v3(0, 0.08f, 0), v3(m_rng.F(-0.2f, 0.2f), m_rng.F(1.4f, 2.8f), m_rng.F(-0.2f, 0.2f)), 1.8f, 0.038f, 1.f, 0.35f, 0.05f, 5, -1.6f, 0.4f);
+							extra++;
+						} else if (theme == TH_LANTERN && (t == T_ROAD || t == T_RUINS || t == T_PLAIN)) {
+							ep.y += m_rng.F(0.8f, 1.8f);
+							born(13, ep, v3(m_rng.F(-0.15f, 0.15f), 0.2f, m_rng.F(-0.15f, 0.15f)), 2.6f, 0.032f, 1.f, 0.8f, 0.4f, 1, -0.12f, 0.75f);
+							extra++;
+						} else if (theme == TH_FOREST && t == T_FOREST) {
+							ep.y += m_rng.F(3.f, 6.f);
+							born(2, ep, v3(wx * 0.1f, m_rng.F(-0.3f, 0.05f), wz * 0.1f), 3.f, 0.05f, 0.5f, 0.78f, 0.32f, 2, 1.1f, 1.f);
+							extra++;
+						}
 					}
 				}
 			}
@@ -2220,7 +2363,7 @@ void Game::UpdateParticles(float dt)
 		while (m_wxAcc >= 1.f && guard < 8 && m_parts.size() < 3000) {
 			m_wxAcc -= 1.f;
 			guard++;
-			float along = m_rng.F(1.6f, 16.f);
+			float along = m_rng.F(3.4f, 16.f);
 			float lat = m_rng.F(-9.f, 9.f);
 			float up = m_rng.F(-1.5f, 6.5f);
 			V3 p = eye + fwd * along + side * lat + v3(0, up, 0);
@@ -2277,8 +2420,8 @@ void Game::UpdateParticles(float dt)
 			} else if (wx == WX_FOG) {
 				q.v = wind * 0.35f + v3(m_rng.F(-0.2f, 0.2f), m_rng.F(-0.15f, 0.2f), m_rng.F(-0.2f, 0.2f));
 				q.life = q.max = 3.5f;
-				q.size = 0.35f; q.size1 = 0.5f;
-				q.r = 0.78f; q.g = 0.82f; q.b = 0.86f; q.a = 0.35f;
+				q.size = 0.16f; q.size1 = 0.24f;
+				q.r = 0.78f; q.g = 0.82f; q.b = 0.86f; q.a = 0.22f;
 				q.shape = 0; q.grav = 0; q.drag = 0.15f; q.stretch = 0; q.wxHit = 0;
 			} else {
 				q.p.y = gy + m_rng.F(0.1f, 0.6f);
@@ -2355,11 +2498,104 @@ void Game::UpdateParticles(float dt)
 			p.v.x += cosf(m_time * 1.4f + p.p.z) * dt * 1.1f;
 			p.v.z += sinf(m_time * 1.1f + p.p.x) * dt * 0.8f;
 		}
+		if (p.wxHit == 8) {
+			float wx = 0.f, wz = 0.f, lift = 0.f;
+			int airTh = 0;
+			if (m_screen == SC_BATTLE) airTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+			else airTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
+			WindField(m_time, p.p.x, p.p.z, wx, wz, lift, airTh);
+			float follow = dt * 1.8f;
+			p.v.x += (wx - p.v.x) * follow;
+			p.v.z += (wz - p.v.z) * follow;
+			int mode = p.nHit;
+			if (mode == 0) {
+				p.v.y += (lift * 0.55f - p.v.y * 0.4f) * dt;
+				p.v.x += sinf(m_time * 3.1f + p.p.z * 2.f) * dt * 0.55f;
+				p.v.z += cosf(m_time * 2.4f + p.p.x * 1.7f) * dt * 0.45f;
+			} else if (mode == 1) {
+				float dx = p.p.x - sVX, dz = p.p.z - sVZ;
+				float rad = sqrtf(dx * dx + dz * dz) + 0.08f;
+				float spin = (3.8f + lift) / rad;
+				p.v.x += (-dz * spin - dx * 0.35f) * dt;
+				p.v.z += (dx * spin - dz * 0.35f) * dt;
+				p.v.y += (1.1f + lift * 0.35f) * dt;
+			} else if (mode == 2) {
+				p.v.y += sinf(m_time * 9.f + p.p.x * 3.1f) * dt * 2.6f;
+				p.v.x += cosf(m_time * 6.f + p.p.z * 2.2f) * dt * 1.4f;
+				p.v.z += sinf(m_time * 4.4f + p.p.y) * dt * 0.8f;
+			} else if (mode == 3) {
+				p.v.x += sinf(m_time * 1.7f + p.p.z) * dt * 0.6f;
+				p.v.z += cosf(m_time * 1.3f + p.p.x) * dt * 0.45f;
+				p.v.y += sinf(m_time * 2.2f + p.p.x * 0.4f) * dt * 0.2f;
+			} else if (mode == 4) {
+				p.v.x += wx * dt * 0.55f;
+				p.v.z += wz * dt * 0.55f;
+			} else if (mode == 5) {
+				p.grav += dt * 1.8f;
+				if (p.grav > 2.8f) p.grav = 2.8f;
+				p.v.x += sinf(m_time * 5.f + p.p.y) * dt * 0.35f;
+			} else if (mode == 6) {
+				p.v.x += sinf(m_time * 2.2f + p.p.y * 1.5f) * dt * 0.8f;
+				p.v.z += cosf(m_time * 1.8f + p.p.y) * dt * 0.5f;
+			} else if (mode == 8) {
+				p.v.x += sinf(m_time * 1.1f + p.p.y * 2.f) * dt * 0.35f;
+				p.v.y += sinf(m_time * 0.9f + p.p.x) * dt * 0.22f;
+			} else if (mode == 9) {
+				p.v.x += sinf(m_time * 8.f + p.p.z) * dt * 0.4f;
+			} else if (mode == 10) {
+				p.grav = 0.f;
+				p.v.y += sinf(m_time * 0.7f + p.p.x) * dt * 0.25f;
+				p.v.x += cosf(m_time * 0.5f + p.p.z) * dt * 0.12f;
+			} else if (mode == 11) {
+				p.v.y += 0.12f * dt;
+				p.v.x += sinf(m_time * 3.f + p.p.z) * dt * 0.22f;
+			} else if (mode == 12) {
+				p.v.y += 0.08f * dt;
+				p.v.x += cosf(m_time * 0.8f + p.p.z) * dt * 0.25f;
+			} else if (mode == 13) {
+				p.v.x += cosf(m_time * 2.4f + p.p.z) * dt * 0.9f;
+				p.v.z += sinf(m_time * 2.1f + p.p.x) * dt * 0.9f;
+				p.v.y += sinf(m_time * 3.3f + p.p.x + p.p.z) * dt * 0.35f;
+			}
+		} else {
+			float gust = TacBurst(m_time);
+			if (gust > 0.02f) {
+				float ang = m_time * 0.23f;
+				p.v.x += cosf(ang) * gust * 7.5f * dt;
+				p.v.z += sinf(ang) * gust * 6.2f * dt;
+			}
+		}
 		V3 prev = p.p;
 		p.v.y -= p.grav * dt;
 		p.v = p.v * expf(-p.drag * dt);
 		p.p = p.p + p.v * dt;
-		if (p.wxHit > 0 && m_screen == SC_BATTLE && p.v.y < 0.f) {
+		if (p.wxHit == 8 && (m_screen == SC_BATTLE || m_showBuilt)) {
+			const Map& gm = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
+			int ix = (int)floorf(p.p.x), iz = (int)floorf(p.p.z);
+			if (Map::In(ix, iz)) {
+				const Cell& c = gm.At(ix, iz);
+				if (c.t != T_VOID && c.t != T_CHASM && p.nHit != 10) {
+					float gy = gm.TopY(ix, iz);
+					if (p.nHit == 7) {
+						float want = gy + 0.32f;
+						p.p.y += (want - p.p.y) * min(1.f, dt * 3.f);
+						p.v.y *= 0.4f;
+					} else if (p.nHit != 6 && p.nHit != 11 && prev.y > gy + 0.02f && p.p.y <= gy + 0.03f) {
+						p.p.y = gy + 0.04f;
+						float burst = TacBurst(m_time);
+						if (p.nHit == 4) p.v.y = 0.85f + burst * 2.2f;
+						else if (p.nHit == 1) p.v.y = 0.7f + burst * 1.4f;
+						else if (p.nHit == 5 || p.nHit == 9) p.life = 0.04f;
+						else {
+							p.v.y = 0.f;
+							p.grav = 0.f;
+							p.life = min(p.life, p.nHit == 3 ? 0.7f : 0.4f);
+						}
+					}
+				}
+			}
+		}
+		if (p.wxHit > 0 && p.wxHit < 8 && m_screen == SC_BATTLE && p.v.y < 0.f) {
 			int ix = (int)floorf(p.p.x), iz = (int)floorf(p.p.z);
 			if (Map::In(ix, iz)) {
 				const Cell& c = m_b.map.At(ix, iz);
@@ -2733,6 +2969,7 @@ void Game::DrawShowcase3D()
 {
 	if (m_screen == SC_BASE && m_codex == 4) { DrawMonStage(); return; }
 	m_r.SetTheme(m_showMap.theme);
+	m_r.SetStageId(m_showStage);
 	if (m_screen != SC_BATTLE && m_screen != SC_RESULT) {
 		int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
 		if (!m_showBuilt || m_showStage != st) BuildShowcase();
@@ -3041,14 +3278,90 @@ static int CodexFamJobs(int fam, int* dst, int cap)
 static BOOL PreviewAlt(int style);
 static void MonPreviewIn(int id, const Actor& a, int& style, BOOL& fly);
 
+enum { FOE_LIST_MAX = 2048 };
+
+static wchar_t FoldCh(wchar_t c)
+{
+	if (c >= L'A' && c <= L'Z') return (wchar_t)(c - L'A' + L'a');
+	if (c == L'　') return L' ';
+	return c;
+}
+
+static BOOL TextHas(const wchar_t* hay, const wchar_t* needle)
+{
+	if (!needle || !needle[0]) return TRUE;
+	if (!hay) return FALSE;
+	for (const wchar_t* s = hay; *s; s++) {
+		const wchar_t* a = s;
+		const wchar_t* b = needle;
+		while (*a && *b && FoldCh(*a) == FoldCh(*b)) { a++; b++; }
+		if (!*b) return TRUE;
+	}
+	return FALSE;
+}
+
+static int DebutLv(int stage)
+{
+	if (stage < 1) stage = 1;
+	if (stage > TAC_STAGE_MAX) stage = TAC_STAGE_MAX;
+	return 1 + (stage - 1) * 29 / 18;
+}
+
+static void MonLvSpan(int id, int& lo, int& hi)
+{
+	const MonsterDef& md = MonsterInfo(id);
+	lo = DebutLv(MonsterDebut(id));
+	int end = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
+	hi = DebutLv(end);
+	if (hi < lo) hi = lo;
+}
+
+static BOOL BandHasDebut(int band, int lo)
+{
+	static const int b0[8] = { 1, 1, 11, 21, 41, 61, 101, 201 };
+	static const int b1[8] = { 99999, 10, 20, 40, 60, 100, 200, 99999 };
+	if (band < 0) band = 0;
+	if (band > 7) band = 7;
+	return lo >= b0[band] && lo <= b1[band];
+}
+
+int Game::FoeList(int* out, int cap) const
+{
+	int ids[FOE_LIST_MAX];
+	int n = MonsterCatalog(ids, FOE_LIST_MAX);
+	int w = 0;
+	if (!out || cap <= 0) return 0;
+	for (int i = 0; i < n && w < cap; i++) {
+		int id = ids[i];
+		BOOL known = MonsterKnown(id, m_save.stageCleared);
+		if (m_monSeenOnly && !known) continue;
+		if (m_monFind[0]) {
+			if (!known || !TextHas(MonsterLabel(id), m_monFind)) continue;
+		}
+		int lo = 1, hi = 1;
+		MonLvSpan(id, lo, hi);
+		(void)hi;
+		if (!BandHasDebut(m_monBand, lo)) continue;
+		out[w++] = id;
+	}
+	return w;
+}
+
 void Game::EnsureMonPreview()
 {
-	static int ids[256];
-	int n = MonsterCatalog(ids, 256);
-	if (n <= 0) { m_monShown = -1; return; }
-	if (m_monSel < 0) m_monSel = 0;
-	if (m_monSel >= n) m_monSel = n - 1;
-	int id = ids[m_monSel];
+	static int ids[FOE_LIST_MAX];
+	int n = FoeList(ids, FOE_LIST_MAX);
+	if (n <= 0) {
+		if (m_monShown != -1) {
+			m_r.LoadBattleCreatures(NULL, 0);
+			m_monShown = -1;
+		}
+		return;
+	}
+	BOOL in = FALSE;
+	for (int i = 0; i < n; i++) if (ids[i] == m_monSel) in = TRUE;
+	if (!in) m_monSel = ids[0];
+	int id = m_monSel;
 	if (!MonsterKnown(id, m_save.stageCleared)) {
 		if (m_monShown != -1) {
 			m_r.LoadBattleCreatures(NULL, 0);
@@ -3074,6 +3387,8 @@ void Game::DrawMonStage()
 {
 	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
 	if (!m_showBuilt || m_showStage != st) BuildShowcase();
+	m_r.SetTheme(m_showMap.theme);
+	m_r.SetStageId(m_showStage);
 	EnsureMonPreview();
 	Env e;
 	ThemeEnv(m_showMap.theme, e);
@@ -3111,42 +3426,89 @@ void Game::DrawMonStage()
 
 void Game::DrawMonCodex()
 {
-	static int ids[256];
-	int n = MonsterCatalog(ids, 256);
-	if (m_monSel < 0) m_monSel = 0;
-	if (n > 0 && m_monSel >= n) m_monSel = n - 1;
+	static int ids[FOE_LIST_MAX];
+	int nAll = MonsterCatalog(ids, FOE_LIST_MAX);
 	float x = U(24), y = U(24), w = min(U(520.f), (float)m_w * .46f), h = (float)m_h - U(108);
 	Panel(x, y, w, h);
 	const wchar_t* title = LangPick14(L"敵一覧", L"Foes", L"Ennemis", L"Nemici", L"Enemigos", L"적 목록", L"敌人一览", L"الأعداء", L"Враги", L"Gegner", L"Inimigos", L"Vijanden", L"Wrogowie", L"Düşmanlar");
-	m_r.HudText(title, x + w * .5f, y + U(28), U(22), RGBA8(255, 226, 150), 1, 1);
-	int known = 0;
-	for (int i = 0; i < n; i++) if (MonsterKnown(ids[i], m_save.stageCleared)) known++;
+	m_r.HudText(title, x + U(16), y + U(22), U(20), RGBA8(255, 226, 150), 0, 1);
+	float fy = y + U(40);
+	float bh = U(28);
+	float gap = U(6);
+	float clearW = U(36);
+	float findW = w - U(32) - clearW - gap;
+	wchar_t box[40];
+	BOOL finding = m_textFocus == 4;
+	if (m_monFind[0]) swprintf_s(box, L"%s%s", m_monFind, (finding && ((int)(m_time * 2.f) & 1)) ? L"|" : L"");
+	else wcscpy_s(box, finding ? L"|" : LangPick14(L"名前で絞る", L"Filter by name", L"Filtrer par nom", L"Filtra per nome", L"Filtrar por nombre", L"이름으로 찾기", L"按名字筛选", L"تصفية بالاسم", L"Фильтр по имени", L"Nach Name filtern", L"Filtrar por nome", L"Filter op naam", L"Filtruj po nazwie", L"Ada göre süz"));
+	if (Btn(ID_MON_FIND, x + U(16), fy, findW, bh, box, TRUE, finding, U(13))) m_textFocus = 4;
+	if (Btn(ID_MON_CLEAR, x + U(16) + findW + gap, fy, clearW, bh, L"×", m_monFind[0] != 0, FALSE, U(16))) {
+		m_monFind[0] = 0;
+		m_codexPage = 0;
+		m_textFocus = 4;
+	}
+	fy += bh + gap;
+	static const wchar_t* bandL[8] = { L"", L"Lv 1–10", L"Lv 11–20", L"Lv 21–40", L"Lv 41–60", L"Lv 61–100", L"Lv 101–200", L"Lv 201+" };
+	int band = m_monBand;
+	if (band < 0 || band > 7) band = 0;
+	const wchar_t* bandName = band == 0
+		? LangPick14(L"すべてのLv", L"Any level", L"Tout niveau", L"Ogni livello", L"Cualquier nivel", L"모든 레벨", L"全部等级", L"كل المستويات", L"Любой уровень", L"Jedes Level", L"Qualquer nível", L"Elk level", L"Każdy poziom", L"Tüm seviye")
+		: bandL[band];
+	float lvW = U(36);
+	if (Btn(ID_MON_LVPREV, x + U(16), fy, lvW, bh, L"◀")) { m_monBand = (band + 7) % 8; m_codexPage = 0; }
+	m_r.HudText(bandName, x + U(16) + lvW + U(8), fy + bh * .5f, U(13), RGBA8(255, 226, 150), 0, 1);
+	if (Btn(ID_MON_LVNEXT, x + U(16) + lvW + U(168), fy, lvW, bh, L"▶")) { m_monBand = (band + 1) % 8; m_codexPage = 0; }
+	const wchar_t* seenW = LangPick14(L"見た敵", L"Seen", L"Vus", L"Visti", L"Vistos", L"본 적", L"见过", L"المشاهد", L"Виденные", L"Gesehen", L"Vistos", L"Gezien", L"Widziani", L"Görülen");
+	float seenX = x + w - U(16) - U(96);
+	if (Btn(ID_MON_SEEN, seenX, fy, U(96), bh, seenW, TRUE, m_monSeenOnly != 0, U(13))) {
+		m_monSeenOnly = m_monSeenOnly ? 0 : 1;
+		m_codexPage = 0;
+	}
+	int n = FoeList(ids, FOE_LIST_MAX);
+	BOOL inList = FALSE;
+	for (int i = 0; i < n; i++) if (ids[i] == m_monSel) inList = TRUE;
+	if (!inList && n > 0) m_monSel = ids[0];
 	wchar_t sub[64];
-	swprintf_s(sub, L"%d / %d", known, n);
-	m_r.HudText(sub, x + w * .5f, y + U(52), U(14), RGBA8(190, 200, 220), 1, 0);
-	float listTop = y + U(72);
-	float listBot = y + h - U(236);
+	swprintf_s(sub, L"%d / %d", n, nAll);
+	m_r.HudText(sub, x + w - U(16), y + U(22), U(13), RGBA8(190, 200, 220), 2, 0);
+	float listTop = fy + bh + U(8);
+	float listBot = y + h - U(220);
+	if (listBot < listTop + U(80)) listBot = listTop + U(80);
 	int per = (int)((listBot - listTop) / U(28));
-	if (per < 4) per = 4;
+	if (per < 3) per = 3;
 	int pages = max(1, (n + per - 1) / per);
 	if (m_codexPage < 0) m_codexPage = 0;
 	if (m_codexPage >= pages) m_codexPage = pages - 1;
 	int a = m_codexPage * per, b = min(n, a + per);
 	float yy = listTop;
+	if (n < 1) {
+		m_r.HudText(LangPick14(L"該当なし", L"No matches", L"Aucun", L"Nessuno", L"Ninguno", L"없음", L"没有符合的", L"لا يوجد", L"Нет совпадений", L"Keine Treffer", L"Nenhum", L"Geen", L"Brak", L"Yok"), x + U(24), yy + U(8), U(14), RGBA8(170, 176, 190), 0, 0);
+	}
 	for (int i = a; i < b; i++) {
-		BOOL seen = MonsterKnown(ids[i], m_save.stageCleared);
-		BOOL on = i == m_monSel;
+		int id = ids[i];
+		BOOL seen = MonsterKnown(id, m_save.stageCleared);
+		BOOL on = id == m_monSel;
 		if (on) m_r.HudRect(x + U(12), yy - U(4), w - U(24), U(26), RGBA8(70, 78, 120, 180));
-		const wchar_t* nm = seen ? MonsterLabel(ids[i]) : L"？？？";
-		m_r.HudText(nm, x + U(24), yy + U(8), U(15), on ? RGBA8(255, 226, 150) : (seen ? RGBA8(236, 236, 244) : RGBA8(140, 146, 164)), 0, 1);
+		const wchar_t* nm = seen ? MonsterLabel(id) : L"？？？";
+		m_r.HudText(nm, x + U(24), yy + U(8), FitTextPx(nm, w - U(150), U(15), 1), on ? RGBA8(255, 226, 150) : (seen ? RGBA8(236, 236, 244) : RGBA8(140, 146, 164)), 0, 1);
 		if (seen) {
-			int kn = FoeKills(ids[i]);
+			int lo = 1, hi = 1;
+			MonLvSpan(id, lo, hi);
+			wchar_t lv[24];
+			if (hi > lo && MonsterInfo(id).maxStage <= 0) swprintf_s(lv, L"%d+", lo);
+			else if (hi > lo) swprintf_s(lv, L"%d–%d", lo, hi);
+			else swprintf_s(lv, L"%d", lo);
+			m_r.HudText(lv, x + w - U(52), yy + U(8), U(12), RGBA8(180, 196, 220), 2, 0);
+			int kn = FoeKills(id);
 			wchar_t ks[16];
 			swprintf_s(ks, L"%d", kn);
-			m_r.HudText(ks, x + w - U(20), yy + U(8), U(14), kn > 0 ? RGBA8(255, 214, 120) : RGBA8(140, 146, 164), 2, 0);
+			m_r.HudText(ks, x + w - U(16), yy + U(8), U(13), kn > 0 ? RGBA8(255, 214, 120) : RGBA8(140, 146, 164), 2, 0);
 		}
-		if (m_click && m_clickX >= x + U(12) && m_clickX < x + w - U(12) && m_clickY >= yy - U(4) && m_clickY < yy + U(22))
-			m_monSel = i;
+		if (m_click && m_clickX >= x + U(12) && m_clickX < x + w - U(12) && m_clickY >= yy - U(4) && m_clickY < yy + U(22)) {
+			m_monSel = id;
+			m_textFocus = 0;
+			m_click = FALSE;
+		}
 		yy += U(28);
 	}
 	float navY = listBot + U(4);
@@ -3166,7 +3528,7 @@ void Game::DrawMonCodex()
 		int lv = 1, stt[S_COUNT];
 		MonsterPreview(id, &lv, stt);
 		int lo = MonsterDebut(id);
-		wchar_t line[160];
+		wchar_t line[320];
 		const wchar_t* stageW = LangPick14(L"出現", L"Appears", L"Apparition", L"Compare", L"Aparece", L"출현", L"出现", L"الظهور", L"Появление", L"Erscheint", L"Aparece", L"Verschijnt", L"Pojawia się", L"Çıkış");
 		if (md.maxStage > 0) swprintf_s(line, L"%s %d-%d  Lv%d", stageW, lo, md.maxStage, lv);
 		else swprintf_s(line, L"%s %d+  Lv%d", stageW, lo, lv);
@@ -3179,11 +3541,9 @@ void Game::DrawMonCodex()
 			m_r.HudText(line, x + U(16) + (i % 2) * col, sy + (i / 2) * U(16), U(13), RGBA8(230, 232, 240), 0, 0);
 		}
 		sy += U(16) * 5 + U(2);
-		const wchar_t* wa = md.weak[0] ? ElemWord(md.weak[0]) : NULL;
-		const wchar_t* wb = md.weak[1] ? ElemWord(md.weak[1]) : NULL;
-		if (wa && wb) swprintf_s(line, L"%s %s・%s  %d-%d", WeakLabel(), wa, wb, md.rMin, md.rMax);
-		else if (wa) swprintf_s(line, L"%s %s  %d-%d", WeakLabel(), wa, md.rMin, md.rMax);
-		else swprintf_s(line, L"%d-%d", md.rMin, md.rMax);
+		wchar_t wk[240];
+		MonsterWeakText(id, wk, 240);
+		swprintf_s(line, L"%s  %d-%d", wk, md.rMin, md.rMax);
 		m_r.HudText(line, x + U(16), sy, U(13), RGBA8(210, 220, 235), 0, 0);
 		sy += U(16);
 		int kn = FoeKills(id);
@@ -3246,6 +3606,7 @@ void Game::DrawCodexTabs()
 	for (int i = 0; i < 5; i++) {
 		BOOL on = (i == 0 && m_codex == 2) || (i == 1 && m_codex == 3) || (i == 2 && m_codex == 1) || (i == 3 && m_codex == 4);
 		if (Btn(ids[i], x, y, bw, bh, labels[i], TRUE, on)) {
+			if (i != 3 && m_textFocus == 4) m_textFocus = 0;
 			if (i == 0) m_codex = 2;
 			else if (i == 1) m_codex = 3;
 			else if (i == 2) { m_codex = 1; m_codexPage = 0; }
@@ -4262,9 +4623,11 @@ void Game::DrawShop()
 		sy += U(34);
 	}
 	float sellBot = y + h - U(96);
-	int sp = (int)((sellBot - sy) / U(34));
-	if (sp > 20) sp = 20;
-	if (sp < 3) sp = 3;
+	// 売却ボタンは 250..265。266 と 267 はページ送り。購入の 270 とは重ならない。
+	const int sellIdRows = 16;
+	int fitSell = (int)((sellBot - sy) / U(34));
+	if (fitSell < 1) fitSell = 1;
+	if (fitSell > sellIdRows) fitSell = sellIdRows;
 	int sellIds[CRAFT_N];
 	int on = 0;
 	if (m_shopKind == 5) {
@@ -4289,7 +4652,12 @@ void Game::DrawShop()
 			sellIds[on++] = gid;
 		}
 	}
-	int spages = max(1, (on + sp - 1) / sp);
+	int sp = fitSell;
+	int spages = on < 1 ? 1 : max(1, (on + sp - 1) / sp);
+	if (spages > 1 && fitSell > 1) {
+		sp = fitSell - 1;
+		spages = max(1, (on + sp - 1) / sp);
+	}
 	if (m_shopSellPage >= spages) m_shopSellPage = spages - 1;
 	if (m_shopSellPage < 0) m_shopSellPage = 0;
 	int sa = m_shopSellPage * sp, sb = min(on, sa + sp);
@@ -4380,9 +4748,9 @@ void Game::DrawShop()
 	if (spages > 1) {
 		wchar_t spg[32];
 		swprintf_s(spg, L"%d / %d", m_shopSellPage + 1, spages);
-		if (Btn(ID_SHOP_SELL0 + 8, x + w * .66f, sy, U(36), U(28), L"◀")) m_shopSellPage = (m_shopSellPage + spages - 1) % spages;
+		if (Btn(ID_SHOP_SELL0 + 16, x + w * .66f, sy, U(36), U(28), L"◀")) m_shopSellPage = (m_shopSellPage + spages - 1) % spages;
 		m_r.HudText(spg, x + w * .66f + U(70), sy + U(14), U(13), RGBA8(230, 230, 236), 0, 1);
-		if (Btn(ID_SHOP_SELL0 + 9, x + w * .66f + U(110), sy, U(36), U(28), L"▶")) m_shopSellPage = (m_shopSellPage + 1) % spages;
+		if (Btn(ID_SHOP_SELL0 + 17, x + w * .66f + U(110), sy, U(36), U(28), L"▶")) m_shopSellPage = (m_shopSellPage + 1) % spages;
 	}
 	if (hov && hov[0]) {
 		float dx = x + U(12);

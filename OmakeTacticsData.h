@@ -572,7 +572,8 @@ struct MonsterDef {
 	DWORD tint;        // 0x00RRGGBB 乗算
 	int maxStage;      // 0=上限なし。これを超えたステージには出さない
 	int nameB;         // 0未満なら nameTx だけ。0以上なら「形容 + 種族」
-	int weak[2];       // 弱点。0 はなし。属性か、物理・魔法・近距離・遠距離
+	int weak[4];       // 弱点 1〜4。0 は空き。属性か、物理・魔法・近距離・遠距離
+	int ailWeak[2];    // 状態異常の弱点。0 は空き。EF_*
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
@@ -637,6 +638,7 @@ inline int UnitSpan(const Unit& u)
 }
 int UnitStat(const Unit& u, int s);     // バフ込み
 float AilmentBreak(const Unit& d, int el); // 状態と属性の相性。弱点なら 2
+void UnitWeakText(const Unit& u, wchar_t* out, int cap); // 弱点に、状態の三つ巴で残った属性を足す
 void CharFightBonus(const CharData& c, int out[S_COUNT]); // 装備・装飾・パッシブで増える分。戦闘の UnitStat と同じ
 int UnitMove(const Unit& u);
 int UnitJump(const Unit& u);

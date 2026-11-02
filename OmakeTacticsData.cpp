@@ -3354,7 +3354,7 @@ static const wchar_t* ImportLocName(int model)
 	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
 }
 
-enum { IMP_CAP = 1024, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
+enum { IMP_CAP = 2048, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
 static MonsterDef s_monImp[IMP_CAP];
 static int s_monImpOk = 0;
 static int s_poolN[4];
@@ -3448,52 +3448,10 @@ static int NameHas(const wchar_t* n, const wchar_t* k)
 {
 	return n && k && wcsstr(n, k) != NULL;
 }
-static void SetWeak(MonsterDef& d, int a, int b)
-{
-	d.weak[0] = a;
-	d.weak[1] = b;
-}
-static void WeakFromName(MonsterDef& d, const wchar_t* n)
-{
-	if (!n) { SetWeak(d, EL_FIRE, EL_MELEE); return; }
-	if (NameHas(n, L"Dragon") || NameHas(n, L"Wyvern") || NameHas(n, L"Drake")) SetWeak(d, EL_ICE, EL_RANGE);
-	else if (NameHas(n, L"Ghost")) SetWeak(d, EL_HOLY, EL_FIRE);
-	else if (NameHas(n, L"Demon")) SetWeak(d, EL_HOLY, EL_ICE);
-	else if (NameHas(n, L"Wizard") || NameHas(n, L"Witch")) SetWeak(d, EL_PHYS, EL_MELEE);
-	else if (NameHas(n, L"Golem")) SetWeak(d, EL_THUNDER, EL_MAGIC);
-	else if (NameHas(n, L"Yeti")) SetWeak(d, EL_FIRE, EL_MAGIC);
-	else if (NameHas(n, L"Ninja")) SetWeak(d, EL_HOLY, EL_RANGE);
-	else if (NameHas(n, L"Mush") || NameHas(n, L"Spider") || NameHas(n, L"Cactoro")) SetWeak(d, EL_FIRE, EL_WIND);
-	else if (NameHas(n, L"Blob") || NameHas(n, L"Glub")) SetWeak(d, EL_FIRE, EL_ICE);
-	else if (NameHas(n, L"Alien")) SetWeak(d, EL_HOLY, EL_THUNDER);
-	else if (NameHas(n, L"Orc")) SetWeak(d, EL_HOLY, EL_MAGIC);
-	else if (NameHas(n, L"King") && !NameHas(n, L"Kingfisher")) SetWeak(d, EL_THUNDER, EL_MAGIC);
-	else if (NameHas(n, L"Shark") || NameHas(n, L"Whale") || NameHas(n, L"Piranha") || NameHas(n, L"Fish") || NameHas(n, L"Tang") || NameHas(n, L"Koi") || NameHas(n, L"Tuna") || NameHas(n, L"Dolphin") || NameHas(n, L"Manta") || NameHas(n, L"Squid") || NameHas(n, L"Angler"))
-		SetWeak(d, EL_THUNDER, EL_ICE);
-	else if (NameHas(n, L"Snake") || NameHas(n, L"Frog") || NameHas(n, L"Worm")) SetWeak(d, EL_ICE, EL_FIRE);
-	else if (NameHas(n, L"Wasp") || NameHas(n, L"Birb") || NameHas(n, L"Pigeon") || NameHas(n, L"Hywirl") || NameHas(n, L"Armabee") || NameHas(n, L"Chicken"))
-		SetWeak(d, EL_WIND, EL_RANGE);
-	else if (NameHas(n, L"Trex") || NameHas(n, L"Dino") || NameHas(n, L"Raptor")) SetWeak(d, EL_ICE, EL_MAGIC);
-	else if (NameHas(n, L"Stego") || NameHas(n, L"Tricera")) SetWeak(d, EL_THUNDER, EL_MAGIC);
-	else if (NameHas(n, L"Apatosaurus") || NameHas(n, L"Parasaurolophus")) SetWeak(d, EL_FIRE, EL_RANGE);
-	else if (NameHas(n, L"Wolf") || NameHas(n, L"Fox") || NameHas(n, L"Husky") || NameHas(n, L"Shiba") || NameHas(n, L"Cat") || NameHas(n, L"Rat") || NameHas(n, L"Bunny"))
-		SetWeak(d, EL_FIRE, EL_MELEE);
-	else if (NameHas(n, L"Bull") || NameHas(n, L"Cow") || NameHas(n, L"Deer") || NameHas(n, L"Stag") || NameHas(n, L"Horse") || NameHas(n, L"Donkey") || NameHas(n, L"Alpaca"))
-		SetWeak(d, EL_FIRE, EL_MELEE);
-	else if (NameHas(n, L"Tribal")) SetWeak(d, EL_HOLY, EL_MELEE);
-	else if (NameHas(n, L"Hum")) SetWeak(d, EL_THUNDER, EL_MAGIC);
-	else {
-		static const int pair[10][2] = {
-			{ EL_FIRE, EL_ICE }, { EL_THUNDER, EL_RANGE }, { EL_HOLY, EL_DARK }, { EL_WIND, EL_MELEE },
-			{ EL_EARTH, EL_MAGIC }, { EL_POISON, EL_FIRE }, { EL_ICE, EL_PHYS }, { EL_MAGIC, EL_RANGE },
-			{ EL_DARK, EL_HOLY }, { EL_PHYS, EL_MELEE }
-		};
-		int h = 0;
-		for (const wchar_t* p = n; *p; ++p) h = h * 17 + (int)*p;
-		if (h < 0) h = -h;
-		SetWeak(d, pair[h % 10][0], pair[h % 10][1]);
-	}
-}
+// 取り込み種は 1 種 1 行。個体では引かない。並びは kImportName と同じ。
+static const int kImportWeak[kImportN][6] = {
+#include "tactics_src/mon_weak.inc"
+};
 static int AilmentFor(const wchar_t* n, int i)
 {
 	if (NameHas(n, L"Spider") || NameHas(n, L"Ghost") || NameHas(n, L"Mush") || NameHas(n, L"Frog") || NameHas(n, L"Snake") || NameHas(n, L"Puffer") || NameHas(n, L"Blob") || NameHas(n, L"Wasp"))
@@ -3512,16 +3470,38 @@ static void EnsureMonsters()
 {
 	if (!s_monImpOk) {
 	for (int p = 0; p < 4; p++) s_poolN[p] = 0;
-	static const int kClassicWeak[M_COUNT][2] = {
-		{ EL_FIRE, EL_ICE }, { EL_HOLY, EL_FIRE }, { EL_HOLY, EL_MAGIC }, { EL_HOLY, EL_MELEE },
-		{ EL_WIND, EL_RANGE }, { EL_HOLY, EL_MELEE }, { EL_FIRE, EL_ICE }, { EL_THUNDER, EL_MAGIC },
-		{ EL_ICE, EL_RANGE }, { EL_HOLY, EL_THUNDER }, { EL_ICE, EL_RANGE }
+	static const int kClassicWeak[M_COUNT][4] = {
+		{ EL_FIRE, EL_ICE, 0, 0 },
+		{ EL_HOLY, 0, 0, 0 },
+		{ EL_HOLY, EL_MAGIC, EL_MELEE, 0 },
+		{ EL_WIND, EL_RANGE, 0, 0 },
+		{ EL_THUNDER, EL_DARK, EL_WIND, 0 },
+		{ EL_HOLY, EL_FIRE, EL_ICE, EL_MAGIC },
+		{ EL_FIRE, EL_ICE, EL_POISON, 0 },
+		{ EL_THUNDER, EL_MAGIC, EL_EARTH, 0 },
+		{ EL_ICE, EL_RANGE, EL_WIND, 0 },
+		{ EL_HOLY, EL_THUNDER, EL_MELEE, EL_DARK },
+		{ EL_ICE, EL_RANGE, EL_THUNDER, EL_HOLY }
+	};
+	static const int kClassicAil[M_COUNT][2] = {
+		{ EF_POISON, 0 },
+		{ EF_STUN, 0 },
+		{ EF_BLEED, EF_DEFDOWN },
+		{ EF_BLIND, 0 },
+		{ EF_SILENCE, 0 },
+		{ EF_SILENCE, EF_FREEZE },
+		{ EF_POISON, EF_SLOW },
+		{ EF_STUN, EF_DEFDOWN },
+		{ EF_BLEED, 0 },
+		{ EF_BURN, 0 },
+		{ EF_FREEZE, EF_BLEED }
 	};
 	for (int i = 0; i < M_COUNT; i++) {
 		MonsterDef& d = kMon[i];
 		FillUnitSheet(d.base, d.grow, G_MELEE, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
-		d.weak[0] = kClassicWeak[i][0];
-		d.weak[1] = kClassicWeak[i][1];
+		for (int k = 0; k < 4; k++) d.weak[k] = kClassicWeak[i][k];
+		d.ailWeak[0] = kClassicAil[i][0];
+		d.ailWeak[1] = kClassicAil[i][1];
 		if (i == M_SKEL_MINION && d.skills[0] < 0) d.skills[0] = SKL_E_SPIT;
 		if (i == M_SKEL_ARCHER && d.skills[0] < 0) d.skills[0] = SKL_E_SPIT;
 		if (i == M_BAT && d.skills[1] < 0) d.skills[1] = SKL_E_SPIT;
@@ -3578,7 +3558,9 @@ static void EnsureMonsters()
 			int ail = AilmentFor(nm, i);
 			if (ail >= 0 && ail != d.skills[0] && ail != d.skills[1]) d.skills[2] = ail;
 		}
-		WeakFromName(d, nm);
+		for (int k = 0; k < 4; k++) d.weak[k] = kImportWeak[i][k];
+		d.ailWeak[0] = kImportWeak[i][4];
+		d.ailWeak[1] = kImportWeak[i][5];
 		if (summonOnly) {
 			d.minStage = TAC_STAGE_MAX;
 			d.maxStage = 1;
@@ -5253,11 +5235,13 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 	else if (sd && sd->rMax >= 0) ranged = (sd->rMin >= 2 || sd->rMax >= 2) ? 1 : 0;
 	else ranged = (UnitRangeMax(a) >= 2 || WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1) ? 1 : 0;
 	const MonsterDef& md = MonsterInfo(d.monster);
-	int ws[2] = { md.weak[0], md.weak[1] };
 	int n = 0;
-	for (int i = 0; i < 2; i++) {
-		int w = ws[i];
-		if (w == EL_NONE || (i == 1 && w == ws[0])) continue;
+	for (int i = 0; i < 4; i++) {
+		int w = md.weak[i];
+		if (w == EL_NONE) continue;
+		int dup = 0;
+		for (int j = 0; j < i; j++) if (md.weak[j] == w) dup = 1;
+		if (dup) continue;
 		int hit = 0;
 		if (w >= EL_FIRE && w <= EL_POISON && w == el) hit = 1;
 		else if (w == EL_MAGIC && magic) hit = 1;
@@ -5265,6 +5249,9 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 		else if (w == EL_RANGE && ranged) hit = 1;
 		else if (w == EL_MELEE && !ranged) hit = 1;
 		if (hit) n++;
+	}
+	if (sd) {
+		for (int i = 0; i < 2; i++) if (md.ailWeak[i] && md.ailWeak[i] == sd->effect) { n++; break; }
 	}
 	return n;
 }
@@ -5961,6 +5948,12 @@ static void ClearAilments(Unit& d)
 static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
 {
 	int turns = r.Range(1, 3);
+	int ailBonus = 0;
+	if (d.team == TEAM_ENEMY && effect != EF_NONE) {
+		const MonsterDef& md = MonsterInfo(d.monster);
+		for (int i = 0; i < 2; i++) if (md.ailWeak[i] == effect) ailBonus = 1;
+	}
+	turns += ailBonus;
 	switch (effect) {
 	case EF_SLOW:
 		if (UnitHasPas(d, PAS_NOSLOW) || UnitAilmentHeld(d)) return false;
@@ -5978,19 +5971,19 @@ static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
 		return true;
 	case EF_SLEEP:
 		if (UnitHasPas(d, PAS_NOSLEEP) || UnitAilmentHeld(d)) return false;
-		d.sleep = 1;
+		d.sleep = 1 + ailBonus;
 		return true;
 	case EF_CONFUSE:
 		if (UnitHasPas(d, PAS_NOCONFUSE) || UnitAilmentHeld(d)) return false;
-		d.confuse = 2;
+		d.confuse = 2 + ailBonus;
 		return true;
 	case EF_STUN:
 		if (UnitHasPas(d, PAS_NOSTUN) || UnitAilmentHeld(d)) return false;
-		d.stun = 1;
+		d.stun = 1 + ailBonus;
 		return true;
 	case EF_FREEZE:
 		if (UnitHasPas(d, PAS_NOSLEEP) || UnitAilmentHeld(d)) return false;
-		d.freeze = 2;
+		d.freeze = 2 + ailBonus;
 		return true;
 	case EF_BURN:
 		if (d.burn > 0) return false;
@@ -9503,12 +9496,79 @@ void MonsterWeakText(int monster, wchar_t* out, int cap)
 {
 	if (!out || cap < 2) return;
 	const MonsterDef& md = MonsterInfo(monster);
-	const wchar_t* a = ElemWord(md.weak[0]);
-	const wchar_t* b = ElemWord(md.weak[1]);
+	const wchar_t* bits[6];
+	int n = 0;
+	for (int i = 0; i < 4 && n < 6; i++) {
+		const wchar_t* w = ElemWord(md.weak[i]);
+		if (w) bits[n++] = w;
+	}
+	for (int i = 0; i < 2 && n < 6; i++) {
+		const wchar_t* w = EffectWord(md.ailWeak[i]);
+		if (w) bits[n++] = w;
+	}
 	const wchar_t* none = LangPick14(L"なし", L"None", L"Aucune", L"Nessuna", L"Ninguna", L"없음", L"无", L"لا شيء", L"Нет", L"Keine", L"Nenhuma", L"Geen", L"Brak", L"Yok");
-	if (a && b) swprintf_s(out, cap, L"%s %s・%s", WeakLabel(), a, b);
-	else if (a || b) swprintf_s(out, cap, L"%s %s", WeakLabel(), a ? a : b);
-	else swprintf_s(out, cap, L"%s %s", WeakLabel(), none);
+	if (n <= 0) { swprintf_s(out, cap, L"%s %s", WeakLabel(), none); return; }
+	wchar_t body[192];
+	body[0] = 0;
+	for (int i = 0; i < n; i++) {
+		if (body[0]) wcscat_s(body, L"・");
+		wcscat_s(body, bits[i]);
+	}
+	swprintf_s(out, cap, L"%s %s", WeakLabel(), body);
+}
+
+static void MarkBreakEls(const Unit& d, int* brk)
+{
+	if (d.burn > 0) brk[EL_ICE] = 1;
+	if (d.freeze > 0) brk[EL_FIRE] = 1;
+	if (d.stun > 0 || d.bleed > 0) brk[EL_WIND] = 1;
+	if (d.confuse > 0 || d.defDown > 0) brk[EL_EARTH] = 1;
+	if (d.slow > 0 || d.sleep > 0) brk[EL_THUNDER] = 1;
+	if (d.poison > 0) brk[EL_HOLY] = 1;
+	if (d.blind > 0) brk[EL_POISON] = 1;
+	if (d.silence > 0) brk[EL_DARK] = 1;
+}
+
+void UnitWeakText(const Unit& u, wchar_t* out, int cap)
+{
+	MonsterWeakText(u.monster, out, cap);
+	if (!out || cap < 8 || u.team != TEAM_ENEMY) return;
+	int innate[16] = {}, brk[16] = {};
+	const MonsterDef& md = MonsterInfo(u.monster);
+	for (int i = 0; i < 4; i++) {
+		int w = md.weak[i];
+		if (w > EL_NONE && w < 16) innate[w] = 1;
+	}
+	MarkBreakEls(u, brk);
+	static const int kTri[2][3] = {
+		{ EL_THUNDER, EL_WIND, EL_EARTH },
+		{ EL_POISON, EL_HOLY, EL_DARK }
+	};
+	int third[2], nThird = 0;
+	for (int t = 0; t < 2; t++) {
+		int n = 0, live = 0, miss = EL_NONE;
+		for (int i = 0; i < 3; i++) {
+			int el = kTri[t][i];
+			if (innate[el] || brk[el]) n++;
+			else miss = el;
+			if (brk[el]) live = 1;
+		}
+		if (live && n == 2 && miss != EL_NONE && nThird < 2) third[nThird++] = miss;
+	}
+	if (nThird <= 0) return;
+	const wchar_t* tag = LangPick14(L"三つ巴", L"Trio", L"Trio", L"Trio", L"Trío", L"삼파전", L"三方", L"ثلاثي", L"Трио", L"Trio", L"Trio", L"Trio", L"Trójkąt", L"Üçlü");
+	wchar_t extra[96];
+	extra[0] = 0;
+	for (int i = 0; i < nThird; i++) {
+		const wchar_t* w = ElemWord(third[i]);
+		if (!w) continue;
+		if (extra[0]) wcscat_s(extra, L"・");
+		wcscat_s(extra, w);
+	}
+	if (!extra[0]) return;
+	wchar_t add[128];
+	swprintf_s(add, L"  %s %s", tag, extra);
+	if ((int)wcslen(out) + (int)wcslen(add) < cap) wcscat_s(out, cap, add);
 }
 
 } // namespace otac

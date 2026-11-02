@@ -89,7 +89,7 @@ BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
 	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return FALSE;
 	DWORD sz = GetFileSize(h, NULL);
-	if (sz < 24 || sz > 128u * 1024u * 1024u) { CloseHandle(h); return FALSE; }
+	if (sz < 24 || sz > 512u * 1024u * 1024u) { CloseHandle(h); return FALSE; }
 	BYTE* b = (BYTE*)malloc(sz);
 	DWORD got = 0;
 	BOOL ok = b && ReadFile(h, b, sz, &got, NULL) && got == sz;

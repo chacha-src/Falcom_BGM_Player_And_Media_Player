@@ -39,13 +39,31 @@ float vnoise(float2 p)
 }
 float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
 
+float GustAmtT()
+{
+	float burst = 0;
+	float s = sin(Eye.w * 0.85);
+	if (s > 0.72) {
+		float u = (s - 0.72) / 0.28;
+		burst = u * u * (3.0 - 2.0 * u);
+	}
+	float s2 = sin(Eye.w * 0.37 + 2.1);
+	if (s2 > 0.82) {
+		float u = (s2 - 0.82) / 0.18;
+		burst = max(burst, u);
+	}
+	return burst;
+}
+
 float3 Sway(float3 w, float amt)
 {
-	if (amt <= 0) return w;
+	if (amt <= 0.001) return w;
+	float g = GustAmtT();
+	float k = amt * (1.0 + g * 2.8);
 	float t = Eye.w;
 	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.5 + sin(t * 2.9 + w.x * 1.7) * 0.25;
-	w.x += s * amt * 0.07;
-	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * amt * 0.05;
+	w.x += s * k * 0.07 + cos(t * 0.23) * g * amt * 0.16;
+	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * k * 0.05 + sin(t * 0.23) * g * amt * 0.12;
 	return w;
 }
 
@@ -61,11 +79,20 @@ TC VST(VSIn v)
 		float amp = 0.045;
 		if (th > 2.5 && th < 3.5) amp = 0.012;
 		else if (th > 5.5 && th < 6.5) amp = 0.022;
-		else if (th > 6.5) amp = 0.01;
-		w.y += sin(w.x * 1.6 + w.z * 0.7 + t * 1.25) * amp + cos(w.z * 2.0 - t * 0.8) * amp * 0.7;
+		else if (th > 8.5 && th < 9.5) amp = 0.08;
+		else if (th > 7.5 && th < 8.5) amp = 0.016;
+		else if (th > 6.5) amp = 0.012;
+		amp *= 1.0 + GustAmtT() * 1.8;
+		float2 flow = v.c.rg * 2.0 - 1.0;
+		float rush = saturate(v.c.b * 1.35);
+		float spd = lerp(0.45, 2.6, rush);
+		float2 xz = w.xz - flow * t * spd;
+		w.y += sin(xz.x * 1.35 + xz.y * 0.34 - t * 1.15) * amp;
+		w.y += sin(xz.x * -0.84 + xz.y * 2.4 - t * 1.7) * amp * 0.55;
+		w.y += sin(xz.x * 0.82 - xz.y * 4.1 - t * 2.3) * amp * 0.28 * (1.0 + rush);
 	} else if (Params.y > 1.5 && Params.y < 2.5) {
 		float t = Eye.w;
-		w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * 0.018;
+		w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * (0.018 + GustAmtT() * 0.016);
 	}
 	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c;
 	return o;
@@ -117,18 +144,25 @@ PSIn DST(TF factors, float3 b : SV_DomainLocation, const OutputPatch<TC, 3> p)
 		w += n * (h * 0.65 + h2 * 0.35) * Q.z * saturate(n.y * 0.65 + 0.35);
 		if (n.y > 0.72 && Params.y < 0.5) {
 			float th = FogColor.a;
-			float freq = 3.1, amp = 0.55;
-			if (th > 0.5 && th < 1.5) { freq = 1.5; amp = 0.9; }
-			else if (th > 1.5 && th < 2.5) { freq = 4.2; amp = 0.4; }
-			else if (th > 2.5 && th < 3.5) { freq = 6.0; amp = 0.32; }
-			else if (th > 3.5 && th < 4.5) { freq = 2.4; amp = 0.7; }
-			else if (th > 4.5 && th < 5.5) { freq = 2.1; amp = 1.05; }
-			else if (th > 5.5 && th < 6.5) { freq = 3.6; amp = 0.48; }
-			else if (th > 6.5 && th < 7.5) { freq = 2.8; amp = 0.5; }
-			else if (th > 7.5 && th < 8.5) { freq = 2.6; amp = 0.28; }
-			else if (th > 8.5) { freq = 1.8; amp = 0.62; }
-			float g = fbm2(w.xz * freq + float2(0, Eye.w * 0.05)) - 0.5;
+			float freq = 3.1, amp = 0.55, drift = 0.05;
+			if (th < 0.5) { freq = 4.4; amp = 0.42; drift = 0.12; }
+			else if (th < 1.5) { freq = 1.5; amp = 0.9; drift = 0.04; }
+			else if (th < 2.5) { freq = 4.2; amp = 0.4; drift = 0.03; }
+			else if (th < 3.5) { freq = 6.0; amp = 0.32; drift = 0.08; }
+			else if (th < 4.5) { freq = 2.4; amp = 0.7; drift = 0.14; }
+			else if (th < 5.5) { freq = 2.1; amp = 1.05; drift = 0.06; }
+			else if (th < 6.5) { freq = 3.6; amp = 0.48; drift = 0.04; }
+			else if (th < 7.5) { freq = 2.8; amp = 0.5; drift = 0.02; }
+			else if (th < 8.5) { freq = 2.6; amp = 0.28; drift = 0.07; }
+			else if (th < 9.5) { freq = 1.8; amp = 0.62; drift = 0.16; }
+			else if (th < 10.5) { freq = 5.2; amp = 0.22; drift = 0.01; }
+			else if (th < 11.5) { freq = 7.0; amp = 0.18; drift = 0.0; }
+			else if (th < 12.5) { freq = 3.4; amp = 0.38; drift = 0.02; }
+			else { freq = 2.2; amp = 0.45; drift = 0.05; }
+			float g = fbm2(w.xz * freq + float2(Eye.w * drift, Eye.w * drift * 0.6)) - 0.5;
 			w += n * g * Q.z * amp;
+			float g2 = fbm2(w.xz * freq * 2.4 + Eye.w * drift * 1.6) - 0.5;
+			w += n * g2 * Q.z * amp * 0.35;
 		}
 	}
 	PSIn o;
