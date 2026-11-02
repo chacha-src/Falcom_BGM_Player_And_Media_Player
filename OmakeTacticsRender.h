@@ -462,11 +462,14 @@ private:
 		DWORD frame; float time; M4 world; int valid;
 		float limbPrev[CLOTH_SEGS][3];
 		float handPrev[2][3];
+		float vel[3];
 		int limbOk;
-		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0) {
+		int slot;
+		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0), slot(-1) {
 			world = MIdent();
 			memset(limbPrev, 0, sizeof(limbPrev));
 			memset(handPrev, 0, sizeof(handPrev));
+			vel[0] = vel[1] = vel[2] = 0.f;
 		}
 	};
 	Fix<ClothInst, CLOTH_INST> m_clothInst;
@@ -597,7 +600,12 @@ private:
 		const void* owner; int style;
 		ID3D11Buffer* sb; ID3D11UnorderedAccessView* uav; ID3D11ShaderResourceView* srv;
 		DWORD frame; float time; M4 world; int valid;
-		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0) { world = MIdent(); }
+		float vel[3];
+		int slot;
+		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1) {
+			world = MIdent();
+			vel[0] = vel[1] = vel[2] = 0.f;
+		}
 	};
 	Fix<HairInst, HAIR_INST> m_hairInst;
 	ID3D11Buffer* m_hairScratchSB;

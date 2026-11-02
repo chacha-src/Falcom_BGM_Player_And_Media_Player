@@ -926,33 +926,83 @@ static bool ShapeInside(int kind, float x, float y)
 static BYTE gShape[MAPN][MAPN];
 static int gShapeOn = 0;
 
+// 小さい欠けは捨て、残った島は消さずに一番大きい島へ3マス幅でつなぐ。
 static void KeepLargestMask(BYTE mask[MAPN][MAPN])
 {
-	static int comp[MAPN][MAPN];
-	memset(comp, 0, sizeof(comp));
-	int bestId = 0, bestN = 0, id = 0;
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	static int comp[MAPN][MAPN];
 	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		if (!mask[z][x] || comp[z][x]) continue;
-		id++;
-		int qh = 0, qt = 0, n = 0;
-		qx[qt] = x; qz[qt] = z; qt++;
-		comp[z][x] = id;
-		while (qh < qt) {
-			int cx = qx[qh], cz = qz[qh]; qh++; n++;
-			for (int k = 0; k < 4; k++) {
-				int nx = cx + dx[k], nz = cz + dz[k];
-				if (!Map::In(nx, nz) || comp[nz][nx] || !mask[nz][nx]) continue;
-				comp[nz][nx] = id;
-				qx[qt] = nx; qz[qt] = nz; qt++;
+	static int par[MAPN][MAPN];
+	static BYTE vis[MAPN][MAPN];
+	for (int pass = 0; pass < 6; pass++) {
+		memset(comp, 0, sizeof(comp));
+		int id = 0, bestId = 0, bestN = 0;
+		int bigId[64], nBig = 0;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			if (!mask[z][x] || comp[z][x]) continue;
+			id++;
+			int qh = 0, qt = 0, n = 0;
+			qx[qt] = x; qz[qt] = z; qt++;
+			comp[z][x] = id;
+			while (qh < qt) {
+				int cx = qx[qh], cz = qz[qh]; qh++; n++;
+				for (int k = 0; k < 4; k++) {
+					int nx = cx + dx[k], nz = cz + dz[k];
+					if (!Map::In(nx, nz) || comp[nz][nx] || !mask[nz][nx]) continue;
+					comp[nz][nx] = id;
+					qx[qt] = nx; qz[qt] = nz; qt++;
+				}
 			}
+			if (n < 8) {
+				for (int i = 0; i < qt; i++) mask[qz[i]][qx[i]] = 0;
+				continue;
+			}
+			if (n > bestN) { bestN = n; bestId = id; }
+			if (nBig < 64) bigId[nBig++] = id;
 		}
-		if (n > bestN) { bestN = n; bestId = id; }
+		if (bestId <= 0 || nBig <= 1) return;
+		int grew = 0;
+		for (int t = 0; t < nBig; t++) {
+			if (bigId[t] == bestId) continue;
+			memset(vis, 0, sizeof(vis));
+			int qh = 0, qt = 0;
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				if (comp[z][x] != bestId) continue;
+				vis[z][x] = 1;
+				par[z][x] = -1;
+				qx[qt] = x; qz[qt] = z; qt++;
+			}
+			int hx = -1, hz = -1;
+			while (qh < qt && hx < 0) {
+				int cx = qx[qh], cz = qz[qh]; qh++;
+				for (int k = 0; k < 4 && hx < 0; k++) {
+					int nx = cx + dx[k], nz = cz + dz[k];
+					if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+					vis[nz][nx] = 1;
+					par[nz][nx] = cz * MAPN + cx;
+					if (comp[nz][nx] == bigId[t]) { hx = nx; hz = nz; break; }
+					qx[qt] = nx; qz[qt] = nz; qt++;
+				}
+			}
+			if (hx < 0) continue;
+			int x = hx, z = hz, guard = MAPN * 2;
+			while (guard-- > 0) {
+				for (int oz = -1; oz <= 1; oz++) for (int ox = -1; ox <= 1; ox++) {
+					int xx = x + ox, zz = z + oz;
+					if (!Map::In(xx, zz)) continue;
+					mask[zz][xx] = 1;
+					if (comp[zz][xx] == 0) comp[zz][xx] = bestId;
+				}
+				if (par[z][x] < 0) break;
+				int p = par[z][x];
+				x = p % MAPN; z = p / MAPN;
+			}
+			for (int z2 = 0; z2 < MAPN; z2++) for (int x2 = 0; x2 < MAPN; x2++)
+				if (comp[z2][x2] == bigId[t]) comp[z2][x2] = bestId;
+			grew = 1;
+		}
+		if (!grew) return;
 	}
-	if (bestId <= 0) return;
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
-		if (mask[z][x] && comp[z][x] != bestId) mask[z][x] = 0;
 }
 
 static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
@@ -1090,11 +1140,13 @@ static int GroundWalk(const Cell& c)
 	return TerrainInfo(c.t).costFoot < 99;
 }
 
-// 見た目で離れている島は、歩いて渡れない。開始地点の島だけ残す。
+// 塵だけの欠けは消す。島そのものは残し、後段で歩いて渡れるようにつなぐ。
 static void CutLooseIslands(Map& m)
 {
 	static int comp[MAPN][MAPN];
 	memset(comp, 0, sizeof(comp));
+	static int area[MAPN * MAPN + 1];
+	memset(area, 0, sizeof(area));
 	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	int bestId = 0, bestN = 0, id = 0;
@@ -1114,6 +1166,7 @@ static void CutLooseIslands(Map& m)
 			}
 		}
 		if (n > bestN) { bestN = n; bestId = id; }
+		if (id > 0 && id <= MAPN * MAPN) area[id] = n;
 	}
 	if (bestId <= 0) return;
 	int keepId[MAX_GROUPS + 2], keepN = 0;
@@ -1131,8 +1184,9 @@ static void CutLooseIslands(Map& m)
 	}
 	static BYTE seen[MAPN][MAPN];
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		int on = 0;
-		for (int i = 0; i < keepN && !on; i++) if (comp[z][x] == keepId[i]) on = 1;
+		int cid = comp[z][x];
+		int on = (cid > 0 && cid <= MAPN * MAPN && area[cid] >= 8) ? 1 : 0;
+		for (int i = 0; i < keepN && !on; i++) if (cid == keepId[i]) on = 1;
 		seen[z][x] = (BYTE)on;
 	}
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
@@ -1602,6 +1656,16 @@ static void PaintStair(Cell& c, int h)
 	if (c.nLay < 1) c.nLay = 1;
 }
 
+static void SetLayerHt(Cell& c, int L, int h)
+{
+	h = Clampi(h, 1, MAXH);
+	if (L <= 0) c.h = (BYTE)h;
+	else if (L == 1) c.h1 = (BYTE)h;
+	else if (L == 2) c.h2 = (BYTE)h;
+	else if (L == 3) c.h3 = (BYTE)h;
+	else c.h4 = (BYTE)h;
+}
+
 // 届かない足場の縁に、高さ1段ずつの階段を1本足す。移動力は見ない。
 static int StairOnce(Map& m)
 {
@@ -1665,7 +1729,16 @@ static int StairOnce(Map& m)
 				break;
 			}
 		}
-		if (pick < 0) break;
+		if (pick < 0) {
+			// 横に足場が無い段差は、届かない側を一段ずつ下げて渡れるようにする。
+			if (rx >= 0 && abs(hU - h) > 2) {
+				int nh = h + (hU > h ? 2 : -2);
+				int before = LayerHt(m.c[uz][ux], uL);
+				SetLayerHt(m.c[uz][ux], uL, nh);
+				if (LayerHt(m.c[uz][ux], uL) != before) changed = 1;
+			}
+			break;
+		}
 		int nx = cx + dx[pick], nz = cz + dz[pick];
 		int nh = Clampi(h + step, 1, MAXH);
 		Cell& c = m.c[nz][nx];
@@ -1681,11 +1754,118 @@ static int StairOnce(Map& m)
 	return changed;
 }
 
+// 空白で隔てられた足場へ、一番近い到達地から丘を1本渡す。
+static int BridgeOnce(Map& m)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	if (!BfsFeet(m, seen)) return 0;
+	static BYTE vis[MAPN][MAPN];
+	memset(vis, 0, sizeof(vis));
+	static short px[MAPN][MAPN], pz[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qh = 0, qt = 0;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int reach = 0;
+		for (int L = 0; L < LAY_N; L++) if (seen[L][z][x]) reach = 1;
+		if (!reach) continue;
+		vis[z][x] = 1;
+		px[z][x] = (short)x; pz[z][x] = (short)z;
+		qx[qt] = x; qz[qt] = z; qt++;
+	}
+	if (qt <= 0) return 0;
+	int fx = -1, fz = -1;
+	while (qh < qt && fx < 0) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4 && fx < 0; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+			if (m.c[nz][nx].t == T_DOOR) continue;
+			vis[nz][nx] = 1;
+			px[nz][nx] = (short)x; pz[nz][nx] = (short)z;
+			int hole = 0;
+			for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[nz][nx], L) && !seen[L][nz][nx]) hole = 1;
+			if (hole) { fx = nx; fz = nz; break; }
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	if (fx < 0) return 0;
+	int pathX[MAPN * 2], pathZ[MAPN * 2], np = 0;
+	int x = fx, z = fz;
+	while (np < MAPN * 2) {
+		pathX[np] = x; pathZ[np] = z; np++;
+		int px0 = (int)px[z][x], pz0 = (int)pz[z][x];
+		if (px0 == x && pz0 == z) break;
+		x = px0; z = pz0;
+	}
+	if (np < 3) return 0;
+	int h = 4;
+	int rx = pathX[np - 1], rz = pathZ[np - 1];
+	for (int L = 0; L < LAY_N; L++) if (seen[L][rz][rx]) { h = LayerHt(m.c[rz][rx], L); break; }
+	h = Clampi(h, 1, MAXH);
+	int changed = 0;
+	for (int i = 1; i < np - 1; i++) for (int oz = -1; oz <= 1; oz++) for (int ox = -1; ox <= 1; ox++) {
+		int xx = pathX[i] + ox, zz = pathZ[i] + oz;
+		if (!Map::In(xx, zz)) continue;
+		Cell& c = m.c[zz][xx];
+		if (c.t == T_DOOR) continue;
+		if (ox || oz) {
+			if (c.t != T_VOID && c.t != T_CHASM && TerrainInfo(c.t).costFoot < 99) continue;
+		}
+		int beforeT = (int)c.t, beforeH = (int)c.h;
+		if (!CellStand(c, 0) || abs((int)c.h - h) > 2) {
+			if (c.t == T_VOID || c.t == T_CHASM || TerrainInfo(c.t).costFoot >= 99) c.t = T_HILL;
+			c.h = (BYTE)h;
+			if (c.nLay < 1) c.nLay = 1;
+		}
+		if ((int)c.t != beforeT || (int)c.h != beforeH) changed = 1;
+	}
+	return changed;
+}
+
+// 隣り合っているのに高さが2を超える足場を、外から一段ずつ歩ける傾斜にする。
+static int EaseAll(Map& m)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int changed = 0;
+	for (int wave = 0; wave < 96; wave++) {
+		if (!BfsFeet(m, seen)) return changed;
+		int step = 0;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			for (int L = 0; L < LAY_N; L++) {
+				if (!CellStand(m.c[z][x], L) || seen[L][z][x]) continue;
+				int hU = LayerHt(m.c[z][x], L);
+				int best = 999, hR = hU;
+				for (int k = 0; k < 4; k++) {
+					int nx = x + dx[k], nz = z + dz[k];
+					if (!Map::In(nx, nz)) continue;
+					for (int NL = 0; NL < LAY_N; NL++) {
+						if (!seen[NL][nz][nx]) continue;
+						int gap = abs(hU - LayerHt(m.c[nz][nx], NL));
+						if (gap < best) { best = gap; hR = LayerHt(m.c[nz][nx], NL); }
+					}
+				}
+				if (best > 900 || best <= 2) continue;
+				SetLayerHt(m.c[z][x], L, hR + (hU > hR ? 2 : -2));
+				step = 1;
+				changed = 1;
+			}
+		}
+		if (!step) break;
+	}
+	return changed;
+}
+
 static void ConnectFeet(Map& m)
 {
-	for (int i = 0; i < 512; i++) {
+	for (int i = 0; i < 64; i++) {
 		if (FeetLinked(m)) return;
-		if (!StairOnce(m)) return;
+		StairOnce(m);
+		if (FeetLinked(m)) return;
+		EaseAll(m);
+		if (FeetLinked(m)) return;
+		if (!BridgeOnce(m)) return;
 	}
 }
 

@@ -6207,12 +6207,51 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 	return TRUE;
 }
 
-static void TacWind(float time, const M4& world, float amp, float out[3])
+static float TacBurst(float time)
 {
-	const float wx = sinf(time * 0.65f) * 0.55f + sinf(time * 0.17f + 1.3f) * 0.35f;
-	const float wz = cosf(time * 0.55f) * 0.45f + sinf(time * 0.23f) * 0.25f;
-	const V3 w = MXformDir(MInverse(world), v3(wx, 0.f, wz));
-	out[0] = w.x * amp; out[1] = w.y * amp; out[2] = w.z * amp;
+	// 数秒に一度、1秒あまり。立っているときもポートレートでも見える間隔。
+	float burst = 0.f;
+	const float s = sinf(time * 0.85f);
+	if (s > 0.72f) {
+		const float u = (s - 0.72f) / 0.28f;
+		burst = u * u * (3.f - 2.f * u);
+	}
+	const float s2 = sinf(time * 0.37f + 2.1f);
+	if (s2 > 0.82f) {
+		const float u = (s2 - 0.82f) / 0.18f;
+		if (u > burst) burst = u;
+	}
+	return burst;
+}
+
+static void TacVel(const M4& prev, const M4& now, float dt, float out[3])
+{
+	out[0] = out[1] = out[2] = 0.f;
+	if (dt < 1e-4f) return;
+	const V3 w = v3(now.m[12] - prev.m[12], now.m[13] - prev.m[13], now.m[14] - prev.m[14]) * (1.f / dt);
+	V3 m = MXformDir(MInverse(now), w);
+	const float sp = Len(m);
+	if (sp > 6.f) m = m * (6.f / sp);
+	out[0] = m.x; out[1] = m.y; out[2] = m.z;
+}
+
+static void TacWind(float time, const M4& world, const float vel[3], float amp, float out[3])
+{
+	// 突風は倍率。移動中の風は進行の逆で、前から後ろへ流れる。止まっているときは弱い横風だけ。
+	const float gustK = 1.f + TacBurst(time) * 2.6f;
+	const float ang = time * 0.23f;
+	const V3 amb = MXformDir(MInverse(world), v3(cosf(ang) * 0.50f, 0.f, sinf(ang) * 0.42f));
+	const float vx = vel ? vel[0] : 0.f, vy = vel ? vel[1] : 0.f, vz = vel ? vel[2] : 0.f;
+	const float sp = sqrtf(vx * vx + vy * vy + vz * vz);
+	float hx = 0.f, hy = 0.f, hz = 0.f;
+	if (sp > 0.30f) {
+		const float stream = 1.25f + fminf(sp, 5.f) * 0.28f;
+		const float s = stream / sp;
+		hx = -vx * s; hy = -vy * s; hz = -vz * s;
+	}
+	out[0] = (amb.x * 1.10f + hx) * gustK * amp;
+	out[1] = (amb.y * 1.10f + hy) * gustK * amp;
+	out[2] = (amb.z * 1.10f + hz) * gustK * amp;
 }
 
 static void TacGrav(const M4& world, float g, float out[3])
@@ -6232,15 +6271,27 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		&& ac.softSRV[0] && ac.softSRV[1] && m_cbSoft && m_csSoft[0] && m_csSoft[1];
 	if (!canSkirt && !canSoft) return;
 	ClothInst* ci = NULL;
-	for (ClothInst& x : m_clothInst) if (x.owner == owner && x.model == ac.model && x.cos == ac.cos && x.cup == ac.cup) { ci = &x; break; }
+	if (m_inPortrait) {
+		for (ClothInst& x : m_clothInst) if (x.slot == m_portraitSlot) { ci = &x; break; }
+	} else {
+		for (ClothInst& x : m_clothInst) if (x.slot < 0 && x.owner == owner && x.model == ac.model && x.cos == ac.cos && x.cup == ac.cup) { ci = &x; break; }
+	}
 	if (!ci) {
 		// 空きが無ければ、いちばん長く描いていないキャラの分を使い回す。
 		if (m_clothInst.size() < CLOTH_INST) { m_clothInst.push_back(ClothInst()); ci = &m_clothInst.back(); }
 		else { ci = &m_clothInst[0]; for (ClothInst& x : m_clothInst) if (x.frame < ci->frame) ci = &x; }
-		ci->owner = owner; ci->model = ac.model; ci->cos = ac.cos; ci->cup = ac.cup; ci->valid = 0; ci->limbOk = 0;
+		ci->valid = 0; ci->limbOk = 0;
 	}
+	if (m_inPortrait) {
+		if (ci->slot != m_portraitSlot || ci->model != ac.model || ci->cos != ac.cos || ci->cup != ac.cup) { ci->valid = 0; ci->limbOk = 0; }
+		ci->slot = m_portraitSlot;
+	} else if (ci->slot >= 0 || ci->owner != owner || ci->model != ac.model || ci->cos != ac.cos || ci->cup != ac.cup) {
+		ci->valid = 0; ci->limbOk = 0;
+		ci->slot = -1;
+	}
+	ci->owner = owner; ci->model = ac.model; ci->cos = ac.cos; ci->cup = ac.cup;
 	const float dtRaw = m_time - ci->time;
-	int reset = !ci->valid || m_inPortrait;
+	int reset = !ci->valid;
 	M4 delta = MIdent();
 	if (!reset) {
 		delta = MMul(ci->world, MInverse(world));
@@ -6250,6 +6301,9 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
 	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
 	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+	float velUse[3] = { ci->vel[0], ci->vel[1], ci->vel[2] };
+	if (reset) { velUse[0] = velUse[1] = velUse[2] = 0.f; ci->vel[0] = ci->vel[1] = ci->vel[2] = 0.f; }
+	else if (dtRaw > 1e-3f) { TacVel(ci->world, world, dtRaw, velUse); ci->vel[0] = velUse[0]; ci->vel[1] = velUse[1]; ci->vel[2] = velUse[2]; }
 	if (canSkirt) {
 	// 今・軌跡3つ・作業・目標からのずれ・古い軌跡2つ。歩きや攻撃の1フレームで裾をなびかせない。
 	if (!ci->uav) {
@@ -6313,7 +6367,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	cb.sim[2] = reset ? 1.f : 0.f;
 	cb.sim[3] = hs;
 	cb.mode[3] = m_time;
-	TacWind(m_time, world, 0.48f, cb.wind);
+	TacWind(m_time, world, velUse, 0.48f, cb.wind);
 	cb.wind[3] = Clampf(dp.fly, 0.f, 1.f);
 	TacGrav(world, 9.2f, cb.grav);
 	cb.grav[3] = ac.clothY0;
@@ -6385,7 +6439,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 				scb.bone[b] = (j >= 0 && j < pose.nJ) ? pose.palette[j] : MIdent();
 			}
 			scb.sim[0] = dt; scb.sim[1] = dt * 60.f; scb.sim[2] = reset ? 1.f : 0.f; scb.sim[3] = hs;
-			TacWind(m_time, world, 0.40f, scb.wind);
+			TacWind(m_time, world, velUse, 0.40f, scb.wind);
 			TacGrav(world, 9.2f, scb.grav);
 			const int jChest = ac.softBone[0];
 			const M4 chest = (jChest >= 0 && jChest < pose.nJ) ? pose.palette[jChest] : MIdent();
@@ -6520,55 +6574,41 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 		if (FAILED(m_dev->CreateUnorderedAccessView(*sb, &ud, uav))) { TAC_REL(*sb); return FALSE; }
 		return TRUE;
 	};
-	ID3D11UnorderedAccessView* stU = NULL;
 	HairInst* hi = NULL;
-	int reset = 1;
-	M4 delta = MIdent();
-	BOOL step = TRUE;
-	float dt = 1.f / 60.f;
-	// 顔アップも戦闘と同じく、前の数フレームと比べて垂らす。毎フレーム置き直すと毛が胴へ戻る。
-	static DWORD portFrame = 0;
-	static float portTime = 0.f;
-	static M4 portWorld;
-	static int portValid = 0;
-	static int portStyle = -1;
-	static int portSlot = -1;
-	static const void* portOwner = NULL;
-	static int portInit = 0;
-	if (!portInit) { portWorld = MIdent(); portInit = 1; }
 	if (portrait) {
-		if (!makeState(&m_hairScratchSB, &m_hairScratchUAV)) return;
-		stU = m_hairScratchUAV;
-		const float dtRaw = m_time - portTime;
-		reset = !portValid || portStyle != style || portSlot != m_portraitSlot || portOwner != owner;
-		if (!reset) {
-			delta = MMul(portWorld, MInverse(world));
-			const float* t = &delta.m[12];
-			if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
-		}
-		reset = 1;
-		step = TRUE;
-		dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+		for (HairInst& x : m_hairInst) if (x.slot == m_portraitSlot) { hi = &x; break; }
 	} else {
-		for (HairInst& x : m_hairInst) if (x.owner == owner) { hi = &x; break; }
-		if (!hi) {
-			if (m_hairInst.size() < HAIR_INST) { m_hairInst.push_back(HairInst()); hi = &m_hairInst.back(); }
-			else { hi = &m_hairInst[0]; for (HairInst& x : m_hairInst) if (x.frame < hi->frame) hi = &x; }
-			hi->owner = owner; hi->style = -1; hi->valid = 0;
-		}
-		if (hi->style != style) { hi->style = style; hi->valid = 0; }
-		if (!makeState(&hi->sb, &hi->uav)) return;
-		const float dtRaw = m_time - hi->time;
-		reset = !hi->valid;
-		if (!reset) {
-			delta = MMul(hi->world, MInverse(world));
-			const float* t = &delta.m[12];
-			if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
-		}
-		step = reset || (hi->frame != m_frame && dtRaw > 1e-4f);
-		dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
-		stU = hi->uav;
+		for (HairInst& x : m_hairInst) if (x.slot < 0 && x.owner == owner) { hi = &x; break; }
 	}
+	if (!hi) {
+		if (m_hairInst.size() < HAIR_INST) { m_hairInst.push_back(HairInst()); hi = &m_hairInst.back(); }
+		else { hi = &m_hairInst[0]; for (HairInst& x : m_hairInst) if (x.frame < hi->frame) hi = &x; }
+		hi->style = -1; hi->valid = 0;
+	}
+	if (portrait) {
+		if (hi->slot != m_portraitSlot || hi->style != style) hi->valid = 0;
+		hi->slot = m_portraitSlot;
+	} else if (hi->slot >= 0 || hi->owner != owner || hi->style != style) {
+		hi->valid = 0;
+		hi->slot = -1;
+	}
+	hi->owner = owner;
+	hi->style = style;
+	if (!makeState(&hi->sb, &hi->uav)) return;
+	ID3D11UnorderedAccessView* stU = hi->uav;
+	const float dtRaw = m_time - hi->time;
+	int reset = !hi->valid;
+	M4 delta = MIdent();
+	if (!reset) {
+		delta = MMul(hi->world, MInverse(world));
+		const float* t = &delta.m[12];
+		if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
+	}
+	const BOOL step = reset || (hi->frame != m_frame && dtRaw > 1e-4f);
+	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+	float velUse[3] = { hi->vel[0], hi->vel[1], hi->vel[2] };
+	if (reset) { velUse[0] = velUse[1] = velUse[2] = 0.f; hi->vel[0] = hi->vel[1] = hi->vel[2] = 0.f; }
+	else if (dtRaw > 1e-3f) { TacVel(hi->world, world, dtRaw, velUse); hi->vel[0] = velUse[0]; hi->vel[1] = velUse[1]; hi->vel[2] = velUse[2]; }
 	struct HCB {
 		M4 delta, head, pal, palInv;
 		float sim[4], wind[4], body[4], capA[8][4], capB[8][4];
@@ -6585,7 +6625,7 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	cb.sim[1] = dt * 60.f;
 	cb.sim[2] = reset ? 1.f : 0.f;
 	cb.sim[3] = m_time;
-	TacWind(m_time, world, 0.30f, cb.wind);
+	TacWind(m_time, world, velUse, 0.52f, cb.wind);
 	TacGrav(world, 4.6f, cb.grav);
 	for (int i = 0; i < 8; i++) { cb.capA[i][3] = -1.f; cb.capB[i][3] = -1.f; }
 	const Model* md = (model >= 0 && model < (int)models.size()) ? &models[model] : NULL;
@@ -6672,16 +6712,8 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	m_ctx->CSSetShaderResources(0, 2, nos);
 	m_ctx->CSSetConstantBuffers(0, 2, nob);
 	m_ctx->CSSetShader(NULL, NULL, 0);
-	if (portrait) {
-		portFrame = m_frame;
-		portOwner = owner;
-		portStyle = style;
-		portSlot = m_portraitSlot;
-		if (step) { portTime = m_time; portWorld = world; portValid = 1; }
-	} else if (hi) {
-		hi->frame = m_frame;
-		if (step) { hi->time = m_time; hi->world = world; hi->valid = 1; }
-	}
+	hi->frame = m_frame;
+	if (step) { hi->time = m_time; hi->world = world; hi->valid = 1; }
 }
 
 // 髪型ごとの頭を覆う殻（最大 256 点）。載せ位置は体ごとに一度だけ探す。

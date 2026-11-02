@@ -118,6 +118,58 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 
 メニュー用フォント（8–24pt、太字／斜体）もホバープレビュー付きで変更できます。**立体アクセント強め** で、区切りや行の立体表現を強くできます。
 
+見た目の色と輪郭は **テーマ** でまとめて替えられます。既定は **可愛い**。コンテキストメニューから、格好いい／中二／夜光／墨／森／キャンディ／鋼、超可愛い／超格好いい、春・夏・秋・冬、夕暮れ／朝／雨／海／月／琥珀／藤、レトロ、清楚・学園・ゴシック（女／男）、ぶっ壊れ、天界／廃墟／神社／星空／深海／花園／薔薇／蝶。ボタンや区切りの色・印までテーマに揃います。選んだテーマは次回も残ります。
+
+### 覚えておく設定
+ウィンドウの位置、音のつまみ、リストの終わり方などは、終了しても次に開いたときに戻ります。曲そのものの音量やキーは曲ごと設定（★）側、画面の置き方や再生の決まりごとはアプリ側、という分けです。
+
+**リストの進み方**
+
+- **連続再生** はリストを最後まで進めます。**ループ再生** は今の曲、または選んだ区間を繰り返します。**ランダム再生** はメディプレのリスト順です（ファルコム画面のランダムとは別です）
+- **終了動作** はリストの最後でどうするかです。**最後で停止**／**同じリストを繰返し**（既定）／**次のリストへ**（最後のリストでは停止）／**全リストを循環**（最後のリストのあと先頭のリストへ）
+- **ループ回数** は無制限か、指定した回数です。回数の上限はとても大きく取れます
+- **クロスフェード** は連続再生のとき曲のつなぎで重ねます。ループしている曲は、5分の時点でも一度クロスフェードします
+
+**検索**
+
+検索語は、絞り込み ON だと一致した曲だけを出し、OFF だと ▲▼ で前後の一致へ飛びます。**正規表現** を入れると大小文字を区別しない ECMAScript の式です（例: `^Ys|空の軌跡$`）。式が壊れているときは一致なしになります。
+
+**窓の位置は画面モードごと**
+
+ファルコムBGM画面とメディアプレイヤー画面で、EQ・ピアノロール・アナライザー・MIDIモニタ・WRD・検出パラメータ・プレイリスト追随の位置と開閉を別々に覚えます。片方で動かしても、もう片方の置き場所は崩れません。メインを動かすと、追随ロックのついたサブ窓が付いてきます。
+
+**音量の系統**
+
+主音量、EQマスター、拡張音量は別です。さらに kpi／mp3／Winamp系プラグイン／CEmu は、フォーマットごとの音量段階を持てます。テンポとピッチのスライダー位置も次回に残ります（200 が 100%）。
+
+**MIDI の出し先**
+
+プレイリストの SMF は、レンダリングの「MIDI再生」で KPI優先／VST優先／VSTホスト優先を選びます。GS 用と XG 用の VST（または .sf2）は別欄です。SoundFont のパスを空にすると、プラグインと同じ場所の SGM 系 .sf2 を探します。欄に .sf2 を直接書いたときは、そのファイルを使います。
+
+LA を Windows の MIDI マッパーや MIDI 出力へ出すときだけ、**SC モジュール**（バンク MSB 127 / LSB 0）か **実機 MT-32**（バンクを出さずプログラムだけ）かを選べます。繋がっているのがどちらかは自動では分かりません。VST（SOUND Canvas VA など）へ出すときは、こちらに関係なくバンク 127 です。
+
+ピアノロールと MIDI モニタには、MIDI In を2系統まで名前で覚えられます。MIDI Out は「なし」「MIDI マッパー」「機器名」です。
+
+**CEmu**
+
+データフォルダが空のときは、実行ファイルの隣の `data` を見ます。**G.I.M.I.C** は既定ではソフトのままです。レンダリングで実機にすると、対応チップの曲を実機へ出します。CEmu の音量段階も別です。実行ファイルの隣に `arcdata.zip`（または `.7z`）があるとき、Cemu対応一覧にタイトルが出ます。
+
+**画面キャプチャの足し**
+
+録画モードはプライマリ／全モニタ／ウィンドウ合成に加え、**特定のモニタ** も選べます。マウスカーソルを載せるか、システム音、マイク、FPS、出力解像度、MPの曲を合成に含めるかは次回も残ります。効果は先頭だけでなくチェーン（最大8段）で、段ごとの強さがあります。配線は名前付きで16個まで覚えられ、選んでいるプリセットも残ります。ライブ配信（YouTube のトークンや RTMP の URL／キー）も、入れた内容は次に開いたときに残っています。
+
+**更新の聞き方**
+
+起動時の更新確認は、毎回聞く／新しい版があればそのまま更新する／次回から聞かない、を覚えます。演奏中の定期チェックからは、自動更新がオンでも勝手には更新しません。上書きに失敗したときは、次回起動で「ダウンロード」フォルダへ手動展開する案内に回します。サイトへの回数加算は、直近1日ですでに足していれば重ねません。
+
+**Soft3D の画**
+
+迷路と空中レースの窓位置、難易度、相手、テーマ、アイテムの種類、ズームは次回も残ります。迷路は歩行の揺れ、視野（55°／70°／90° を基準にホイールと合成）、地下の階数、進行の自動保存もあります。メッシュの密度は軽量〜緻密〜美麗、グラフィック品質は 1〜10 で、GPU に任せるか自分で固定するかを選べます。PCM の効果音はオフにもできます。
+
+**ボイスチェンジャーのつまみ**
+
+男女・年齢のプリセットに加え、明るさ、息、音質（低遅延／高音質）、かかり（通常／ロボット／ラジオ）を覚えます。**マイクへ適用** を入れると、メディアプレイヤーや画面キャプチャのマイクミックスにも同じ設定が乗ります。
+
 ### 操作ガイド
 メディアプレイヤーの「？」に加え、EQ・プレイリスト・動画・レンダリング・キャプチャ・アナライザ・ピアノロール・メイン画面など、各 UI から **操作ガイド**（GDIヘルプ）を開けます。コンテキストメニューの「操作ガイド」からも到達できます。
 
@@ -362,7 +414,10 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - タスクバーのジャンプリスト（最近再生した曲、再演奏／停止／前後曲、EQ、ジャケット、レンダ、フォルダなど）
 - タスクバーサムネイルツールバー（再演奏／一時停止／停止／次曲など）
 - コンテキストメニューの描画アニメ・フォント、アクリル即切替、各窓の操作ガイド
-- 起動時・定期の更新チェック
+- 起動時・定期の更新チェック（毎回聞く／自動／聞かない。定期チェックは演奏中に勝手に更新しない）
+- リスト終了動作（停止／同じリスト／次リスト／全リスト循環）、メディプレのランダム、正規表現検索
+- メニューの見た目テーマ（既定は可愛い）
+- ファルコム画面とメディプレでサブ窓の位置を別々に記憶
 - Windowsミキサーでアプリがミュートされているときの警告
 - メディアプレイヤー側の最小化連動やツールチップ表示など
 - メイン画面を動かすと関連ウィンドウが追随（各サブ窓の追随ロック）
@@ -372,6 +427,7 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - 拡張音量（主音量／EQマスターとは別系統）
 - Soft3D迷路（おまけ・下段ボタンから。地下階層・曲連動アイテムあり）
 - Soft3D空中レース（おまけ・下段の「レース」。光帯コース・AI対戦・テーマ地形）
+- おまけタクティクス（下段「おまけ」またはツール。ターン制・全100ステージ。キャラ作成・育成・店・調合）
 - VSTホスト（下段「VST」。パート配線・鍵盤演奏）と、.mid の再生（KPI優先／VST優先／VSTホストのプリセット。GS/XG は VST または SoundFont）
 - MIDIモニタ（SMF 32パート／GS・XG、FM側は OPNA。簡易3D）
 - WRD画面（PC-98 MIMPI の .wrd）、SASAMI Composer（テキスト／MIDI・FMスコア／ピアノロール）、CDプレイヤー（再生・取り込み・曲目検索・書き込み）
@@ -396,6 +452,16 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - **コース:** **生成** でデモ走行（俯瞰の下見）、**スタート** でカウント後に本戦。帯の上で推進力・中央の緑帯でHPが回復。帯外はショートカット向きですが推進力が尽きると戻されます
 - **設定:** AI（超簡単〜強烈）、相手台数、距離、周回、テーマ（森／遺跡／石油工場／夜の街／水中／草原／メサ／雲 など）
 - **連動:** アイテム球は再生中のテンポやピッチも変えます。ゴール後は表彰台（1〜3位）
+
+## おまけ：タクティクス
+メディアプレイヤー下段の **おまけ**、またはツールの「おまけ」から開ける、DirectX 11 のターン制シミュレーションです。迷路・レースと同じく本編の再生とは別枠で、ファンタジーの戦場を100ステージ進めます。
+
+- **拠点:** キャラを作ってパーティを組み、出撃します。性別・血統（戦士／魔法）・クラス・体格・髪・服・帽子・マント・アバターを選べます。クラスはソルジャー、ファイター、アーチャー、シーフ、メイジ、クレリックから始まり、パラディン、ルーンナイト、バーサーカー、スナイパー、アサシン、ウィザード、ビショップ、スカイナイト、勇者、アークメイジ、聖者、ファントム、ドラゴンロード、グラディエーター、シャドウなどへ育ちます。図鑑で技と成長を確認できます
+- **戦闘:** 移動、攻撃、スキル、アイテム、待機、押し出し、扉、坂の登り。予測でダメージ・命中・会心・反撃が出ます。向き（正面／側面／背面）、地形、天候（雨／雪／灰）が入ります。Undo で直前の手順を戻せます。C で重なった道の階層、坂から上の道へ進みます
+- **成長と店:** 経験値でレベルアップし、技を覚えます。進化（クラスチェンジ）とジョブの試しがあります。ゴールドで武器・防具・アクセサリ・ビーズを売買し、素材で調合します。宝箱、扉、レバー、柵、援軍もあります
+- **マップ:** 平原、峡谷、森、雪、砂漠、火山、沼、遺跡、海底、滝、軌道、ステーション、城塞、灯台。敵はスライム、スケルトン、コウモリ、リッチ、ゴーレム、ワイバーン、闇騎士、ドラゴンなど
+- **操作:** 左クリックで決定、右クリックで戻る。左ドラッグで見渡し、右ドラッグで回転、中ドラッグで移動、ホイールでズーム、ホイールクリックで階層。矢印／WASD でカーソル、Enter／Space／Z で決定、Esc／X で戻る、Q／E で回転、Tab でユニット切替、R で視点を戻す、Shift で早送り、F1／H で操作説明。パッドは左スティック／十字キー、A 決定、B 戻る、LB／RB 回転、右スティックで視点
+- **セーブと音:** スロットのほか、途中セーブとオートセーブがあります。効果音は FM／SSG の短い音です。BGM は実行ファイルの隣の `tacticsbgm` に置きます。拠点は `tactics.ogg`、戦闘は地形ごとの `tacticsgame*.ogg`（無ければ `tacticsgame.ogg`）、店・作成・勝利・危機もそれぞれのファイルです。プレイリストには載りません。画質は軽量から上限まで、アニメはフル／短縮を選べます
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -529,6 +595,58 @@ Custom context menus offer **menu animation** styles for show/hide. The choice i
 - Big Bang / Black Hole / Spiral / Petals / Zipper (L/R) / Aurora (wave, default)
 
 Menu font (8–24 pt, bold/italic) can be changed with hover preview. **Stronger 3D accent** thickens the depth on separators and rows.
+
+Color and outline follow a **theme**. The default is **Cute**. From the context menu: Stylish, Dramatic, Neon, Ink, Forest, Candy, Steel, Super Cute, Super Stylish, Spring / Summer / Autumn / Winter, Dusk, Dawn, Rain, Sea, Moon, Amber, Wisteria, Retro, Neat / School / Gothic (F/M), Broken, Heaven, Ruins, Shrine, Starry, Abyss, Garden, Rose, and Butterfly. Buttons and separators pick up the same palette. The choice is kept for the next launch.
+
+### Settings that stick
+Window placement, level knobs, and how a list ends all come back the next time you open the player. Per-track volume and key live with the ★ per-song save. Layout and playback rules live with the app.
+
+**How a list moves**
+
+- **Continuous** plays through the list. **Loop** repeats the current track or the selected range. **Random** shuffles the media-player list (separate from random on the Falcom screen)
+- **End behavior** is what happens after the last track: **Stop at end**, **Repeat list** (the default), **Next playlist** (stop on the last playlist), or **Cycle all lists** (after the last playlist, continue from the first)
+- **Loop count** is unlimited or a set number. The cap is very large
+- **Crossfade** blends the join while continuous play is on. A looped track also crossfades once at the five-minute mark
+
+**Find**
+
+With filter on, the list shows only matches. With filter off, up/down jumps to the previous or next match. **Regex** is a case-insensitive ECMAScript expression (for example `^Ys|空の軌跡$`). A broken expression matches nothing.
+
+**Window places, per screen mode**
+
+The Falcom BGM screen and the media player each remember their own open/closed state and position for EQ, piano roll, analyzer, MIDI monitor, WRD, the detection-tuning window, and playlist follow. Moving one mode does not shove the other. Sub-windows with follow lock travel with the main window.
+
+**Volume paths**
+
+Main volume, EQ master, and extended volume are separate. kpi, mp3, Winamp-family plugins, and CEmu each have their own level step. Tempo and pitch slider positions are kept too (200 means 100%).
+
+**Where MIDI goes**
+
+Playlist SMF uses Rendering → **MIDI play**: prefer KPI, prefer VST, or prefer a VST Host preset. GS and XG each have their own VST or `.sf2` field. An empty SoundFont path looks for an SGM-style `.sf2` next to the plugin. A `.sf2` typed into the field is used as-is.
+
+Only when LA is sent to the Windows MIDI mapper or a MIDI-out port do you choose **SC module** (bank MSB 127 / LSB 0) or **real MT-32** (program changes only, no bank select). The player cannot tell which box is actually plugged in. VST instruments such as SOUND Canvas VA always use bank 127, regardless of that choice.
+
+The piano roll and MIDI monitor can remember two MIDI In ports by name. MIDI Out is none, the MIDI mapper, or a named device.
+
+**CEmu**
+
+An empty data folder means `data` next to the executable. **G.I.M.I.C** stays on the software path unless Rendering is set to the real unit, in which case supported chips go to the hardware. CEmu has its own volume step. When `arcdata.zip` (or `.7z`) sits next to the executable, the Cemu supported-list window shows the titles.
+
+**More on screen capture**
+
+Besides primary, all monitors, and window composition, you can pick **one monitor**. Whether the mouse cursor, system audio, microphone, FPS, output size, and the media-player window are included is remembered. Effects are a chain of up to eight slots, each with its own strength. Up to 16 named wirings can be stored, including which preset is selected. Live-stream details (YouTube tokens, RTMP URL and key) come back the next time you open the window.
+
+**How updates ask**
+
+Startup update check can ask every time, apply a newer build on its own, or stay quiet. The periodic check will not update by itself even when auto-update is on, so playback is not interrupted. If the new exe could not replace the running one, the next launch offers a manual unpack into Downloads. The site download counter is not incremented again if it was already counted within the last day.
+
+**Soft3D picture**
+
+Maze and aerial-race window placement, difficulty, opponents, theme, item mask, and zoom are kept. The maze also keeps walk bob, field of view (55° / 70° / 90°, combined with the wheel), basement count, and autosaved progress. Mesh density runs from light through dense to fine. Graphics quality is 1–10, either left to the GPU or pinned by you. PCM sound effects can be turned off.
+
+**Voice-changer knobs**
+
+Besides the gender and age presets, brightness, breath, quality (low latency / high), and style (plain / robot / radio) are kept. **Apply to mic** feeds the same settings into the media-player and screen-capture microphone mix.
 
 ### Operation Guides
 Besides the media player **?**, GDI operation guides are available from EQ, playlist, video, rendering, capture, analyzer, piano roll, main window, and more—also via each window’s context-menu **Operation guide** item.
@@ -774,7 +892,10 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 - Taskbar jump list (recent tracks, replay/stop/prev/next, EQ, jacket, render, folder, and more)
 - Taskbar thumbnail toolbar (replay / pause / stop / next, etc.)
 - Context-menu animation & font, acrylic quick toggle, per-window operation guides
-- Startup and periodic update checks
+- Startup and periodic update checks (ask / auto / don’t ask; the periodic check will not update during playback)
+- Playlist end behavior (stop / repeat list / next list / cycle all), media-player random, regex find
+- Menu look theme (default Cute)
+- Falcom screen and media player remember sub-window placement separately
 - Warning when the app is muted in the Windows volume mixer
 - Media-player extras such as minimize sync and tooltips
 - Related windows follow when the main window is moved (per-window follow lock)
@@ -784,6 +905,7 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 - Extended volume (separate from main volume / EQ master)
 - Soft3D maze (bonus; bottom-bar button; basements and track-linked items)
 - Soft3D aerial race (bonus; bottom-bar **Race**; light-band course, AI, themed terrain)
+- Bonus tactics (bottom-bar **Extras** or Tools; turn-based, 100 stages; create, train, shop, craft)
 - VST host (bottom-bar **VST**; part routing and keyboard play) and .mid playback (Prefer KPI / Prefer VST / VST Host preset; GS/XG via VST or SoundFont)
 - MIDI monitor (SMF 32 parts / GS·XG; FM side is OPNA; simple 3D)
 - WRD screen (PC-98 MIMPI `.wrd`), SASAMI Composer (text / MIDI·FM score / piano roll), CD player (play / rip / lookup / burn)
@@ -808,6 +930,16 @@ An aerial race opened from the media player’s bottom-bar **Race** button. You 
 - **Course:** **Generate** runs a demo lap (overview recon); **Start** begins the race after a countdown. On the band you regenerate thrust; the inner green strip restores HP. Off-band is useful for shortcuts, but empty thrust snaps you back
 - **Settings:** AI (super easy–intense), opponent count, length, laps, theme (forest / ruins / oil factory / night city / underwater / grassland / mesa / clouds, etc.)
 - **Track links:** Item orbs also change the playing track’s tempo or pitch. After the finish, a podium shows 1st–3rd
+
+## Extra: Tactics
+A DirectX 11 turn-based tactics game opened from the media player’s bottom-bar **Extras**, or from Tools → Extras. Same “bonus, not core playback” slot as the maze and the race: a fantasy campaign of 100 stages.
+
+- **Base:** Create characters, form a party, and sortie. Gender, lineage (warrior / magic), class, build, hair, outfit, hat, cape, and avatar are all choices. Classes start at Soldier, Fighter, Archer, Thief, Mage, and Cleric, and grow into Paladin, Rune Knight, Berserker, Sniper, Assassin, Wizard, Bishop, Sky Knight, Hero, Archmage, Saint, Phantom, Dragon Lord, Gladiator, Shadow, and others. A codex lists skills and growth
+- **Battle:** Move, attack, skill, item, wait, shove, doors, and climb ramps. The forecast shows damage, hit, crit, and counter. Facing (front / side / back), terrain, and weather (rain / snow / ash) all apply. Undo steps back one action. C switches stacked paths; a ramp climbs to the upper path
+- **Growth and shops:** Experience levels units and teaches skills. There is class evolution and a job trial. Gold buys and sells weapons, armor, accessories, and beads; materials craft items. Chests, doors, levers, fences, and reinforcements show up on maps
+- **Maps:** Plains, canyon, forest, snow, desert, volcano, swamp, ruins, seabed, falls, orbit, station, citadel, and lantern. Enemies include slimes, skeletons, bats, liches, golems, wyverns, dark knights, and dragons
+- **Controls:** Left click confirms, right click goes back. Left-drag looks around, right-drag rotates, middle-drag pans, the wheel zooms, and a wheel click changes layer. Arrows / WASD move the cursor, Enter / Space / Z confirm, Esc / X go back, Q / E rotate, Tab cycles units, R recenters the view, Shift fast-forwards, F1 / H opens this help. On a pad: left stick / d-pad, A confirm, B back, LB / RB rotate, right stick looks
+- **Saves and sound:** Besides named slots there is a suspend save and an autosave. Sound effects are short FM / SSG tones. BGM lives in `tacticsbgm` next to the executable: `tactics.ogg` at the base, a per-terrain `tacticsgame*.ogg` in battle (or `tacticsgame.ogg` if that file is missing), plus shop, create, victory, and danger tracks. These files are not added to the playlist. Picture quality runs from light to the top end, and battle animation can be full or short
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
