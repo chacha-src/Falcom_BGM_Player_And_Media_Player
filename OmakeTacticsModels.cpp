@@ -1565,6 +1565,44 @@ void ActorUpdate(Actor& a, float dt)
 	a.flyLean += (goal - a.flyLean) * k;
 	if (a.flyLean < 0.001f) a.flyLean = 0.f;
 	else if (a.flyLean > 0.999f) a.flyLean = 1.f;
+	// 浮いている人の脚。移動中はばた足、待機は重さで垂れてぶらぶら。角度は骨の X（前後）まわり、負で後ろ。
+	// 目標へ減衰の弱いばねで寄せるので、動き出しや止まりで脚が遅れて振れ、少し揺れ返してから落ち着く。
+	if (a.proc != 3 || a.hover < 0.05f) { a.legOk = 0; return; }
+	const float st = Clampf(dt, 0.f, 1.f / 15.f);
+	a.legT += st;
+	const float mv = a.flyLean;
+	float tg[7];
+	for (int s = 0; s < 2; s++) {
+		const float ph = a.legT * 6.2831853f * 1.6f + s * 3.14159265f;
+		const float sw = a.legT * 6.2831853f * 0.37f + s * 1.9f + a.idleSeed * 6.f;
+		// 腰に対して太ももを前後に振ると、腰に付いた裾や後ろの裾から太ももと脛が抜ける。後ろへ流すのは腰の前傾で、ばた足は膝の曲げ伸ばしにする。
+		const float hipM = 0.03f + 0.04f * sinf(ph);
+		const float kneeM = -0.18f - 0.14f * (0.5f + 0.5f * sinf(ph - 1.2f));
+		// 垂れた脚は重さで脛がほぼ真下を向く（膝の曲げ ≒ 股の前への曲げ）。脛が後ろへ振れないので長い裾から抜けない。
+		// 股を前へ大きく曲げると、脚に付く前の裾と腰に付く後ろの裾が割れて、脇から脛が見える。
+		const float hipI = (s ? 0.07f : 0.03f) + 0.025f * sinf(sw);
+		const float kneeI = -hipI - 0.03f - 0.025f * sinf(sw + 0.8f);
+		tg[s * 3 + 0] = hipI + (hipM - hipI) * mv;
+		tg[s * 3 + 1] = kneeI + (kneeM - kneeI) * mv;
+		// 足首は負でつま先が下。垂れた足は力が抜けて下を向き、ばた足では脛の線に沿って伸びる。
+		tg[s * 3 + 2] = -0.50f - 0.25f * mv - 0.10f * sinf(ph + 0.6f) * mv - 0.05f * sinf(sw) * (1.f - mv);
+	}
+	tg[6] = -0.30f * mv;
+	if (!a.legOk) {
+		for (int i = 0; i < 7; i++) { a.legQ[i] = tg[i]; a.legV[i] = 0.f; }
+		a.legOk = 1;
+		return;
+	}
+	// 1/120 秒刻み。固有 1.5Hz・減衰比 0.35。腰の前傾は重いので遅く。
+	for (float left = st; left > 1e-5f; left -= 1.f / 120.f) {
+		const float h = left < 1.f / 120.f ? left : 1.f / 120.f;
+		for (int i = 0; i < 7; i++) {
+			const float w0 = i == 6 ? 6.f : 9.4f;
+			const float acc = (tg[i] - a.legQ[i]) * w0 * w0 - a.legV[i] * 2.f * 0.35f * w0;
+			a.legV[i] += acc * h;
+			a.legQ[i] += a.legV[i] * h;
+		}
+	}
 }
 
 static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
@@ -1725,33 +1763,38 @@ static int HumanJoint(const Renderer& r, const Model& m, const char* a, const ch
 	return j;
 }
 
+// 浮いている人の脚は歩きのクリップを捨て、休みの形から ActorUpdate のばねの角度で置き直す。
+// 歩きの脚を残したまま後ろへ倒すと、太ももが水平まで上がって長い裾を突き破る。
 static void ApplyFlyTrail(Actor& a, const Renderer& r)
 {
-	if (a.flyLean < 0.02f || a.proc != 3 || !a.poseValid) return;
-	if (a.clip == CL_1H_CHOP || a.clip == CL_1H_SLICE || a.clip == CL_1H_STAB || a.clip == CL_2H_CHOP || a.clip == CL_2H_SPIN
-		|| a.clip == CL_1H_SHOOT || a.clip == CL_2H_SHOOT || a.clip == CL_CAST_SHOOT || a.clip == CL_CAST_RAISE || a.clip == CL_CAST_LONG
-		|| a.clip == CL_THROW || a.clip == CL_PUNCH || a.clip == CL_HIT_A || a.clip == CL_HIT_B || a.clip == CL_DEATH
-		|| a.clip == CL_BLOCK || a.clip == CL_DODGE) return;
+	if (!a.legOk || a.proc != 3 || !a.poseValid || a.poseHold) return;
+	if (a.clip == CL_DEATH || a.clip == CL_BLOCK || a.clip == CL_DODGE) return;
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	const Model& m = r.models[a.model];
 	if (strncmp(m.name, "Hum", 3) != 0) return;
-	int ul = HumanJoint(r, m, "UpperLeg.L", "upperleg.l");
-	int ur = HumanJoint(r, m, "UpperLeg.R", "upperleg.r");
-	if (ul < 0 || ur < 0) return;
-	float w = a.flyLean;
-	SpinJointBack(m, a.pose, ul, -0.95f * w);
-	SpinJointBack(m, a.pose, ur, -0.95f * w);
+	int jt[2][3] = {
+		{ HumanJoint(r, m, "UpperLeg.L", "upperleg.l"), HumanJoint(r, m, "LowerLeg.L", "lowerleg.l"), HumanJoint(r, m, "Foot.L", "foot.l") },
+		{ HumanJoint(r, m, "UpperLeg.R", "upperleg.r"), HumanJoint(r, m, "LowerLeg.R", "lowerleg.r"), HumanJoint(r, m, "Foot.R", "foot.r") } };
+	if (jt[0][0] < 0 || jt[1][0] < 0) return;
+	// 脚の下の骨（つま先など）もクリップの歩きを持つので休みへ戻す。
+	for (int j = 0; j < m.nJ && j < a.pose.nJ; j++) {
+		BOOL leg = FALSE;
+		for (int p = j; p >= 0 && !leg; p = m.parent[p]) leg = p == jt[0][0] || p == jt[1][0];
+		if (!leg) continue;
+		V3 s = m.restS[j];
+		if (a.mods.any) { s.x *= a.mods.scale[j].x; s.y *= a.mods.scale[j].y; s.z *= a.mods.scale[j].z; }
+		a.pose.local[j] = MTRS(m.restT[j], m.restR[j], s);
+	}
 	r.FinishPose(m, a.pose, &a.mods);
-	int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
-	int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
-	SpinJointBack(m, a.pose, ll, -0.40f * w);
-	SpinJointBack(m, a.pose, lr, -0.40f * w);
-	r.FinishPose(m, a.pose, &a.mods);
-	int fl = HumanJoint(r, m, "Foot.L", "foot.l");
-	int fr = HumanJoint(r, m, "Foot.R", "foot.r");
-	SpinJointBack(m, a.pose, fl, 0.50f * w);
-	SpinJointBack(m, a.pose, fr, 0.50f * w);
-	r.FinishPose(m, a.pose, &a.mods);
+	int hips = HumanJoint(r, m, "Hips", "hips");
+	if (hips >= 0 && fabsf(a.legQ[6]) > 1e-4f) {
+		SpinJointBack(m, a.pose, hips, a.legQ[6]);
+		r.FinishPose(m, a.pose, &a.mods);
+	}
+	for (int k = 0; k < 3; k++) {
+		for (int s = 0; s < 2; s++) SpinJointBack(m, a.pose, jt[s][k], a.legQ[s * 3 + k]);
+		r.FinishPose(m, a.pose, &a.mods);
+	}
 }
 
 void ActorPose(Actor& a, const Library& lib, const Renderer& r)
@@ -2264,6 +2307,8 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			d.blink = HumanBlink(time, a.blinkSeed);
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
+			d.noTess = 1;
+			d.fly = a.legOk ? 1.f : 0.f;
 		}
 		float hs = a.htScale > 0.05f ? a.htScale : 1.f;
 		d.bodyScale = hs;
@@ -2279,15 +2324,23 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			int ix = humM->name[4] - '0';
 			if (ix >= 0 && ix < MODEL_N) d.skinTone = ix + 1;
 		}
+		// 区間行列を持たない素体も、名前で肌色を決めて同じ服を着せる。
+		if (humM && !digitBody) {
+			if (!strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing")) d.skinTone = 4;
+			else if (!strcmp(humM->name, "HumMedieval")) d.skinTone = 5;
+			else if (!strcmp(humM->name, "HumWitch")) d.skinTone = 6;
+		}
 		d.hideMeshHair = (hum && a.hair > 0) ? 1 : 0;
 		BOOL ava = FALSE;
-		// 白人の素体は裸体。性別を切り替えるとアバターは 0 に戻るので、未選択のときは既定の服を着せる。
+		// 未選択は元の粗い体に戻さず、同じ滑らかな体へ既定の服を着せる。1〜6 系の元メッシュは脚が潰れている。
 		// 男性は 9 番（tucked shirt・ズボン・靴）、女性は 12 番（スーツ・ブーツ）。肩当てとマントは残す。
 		int avaId = a.avatar;
 		BOOL bareBase = FALSE;
 		if (humM && avaId <= 0) {
-			if (strcmp(humM->name, "HumM0") == 0) { avaId = 9; bareBase = TRUE; }
-			else if (strcmp(humM->name, "HumF0") == 0) { avaId = 12; bareBase = TRUE; }
+			const BOOL mal = strncmp(humM->name, "HumM", 4) == 0 || !strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing");
+			const BOOL fem = strncmp(humM->name, "HumF", 4) == 0 || !strcmp(humM->name, "HumMedieval") || !strcmp(humM->name, "HumWitch");
+			if (mal) { avaId = 9; bareBase = TRUE; }
+			else if (fem) { avaId = 12; bareBase = TRUE; }
 		}
 		if (hum && avaId > 0) {
 			d.clothTint = a.avaTint;
@@ -2416,6 +2469,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			dh0.hue = 0;
 			dh0.outline = 0;
 			dh0.twoSided = 1;
+			dh0.noTess = 1;
 			dh0.sway = 0.f;
 			dh0.emissive = 0.f;
 			{

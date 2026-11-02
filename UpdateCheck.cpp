@@ -45,6 +45,10 @@ static const TCHAR* kTacOggNames[] = {
 	_T("tacticsgameruins.ogg"),
 	_T("tacticsgameseabed.ogg"),
 	_T("tacticsgamewaterfall.ogg"),
+	_T("tacticsgameorbit.ogg"),
+	_T("tacticsgamestation.ogg"),
+	_T("tacticsgamecitadel.ogg"),
+	_T("tacticsgamelantern.ogg"),
 	_T("tacticsgamedanger.ogg"),
 	_T("tacticsgameclear.ogg"),
 };

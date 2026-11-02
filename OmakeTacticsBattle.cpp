@@ -818,7 +818,7 @@ void Game::StartBattle(int stage)
 		swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), stage);
 		swprintf_s(sub, L"%s  —  %s", TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_GOAL));
 	}
-	AddBanner(t, sub, titleCol, 0, 2.4f, MSG_DEPTH);
+	AddBanner(t, sub, titleCol, 0, title ? 6.2f : 2.4f, MSG_DEPTH);
 	TacSfx(TS_START);
 }
 

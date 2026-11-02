@@ -135,6 +135,12 @@ def main():
                 hx = dict(yaw=np.array(src["yaw"], np.float64), mid=np.array(src["mid"], np.float64),
                           sc=float(src["sc"]), off=np.array(src["off"], np.float64) + delta)
             Ms = M.model_segments(gbs[1 if female else 0], qj, hx, tip)
+            # 1/2 系（HumF1..6 / HumM1..6）は 0 系の人体を骨へ載せ直す。パックの区間のままだと肋骨が潰れ脇が空く。
+            ref = "zhum_HumF0.glb" if female else "zhum_HumM0.glb"
+            if fn.startswith("zhum_Hum") and fn != ref and ref in donors:
+                Ms, _ = M.fit_to_ref(gbs[1 if female else 0], qj, donors[ref], Ms)
+            if fn in ("zhum_HumF0.glb", "zhum_HumM0.glb"):
+                donors[fn] = Ms
             fo.write(pm.pack_name(pm.disp_name(fn), 32))
             fo.write(struct.pack("<I", 1 if female else 0))
             fo.write(Ms[:, :3, :].astype("<f4").tobytes())

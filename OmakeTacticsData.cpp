@@ -420,6 +420,10 @@ static const ThemeParam kTheme[TH_COUNT] = {
 	{ 3.0f, .050f, 2, T_PLAIN, .70f, 1, 2, 3, 1, 0 },
 	{ 3.4f, .048f, 2, T_SAND, .78f, 0, 1, 4, 1, 0 },
 	{ 5.5f, .052f, 3, T_PLAIN, .66f, 0, 2, 3, 1, 0 },
+	{ 4.2f, .042f, 2, T_RUINS, .9f, 1, 2, 6, 0, 0 },
+	{ 2.4f, .07f, 2, T_RUINS, .88f, 0, 1, 2, 1, 0 },
+	{ 4.8f, .05f, 3, T_RUINS, .72f, 0, 2, 4, 1, 0 },
+	{ 3.2f, .046f, 2, T_PLAIN, .8f, 0, 1, 2, 1, 0 },
 };
 
 static bool FootPassable(int t) { return TerrainInfo(t).costFoot < 99; }
@@ -645,6 +649,57 @@ static void EnsureClimbPath(Map& m, int sx, int sz, int tx, int tz)
 		if ((int)c.h > (int)f.h + 1) c.h = (BYTE)(f.h + 1);
 		if ((int)c.h + 1 < (int)f.h) c.h = (BYTE)max(1, (int)f.h - 1);
 		x = px; z = pz;
+	}
+}
+
+static int NearPartyOrGroup(const Map& m, int x, int z, int extra)
+{
+	for (int i = 0; i < m.nP && i < MAX_PARTY; i++)
+		if (max(abs(x - m.pStartX[i]), abs(z - m.pStartZ[i])) <= extra) return 1;
+	for (int g = 0; g < m.nGrp; g++) {
+		int rad = m.grp[g].boss ? extra + 2 : extra;
+		for (int k = 0; k < m.grp[g].n && k < GRP_CAP; k++)
+			if (max(abs(x - (int)m.grp[g].x[k]), abs(z - (int)m.grp[g].z[k])) <= rad) return 1;
+	}
+	return 0;
+}
+
+static void FlattenStand(Cell& c, int h)
+{
+	if (c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM
+		|| c.t == T_MOUNTAIN || c.t == T_ROCK || c.t == T_DOOR
+		|| TerrainInfo(c.t).costFoot >= 99)
+		c.t = T_PLAIN;
+	c.h = (BYTE)Clampi(h, 1, MAXH);
+	c.prop = PK_NONE;
+	c.nLay = 0;
+	if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+}
+
+// ボスは足が広い。後から岩や水を敷いても、立っているマスと周囲は平らな地面のままにする。
+static void OpenStandPads(Map& m)
+{
+	for (int g = 0; g < m.nGrp; g++) {
+		MapGroup& grp = m.grp[g];
+		if (grp.n <= 0) continue;
+		if (grp.boss) {
+			int cx = grp.x[0], cz = grp.z[0];
+			int h = 2;
+			if (Map::In(cx, cz) && m.c[cz][cx].h > 0 && m.c[cz][cx].t != T_VOID && m.c[cz][cx].t != T_CHASM)
+				h = (int)m.c[cz][cx].h;
+			for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++) {
+				int x = cx + dx, z = cz + dz;
+				if (!Map::In(x, z)) continue;
+				FlattenStand(m.c[z][x], h);
+			}
+		}
+		for (int k = 0; k < grp.n && k < GRP_CAP; k++) {
+			int x = grp.x[k], z = grp.z[k];
+			if (!Map::In(x, z)) continue;
+			if (TerrainInfo(m.c[z][x].t).costFoot >= 99 || m.c[z][x].t == T_VOID)
+				FlattenStand(m.c[z][x], max(1, (int)m.c[z][x].h > 0 ? (int)m.c[z][x].h : 2));
+			m.c[z][x].prop = PK_NONE;
+		}
 	}
 }
 
@@ -1061,8 +1116,25 @@ static void CutLooseIslands(Map& m)
 		if (n > bestN) { bestN = n; bestId = id; }
 	}
 	if (bestId <= 0) return;
+	int keepId[MAX_GROUPS + 2], keepN = 0;
+	auto addKeep = [&](int id) {
+		if (id <= 0) return;
+		for (int i = 0; i < keepN; i++) if (keepId[i] == id) return;
+		if (keepN < MAX_GROUPS + 2) keepId[keepN++] = id;
+	};
+	int home = 0;
+	if (m.nP > 0 && Map::In(m.pStartX[0], m.pStartZ[0])) home = comp[m.pStartZ[0]][m.pStartX[0]];
+	addKeep(home > 0 ? home : bestId);
+	for (int g = 0; g < m.nGrp; g++) for (int k = 0; k < m.grp[g].n && k < GRP_CAP; k++) {
+		int x = m.grp[g].x[k], z = m.grp[g].z[k];
+		if (Map::In(x, z)) addKeep(comp[z][x]);
+	}
 	static BYTE seen[MAPN][MAPN];
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) seen[z][x] = comp[z][x] == bestId ? 1 : 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int on = 0;
+		for (int i = 0; i < keepN && !on; i++) if (comp[z][x] == keepId[i]) on = 1;
+		seen[z][x] = (BYTE)on;
+	}
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (seen[z][x]) continue;
 		Cell& c = m.c[z][x];
@@ -1400,6 +1472,7 @@ static void StampDeckPreset(Map& m, Rng& r, int ground, int preset)
 
 static void StampLandmarks(Map& m, Rng& r, int th, BYTE taken[MAPN][MAPN])
 {
+	if (th >= TH_SEABED) return;
 	struct Fp { int w, d; };
 	static const Fp kFp[6] = { { 2, 2 }, { 3, 3 }, { 1, 3 }, { 3, 1 }, { 2, 3 }, { 2, 1 } };
 	int want = 5 + (m.stage % 4);
@@ -2016,10 +2089,76 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		}
 	}
 
+	if (th == TH_ORBIT || th == TH_STATION || th == TH_CITADEL || th == TH_LANTERN) {
+		auto disc = [&](int cx, int cz, int rad, int t, int dh) {
+			for (int zz = cz - rad; zz <= cz + rad; zz++) for (int xx = cx - rad; xx <= cx + rad; xx++) {
+				if (!Map::In(xx, zz)) continue;
+				int dx = xx - cx, dz = zz - cz;
+				if (dx * dx + dz * dz > rad * rad) continue;
+				Cell& c = m.c[zz][xx];
+				if (c.t == T_VOID || c.t == T_BRIDGE) continue;
+				if ((t == T_ROCK || t == T_WATER || t == T_CHASM) && NearPartyOrGroup(m, xx, zz, 1)) continue;
+				c.t = (BYTE)t;
+				c.h = (BYTE)Clampi((int)c.h + dh, 1, MAXH - 2);
+			}
+		};
+		if (th == TH_ORBIT) {
+			disc(18, 20, 5, T_HILL, 2);
+			disc(46, 40, 3, T_ROCK, 1);
+			disc(30, 48, 4, T_RUINS, 0);
+			for (int z = 2; z < MAPN - 2; z++) for (int x = 2; x < MAPN - 2; x++) {
+				Cell& c = m.c[z][x];
+				if (c.t == T_PLAIN && (c.var % 9) == 0 && !NearPartyOrGroup(m, x, z, 1)) c.t = T_ROCK;
+				else if (c.t == T_PLAIN && (c.var % 5) == 0) c.t = T_RUINS;
+			}
+		} else if (th == TH_STATION) {
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				Cell& c = m.c[z][x];
+				if (c.t == T_PLAIN || c.t == T_HILL) c.t = T_RUINS;
+				if ((x % 8) == 0 || (z % 8) == 0) {
+					if (c.t != T_CHASM && c.t != T_WATER && c.t != T_VOID) c.t = T_ROAD;
+				}
+			}
+			disc(MAPN / 2, MAPN / 2, 6, T_RUINS, 1);
+			disc(16, 16, 3, T_HILL, 2);
+			disc(48, 18, 3, T_HILL, 2);
+		} else if (th == TH_CITADEL) {
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				Cell& c = m.c[z][x];
+				if (c.t == T_PLAIN) c.t = T_RUINS;
+				int dx = x - MAPN / 2, dz = z - MAPN / 2;
+				int ad = dx < 0 ? -dx : dx;
+				int az = dz < 0 ? -dz : dz;
+				if ((ad == 10 || az == 10) && ad < 16 && az < 16 && c.t != T_BRIDGE && !NearPartyOrGroup(m, x, z, 1)) c.t = T_ROCK;
+				if ((ad > 14 && ad < 17) || (az > 14 && az < 17)) {
+					if (c.t != T_BRIDGE && (x % 6) != 0 && (z % 6) != 0 && !NearPartyOrGroup(m, x, z, 1)) c.t = T_WATER;
+				}
+			}
+			disc(MAPN / 2, MAPN / 2, 4, T_RUINS, 2);
+		} else {
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				int dx = x - MAPN / 2, dz = z - MAPN / 2;
+				Cell& c = m.c[z][x];
+				if (dx * dx + dz * dz > 16 * 16 && c.t != T_BRIDGE && c.t != T_VOID && !NearPartyOrGroup(m, x, z, 1)) c.t = T_WATER;
+				else if (c.t == T_PLAIN) c.t = T_SNOW;
+			}
+			disc(20, 22, 3, T_HILL, 1);
+			disc(42, 36, 3, T_RUINS, 1);
+			disc(28, 44, 2, T_RUINS, 2);
+		}
+		(void)r;
+	}
 	// 8) 小物
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		Cell& c = m.c[z][x];
 		c.prop = PK_NONE;
+		if (th >= TH_SEABED) {
+			if (NearPartyOrGroup(m, x, z, 1)) continue;
+			if (c.t == T_ROCK || c.t == T_MOUNTAIN) c.prop = PK_KIT;
+			else if (c.t != T_VOID && c.t != T_WATER && c.t != T_LAVA && c.t != T_BRIDGE && c.t != T_CHASM && c.t != T_DOOR && (c.var % 17) == 0)
+				c.prop = PK_KIT;
+			continue;
+		}
 		switch (c.t) {
 		case T_FOREST:
 			if (th == TH_SEABED) c.prop = (c.var & 1) ? PK_LILY : PK_ROCK;
@@ -2030,7 +2169,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			break;
 		case T_MOUNTAIN: c.prop = PK_MOUNT; break;
 		case T_ROCK:
-			if (th == TH_RUINS) c.prop = PK_PILLAR;
+			if (th == TH_RUINS || th == TH_CITADEL) c.prop = PK_PILLAR;
+			else if (th == TH_ORBIT || th == TH_STATION) c.prop = (c.var & 1) ? PK_ROCK : PK_PILLAR;
 			else if (th == TH_SWAMP || th == TH_VOLCANO) c.prop = (c.var & 1) ? PK_GRAVE : PK_ROCK;
 			else c.prop = PK_ROCK;
 			break;
@@ -2038,7 +2178,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			if ((th == TH_SWAMP || th == TH_PLAINS || th == TH_FOREST || th == TH_FALLS || th == TH_SEABED) && (c.var % 5) == 0) c.prop = PK_LILY;
 			break;
 		case T_RUINS:
-			if ((c.var % 23) == 0) c.prop = PK_LANTERN;
+			if (th == TH_ORBIT || th == TH_STATION || th == TH_LANTERN || (c.var % 23) == 0) c.prop = PK_LANTERN;
+			else if (th == TH_CITADEL && (c.var % 11) == 0) c.prop = PK_PILLAR;
 			break;
 		default: break;
 		}
@@ -2049,17 +2190,17 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		int tx = Clampi(pax + 2, 1, MAPN - 2), tz = Clampi(paz - 2, 1, MAPN - 2);
 		bool used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == tx && m.pStartZ[i] == tz) used = true;
-		if (!used && m.c[tz][tx].t != T_VOID) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = PK_TENT; }
+		if (!used && m.c[tz][tx].t != T_VOID) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_TENT); }
 		int fx = Clampi(pax - 2, 1, MAPN - 2), fz = Clampi(paz + 2, 1, MAPN - 2);
 		used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == fx && m.pStartZ[i] == fz) used = true;
-		if (!used && m.c[fz][fx].t != T_VOID) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = PK_FLAG; }
+		if (!used && m.c[fz][fx].t != T_VOID) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_FLAG); }
 		for (int k = 0; k < 3 && m.nGrp > 0; k++) {
 			const MapGroup& g0 = m.grp[0];
 			int cx = Clampi(g0.ax + r.Range(-4, 4), 1, MAPN - 2), cz = Clampi(g0.az + r.Range(-4, 4), 1, MAPN - 2);
 			if (taken[cz][cx] || !FootPassable(m.c[cz][cx].t)) continue;
 			m.c[cz][cx].t = T_ROCK;
-			m.c[cz][cx].prop = (BYTE)(th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL);
+			m.c[cz][cx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : (th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL));
 			taken[cz][cx] = 1;
 		}
 	}
@@ -2127,7 +2268,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			Cell& c = m.c[s / MAPN][s % MAPN];
 			c.gimm = GM_CHEST;
 			c.gparam = (BYTE)r.Range(0, 2);
-			c.prop = PK_CRATE;
+			c.prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_CRATE);
 		}
 		int nDoor = Clampi(span / 14, 0, 4);
 		for (int i = 0; i < nDoor; i++) {
@@ -2160,7 +2301,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			m.c[z][x].gparam = (BYTE)link;
 			m.c[lz][lx].gimm = GM_LEVER;
 			m.c[lz][lx].gparam = (BYTE)link;
-			m.c[lz][lx].prop = PK_LANTERN;
+			m.c[lz][lx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_LANTERN);
 			link++;
 		}
 		int nFence = Clampi(span / 16, 0, 3);
@@ -2213,6 +2354,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			StampCaves(m, r, tp, pax, paz, roll <= 2);
 	}
 	ReapplyShape(m);
+	OpenStandPads(m);
 	for (int z = 1; z < MAPN - 1; z++) for (int x = 1; x < MAPN - 1; x++) {
 		Cell& c = m.c[z][x];
 		if (c.t != T_WATER || c.gimm) continue;
@@ -2226,6 +2368,11 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		if (!shore && ((x / 3 + z / 3) & 1) == 0) c.gparam = 3;
 	}
 	CutLooseIslands(m);
+	OpenStandPads(m);
+	if (m.nP > 0) {
+		for (int g = 0; g < m.nGrp; g++) if (m.grp[g].n > 0)
+			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].x[0], m.grp[g].z[0]);
+	}
 }
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
@@ -6400,7 +6547,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (closeBy) continue;
 			c.gimm = GM_CHEST;
 			c.gparam = (BYTE)((x + z) % 3);
-			c.prop = PK_CRATE;
+			c.prop = (BYTE)(b.map.theme >= TH_SEABED ? PK_KIT : PK_CRATE);
 			added++;
 		}
 	}
@@ -6421,7 +6568,18 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			u.hpShow = (float)u.hp;
 			u.grp = g;
 			u.alert = 0;
-			if (!PlaceFoot(b, n, grp.x[k], grp.z[k])) continue;
+			if (!PlaceFoot(b, n, grp.x[k], grp.z[k])) {
+				if (!boss) continue;
+				int s = max(1, UnitSpan(u));
+				int gx = Clampi((int)grp.x[k], 1, MAPN - s - 1);
+				int gz = Clampi((int)grp.z[k], 1, MAPN - s - 1);
+				int h = 2;
+				if (Map::In(gx, gz) && b.map.c[gz][gx].h > 0) h = (int)b.map.c[gz][gx].h;
+				for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+					if (Map::In(gx + dx, gz + dz)) StampWalk(b.map.c[gz + dz][gx + dx], h);
+				u.x = gx;
+				u.z = gz;
+			}
 			if (!boss) {
 				const Cell& cell = b.map.At(u.x, u.z);
 				int nl = CellLayN(cell);
@@ -6437,6 +6595,44 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.nUnits = n;
 	b.RebuildOcc();
+	if (b.sweep != TAC_VAR_SWEEP) {
+		int hasBoss = 0, farUi = -1, farD = -1;
+		int px = b.map.nP > 0 ? b.map.pStartX[0] : 0;
+		int pz = b.map.nP > 0 ? b.map.pStartZ[0] : 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& eu = b.u[i];
+			if (!eu.alive || eu.team != TEAM_ENEMY) continue;
+			if (eu.boss) hasBoss = 1;
+			int d = abs(eu.x - px) + abs(eu.z - pz);
+			if (d > farD) { farD = d; farUi = i; }
+		}
+		if (!hasBoss && farUi >= 0) {
+			Unit& eu = b.u[farUi];
+			int x = eu.x, z = eu.z, grp = eu.grp, alert = eu.alert, ct = eu.ct;
+			float face = eu.face;
+			int lv = max(1, eu.ch.lv + 3);
+			MakeEnemy(eu, BossMonster(b.stage, r), lv, 1, r);
+			eu.face = face;
+			eu.ct = ct;
+			eu.grp = grp;
+			eu.alert = alert;
+			eu.hpShow = (float)eu.hp;
+			eu.x = x;
+			eu.z = z;
+			b.RebuildOcc();
+			if (!FootFits(b, farUi, eu.x, eu.z)) {
+				int s = max(1, UnitSpan(eu));
+				int gx = Clampi(x, 1, MAPN - s - 1);
+				int gz = Clampi(z, 1, MAPN - s - 1);
+				int h = 2;
+				if (Map::In(gx, gz) && b.map.c[gz][gx].h > 0) h = (int)b.map.c[gz][gx].h;
+				for (int dz = -1; dz <= s; dz++) for (int dx = -1; dx <= s; dx++)
+					if (Map::In(gx + dx, gz + dz)) StampWalk(b.map.c[gz + dz][gx + dx], h);
+				eu.x = gx;
+				eu.z = gz;
+			}
+		}
+	}
 	RescueStuckFeet(b);
 	if (b.sweep == TAC_VAR_SCAR) {
 		for (int i = 0; i < b.nUnits; i++) {

@@ -890,6 +890,101 @@ def build_costume(gb, parts):
             sc = np.where(fix, want / rad, 1.0)
             P[cm] = ax + (P[cm] - ax) * sc[:, None]
     T = np.concatenate(T)
+    # 重ね着。内の層（素体 → 下衣 → 上衣 → 襟・リボン・エプロン）から順に、各部品を下の面より外へ出す。
+    # 押した量は部品の網の上でならして広げる（ふわっと着せてから縮めた形）。肌も下の布も突き抜けず、面は段にならない。
+    # 下の面までの符号付き距離は、近い 6 点の接平面までの距離の重み付き平均（頂点 1 点だと面が角張る）。
+    if os.environ.get("NO_LAYER") != "1":
+        from scipy.spatial import cKDTree
+        from scipy.sparse import coo_matrix, diags
+        rank = []
+        for (it, _), rt in zip(parts, role):
+            if re.search(r"collar|ribbon|apron|bowtie|necktie", it):
+                rank.append(3)
+            elif rt == "top":
+                rank.append(2)
+            else:
+                rank.append(1)
+        bn = gb.nrm / np.maximum(np.linalg.norm(gb.nrm, axis=1, keepdims=True), 1e-12)
+        btree = cKDTree(gb.pos)
+        for pi in sorted(range(len(parts)), key=lambda k: rank[k]):
+            a0, a1 = spans[pi]
+            if a1 - a0 < 4:
+                continue
+            tm = T[(T >= a0).all(1) & (T < a1).all(1)] - a0
+            nv = a1 - a0
+            # 下の面: 素体と、自分より内の層の部品
+            S = [gb.pos]; SN = [bn]; gap = [np.full(len(gb.pos), 0.004)]; SW = [gb.WB]
+            for qi in range(len(parts)):
+                if rank[qi] >= rank[pi] or qi == pi or role[qi] == "shoes" or role[pi] == "shoes":
+                    continue
+                b0, b1 = spans[qi]
+                tq = T[(T >= b0).all(1) & (T < b1).all(1)]
+                if len(tq) == 0:
+                    continue
+                q = P[b0:b1]
+                qn = vnormals(P, tq)[b0:b1]
+                # 布の法線は表裏が揃っていないことがある。素体から離れる向きへ揃える。
+                _, bi = btree.query(q)
+                flip = ((q - gb.pos[bi]) * qn).sum(1) < 0
+                qn[flip] *= -1
+                S.append(q); SN.append(qn); gap.append(np.full(len(q), 0.003)); SW.append(Wall[b0:b1])
+            S = np.concatenate(S); SN = np.concatenate(SN); gap = np.concatenate(gap); SW = np.concatenate(SW)
+            stree = cKDTree(S)
+            A = coo_matrix((np.ones(len(tm) * 6), (np.r_[tm[:, 0], tm[:, 1], tm[:, 2], tm[:, 1], tm[:, 2], tm[:, 0]],
+                                                  np.r_[tm[:, 1], tm[:, 2], tm[:, 0], tm[:, 0], tm[:, 1], tm[:, 2]])), shape=(nv, nv)).tocsr()
+            A.data[:] = 1.0
+            deg = np.asarray(A.sum(1)).ravel()
+            Avg = diags(1.0 / np.maximum(deg, 1)) @ A
+            P0 = P[a0:a1].copy()
+            D = np.zeros_like(P0)
+
+            def need_of(Q):
+                dist, nn = stree.query(Q, k=6, distance_upper_bound=0.04)
+                ok = np.isfinite(dist)
+                nn = np.where(ok, nn, 0)
+                w = np.where(ok, 1.0 / (dist + 0.002), 0.0)
+                ws = w.sum(1)
+                has = ws > 0
+                wn = w / np.maximum(ws, 1e-12)[:, None]
+                sd = (((Q[:, None, :] - S[nn]) * SN[nn]).sum(2) * wn).sum(1)
+                g = (gap[nn] * wn).sum(1)
+                n_ = (SN[nn] * wn[:, :, None]).sum(1)
+                n_ /= np.maximum(np.linalg.norm(n_, axis=1, keepdims=True), 1e-9)
+                need = np.where(has, g - sd, 0.0)
+                # 下の面から 4cm 以上奥（反対側の面）は当たりとみなさない
+                need[need > 0.04] = 0.0
+                return need, n_
+
+            for it_ in range(10):
+                need, n_ = need_of(P0 + D)
+                m = need > 0
+                if not m.any():
+                    break
+                D[m] += n_[m] * need[m, None]
+                for _s in range(3):
+                    Ds = Avg @ D
+                    D = np.where(deg[:, None] > 0, 0.5 * D + 0.5 * Ds, D)
+            need, n_ = need_of(P0 + D)
+            m = need > 0
+            D[m] += n_[m] * need[m, None]
+            P[a0:a1] = P0 + D
+            # 下の面に沿う所は、下の面（肌か内の布）のウェイトへ寄せる。重ねた層が別の骨の混ぜ方だと、
+            # 腕を下ろしたときに層が入れ替わって下の布が上へ出る。1cm 以内は全部、3cm で元のまま。
+            dist, nn = stree.query(P[a0:a1], k=4, distance_upper_bound=0.03)
+            ok = np.isfinite(dist)
+            nn = np.where(ok, nn, 0)
+            w = np.where(ok, 1.0 / (dist + 0.003), 0.0)
+            ws = w.sum(1)
+            has = ws > 0
+            wt = (SW[nn] * (w / np.maximum(ws, 1e-12)[:, None])[:, :, None]).sum(1)
+            d0 = np.where(ok[:, 0], dist[:, 0], 1.0)
+            t = np.clip((0.03 - d0) / 0.02, 0.0, 1.0)
+            t = t * t * (3 - 2 * t) * has
+            Wn = Wall[a0:a1] * (1 - t)[:, None] + wt * t[:, None]
+            Wall[a0:a1] = Wn / np.maximum(Wn.sum(1, keepdims=True), 1e-9)
+            if os.environ.get("LAYER_LOG"):
+                print("  layer", parts[pi][0], "rank", rank[pi], "moved>1mm", int((np.linalg.norm(D, axis=1) > 0.001).sum()), "/", nv,
+                      "max %.4f" % float(np.linalg.norm(D, axis=1).max()))
     out = dict(pos=P, col=np.concatenate(C), tri=T, W=Wall, nrm=vnormals(P, T))
     if gb.female:
         out["dmax"] = np.concatenate(DX); out["dmin"] = np.concatenate(DN)
@@ -1099,6 +1194,91 @@ def model_segments(gb, qj, head_xf, foot_tip_z):
         M["Foot." + side] = _seg_mat_framed(ank_mh, toe_mh, ank_mh + np.array([0.0, 1.0, 0.0]),
                                             ank + off_h, toe + off_h, ank + off_h + np.array([0.0, 1.0, 0.0]), g, g)
     return np.array([M[s] for s in SEGS])
+
+
+def fit_to_ref(gb, qj1, M0, Mp1):
+    """1/2 系の骨（左右非対称・肩幅が狭い・脚が長い）へ、0 系の人体をそのまま載せる。
+    M0: 0 系の区間行列 (nSeg,4,4)。Mp1: その体の今の行列（頭・手・指・足の向きだけ使う）。
+    胴はひとつのアフィン（相似に近い）。継ぎ目は親の像を子の根にして、区間の間で肉が割れない。"""
+    sk = load_skel(gb.v)
+    J = lambda n, part="head": to_render(sk[n][part][None], gb.ground)[0]
+    ix = {s: i for i, s in enumerate(SEGS)}
+    ap = lambda Mx, p: (Mx @ np.append(p, 1.0))[:3]
+    # 0 系の体が実際に曲がる点（MH の関節を 0 系の行列で写した点）
+    r = {}
+    r["UA.L"] = ap(M0[ix["UpperArm.L"]], J("upperarm01.L")); r["UA.R"] = ap(M0[ix["UpperArm.R"]], J("upperarm01.R"))
+    r["LA.L"] = ap(M0[ix["LowerArm.L"]], J("lowerarm01.L")); r["LA.R"] = ap(M0[ix["LowerArm.R"]], J("lowerarm01.R"))
+    r["HD.L"] = ap(M0[ix["Hand.L"]], J("wrist.L")); r["HD.R"] = ap(M0[ix["Hand.R"]], J("wrist.R"))
+    r["UL.L"] = ap(M0[ix["UpperLeg.L"]], J("upperleg01.L")); r["UL.R"] = ap(M0[ix["UpperLeg.R"]], J("upperleg01.R"))
+    r["LL.L"] = ap(M0[ix["LowerLeg.L"]], J("lowerleg01.L")); r["LL.R"] = ap(M0[ix["LowerLeg.R"]], J("lowerleg01.R"))
+    r["FT.L"] = ap(M0[ix["Foot.L"]], J("foot.L")); r["FT.R"] = ap(M0[ix["Foot.R"]], J("foot.R"))
+    r["NK"] = ap(M0[ix["Neck"]], J("neck01")); r["HE"] = ap(M0[ix["Head"]], J("head"))
+    t = {}
+    for k, n in (("UA", "UpperArm"), ("LA", "LowerArm"), ("HD", "Hand"), ("UL", "UpperLeg"), ("LL", "LowerLeg"), ("FT", "Foot")):
+        for sd in ("L", "R"):
+            t[k + "." + sd] = np.asarray(qj1[n + "." + sd], np.float64)
+    t["NK"] = np.asarray(qj1["Neck"], np.float64); t["HE"] = np.asarray(qj1["Head"], np.float64)
+    mid = lambda d, k: 0.5 * (d[k + ".L"] + d[k + ".R"])
+    H0, H1 = mid(r, "UL")[1], mid(t, "UL")[1]
+    S0, S1 = mid(r, "UA")[1], mid(t, "UA")[1]
+    N0, N1 = r["NK"][1], t["NK"][1]
+    sv = (N1 - H1) / (N0 - H0)
+    w0 = 0.5 * abs(r["UA.R"][0] - r["UA.L"][0]); w1 = 0.5 * abs(t["UA.R"][0] - t["UA.L"][0])
+    sl = float(np.clip(min(sv, 0.5 * (1.0 + w1 / w0)), 0.80, 1.05))
+    sdp = 0.5 * (sl + sv)
+    c0h, c0s, c1h, c1s = mid(r, "UL"), mid(r, "UA"), mid(t, "UL"), mid(t, "UA")
+
+    # 1/2 系は股の関節が後ろ、肩の関節が前にずれている。背骨（腰〜首）はまっすぐなので、前後は背骨に合わせる。
+    # 股や肩に合わせると胴ごと前へ倒れる。腕と脚は根の像から関節へ平行にずらす。
+    zh0 = ap(M0[ix["Hips"]], J("spine05"))
+    zh1 = np.asarray(qj1["Hips"], np.float64)
+
+    def torso(p):
+        u = (p[1] - H0) / (S0 - H0)
+        c0 = c0h + (c0s - c0h) * u
+        c1 = c1h + (c1s - c1h) * u
+        v = (p[1] - zh0[1]) / (r["NK"][1] - zh0[1])
+        z0 = zh0[2] + (r["NK"][2] - zh0[2]) * v
+        z1 = zh1[2] + (t["NK"][2] - zh1[2]) * v
+        return np.array([c1[0] + (p[0] - c0[0]) * sl, H1 + (p[1] - H0) * sv, z1 + (p[2] - z0) * sdp])
+
+    def affine_of(f):
+        P = np.array([[0, 1, 0], [1, 1, 0], [0, 2, 0], [0, 1, 1]], np.float64)
+        Q = np.array([f(p) for p in P])
+        X = np.eye(4)
+        X[:3, :3] = np.stack([Q[1] - Q[0], Q[2] - Q[0], Q[3] - Q[0]], 1)
+        X[:3, 3] = Q[0] - X[:3, :3] @ P[0]
+        return X
+
+    XT = affine_of(torso)
+    X = {}
+    for s in ("Hips", "Abdomen", "Torso", "Chest", "Shoulder.L", "Shoulder.R"):
+        X[s] = XT
+    XH = Mp1[ix["Head"]] @ np.linalg.inv(M0[ix["Head"]])
+    X["Head"] = XH
+    hs = float(np.mean(np.linalg.norm(XH[:3, :3], axis=0)))
+    gn = 0.5 * (sl + hs)
+    X["Neck"] = _seg_mat(r["NK"], r["HE"], ap(XT, r["NK"]), ap(XH, r["HE"]), gn, gn)
+    for sd in ("L", "R"):
+        pu = ap(XT, r["UA." + sd])
+        el = t["LA." + sd] + 0.5 * (pu - t["UA." + sd])
+        wr = ap(Mp1[ix["Hand." + sd]] @ np.linalg.inv(M0[ix["Hand." + sd]]), r["HD." + sd])
+        X["UpperArm." + sd] = _seg_mat(r["UA." + sd], r["LA." + sd], pu, el, sdp, sdp)
+        X["LowerArm." + sd] = _seg_mat(r["LA." + sd], r["HD." + sd], el, wr, sdp, sdp)
+        pl = ap(XT, r["UL." + sd])
+        off = pl - t["UL." + sd]
+        kn = t["LL." + sd] + np.array([off[0], 0.0, off[2]])
+        an = np.array([t["FT." + sd][0] + off[0], r["FT." + sd][1], t["FT." + sd][2] + off[2]])
+        X["UpperLeg." + sd] = _seg_mat(r["UL." + sd], r["LL." + sd], pl, kn, sdp, sdp)
+        X["LowerLeg." + sd] = _seg_mat(r["LL." + sd], r["FT." + sd], kn, an, sdp, sdp)
+        XF = Mp1[ix["Foot." + sd]] @ np.linalg.inv(M0[ix["Foot." + sd]])
+        XF[:3, 3] += an - ap(XF, r["FT." + sd])
+        X["Foot." + sd] = XF
+    out = np.array(Mp1, np.float64).copy()
+    for s, Xs in X.items():
+        out[ix[s]] = Xs @ M0[ix[s]]
+    info = dict(sv=sv, sl=sl, sd=sdp, w0=w0, w1=w1)
+    return out, info
 
 
 def qjoints(rec):

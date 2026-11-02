@@ -2350,6 +2350,7 @@
 #define IDR_CSO_TAC_PSG7                4924
 #define IDR_CSO_TAC_PSG8                4960
 #define IDR_CSO_TAC_PSG9                4961
+#define IDR_CSO_TAC_PSGX                4962
 #define IDR_CSO_TAC_PSPROP              4925
 #define IDR_CSO_TAC_PSWATER             4926
 #define IDR_CSO_TAC_PSLAVA              4927

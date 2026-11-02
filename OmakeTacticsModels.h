@@ -61,6 +61,9 @@ struct Actor {
 	float hover;        // 浮遊高さ
 	float flap;         // 1 で移動中のはばたき。0 は待機の羽ばたき
 	float flyLean;      // 0=脚はクリップのまま 1=飛行で下半身が後ろへ流れる
+	float legQ[7], legV[7]; // 浮いている人の脚の角度と速さ（左右の股・膝・足首、腰の前傾）。ActorUpdate のばねで積む
+	float legT;         // 脚の揺れの時刻
+	int legOk;          // legQ が入っているか
 	int gait;           // Gait。移動の足取り
 	PoseMods mods;
 	int clip, prev;

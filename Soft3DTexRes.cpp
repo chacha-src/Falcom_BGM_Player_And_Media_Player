@@ -34,10 +34,10 @@ BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
 	if (len) *len = 0;
 	if (!data || !len || id <= 0) return FALSE;
 	wchar_t rel[96] = {};
-	if (id >= IDR_TAC_PH0 && id <= IDR_TAC_PH19) {
+	if (id >= IDR_TAC_PH0 && id < IDR_TAC_PH0 + 28) {
 		int i = id - IDR_TAC_PH0;
-		int theme = (i < 10) ? i : i - 10;
-		swprintf_s(rel, L"tactics\\terrain\\ph%d_%c.jpg", theme, (i < 10) ? L'a' : L'n');
+		int theme = (i < 14) ? i : i - 14;
+		swprintf_s(rel, L"tactics\\terrain\\ph%d_%c.jpg", theme, (i < 14) ? L'a' : L'n');
 	} else {
 		struct Row { int id; const wchar_t* rel; };
 		static const Row kRow[] = {

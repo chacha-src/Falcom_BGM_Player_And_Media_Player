@@ -132,7 +132,9 @@ struct DrawParams {
 	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
 	int skinTone;        // 0無し 1白人 2アジア人 3黒人 4ラテン系 5中東系 6南アジア系 7ポリネシア系。服と髪は変えない
 	float blink;         // 0開 1閉。人間のまぶた
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0) {}
+	int noTess;          // 1 ならテッセレーションしない。重ね着や髪は数 mm の隙間しかなく、曲面化と変位で層が入れ替わる
+	float fly;           // 0〜1。宙に浮いている人間。スカートは脚から離れて世界の下へ垂れる
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -273,7 +275,10 @@ public:
 		// 脚の形の骨。segJ は [根元の骨, 先の骨]、segG は [0]=根元（xyz と長さ） [1]=骨の向き [2]=前 [3]=横（バインド）。
 		// 0・1 は太もも左右（座ったかどうかもこれで見る）。4・5 は足。
 		int segN; int segJ[CLOTH_SEGS][2]; float segG[CLOTH_SEGS][4][4];
+		// 1/2 系の手足の骨は肉の芯から数 cm ずれる。当たりの軸はバインドの関節にこれを足す（0 系は 0）。
+		float jOff[64][3];
 		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), softN(0), softVN(0), segN(0) {
+			memset(jOff, 0, sizeof(jOff));
 			for (int i = 0; i < 32; i++) backZ[i] = 0;
 			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
 			softSB[0] = softSB[1] = NULL; softSRV[0] = softSRV[1] = NULL;
@@ -545,6 +550,7 @@ private:
 	ID3D11DomainShader* m_dsT;
 	ID3D11PixelShader* m_psUi;
 	ID3D11PixelShader* m_psGround[TH_COUNT];
+	ID3D11PixelShader* m_psTheme;
 	ID3D11PixelShader* m_psProp;
 	ID3D11PixelShader* m_psWater;
 	ID3D11PixelShader* m_psLava;

@@ -38,6 +38,10 @@ R(TX_TH_SWAMP, L"湿地帯", L"Marshland", L"Marécages", L"Paludi", L"Marismas"
 R(TX_TH_RUINS, L"古代遺跡", L"Ancient Ruins", L"Ruines antiques", L"Rovine antiche", L"Ruinas antiguas", L"고대 유적", L"古代遗迹", L"الأطلال القديمة", L"Древние руины", L"Alte Ruinen", L"Ruínas antigas", L"Oude ruïnes", L"Starożytne ruiny", L"Antik harabeler")
 R(TX_TH_SEABED, L"海底", L"Seabed", L"Fond marin", L"Fondale", L"Fondo marino", L"해저", L"海底", L"قاع البحر", L"Морское дно", L"Meeresgrund", L"Fundo do mar", L"Zeebodem", L"Dno morskie", L"Deniz tabanı")
 R(TX_TH_FALLS, L"滝", L"Waterfall", L"Cascade", L"Cascata", L"Cascada", L"폭포", L"瀑布", L"شلال", L"Водопад", L"Wasserfall", L"Cachoeira", L"Waterval", L"Wodospad", L"Şelale")
+R(TX_TH_ORBIT, L"軌道", L"Orbit", L"Orbite", L"Orbita", L"Órbita", L"궤도", L"轨道", L"مدار", L"Орбита", L"Orbit", L"Órbita", L"Baan", L"Orbita", L"Yörünge")
+R(TX_TH_STATION, L"船渠", L"Dock", L"Dock", L"Darsena", L"Dársena", L"선거", L"船坞", L"حوض", L"Док", L"Dock", L"Doca", L"Dok", L"Dok", L"Havuz")
+R(TX_TH_CITADEL, L"魔城", L"Citadel", L"Citadelle", L"Cittadella", L"Ciudadela", L"마성", L"魔城", L"قلعة", L"Цитадель", L"Zitadelle", L"Cidadela", L"Citadel", L"Cytadela", L"Kale")
+R(TX_TH_LANTERN, L"月灯", L"Moonlantern", L"Lanterne lunaire", L"Lanterna lunare", L"Farol lunar", L"월등", L"月灯", L"قنديل القمر", L"Лунный фонарь", L"Mondlaterne", L"Lanterna lunar", L"Maanlantaarn", L"Księżycowa latarnia", L"Ay feneri")
 // ---------------------------------------------------------------- 能力値
 R(TX_ST_HP, L"HP", L"HP", L"PV", L"PS", L"PV", L"HP", L"HP", L"الصحة", L"ОЗ", L"LP", L"PV", L"LP", L"PŻ", L"CP")
 R(TX_ST_MP, L"MP", L"MP", L"PM", L"PM", L"PM", L"MP", L"MP", L"المانا", L"ОМ", L"MP", L"PM", L"MP", L"PM", L"MP")

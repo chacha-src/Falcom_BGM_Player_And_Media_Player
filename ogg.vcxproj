@@ -1656,6 +1656,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_psg9.cso" />
     <None Include="res\cso\tac_psgrade.cso" />
     <None Include="res\cso\tac_psgrtiny.cso" />
+    <None Include="res\cso\tac_psgx.cso" />
     <None Include="res\cso\tac_psh.cso" />
     <None Include="res\cso\tac_pslava.cso" />
     <None Include="res\cso\tac_psm.cso" />

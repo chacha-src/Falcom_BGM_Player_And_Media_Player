@@ -401,6 +401,8 @@ IDR_CSO_TAC_PSG8        RCDATA                  "res\\cso\\tac_psg8.cso"
 
 IDR_CSO_TAC_PSG9        RCDATA                  "res\\cso\\tac_psg9.cso"
 
+IDR_CSO_TAC_PSGX        RCDATA                  "res\\cso\\tac_psgx.cso"
+
 IDR_CSO_TAC_PSPROP      RCDATA                  "res\\cso\\tac_psprop.cso"
 
 IDR_CSO_TAC_PSWATER     RCDATA                  "res\\cso\\tac_pswater.cso"
@@ -3081,7 +3083,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1616
+ FILEVERSION 0,9,1,1620
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3099,10 +3101,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.01 v1616"
-            VALUE "FileVersion", "0.9.1.1616"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.02 v1620"
+            VALUE "FileVersion", "0.9.1.1620"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.01"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.02"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

@@ -65,6 +65,10 @@ void ThemeEnv(int th, Env& e)
 		{ { 58, 56, 120 }, { 206, 170, 204 }, { 166, 144, 176 }, { 150, 140, 190 }, { 110, 90, 90 }, .6f, .6f, .35f, .52f, .6f, { 160, 156, 140 } },
 		{ { 36, 110, 150 }, { 140, 206, 214 }, { 90, 168, 186 }, { 110, 186, 200 }, { 40, 80, 90 }, .4f, .62f, .28f, .55f, .4f, { 48, 110, 100 } },
 		{ { 150, 188, 214 }, { 226, 232, 236 }, { 200, 214, 220 }, { 170, 190, 200 }, { 80, 100, 80 }, .4f, .8f, .3f, .58f, .55f, { 90, 140, 80 } },
+		{ { 6, 8, 22 }, { 18, 28, 58 }, { 12, 16, 36 }, { 40, 50, 80 }, { 20, 22, 32 }, .2f, .35f, .9f, .28f, .75f, { 48, 54, 68 } },
+		{ { 18, 22, 36 }, { 70, 90, 110 }, { 40, 50, 70 }, { 80, 100, 120 }, { 40, 44, 52 }, .55f, .7f, .25f, .42f, .7f, { 90, 98, 108 } },
+		{ { 28, 18, 48 }, { 90, 70, 110 }, { 60, 48, 80 }, { 90, 70, 120 }, { 50, 40, 60 }, .35f, .55f, .7f, .4f, .55f, { 150, 146, 158 } },
+		{ { 40, 48, 90 }, { 210, 200, 230 }, { 160, 170, 200 }, { 180, 190, 220 }, { 90, 90, 110 }, .25f, .8f, .4f, .5f, .45f, { 186, 190, 210 } },
 	};
 	const T& t = k[Clampi(th, 0, TH_COUNT - 1)];
 	e.skyTop = RGBA8(t.top[0], t.top[1], t.top[2]);
@@ -627,7 +631,7 @@ void Game::Tick(float dt)
 	RenderFrame();
 }
 
-static_assert(TAC_BGM_FALLS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
+	static_assert(TAC_BGM_LANTERN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
 // 勝利目前は二つのときだけ。距離も匹数も見ない。毎フレーム組み直す。
 // 掃討は索敵の外も全員。最大HPも残りHPも数える。倒した敵の最大HPは分母に残す。
@@ -1629,6 +1633,20 @@ void Game::DrawBanners(float)
 		float px = U(30);
 		if (b.style == 1) { y = m_h * .4f; px = U(52); }
 		else if (b.style == 2) { y = stackY + U(16); px = U(16); stackY += U(46); }
+		if (b.style == 0 && b.life >= 4.f) {
+			float subPx = px * 0.48f;
+			float tw = m_r.TextWidth(b.s, px, 1);
+			float sw = b.sub[0] ? m_r.TextWidth(b.sub, subPx, 0) : 0.f;
+			float bw = max(tw, sw) + U(64);
+			float bh = px * 1.15f + (b.sub[0] ? subPx * 1.7f : px * 0.35f);
+			float bx = m_w * 0.5f - bw * 0.5f;
+			float by = y - px * 0.72f;
+			int cr = b.col & 255, cg = (b.col >> 8) & 255, cb = (b.col >> 16) & 255;
+			int pulse = 170 + (int)(50.f * sinf(b.t * 2.6f));
+			m_r.HudRect(bx, by, bw, bh, RGBA8(8, 10, 18, 186));
+			m_r.HudFrame(bx, by, bw, bh, U(3.5f), RGBA8(cr, cg, cb, pulse));
+			m_r.HudFrame(bx + U(7), by + U(7), bw - U(14), bh - U(14), U(1.5f), RGBA8(255, 236, 214, 150));
+		}
 		DrawMsgLine(m_r, b.s, m_w * .5f, y, px, b.col, b.pat, u, b.pat * 1.3f, 1);
 		if (b.sub[0]) DrawMsgLine(m_r, b.sub, m_w * .5f, y + px * 0.85f, px * 0.48f, RGBA8(235, 235, 240), b.pat, u, b.pat * 1.3f + 0.4f, 0);
 		++i;
@@ -2134,6 +2152,22 @@ void Game::UpdateParticles(float dt)
 					break;
 				case TH_SEABED:
 					air(around(12.f, 1.6f, 5.5f), v3(m_rng.F(-0.1f, 0.2f), m_rng.F(0.35f, 0.9f), m_rng.F(-0.1f, 0.15f)), 2.8f, 0.04f, 0.015f, 0.6f, 0.88f, 1.f, 1, 1, -0.25f, 0.25f, 0.f);
+					break;
+				case TH_ORBIT:
+					air(around(18.f, 3.f, 10.f), v3(m_rng.F(-0.4f, 0.6f), m_rng.F(-0.15f, 0.2f), m_rng.F(-0.3f, 0.3f)), 3.2f, 0.03f, 0.01f, 0.85f, 0.9f, 1.f, 1, 1, 0.f, 0.15f, 0.f);
+					if ((n & 1) == 0) air(around(14.f, 2.2f, 6.f), v3(m_rng.F(0.4f, 1.6f), m_rng.F(-0.2f, 0.2f), m_rng.F(-0.4f, 0.4f)), 2.4f, 0.08f, 0.03f, 0.55f, 0.58f, 0.62f, 0, 0, 0.05f, 0.3f, 0.f);
+					break;
+				case TH_STATION:
+					air(around(12.f, 2.4f, 7.f), v3(m_rng.F(-0.2f, 0.35f), m_rng.F(0.05f, 0.4f), m_rng.F(-0.2f, 0.2f)), 2.2f, 0.035f, 0.012f, 0.45f, 0.85f, 1.f, 1, 1, -0.02f, 0.3f, 0.f);
+					if ((n & 2) == 0) air(around(10.f, 1.2f, 3.f), v3(0.f, 0.15f, 0.f), 1.4f, 0.06f, 0.02f, 1.f, 0.55f, 0.15f, 5, 1, -0.05f, 0.4f, 0.f);
+					break;
+				case TH_CITADEL:
+					air(around(14.f, 2.8f, 8.f), v3(m_rng.F(-1.4f, -0.4f), m_rng.F(-0.15f, 0.25f), m_rng.F(-0.35f, 0.35f)), 2.2f, 0.07f, 0.02f, 0.15f, 0.12f, 0.18f, 2, 0, 0.02f, 0.35f, 0.4f);
+					if ((n & 3) == 0) air(around(11.f, 3.5f, 6.f), v3(m_rng.F(-0.1f, 0.1f), 0.2f, m_rng.F(-0.1f, 0.1f)), 2.6f, 0.04f, 0.01f, 0.7f, 0.55f, 1.f, 1, 1, -0.05f, 0.3f, 0.f);
+					break;
+				case TH_LANTERN:
+					air(around(15.f, 2.6f, 8.f), v3(m_rng.F(-0.25f, 0.35f), m_rng.F(0.15f, 0.55f), m_rng.F(-0.2f, 0.2f)), 2.8f, 0.05f, 0.015f, 1.f, 0.9f, 0.65f, 1, 1, -0.08f, 0.25f, 0.f);
+					air(around(13.f, 1.2f, 3.5f), v3(m_rng.F(-0.15f, 0.2f), m_rng.F(0.05f, 0.25f), m_rng.F(-0.1f, 0.15f)), 2.4f, 0.08f, 0.03f, 0.9f, 0.92f, 1.f, 0, 1, -0.04f, 0.2f, 0.f);
 					break;
 				default:
 					air(around(12.f, 2.8f, 7.f), v3(m_rng.F(-0.2f, 0.25f), m_rng.F(0.1f, 0.45f), m_rng.F(-0.15f, 0.15f)), 1.8f, 0.05f, 0.015f, 0.9f, 0.96f, 1.f, 1, 1, -0.05f, 0.3f, 0.f);

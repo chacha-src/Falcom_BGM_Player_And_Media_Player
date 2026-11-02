@@ -55,6 +55,7 @@ Renderer::Renderer()
 	m_vsT = NULL; m_hsT = NULL; m_dsT = NULL;
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
 	for (int gi = 0; gi < TH_COUNT; gi++) m_psGround[gi] = NULL;
+	m_psTheme = NULL;
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
 	m_photoTex = NULL; m_photoSrv = NULL; m_sphereTex = NULL; m_sphereSrv = NULL;
 	m_envTex = NULL; m_envSrv = NULL;
@@ -157,6 +158,7 @@ void Renderer::Release()
 	TAC_REL(m_psDofH); TAC_REL(m_psDofU); TAC_REL(m_vsT); TAC_REL(m_hsT); TAC_REL(m_dsT); TAC_REL(m_psUi);
 	TAC_REL(m_psProp); TAC_REL(m_psWater); TAC_REL(m_psLava);
 	for (int gi = 0; gi < TH_COUNT; gi++) TAC_REL(m_psGround[gi]);
+	TAC_REL(m_psTheme);
 	m_psOverride = NULL;
 	TAC_REL(m_groundSrv); TAC_REL(m_groundTex); TAC_REL(m_matSrv); TAC_REL(m_matTex);
 	TAC_REL(m_photoSrv); TAC_REL(m_photoTex); TAC_REL(m_sphereSrv); TAC_REL(m_sphereTex); TAC_REL(m_envSrv); TAC_REL(m_envTex);
@@ -482,6 +484,7 @@ BOOL Renderer::CreateShaders()
 		{ "PSG4", IDR_CSO_TAC_PSG4, &m_psGround[4] }, { "PSG5", IDR_CSO_TAC_PSG5, &m_psGround[5] },
 		{ "PSG6", IDR_CSO_TAC_PSG6, &m_psGround[6] }, { "PSG7", IDR_CSO_TAC_PSG7, &m_psGround[7] },
 		{ "PSG8", IDR_CSO_TAC_PSG8, &m_psGround[8] }, { "PSG9", IDR_CSO_TAC_PSG9, &m_psGround[9] },
+		{ "PSGX", IDR_CSO_TAC_PSGX, &m_psTheme },
 		{ "PSProp", IDR_CSO_TAC_PSPROP, &m_psProp }, { "PSWater", IDR_CSO_TAC_PSWATER, &m_psWater }, { "PSLava", IDR_CSO_TAC_PSLAVA, &m_psLava },
 	};
 	for (auto& d : ps) {
@@ -905,7 +908,7 @@ static int StageTierQ(int q)
 static int PhotoSideFor(int q)
 {
 	int t = StageTierQ(q);
-	if (t <= 0) return 0;
+	if (t <= 0) return 256;
 	if (t == 1) return 256;
 	if (t == 2) return 512;
 	return 1024;
@@ -1044,19 +1047,23 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 {
 	static const BYTE kTop[TH_COUNT][3] = {
 		{ 84, 146, 228 }, { 112, 146, 214 }, { 66, 128, 172 }, { 128, 160, 214 }, { 98, 162, 232 },
-		{ 40, 24, 34 }, { 70, 92, 82 }, { 58, 56, 120 }, { 36, 110, 150 }, { 150, 188, 214 }
+		{ 40, 24, 34 }, { 70, 92, 82 }, { 58, 56, 120 }, { 36, 110, 150 }, { 150, 188, 214 },
+		{ 6, 8, 22 }, { 18, 22, 36 }, { 28, 18, 48 }, { 40, 48, 90 }
 	};
 	static const BYTE kHor[TH_COUNT][3] = {
 		{ 206, 228, 246 }, { 246, 206, 164 }, { 176, 214, 194 }, { 232, 238, 248 }, { 252, 228, 176 },
-		{ 170, 66, 40 }, { 156, 166, 132 }, { 206, 170, 204 }, { 140, 206, 214 }, { 226, 232, 236 }
+		{ 170, 66, 40 }, { 156, 166, 132 }, { 206, 170, 204 }, { 140, 206, 214 }, { 226, 232, 236 },
+		{ 18, 28, 58 }, { 70, 90, 110 }, { 90, 70, 110 }, { 210, 200, 230 }
 	};
 	static const BYTE kGnd[TH_COUNT][3] = {
 		{ 110, 170, 80 }, { 170, 120, 80 }, { 70, 120, 60 }, { 230, 236, 246 }, { 220, 194, 140 },
-		{ 80, 70, 68 }, { 80, 96, 60 }, { 160, 156, 140 }, { 48, 110, 100 }, { 90, 140, 80 }
+		{ 80, 70, 68 }, { 80, 96, 60 }, { 160, 156, 140 }, { 48, 110, 100 }, { 90, 140, 80 },
+		{ 48, 54, 68 }, { 90, 98, 108 }, { 150, 146, 158 }, { 186, 190, 210 }
 	};
 	static const float kSun[TH_COUNT][3] = {
 		{ .45f, .82f, .35f }, { .55f, .7f, .3f }, { .35f, .85f, .4f }, { .4f, .7f, .5f }, { .5f, .85f, .2f },
-		{ .3f, .75f, .55f }, { .35f, .8f, .45f }, { .6f, .6f, .35f }, { .4f, .62f, .28f }, { .4f, .8f, .3f }
+		{ .3f, .75f, .55f }, { .35f, .8f, .45f }, { .6f, .6f, .35f }, { .4f, .62f, .28f }, { .4f, .8f, .3f },
+		{ .2f, .35f, .9f }, { .55f, .7f, .25f }, { .35f, .55f, .7f }, { .25f, .8f, .4f }
 	};
 	theme = Clampi(theme, 0, TH_COUNT - 1);
 	float len = sqrtf(x * x + y * y + z * z);
@@ -1097,7 +1104,7 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 	r += sr * (disk * 1.4f + glow * 0.28f);
 	g += sg * (disk * 1.4f + glow * 0.28f);
 	b += sb * (disk * 1.4f + glow * 0.28f);
-	if (theme != TH_VOLCANO && y > 0.05f) {
+	if (theme != TH_VOLCANO && theme != TH_ORBIT && theme != TH_STATION && y > 0.05f) {
 		float cl = TNoise(theme * 19 + 4, x * 3.4f + 8.f, z * 3.4f);
 		if (cl > 0.62f) {
 			float a = (cl - 0.62f) * 1.8f * Clampf(y * 2.f, 0, 1);
@@ -1107,6 +1114,20 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 	if (theme == TH_VOLCANO && y > 0.15f && TNoise(9, x * 40.f, z * 40.f) > 0.96f) { r += 0.8f; g += 0.75f; b += 0.6f; }
 	if (theme == TH_FALLS && fabsf(y) < 0.18f) { r = Lerpf(r, 0.92f, 0.35f); g = Lerpf(g, 0.95f, 0.35f); b = Lerpf(b, 1.f, 0.35f); }
 	if (theme == TH_RUINS && y > 0.35f && TNoise(3, x * 30.f, z * 30.f) > 0.97f) { r += 0.45f; g += 0.45f; b += 0.7f; }
+	if (theme == TH_ORBIT || theme == TH_STATION) {
+		if (y > 0.02f && TNoise(theme * 3, x * 80.f, z * 80.f) > 0.97f) { r += 0.9f; g += 0.95f; b += 1.f; }
+		if (theme == TH_ORBIT && y > 0.2f) {
+			float neb = TNoise(21, x * 2.2f + 3.f, z * 2.2f);
+			if (neb > 0.55f) { r = Lerpf(r, 0.35f, 0.25f); g = Lerpf(g, 0.2f, 0.2f); b = Lerpf(b, 0.55f, 0.35f); }
+		}
+		if (theme == TH_STATION && y > 0.15f && TNoise(8, x * 18.f, z * 6.f) > 0.82f) { r += 0.15f; g += 0.45f; b += 0.55f; }
+	}
+	if (theme == TH_CITADEL && y > 0.25f && TNoise(11, x * 12.f, z * 12.f) > 0.72f) { r = Lerpf(r, 0.55f, 0.2f); g = Lerpf(g, 0.35f, 0.15f); b = Lerpf(b, 0.7f, 0.25f); }
+	if (theme == TH_LANTERN && y > 0.05f) {
+		float moon = expf((y - 0.85f) * 8.f);
+		r += moon * 0.35f; g += moon * 0.4f; b += moon * 0.55f;
+		if (TNoise(15, x * 6.f, z * 6.f) > 0.7f) { r = Lerpf(r, 0.85f, 0.2f); g = Lerpf(g, 0.88f, 0.2f); b = Lerpf(b, 1.f, 0.25f); }
+	}
 }
 
 static void FillCube(int theme, int face, DWORD* dst)
@@ -1145,10 +1166,10 @@ void Renderer::PollStageLook()
 {
 	if (!m_dev || !m_ctx) return;
 	if (!m_photoSrv) {
-		DWORD blank[20];
-		for (int i = 0; i < 20; i++) blank[i] = 0;
+		DWORD blank[28];
+		for (int i = 0; i < 28; i++) blank[i] = 0;
 		ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
-		if (MakeGpuArray(m_dev, m_ctx, 1, 20, blank, FALSE, &t, &s)) { m_photoTex = t; m_photoSrv = s; }
+		if (MakeGpuArray(m_dev, m_ctx, 1, 28, blank, FALSE, &t, &s)) { m_photoTex = t; m_photoSrv = s; }
 	}
 	int tier = StageTierQ(m_quality);
 	if (m_envTheme != m_theme || m_envBucket != tier || !m_envSrv || !m_sphereSrv) {
@@ -1173,20 +1194,20 @@ void Renderer::PollStageLook()
 	int want = PhotoSideFor(m_quality);
 	if (want > 0 && want != m_photoSide) {
 		size_t pix = (size_t)want * want;
-		DWORD* px = (DWORD*)calloc(pix * 20, sizeof(DWORD));
+		DWORD* px = (DWORD*)calloc(pix * (size_t)(TH_COUNT * 2), sizeof(DWORD));
 		if (px) {
 			int live = 0;
 			for (int theme = 0; theme < TH_COUNT; theme++) {
 				for (int nrm = 0; nrm < 2; nrm++) {
 					const BYTE* data = NULL; DWORD n = 0;
-					DWORD* dst = px + (size_t)(theme + nrm * 10) * pix;
-					if (LockRc(IDR_TAC_PH0 + theme + nrm * 10, &data, &n) && DecodeScaled(data, (int)n, want, dst)) {
+					DWORD* dst = px + (size_t)(theme + nrm * TH_COUNT) * pix;
+					if (LockRc(IDR_TAC_PH0 + theme + nrm * TH_COUNT, &data, &n) && DecodeScaled(data, (int)n, want, dst)) {
 						if (!nrm) live++;
 					} else memset(dst, 0, pix * sizeof(DWORD));
 				}
 			}
 			ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
-			if (live > 0 && MakeGpuArray(m_dev, m_ctx, want, 20, px, FALSE, &t, &s)) {
+			if (live > 0 && MakeGpuArray(m_dev, m_ctx, want, TH_COUNT * 2, px, FALSE, &t, &s)) {
 				TAC_REL(m_photoSrv); TAC_REL(m_photoTex);
 				m_photoTex = t; m_photoSrv = s;
 				m_photoSide = want;
@@ -2382,6 +2403,18 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 							float& R = skin.skullR[ie * SKULL_NA + ia];
 							if (r > R) R = r;
 						}
+						// 頭頂は三角形が粗くて空の区画ができる。0 のまま残ると CSSkin の補間で頭蓋の半径が 0 に落ち、
+						// 髪が頭蓋の中へ沈んでハゲになる。隣の区画から埋める。
+						for (int pass = 0; pass < 6; pass++) for (int ie = 0; ie < SKULL_NE; ie++) for (int ia = 0; ia < SKULL_NA; ia++) {
+							float& R = skin.skullR[ie * SKULL_NA + ia];
+							if (R > 0.02f) continue;
+							float best = R;
+							best = fmaxf(best, skin.skullR[ie * SKULL_NA + (ia + 1) % SKULL_NA]);
+							best = fmaxf(best, skin.skullR[ie * SKULL_NA + (ia + SKULL_NA - 1) % SKULL_NA]);
+							if (ie > 0) best = fmaxf(best, skin.skullR[(ie - 1) * SKULL_NA + ia]);
+							if (ie < SKULL_NE - 1) best = fmaxf(best, skin.skullR[(ie + 1) * SKULL_NA + ia]);
+							R = best;
+						}
 					}
 				}
 			}
@@ -3553,6 +3586,7 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 	Buf<int>& bOff, Buf<WORD>& bTri, Buf<WORD>& cTri, int& nbA, int& nvA, BustRef& br)
 {
 	typedef Renderer::CSkinV SV;
+	(void)keep;
 	const int nBT = bodyTri.size() / 3, nCT = cosTri.size() / 3;
 	nbA = nb; nvA = nv;
 	br.kn[0] = br.kn[1] = -1; br.z0 = br.x0 = 0.f;
@@ -3654,8 +3688,6 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 		for (;;) {
 			M.clear();
 			for (int i = 0; i < nT; i++) {
-				const int t = Tt[i];
-				if (t >= 0 && !(t / 8 < keep.size() && ((keep[t / 8] >> (t & 7)) & 1))) continue;
 				const int* q = &T[i * 3];
 				if (!inR[q[0]] && !inR[q[1]] && !inR[q[2]]) continue;
 				for (int e = 0; e < 3; e++) {
@@ -3817,22 +3849,20 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 // ・胸壁: 胸の外の輪（H の土台の 1.15〜1.7 倍）の A の形（最小の差分）の半径へ 3 次の曲面を当て、内側をそれで置き換える。
 // ・山: 上は丸い山を縁で滑らかに胸へ溶かし、下は乳房下の折れ目（大きいほど締まり、真下だけ）。乳輪と乳首を載せ、
 //   垂れの分だけ下げる。押し出す向きは胴の外向きを正面へ寄せたもの。腕・肩・首から 3cm 以内は弱める。
-// ・服 [nb, ne) は、近い体（腹側・同じ左右）の胸壁＋山の動きをガウスで写す。服の位置で山を作り直すと背中に胸が付く。
-// 法線は元の法線へ、形の面法線とバインドの面法線の差を足す。jig は山の分の差分（揺れの重み）。
+// ・服 [nb, ne) は、近い体（腹側・同じ左右）の山の動きだけをガウスで写し、中央の谷も胸の頂の高さに少し引き上げる。
 static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* bn, int cup, const BustRef& br,
 	const WORD* bodyTri, int nBodyTri, const BYTE* armJ, const WORD* idx, int nIdx, float* jig)
 {
 	if (nb <= 0 || nb > ne || ne > nv || !bn || br.kn[0] < 0 || br.kn[1] < 0 || br.kn[0] >= nb || br.kn[1] >= nb) return;
 	cup = Clampi(cup, 0, BUST_N - 1);
-	static Buf<float> P, S, Wl, X, X2, tw, D, U, L;
+	static Buf<float> P, S, Wl, tw, D, U, L;
 	static Buf<int> root;
-	static Buf<BYTE> arm, in, mv, mv2;
-	static Buf<unsigned long long> E;
-	static Buf<int> Tu, cand;
-	P.resize(nv * 3); S.resize(nb * 3); Wl.resize(nb * 3); X.resize(nb * 2); X2.resize(nb * 2); tw.resize(nb); D.resize(nv * 3);
-	root.resize(nb); arm.resize(nb); in.resize(nb); mv.resize(nb); mv2.resize(nb);
-	if (P.size() < nv * 3 || S.size() < nb * 3 || Wl.size() < nb * 3 || X.size() < nb * 2 || X2.size() < nb * 2 || tw.size() < nb || D.size() < nv * 3
-		|| root.size() < nb || arm.size() < nb || in.size() < nb || mv.size() < nb || mv2.size() < nb) return;
+	static Buf<BYTE> arm, in;
+	static Buf<int> cand;
+	P.resize(nv * 3); S.resize(nb * 3); Wl.resize(nb * 3); tw.resize(nb); D.resize(nv * 3);
+	root.resize(nb); arm.resize(nb); in.resize(nb);
+	if (P.size() < nv * 3 || S.size() < nb * 3 || Wl.size() < nb * 3 || tw.size() < nb || D.size() < nv * 3
+		|| root.size() < nb || arm.size() < nb || in.size() < nb) return;
 	for (int k = 0; k < nv; k++) for (int a = 0; a < 3; a++) { P[k * 3 + a] = v[k].p[a] + bn[k * 3 + a]; D[k * 3 + a] = 0.f; }
 	for (int k = 0; k < nb * 3; k++) S[k] = Wl[k] = P[k];
 	// 継ぎ目で同じ位置の頂点を 0.1mm で一つにまとめる。
@@ -3860,8 +3890,8 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		}
 	}
 	const float z0 = br.z0, x0 = br.x0;
-	const float dxR = v[br.kn[1]].p[0] - x0, dzR = v[br.kn[1]].p[2] - z0;
-	const float dxL = v[br.kn[0]].p[0] - x0, dzL = v[br.kn[0]].p[2] - z0;
+	const float dxR = S[br.kn[1] * 3] - x0, dzR = S[br.kn[1] * 3 + 2] - z0;
+	const float dxL = S[br.kn[0] * 3] - x0, dzL = S[br.kn[0] * 3 + 2] - z0;
 	const float rho0 = 0.5f * (sqrtf(dxR * dxR + dzR * dzR) + sqrtf(dxL * dxL + dzL * dzL));
 	if (rho0 < 0.02f) return;
 	for (int k = 0; k < nb; k++) {
@@ -3869,14 +3899,13 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		int m = 0;
 		for (int c = 1; c < 4; c++) if (q.w[c] > q.w[m]) m = c;
 		arm[k] = armJ[q.j[m]] ? 1 : 0;
-		X[k * 2] = atan2f(q.p[0] - x0, z0 - q.p[2]) * rho0;
-		X[k * 2 + 1] = q.p[1];
 	}
-	// 乳首の角度・高さ・半径。r は H の土台を k 倍した楕円での距離（1 で縁）。
+	// A カップ（S = p + bn）はすでに平らで裏返りもない胸板になっている。3 次曲面で胸壁を作り直すと、
+	// 外の輪に混ざる肩の半径に引かれて胸の中央が 3.7cm 奥へ凹み、山を足しても平らな箱になる。S をそのまま土台にする。
 	float thN[2], yN[2], rhN[2];
 	for (int s = 0; s < 2; s++) {
-		const float* p = v[br.kn[s]].p;
-		thN[s] = X[br.kn[s] * 2] / rho0; yN[s] = p[1];
+		const float* p = &S[br.kn[s] * 3];
+		thN[s] = atan2f(p[0] - x0, z0 - p[2]); yN[s] = p[1];
 		rhN[s] = sqrtf((p[0] - x0) * (p[0] - x0) + (p[2] - z0) * (p[2] - z0));
 	}
 	const float W7 = kBustW[BUST_N - 1];
@@ -3887,61 +3916,14 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		if (vo) *vo = vv;
 		return sqrtf((u / a) * (u / a) + (vv / b) * (vv / b));
 	};
-	// 裏返らない並び。胸の範囲（H の 1.3 倍）の溶接した三角形の向きを数え、多い向きと逆の三角形の頂点と 2 輪をならす。
-	for (int k = 0; k < nb; k++) {
-		const float th = X[k * 2] / rho0;
-		in[k] = root[k] == k && fabsf(th) < 1.7f && (rad(th, X[k * 2 + 1], 0, W7, 1.3f, 0, 0) < 1.f || rad(th, X[k * 2 + 1], 1, W7, 1.3f, 0, 0) < 1.f);
-	}
-	Tu.clear();
-	for (int t = 0; t < nBodyTri; t++) {
-		int q[3];
-		for (int e = 0; e < 3; e++) q[e] = bodyTri[t * 3 + e] < nb ? root[bodyTri[t * 3 + e]] : -1;
-		if (q[0] < 0 || q[1] < 0 || q[2] < 0 || q[0] == q[1] || q[1] == q[2] || q[2] == q[0] || !in[q[0]] || !in[q[1]] || !in[q[2]]) continue;
-		for (int e = 0; e < 3; e++) Tu.push_back(q[e]);
-	}
-	E.clear();
-	for (int i = 0; i + 2 < Tu.size(); i += 3)
-		for (int e = 0; e < 3; e++) for (int f = 0; f < 3; f++) if (e != f) E.push_back(((unsigned long long)(unsigned)Tu[i + e] << 32) | (unsigned)Tu[i + f]);
-	int nE = 0;
-	if (E.size() > 1) qsort(E.data(), E.size(), sizeof(unsigned long long), CmpU64);
-	for (int i = 0; i < E.size(); i++) if (nE == 0 || E[i] != E[nE - 1]) E[nE++] = E[i];
-	E.resize(nE);
-	auto area = [&](int i) {
-		const float* a = &X[Tu[i] * 2]; const float* b = &X[Tu[i + 1] * 2]; const float* c = &X[Tu[i + 2] * 2];
-		return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-	};
-	int pos = 0, neg = 0;
-	for (int i = 0; i + 2 < Tu.size(); i += 3) { const float ar = area(i); if (ar > 0.f) pos++; else if (ar < 0.f) neg++; }
-	const float sgn = pos >= neg ? 1.f : -1.f;
-	for (int it = 0; it < 60; it++) {
-		for (int k = 0; k < nb; k++) mv[k] = 0;
-		BOOL bad = FALSE;
-		for (int i = 0; i + 2 < Tu.size(); i += 3) if (area(i) * sgn <= 0.f) { mv[Tu[i]] = mv[Tu[i + 1]] = mv[Tu[i + 2]] = 1; bad = TRUE; }
-		if (!bad) break;
-		for (int ring = 0; ring < 2; ring++) {
-			for (int k = 0; k < nb; k++) mv2[k] = mv[k];
-			for (int i = 0; i < nE; i++) if (mv2[(int)(E[i] >> 32)]) mv[(int)(E[i] & 0xFFFFFFFFu)] = 1;
-		}
-		for (int k = 0; k < nb; k++) if (!in[k]) mv[k] = 0;
-		for (int j = 0; j < 10; j++) {
-			for (int k = 0; k < nb; k++) if (mv[k]) { X2[k * 2] = X[k * 2]; X2[k * 2 + 1] = X[k * 2 + 1]; }
-			for (int i = 0; i < nE;) {
-				const int s = (int)(E[i] >> 32);
-				float ax = 0.f, ay = 0.f; int c = 0;
-				for (; i < nE && (int)(E[i] >> 32) == s; i++) { const int d = (int)(E[i] & 0xFFFFFFFFu); ax += X[d * 2]; ay += X[d * 2 + 1]; c++; }
-				if (mv[s] && c) { X2[s * 2] = ax / c; X2[s * 2 + 1] = ay / c; }
-			}
-			for (int k = 0; k < nb; k++) if (mv[k]) { X[k * 2] = X2[k * 2]; X[k * 2 + 1] = X2[k * 2 + 1]; }
-		}
-	}
-	for (int k = 0; k < nb; k++) { X[k * 2] = X[root[k] * 2]; X[k * 2 + 1] = X[root[k] * 2 + 1]; }
-	for (int s = 0; s < 2; s++) { thN[s] = X[br.kn[s] * 2] / rho0; yN[s] = X[br.kn[s] * 2 + 1]; }
+	(void)bodyTri; (void)nBodyTri;
 	// 腕らしさ: 上腕・手からの距離で 0→1（5cm）。肩は形だけ残し、距離には入れない。
 	{
 		float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
-	for (int k = 0; k < nb; k++) {
-			const float th = X[k * 2] / rho0;
-			in[k] = root[k] == k && fabsf(th) < 1.8f && (rad(th, X[k * 2 + 1], 0, W7, 1.45f, 0, 0) < 1.f || rad(th, X[k * 2 + 1], 1, W7, 1.45f, 0, 0) < 1.f);
+		for (int k = 0; k < nb; k++) {
+			const float* p = &S[k * 3];
+			const float th = atan2f(p[0] - x0, z0 - p[2]);
+			in[k] = root[k] == k && fabsf(th) < 1.8f && (rad(th, p[1], 0, W7, 1.45f, 0, 0) < 1.f || rad(th, p[1], 1, W7, 1.45f, 0, 0) < 1.f);
 			tw[k] = 0.f;
 			if (in[k]) for (int a = 0; a < 3; a++) { lo[a] = fminf(lo[a], v[k].p[a]); hi[a] = fmaxf(hi[a], v[k].p[a]); }
 		}
@@ -3965,97 +3947,98 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		}
 		for (int k = 0; k < nb; k++) tw[k] = tw[root[k]];
 	}
-	// 胸壁。左右ごとに 3 次の曲面 rW(u, v) を当て、内側（H の 1.35 倍まで）をそれへ寄せる。
+	// 胸壁 Wl。S = p + bn には乳首の周りだけ 4.5cm 突き出た狭い突起が残っていて、そのまま山 D を足すと二重盛りでロケット状になる。
+	// 外の輪（|th| < 1.35, r = 1.10〜1.65）と胸骨（|th| < 0.14）に 2 次曲面 rW(u, v) を当て、既存の狭い突起を滑らかな胸板 Wl に戻す。
 	for (int s = 0; s < 2; s++) {
-		double A[10][11] = {};
+		const float sgn = s ? 1.f : -1.f;
+		double A[6][7] = {};
 		int nr = 0;
 		for (int k = 0; k < nb; k++) {
-			const float th = X[k * 2] / rho0;
-			if (fabsf(th) >= 1.6f || arm[k] || th * (s ? 1.f : -1.f) <= 0.f) continue;
-			float u, vv;
-			const float r = rad(th, X[k * 2 + 1], s, W7, 1.f, &u, &vv);
-			if (r <= 1.15f || r >= 1.7f) continue;
-			const double f[10] = { 1., u, vv, (double)u * u, (double)u * vv, (double)vv * vv, (double)u * u * u, (double)u * u * vv, (double)u * vv * vv, (double)vv * vv * vv };
+			if (arm[k]) continue;
 			const float* p = &S[k * 3];
+			const float th = atan2f(p[0] - x0, z0 - p[2]), y = p[1];
+			float u, vv;
+			const float r = rad(th, y, s, W7, 1.f, &u, &vv);
+			const BOOL outer = fabsf(th) < 1.35f && th * sgn > 0.f && r > 1.10f && r < 1.65f;
+			const BOOL stern = fabsf(th) < 0.14f && p[2] < z0 && fabsf(vv) < 0.11f;
+			if (!outer && !stern) continue;
+			const double w = stern ? 16.0 : 1.0;
+			const double f[6] = { 1., u, vv, (double)u * u, (double)u * vv, (double)vv * vv };
 			const double rA = sqrt((double)(p[0] - x0) * (p[0] - x0) + ((double)p[2] - z0) * ((double)p[2] - z0));
-			for (int i = 0; i < 10; i++) { for (int j = 0; j < 10; j++) A[i][j] += f[i] * f[j]; A[i][10] += f[i] * rA; }
+			for (int i = 0; i < 6; i++) { for (int j = 0; j < 6; j++) A[i][j] += w * f[i] * f[j]; A[i][6] += w * f[i] * rA; }
 			nr++;
 		}
-		if (nr < 20) continue;
-		for (int i = 0; i < 10; i++) {
+		if (nr < 16) continue;
+		for (int i = 0; i < 6; i++) {
 			int pv = i;
-			for (int r = i + 1; r < 10; r++) if (fabs(A[r][i]) > fabs(A[pv][i])) pv = r;
-			if (fabs(A[pv][i]) < 1e-30) { nr = 0; break; }
-			if (pv != i) for (int c = 0; c < 11; c++) { const double t = A[i][c]; A[i][c] = A[pv][c]; A[pv][c] = t; }
-			for (int r = 0; r < 10; r++) if (r != i) {
+			for (int r = i + 1; r < 6; r++) if (fabs(A[r][i]) > fabs(A[pv][i])) pv = r;
+			if (fabs(A[pv][i]) < 1e-24) { nr = 0; break; }
+			if (pv != i) for (int c = 0; c < 7; c++) { const double t = A[i][c]; A[i][c] = A[pv][c]; A[pv][c] = t; }
+			for (int r = 0; r < 6; r++) if (r != i) {
 				const double f = A[r][i] / A[i][i];
-				for (int c = i; c < 11; c++) A[r][c] -= f * A[i][c];
+				for (int c = i; c < 7; c++) A[r][c] -= f * A[i][c];
 			}
 		}
 		if (!nr) continue;
-		double cf[10];
-		for (int i = 0; i < 10; i++) cf[i] = A[i][10] / A[i][i];
-			for (int k = 0; k < nb; k++) {
-			const float th = X[k * 2] / rho0;
+		double cf[6];
+		for (int i = 0; i < 6; i++) cf[i] = A[i][6] / A[i][i];
+		for (int k = 0; k < nb; k++) {
+			const float* p = &S[k * 3];
+			const float th = atan2f(p[0] - x0, z0 - p[2]), y = p[1];
 			float u, vv;
-			const float r = rad(th, X[k * 2 + 1], s, W7, 1.f, &u, &vv);
-			const float wf = Smooth01((1.35f - r) / .35f) * Smooth01(th * (s ? 1.f : -1.f) * rhN[s] / .012f) * tw[k];
+			const float r = rad(th, y, s, W7, 1.f, &u, &vv);
+			const float wf = Smooth01((1.35f - r) / .35f) * Smooth01(th * sgn * rhN[s] / .012f) * tw[k];
 			if (wf <= 0.f) continue;
-			const float rW = (float)(cf[0] + cf[1] * u + cf[2] * vv + cf[3] * u * u + cf[4] * u * vv + cf[5] * vv * vv
-				+ cf[6] * u * u * u + cf[7] * u * u * vv + cf[8] * u * vv * vv + cf[9] * vv * vv * vv);
+			const float rW = (float)(cf[0] + cf[1] * u + cf[2] * vv + cf[3] * u * u + cf[4] * u * vv + cf[5] * vv * vv);
 			if (!(rW > 0.04f) || rW > 0.28f) continue;
-			const float tg[3] = { x0 + rW * sinf(th), X[k * 2 + 1], z0 - rW * cosf(th) };
+			const float tg[3] = { x0 + rW * sinf(th), y, z0 - rW * cosf(th) };
 			for (int a = 0; a < 3; a++) Wl[k * 3 + a] += wf * (tg[a] - Wl[k * 3 + a]);
 		}
 	}
 	for (int k = 0; k < nb; k++) for (int a = 0; a < 3; a++) Wl[k * 3 + a] = Wl[root[k] * 3 + a];
-	// 山。内側を重ねて谷間をなだらかに。張りは抑える。左右は硬い max ではなく滑らかに混ぜる。
-	const float W = kBustW[cup], PP = kBustP[cup] * W * 0.88f, sag = kBustSag[cup];
-	const float edc = .08f + .37f * (1.f - (float)cup / 7.f), ar = .017f + .005f * (float)cup / 7.f;
-	auto mound = [&](float xa, float y, float t, float* d) {
+	// 山。平らな胸板 Wl の上に、カップに応じた幅 W の広いドームと、中心から外周への放射広がりを載せる。
+	const float W = kBustW[cup], PP = kBustP[cup] * W * 0.72f, sag = kBustSag[cup];
+	const float edc = .20f + .25f * (1.f - (float)cup / 7.f);
+	const float spread = Clampf((W - kBustW[0]) / (kBustW[BUST_N - 1] - kBustW[0]), 0.f, 1.f);
+	auto mound = [&](float th, float y, float t, float* d) {
 		d[0] = d[1] = d[2] = 0.f;
 		if (t <= 0.f) return;
-		const float th = xa / rho0;
-		float hS[2] = {}, dS[2][3] = {};
 		for (int s = 0; s < 2; s++) {
-			const float u = (th - thN[s]) * (s ? 1.f : -1.f) * rhN[s], vv = y - yN[s];
-			const float a = (u > 0.f ? .48f * W : .70f * W), b = (vv > 0.f ? fminf(.5f * W, .08f) : .4f * W);
-			const float r = sqrtf((u / a) * (u / a) + (vv / b) * (vv / b));
+			const float sgn = s ? 1.f : -1.f;
+			if (th * sgn <= 0.f) continue;
+			const float u = (th - thN[s]) * sgn * rhN[s], vv = y - yN[s];
+			// 内側の裾は胸骨の手前（th=0 の 4mm 外）まで広げ、反対側へは出さない。狭い二つの円錐にならず、中央に自然な谷間ができる。
+			const float aIn = fminf(.58f * W, fmaxf(fabsf(thN[s]) * rhN[s] - 0.004f, 0.035f));
+			const float a = u > 0.f ? .50f * W : aIn, b = vv > 0.f ? fminf(.56f * W, .095f) : .46f * W;
+			const float ru = u / a, rv = vv / b;
+			const float r = sqrtf(ru * ru + rv * rv);
 			if (r >= 1.f) continue;
-			const float tt = Smooth01(vv / b * 1.5f + .5f);
+			const float tt = Smooth01(vv / b * 1.4f + .5f);
 			float down = Clampf(-vv / b, 0.f, 1.f);
 			down = fminf(down * down / fmaxf(r * r, 1e-9f), 1.f);
-			const float ed = .50f + (edc - .50f) * down;
-			const float fu = powf(1.f - r * r, 0.82f) * Smooth01((1.f - r) / .62f);
-			const float fd = (1.f - powf(r, 2.2f)) * Smooth01((1.f - r) / ed);
+			const float ed = .56f + (edc - .56f) * down;
+			// 先端を平らに丸めたドーム（1 - r^2 の 0.55 乗）。中心の曲率を緩やかにして尖りを消す。
+			const float fu = powf(1.f - r * r, 0.55f) * Smooth01((1.f - r) / .55f);
+			const float fd = (1.f - powf(r, 2.6f)) * Smooth01((1.f - r) / ed);
 			float h = PP * (fd + (fu - fd) * tt);
-			if (h > 0.f) {
-				const float rr = sqrtf(u * u + vv * vv);
-				const float qa = fmaxf(1.f - (rr / ar) * (rr / ar), 0.f), qn = fmaxf(1.f - (rr / .005f) * (rr / .005f), 0.f);
-				h += .0008f * qa * qa + .0010f * qn * qn;
-			}
-			if (u > 0.f) h += 0.0020f * (1.f - r) * Smooth01(u / fmaxf(0.48f * W, 1e-4f));
-			h *= t;
+			// 胸骨のすぐ横（3mm → 19mm）で滑らかに 0 へ落とし、はっきりした谷間にする。
+			const float cleav = Smooth01((fabsf(th) * rhN[s] - 0.003f) / 0.016f);
+			h *= t * cleav;
 			if (h <= 0.f) continue;
-			hS[s] = h;
-			const float outer = u > 0.f ? Smooth01(u / fmaxf(0.48f * W, 1e-4f)) : 0.f;
-			const float inward = u < 0.f ? Smooth01(-u / fmaxf(0.70f * W, 1e-4f)) : 0.f;
-			const float td = th * (0.14f + 0.20f * outer);
-			dS[s][0] = sinf(td) * h + (s ? -1.f : 1.f) * inward * h * 0.10f;
-			dS[s][1] = -sag * h;
-			dS[s][2] = -cosf(td) * h;
+			// 素体のメッシュ自体を乳房の中心から放射状に広げる。中心近くの頂点が外周へ広がり、広い半球面を作る。
+			const float bell = (1.f - r) * (1.f + 1.4f * r) * (1.f - r) * t * cleav;
+			const float expU = ru * (u > 0.f ? 0.36f : 0.24f) * (PP + 0.016f * spread) * bell;
+			const float expV = rv * (vv < 0.f ? 0.42f : 0.26f) * (PP + 0.016f * spread) * bell;
+			const float outer = u > 0.f ? Smooth01(u / fmaxf(0.50f * W, 1e-4f)) : 0.f;
+			const float td = th * (0.12f + 0.16f * outer);
+			d[0] = sinf(td) * h + sgn * expU;
+			d[1] = expV - sag * h * (0.90f + 0.50f * Smooth01(-vv / b));
+			d[2] = -cosf(td) * h;
 		}
-		const float hL = hS[0], hR = hS[1], hs = hL + hR;
-		if (hs <= 1e-9f) return;
-		const float q = 2.3f;
-		const float h = powf(powf(hL, q) + powf(hR, q), 1.f / q);
-		const float wL = hL / hs, wR = hR / hs, hAvg = wL * hL + wR * hR;
-		const float sc = hAvg > 1e-8f ? h / hAvg : 1.f;
-		for (int a = 0; a < 3; a++) d[a] = (wL * dS[0][a] + wR * dS[1][a]) * sc;
-		d[2] *= 1.f - 0.12f * (1.f - Smooth01(fabsf(th) / 0.30f));
 	};
 	for (int k = 0; k < nb; k++) {
-		mound(X[k * 2], X[k * 2 + 1], tw[k], &D[k * 3]);
+		const float* p = &Wl[k * 3];
+		mound(atan2f(p[0] - x0, z0 - p[2]), p[1], tw[k], &D[k * 3]);
 		for (int a = 0; a < 3; a++) P[k * 3 + a] = Wl[k * 3 + a] + D[k * 3 + a];
 	}
 	// 肋骨の横を少し外へ。胸の下〜脇の下。正面の谷は触らない。
@@ -4063,7 +4046,8 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		const float yRib = 0.5f * (yN[0] + yN[1]);
 		for (int k = 0; k < nb; k++) {
 			if (arm[k] || tw[k] <= 0.f) continue;
-			const float th = X[k * 2] / rho0, y = X[k * 2 + 1], ath = fabsf(th);
+			const float* p = &S[k * 3];
+			const float th = atan2f(p[0] - x0, z0 - p[2]), y = p[1], ath = fabsf(th);
 			if (ath < 0.50f || ath > 1.20f || y > yRib + 0.015f || y < yRib - 0.13f) continue;
 			const float g = Smooth01((ath - 0.50f) / 0.18f) * Smooth01((1.20f - ath) / 0.18f)
 				* Smooth01((yRib + 0.015f - y) / 0.03f) * Smooth01((y - (yRib - 0.13f)) / 0.03f) * tw[k];
@@ -4074,8 +4058,14 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		}
 	}
 	if (ne > nb) {
-		// 服は体の完成形の動きだけを写す。山を服で作り直すと穴と突起になる。腹側・同じ左右だけ。
-		const float TR = 0.018f, inv2 = 1.f / (2.f * TR * TR), cut = 25.f * TR * TR;
+		// 服にも S と同じ狭い突起が焼き込まれているので、素体の完成形との差（P - S = 突起消去 + 広いドーム）を写す。
+		// 揺れの重み jig には山の成分 D を写す。
+		const float TR = 0.020f, inv2 = 1.f / (2.f * TR * TR), cut = 20.f * TR * TR;
+		const float yMid = 0.5f * (yN[0] + yN[1]);
+		const float dzPeak = 0.5f * ((P[br.kn[0] * 3 + 2] - S[br.kn[0] * 3 + 2]) + (P[br.kn[1] * 3 + 2] - S[br.kn[1] * 3 + 2]));
+		const float dyPeak = 0.5f * ((P[br.kn[0] * 3 + 1] - S[br.kn[0] * 3 + 1]) + (P[br.kn[1] * 3 + 1] - S[br.kn[1] * 3 + 1]));
+		float cMin = 1e9f;
+		for (int k = nb; k < ne; k++) if (P[k * 3 + 1] < cMin) cMin = P[k * 3 + 1];
 		float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
 		cand.clear();
 		for (int k = 0; k < nb; k++) {
@@ -4107,11 +4097,22 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 			}
 			if (sw < 1e-6f) continue;
 			const float inv = fade / sw;
+			for (int a = 0; a < 3; a++) { w3[a] *= inv; d3[a] *= inv; }
+			// 水着は胸から股で終わる（yMin > 0.70）ので谷間を見せる。シャツやドレスは谷の布も前へ渡す。
+			const float wMid = (cMin < 0.65f ? 1.f : 0.f) * (1.f - Smooth01(fabsf(sx) / 0.048f))
+				* Smooth01((c[1] - (yMid - 0.44f * W)) / 0.035f) * Smooth01((yMid + 0.055f - c[1]) / 0.035f) * fade;
+			if (wMid > 0.f && dzPeak < 0.f) {
+				const float zSpan = dzPeak * 0.58f * wMid;
+				if (zSpan < w3[2]) {
+					w3[2] = zSpan;
+					w3[1] = fminf(w3[1], dyPeak * 0.50f * wMid);
+				}
+			}
 			for (int a = 0; a < 3; a++) {
-				D[k * 3 + a] = d3[a] * inv;
-				P[k * 3 + a] = c[a] + w3[a] * inv;
+				D[k * 3 + a] = d3[a];
+				P[k * 3 + a] = c[a] + w3[a];
+			}
 		}
-	}
 	}
 	// 面法線をバインドと形で積み、差を元の法線へ足す。
 	U.resize(nv * 3); L.resize(nv * 3);
@@ -4276,6 +4277,7 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 		if (j < 0 || j >= md.nJ) return FALSE;
 		M4 b = MInverse(md.invBind[j]);
 		o[0] = b.m[12]; o[1] = b.m[13]; o[2] = b.m[14];
+		if (j < 64) { o[0] += nc.jOff[j][0]; o[1] += nc.jOff[j][1]; o[2] += nc.jOff[j][2]; }
 		return TRUE;
 	};
 	const int jChest = joint("Chest") >= 0 ? joint("Chest") : joint("Torso");
@@ -4287,7 +4289,8 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 	nc.softBone[2] = jLA[0] >= 0 ? jLA[0] : jUA[0];
 	nc.softBone[3] = jUA[1];
 	nc.softBone[4] = jLA[1] >= 0 ? jLA[1] : jUA[1];
-	auto armRadius = [&](int ja, int jb, const float* A, const float* B) {
+	// 腕の太さは端ごとに測る（t0〜t1 の帯）。区間全体の最大だと、肩の太さで肘や手首の袖まで押し広げてこぶになる。
+	auto armRadius = [&](int ja, int jb, const float* A, const float* B, float t0, float t1) {
 		V3 ax = v3(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
 		const float L = Len(ax);
 		if (L < 0.05f) return 0.042f;
@@ -4302,32 +4305,29 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 			if (wl < 180) continue;
 			const V3 q = v3(V[k].p[0] - A[0], V[k].p[1] - A[1], V[k].p[2] - A[2]);
 			const float t = Clampf(Dot(q, ax) / L, 0.f, 1.f);
+			if (t < t0 || t > t1) continue;
 			const float dist = Len(q - ax * (t * L));
 			if (dist > 0.12f) continue;
 			if (dist > r) r = dist;
 			got++;
 		}
-		return got >= 6 ? Clampf(r + 0.010f, 0.034f, 0.080f) : 0.045f;
+		return got >= 4 ? Clampf(r + 0.008f, 0.030f, 0.080f) : 0.042f;
 	};
 	for (int side = 0; side < 2; side++) {
 		float A[3], B[3], H[3];
 		if (jUA[side] >= 0 && jLA[side] >= 0 && bindPos(jUA[side], A) && bindPos(jLA[side], B)) {
 			const int c = side * 2;
-			const float rad = armRadius(jUA[side], jLA[side], A, B);
 			nc.armJ[c][0] = jUA[side]; nc.armJ[c][1] = jLA[side];
-			nc.armA[c][0] = A[0]; nc.armA[c][1] = A[1]; nc.armA[c][2] = A[2]; nc.armA[c][3] = rad;
-			nc.armB[c][0] = B[0]; nc.armB[c][1] = B[1]; nc.armB[c][2] = B[2]; nc.armB[c][3] = rad;
+			nc.armA[c][0] = A[0]; nc.armA[c][1] = A[1]; nc.armA[c][2] = A[2]; nc.armA[c][3] = armRadius(jUA[side], jLA[side], A, B, 0.f, 0.35f);
+			nc.armB[c][0] = B[0]; nc.armB[c][1] = B[1]; nc.armB[c][2] = B[2]; nc.armB[c][3] = armRadius(jUA[side], jLA[side], A, B, 0.65f, 1.f);
 		}
 		if (jLA[side] >= 0 && jHand[side] >= 0 && bindPos(jLA[side], B) && bindPos(jHand[side], H)) {
 			const int c = side * 2 + 1;
-			const float rad = armRadius(jLA[side], jHand[side], B, H);
 			nc.armJ[c][0] = jLA[side]; nc.armJ[c][1] = jHand[side];
-			nc.armA[c][0] = B[0]; nc.armA[c][1] = B[1]; nc.armA[c][2] = B[2]; nc.armA[c][3] = rad;
-			nc.armB[c][0] = H[0]; nc.armB[c][1] = H[1]; nc.armB[c][2] = H[2]; nc.armB[c][3] = rad;
+			nc.armA[c][0] = B[0]; nc.armA[c][1] = B[1]; nc.armA[c][2] = B[2]; nc.armA[c][3] = armRadius(jLA[side], jHand[side], B, H, 0.f, 0.35f);
+			nc.armB[c][0] = H[0]; nc.armB[c][1] = H[1]; nc.armB[c][2] = H[2]; nc.armB[c][3] = armRadius(jLA[side], jHand[side], B, H, 0.65f, 1.f);
 		}
 	}
-	BOOL f12 = FALSE;
-	if (!strcmp(md.name, "HumF1") || !strcmp(md.name, "HumF2")) f12 = TRUE;
 	const int GX = 8, GY = 5, GN = GX * GY;
 	int chestBase = -1;
 	if (jig && jChest >= 0 && moved && root) {
@@ -4370,7 +4370,7 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 			}
 		}
 		// 1/2 系は格子に載せると面が折れるので、胸下は CPU の垂らしだけ。当たりはあとで頂点 CS。
-		if (!f12 && ok[0] && ok[1] && looseN >= 20 && x1 > x0 + 0.04f) {
+		if (0 && ok[0] && ok[1] && looseN >= 20 && x1 > x0 + 0.04f) {
 			float yTop = (apex[0][1] + apex[1][1]) * 0.5f + 0.015f;
 			if (yBot > yTop - 0.06f) yBot = yTop - 0.08f;
 			x0 -= 0.02f; x1 += 0.02f;
@@ -4446,13 +4446,13 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 						o.p[0] = p[0]; o.p[1] = p[1]; o.p[2] = p[2];
 						o.p[3] = Clampf(moved[root[i]] / 0.02f, 0.35f, 1.f);
 						verts.push_back(o);
-						if (!f12 && jig && o.p[3] > 0.65f) memset(&jig[(size_t)(nb + i) * 3], 0, 12);
+						if (jig && o.p[3] > 0.65f) memset(&jig[(size_t)(nb + i) * 3], 0, 12);
 					}
 				} else chestBase = -1;
 			}
 		}
 	}
-	for (int side = 0; !f12 && side < 2 && nodes.size() + 8 <= Renderer::SOFT_MAX; side++) {
+	for (int side = 0; side < 2 && nodes.size() + 8 <= Renderer::SOFT_MAX; side++) {
 		float A[3], H[3];
 		if (jUA[side] < 0 || jHand[side] < 0 || !bindPos(jUA[side], A) || !bindPos(jHand[side], H)) continue;
 		const int armJ[3] = { jUA[side], jLA[side] >= 0 ? jLA[side] : jUA[side], jHand[side] };
@@ -4588,6 +4588,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		if (j < 0 || j >= md.nJ) return FALSE;
 		M4 b = MInverse(md.invBind[j]);
 		o[0] = b.m[12]; o[1] = b.m[13]; o[2] = b.m[14];
+		if (j < 64) { o[0] += nc.jOff[j][0]; o[1] += nc.jOff[j][1]; o[2] += nc.jOff[j][2]; }
 		return TRUE;
 	};
 	const int jHips = jointOf("Hips");
@@ -4645,11 +4646,19 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		}
 	}
 	for (int i = 0; i < n; i++) { moved[i] = 0.f; oldZ[i] = V[nb + i].p[2]; }
+	BYTE armQ[256] = {};
+	for (int j = 0; j < md.nJ && j < 256; j++) {
+		for (int a = j, g = 0; a >= 0 && a < md.nJ && g < 64; a = md.parent[a], g++) {
+			if (a == jUA[0] || a == jUA[1]) { armQ[j] = 1; break; }
+		}
+	}
 
 	// 胸の下。頂（素体の胸でいちばん前の点）から垂らした布は、下の体（お腹・腰）に触れる所までまっすぐ張る。
 	// 縦の列ごとに、頂から下の布の前面へ引いた接線（前面をどこも横切らない一番前の線）より奥の布を前へ出す。
-	// 谷間は左右の頂を結ぶ線で渡す。横と背中は触らない（法線が前か下を向く布だけ）。
-	if (jig) {
+	// 水着（衣装の下端が y > 0.65m）は肌に密着するので張らない。
+	float cosYMin = 1e9f;
+	for (int i = 0; i < n; i++) if (V[nb + i].p[1] < cosYMin) cosYMin = V[nb + i].p[1];
+	if (jig && cosYMin < 0.65f) {
 		float apex[2][3] = {}, apexJ[2][3] = {};
 		int ok[2] = { 0, 0 };
 		for (int k = 0; k < nb; k++) {
@@ -4666,6 +4675,11 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		if (ok[0] && ok[1] && apex[1][0] - apex[0][0] > 0.04f) {
 			const float ya = (apex[0][1] + apex[1][1]) * 0.5f, yLow = hipY - 0.12f;
 			const float zFront = apex[0][2] < apex[1][2] ? apex[0][2] : apex[1][2];
+			float S_stern = zFront + 0.03f;
+			for (int k = 0; k < nb; k++) {
+				const float* p = V[k].p;
+				if (fabsf(p[0] - cx) < 0.015f && fabsf(p[1] - ya) < 0.025f && p[2] < 0.f) S_stern = fminf(S_stern, p[2]);
+			}
 			auto apexZ = [&](float x, float* u) {
 				if (x > apex[0][0] && x < apex[1][0]) {
 					*u = (x - apex[0][0]) / (apex[1][0] - apex[0][0]);
@@ -4681,46 +4695,76 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			Buf<float> fz;
 			fz.arena = 1;
 			fz.fill(NBIN * NY, 1e9f);
-			float slope[NBIN], yTan[NBIN];
-			for (int b = 0; b < NBIN; b++) { slope[b] = 0.f; yTan[b] = ya; }
+			float slope[NBIN], yTan[NBIN], zTop[NBIN];
+			for (int b = 0; b < NBIN; b++) { slope[b] = 0.f; yTan[b] = ya; zTop[b] = zFront; }
 			if (fz.size() == NBIN * NY && ya - yLow > 0.08f) {
 				for (int i = 0; i < n; i++) {
 					if (root[i] != i) continue;
 					const float* p = V[nb + i].p;
 					const float* nr = V[nb + i].n;
-					if (p[1] > ya || p[1] < yLow || p[2] > zFront + 0.40f || -nr[2] - 0.5f * nr[1] < 0.2f) continue;
-					const int b = binOf(p[0]), yb = (int)((ya - p[1]) / 0.01f);
-					if (b < 0 || b >= NBIN || yb < 0 || yb >= NY) continue;
+					if (p[1] > ya + 0.02f || p[1] < yLow || p[2] > zFront + 0.40f || -nr[2] - 0.5f * nr[1] < 0.2f) continue;
+					const int b = binOf(p[0]), yb = Clampi((int)((ya - p[1]) / 0.01f), 0, NY - 1);
+					if (b < 0 || b >= NBIN) continue;
 					float& z = fz[b * NY + yb];
 					if (p[2] < z) z = p[2];
 				}
-				// 頂からの接線。頂より 3〜30cm 下で、傾き（下がるほど奥へ）がいちばん小さい所に触れる。
-				// 30cm より下まで張るとお腹全体が覆われて妊婦のように見えるので、そこで打ち切る。
-				float sl[NBIN];
+				// 各列の始点は、素体の頂の包絡（左右はなだらかに下げ、谷も少し持ち上げる）と、その列の胸の前面のうち前にある方。
+				// リボン等だけ出た列を横へ広げてから、ガウスで滑らかにする。
+				const float zAvg = 0.5f * (apex[0][2] + apex[1][2]);
+				const float zSpanC = zAvg + (S_stern - zAvg) * 0.35f;
+				float zRaw[NBIN];
 				for (int b = 0; b < NBIN; b++) {
-					float u;
-					const float zx = apexZ(cx + ((float)(b - NBIN / 2) + 0.5f) * 0.01f, &u);
-					float best = 1e9f, yb = ya;
-					for (int k = 3; k < NY && k <= 30; k++) {
-						const float z = fz[b * NY + k];
-						if (z > 1e8f) continue;
-						const float dy = (float)k * 0.01f;
-						const float s = (z - zx) / dy;
-						if (s < best) { best = s; yb = ya - dy; }
+					const float xb = cx + ((float)(b - NBIN / 2) + 0.5f) * 0.01f;
+					float z0b = 0.f;
+					if (xb >= apex[0][0] && xb <= apex[1][0]) {
+						const float u0 = (xb - apex[0][0]) / (apex[1][0] - apex[0][0]);
+						const float lin = apex[0][2] + (apex[1][2] - apex[0][2]) * u0;
+						const float mid = sinf(u0 * 3.14159265f);
+						z0b = lin + (zSpanC - lin) * (mid * mid) * 0.55f;
+					} else {
+						const int s = xb < cx ? 0 : 1;
+						const float d = fabsf(xb - apex[s][0]);
+						z0b = apex[s][2] + 0.032f * Smooth01(d / 0.065f);
 					}
-					sl[b] = best < 1e8f ? best : 0.f;
-					yTan[b] = best < 1e8f ? yb : ya;
+					z0b -= 0.004f;
+					for (int k = 0; k <= 3 && k < NY; k++) if (fz[b * NY + k] < z0b) z0b = fz[b * NY + k];
+					zRaw[b] = z0b;
 				}
-				// 列ごとの傾きの差で布に段が付かないよう、横にならす。
+				float zDil[NBIN];
 				for (int b = 0; b < NBIN; b++) {
-					float a = 0.f, w = 0.f;
-					for (int d = -2; d <= 2; d++) {
+					float m = zRaw[b];
+					for (int d = -2; d <= 2; d++) if (b + d >= 0 && b + d < NBIN && zRaw[b + d] < m) m = zRaw[b + d];
+					zDil[b] = m;
+				}
+				for (int b = 0; b < NBIN; b++) {
+					float sw = 0.f, sz = 0.f;
+					for (int d = -6; d <= 6; d++) {
 						const int c = b + d;
-						if (c < 0 || c >= NBIN || yTan[c] >= ya) continue;
-						a += sl[c]; w += 1.f;
+						if (c < 0 || c >= NBIN) continue;
+						const float w = expf(-0.5f * (float)(d * d) / 6.25f);
+						sw += w; sz += w * zDil[c];
 					}
-					slope[b] = w > 0.f ? a / w : 0.f;
+					zTop[b] = sz / sw;
 				}
+				// 胸の下の着地は全列で揃える（頂より 16cm 下、傾き 0.14 = 16cm で 2.2cm 奥）。列ごとに別のお腹の点へ触れると縦の折れ目が出る。
+				for (int b = 0; b < NBIN; b++) {
+					yTan[b] = ya - 0.16f;
+					float zBot = zTop[b] + 0.14f * 0.16f;
+					for (int k = 14; k <= 18 && k < NY; k++) if (fz[b * NY + k] < zBot) zBot = fz[b * NY + k];
+					slope[b] = (zBot - zTop[b]) / 0.16f;
+				}
+				float slSm[NBIN];
+				for (int b = 0; b < NBIN; b++) {
+					float sw = 0.f, ss = 0.f;
+					for (int d = -5; d <= 5; d++) {
+						const int c = b + d;
+						if (c < 0 || c >= NBIN) continue;
+						const float w = expf(-0.5f * (float)(d * d) / 4.f);
+						sw += w; ss += w * slope[c];
+					}
+					slSm[b] = ss / sw;
+				}
+				for (int b = 0; b < NBIN; b++) slope[b] = slSm[b];
 			}
 			for (int i = 0; i < n; i++) {
 				if (root[i] != i) continue;
@@ -4732,19 +4776,28 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 				const BOOL between = x > apex[0][0] && x < apex[1][0];
 				const int s = x < cx ? 0 : 1;
 				float u = 0.f;
-				const float zx = apexZ(x, &u);
-				float wl = between ? 1.f : 1.f - Smooth01((fabsf(x - apex[s][0]) - 0.03f) / 0.07f);
-				wl *= Smooth01((-nr[2] - 0.5f * nr[1] - 0.15f) / 0.35f);
-				if (wl <= 0.f) continue;
-				float zl, wv = 1.f, t = 0.f;
-				// カップと襟ぐりは作者の形のまま。頂より上を前へ出すと、胸の中央が割れる。
-				if (p[1] > ya - 0.06f) continue;
+				(void)apexZ(x, &u);
+				float wl = between ? 1.f : 1.f - Smooth01((fabsf(x - apex[s][0]) - 0.04f) / 0.07f);
+				wl *= Smooth01((-nr[2] - 0.5f * nr[1] - 0.10f) / 0.30f);
+				// 胸の横に下りた袖の内側も前を向く。腕の布を接線へ引くと、肘と脇に角が立つ。
 				{
-					const int b = binOf(x);
-					if (b < 0 || b >= NBIN || yTan[b] >= ya || p[1] < yTan[b]) continue;
-					t = (ya - p[1]) / (ya - yTan[b]);
-					zl = zx + slope[b] * (ya - p[1]);
+					int aw = 0;
+					for (int c = 0; c < 4; c++) if (V[nb + i].w[c] && V[nb + i].j[c] < 256 && armQ[V[nb + i].j[c]]) aw += V[nb + i].w[c];
+					wl *= 1.f - Smooth01((float)aw / 90.f);
 				}
+				if (wl <= 0.f) continue;
+				// 頂のすぐ下から滑らかに張り始め、下の端（yTan）でも滑らかに 0 へ落としてお腹に段を作らない。
+				const float bF = (x - cx) / 0.01f + (float)(NBIN / 2) - 0.5f;
+				const int b = Clampi((int)floorf(bF), 0, NBIN - 2);
+				const float wb = Clampf(bF - (float)b, 0.f, 1.f);
+				const float yt = yTan[b] * (1.f - wb) + yTan[b + 1] * wb;
+				if (yt >= ya || p[1] < yt) continue;
+				const float t = (ya - p[1]) / (ya - yt);
+				const float wv = Smooth01((ya - 0.005f - p[1]) / 0.032f) * Smooth01((1.f - t) / 0.25f);
+				if (wv <= 0.f) continue;
+				const float zt = zTop[b] * (1.f - wb) + zTop[b + 1] * wb;
+				const float slb = slope[b] * (1.f - wb) + slope[b + 1] * wb;
+				const float zl = zt + slb * (ya - p[1]) - 0.005f * sinf(t * 3.14159265f);
 				const float mv = (p[2] - zl) * wl * wv;
 				if (mv <= 0.0005f) continue;
 				moved[i] = mv;
@@ -4827,7 +4880,60 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		if (p[1] < cMin[c]) cMin[c] = p[1];
 		if (fabsf(p[0] - cx) < 0.035f && p[1] < cCen[c]) cCen[c] = p[1];
 	}
-	auto skirtComp = [&](int c) { return cMin[c] < hipY - 0.12f && cCen[c] < 1e8f && cCen[c] - cMin[c] < 0.10f; };
+	// 裾の輪。部品の縁（面が片側にしかない辺）をつないだ輪のうち、いちばん低い縁の点を含む輪が
+	// 左右の脚をまたいでいればスカート。短パンや水着は脚ごとに輪が分かれ、内股の裾が中央へ来ても脚をまたがない。
+	Buf<int> lowB, ring;
+	Buf<float> rLo, rHi;
+	Buf<BYTE> onB;
+	lowB.arena = ring.arena = rLo.arena = rHi.arena = onB.arena = 1;
+	lowB.fill(n, -1); ring.resize(n); rLo.fill(n, 1e9f); rHi.fill(n, -1e9f); onB.fill(n, 0);
+	if (lowB.size() < n || ring.size() < n || rLo.size() < n || rHi.size() < n || onB.size() < n) return;
+	for (int i = 0; i < n; i++) ring[i] = i;
+	{
+		Buf<unsigned long long> ek;
+		ek.arena = 1;
+		ek.reserve(cosTri.size());
+		for (int t = 0; t + 2 < cosTri.size(); t += 3) {
+			int id[3] = { cosTri[t], cosTri[t + 1], cosTri[t + 2] };
+			if (id[0] >= n || id[1] >= n || id[2] >= n) continue;
+			for (int e = 0; e < 3; e++) {
+				const unsigned a = (unsigned)root[id[e]], b = (unsigned)root[id[(e + 1) % 3]];
+				if (a == b) continue;
+				ek.push_back(a < b ? ((unsigned long long)a << 32) | b : ((unsigned long long)b << 32) | a);
+			}
+		}
+		const int ne = ek.size();
+		if (ne > 0) qsort(ek.data(), ne, sizeof(unsigned long long), CmpU64);
+		for (int e = 0; e < ne; ) {
+			int f = e + 1;
+			while (f < ne && ek[f] == ek[e]) f++;
+			if (f - e == 1) {
+				const int a = (int)(ek[e] >> 32), b = (int)(ek[e] & 0xFFFFFFFFu);
+				const int ra = UfFind(ring, a), rb = UfFind(ring, b);
+				if (ra != rb) ring[ra] = rb;
+				for (int k = 0; k < 2; k++) {
+					const int v = k ? b : a;
+					const int c = UfFind(par, v);
+					if (lowB[c] < 0 || V[nb + v].p[1] < V[nb + lowB[c]].p[1]) lowB[c] = v;
+					onB[v] = 1;
+				}
+			}
+			e = f;
+		}
+		for (int v = 0; v < n; v++) {
+			if (!onB[v]) continue;
+			const int r = UfFind(ring, v);
+			const float x = V[nb + v].p[0] - cx;
+			if (x < rLo[r]) rLo[r] = x;
+			if (x > rHi[r]) rHi[r] = x;
+		}
+	}
+	auto hemRing = [&](int c) -> BOOL {
+		if (lowB[c] < 0) return TRUE;
+		const int r = UfFind(ring, lowB[c]);
+		return rLo[r] < -0.04f && rHi[r] > 0.04f;
+	};
+	auto skirtComp = [&](int c) { return cMin[c] < hipY - 0.12f && cCen[c] < 1e8f && cCen[c] - cMin[c] < 0.10f && hemRing(c); };
 
 	// 脚の形。太もも・すねごとに骨に沿って PT 段・まわり PF 分割し、体の頂点のいちばん外の半径に布の厚み 6mm を足す。
 	// 前（-Z）を骨に直交させた向きを φ=0 にする。動いた布は骨の逆行列でこの空間へ戻して比べる。
@@ -5092,7 +5198,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		const float rad = sqrtf((s.p[0] - cx) * (s.p[0] - cx) + (s.p[2] - cz) * (s.p[2] - cz));
 		for (int e = 0; e < 4; e++) {
 			if (w[e] <= 0.f) continue;
-			rs[id[e]] += rad * w[e];
+			if (rad > rs[id[e]]) rs[id[e]] = rad;
 			rw[id[e]] += w[e];
 			for (int c = 0; c < 4; c++) {
 				if (!s.w[c] || s.j[c] >= NJW) continue;
@@ -5152,7 +5258,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		const int q = r * K + s, f = from[q];
 		ClothGpuN& o = nodes[q];
 		memset(&o, 0, sizeof(o));
-		const float R = rs[f] / rw[f];
+		const float R = rs[f];
 		const float th = ((float)s / (float)K - 0.5f) * PI2;
 		o.x[0] = cx + R * sinf(th);
 		o.x[1] = y0 - span * (float)r / (float)M;
@@ -5210,12 +5316,12 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			}
 		}
 	}
+	// 格子の点がもともと脚の筒の中にあるときは、その深さを allow に足して静止時の筒の押し出しを消す。
+	// 長いドレスの背中は脚の筒に触れていて、点を外へ押し出すと St[3*NMAX] が膨らみ、同じ所をもう一度 Collide して裾が波打つ。
 	auto allowOf = [&](float c, float e) {
 		const float r = 0.07f, h = fminf(e * 0.5f, r);
 		const float margin = Clampf(r - sqrtf(r * r - h * h), 0.004f, 0.018f);
-		(void)c;
-		// 面が弦になって脚の丸みへ沈む分だけ残す。作りの食い込みを許すと、足が裾から出る。
-		return -margin;
+		return -margin + (c < 0.008f ? 0.008f - c : 0.f);
 	};
 	for (int q = 0; q < NN; q++) nodes[q].q[1] = allowOf(nodes[q].q[1], span / (float)M);
 
@@ -5248,7 +5354,8 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		memcpy(o.p, s.p, 12);
 		o.p[3] = m;
 		memcpy(o.n, s.n, 12);
-		o.n[3] = allowOf(clearance(s.p), edge[root[i]]);
+		const float rj = 0.07f, hj = fminf(edge[root[i]] * 0.5f, rj);
+		o.n[3] = -Clampf(rj - sqrtf(rj * rj - hj * hj), 0.004f, 0.018f);
 		verts.push_back(o);
 	}
 	if (verts.size() < 16) { nodes.clear(); verts.clear(); nc.segN = 0; return; }
@@ -5298,16 +5405,14 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			const BOOL isArm = d >= 0 && d < 256 && armBone[d];
 			if (!isLeg && !isArm) continue;
 			const float* p = V[k].p;
-			// 見せてよいのは当たりが全部の太さになった所だけ。太ももの当たりは股より下（hipY-0.07）から 12cm かけて
-			// 太くなり、腰と混ぜた頂点は当たりの形に入れていないので、どちらも布を突き抜ける。2cm の余裕を取って隠す。
+			// スカートの内側の脚も下から見たときに欠けないよう描く。股の付け根（腰と混ざる帯）だけ残さず、靴やタイツが 8mm 以内に密着する所だけ 1 にする。
 			if (isLeg) {
-				if (p[1] > hipY - 0.21f) continue;
-				if (yMin < hipY - 0.35f && p[1] < hipY - 0.32f) continue;
+				if (p[1] > hipY - 0.14f) continue;
 			}
 			int lw = 0;
 			const BYTE* bone = isLeg ? legJ : armBone;
 			for (int c = 0; c < 4; c++) if (V[k].w[c] && V[k].j[c] < 256 && bone[V[k].j[c]]) lw += V[k].w[c];
-			if (lw < 204) continue;
+			if (lw < 180) continue;
 			float nx = V[k].n[0], ny = V[k].n[1], nz = V[k].n[2];
 			float nl = sqrtf(nx * nx + ny * ny + nz * nz);
 			BOOL hit = FALSE;
@@ -5369,44 +5474,6 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			}
 			expose[k] = hit ? 1 : 2;
 		}
-		// 腰から裾まで、スカートの内側にある素体（3）。ゆるいドレスは脚から 8mm 以上離れるので、上の判定だけだと
-		// ふくらはぎと足が「見えてよい」に戻り、布を突き抜ける。周の布が三方にある区画より内なら、裾の下まで隠す。
-		// 裾より下と、布の外（腕、短いスカートの下の足）は残る。
-		enum { HK = 32, HB = 64 };
-		const float hTop = y0 + 0.15f, hBot = yMin - 0.08f, hDy = (hTop - hBot) / (float)HB;
-		float rOut[HB][HK];
-		for (int b = 0; b < HB; b++) for (int s = 0; s < HK; s++) rOut[b][s] = -1.f;
-		auto hBin = [&](const float* p, int* b, int* s, float* r) {
-			const float dx = p[0] - cx, dz = p[2] - cz;
-			*r = sqrtf(dx * dx + dz * dz);
-			*b = (int)floorf((p[1] - hBot) / hDy);
-			*s = ((int)floorf((atan2f(dx, dz) / PI2 + 0.5f) * (float)HK) % HK + HK) % HK;
-			return *b >= 0 && *b < HB;
-		};
-		for (int i = 0; i < n; i++) {
-			if (!isSk[i]) continue;
-			int b, s; float r;
-			if (hBin(V[nb + i].p, &b, &s, &r) && r > rOut[b][s]) rOut[b][s] = r;
-		}
-		for (int pass = 0; pass < 3; pass++) for (int b = 0; b < HB; b++) for (int s = 0; s < HK; s++) {
-			if (rOut[b][s] > 0.f) continue;
-			float best = -1.f;
-			if (b > 0) best = fmaxf(best, rOut[b - 1][s]);
-			if (b < HB - 1) best = fmaxf(best, rOut[b + 1][s]);
-			best = fmaxf(best, rOut[b][(s + 1) % HK]);
-			best = fmaxf(best, rOut[b][(s + HK - 1) % HK]);
-			rOut[b][s] = best;
-		}
-		for (int k = 0; k < nb; k++) {
-			if (expose[k] == 1 || expose[k] == 3) continue;
-			const int d = DomJoint(V[k]);
-			if (d >= 0 && d < 256 && armBone[d]) continue;
-			int b, s; float r;
-			if (!hBin(V[k].p, &b, &s, &r)) continue;
-			float cov = 1e9f;
-			for (int e = -1; e <= 1; e++) cov = fminf(cov, rOut[b][(s + e + HK) % HK]);
-			if (cov > 0.f && r < cov - 0.012f) expose[k] = 3;
-		}
 	}
 	nc.clothN = NN;
 	nc.clothVN = verts.size();
@@ -5423,6 +5490,16 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 	const Model& md = models[model];
 	const AvaModel* am = NULL;
 	for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { am = &x; break; }
+	// 区間行列を持たない素体（冒険者・王・中世・魔女）にも、同じ性別の 0 系の区間行列を借りて同じ手順で着せる。
+	// 骨の並びは違うが、関節は名前で引くので区間番号のまま通る。
+	if (!am) {
+		const BOOL fem = strncmp(md.name, "HumF", 4) == 0;
+		const BOOL mal = strncmp(md.name, "HumM", 4) == 0;
+		if (fem || mal) {
+			const char* ref = fem ? "HumF0" : "HumM0";
+			for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, ref)) { am = &x; break; }
+		}
+	}
 	if (!am || md.rig < 0 || md.rig >= (int)rigs.size()) return FALSE;
 	int ci = -1;
 	for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
@@ -5573,127 +5650,47 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			}
 		}
 		const CreatureSkin* own = NULL;
-		BOOL mhFace = FALSE;
+		BOOL mhFace = TRUE;
 		for (const CreatureSkin& hs : m_skins) if (hs.model == model) {
 			if (!own && hs.headTri.size() >= 9) own = &hs;
-			if (hs.faceSet == am->gender && hs.faceN == body.nFace) mhFace = TRUE;
 		}
-		Buf<BYTE> mhHead;
-		Buf<int> headMap;
-		mhHead.arena = 1;
-		headMap.arena = 1;
+		// 共通素体（body）はもともと 0 番〜nFace-1 番に溶接済みの頭を持っていて、首の輪と頂点も色も法線も一続きになっている。
+		// ここで頭を切り落として素体側の頭を継ぎ直すと、首と顎の境で三角形が全て消えて穴と黒い筋になる。
 		int nAdd = 0;
-		if (own && !mhFace && headSeg >= 0) {
-			headMap.fill((int)own->bind.size(), -1);
-			if (headMap.size() == own->bind.size()) {
-				for (size_t t = 0; t + 2 < own->headTri.size(); t++) {
-					int v = own->headTri[t];
-					if (v >= 0 && v < (int)own->bind.size() && headMap[v] < 0) headMap[v] = nAdd++;
-				}
-			}
-		}
 		// 胸の周りの体と服の三角形を細かく割る。並びは [体][体の新][服][服の新]（元の体の番号は変わらない）。
-		// 頭を継ぐ分は残す（継げなくなると顔が変わる）。
 		static Buf<int> bOff;
 		static Buf<WORD> bTri, cTri;
 		BustRef br;
 		int nbA = (int)nb, nvA = (int)nv;
 		{
-			const int reserve = (own && !mhFace && nAdd > 30 && (int)nv + nAdd <= 64000) ? nAdd : 0;
-			const int maxAdd = (reserve ? 64000 - reserve : 65000) - (int)nv;
+			const int maxAdd = 65000 - (int)nv;
 			if (!RefineBust(sk, bx, bn, (int)nb, (int)nv, body.bodyTri, cos.keep, cos.tri, armJ, maxAdd, bOff, bTri, cTri, nbA, nvA, br)) {
 				g_avaNeedReset = 1;
 				return holdBare();
 			}
 		}
-		const BOOL graft = own && !mhFace && nAdd > 30 && nvA + nAdd <= 64000;
+		const BOOL graft = FALSE;
 		int faceBase = 0;
-		if (graft) {
-			mhHead.fill(nb, 0);
-			for (size_t k = 0; k < nb && k < mhHead.size(); k++) {
-				const CSkinV& s = body.m.v[k];
-				int best = 0, bw = -1;
-				for (int c = 0; c < 4; c++) if ((int)s.w[c] > bw) { bw = (int)s.w[c]; best = s.j[c]; }
-				mhHead[k] = (best == headSeg) ? 1 : 0;
-			}
-		}
+		(void)mhFace; (void)own; (void)nAdd; (void)faceBase;
 		Buf<WORD> idx;
 		idx.arena = 1;
-		idx.reserve(bTri.size() + body.extraTri.size() + cTri.size() + (graft ? own->headTri.size() : 0));
+		idx.reserve(bTri.size() + body.extraTri.size() + cTri.size());
 		for (size_t t = 0; t * 3 < body.bodyTri.size(); t++) {
 			if (t / 8 >= cos.keep.size() || !((cos.keep[t / 8] >> (t & 7)) & 1)) continue;
 			for (int ch = bOff[(int)t]; ch < bOff[(int)t + 1]; ch++) {
 				int a = bTri[ch * 3], b = bTri[ch * 3 + 1], c = bTri[ch * 3 + 2];
-			if (graft && a < (int)mhHead.size() && b < (int)mhHead.size() && c < (int)mhHead.size()
-				&& mhHead[a] && mhHead[b] && mhHead[c]) continue;
-			idx.push_back((WORD)a); idx.push_back((WORD)b); idx.push_back((WORD)c);
+				idx.push_back((WORD)a); idx.push_back((WORD)b); idx.push_back((WORD)c);
 			}
 		}
-		if (!graft) for (size_t k = 0; k < body.extraTri.size(); k++) idx.push_back(body.extraTri[k]);
+		for (size_t k = 0; k < body.extraTri.size(); k++) idx.push_back(body.extraTri[k]);
 		for (WORD w : cTri) idx.push_back((WORD)(w + nbA));
-		if (graft) {
-			DWORD skinC = 0;
-			double sr = 0, sg = 0, sb = 0; int nsamp = 0;
-			for (int v = 0; v < (int)headMap.size(); v++) if (headMap[v] >= 0) {
-				DWORD c = own->bind[v].c;
-				float r = (c & 255) / 255.f, g = ((c >> 8) & 255) / 255.f, b = ((c >> 16) & 255) / 255.f;
-				float y = 0.30f * r + 0.59f * g + 0.11f * b;
-				if (y < 0.12f || y > 0.82f || r + 0.02f < b) continue;
-				sr += r; sg += g; sb += b; nsamp++;
-			}
-			if (nsamp >= 20) {
-				auto q8 = [](double x) { int v = (int)(x * 255.0 + 0.5); return v < 0 ? 0 : (v > 255 ? 255 : v); };
-				skinC = RGBA8(q8(sr / nsamp), q8(sg / nsamp), q8(sb / nsamp));
-				for (size_t k = 0; k < (size_t)nbA && k < sk.cloth.size(); k++)
-					if (!sk.cloth[k] && (k >= mhHead.size() || !mhHead[k])) sk.bind[k].c = skinC;
-			}
-			const int base = (int)sk.bind.size();
-			faceBase = base;
-			sk.bind.resize(base + nAdd);
-			sk.cloth.resize(base + nAdd);
-			sk.meshHair.fill(base + nAdd, 0);
-			if (hasBust) {
-				size_t z0 = bx.size();
-				bx.resize((base + nAdd) * 3);
-				bn.resize((base + nAdd) * 3);
-				for (size_t i = z0; i < bx.size(); i++) { bx[i] = 0.f; bn[i] = 0.f; }
-			}
-			for (int v = 0; v < (int)headMap.size(); v++) if (headMap[v] >= 0) {
-				CSkinV& d = sk.bind[base + headMap[v]];
-				d = own->bind[v];
-				sk.cloth[base + headMap[v]] = 0;
-				const BOOL strand = v < (int)own->meshHair.size() && own->meshHair[v];
-				if (strand) sk.meshHair[base + headMap[v]] = 1;
-				if (headFit && !strand) {
-					const float dz = d.p[2] - hjc[2];
-					const float face = 1.f - Smooth01((dz + 0.012f) / 0.045f);
-					if (face > 0.05f) {
-						const float k = 1.f + 0.06f * face;
-						d.p[0] = hjc[0] + (d.p[0] - hjc[0]) * k;
-						d.p[2] = hjc[2] + (d.p[2] - hjc[2]) * k;
-						if (d.p[1] > hjc[1] - 0.008f)
-							d.p[1] = hjc[1] + (d.p[1] - hjc[1]) * (1.f + 0.03f * face);
-					}
-				}
-			}
-			for (size_t t = 0; t + 2 < own->headTri.size(); t += 3) {
-				int a = own->headTri[t], b = own->headTri[t + 1], c = own->headTri[t + 2];
-				if (a < 0 || b < 0 || c < 0 || a >= (int)headMap.size() || b >= (int)headMap.size() || c >= (int)headMap.size()
-					|| headMap[a] < 0 || headMap[b] < 0 || headMap[c] < 0) continue;
-				idx.push_back((WORD)(base + headMap[a]));
-				idx.push_back((WORD)(base + headMap[b]));
-				idx.push_back((WORD)(base + headMap[c]));
-			}
-			BindFaceSynth(sk, base, nAdd);
-		}
-		Buf<float> pF0, pCup, nCup;
+		Buf<float> pF0;
 		pF0.arena = 1;
-		pCup.arena = 1;
-		nCup.arena = 1;
-		static Buf<BYTE> limbV;
-		limbV.resize(nvA);
-		int chestSeg = -1;
-		for (int s = 0; s < ns; s++) if (!strcmp(m_avaSeg[s], "Chest")) { chestSeg = s; break; }
+		int chestSeg = -1, neckSeg = -1;
+		for (int s = 0; s < ns; s++) {
+			if (!strcmp(m_avaSeg[s], "Chest")) chestSeg = s;
+			else if (!strcmp(m_avaSeg[s], "Neck")) neckSeg = s;
+		}
 		if (hasBust && amShape != am) {
 			pF0.resize(nvA * 3);
 			if (pF0.size() < nvA * 3) { g_avaNeedReset = 1; return holdBare(); }
@@ -5706,15 +5703,6 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			if (nc.jig.size() < nAll * 3 || bn.size() < nAll * 3) { g_avaNeedReset = 1; return holdBare(); }
 			ShapeCup(sk.bind.data(), nAll, nbA, nvA, bn.data(), cupK, br,
 				bTri.data(), bTri.size() / 3, armJ, idx.data(), (int)idx.size(), nc.jig.data());
-		}
-		if (amShape != am) {
-			pCup.resize(nvA * 3);
-			nCup.resize(nvA * 3);
-			if (pCup.size() < nvA * 3 || nCup.size() < nvA * 3) { g_avaNeedReset = 1; return holdBare(); }
-			for (int k = 0; k < nvA; k++) {
-				for (int a = 0; a < 3; a++) pCup[k * 3 + a] = sk.bind[k].p[a];
-				for (int a = 0; a < 3; a++) nCup[k * 3 + a] = sk.bind[k].n[a];
-			}
 		}
 		// 体は各バインド、胸の差分は Chest だけで載せる（首ウェイトでデコルテが潰れない）。
 		float Lr[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
@@ -5776,7 +5764,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					}
 				}
 			}
-			if (headFit && headOpen > 1.001f && k < (int)nb) {
+			if (0 && headFit && headOpen > 1.001f && k < (int)nb) {
 				int bestS = 0, bestW = -1;
 				for (int c = 0; c < 4; c++) if ((int)d.w[c] > bestW) { bestW = (int)d.w[c]; bestS = d.j[c]; }
 				if (bestS == headSeg && bestW > 160) {
@@ -5792,309 +5780,56 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				}
 			}
 		}
-		// 頭・腕・胴・脚。上の前はブラウス一塊（Vを胸で載せる）。袖は F0 で腕の体に近いものだけ腕。
-		{
-			auto segLimb = [&](int s) -> BYTE {
-				if (s < 0 || s >= ns) return 0;
-				const char* n = m_avaSeg[s];
-				if (!strncmp(n, "Head", 4)) return 4;
-				if (!strncmp(n, "Neck", 4)) return 2;
-				if (strstr(n, "Shoulder") || strstr(n, "Arm") || strstr(n, "Hand")
-					|| strstr(n, "Index") || strstr(n, "Middle") || strstr(n, "Ring")
-					|| strstr(n, "Pinky") || strstr(n, "Thumb")) return 1;
-				if (strstr(n, "Leg") || strstr(n, "Foot") || strstr(n, "Toe")) return 3;
-				if (strstr(n, "Chest") || strstr(n, "Torso") || strstr(n, "Abdomen")
-					|| strstr(n, "Hips") || strstr(n, "Spine") || strstr(n, "Pelvis")) return 2;
-				return 0;
-			};
-			for (int k = 0; k < nvA && k < limbV.size(); k++) {
-				const CSkinV& d = sk.bind[k];
-				BYTE bestL = 0;
-				int bestW = -1;
-				for (int c = 0; c < 4; c++) {
-					const BYTE L = segLimb(d.j[c]);
-					if (L && (int)d.w[c] > bestW) { bestW = (int)d.w[c]; bestL = L; }
-				}
-				limbV[k] = bestL;
-			}
-			const float CELL = 0.03f;
-			auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-				int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-				return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-			};
-			auto posOf = [&](int i) -> const float* {
-				return (pCup.size() >= (size_t)(i + 1) * 3) ? &pCup[i * 3] : sk.bind[i].p;
-			};
-			auto armSurf = [&](int i) -> BOOL {
-				if (i < 0 || i >= (int)sk.bind.size()) return FALSE;
-				const CSkinV& d = sk.bind[i];
-				int best = 0, bw = -1;
-				for (int c = 0; c < 4; c++) if ((int)d.w[c] > bw) { bw = (int)d.w[c]; best = d.j[c]; }
-				if (best < 0 || best >= ns) return FALSE;
-				const char* nm = m_avaSeg[best];
-				return strstr(nm, "UpperArm") || strstr(nm, "LowerArm");
-			};
-			static Buf<unsigned long long> lk;
-			lk.clear();
-			for (int k = 0; k < nbA && k < limbV.size(); k++)
-				lk.push_back(((unsigned long long)cellOf(posOf(k), 0, 0, 0) << 32) | (unsigned)k);
-			const int nkL = lk.size();
-			if (nkL > 0) qsort(lk.data(), nkL, sizeof(unsigned long long), CmpU64);
-			for (int k = nbA; k < nvA && k < limbV.size(); k++) {
-				const float* p = posOf(k);
-				if (p[1] <= 1.18f || p[1] >= 1.56f) continue;
-				limbV[k] = 2;
-				float d1 = 1e9f, d2 = 1e9f;
-				for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-					const unsigned long long cell = cellOf(p, dx, dy, dz);
-					int lo = 0, hi = nkL;
-					while (lo < hi) { int m = (lo + hi) >> 1; if ((lk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-					for (int q = lo; q < nkL && (lk[q] >> 32) == cell; q++) {
-						const int i = (int)(lk[q] & 0xFFFFFFFFu);
-						const float* b = posOf(i);
-						const float d2v = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-						if (armSurf(i) && d2v < d1) d1 = d2v;
-						if (limbV[i] == 2 && d2v < d2) d2 = d2v;
-					}
-				}
-				d1 = (d1 < 1e8f) ? sqrtf(d1) : 1e9f;
-				d2 = (d2 < 1e8f) ? sqrtf(d2) : 1e9f;
-				if (d1 < 0.038f && d1 + 0.012f < d2 && fabsf(p[0]) > 0.10f) {
-					limbV[k] = 1;
-				}
-			}
-		}
-		// 1/2 系の服は胸・上腕の行列で振らない（0 系とは別）。肋骨を戻したあと、F0 の形を近い体の差分で載せる。
-		if (pCup.size() >= (size_t)nvA * 3 && nCup.size() >= (size_t)nvA * 3 && amShape != am) {
-			const float CELL = 0.03f;
-			auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-				int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-				return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-			};
-			static Buf<unsigned long long> rk;
-			rk.clear();
-			for (int k = 0; k < nbA; k++)
-				rk.push_back(((unsigned long long)cellOf(&pCup[k * 3], 0, 0, 0) << 32) | (unsigned)k);
-			const int nk = rk.size();
-			if (nk > 0) qsort(rk.data(), nk, sizeof(unsigned long long), CmpU64);
-			for (int k = nbA; k < nvA; k++) {
-				if (k >= limbV.size() || limbV[k] != 1) continue;
-				if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-				CSkinV& d = sk.bind[k];
-				int aw = 0;
-				for (int c = 0; c < 4; c++) if (d.j[c] < ns) {
-					const char* n = m_avaSeg[d.j[c]];
-					if (strstr(n, "Shoulder") || strstr(n, "Arm") || strstr(n, "Hand")) aw += d.w[c];
-				}
-				if (aw >= 160) continue;
-				const float* p = &pCup[k * 3];
-				if (fabsf(p[0]) < 0.13f) continue;
-				float dL = 1e9f;
-				int nearL = -1;
-				for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-					const unsigned long long cell = cellOf(p, dx, dy, dz);
-					int lo = 0, hi = nk;
-					while (lo < hi) { int m = (lo + hi) >> 1; if ((rk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-					for (int q = lo; q < nk && (rk[q] >> 32) == cell; q++) {
-						const int i = (int)(rk[q] & 0xFFFFFFFFu);
-						if (i >= limbV.size() || limbV[i] != 1) continue;
-						const float* b = &pCup[i * 3];
-						const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-						if (d2 < dL && d2 <= 0.10f * 0.10f) { dL = d2; nearL = i; }
-					}
-				}
-				if (nearL < 0) continue;
-				const CSkinV& bv = sk.bind[nearL];
-				for (int c = 0; c < 4; c++) { d.j[c] = bv.j[c]; d.w[c] = bv.w[c]; }
-			}
-			for (int k = nbA; k < nvA; k++) {
-				if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-				CSkinV& d = sk.bind[k];
-				if (d.p[1] < 1.32f || d.p[1] > 1.50f || fabsf(d.p[0]) < 0.12f) continue;
-				if (d.n[2] < -0.25f && fabsf(d.p[0]) < 0.14f) continue;
-				int aw = 0;
-				for (int c = 0; c < 4; c++) if (d.j[c] < ns) {
-					const char* n = m_avaSeg[d.j[c]];
-					if (strstr(n, "UpperArm") || strstr(n, "Shoulder")) aw += d.w[c];
-				}
-				if (aw >= 180) continue;
-				const float* p = &pCup[k * 3];
-				float dL = 1e9f;
-				int nearL = -1;
-				for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-					const unsigned long long cell = cellOf(p, dx, dy, dz);
-					int lo = 0, hi = nk;
-					while (lo < hi) { int m = (lo + hi) >> 1; if ((rk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-					for (int q = lo; q < nk && (rk[q] >> 32) == cell; q++) {
-						const int i = (int)(rk[q] & 0xFFFFFFFFu);
-						if (i >= limbV.size() || limbV[i] != 1) continue;
-						const float* b = &pCup[i * 3];
-						const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-						if (d2 < dL && d2 <= 0.08f * 0.08f) { dL = d2; nearL = i; }
-					}
-				}
-				if (nearL < 0) continue;
-				const CSkinV& bv = sk.bind[nearL];
-				for (int c = 0; c < 4; c++) { d.j[c] = bv.j[c]; d.w[c] = bv.w[c]; }
-			}
-		}
-		float ribPull = 0.f, ribX1 = br.x0;
-		// F1/F2 のバインドは肩幅比で肋骨を絞り腕を外へやる。F0 の幅と脇へ戻す。
-		// 袖は体のウェイトを写してあるので、同じ式で動かせば沈まない。
-		if (pF0.size() >= (size_t)nvA * 3 && amShape != am) {
-			int sCh = -1, sTo = -1, sAb = -1, sHi = -1, sSh[2] = { -1, -1 }, sUA[2] = { -1, -1 }, sLA[2] = { -1, -1 };
-			for (int s = 0; s < ns; s++) {
-				if (!strcmp(m_avaSeg[s], "Chest")) sCh = s;
-				else if (!strcmp(m_avaSeg[s], "Torso")) sTo = s;
-				else if (!strcmp(m_avaSeg[s], "Abdomen")) sAb = s;
-				else if (!strcmp(m_avaSeg[s], "Hips")) sHi = s;
-				else if (!strcmp(m_avaSeg[s], "Shoulder.L")) sSh[0] = s;
-				else if (!strcmp(m_avaSeg[s], "Shoulder.R")) sSh[1] = s;
-				else if (!strcmp(m_avaSeg[s], "UpperArm.L")) sUA[0] = s;
-				else if (!strcmp(m_avaSeg[s], "UpperArm.R")) sUA[1] = s;
-				else if (!strcmp(m_avaSeg[s], "LowerArm.L")) sLA[0] = s;
-				else if (!strcmp(m_avaSeg[s], "LowerArm.R")) sLA[1] = s;
-			}
-			auto twOf = [&](const CSkinV& d) -> float {
-				float t = 0.f;
-				for (int c = 0; c < 4; c++) {
-					const int j = d.j[c];
-					const float w = d.w[c] / 255.f;
-					if (j == sCh) t += w;
-					else if (j == sTo) t += w * 0.95f;
-					else if (j == sAb) t += w * 0.90f;
-					else if (j == sHi) t += w * 0.35f;
-				}
-				return t;
-			};
-			auto awOf = [&](const CSkinV& d) -> float {
-				float a = 0.f;
-				for (int c = 0; c < 4; c++) {
-					const int j = d.j[c];
-					const float w = d.w[c] / 255.f;
-					if (j == sSh[0] || j == sSh[1] || j == sUA[0] || j == sUA[1]) a += w;
-					else if (j == sLA[0] || j == sLA[1]) a += w * 0.45f;
-				}
-				return a;
-			};
-			float x0 = br.x0, x1 = br.x0;
-			if (br.kn[0] >= 0 && br.kn[1] >= 0 && br.kn[0] < nvA && br.kn[1] < nvA)
-				x1 = 0.5f * (sk.bind[br.kn[0]].p[0] + sk.bind[br.kn[1]].p[0]);
-			float rib0 = 0.f, rib1 = 0.f, wst0 = 0.f, wst1 = 0.f, arm0 = 0.f, arm1 = 0.f, to0 = 0.f, to1 = 0.f;
-			int nRib = 0, nWst = 0, nArm = 0, nTo = 0;
-			for (int k = 0; k < nbA; k++) {
-				const CSkinV& d = sk.bind[k];
-				const float* q0 = &pF0[k * 3];
-				const float y = q0[1];
-				const float tw = twOf(d), aw = awOf(d);
-				if (y > 1.16f && y < 1.36f && tw > 0.40f && aw < 0.30f) {
-					rib0 += fabsf(q0[0] - x0);
-					rib1 += fabsf(d.p[0] - x1);
-					nRib++;
-				}
-				if (y > 1.00f && y < 1.20f && tw > 0.40f && aw < 0.25f) {
-					wst0 += fabsf(q0[0] - x0);
-					wst1 += fabsf(d.p[0] - x1);
-					nWst++;
-				}
-				if (y > 1.22f && y < 1.48f && aw > 0.50f) {
-					arm0 += fabsf(q0[0] - x0);
-					arm1 += fabsf(d.p[0] - x1);
-					nArm++;
-				}
-				if (y > 1.26f && y < 1.42f && tw > 0.50f && aw < 0.25f) {
-					to0 += fabsf(q0[0] - x0);
-					to1 += fabsf(d.p[0] - x1);
-					nTo++;
-				}
-			}
-			if (nRib) { rib0 /= (float)nRib; rib1 /= (float)nRib; }
-			if (nWst) { wst0 /= (float)nWst; wst1 /= (float)nWst; }
-			if (nArm) { arm0 /= (float)nArm; arm1 /= (float)nArm; }
-			if (nTo) { to0 /= (float)nTo; to1 /= (float)nTo; }
-			float kRib = (rib1 > 1e-4f) ? rib0 / rib1 : 1.f;
-			float kWst = (wst1 > 1e-4f) ? wst0 / wst1 : 1.f;
-			if (kWst > kRib) kRib = kWst;
-			if (kRib < 1.f) kRib = 1.f;
-			else if (kRib > 1.45f) kRib = 1.45f;
-			float pull = (nArm && nTo && arm1 - to1 > arm0 - to0) ? (arm1 - to1) - (arm0 - to0) : 0.f;
-			if (pull > 0.045f) pull = 0.045f;
-			ribPull = pull;
-			ribX1 = x1;
-			if (nRib >= 8 || nArm >= 8 || nWst >= 8) {
-				auto applyPN = [&](CSkinV& d, int k) {
-					float tw = twOf(d), aw = awOf(d);
-					if (k >= nbA && k < limbV.size() && limbV[k] == 1) tw = 0.f;
-					if (tw <= 0.02f && aw <= 0.02f) return;
-					float s = 1.f + (kRib - 1.f) * tw;
-					if (s < 0.85f) s = 0.85f;
-					else if (s > 1.45f) s = 1.45f;
-					d.p[0] = x1 + (d.p[0] - x1) * s;
-					if (aw > 0.02f && pull > 0.f)
-						d.p[0] += ((d.p[0] > x1) ? -pull : pull) * aw;
-				};
-				for (int k = 0; k < nvA; k++) applyPN(sk.bind[k], k);
-			}
-			// 1/2 系の服は F0 の形を、戻した体の近い点の差分だけで載せる。行列では振らない。
-			if (pCup.size() >= (size_t)nvA * 3) {
-				const float CELL = 0.03f;
-				auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-					int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-					return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-				};
-				static Buf<unsigned long long> tk;
-				tk.clear();
-				for (int k = 0; k < nbA; k++)
-					tk.push_back(((unsigned long long)cellOf(&pCup[k * 3], 0, 0, 0) << 32) | (unsigned)k);
-				const int nkT = tk.size();
-				if (nkT > 0) qsort(tk.data(), nkT, sizeof(unsigned long long), CmpU64);
-				float td[3] = {};
-				int nTd = 0;
-				for (int k = 0; k < nbA; k++) {
-					if (k >= limbV.size() || limbV[k] != 2) continue;
-					const float* b0 = &pCup[k * 3];
-					if (b0[1] < 1.00f || b0[1] > 1.55f) continue;
-					td[0] += sk.bind[k].p[0] - b0[0];
-					td[1] += sk.bind[k].p[1] - b0[1];
-					td[2] += sk.bind[k].p[2] - b0[2];
-					nTd++;
-				}
-				if (nTd > 0) { const float invT = 1.f / (float)nTd; td[0] *= invT; td[1] *= invT; td[2] *= invT; }
-				for (int k = nbA; k < nvA; k++) {
-					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-					const float* p = &pCup[k * 3];
-					float dA = 1e9f;
-					int pick = -1;
-					for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-						const unsigned long long cell = cellOf(p, dx, dy, dz);
-						int lo = 0, hi = nkT;
-						while (lo < hi) { int m = (lo + hi) >> 1; if ((tk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-						for (int q = lo; q < nkT && (tk[q] >> 32) == cell; q++) {
-							const int i = (int)(tk[q] & 0xFFFFFFFFu);
-							const float* b = &pCup[i * 3];
-							const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-							if (d2 < dA && d2 <= 0.12f * 0.12f) { dA = d2; pick = i; }
-						}
-					}
-					CSkinV& d = sk.bind[k];
-					if (pick >= 0) {
-						const float* b0 = &pCup[pick * 3];
-						const float* b1 = sk.bind[pick].p;
-						d.p[0] = p[0] + (b1[0] - b0[0]);
-						d.p[1] = p[1] + (b1[1] - b0[1]);
-						d.p[2] = p[2] + (b1[2] - b0[2]);
-					} else {
-						d.p[0] = p[0] + td[0];
-						d.p[1] = p[1] + td[1];
-						d.p[2] = p[2] + td[2];
-					}
-				}
-			}
-		}
 		for (int k = 0; k < nvA; k++) {
 			CSkinV& d = sk.bind[k];
 			for (int c = 0; c < 4; c++)
 				d.j[c] = (unsigned char)(d.j[c] < ns ? segJ[d.j[c]] : segJ[0]);
+		}
+		// 1/2 系（HumF1〜6 / HumM1〜6）は 0 系の体を骨へ載せ直してある。手足の骨は肉の芯から数 cm 外れるので、
+		// 区間の中ほどの肉の中心へ軸を寄せる。肘と膝は上下の区間の中間、手は骨のまま、足首は脛に合わせる。
+		const BOOL fit12 = (!strncmp(md.name, "HumF", 4) || !strncmp(md.name, "HumM", 4)) && md.name[4] >= '1' && md.name[4] <= '9';
+		if (fit12) {
+			const char* lim[4][3] = {
+				{ "UpperArm.L", "LowerArm.L", "Hand.L" }, { "UpperArm.R", "LowerArm.R", "Hand.R" },
+				{ "UpperLeg.L", "LowerLeg.L", "Foot.L" }, { "UpperLeg.R", "LowerLeg.R", "Foot.R" }
+			};
+			for (int l = 0; l < 4; l++) {
+				int jj[3];
+				float P[3][3], cs[2][3] = {};
+				BOOL ok = TRUE;
+				for (int e = 0; e < 3 && ok; e++) {
+					jj[e] = SegJoint(segJ.data(), m_avaSeg, ns, lim[l][e]);
+					if (jj[e] < 0 || jj[e] >= md.nJ || jj[e] >= 64) { ok = FALSE; break; }
+					const M4 b = MInverse(md.invBind[jj[e]]);
+					P[e][0] = b.m[12]; P[e][1] = b.m[13]; P[e][2] = b.m[14];
+				}
+				if (!ok) continue;
+				for (int sgi = 0; sgi < 2; sgi++) {
+					const float* A = P[sgi];
+					const float* B = P[sgi + 1];
+					const float ab[3] = { B[0] - A[0], B[1] - A[1], B[2] - A[2] };
+					const float L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+					if (L2 < 1e-6f) continue;
+					int got = 0;
+					for (int k = 0; k < nbA; k++) {
+						if (DomJoint(sk.bind[k]) != jj[sgi]) continue;
+						const float* p = sk.bind[k].p;
+						const float t = ((p[0] - A[0]) * ab[0] + (p[1] - A[1]) * ab[1] + (p[2] - A[2]) * ab[2]) / L2;
+						if (t < 0.25f || t > 0.75f) continue;
+						const float r[3] = { p[0] - A[0] - ab[0] * t, p[1] - A[1] - ab[1] * t, p[2] - A[2] - ab[2] * t };
+						if (r[0] * r[0] + r[1] * r[1] + r[2] * r[2] > 0.12f * 0.12f) continue;
+						for (int a = 0; a < 3; a++) cs[sgi][a] += r[a];
+						got++;
+					}
+					if (got >= 12) for (int a = 0; a < 3; a++) cs[sgi][a] /= (float)got;
+					else for (int a = 0; a < 3; a++) cs[sgi][a] = 0.f;
+				}
+				for (int a = 0; a < 3; a++) {
+					nc.jOff[jj[0]][a] = cs[0][a];
+					nc.jOff[jj[1]][a] = 0.5f * (cs[0][a] + cs[1][a]);
+					nc.jOff[jj[2]][a] = (l < 2) ? 0.f : cs[1][a];
+				}
+			}
 		}
 		// 腕を少し太くし、カプセルより内の袖を外へ。軸に潰れた頂点は法線で戻す。
 		{
@@ -6103,35 +5838,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				if (j < 0 || j >= md.nJ) return FALSE;
 				const M4 b = MInverse(md.invBind[j]);
 				o[0] = b.m[12]; o[1] = b.m[13]; o[2] = b.m[14];
-				if (amShape != am) {
-					int s = -1;
-					for (int i = 0; i < ns; i++) if (!strcmp(m_avaSeg[i], name)) { s = i; break; }
-					if (s >= 0) {
-						const float* A0 = &amShape->M[(size_t)s * 12];
-						const float* Am = &am->M[(size_t)s * 12];
-						const float a00 = A0[0], a01 = A0[1], a02 = A0[2], a10 = A0[4], a11 = A0[5], a12 = A0[6], a20 = A0[8], a21 = A0[9], a22 = A0[10];
-						const float det = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20);
-						if (fabsf(det) > 1e-12f) {
-							const float inv = 1.f / det;
-							const float i00 = (a11 * a22 - a12 * a21) * inv, i01 = (a02 * a21 - a01 * a22) * inv, i02 = (a01 * a12 - a02 * a11) * inv;
-							const float i10 = (a12 * a20 - a10 * a22) * inv, i11 = (a00 * a22 - a02 * a20) * inv, i12 = (a02 * a10 - a00 * a12) * inv;
-							const float i20 = (a10 * a21 - a11 * a20) * inv, i21 = (a01 * a20 - a00 * a21) * inv, i22 = (a00 * a11 - a01 * a10) * inv;
-							const float px = o[0] - A0[3], py = o[1] - A0[7], pz = o[2] - A0[11];
-							const float rx = i00 * px + i01 * py + i02 * pz, ry = i10 * px + i11 * py + i12 * pz, rz = i20 * px + i21 * py + i22 * pz;
-							o[0] = Am[0] * rx + Am[1] * ry + Am[2] * rz + Am[3];
-							o[1] = Am[4] * rx + Am[5] * ry + Am[6] * rz + Am[7];
-							o[2] = Am[8] * rx + Am[9] * ry + Am[10] * rz + Am[11];
-						}
-					}
-					if (ribPull > 1e-6f) {
-						float awj = 0.f;
-						if (!strcmp(name, "Shoulder.L") || !strcmp(name, "Shoulder.R")
-							|| !strcmp(name, "UpperArm.L") || !strcmp(name, "UpperArm.R")) awj = 1.f;
-						else if (!strcmp(name, "LowerArm.L") || !strcmp(name, "LowerArm.R")) awj = 0.45f;
-						if (awj > 0.f)
-							o[0] += ((o[0] > ribX1) ? -ribPull : ribPull) * awj;
-					}
-				}
+				if (j < 64) { o[0] += nc.jOff[j][0]; o[1] += nc.jOff[j][1]; o[2] += nc.jOff[j][2]; }
 				return TRUE;
 			};
 			auto onAxis = [&](const float* A, const float* B, const float* p, float* t, float* ax, float* rx, float* ry, float* rz, float* rl) -> BOOL {
@@ -6169,58 +5876,94 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				const int j0 = SegJoint(segJ.data(), m_avaSeg, ns, pair[s][0]);
 				const int j1 = SegJoint(segJ.data(), m_avaSeg, ns, pair[s][1]);
 				if (j0 < 0) continue;
-				const float amt = s < 2 ? 0.006f : 0.004f, pad = s < 2 ? 0.008f : 0.007f;
-				float rSum = 0.f;
-				int got = 0;
+				const float amt = s < 2 ? 0.006f : 0.004f, pad = s < 2 ? 0.007f : 0.006f;
 				for (int k = 0; k < nbA; k++) {
 					const int d = DomJoint(sk.bind[k]);
 					if (d != j0 && d != j1) continue;
 					float t, ax[3], rx, ry, rz, rl;
 					if (!onAxis(A, B, sk.bind[k].p, &t, ax, &rx, &ry, &rz, &rl) || rl > 0.08f) continue;
-					rSum += rl;
-					got++;
 					if (!away(sk.bind[k], A, B, &rx, &ry, &rz, &rl)) continue;
 					const float g = amt * Smooth01(t * 4.f) * Smooth01((1.f - t) * 4.f);
 					if (g <= 0.f) continue;
 					float* p = sk.bind[k].p;
 					p[0] += rx / rl * g; p[1] += ry / rl * g; p[2] += rz / rl * g;
 				}
-				float rBody = got >= 6 ? rSum / (float)got : 0.038f;
-				if (rBody < 0.026f) rBody = 0.026f;
-				else if (rBody > 0.052f) rBody = 0.052f;
-				const float want = rBody + pad;
+				// 太くした腕の形を、軸に沿った段 × まわりの角度で測る。袖は頂点ごとにその形の外へだけ出す。
+				// 一つの平均の円柱へ揃えると、力こぶや肩は肌が突き抜け、細い所は袖が波打つ。脇の胴の布まで円柱へ引くと角が立つ。
+				enum { PT = 12, PA = 12 };
+				float prof[PT][PA];
+				for (int a = 0; a < PT; a++) for (int b = 0; b < PA; b++) prof[a][b] = -1.f;
+				const float ab[3] = { B[0] - A[0], B[1] - A[1], B[2] - A[2] };
+				const float abL = sqrtf(ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2]);
+				if (abL < 0.05f) continue;
+				const float an[3] = { ab[0] / abL, ab[1] / abL, ab[2] / abL };
+				float e1[3] = { -an[2] * an[0], -an[2] * an[1], 1.f - an[2] * an[2] };
+				{
+					const float l = sqrtf(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+					if (l < 1e-4f) continue;
+					e1[0] /= l; e1[1] /= l; e1[2] /= l;
+				}
+				const float e2[3] = { an[1] * e1[2] - an[2] * e1[1], an[2] * e1[0] - an[0] * e1[2], an[0] * e1[1] - an[1] * e1[0] };
+				auto binF = [&](float t, float rx, float ry, float rz, float* ft, float* fa) {
+					*ft = Clampf((t + 0.04f) / 1.12f, 0.f, 1.f) * (float)(PT - 1);
+					const float ang = atan2f(rx * e2[0] + ry * e2[1] + rz * e2[2], rx * e1[0] + ry * e1[1] + rz * e1[2]);
+					*fa = (ang / 6.2831853f + 0.5f) * (float)PA;
+				};
+				for (int k = 0; k < nbA; k++) {
+					const int d = DomJoint(sk.bind[k]);
+					if (d != j0 && d != j1) continue;
+					int wl = 0;
+					for (int c = 0; c < 4; c++) if ((int)sk.bind[k].j[c] == j0 || (int)sk.bind[k].j[c] == j1) wl += sk.bind[k].w[c];
+					if (wl < 180) continue;
+					float t, ax[3], rx, ry, rz, rl;
+					if (!onAxis(A, B, sk.bind[k].p, &t, ax, &rx, &ry, &rz, &rl) || rl > 0.08f || rl < 1e-4f) continue;
+					float ft, fa;
+					binF(t, rx, ry, rz, &ft, &fa);
+					const int bt = Clampi((int)(ft + 0.5f), 0, PT - 1), ba = ((int)floorf(fa) % PA + PA) % PA;
+					if (rl > prof[bt][ba]) prof[bt][ba] = rl;
+				}
+				for (int pass = 0; pass < 6; pass++) for (int a = 0; a < PT; a++) for (int b = 0; b < PA; b++) {
+					if (prof[a][b] > 0.f) continue;
+					float best = -1.f;
+					best = fmaxf(best, prof[a][(b + 1) % PA]);
+					best = fmaxf(best, prof[a][(b + PA - 1) % PA]);
+					if (a > 0) best = fmaxf(best, prof[a - 1][b]);
+					if (a < PT - 1) best = fmaxf(best, prof[a + 1][b]);
+					prof[a][b] = best;
+				}
+				float pr[PT][PA];
+				for (int a = 0; a < PT; a++) for (int b = 0; b < PA; b++) {
+					float m = prof[a][b];
+					m = fmaxf(m, prof[a][(b + 1) % PA]);
+					m = fmaxf(m, prof[a][(b + PA - 1) % PA]);
+					pr[a][b] = m > 0.f ? Clampf(m, 0.020f, 0.075f) : 0.036f;
+				}
 				for (int k = nbA; k < nvA; k++) {
 					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
 					CSkinV& d = sk.bind[k];
-					if (fabsf(d.p[0]) < 0.055f) continue;
 					int aw = 0;
 					for (int c = 0; c < 4; c++) if ((int)d.j[c] == j0 || (int)d.j[c] == j1) aw += d.w[c];
-					if (aw < 20) continue;
+					const float wA = Smooth01(((float)aw - 40.f) / 140.f);
+					if (wA <= 0.f) continue;
 					float t, ax[3], rx, ry, rz, rl;
 					if (!onAxis(A, B, d.p, &t, ax, &rx, &ry, &rz, &rl)) continue;
 					if (rl > 0.16f) continue;
 					if (!away(d, A, B, &rx, &ry, &rz, &rl)) continue;
-					float dest = -1.f;
-					if (rl <= rBody + 0.003f && rl < want) dest = want;
-					else if (rl > rBody + 0.011f) dest = rBody + 0.011f;
-					if (dest < 0.f) continue;
+					float ft, fa;
+					binF(t, rx, ry, rz, &ft, &fa);
+					const int t0 = Clampi((int)ft, 0, PT - 2);
+					const float wt = Clampf(ft - (float)t0, 0.f, 1.f);
+					const int a0 = ((int)floorf(fa - 0.5f) % PA + PA) % PA;
+					const float wa = (fa - 0.5f) - floorf(fa - 0.5f);
+					const int a1 = (a0 + 1) % PA;
+					const float body = (pr[t0][a0] * (1.f - wa) + pr[t0][a1] * wa) * (1.f - wt) + (pr[t0 + 1][a0] * (1.f - wa) + pr[t0 + 1][a1] * wa) * wt;
+					// 肩側の端（脇の下）は胴の布と混ざるので弱める。肩は下の押し出しが体の法線で外へ出す。
+					const float wEnd = s < 2 ? Smooth01((t - 0.02f) / 0.14f) : 1.f;
+					const float want = body + pad;
+					if (rl >= want) continue;
+					const float dest = rl + (want - rl) * wA * wEnd;
 					const float sc = dest / rl;
 					d.p[0] = ax[0] + rx * sc; d.p[1] = ax[1] + ry * sc; d.p[2] = ax[2] + rz * sc;
-				}
-				if (amShape != am && s < 2) {
-					for (int k = nbA; k < nvA; k++) {
-						if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-						CSkinV& d = sk.bind[k];
-						if (d.p[1] < 1.32f || d.p[1] > 1.52f || fabsf(d.p[0]) < 0.10f) continue;
-						float t, ax[3], rx, ry, rz, rl;
-						if (!onAxis(A, B, d.p, &t, ax, &rx, &ry, &rz, &rl)) continue;
-						if (t > 0.38f || rl > 0.10f) continue;
-						if (!away(d, A, B, &rx, &ry, &rz, &rl)) continue;
-						const float dest = rBody + 0.008f;
-						if (fabsf(rl - dest) < 0.001f) continue;
-						const float sc = dest / rl;
-						d.p[0] = ax[0] + rx * sc; d.p[1] = ax[1] + ry * sc; d.p[2] = ax[2] + rz * sc;
-					}
 				}
 			}
 			// 体の中に沈んだ服を、同じ関節の体の外へ。脇の袖を胴の法線で押さない。
@@ -6237,9 +5980,9 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					bk.push_back(((unsigned long long)cellOf(sk.bind[k].p, 0, 0, 0) << 32) | (unsigned)k);
 				const int nk = bk.size();
 				if (nk > 0) qsort(bk.data(), nk, sizeof(unsigned long long), CmpU64);
-				const BOOL f1 = (amShape != am);
-				const float pad = f1 ? 0.011f : 0.008f;
-				const float reach = f1 ? 0.05f : 0.04f;
+				// 重ね着はパックで肌から 4mm 以上・下の布から 3mm 以上離してある。ここで厚く揃えると襟がシャツと同じ面に潰れる。
+				const float pad = 0.004f;
+				const float reach = 0.04f;
 				for (int it = 0; it < 4; it++) for (int k = nbA; k < nvA; k++) {
 					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
 					CSkinV& d = sk.bind[k];
@@ -6267,165 +6010,10 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					if (nl < 1e-5f) continue;
 					nx /= nl; ny /= nl; nz /= nl;
 					const float side = (p[0] - b[0]) * nx + (p[1] - b[1]) * ny + (p[2] - b[2]) * nz;
-					float usePad = pad;
-					if (f1 && k < limbV.size() && limbV[k] == 1) usePad = 0.008f;
-					if (f1 && (k >= limbV.size() || limbV[k] != 1) && nz > 0.22f) usePad = 0.014f;
-					// 胸の下は下向き法線で押すとクリースへ吸い付く。前へゆるく離す。
-					if (f1 && (k >= limbV.size() || limbV[k] != 1)
-						&& p[1] > 1.16f && p[1] < 1.42f && p[2] > 0.02f && fabsf(p[0]) < 0.16f && ny < -0.15f) {
-						float hx = 0.f, hy = -0.18f, hz = 1.f;
-						const float hl = sqrtf(hx * hx + hy * hy + hz * hz);
-						hx /= hl; hy /= hl; hz /= hl;
-						const float sideH = (p[0] - b[0]) * hx + (p[1] - b[1]) * hy + (p[2] - b[2]) * hz;
-						if (sideH < 0.018f) {
-							const float pushH = 0.018f - sideH;
-							d.p[0] += hx * pushH; d.p[1] += hy * pushH; d.p[2] += hz * pushH;
-						}
-						continue;
-					}
-					if (side >= usePad) continue;
-					const float push = usePad - side;
+					if (side >= pad) continue;
+					const float push = pad - side;
 					d.p[0] += nx * push; d.p[1] += ny * push; d.p[2] += nz * push;
 				}
-			}
-			// F0 での体との隙間を、載せた体でも保つ。
-			if (pCup.size() >= (size_t)nvA * 3 && nCup.size() >= (size_t)nvA * 3 && amShape != am) {
-				const float CELL = 0.03f;
-				auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-					int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-					return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-				};
-				static Buf<unsigned long long> rk;
-				rk.clear();
-				for (int k = 0; k < nbA; k++)
-					rk.push_back(((unsigned long long)cellOf(&pCup[k * 3], 0, 0, 0) << 32) | (unsigned)k);
-				const int nk = rk.size();
-				if (nk > 0) qsort(rk.data(), nk, sizeof(unsigned long long), CmpU64);
-				for (int k = nbA; k < nvA; k++) {
-					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-					CSkinV& d = sk.bind[k];
-					const float* p0 = &pCup[k * 3];
-					const BYTE wantL = (k < limbV.size()) ? limbV[k] : 0;
-					float dA = 1e9f, dL = 1e9f;
-					int pick = -1, pickL = -1;
-					for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-						const unsigned long long cell = cellOf(p0, dx, dy, dz);
-						int lo = 0, hi = nk;
-						while (lo < hi) { int m = (lo + hi) >> 1; if ((rk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-						for (int q = lo; q < nk && (rk[q] >> 32) == cell; q++) {
-							const int i = (int)(rk[q] & 0xFFFFFFFFu);
-							const float* b = &pCup[i * 3];
-							const float* n0 = &nCup[i * 3];
-							const float side0 = (p0[0] - b[0]) * n0[0] + (p0[1] - b[1]) * n0[1] + (p0[2] - b[2]) * n0[2];
-							if (side0 < -0.002f) continue;
-							const float d2 = (b[0] - p0[0]) * (b[0] - p0[0]) + (b[1] - p0[1]) * (b[1] - p0[1]) + (b[2] - p0[2]) * (b[2] - p0[2]);
-							if (d2 < dA && d2 <= 0.04f * 0.04f) { dA = d2; pick = i; }
-							if (wantL && i < limbV.size() && limbV[i] == wantL && d2 < dL && d2 <= ((wantL == 1) ? 0.08f * 0.08f : 0.05f * 0.05f)) { dL = d2; pickL = i; }
-						}
-					}
-					if (wantL == 1) {
-						if (pickL < 0) continue;
-						pick = pickL; dA = dL;
-					} else if (pickL >= 0) { pick = pickL; dA = dL; }
-					if (pick < 0) continue;
-					const float* b0 = &pCup[pick * 3];
-					const float* n0 = &nCup[pick * 3];
-					float want = (p0[0] - b0[0]) * n0[0] + (p0[1] - b0[1]) * n0[1] + (p0[2] - b0[2]) * n0[2];
-					if (want < 0.008f) want = 0.008f;
-					float nx = sk.bind[pick].n[0], ny = sk.bind[pick].n[1], nz = sk.bind[pick].n[2];
-					float nl = sqrtf(nx * nx + ny * ny + nz * nz);
-					if (nl < 1e-5f) continue;
-					nx /= nl; ny /= nl; nz /= nl;
-					if (wantL != 1 && p0[1] > 1.16f && p0[1] < 1.42f && p0[2] > 0.02f && fabsf(p0[0]) < 0.16f) {
-						if (want < 0.016f) want = 0.016f;
-						if (n0[1] < -0.15f) { nx = 0.f; ny = -0.18f; nz = 1.f; nl = sqrtf(nx * nx + ny * ny + nz * nz); nx /= nl; ny /= nl; nz /= nl; }
-					}
-					const float* b1 = sk.bind[pick].p;
-					const float side1 = (d.p[0] - b1[0]) * nx + (d.p[1] - b1[1]) * ny + (d.p[2] - b1[2]) * nz;
-					if (side1 >= want) continue;
-					const float push = want - side1;
-					d.p[0] += nx * push; d.p[1] += ny * push; d.p[2] += nz * push;
-				}
-			}
-		}
-		if (amShape != am) {
-			const float CELL = 0.03f;
-			auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-				int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-				return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-			};
-			static Buf<unsigned long long> ck;
-			ck.clear();
-			for (int k = nbA; k < nvA; k++) {
-				if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-				if (k < limbV.size() && limbV[k] != 1) continue;
-				ck.push_back(((unsigned long long)cellOf(sk.bind[k].p, 0, 0, 0) << 32) | (unsigned)k);
-			}
-			const int nk = ck.size();
-			if (nk > 0) qsort(ck.data(), nk, sizeof(unsigned long long), CmpU64);
-			for (int k = 0; k < nbA; k++) {
-				if (k >= limbV.size() || limbV[k] != 1) continue;
-				const float* p = sk.bind[k].p;
-				float dA = 1e9f;
-				int nearC = -1;
-				for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-					const unsigned long long cell = cellOf(p, dx, dy, dz);
-					int lo = 0, hi = nk;
-					while (lo < hi) { int m = (lo + hi) >> 1; if ((ck[m] >> 32) < cell) lo = m + 1; else hi = m; }
-					for (int q = lo; q < nk && (ck[q] >> 32) == cell; q++) {
-						const int i = (int)(ck[q] & 0xFFFFFFFFu);
-						const float* b = sk.bind[i].p;
-						const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-						if (d2 < dA) { dA = d2; nearC = i; }
-					}
-				}
-				if (nearC < 0 || dA > 0.012f * 0.012f) continue;
-				float nx = sk.bind[nearC].n[0], ny = sk.bind[nearC].n[1], nz = sk.bind[nearC].n[2];
-				float nl = sqrtf(nx * nx + ny * ny + nz * nz);
-				if (nl < 1e-5f) continue;
-				nx /= nl; ny /= nl; nz /= nl;
-				const float* c = sk.bind[nearC].p;
-				const float side = (p[0] - c[0]) * nx + (p[1] - c[1]) * ny + (p[2] - c[2]) * nz;
-				if (side <= 0.0015f) continue;
-				float pull = side + 0.002f;
-				if (pull > 0.008f) pull = 0.008f;
-				sk.bind[k].p[0] -= nx * pull;
-				sk.bind[k].p[1] -= ny * pull;
-				sk.bind[k].p[2] -= nz * pull;
-			}
-		}
-		if (amShape != am && br.kn[0] >= 0 && br.kn[1] >= 0 && br.kn[0] < nbA && br.kn[1] < nbA) {
-			const float yNip = 0.5f * (sk.bind[br.kn[0]].p[1] + sk.bind[br.kn[1]].p[1]);
-			float zBin[8];
-			for (int b = 0; b < 8; b++) zBin[b] = -1e9f;
-			for (int k = nbA; k < nvA; k++) {
-				if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-				if (k < limbV.size() && limbV[k] == 1) continue;
-				const float* p = sk.bind[k].p;
-				if (fabsf(p[1] - yNip) > 0.045f || p[2] < 0.02f) continue;
-				const float ax = fabsf(p[0]);
-				if (ax > 0.16f) continue;
-				int b = (int)(ax / 0.02f);
-				if (b > 7) b = 7;
-				if (p[2] > zBin[b]) zBin[b] = p[2];
-			}
-			const float zKn = 0.5f * (sk.bind[br.kn[0]].p[2] + sk.bind[br.kn[1]].p[2]);
-			for (int b = 0; b < 8; b++) if (zBin[b] < -1e8f) zBin[b] = zKn;
-			for (int k = nbA; k < nvA; k++) {
-				if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-				if (k < limbV.size() && limbV[k] == 1) continue;
-				CSkinV& d = sk.bind[k];
-				if (d.p[2] < 0.010f || fabsf(d.p[0]) > 0.15f) continue;
-				if (d.n[2] > 0.25f) continue;
-				if (d.p[1] > yNip + 0.02f || d.p[1] < yNip - 0.16f) continue;
-				int b = (int)(fabsf(d.p[0]) / 0.02f);
-				if (b > 7) b = 7;
-				const float zShelf = zBin[b];
-				const float drop = yNip - d.p[1];
-				if (drop < 0.008f) continue;
-				const float blend = Smooth01((drop - 0.012f) / 0.07f);
-				const float zHang = zShelf - drop * 0.32f;
-				d.p[2] += (zHang - d.p[2]) * blend;
 			}
 		}
 		Buf<ClothGpuN> clothN;
@@ -6437,129 +6025,6 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		Buf<SoftGpuV> softV;
 		softN.arena = softV.arena = 1;
 		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ.data(), m_avaSeg, ns, md, nc.jig.empty() ? NULL : nc.jig.data(), clothN, clothV, clothP, expose, softN, softV);
-		if (amShape != am && cTri.size() >= 3 && nbA < nvA) {
-			const int cn = nvA - nbA;
-			Buf<int> adj;
-			Buf<float> tmp;
-			adj.arena = tmp.arena = 1;
-			adj.fill(cn * 4, -1);
-			tmp.resize(cn * 3);
-			if (adj.size() == cn * 4 && tmp.size() == cn * 3) {
-				auto addE = [&](int a, int b) {
-					if (a < 0 || b < 0 || a >= cn || b >= cn || a == b) return;
-					int* s = &adj[a * 4];
-					for (int e = 0; e < 4; e++) {
-						if (s[e] == b) return;
-						if (s[e] < 0) { s[e] = b; return; }
-					}
-				};
-				for (int t = 0; t + 2 < cTri.size(); t += 3) {
-					const int a = cTri[t], b = cTri[t + 1], c = cTri[t + 2];
-					addE(a, b); addE(b, a); addE(b, c); addE(c, b); addE(c, a); addE(a, c);
-				}
-				for (int it = 0; it < 3; it++) {
-					for (int i = 0; i < cn; i++) {
-						const CSkinV& s = sk.bind[nbA + i];
-						tmp[i * 3] = s.p[0]; tmp[i * 3 + 1] = s.p[1]; tmp[i * 3 + 2] = s.p[2];
-						if (nbA + i < (int)sk.cloth.size() && !sk.cloth[nbA + i]) continue;
-						if (i + nbA < limbV.size() && limbV[nbA + i] == 3) continue;
-						if (s.p[1] < 1.08f) continue;
-						float ax = 0.f, ay = 0.f, az = 0.f, w = 0.f;
-						for (int e = 0; e < 4; e++) {
-							const int j = adj[i * 4 + e];
-							if (j < 0) continue;
-							const float* q = sk.bind[nbA + j].p;
-							ax += q[0]; ay += q[1]; az += q[2]; w += 1.f;
-						}
-						if (w < 2.f) continue;
-						ax /= w; ay /= w; az /= w;
-						float k = 0.38f;
-						if (s.p[1] > 1.52f || s.n[1] > 0.42f) k = 0.12f;
-						else if (s.p[2] < 0.02f && s.p[1] > 1.36f && fabsf(s.p[0]) < 0.08f) k = 0.16f;
-						tmp[i * 3] = s.p[0] + (ax - s.p[0]) * k;
-						tmp[i * 3 + 1] = s.p[1] + (ay - s.p[1]) * k;
-						tmp[i * 3 + 2] = s.p[2] + (az - s.p[2]) * k;
-					}
-					for (int i = 0; i < cn; i++) {
-						sk.bind[nbA + i].p[0] = tmp[i * 3];
-						sk.bind[nbA + i].p[1] = tmp[i * 3 + 1];
-						sk.bind[nbA + i].p[2] = tmp[i * 3 + 2];
-					}
-				}
-				Buf<float> fn;
-				fn.arena = 1;
-				fn.fill(cn * 3, 0.f);
-				if (fn.size() == cn * 3) {
-					for (int t = 0; t + 2 < cTri.size(); t += 3) {
-						const int id[3] = { cTri[t], cTri[t + 1], cTri[t + 2] };
-						if (id[0] < 0 || id[1] < 0 || id[2] < 0 || id[0] >= cn || id[1] >= cn || id[2] >= cn) continue;
-						const float* a = sk.bind[nbA + id[0]].p;
-						const float* b = sk.bind[nbA + id[1]].p;
-						const float* c = sk.bind[nbA + id[2]].p;
-						const float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
-						const float e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
-						const float n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
-						for (int e = 0; e < 3; e++) for (int a = 0; a < 3; a++) fn[id[e] * 3 + a] += n[a];
-					}
-					for (int i = 0; i < cn; i++) {
-						if (nbA + i < (int)sk.cloth.size() && !sk.cloth[nbA + i]) continue;
-						float* nr = sk.bind[nbA + i].n;
-						const float lx = fn[i * 3], ly = fn[i * 3 + 1], lz = fn[i * 3 + 2];
-						const float l = sqrtf(lx * lx + ly * ly + lz * lz);
-						if (l < 1e-8f) continue;
-						nr[0] = lx / l; nr[1] = ly / l; nr[2] = lz / l;
-					}
-				}
-				if (softN.size() == 0) {
-					float C[3] = { 0.f, 1.40f, 0.02f };
-					if (br.kn[0] >= 0 && br.kn[0] < nbA) {
-						C[0] = sk.bind[br.kn[0]].p[0] * 0.5f + sk.bind[br.kn[1] >= 0 && br.kn[1] < nbA ? br.kn[1] : br.kn[0]].p[0] * 0.5f;
-						C[1] = sk.bind[br.kn[0]].p[1];
-						C[2] = sk.bind[br.kn[0]].p[2];
-					}
-					for (int k = 0; k < 4; k++) {
-						SoftGpuN o;
-						memset(&o, 0, sizeof(o));
-						o.x[0] = C[0]; o.x[1] = C[1]; o.x[2] = C[2]; o.x[3] = 1.f;
-						o.p[3] = 0.f;
-						o.nb[0] = o.nb[1] = o.nb[2] = o.nb[3] = 0xFFFFFFFFu;
-						softN.push_back(o);
-					}
-					for (int i = 0; i < cn; i++) {
-						if (nbA + i < (int)sk.cloth.size() && !sk.cloth[nbA + i]) continue;
-						if (nbA + i < limbV.size() && limbV[nbA + i] == 3) continue;
-						const CSkinV& s = sk.bind[nbA + i];
-						if (s.p[1] < 1.08f) continue;
-						unsigned nbh[4] = { 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu };
-						int got = 0;
-						for (int e = 0; e < 4; e++) {
-							const int j = adj[i * 4 + e];
-							if (j < 0) continue;
-							nbh[got] = (unsigned)(nbA + j);
-							got++;
-						}
-						if (got < 2) continue;
-						SoftGpuV o;
-						memset(&o, 0, sizeof(o));
-						o.a[0] = (unsigned)(nbA + i);
-						o.a[1] = nbh[0] | (nbh[1] << 16);
-						o.a[2] = nbh[2] | (nbh[3] << 16);
-						o.a[3] = 0;
-						o.w[0] = 1.f;
-						o.p[0] = s.p[0]; o.p[1] = s.p[1]; o.p[2] = s.p[2];
-						o.p[3] = 0.f;
-						softV.push_back(o);
-					}
-					if (softN.size() >= 4 && softV.size() >= 8) {
-						nc.softN = softN.size();
-						nc.softVN = softV.size();
-					} else {
-						softN.clear(); softV.clear();
-						nc.softN = nc.softVN = 0;
-					}
-				}
-			}
-		}
 		if (expose.size() == nbA) {
 			BYTE outArm[256] = {};
 			{
@@ -6577,46 +6042,6 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				for (int j = 0; j < md.nJ && j < 256; j++) {
 					for (int a = j, g = 0; a >= 0 && a < md.nJ && g < 64; a = md.parent[a], g++) {
 						if (a == hd[0] || a == hd[1]) { outHand[j] = 1; break; }
-					}
-				}
-			}
-			if (amShape != am) {
-				const float CELL = 0.03f;
-				auto cellOf = [&](const float* p, int dx, int dy, int dz) -> unsigned {
-					int x = (int)floorf(p[0] / CELL) + dx + 512, y = (int)floorf(p[1] / CELL) + dy + 512, z = (int)floorf(p[2] / CELL) + dz + 512;
-					return (unsigned)(x & 1023) | ((unsigned)(y & 1023) << 10) | ((unsigned)(z & 1023) << 20);
-				};
-				static Buf<unsigned long long> ck;
-				ck.clear();
-				for (int k = nbA; k < nvA; k++) {
-					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
-					ck.push_back(((unsigned long long)cellOf(sk.bind[k].p, 0, 0, 0) << 32) | (unsigned)k);
-				}
-				const int nk = ck.size();
-				if (nk > 0) qsort(ck.data(), nk, sizeof(unsigned long long), CmpU64);
-				for (int k = 0; k < nbA; k++) {
-					if (!armV(k)) continue;
-					const int dj = DomJoint(sk.bind[k]);
-					if (dj >= 0 && dj < 256 && outHand[dj]) continue;
-					const float* p = sk.bind[k].p;
-					float dA = 1e9f;
-					int nearC = -1;
-					for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-						const unsigned long long cell = cellOf(p, dx, dy, dz);
-						int lo = 0, hi = nk;
-						while (lo < hi) { int m = (lo + hi) >> 1; if ((ck[m] >> 32) < cell) lo = m + 1; else hi = m; }
-						for (int q = lo; q < nk && (ck[q] >> 32) == cell; q++) {
-							const int i = (int)(ck[q] & 0xFFFFFFFFu);
-							const float* b = sk.bind[i].p;
-							const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
-							if (d2 < dA) { dA = d2; nearC = i; }
-						}
-					}
-					if (nearC >= 0 && dA <= 0.010f * 0.010f) {
-						const float* c = sk.bind[nearC].p;
-						const float nx = sk.bind[k].n[0], ny = sk.bind[k].n[1], nz = sk.bind[k].n[2];
-						if ((c[0] - p[0]) * nx + (c[1] - p[1]) * ny + (c[2] - p[2]) * nz > 0.001f)
-							expose[k] = 1;
 					}
 				}
 			}
@@ -6670,14 +6095,13 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					if (shCap(a) && shCap(b) && shCap(c)) {
 						const int ea = expose[a], eb = expose[b], ec = expose[c];
 						const int nHid = (ea == 1) + (eb == 1) + (ec == 1);
-						if (nHid >= (amShape != am ? 1 : 3)) continue;
+						if (nHid >= 3) continue;
 						if (ea != 1 || eb != 1 || ec != 1) {
 							idx.push_back((WORD)a); idx.push_back((WORD)b); idx.push_back((WORD)c);
 						}
 						continue;
 					}
 					const int ea = expose[a], eb = expose[b], ec = expose[c];
-					if (amShape != am && (ea == 1 || eb == 1 || ec == 1)) continue;
 					if (!visOk(ea) || !visOk(eb) || !visOk(ec) || (ea < 2 && eb < 2 && ec < 2)) continue;
 					idx.push_back((WORD)a); idx.push_back((WORD)b); idx.push_back((WORD)c);
 				}
@@ -6704,14 +6128,14 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		if (TacAvaBad()) { g_avaNeedReset = 1; return holdBare(); }
 		if (idx.size() < 3 || sk.bind.size() > 65535) return FALSE;
 		// 頭を載せてから骨の倍率で頂点が動く。目印を先に取ると、唇も瞬きも空を撫でる。
-		if (graft) BindFaceSynth(sk, faceBase, nAdd);
-		if (!graft) for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
+		for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
 			sk.faceSet = hs.faceSet;
 			sk.faceStart = 0;
 			sk.faceN = body.nFace;
 			memcpy(sk.faceLin, hs.faceLin, sizeof(sk.faceLin));
 			break;
 		}
+		if (sk.faceSet < 0 && body.nFace > 30) BindFaceSynth(sk, 0, body.nFace);
 		static Buf<VtxS> pv;
 		pv.resize((int)sk.bind.size());
 		if (!pv.data() || pv.size() < (int)sk.bind.size()) return FALSE;
@@ -6890,6 +6314,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	cb.sim[3] = hs;
 	cb.mode[3] = m_time;
 	TacWind(m_time, world, 0.48f, cb.wind);
+	cb.wind[3] = Clampf(dp.fly, 0.f, 1.f);
 	TacGrav(world, 9.2f, cb.grav);
 	cb.grav[3] = ac.clothY0;
 	if (step) {
@@ -7556,10 +6981,7 @@ void Renderer::EnsureScalp(int model, int headJ)
 	if (sk->headTri.size() >= 9) {
 		const float yTop = sk->crown[1];
 		const float capCx = sk->skullC[0], capCy = sk->skullC[1], capCz = sk->skullC[2];
-		// HumF0 / HumM0 は分け目に地肌が出るので殻を被せる。額までは下ろさない。
-		const char* mn = (model >= 0 && model < (int)models.size()) ? models[model].name : "";
-		const BOOL whiteHead = mn && strncmp(mn, "Hum", 3) == 0 && mn[3] && mn[4] == '0';
-		// モデルが変わるたびに新しい塊を切ると、本体の arena が数秒で埋まり、次に開いたとき落ちる。
+		// 0 系も 1/2 系も同じ共通素体の頭を使うので、頭蓋の殻は全モデル同じ範囲（後頭〜頭頂〜側頭、額は出す）にする。
 		static Buf<int> map;
 		map.fill(nv, -1);
 		if (map.size() == nv) {
@@ -7568,43 +6990,25 @@ void Renderer::EnsureScalp(int model, int headJ)
 			for (int t = 0; t + 2 < (int)sk->headTri.size(); t += 3) {
 				int ix[3] = { sk->headTri[t], sk->headTri[t + 1], sk->headTri[t + 2] };
 				if (ix[0] < 0 || ix[1] < 0 || ix[2] < 0 || ix[0] >= nv || ix[1] >= nv || ix[2] >= nv) continue;
-				if (whiteHead) {
-					// 三点とも殻の内側。額は出す。眉まで被せると額が消える。
-					int nKeep = 0;
-					for (int c = 0; c < 3; c++) {
-						const float* p = sk->bind[ix[c]].p;
-						float nx = p[0] - capCx, ny = p[1] - (yTop - 0.09f), nz = p[2] - capCz;
-						float nl = sqrtf(nx * nx + ny * ny + nz * nz);
-						if (nl > 1e-6f) { nx /= nl; ny /= nl; nz /= nl; }
-						BOOL keep = p[1] > yTop - 0.052f;
-						if (nz < -0.18f && p[1] < yTop - 0.055f) keep = FALSE;
-						if (keep) nKeep++;
-					}
-					if (nKeep < 3) continue;
-				} else {
 				float cy = 0.f, cz = 0.f;
 				for (int c = 0; c < 3; c++) {
 					cy += sk->bind[ix[c]].p[1];
 					cz += sk->bind[ix[c]].p[2];
 				}
-					// 渦と分け目の穴を髪色で塞ぐ。額は出す。
+				// 渦と分け目と耳の上の隙間を髪色で塞ぐ。額と顔（前側 dz < -0.02 で天辺より 5cm 下）は出す。
 				const float dy = cy * (1.f / 3.f) - yTop, dz = cz * (1.f / 3.f) - capCz;
-					if (dy < -0.15f) continue;
-					if (dy < -0.05f && dz < -0.02f) continue;
-				}
+				if (dy < -0.15f) continue;
+				if (dy < -0.048f && dz < -0.015f) continue;
 				for (int c = 0; c < 3; c++) {
 					int v = ix[c];
 					if (map[v] < 0) {
 						if (m_capBind.size() >= 60000) { map[v] = 0; continue; }
 						const CSkinV& src = sk->bind[v];
-						// メッシュ法線は内側を向いていることがある。頭蓋の中心から外へ出す。
-						// 白人の顔は継いだとき前へ 6% 張るので、殻は 9mm。他は 6mm。
-						const float oy = whiteHead ? (yTop - 0.09f) : capCy;
-						float nx = src.p[0] - capCx, ny = src.p[1] - oy, nz = src.p[2] - capCz;
+						float nx = src.p[0] - capCx, ny = src.p[1] - capCy, nz = src.p[2] - capCz;
 						float nl = sqrtf(nx * nx + ny * ny + nz * nz);
 						if (nl > 1e-6f) { nx /= nl; ny /= nl; nz /= nl; }
 						else { nx = 0.f; ny = 1.f; nz = 0.f; }
-						const float push = whiteHead ? 0.009f : 0.006f;
+						const float push = 0.005f;
 						VtxS s;
 						memset(&s, 0, sizeof(s));
 						s.p[0] = src.p[0] + nx * push;
@@ -7716,9 +7120,9 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			if (ref >= 0) {
 				const float cx = m_hairCap[ref][0], cy = m_hairCap[ref][1], cz = m_hairCap[ref][2];
 				const float ry = seg[4] * cx + seg[5] * cy + seg[6] * cz + seg[7];
-				liftDy = (hs->crown[1] + 0.028f) - ry;
-				if (liftDy < 0.020f) liftDy = 0.020f;
-				else if (liftDy > 0.18f) liftDy = 0.18f;
+				liftDy = (hs->crown[1] + 0.020f) - ry;
+				if (liftDy < 0.012f) liftDy = 0.012f;
+				else if (liftDy > 0.22f) liftDy = 0.22f;
 			}
 		}
 		slot[13] += liftDy;
@@ -8205,6 +7609,8 @@ void Renderer::SetObj(const M4& world, const DrawParams& dp, float outlineW)
 	o.params[0] = outlineW; o.params[1] = dp.mode; o.params[2] = dp.emissive; o.params[3] = dp.hue;
 	o.extra[0] = dp.dissolve; o.extra[1] = dp.flash; o.extra[2] = dp.rim; o.extra[3] = dp.sway;
 	o.oc[0] = (dp.outlineColor & 255) / 255.f; o.oc[1] = ((dp.outlineColor >> 8) & 255) / 255.f; o.oc[2] = ((dp.outlineColor >> 16) & 255) / 255.f; o.oc[3] = ((dp.outlineColor >> 24) & 255) / 255.f;
+	// 本描画の輪郭色の a は使わない。人の体・服・髪の印にする（地形向けの細かい法線と縁の光を外す）。
+	if (dp.noTess && outlineW <= 0.f) o.oc[3] = 2.f;
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (SUCCEEDED(m_ctx->Map(m_cbObj, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) { memcpy(ms.pData, &o, sizeof(o)); m_ctx->Unmap(m_cbObj, 0); }
 }
@@ -8292,7 +7698,7 @@ void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M
 void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp)
 {
 	if (!m.vb || !m.ib) return;
-	m_allowTess = !(dp.outline > 0.f);
+	m_allowTess = !(dp.outline > 0.f) && !dp.noTess;
 	UINT st = m.stride, off = 0;
 	m_ctx->IASetVertexBuffers(0, 1, &m.vb, &st, &off);
 	m_ctx->IASetIndexBuffer(m.ib, m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
@@ -8366,7 +7772,7 @@ void Renderer::DrawTerrain()
 {
 	DrawParams dp;
 	dp.rim = 0;
-	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : NULL;
+	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : m_psTheme;
 	if (m_terrain.vb) DrawStatic(m_terrain, MIdent(), dp);
 	int gx = -99, gz = -99;
 	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
@@ -8755,7 +8161,7 @@ static bool ScenicGround(int t)
 static bool ScenicSkipProp(int prop)
 {
 	return prop == PK_TENT || prop == PK_FLAG || prop == PK_BARREL || prop == PK_CRATE
-		|| prop == PK_LANTERN || prop == PK_MOUNT || prop == PK_HILLTREES || prop == PK_TREES;
+		|| prop == PK_LANTERN || prop == PK_MOUNT || prop == PK_HILLTREES || prop == PK_TREES || prop == PK_KIT;
 }
 
 static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer::SceneryPuff* puff, int& puffN)
@@ -8792,6 +8198,7 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 		float px = x + ox, pz = z + oz, py = m.StandY(x, z);
 		float yaw = (h & 255) / 255.f * 6.2831853f;
 		float u = (h & 65535) / 65535.f;
+		if (theme >= TH_SEABED) continue;
 		switch (theme) {
 		case TH_PLAINS:
 			if ((h % 3) != 0) break;
@@ -8874,6 +8281,23 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if (wet && (h % 3) == 0) Tuft(mb, px, py, pz, 0.32f + u * 0.2f, 0.03f, yaw, RGBA8(40, 78, 36), RGBA8(150, 176, 72, 60));
 			else if ((h % 4) == 0) Tuft(mb, px, py, pz, 0.08f + u * 0.05f, 0.08f, yaw, RGBA8(36, 86, 38), RGBA8(90, 150, 64, 90));
 			break; }
+		case TH_ORBIT:
+			if ((h % 6) == 0) AddBox(mb, v3(px, py + 0.08f, pz), v3(0.18f + u * 0.12f, 0.05f, 0.1f), RGBA8(70, 78, 90), -1);
+			if ((h % 13) == 0) AddBox(mb, v3(px, py + 0.22f, pz), v3(0.16f, 0.16f, 0.16f), RGBA8(120, 150, 190), -1);
+			break;
+		case TH_STATION:
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.2f, pz), v3(0.04f, 0.2f, 0.04f), RGBA8(140, 150, 160), -1);
+			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.42f, pz), v3(0.16f, 0.03f, 0.03f), (h & 8) ? RGBA8(255, 70, 40) : RGBA8(40, 180, 255), -1);
+			break;
+		case TH_CITADEL:
+			if ((h % 7) == 0) AddBox(mb, v3(px, py + 0.35f, pz), v3(0.12f, 0.35f, 0.12f), RGBA8(186, 180, 196), -1);
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.72f, pz), v3(0.2f, 0.04f, 0.2f), RGBA8(90, 70, 110), -1);
+			break;
+		case TH_LANTERN:
+			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.45f, pz), v3(0.02f, 0.4f, 0.02f), RGBA8(210, 200, 170), -1);
+			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.88f, pz), v3(0.07f, 0.05f, 0.07f), RGBA8(255, 210, 120), -1);
+			if ((h % 3) == 0) AddPuff(puff, puffN, 7, px, py + 0.2f, pz, 10.f);
+			break;
 		default: break;
 		}
 	}
@@ -9007,6 +8431,84 @@ static void EmitEdgeWall(MeshBuild& geo, const Map& m, int x, int z, int dir, in
 		geo.Quad(v3(px[i], y0, pz[i]), v3(px[i + 1], y1, pz[i + 1]),
 			v3(px[i + 1], b1, pz[i + 1]), v3(px[i], b0, pz[i]), nrm, 0, 0, 1, 1, -1, col);
 	}
+}
+
+struct KitMesh { int theme; Buf<VtxS> v; Buf<WORD> i; };
+static KitMesh gKit[40];
+static int gKitN = 0, gKitReady = 0, gKitAt[16], gKitCnt[16];
+
+static void EnsureThemeKits()
+{
+	if (gKitReady) return;
+	gKitReady = 1;
+	gKitN = 0;
+	for (int i = 0; i < 16; i++) { gKitAt[i] = 0; gKitCnt[i] = 0; }
+	static_assert(sizeof(VtxS) == 36, "kit vertex");
+	wchar_t dir[MAX_PATH];
+	GetModuleFileNameW(NULL, dir, MAX_PATH);
+	wchar_t* sl = wcsrchr(dir, L'\\');
+	if (sl) *sl = 0;
+	wchar_t path[MAX_PATH];
+	swprintf_s(path, L"%s\\tacticsbgm\\resource\\tactics\\props\\kit.bin", dir);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD sz = GetFileSize(h, NULL);
+	BYTE* buf = (sz >= 8 && sz < 16u * 1024u * 1024u) ? (BYTE*)malloc(sz) : NULL;
+	DWORD got = 0;
+	BOOL ok = buf && ReadFile(h, buf, sz, &got, NULL) && got == sz && memcmp(buf, "TPR1", 4) == 0;
+	CloseHandle(h);
+	if (!ok) { free(buf); return; }
+	const BYTE* p = buf + 4;
+	const BYTE* end = buf + sz;
+	UINT n = 0;
+	memcpy(&n, p, 4); p += 4;
+	if (n > 40) n = 40;
+	for (UINT i = 0; i < n && p + 12 <= end; i++) {
+		UINT theme = 0, nv = 0, ni = 0;
+		memcpy(&theme, p, 4); p += 4;
+		memcpy(&nv, p, 4); p += 4;
+		memcpy(&ni, p, 4); p += 4;
+		size_t vb = (size_t)nv * sizeof(VtxS);
+		size_t ib = ((size_t)ni * 2u + 3u) & ~3u;
+		if (theme >= 16 || !nv || ni < 3 || nv > 65000 || p + vb + ib > end) break;
+		KitMesh& km = gKit[gKitN];
+		km.theme = (int)theme;
+		km.v.resize((int)nv);
+		km.i.resize((int)ni);
+		if (!km.v.data() || !km.i.data()) break;
+		memcpy(km.v.data(), p, vb); p += vb;
+		memcpy(km.i.data(), p, (size_t)ni * 2u); p += ib;
+		gKitN++;
+	}
+	free(buf);
+	for (int t = 0; t < 16; t++) {
+		int b = -1, c = 0;
+		for (int i = 0; i < gKitN; i++) if (gKit[i].theme == t) {
+			if (b < 0) b = i;
+			c++;
+		}
+		gKitAt[t] = b < 0 ? 0 : b;
+		gKitCnt[t] = c;
+	}
+}
+
+static void PlaceKit(MeshBuild& mb, int theme, int var, float x, float y, float z, float yaw)
+{
+	if (theme < 0 || theme >= 16 || gKitCnt[theme] <= 0) return;
+	if (mb.v.size() > 220000) return;
+	const KitMesh& s = gKit[gKitAt[theme] + (var % gKitCnt[theme])];
+	float sc = 0.92f + (var % 5) * 0.05f;
+	M4 w = MMul(MMul(MScale(sc, sc, sc), MRotY(yaw)), MTrans(x, y, z));
+	UINT base = (UINT)mb.v.size();
+	for (int i = 0; i < (int)s.v.size(); i++) {
+		VtxS vx = s.v[i];
+		V3 p = MXformPt(w, v3(vx.p[0], vx.p[1], vx.p[2]));
+		V3 nrm = Norm(MXformDir(w, v3(vx.n[0], vx.n[1], vx.n[2])));
+		vx.p[0] = p.x; vx.p[1] = p.y; vx.p[2] = p.z;
+		vx.n[0] = nrm.x; vx.n[1] = nrm.y; vx.n[2] = nrm.z;
+		mb.v.push_back(vx);
+	}
+	for (int i = 0; i < (int)s.i.size(); i++) mb.i.push_back(base + s.i[i]);
 }
 
 BOOL Renderer::BuildTerrain(const Map& m)
@@ -9150,14 +8652,20 @@ BOOL Renderer::BuildTerrain(const Map& m)
 	case TH_DESERT: m_waterColor = RGBA8(50, 150, 170); break;
 	case TH_SEABED: m_waterColor = RGBA8(20, 70, 90); break;
 	case TH_FALLS: m_waterColor = RGBA8(170, 210, 230); break;
+	case TH_ORBIT: m_waterColor = RGBA8(40, 60, 120); break;
+	case TH_STATION: m_waterColor = RGBA8(40, 140, 170); break;
+	case TH_CITADEL: m_waterColor = RGBA8(40, 28, 70); break;
+	case TH_LANTERN: m_waterColor = RGBA8(170, 186, 220); break;
 	default: m_waterColor = RGBA8(55, 125, 190); break;
 	}
 
 	// 小物。木・岩・橋は写真テクスチャ、旗やランタンはモデル自身のテクスチャ。
-	static MeshBuild treeMb, rockMb, proc, tentMb, flagMb, lilyMb, plantMb, lantMb, pumpMb;
+	static MeshBuild treeMb, rockMb, proc, tentMb, flagMb, lilyMb, plantMb, lantMb, pumpMb, kitMb;
 	treeMb.v.clear(); treeMb.i.clear(); rockMb.v.clear(); rockMb.i.clear(); proc.v.clear(); proc.i.clear();
 	tentMb.v.clear(); tentMb.i.clear(); flagMb.v.clear(); flagMb.i.clear(); lilyMb.v.clear(); lilyMb.i.clear();
 	plantMb.v.clear(); plantMb.i.clear(); lantMb.v.clear(); lantMb.i.clear(); pumpMb.v.clear(); pumpMb.i.clear();
+	kitMb.v.clear(); kitMb.i.clear();
+	EnsureThemeKits();
 	auto flush = [&](MeshBuild& mb, int tex, float mat) {
 		if (mb.v.empty()) return;
 		PropBatch pb;
@@ -9244,6 +8752,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 			case PK_CRATE: place(wood, sCrate, cx, cy, cz, 2.6f, rot, tint, 0); break;
 			case PK_LANTERN: place(lantMb, sLant, cx + .3f, cy, cz + .3f, .6f, rot, tint, 0); break;
 			case PK_PUMPKIN: place(pumpMb, sPump, cx, cy, cz, .45f, rot, tint, 0); break;
+			case PK_KIT: PlaceKit(kitMb, m.theme, c.var, cx, cy, cz, rot); break;
 			}
 		}
 		auto texOf = [&](int si) { return si >= 0 ? statics[si].tex : TEX_WHITE; };
@@ -9256,6 +8765,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 		flush(plantMb, texOf(sPlant), 3);
 		flush(lantMb, texOf(sLant), 3);
 		flush(pumpMb, texOf(sPump), 3);
+		flush(kitMb, TEX_WHITE, 3);
 	}
 	flush(wood, TEX_WHITE, 2);
 	flush(sceneMb, TEX_WHITE, 3);
@@ -9274,6 +8784,10 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 		else if (m.theme == TH_CANYON) { r = 150; g = 115; b = 80; }
 		else if (m.theme == TH_SEABED) { r = 70; g = 140; b = 120; }
 		else if (m.theme == TH_FALLS) { r = 90; g = 150; b = 80; }
+		else if (m.theme == TH_ORBIT) { r = 50; g = 58; b = 78; }
+		else if (m.theme == TH_STATION) { r = 90; g = 100; b = 112; }
+		else if (m.theme == TH_CITADEL) { r = 130; g = 120; b = 145; }
+		else if (m.theme == TH_LANTERN) { r = 190; g = 196; b = 214; }
 		else { r = 105; g = 165; b = 80; }
 		break;
 	case T_FOREST:

@@ -56,7 +56,7 @@ Texture2D ShadowMap : register(t1);
 Texture2D DepthMap : register(t2); // グレード専用。近いほど 0、空は 1。
 Texture2DArray Ground : register(t3); // 0..7 地面アルベド(a=AO) 8..15 法線。スロット表の外。
 Texture2DArray Mat : register(t4);    // 樹皮・葉・岩・木材。各アルベドと法線。
-Texture2DArray Photo : register(t5);  // 0..9 実写アルベド(a>0.5で有効) 10..19 法線
+	Texture2DArray Photo : register(t5);  // 0..13 実写アルベド(a>0.5で有効) 14..27 法線
 Texture2D SphereMap : register(t6);   // 反射ベクトルの球体マップ
 TextureCube EnvMap : register(t7);    // ステージの環境キューブ
 SamplerState SL : register(s0);
@@ -420,9 +420,14 @@ float3 DetailN(float3 n, float3 w)
 
 GOut PSM(PSIn i)
 {
+	// 人の体・服・髪（輪郭色 a>1.5）。地形の細かい法線は肌と布をまだらにし、浅い角度の縁の光は紺を灰色に飛ばす。
+	const float person = OutlineColor.a > 1.5 ? 1. : 0.;
 	float3 n = normalize(i.n);
-	n = DetailN(n, i.w);
 	float3 v = normalize(Eye.xyz - i.w);
+	// 人は両面で描く。襟やリボンは裏表 2 枚が同じ位置に重なり、裏の 1 枚が勝つと体側を向いた法線で灰色に沈む。
+	// はっきり裏を向いた法線だけ返す（輪郭付近の 0 前後は触らない）。
+	if (person > 0.5 && dot(n, v) < -0.1) n = -n;
+	if (person < 0.5) n = DetailN(n, i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
 	float3 albedo = tx.rgb * i.c.rgb;
 	if (abs(Params.w) > 0.001) {
@@ -467,11 +472,11 @@ GOut PSM(PSIn i)
 		else if (Q.x > 4.5 && Q.x < 5.5) rimA = 0.24;
 		else if (Q.x > 5.5) rimA = 0.28;
 		else if (Q.x > 3.5 && Q.x < 4.5) rimA = 0.08;
-		col += tr * frC * rimA * (0.5 + 0.5 * sh);
+		col += tr * frC * rimA * (0.5 + 0.5 * sh) * (1. - person * 0.8);
 	}
 	col += emis;
 	float hair = (Params.y > 6.5 && Params.y < 7.5) ? 1 : 0;
-	col = DewShade(col, albedo, n, v, sh, skin, hair);
+	col = lerp(col, DewShade(col, albedo, n, v, sh, skin, hair), 1. - person * 0.6);
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
@@ -719,12 +724,11 @@ GOut GroundPS(PSIn i, float theme)
 		float2 c2 = i.w.xz * 1.3 - Eye.w * float2(0.07, 0.12);
 		bedCaus = pow(saturate(sin(c1.x * 6.2) * sin(c1.y * 5.4) + sin(c2.x * 4.8) * sin(c2.y * 5.1)), 2);
 	}
-	// 配列は 0..7 がアルベド、8..15 が法線。海底と滝は既存スライスを染める。
+	// 配列は 0..7 がアルベド、8..15 が法線。海底・滝・追加4テーマは実写を床にする。
+	bool dedicated = theme > 7.5;
 	float texTheme = theme;
-	if (theme > 7.5 && theme < 8.5) texTheme = 4;
-	else if (theme > 8.5) texTheme = 1;
-	float4 alb = Ground.Sample(SL, float3(uv, texTheme));
-	float4 nr = Ground.Sample(SL, float3(uv, texTheme + 8));
+	float4 alb = dedicated ? float4(0.42, 0.42, 0.44, 1) : Ground.Sample(SL, float3(uv, texTheme));
+	float4 nr = dedicated ? float4(0.5, 0.5, 1, 1) : Ground.Sample(SL, float3(uv, texTheme + 8));
 	float3 albedo = alb.rgb * lerp(0.78, 1, alb.a) * i.c.rgb;
 	if (cliff > 0.5) albedo *= 0.8;
 	float3 nLit = DetailN(Bump(n, nr.rgb), i.w);
@@ -807,7 +811,7 @@ GOut GroundPS(PSIn i, float theme)
 		float ray = pow(saturate(0.5 + 0.5 * sin(i.w.x * 0.35 + i.w.z * 0.12 + Eye.w * 0.35)), 5);
 		ray *= pow(saturate(0.5 + 0.5 * sin(i.w.z * 0.22 - Eye.w * 0.18)), 3);
 		glow += float3(0.45, 0.85, 1) * ray * saturate(n.y) * 0.08;
-	} else {
+	} else if (theme < 9.5) {
 		rough = 0.42;
 		f0 = float3(0.06, 0.065, 0.07);
 		albedo *= float3(0.78, 0.86, 0.9);
@@ -816,38 +820,78 @@ GOut GroundPS(PSIn i, float theme)
 		float sheet = pow(0.5 + 0.5 * sin(i.w.z * 0.8 - Eye.w * 2.6), 3);
 		glow += float3(0.7, 0.88, 1) * sheet * 0.12;
 		albedo = lerp(albedo, float3(0.75, 0.86, 0.92), spray * 0.16);
+	} else if (theme < 10.5) {
+		rough = 0.35;
+		f0 = float3(0.08, 0.09, 0.12);
+		albedo *= float3(0.55, 0.62, 0.78);
+		float panel = step(0.92, frac(sin(floor(i.w.x * 2.0) * 12.3 + floor(i.w.z * 2.0) * 7.1)));
+		glow += float3(0.45, 0.7, 1) * panel * 0.07;
+		float spec = pow(saturate(dot(nLit, normalize(normalize(LightDir.xyz) + v))), 24);
+		glow += float3(0.7, 0.85, 1) * spec * 0.06;
+	} else if (theme < 11.5) {
+		rough = 0.28;
+		f0 = float3(0.12, 0.13, 0.14);
+		albedo *= float3(0.72, 0.78, 0.84);
+		float seam = pow(0.5 + 0.5 * sin(i.w.x * 8.0), 16) + pow(0.5 + 0.5 * sin(i.w.z * 8.0), 16);
+		albedo *= 1 - seam * 0.25;
+		float lamp = step(0.96, hash21(floor(i.w.xz * 1.5)));
+		glow += float3(1, 0.45, 0.15) * lamp * 0.45 + float3(0.2, 0.7, 1) * lamp * 0.2;
+	} else if (theme < 12.5) {
+		rough = 0.22;
+		f0 = float3(0.08, 0.07, 0.09);
+		albedo = lerp(albedo, albedo * float3(0.85, 0.82, 0.9), 0.45);
+		float vein = pow(0.5 + 0.5 * sin(i.w.x * 1.7 + i.w.z * 0.6), 6);
+		albedo = lerp(albedo, float3(0.72, 0.68, 0.78), vein * 0.25);
+		glow += float3(0.45, 0.3, 0.7) * (1 - cliff) * 0.08;
+	} else {
+		rough = 0.4;
+		f0 = float3(0.07, 0.08, 0.1);
+		albedo = lerp(albedo, float3(0.82, 0.86, 0.95), 0.35);
+		float mist = 0.5 + 0.5 * sin(i.w.x * 0.4 + Eye.w * 0.3);
+		glow += float3(1, 0.9, 0.7) * mist * saturate(n.y) * 0.12;
+		float lantern = step(0.97, hash21(floor(i.w.xz * 2.0)));
+		glow += float3(1, 0.78, 0.4) * lantern * 0.55;
 	}
 	float tier = StageTier();
-	if (tier > 0.5) {
-		float2 puv = i.w.xz * (cliff > 0.5 ? 0.22 : 0.15);
+	if (tier > 0.5 || dedicated) {
+		float rep = dedicated ? (cliff > 0.5 ? 0.36 : 0.5) : (cliff > 0.5 ? 0.22 : 0.15);
+		float2 puv = i.w.xz * rep;
 		float4 ph = Photo.Sample(SL, float3(puv, theme));
 		if (ph.a > 0.5) {
 			float3 alb = ph.rgb;
-			if (tier > 1.5 && cliff > 0.5) {
+			bool tri = dedicated || (tier > 1.5 && cliff > 0.5);
+			if (tri && cliff > 0.5) {
 				float3 w = abs(n);
 				w /= max(w.x + w.y + w.z, 1e-3);
-				float3 sx = Photo.Sample(SL, float3(i.w.zy * 0.22, theme)).rgb;
-				float3 sz = Photo.Sample(SL, float3(i.w.xy * 0.22, theme)).rgb;
+				float3 sx = Photo.Sample(SL, float3(i.w.zy * rep, theme)).rgb;
+				float3 sz = Photo.Sample(SL, float3(i.w.xy * rep, theme)).rgb;
 				alb = sx * w.x + alb * w.y + sz * w.z;
 			}
-			if (tier > 3.5) {
-				float3 far = Photo.Sample(SL, float3(puv * 0.23, theme)).rgb;
-				alb = lerp(alb, far, 0.26);
-			}
-			if (tier > 4.5) {
-				float3 grit = Photo.Sample(SL, float3(i.w.xz * 0.46, theme)).rgb;
-				alb = lerp(alb, grit, 0.2);
-			}
-			float photoMix = tier < 1.5 ? 0.58 : (tier < 2.5 ? 0.74 : (tier < 3.5 ? 0.86 : 0.93));
-			albedo = lerp(albedo, alb, photoMix);
-			if (theme > 7.5 && theme < 8.5) albedo *= lerp(float3(1, 1, 1), float3(0.45, 0.78, 1.05), 0.62);
-			else if (theme > 8.5) albedo *= lerp(float3(1, 1, 1), float3(0.78, 0.92, 0.88), 0.28);
-			else if (theme > 5.5 && theme < 6.5) albedo *= lerp(float3(1, 1, 1), float3(0.7, 0.88, 0.62), 0.24);
-			else if (theme > 4.5 && theme < 5.5) albedo *= lerp(float3(1, 1, 1), float3(0.9, 0.62, 0.5), 0.34);
-			if (tier > 2.5) {
-				float3 pn = Photo.Sample(SL, float3(puv, theme + 10)).rgb;
+			if (dedicated) {
+				albedo = alb;
+				if (theme < 8.5) albedo = lerp(albedo, albedo * float3(0.45, 0.78, 0.95), 0.5);
+				else if (theme < 9.5) albedo *= float3(0.9, 0.96, 0.92);
+				else if (theme < 10.5) albedo = saturate(pow(max(albedo, 0.001), 0.62) * 1.05);
+				else if (theme < 11.5) albedo = saturate(albedo * 1.75 + 0.07);
+				else if (theme < 12.5) albedo = saturate(albedo * 1.12 + 0.03);
+			} else {
+				if (tier > 3.5) {
+					float3 far = Photo.Sample(SL, float3(puv * 0.23, theme)).rgb;
+					alb = lerp(alb, far, 0.26);
+				}
 				if (tier > 4.5) {
-					float3 pn2 = Photo.Sample(SL, float3(i.w.xz * 0.46, theme + 10)).rgb;
+					float3 grit = Photo.Sample(SL, float3(i.w.xz * 0.46, theme)).rgb;
+					alb = lerp(alb, grit, 0.2);
+				}
+				float photoMix = tier < 1.5 ? 0.58 : (tier < 2.5 ? 0.74 : (tier < 3.5 ? 0.86 : 0.93));
+				albedo = lerp(albedo, alb, photoMix);
+				if (theme > 5.5 && theme < 6.5) albedo *= lerp(float3(1, 1, 1), float3(0.7, 0.88, 0.62), 0.24);
+				else if (theme > 4.5 && theme < 5.5) albedo *= lerp(float3(1, 1, 1), float3(0.9, 0.62, 0.5), 0.34);
+			}
+			if (tier > 2.5 || dedicated) {
+				float3 pn = Photo.Sample(SL, float3(puv, theme + 14)).rgb;
+				if (tier > 4.5) {
+					float3 pn2 = Photo.Sample(SL, float3(i.w.xz * 0.46, theme + 14)).rgb;
 					pn = lerp(pn, pn2, 0.35);
 				}
 				nLit = DetailN(Bump(n, pn), i.w);
@@ -894,6 +938,7 @@ GOut PSG6(PSIn i) { return GroundPS(i, 6); }
 GOut PSG7(PSIn i) { return GroundPS(i, 7); }
 GOut PSG8(PSIn i) { return GroundPS(i, 8); }
 GOut PSG9(PSIn i) { return GroundPS(i, 9); }
+GOut PSGX(PSIn i) { return GroundPS(i, FogColor.a); }
 
 GOut PSProp(PSIn i)
 {
@@ -1202,14 +1247,14 @@ void ThemeWorld(inout float3 col, float2 uv, float th, float t, float z)
 			col += float3(0.45, 0.7, 1) * rune * sky * (tier > 5.5 ? 0.2 : 0.1);
 		}
 		col = lerp(col, col * float3(0.75, 0.82, 1.05), far * presence * 0.22);
-	} else if (th < 8.5) {
+	} 	else if (th < 8.5) {
 		col += Mote(uv, t, float2(0.02, 0.55), 16, 0.9, 0.04) * float3(0.55, 0.85, 1) * 0.55 * moteK;
 		float caus = pow(saturate(sin(uv.x * 40.0 + t * 0.6) * sin(uv.y * 18.0 - t * 0.4)), 2);
 		col += float3(0.25, 0.7, 1) * caus * horizon * presence * 0.08;
 		float ray = pow(0.5 + 0.5 * sin(uv.x * 30.0 + t * 0.45), 8);
 		col += float3(0.35, 0.75, 1) * ray * sky * presence * 0.1;
 		col = lerp(col, col * float3(0.55, 0.8, 1.05), far * presence * 0.16);
-	} else {
+	} else if (th < 9.5) {
 		col += Mote(uv, t, float2(0.06, 0.45), 18, 0.88, 0.045) * float3(0.85, 0.95, 1) * 0.7 * moteK * (0.4 + sky);
 		if (tier > 2.5) {
 			float prism = 0.5 + 0.5 * sin(uv.x * 10.0 + t * 0.4);
@@ -1217,6 +1262,32 @@ void ThemeWorld(inout float3 col, float2 uv, float th, float t, float z)
 			col += bow * pow(saturate(sky), 1.4) * haze * 0.14;
 		}
 		col = lerp(col, float3(0.78, 0.88, 0.95), far * presence * 0.22);
+	} else if (th < 10.5) {
+		float star = step(0.985, hash21(floor(uv * float2(280, 160))));
+		col += star * float3(0.9, 0.95, 1) * sky * presence;
+		col += Mote(uv, t, float2(0.15, 0.02), 10, 0.8, 0.08) * float3(0.45, 0.55, 0.9) * 0.55 * moteK * horizon;
+		float neb = 0.5 + 0.5 * sin(uv.x * 4.0 + t * 0.15) * sin(uv.y * 3.0 - t * 0.08);
+		col += float3(0.25, 0.15, 0.45) * neb * sky * presence * 0.35;
+		col = lerp(col, float3(0.05, 0.07, 0.16), far * presence * 0.45);
+	} else if (th < 11.5) {
+		float blink = step(0.97, hash21(floor(uv * float2(48, 27)) + floor(t * 2.0)));
+		col += blink * float3(0.3, 0.85, 1) * sky * presence * 0.8;
+		float girder = pow(0.5 + 0.5 * sin(uv.x * 90.0), 18) + pow(0.5 + 0.5 * sin(uv.y * 40.0), 18);
+		col += float3(0.55, 0.7, 0.8) * girder * sky * presence * 0.12;
+		col = lerp(col, col * float3(0.7, 0.78, 0.88), far * presence * 0.3);
+	} else if (th < 12.5) {
+		col += Mote(uv, t, float2(0.35, 0.08), 16, 0.9, 0.04) * float3(0.55, 0.45, 0.7) * 0.7 * moteK;
+		float moon = exp(-pow((uv.x - 0.72) * 3.2, 2) - pow((uv.y - 0.22) * 4.0, 2));
+		col += float3(0.75, 0.7, 0.9) * moon * sky * 0.45;
+		float win = step(0.992, hash21(floor(uv * float2(80, 45)))) * sky;
+		col += float3(1, 0.82, 0.45) * win * presence * 0.7;
+		col = lerp(col, float3(0.22, 0.16, 0.32), far * presence * 0.35);
+	} else {
+		col += Mote(uv, t, float2(0.08, 0.22), 14, 0.88, 0.05) * float3(1, 0.92, 0.7) * 0.8 * moteK * sky;
+		float veil = 0.5 + 0.5 * sin(uv.x * 3.0 + t * 0.2) * sin(uv.y * 2.0 - t * 0.1);
+		col = lerp(col, float3(0.72, 0.76, 0.92), veil * sky * presence * 0.28);
+		col += float3(1, 0.9, 0.7) * pow(saturate(sky), 2) * presence * 0.08;
+		col = lerp(col, col * float3(0.85, 0.88, 1.05), far * presence * 0.25);
 	}
 	if (tier > 2.5 && hasZ > 0.5) {
 		float2 px = Screen.zw * (tier > 5.5 ? 2.4 : 1.8);
@@ -1292,7 +1363,11 @@ float4 PSGrade(QOut i) : SV_Target
 	else if (th < 6.5) { grade = float3(0.97, 1.02, 0.95); shaftK = 0.3; }
 	else if (th < 7.5) { grade = float3(0.97, 0.98, 1.03); shaftK = 0.55; }
 	else if (th < 8.5) { grade = float3(0.92, 0.98, 1.03); shaftK = 0.8; }
-	else { grade = float3(0.98, 0.99, 1.02); shaftK = 0.9; }
+	else if (th < 9.5) { grade = float3(0.98, 0.99, 1.02); shaftK = 0.9; }
+	else if (th < 10.5) { grade = float3(0.82, 0.88, 1.08); shaftK = 0.15; }
+	else if (th < 11.5) { grade = float3(0.9, 0.95, 1.04); shaftK = 0.35; }
+	else if (th < 12.5) { grade = float3(0.95, 0.88, 1.05); shaftK = 0.4; }
+	else { grade = float3(0.96, 0.97, 1.06); shaftK = 0.55; }
 	// 筋は太陽が空にあるとき、空の側だけ。盤面へ放射状に広げない。
 	float sky = saturate((0.46 - i.uv.y) * 2.6);
 	float sunUp = saturate((0.4 - suv.y) * 3.2);

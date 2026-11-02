@@ -18,7 +18,7 @@ for %%F in (
   gpu_vs_rect gpu_ps_rect gpu_vs_piano gpu_cs_hex gpu_cs_glyph
   maze_vst maze_hst maze_dst maze_psw maze_vss maze_pss maze_vsh maze_psh maze_vsq maze_ssr maze_dofp maze_fin maze_psline maze_psmirf maze_pscloud maze_csfx maze_gsw maze_vsskin maze_cssub
   race_vst race_hst race_dst race_psb race_vss race_pss race_vsh race_psh race_vsq race_ssr race_dofp race_fin race_csnoise race_psc race_psline race_pst race_vssi race_psw race_pscloud race_gsw race_vsw race_csgridc race_csgridw
-  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_csclths tac_csclthr tac_csclthw tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psg8 tac_psg9 tac_psprop tac_pswater tac_pslava tac_vst tac_hst tac_dst tac_psgrtiny tac_psdofh tac_psdofu tac_cssoft tac_cssoftw tac_cshair tac_cshairw
+  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_csclths tac_csclthr tac_csclthw tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psg8 tac_psg9 tac_psgx tac_psprop tac_pswater tac_pslava tac_vst tac_hst tac_dst tac_psgrtiny tac_psdofh tac_psdofu tac_cssoft tac_cssoftw tac_cshair tac_cshairw
 ) do if not exist res\cso\%%F.cso goto :needfxc
 powershell -NoProfile -Command "if (-not (Get-Item -ErrorAction SilentlyContinue res\cso\*.cso)) { exit 1 }; $h = @(Get-Item shaders\*.hlsl); $c = @(Get-Item res\cso\*.cso); if (($c | Measure-Object LastWriteTime -Minimum).Minimum -ge ($h | Measure-Object LastWriteTime -Maximum).Maximum) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
@@ -186,6 +186,8 @@ call :cc ps_5_0 PSG8 shaders\omake_tactics.hlsl tac_PSG8 tac_psg8
 if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSG9 shaders\omake_tactics.hlsl tac_PSG9 tac_psg9
 if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSGX shaders\omake_tactics.hlsl tac_PSGX tac_psgx
+if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSProp shaders\omake_tactics.hlsl tac_PSProp tac_psprop
 if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSWater shaders\omake_tactics.hlsl tac_PSWater tac_pswater
@@ -217,7 +219,18 @@ echo cso ok
 exit /b 0
 
 :cc
+powershell -NoProfile -Command "if ((Test-Path 'res\cso\%5.cso') -and ((Get-Item 'res\cso\%5.cso').LastWriteTimeUtc -ge (Get-Item '%3').LastWriteTimeUtc)) { exit 0 } else { exit 1 }"
+if not errorlevel 1 exit /b 0
+for /L %%R in (1,1,5) do (
+  "%FXC%" /nologo /T %1 /E %2 /O3 /Fo shaders\cso\%4.cso %3 >nul 2>nul
+  if not errorlevel 1 (
+    copy /Y shaders\cso\%4.cso res\cso\%5.cso >nul 2>nul
+    if not errorlevel 1 goto :eof
+  )
+  ping -n 2 127.0.0.1 >nul
+)
 "%FXC%" /nologo /T %1 /E %2 /O3 /Fo shaders\cso\%4.cso %3
 if errorlevel 1 exit /b 1
 copy /Y shaders\cso\%4.cso res\cso\%5.cso >nul
+if errorlevel 1 exit /b 1
 goto :eof
