@@ -3937,21 +3937,21 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learn
 // ============================================================ 進化
 struct EvoRow { int from; EvoOption o[4]; };
 static const EvoRow kEvo[] = {
-	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_RUNEKNIGHT, -1 }, { C_SKYKNIGHT, -1 }, { -1, -1 } } },
-	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_PALADIN, -1 }, { C_SKYKNIGHT, -1 }, { C_GLADIATOR, -1 } } },
-	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_ASSASSIN, -1 }, { C_SKYKNIGHT, -1 }, { -1, -1 } } },
-	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SNIPER, -1 }, { C_SKYKNIGHT, -1 }, { C_SHADOW, -1 } } },
-	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_RUNEKNIGHT, -1 }, { C_BISHOP, -1 } } },
-	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_PALADIN, -1 }, { C_WIZARD, -1 }, { C_ALCHEMIST, -1 } } },
-	{ C_PALADIN,    { { C_HERO, -1 }, { C_SAINT, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
-	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_HERO, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
-	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { C_ARCHALCHEMIST, -1 } } },
-	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_HERO, -1 }, { C_SHADOW, -1 }, { C_DRAGONLORD, -1 } } },
-	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_PHANTOM, -1 }, { C_HERO, -1 }, { -1, -1 } } },
-	{ C_SKYKNIGHT,  { { C_DRAGONLORD, -1 }, { C_HERO, -1 }, { C_PHANTOM, -1 }, { C_GLADIATOR, -1 } } },
-	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { C_ARCHALCHEMIST, -1 }, { -1, -1 } } },
-	{ C_BISHOP,     { { C_SAINT, -1 }, { C_ARCHMAGE, -1 }, { C_HERO, -1 }, { -1, -1 } } },
-	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { -1, -1 } } },
+	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_SKYKNIGHT, -1 }, { C_HERO, -1 }, { -1, -1 } } },
+	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_GLADIATOR, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
+	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_PHANTOM, -1 }, { C_JOB0 + 29, -1 }, { -1, -1 } } },
+	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SHADOW, -1 }, { C_JOB0 + 36, -1 }, { -1, -1 } } },
+	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_BISHOP, -1 } } },
+	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_SAINT, -1 }, { C_WIZARD, -1 }, { -1, -1 } } },
+	{ C_PALADIN,    { { C_HERO, -1 }, { C_JOB0 + 23, -1 }, { C_JOB0 + 37, -1 }, { -1, -1 } } },
+	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_DRAGONLORD, -1 }, { C_JOB0 + 25, -1 }, { -1, -1 } } },
+	{ C_RUNEKNIGHT, { { C_ARCHMAGE, -1 }, { C_ARCHALCHEMIST, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
+	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_JOB0 + 29, -1 }, { C_JOB0 + 30, -1 }, { -1, -1 } } },
+	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_JOB0 + 36, -1 }, { C_JOB0 + 39, -1 }, { -1, -1 } } },
+	{ C_SKYKNIGHT,  { { C_HERO, -1 }, { C_JOB0 + 23, -1 }, { C_JOB0 + 37, -1 }, { -1, -1 } } },
+	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_ARCHALCHEMIST, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
+	{ C_BISHOP,     { { C_SAINT, -1 }, { C_JOB0 + 26, -1 }, { C_JOB0 + 72, -1 }, { -1, -1 } } },
+	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
 };
 
 static int LegacyLine(int cls)
@@ -4343,10 +4343,15 @@ int UnitStat(const Unit& u, int s)
 	int v = u.ch.stat[s];
 	const GearDef* w = GearOf(u.ch.reserved[6]);
 	const GearDef* a = GearOf(u.ch.reserved[7]);
-	if (w && s == S_STR) v += w->str;
-	if (w && s == S_MAG) v += w->mag;
-	if (a && s == S_DEF) v += a->def;
-	if (a && s == S_RES) v += a->res;
+	auto addGear = [&](const GearDef* g) {
+		if (!g) return;
+		if (s == S_STR) v += g->str;
+		if (s == S_MAG) v += g->mag;
+		if (s == S_DEF) v += g->def;
+		if (s == S_RES) v += g->res;
+	};
+	addGear(w);
+	addGear(a);
 	v += AccStat(u.accEq[0], s) + AccStat(u.accEq[1], s);
 	if (s == S_DEF && u.buffDef > 0) v = v * 13 / 10;
 	if ((s == S_DEF || s == S_RES) && u.defDown > 0) v = v * 75 / 100;
@@ -5127,9 +5132,6 @@ bool FindRaiseTile(const Battle& b, const Unit& corpse, int& ox, int& oz)
 static bool RaiseHereOk(const Battle& b, const Unit& corpse)
 {
 	if (!FootClear(b, corpse)) return false;
-	int s = UnitSpan(corpse);
-	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
-		if (EnemyHalf(b.map, corpse.x + dx, corpse.z + dz)) return false;
 	return true;
 }
 
@@ -7850,7 +7852,7 @@ int ClassTier(int cls)
 {
 	int t = ClassInfo(cls).tier;
 	if (t < 1) return 1;
-	if (t > 10) return 10;
+	if (t > 12) return 12;
 	return t;
 }
 bool GearCanWear(int cls, const GearDef* g)
@@ -8059,34 +8061,37 @@ int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r)
 	}
 	return gi + 1;
 }
+static int GoodGrant(SaveData& s, int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g) return 0;
+	if (GoodHave(s, i) >= GoodHoldMax(i)) {
+		int gold = max(1, g->price / 2);
+		s.gold += gold;
+		return gold;
+	}
+	if (g->item >= 0) return GainItemN(s, g->item, 1);
+	if (g->extra >= 100) {
+		CraftGoodAdd(g->extra - 100, 1);
+		return 0;
+	}
+	return ItemExtraAdd(s, g->extra, 1);
+}
 bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name, int nameN)
 {
-	int line = MonsterDropLine(monster);
-	int tx = TX_IT_ELIXIR;
-	switch (line) {
-	case 0: tx = TX_IT_MIGHT; break;
-	case 1: tx = TX_IT_ATK; break;
-	case 2: tx = TX_IT_DELAY; break;
-	case 3: tx = TX_IT_RAISE; break;
-	case 4: tx = TX_IT_ETHER; break;
-	default: break;
-	}
-	int cashed = 0;
-	switch (line) {
-	case 0: cashed += GainItemN(s, IT_MIGHT, 1); break;
-	case 1: cashed += ItemExtraAdd(s, IX_ATK, 1); break;
-	case 2: cashed += GainItemN(s, IT_DELAY, 1); break;
-	case 3: cashed += GainItemN(s, IT_RAISE, 1); break;
-	case 4: cashed += ItemExtraAdd(s, IX_ETHER, 1); break;
-	default: cashed += GainItemN(s, IT_ELIXIR, 1); break;
-	}
-	wchar_t buf[96];
-	wcscpy_s(buf, TT(tx));
-	if (r.Chance(45)) {
-		int k = r.Range(0, IX_N - 1);
-		cashed += ItemExtraAdd(s, k, 1);
+	(void)monster;
+	int n = GoodCount();
+	if (n < 1) return false;
+	int a = r.Range(0, n - 1);
+	int cashed = GoodGrant(s, a);
+	wchar_t buf[160];
+	wcscpy_s(buf, TT(GoodAt(a)->nameTx));
+	if (n > 1 && r.Chance(45)) {
+		int b = r.Range(0, n - 2);
+		if (b >= a) b++;
+		cashed += GoodGrant(s, b);
 		wcscat_s(buf, L"  ");
-		wcscat_s(buf, TT(TX_IT_FULL + k));
+		wcscat_s(buf, TT(GoodAt(b)->nameTx));
 	}
 	if (cashed > 0) {
 		wchar_t g[32];
@@ -9233,6 +9238,98 @@ static void JobPathSanitize(CharData& c)
 	if (c.jobDone != 1) c.jobDone = 0;
 }
 
+static int JobRailRoot(const CharData& c)
+{
+	if (c.jobPath[0] >= 0) return c.jobPath[0];
+	if (ClassInfo(c.cls).tier <= 1) return c.cls;
+	return -1;
+}
+
+static bool JobPathWalkOk(const CharData& c)
+{
+	if (c.jobPath[0] < 0) return false;
+	int prev = c.jobPath[0];
+	int last = prev;
+	for (int i = 1; i < JOB_PATH_N; i++) {
+		int v = c.jobPath[i];
+		if (v < 0) break;
+		EvoOption o[4];
+		int n = EvoOptions(prev, o);
+		bool hit = false;
+		for (int k = 0; k < n; k++) if (o[k].target == v) hit = true;
+		if (!hit) return false;
+		prev = v;
+		last = v;
+	}
+	return last == c.cls;
+}
+
+static void JobRailWrite(CharData& c, int cls, const int* par)
+{
+	int rev[JOB_PATH_N];
+	int n = 0;
+	int x = cls;
+	for (int guard = 0; x >= 0 && n < JOB_PATH_N && guard < 32; guard++) {
+		rev[n++] = x;
+		x = par[x];
+	}
+	for (int i = 0; i < JOB_PATH_N; i++) c.jobPath[i] = -1;
+	for (int i = 0; i < n; i++) c.jobPath[i] = rev[n - 1 - i];
+}
+
+// 履歴の起点から新しい転職先を辿れない職は、同じ段に一番近い職へ戻す。
+static bool JobRailFix(CharData& c)
+{
+	if (!c.used) return false;
+	int root = JobRailRoot(c);
+	if (root < 0 || root >= 1024) return false;
+	int par[1024];
+	int que[1024];
+	for (int i = 0; i < 1024; i++) par[i] = -2;
+	par[root] = -1;
+	que[0] = root;
+	int qn = 1;
+	for (int qi = 0; qi < qn; qi++) {
+		int u = que[qi];
+		EvoOption o[4];
+		int n = EvoOptions(u, o);
+		for (int k = 0; k < n; k++) {
+			int v = o[k].target;
+			if (v < 0 || v >= 1024 || par[v] != -2) continue;
+			par[v] = u;
+			if (qn < 1024) que[qn++] = v;
+		}
+	}
+	int cls = c.cls;
+	if (cls >= 0 && cls < 1024 && par[cls] != -2) {
+		if (JobPathWalkOk(c)) return false;
+		JobRailWrite(c, cls, par);
+		return true;
+	}
+	int want = ClassInfo(cls).tier;
+	int best = -1;
+	int bestD = 99;
+	for (int i = 0; i < qn; i++) {
+		int v = que[i];
+		int t = ClassInfo(v).tier;
+		int d = t - want;
+		if (d < 0) d = -d;
+		if (best < 0 || d < bestD || (d == bestD && v < best)) {
+			best = v;
+			bestD = d;
+		}
+	}
+	if (best < 0 || best == c.cls) return false;
+	c.cls = best;
+	JobRailWrite(c, best, par);
+	c.trialFrom = -1;
+	c.trialLv = 0;
+	const ClassDef& cd = ClassInfo(best);
+	for (int s = 0; s < S_COUNT; s++) if (c.stat[s] < cd.base[s]) c.stat[s] = cd.base[s];
+	if (c.stat[S_HP] < 1) c.stat[S_HP] = 1;
+	return true;
+}
+
 bool SaveLoad(SaveData& s)
 {
 	SaveDefaults(s);
@@ -9322,6 +9419,7 @@ bool SaveLoad(SaveData& s)
 	fclose(fp);
 	if (!got) return false;
 	s.version = 7;
+	bool rail = false;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
@@ -9329,6 +9427,7 @@ bool SaveLoad(SaveData& s)
 		JobPathSanitize(c);
 		c.cls = Clampi(c.cls, 0, C_JOB0 + JobCount() - 1);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
+		if (JobRailFix(c)) rail = true;
 		JobFixTrial(c);
 		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);
@@ -9369,6 +9468,7 @@ bool SaveLoad(SaveData& s)
 	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > kGearN) s.gearId[i] = 1;
 	TrophyLoad();
 	CraftLoad();
+	if (rail) SaveWrite(s);
 	return true;
 }
 

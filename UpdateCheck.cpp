@@ -184,22 +184,17 @@ public:
 
 	void SetPos(int nPos)
 	{
-		if (m_progress.GetSafeHwnd()) {
+		if (m_progress.GetSafeHwnd())
 			m_progress.SetPos(nPos);
-			m_progress.UpdateWindow();
-			UpdateWindow();
-			Pump();
-		}
 	}
 
 	void SetStatusText(const CString& text)
 	{
+		if (m_strText == text)
+			return;
 		m_strText = text;
-		if (m_hWnd) {
-			Invalidate(TRUE);
-			UpdateWindow();
-			Show();
-		}
+		if (m_hWnd)
+			Invalidate(FALSE);
 	}
 
 	void Show()
@@ -338,6 +333,9 @@ END_MESSAGE_MAP()
 static CUpdateBusyWnd* g_updateBusy = NULL;
 static int g_updateBusyLastPct = -2;
 static DWORD g_updateBusyLastTick = 0;
+static CString g_updateBusyFile;
+static const DWORD kUpdateBusyUiMs = 250;
+static const DWORD kHttpDlChunk = 256 * 1024;
 
 static CString UpdateBusyDlWaitText()
 {
@@ -396,10 +394,162 @@ static CString UpdateBusyRestartText()
 		L"Yeniden baslatiliyor…");
 }
 
+static CString UpdateBusyCheckText()
+{
+	return LL14(
+		L"更新データチェック中…",
+		L"Checking for updates…",
+		L"Verification des mises a jour…",
+		L"Controllo aggiornamenti…",
+		L"Comprobando actualizaciones…",
+		L"업데이트 확인 중…",
+		L"正在检查更新…",
+		L"جارٍ التحقق من التحديثات…",
+		L"Проверка обновлений…",
+		L"Suche nach Updates…",
+		L"A verificar atualizacoes…",
+		L"Updates controleren…",
+		L"Sprawdzanie aktualizacji…",
+		L"Guncellemeler denetleniyor…");
+}
+
+static CString UpdateBusyUrlLeaf(const CString& url)
+{
+	CString u = url;
+	int fileEq = u.Find(_T("file="));
+	if (fileEq >= 0) {
+		CString f = u.Mid(fileEq + 5);
+		const int amp = f.Find(_T('&'));
+		if (amp >= 0)
+			f = f.Left(amp);
+		if (!f.IsEmpty())
+			return f;
+	}
+	const int q = u.Find(_T('?'));
+	if (q >= 0)
+		u = u.Left(q);
+	const int s = u.ReverseFind(_T('/'));
+	if (s >= 0)
+		u = u.Mid(s + 1);
+	if (u.IsEmpty())
+		u = _T("update");
+	return u;
+}
+
+static CString UpdateBusyFileDlText(int pct)
+{
+	CString t;
+	if (g_updateBusyFile.IsEmpty()) {
+		if (pct >= 0) {
+			t.Format(LL14(
+				L"更新をダウンロードしています…\n%d%%",
+				L"Downloading the update…\n%d%%",
+				L"Telechargement de la mise a jour…\n%d%%",
+				L"Download dell'aggiornamento…\n%d%%",
+				L"Descargando la actualizacion…\n%d%%",
+				L"업데이트를 다운로드하는 중…\n%d%%",
+				L"正在下载更新…\n%d%%",
+				L"جارٍ تنزيل التحديث…\n%d%%",
+				L"Загрузка обновления…\n%d%%",
+				L"Update wird heruntergeladen…\n%d%%",
+				L"A descarregar a atualizacao…\n%d%%",
+				L"Update downloaden…\n%d%%",
+				L"Pobieranie aktualizacji…\n%d%%",
+				L"Guncelleme indiriliyor…\n%d%%"), pct);
+		} else {
+			t = UpdateBusyDlWaitText();
+		}
+		return t;
+	}
+	if (pct >= 0) {
+		t.Format(LL14(
+			L"%s をダウンロードしています…\n%d%%",
+			L"Downloading %s…\n%d%%",
+			L"Telechargement de %s…\n%d%%",
+			L"Download di %s…\n%d%%",
+			L"Descargando %s…\n%d%%",
+			L"%s 다운로드 중…\n%d%%",
+			L"正在下载 %s…\n%d%%",
+			L"جارٍ تنزيل %s…\n%d%%",
+			L"Загрузка %s…\n%d%%",
+			L"%s wird heruntergeladen…\n%d%%",
+			L"A descarregar %s…\n%d%%",
+			L"%s downloaden…\n%d%%",
+			L"Pobieranie: %s…\n%d%%",
+			L"%s indiriliyor…\n%d%%"), (LPCTSTR)g_updateBusyFile, pct);
+	} else {
+		t.Format(LL14(
+			L"%s をダウンロードしています…",
+			L"Downloading %s…",
+			L"Telechargement de %s…",
+			L"Download di %s…",
+			L"Descargando %s…",
+			L"%s 다운로드 중…",
+			L"正在下载 %s…",
+			L"جارٍ تنزيل %s…",
+			L"Загрузка %s…",
+			L"%s wird heruntergeladen…",
+			L"A descarregar %s…",
+			L"%s downloaden…",
+			L"Pobieranie: %s…",
+			L"%s indiriliyor…"), (LPCTSTR)g_updateBusyFile);
+	}
+	return t;
+}
+
+static CString UpdateBusyFileExtractText(int pct)
+{
+	CString t;
+	if (g_updateBusyFile.IsEmpty()) {
+		t = UpdateBusyExtractText();
+		if (pct >= 0) {
+			CString n;
+			n.Format(_T("%s\n%d%%"), (LPCTSTR)t, pct);
+			return n;
+		}
+		return t;
+	}
+	if (pct >= 0) {
+		t.Format(LL14(
+			L"%s を展開しています…\n%d%%",
+			L"Extracting %s…\n%d%%",
+			L"Extraction de %s…\n%d%%",
+			L"Estrazione di %s…\n%d%%",
+			L"Extrayendo %s…\n%d%%",
+			L"%s 압축 해제 중…\n%d%%",
+			L"正在解压 %s…\n%d%%",
+			L"جارٍ استخراج %s…\n%d%%",
+			L"Распаковка %s…\n%d%%",
+			L"%s wird entpackt…\n%d%%",
+			L"A extrair %s…\n%d%%",
+			L"%s uitpakken…\n%d%%",
+			L"Rozpakowywanie: %s…\n%d%%",
+			L"%s aciliyor…\n%d%%"), (LPCTSTR)g_updateBusyFile, pct);
+	} else {
+		t.Format(LL14(
+			L"%s を展開しています…",
+			L"Extracting %s…",
+			L"Extraction de %s…",
+			L"Estrazione di %s…",
+			L"Extrayendo %s…",
+			L"%s 압축 해제 중…",
+			L"正在解压 %s…",
+			L"جارٍ استخراج %s…",
+			L"Распаковка %s…",
+			L"%s wird entpackt…",
+			L"A extrair %s…",
+			L"%s uitpakken…",
+			L"Rozpakowywanie: %s…",
+			L"%s aciliyor…"), (LPCTSTR)g_updateBusyFile);
+	}
+	return t;
+}
+
 static void UpdateBusyClose()
 {
 	g_updateBusyLastPct = -2;
 	g_updateBusyLastTick = 0;
+	g_updateBusyFile.Empty();
 	if (!g_updateBusy)
 		return;
 	if (g_updateBusy->GetSafeHwnd())
@@ -419,11 +569,31 @@ static void UpdateBusyShow(const CString& text, int pct)
 			return;
 		}
 	}
+	g_updateBusyLastPct = pct;
+	g_updateBusyLastTick = GetTickCount();
 	g_updateBusy->SetStatusText(text);
 	if (pct >= 0)
 		g_updateBusy->SetPos(pct);
-	else
-		g_updateBusy->Show();
+	g_updateBusy->Show();
+}
+
+static BOOL UpdateBusyLiveDue(int pct)
+{
+	if (!g_updateBusy || !g_updateBusy->GetSafeHwnd())
+		return FALSE;
+	if (g_updateBusyLastPct < 0 || pct >= 100)
+		return TRUE;
+	return (GetTickCount() - g_updateBusyLastTick) >= kUpdateBusyUiMs;
+}
+
+static void UpdateBusyPaintLive(const CString& text, int pct)
+{
+	g_updateBusyLastPct = pct;
+	g_updateBusyLastTick = GetTickCount();
+	g_updateBusy->SetStatusText(text);
+	if (pct >= 0)
+		g_updateBusy->SetPos(pct);
+	g_updateBusy->Pump();
 }
 
 static void UpdateBusyAlert(const CString& msg)
@@ -442,39 +612,92 @@ static void UpdateBusyDlProgress(ULONGLONG done, ULONGLONG total)
 		if (pct > 100)
 			pct = 100;
 	}
-	const DWORD now = GetTickCount();
-	if (pct == g_updateBusyLastPct && (now - g_updateBusyLastTick) < 120)
+	if (!UpdateBusyLiveDue(pct))
 		return;
-	g_updateBusyLastPct = pct;
-	g_updateBusyLastTick = now;
-	if (pct >= 0) {
-		CString t;
-		t.Format(LL14(
-			L"更新をダウンロードしています…\n%d%%",
-			L"Downloading the update…\n%d%%",
-			L"Telechargement de la mise a jour…\n%d%%",
-			L"Download dell'aggiornamento…\n%d%%",
-			L"Descargando la actualizacion…\n%d%%",
-			L"업데이트를 다운로드하는 중…\n%d%%",
-			L"正在下载更新…\n%d%%",
-			L"جارٍ تنزيل التحديث…\n%d%%",
-			L"Загрузка обновления…\n%d%%",
-			L"Update wird heruntergeladen…\n%d%%",
-			L"A descarregar a atualizacao…\n%d%%",
-			L"Update downloaden…\n%d%%",
-			L"Pobieranie aktualizacji…\n%d%%",
-			L"Guncelleme indiriliyor…\n%d%%"), pct);
-		g_updateBusy->SetStatusText(t);
-		g_updateBusy->SetPos(pct);
-	} else {
-		g_updateBusy->SetStatusText(UpdateBusyDlWaitText());
+	if (g_updateBusy->m_progress.GetSafeHwnd())
+		g_updateBusy->m_progress.SetShowPercent(TRUE);
+	UpdateBusyPaintLive(UpdateBusyFileDlText(pct), pct);
+}
+
+void UpdateBusyShowCheck()
+{
+	DWORD f = 0;
+	if (!InternetGetConnectedState(&f, 0))
+		return;
+	g_updateBusyFile.Empty();
+	g_updateBusyLastPct = -2;
+	UpdateBusyShow(UpdateBusyCheckText(), 0);
+	if (g_updateBusy && g_updateBusy->m_progress.GetSafeHwnd())
+		g_updateBusy->m_progress.SetShowPercent(FALSE);
+}
+
+void UpdateBusyBeginFile(LPCTSTR fileName)
+{
+	if (!g_updateBusy || !g_updateBusy->GetSafeHwnd())
+		return;
+	g_updateBusyFile = fileName ? fileName : _T("");
+	g_updateBusyLastPct = -2;
+	if (g_updateBusy->m_progress.GetSafeHwnd())
+		g_updateBusy->m_progress.SetShowPercent(TRUE);
+	if (g_updateBusy->IsWindowVisible())
+		UpdateBusyPaintLive(UpdateBusyFileDlText(-1), 0);
+	else
+		UpdateBusyShow(UpdateBusyFileDlText(-1), 0);
+}
+
+void UpdateBusyFileProgress(ULONGLONG done, ULONGLONG total)
+{
+	UpdateBusyDlProgress(done, total);
+}
+
+void UpdateBusyShowExtract(LPCTSTR fileName)
+{
+	if (!g_updateBusy || !g_updateBusy->GetSafeHwnd())
+		return;
+	if (fileName && fileName[0])
+		g_updateBusyFile = fileName;
+	g_updateBusyLastPct = -2;
+	if (g_updateBusy->m_progress.GetSafeHwnd())
+		g_updateBusy->m_progress.SetShowPercent(TRUE);
+	if (g_updateBusy->IsWindowVisible())
+		UpdateBusyPaintLive(UpdateBusyFileExtractText(-1), 0);
+	else
+		UpdateBusyShow(UpdateBusyFileExtractText(-1), 0);
+}
+
+void UpdateBusyExtractProgress(int done, int total)
+{
+	if (!g_updateBusy || !g_updateBusy->GetSafeHwnd())
+		return;
+	int pct = 0;
+	if (total > 0) {
+		pct = (int)(((long long)done * 100) / total);
+		if (pct > 100)
+			pct = 100;
 	}
+	if (!UpdateBusyLiveDue(pct))
+		return;
+	if (g_updateBusy->m_progress.GetSafeHwnd())
+		g_updateBusy->m_progress.SetShowPercent(TRUE);
+	UpdateBusyPaintLive(UpdateBusyFileExtractText(pct), pct);
+}
+
+void UpdateBusyCloseUi()
+{
+	UpdateBusyClose();
+}
+
+void UpdateBusyPumpUi()
+{
+	if (g_updateBusy && g_updateBusy->GetSafeHwnd())
+		g_updateBusy->Pump();
 }
 
 // HTTP HEAD で Last-Modified を取得、失敗時は 0
 static time_t HttpGetLastModified(const CString& url)
 {
 	time_t result = 0;
+	UpdateBusyPumpUi();
 	// プロキシ環境下の方でも検知できるよう、システム（IE/WPAD/PAC）のプロキシ設定を使用いたしますわ
 	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return 0;
@@ -642,6 +865,14 @@ static void NotifySiteDownloadCount(const CString& zipUrl)
 	}
 }
 
+static void UpdateBusyInetTune(HINTERNET h)
+{
+	if (!h)
+		return;
+	DWORD rbs = kHttpDlChunk;
+	InternetSetOption(h, INTERNET_OPTION_READ_BUFFER_SIZE, &rbs, sizeof(rbs));
+}
+
 // ZIP をダウンロード。HTTP 200・最低サイズを満たさない場合は失敗（途中ファイルは削除）
 static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULONGLONG minBytes = UPDATE_ZIP_MIN_BYTES, bool countDownload = true)
 {
@@ -650,6 +881,7 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULO
 	// プロキシ環境下の方でもダウンロードできるよう、システムのプロキシ設定を使用いたしますわ
 	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return false;
+	UpdateBusyInetTune(hInternet);
 
 	DWORD timeout = 120000; // 大容量 ZIP 向けに 120 秒
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
@@ -668,8 +900,12 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULO
 	CString noCacheUrl;
 	noCacheUrl.Format(_T("%s?t=%lld"), (LPCTSTR)url, (long long)time(NULL));
 
+	if (g_updateBusy && g_updateBusy->GetSafeHwnd())
+		UpdateBusyBeginFile(UpdateBusyUrlLeaf(url));
+
 	HINTERNET hConnect = InternetOpenUrl(hInternet, noCacheUrl, NULL, 0, flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return false; }
+	UpdateBusyInetTune(hConnect);
 
 	DWORD statusCode = 0;
 	DWORD statusCodeLen = sizeof(statusCode);
@@ -698,18 +934,24 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULO
 	}
 
 	CFile f;
-	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive | CFile::osSequentialScan))
 	{
 		InternetCloseHandle(hConnect);
 		InternetCloseHandle(hInternet);
 		return false;
 	}
 
-	char buf[8192];
+	BYTE* buf = (BYTE*)malloc(kHttpDlChunk);
+	if (!buf) {
+		f.Close();
+		InternetCloseHandle(hConnect);
+		InternetCloseHandle(hInternet);
+		return false;
+	}
 	DWORD bytesRead = 0;
 	ULONGLONG total = 0;
 	BOOL readOk = TRUE;
-	while ((readOk = InternetReadFile(hConnect, buf, sizeof(buf), &bytesRead)) != FALSE && bytesRead > 0)
+	while ((readOk = InternetReadFile(hConnect, buf, kHttpDlChunk, &bytesRead)) != FALSE && bytesRead > 0)
 	{
 		try {
 			f.Write(buf, (UINT)bytesRead);
@@ -722,6 +964,7 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULO
 		total += bytesRead;
 		UpdateBusyDlProgress(total, contentLen);
 	}
+	free(buf);
 
 	f.Close();
 	InternetCloseHandle(hConnect);
@@ -1522,13 +1765,20 @@ void RunStartupUpdateCheck()
 	// 次回から尋ねない: 起動時だけ自動更新／スキップ。定期チェックでは走らせない。
 	if (savedata.updateDontAsk) {
 		UpdateCheckDismissVersion((__int64)serverModified);
-		if (savedata.updateAutoYes)
-			DoUpdateAndRestart();
+		if (savedata.updateAutoYes) {
+			if (DoUpdateAndRestart())
+				return;
+			UpdateBusyShowCheck();
+		}
 		return;
 	}
 
+	const BOOL hadBusy = (g_updateBusy && g_updateBusy->GetSafeHwnd()) ? TRUE : FALSE;
+	UpdateBusyClose();
 	if (UpdateCheckAskUser(NULL, (__int64)serverModified) == IDYES)
 		DoUpdateAndRestart();
+	else if (hadBusy)
+		UpdateBusyShowCheck();
 }
 
 void UpdateCheckDismissVersion(__int64 serverModified)
@@ -2238,6 +2488,7 @@ void EnsureD3dCompilerAvailable()
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
+		UpdateBusyShowExtract(NULL);
 		ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 		DeleteFile(zipPath);
 	}
@@ -2420,6 +2671,7 @@ void EnsureOggHost32Available()
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
+		UpdateBusyShowExtract(NULL);
 		ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES);
 		DeleteFile(zipPath);
 		extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
@@ -2513,6 +2765,7 @@ static bool BonusDownload(const CString& url, const CString& localPath, const CS
 	DeleteFile(localPath);
 	HINTERNET hInternet = InternetOpen(_T("oggYSEDbgm-bonus/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return false;
+	UpdateBusyInetTune(hInternet);
 	DWORD timeout = 180000;
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
@@ -2524,6 +2777,7 @@ static bool BonusDownload(const CString& url, const CString& localPath, const CS
 	noCache.Format(_T("%s?t=%lld"), (LPCTSTR)url, (long long)time(NULL));
 	HINTERNET hConnect = InternetOpenUrl(hInternet, noCache, NULL, 0, flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return false; }
+	UpdateBusyInetTune(hConnect);
 	DWORD statusCode = 0, statusLen = sizeof(statusCode);
 	if (!HttpQueryInfo(hConnect, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL) || statusCode != 200) {
 		InternetCloseHandle(hConnect); InternetCloseHandle(hInternet); return false;
@@ -2534,37 +2788,46 @@ static bool BonusDownload(const CString& url, const CString& localPath, const CS
 	if (HttpQueryInfoA(hConnect, HTTP_QUERY_CONTENT_LENGTH, lenBuf, &lenBufLen, NULL))
 		contentLen = (ULONGLONG)_atoi64(lenBuf);
 	CFile f;
-	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive | CFile::osSequentialScan)) {
 		InternetCloseHandle(hConnect); InternetCloseHandle(hInternet); return false;
 	}
-	char buf[65536];
+	BYTE* buf = (BYTE*)malloc(kHttpDlChunk);
+	if (!buf) {
+		f.Close();
+		InternetCloseHandle(hConnect);
+		InternetCloseHandle(hInternet);
+		return false;
+	}
 	DWORD bytesRead = 0;
 	ULONGLONG total = 0;
 	BOOL readOk = TRUE;
-	while ((readOk = InternetReadFile(hConnect, buf, sizeof(buf), &bytesRead)) != FALSE && bytesRead > 0) {
+	while ((readOk = InternetReadFile(hConnect, buf, kHttpDlChunk, &bytesRead)) != FALSE && bytesRead > 0) {
 		try { f.Write(buf, (UINT)bytesRead); }
 		catch (CFileException* e) { e->Delete(); readOk = FALSE; break; }
 		total += bytesRead;
 		int pct = (contentLen > 0) ? (int)((total * 100ULL) / contentLen) : 0;
 		if (pct > 100) pct = 100;
-		CString t;
-		t.Format(LL14(
-			L"%sを受け取っています…\n%d%%",
-			L"Receiving %s…\n%d%%",
-			L"Réception de %s…\n%d%%",
-			L"Ricezione di %s…\n%d%%",
-			L"Recibiendo %s…\n%d%%",
-			L"%s 받는 중…\n%d%%",
-			L"正在接收%s…\n%d%%",
-			L"جارٍ استلام %s…\n%d%%",
-			L"Получение «%s»…\n%d%%",
-			L"%s wird empfangen…\n%d%%",
-			L"A receber %s…\n%d%%",
-			L"%s ontvangen…\n%d%%",
-			L"Odbieranie: %s…\n%d%%",
-			L"%s alınıyor…\n%d%%"), (LPCTSTR)title, pct);
-		UpdateBusyShow(t, pct);
+		if (UpdateBusyLiveDue(pct)) {
+			CString t;
+			t.Format(LL14(
+				L"%sを受け取っています…\n%d%%",
+				L"Receiving %s…\n%d%%",
+				L"Réception de %s…\n%d%%",
+				L"Ricezione di %s…\n%d%%",
+				L"Recibiendo %s…\n%d%%",
+				L"%s 받는 중…\n%d%%",
+				L"正在接收%s…\n%d%%",
+				L"جارٍ استلام %s…\n%d%%",
+				L"Получение «%s»…\n%d%%",
+				L"%s wird empfangen…\n%d%%",
+				L"A receber %s…\n%d%%",
+				L"%s ontvangen…\n%d%%",
+				L"Odbieranie: %s…\n%d%%",
+				L"%s alınıyor…\n%d%%"), (LPCTSTR)title, pct);
+			UpdateBusyPaintLive(t, pct);
+		}
 	}
+	free(buf);
 	f.Close();
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
@@ -2608,23 +2871,25 @@ static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, cons
 		if (!ok) { DeleteFile(out); SevenZipClose(&a); return false; }
 		any = true;
 		int pct = n ? (int)(((i + 1) * 100) / n) : 100;
-		CString t;
-		t.Format(LL14(
-			L"%sを展開しています…\n%d%%",
-			L"Extracting %s…\n%d%%",
-			L"Extraction de %s…\n%d%%",
-			L"Estrazione di %s…\n%d%%",
-			L"Extrayendo %s…\n%d%%",
-			L"%s 푸는 중…\n%d%%",
-			L"正在解压%s…\n%d%%",
-			L"جارٍ استخراج %s…\n%d%%",
-			L"Распаковка «%s»…\n%d%%",
-			L"%s wird entpackt…\n%d%%",
-			L"A extrair %s…\n%d%%",
-			L"%s uitpakken…\n%d%%",
-			L"Rozpakowywanie: %s…\n%d%%",
-			L"%s açılıyor…\n%d%%"), (LPCTSTR)title, pct);
-		UpdateBusyShow(t, pct);
+		if (UpdateBusyLiveDue(pct)) {
+			CString t;
+			t.Format(LL14(
+				L"%sを展開しています…\n%d%%",
+				L"Extracting %s…\n%d%%",
+				L"Extraction de %s…\n%d%%",
+				L"Estrazione di %s…\n%d%%",
+				L"Extrayendo %s…\n%d%%",
+				L"%s 푸는 중…\n%d%%",
+				L"正在解压%s…\n%d%%",
+				L"جارٍ استخراج %s…\n%d%%",
+				L"Распаковка «%s»…\n%d%%",
+				L"%s wird entpackt…\n%d%%",
+				L"A extrair %s…\n%d%%",
+				L"%s uitpakken…\n%d%%",
+				L"Rozpakowywanie: %s…\n%d%%",
+				L"%s açılıyor…\n%d%%"), (LPCTSTR)title, pct);
+			UpdateBusyPaintLive(t, pct);
+		}
 	}
 	SevenZipClose(&a);
 	return any;

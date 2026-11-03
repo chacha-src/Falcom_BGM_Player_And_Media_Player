@@ -1194,8 +1194,6 @@ static int g_nCurrentKpiIndex = 0;
 static BOOL g_kpiLoadDeferredPlay = FALSE;
 // 起動時サブUI復元中(1メッセージ=1 Create)。MP Timer3 の SyncPushToggleButtons 再入を抑止。
 int g_oggSubUiRestoring = 0;
-static LONG g_silentPluginUpdateStarted = 0;
-static unsigned __stdcall OggSilentPluginUpdateThread(void*);
 
 // KPI(.kpi) + Winamp/XMPlay/AIMP 候補 DLL を同じ再帰で数える（進捗バー総量用）
 static void KpiRewriteSeqAsMidi(CString& media)
@@ -1616,17 +1614,6 @@ void OggPluginLoadOnOneFileDone()
 #include "KpiEnumCache.h"
 
 extern void COgg_KickTimerp();
-
-/* UI 表示後のサイレント更新のみ（カタログは読込窓で同期完了させる） */
-static unsigned __stdcall OggSilentPluginUpdateThread(void*)
-{
-	BOOL upd = FALSE;
-	upd |= KpiInstall_SilentUpdateKbsasami(karento2);
-	upd |= KpiInstall_SilentUpdateFmpmd(karento2);
-	upd |= KpiInstall_SilentUpdateFmMonKpis(karento2);
-	if (upd) KpiEnumCache_Invalidate();
-	return 0;
-}
 
 static void OggKpiLoadingProgressPct(int percent, void* ctx)
 {
@@ -39193,12 +39180,7 @@ void COggDlg::DeferredHeavyStartupImpl()
 LRESULT COggDlg::OnDeferredHeavyStartup(WPARAM, LPARAM)
 {
 	if (!GetSafeHwnd()) return 0;
-	/* HTTP サイレント更新は表示後の裏スレッド（読込窓は止めない） */
-	if (InterlockedExchange(&g_silentPluginUpdateStarted, 1) == 0) {
-		uintptr_t th = _beginthreadex(NULL, 0, OggSilentPluginUpdateThread, NULL, 0, NULL);
-		if (th) CloseHandle((HANDLE)th);
-		else InterlockedExchange(&g_silentPluginUpdateStarted, 0);
-	}
+	/* サイレントプラグイン更新は InitInstance（読込窓の前）で実施済み */
 	/* SetTimer は vblank の投稿が続くと届かない（キーやフォーカスで列が空くまで出ない）。
 	   名前取得は出力列挙をやめたのでここで足し、描いてからツールチップ初期化へ進む。 */
 	OggAppendStartupGpuLine(this);

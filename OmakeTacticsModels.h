@@ -24,7 +24,7 @@ struct Library {
 	V3 humHairPivot[HUM_HAIR_N][HAIR_STYLES];            // 垂れる髪の付け根（後頭部の生え際）
 	int humHairModel[HUM_HAIR_N];
 	int humHairN;
-	GpuMesh wing[2][2];     // [羽根/竜][左/右]
+	GpuMesh wing[2][2];     // [羽根/竜][0=右(-X) / 1=左(+X)]
 	GpuMesh crown;
 	GpuMesh ring;
 	GpuMesh orb;

@@ -1,12 +1,17 @@
 ﻿// KpiPluginInstall.cpp — Plugins.zip を公式配布から取得し exe 隣へ展開
 #include "stdafx.h"
 #include "KpiPluginInstall.h"
+#include "UpdateCheck.h"
 #include <wininet.h>
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
 #include "SevenZipDec.h"
 
 #pragma comment(lib, "wininet.lib")
+
+static DWORD g_kpiPumpTick = 0;
+static const DWORD kKpiUiMs = 250;
+static const DWORD kKpiDlChunk = 256 * 1024;
 
 static void KpiInstallPump()
 {
@@ -21,6 +26,23 @@ static void KpiInstallPump()
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
+}
+
+static void KpiInstallPumpThrottled()
+{
+	const DWORD now = GetTickCount();
+	if (now - g_kpiPumpTick < kKpiUiMs)
+		return;
+	g_kpiPumpTick = now;
+	KpiInstallPump();
+}
+
+static void KpiInstallInetTune(HINTERNET h)
+{
+	if (!h)
+		return;
+	DWORD rbs = kKpiDlChunk;
+	InternetSetOption(h, INTERNET_OPTION_READ_BUFFER_SIZE, &rbs, sizeof(rbs));
 }
 
 static BOOL KpiInstallMkDirDeep(const TCHAR* path)
@@ -188,6 +210,27 @@ static BOOL KpiInstallZipRelSilentNewOk(const CString& rel)
 	return (KpiInstallZipRelIsFmMidiSidecarNew(rel) || KpiInstallZipRelIsSasamiHost(rel)) ? TRUE : FALSE;
 }
 
+static CString KpiInstallUrlLeaf(LPCTSTR url)
+{
+	CString u(url ? url : L"");
+	int fileEq = u.Find(L"file=");
+	if (fileEq >= 0) {
+		CString f = u.Mid(fileEq + 5);
+		const int amp = f.Find(L'&');
+		if (amp >= 0)
+			f = f.Left(amp);
+		if (!f.IsEmpty())
+			return f;
+	}
+	const int q = u.Find(L'?');
+	if (q >= 0)
+		u = u.Left(q);
+	const int s = u.ReverseFind(L'/');
+	if (s >= 0)
+		u = u.Mid(s + 1);
+	return u;
+}
+
 static BOOL KpiInstallSafeRelPathW(const wchar_t* nameInArc, CString& outRel)
 {
 	outRel.Empty();
@@ -221,7 +264,10 @@ static BOOL KpiInstallExtract7z(const TCHAR* zipPath, const TCHAR* destDir, CStr
 	}
 
 	int extracted = 0;
-	for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+	const UInt32 nFiles = a.db.NumFiles;
+	for (UInt32 i = 0; i < nFiles; i++) {
+		UpdateBusyExtractProgress((int)(i + 1), (int)nFiles);
+		KpiInstallPumpThrottled();
 		wchar_t nameW[1024] = {};
 		if (!SevenZipFileNameW(&a, i, nameW, 1024) || !nameW[0])
 			continue;
@@ -337,6 +383,8 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 
 	int extracted = 0;
 	for (ZPOS64_T i = 0; i < gi.number_entry; i++) {
+		UpdateBusyExtractProgress((int)(i + 1), (int)gi.number_entry);
+		KpiInstallPumpThrottled();
 		char filename_inzip[1024] = {};
 		unz_file_info64 fi = {};
 		if (unzGetCurrentFileInfo64(uf, &fi, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0) != UNZ_OK)
@@ -468,6 +516,7 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 			L"Ag baslatilamadi.");
 		return FALSE;
 	}
+	KpiInstallInetTune(hInet);
 	DWORD timeout = 600000;
 	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
@@ -498,6 +547,7 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 			L"Falha no download.", L"Download mislukt.", L"Pobieranie nieudane.", L"Indirme basarisiz.");
 		return FALSE;
 	}
+	KpiInstallInetTune(hUrl);
 
 	status = 0;
 	slen = sizeof(status);
@@ -523,7 +573,8 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 			contentLen = (ULONGLONG)_atoi64(lenBuf);
 	}
 
-	HANDLE hFile = CreateFile(zipPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = CreateFile(zipPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		InternetCloseHandle(hUrl);
 		InternetCloseHandle(hInet);
@@ -536,12 +587,22 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 		return FALSE;
 	}
 
-	BYTE buf[16384];
+	BYTE* buf = (BYTE*)malloc(kKpiDlChunk);
+	if (!buf) {
+		CloseHandle(hFile);
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		errOut = LL14(L"メモリが足りません。", L"Out of memory.", L"Memoire insuffisante.",
+			L"Memoria insufficiente.", L"Memoria insuficiente.", L"메모리가 부족합니다.",
+			L"内存不足。", L"نفاد الذاكرة.", L"Недостаточно памяти.", L"Zu wenig Speicher.",
+			L"Memoria insuficiente.", L"Onvoldoende geheugen.", L"Za malo pamieci.", L"Bellek yetersiz.");
+		return FALSE;
+	}
 	DWORD read = 0;
 	ULONGLONG total = 0;
 	DWORD lastUi = GetTickCount();
 	BOOL ok = TRUE;
-	while (InternetReadFile(hUrl, buf, sizeof(buf), &read) && read > 0) {
+	while (InternetReadFile(hUrl, buf, kKpiDlChunk, &read) && read > 0) {
 		DWORD wr = 0;
 		if (!WriteFile(hFile, buf, read, &wr, NULL) || wr != read) {
 			ok = FALSE;
@@ -549,7 +610,7 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 		}
 		total += read;
 		const DWORD now = GetTickCount();
-		if (progress && (now - lastUi) >= 200) {
+		if (progress && (now - lastUi) >= kKpiUiMs) {
 			lastUi = now;
 			int pct = 0;
 			if (contentLen > 0)
@@ -559,9 +620,10 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 			if (pct > 90) pct = 90;
 			if (pct < 0) pct = 0;
 			progress(pct, ctx);
-			KpiInstallPump();
+			KpiInstallPumpThrottled();
 		}
 	}
+	free(buf);
 	CloseHandle(hFile);
 	InternetCloseHandle(hUrl);
 	InternetCloseHandle(hInet);
@@ -628,6 +690,7 @@ static ULONGLONG KpiInstallFileSize(LPCTSTR path)
 static time_t KpiInstallHttpLastModified(LPCTSTR url)
 {
 	if (!url || !url[0]) return 0;
+	KpiInstallPumpThrottled();
 	HINTERNET hInet = InternetOpen(L"oggKbsasamiUpdate/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInet) return 0;
 	DWORD timeout = 2000;
@@ -691,9 +754,11 @@ static LPCTSTR KpiInstallPluginsArchiveUrl(time_t* outMod)
 static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
 {
 	if (!url || !destPath) return FALSE;
+	UpdateBusyBeginFile(KpiInstallUrlLeaf(url));
 	DeleteFile(destPath);
 	HINTERNET hInet = InternetOpen(L"oggKbsasamiUpdate/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInet) return FALSE;
+	KpiInstallInetTune(hInet);
 	DWORD timeout = 120000;
 	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
@@ -710,6 +775,7 @@ static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
 		InternetCloseHandle(hInet);
 		return FALSE;
 	}
+	KpiInstallInetTune(hUrl);
 	DWORD status = 0, slen = sizeof(status);
 	if (!HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
 		|| status < 200 || status >= 300) {
@@ -717,25 +783,40 @@ static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
 		InternetCloseHandle(hInet);
 		return FALSE;
 	}
-	HANDLE hFile = CreateFile(destPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	ULONGLONG contentLen = 0;
+	{
+		char lenBuf[64] = { 0 };
+		DWORD lenBufLen = sizeof(lenBuf);
+		if (HttpQueryInfoA(hUrl, HTTP_QUERY_CONTENT_LENGTH, lenBuf, &lenBufLen, NULL))
+			contentLen = (ULONGLONG)_atoi64(lenBuf);
+	}
+	HANDLE hFile = CreateFile(destPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		InternetCloseHandle(hUrl);
 		InternetCloseHandle(hInet);
 		return FALSE;
 	}
-	BYTE buf[16384];
+	BYTE* buf = (BYTE*)malloc(kKpiDlChunk);
+	if (!buf) {
+		CloseHandle(hFile);
+		InternetCloseHandle(hUrl);
+		InternetCloseHandle(hInet);
+		return FALSE;
+	}
 	DWORD read = 0;
 	ULONGLONG total = 0;
 	BOOL ok = TRUE;
-	while (InternetReadFile(hUrl, buf, sizeof(buf), &read) && read > 0) {
+	while (InternetReadFile(hUrl, buf, kKpiDlChunk, &read) && read > 0) {
 		DWORD wr = 0;
 		if (!WriteFile(hFile, buf, read, &wr, NULL) || wr != read) {
 			ok = FALSE;
 			break;
 		}
 		total += read;
-		KpiInstallPump();
+		UpdateBusyFileProgress(total, contentLen);
 	}
+	free(buf);
 	CloseHandle(hFile);
 	InternetCloseHandle(hUrl);
 	InternetCloseHandle(hInet);
@@ -812,6 +893,7 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 	if (!KpiInstallHttpDownloadFile(pluginsUrl, zipPath))
 		return FALSE;
 
+	UpdateBusyShowExtract(KpiInstallUrlLeaf(pluginsUrl));
 	CString err;
 	/* 既存のみ更新。kbsasami/kbfmmidi の kpi/txt/wopn と host32/64 は新規可。c86ctl は出さない */
 	const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err, TRUE, TRUE);
@@ -1270,6 +1352,7 @@ static BOOL KpiInstallZipCopyOne(LPCTSTR zipUrl, LPCTSTR workDir, LPCTSTR relSrc
 	DeleteFile(zipPath);
 	if (!KpiInstallHttpDownloadFile(zipUrl, zipPath))
 		return FALSE;
+	UpdateBusyShowExtract(KpiInstallUrlLeaf(zipUrl));
 	TCHAR extractDir[MAX_PATH * 2] = {};
 	_sntprintf_s(extractDir, _TRUNCATE, L"%s\\_ex", workDir);
 	/* 展開先を空に近い状態へ */
@@ -1343,6 +1426,7 @@ static BOOL KpiInstallFetchOfficialFmpmdDlls(LPCTSTR fmpmdDir, WORD want)
 			const TCHAR* ext = (urlN >= 3 && _tcsicmp(pluginsUrl + urlN - 3, L".7z") == 0) ? L".7z" : L".zip";
 			_sntprintf_s(zipPath, _TRUNCATE, L"%s\\_plugins%s", work, ext);
 			if (KpiInstallHttpDownloadFile(pluginsUrl, zipPath)) {
+				UpdateBusyShowExtract(KpiInstallUrlLeaf(pluginsUrl));
 				TCHAR exDir[MAX_PATH * 2] = {};
 				_sntprintf_s(exDir, _TRUNCATE, L"%s\\_plex", work);
 				CreateDirectory(exDir, NULL);

@@ -175,7 +175,7 @@ private:
 	void RunSlotFile(int job);
 	void ImportConfirmed();
 	void DrawShop();
-	float DrawSoundOpts(float x, float y, float w, float k, int* tip = 0, float* tipY = 0);
+	float DrawSoundOpts(float x, float y, float w, float k, int* tip = 0, float* tipY = 0, float* tipX = 0, float* tipW = 0, float* tipH = 0);
 	void ApplyAudio();
 	void DrawCodex();
 	void DrawMonCodex();
@@ -374,6 +374,10 @@ private:
 	int m_codexShape;        // 0全部 1単体 2範囲 3広域 4直線 5扇
 	int m_codexEl;           // 0全部。以降は属性
 	int m_codexSort;         // 0職 1名前 2MP 3習得
+	int m_growPath[14];      // ジョブツリーで上から選んだ職
+	int m_growN;
+	float m_growScroll;
+	int m_growSeen;
 	int m_skillPage;
 	int m_skillTab;          // 0攻撃 1回復 2クラフト 3陣形
 	int m_skillShape;        // 攻撃: 0全部 1単体 2範囲 3広域
@@ -621,5 +625,136 @@ private:
 	int m_menuConfirm;
 	float m_enemyWait;
 };
+
+inline void AppendStatBit(wchar_t* dst, int cap, int stat, int v)
+{
+	if (!dst || cap < 8 || !v || stat < 0 || stat >= S_COUNT) return;
+	wchar_t one[40];
+	swprintf_s(one, L" %s%+d", TT(StatNameTx(stat)), v);
+	if ((int)wcslen(dst) + (int)wcslen(one) + 1 < cap) wcscat_s(dst, cap, one);
+}
+inline void GearTipText(const GearDef* g, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	if (!g) return;
+	AppendStatBit(out, cap, S_STR, g->str);
+	AppendStatBit(out, cap, S_MAG, g->mag);
+	AppendStatBit(out, cap, S_DEF, g->def);
+	AppendStatBit(out, cap, S_RES, g->res);
+	const wchar_t* role = GearRole(g);
+	if (role && role[0]) {
+		if (out[0] && (int)wcslen(out) + 2 < cap) wcscat_s(out, cap, L"\n");
+		if ((int)wcslen(out) + (int)wcslen(role) + 1 < cap) wcscat_s(out, cap, role);
+	}
+}
+inline void AccTipText(int id, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	if (id <= 0) { wcsncpy_s(out, cap, TT(TX_PT_NONE), _TRUNCATE); return; }
+	wcsncpy_s(out, cap, AccName(id), _TRUNCATE);
+	for (int st = 0; st < S_COUNT; st++) AppendStatBit(out, cap, st, AccStat(id, st));
+}
+// ホバーした枠の隣に、文章が収まる大きさで説明を出す。
+inline void DrawHoverNote(Renderer& r, float ax, float ay, float aw, float ah, float ui, int sw, int sh, const wchar_t* text)
+{
+	if (!text || !text[0] || sw < 32 || sh < 32) return;
+	float px = 13.f * ui;
+	if (px < 11.f) px = 11.f;
+	float pad = 10.f * ui;
+	float tw = 380.f * ui;
+	if (tw > (float)sw * 0.46f) tw = (float)sw * 0.46f;
+	if (tw > (float)sw - 16.f) tw = (float)sw - 16.f;
+	if (tw < 160.f) tw = min(160.f, (float)sw - 16.f);
+	float inner = tw - pad * 2.f;
+	if (inner < 48.f) inner = 48.f;
+	int lines = 1;
+	float acc = 0.f;
+	for (const wchar_t* p = text; *p; p++) {
+		if (*p == L'\n') { lines++; acc = 0.f; continue; }
+		acc += px;
+		if (acc > inner) { lines++; acc = px; }
+	}
+	if (lines > 16) lines = 16;
+	float th = pad * 2.f + lines * (px * 1.4f);
+	float capH = (float)sh * 0.55f;
+	if (th > capH) th = capH;
+	if (th < 40.f * ui) th = 40.f * ui;
+	float gap = 8.f * ui;
+	float tx = ax - tw - gap;
+	float ty = ay;
+	if (tx < 8.f) {
+		float right = ax + aw + gap;
+		if (right + tw <= (float)sw - 8.f) tx = right;
+		else {
+			tx = ax;
+			if (tx + tw > (float)sw - 8.f) tx = (float)sw - tw - 8.f;
+			if (tx < 8.f) tx = 8.f;
+			float above = ay - th - gap;
+			if (above >= 8.f) ty = above;
+			else {
+				float below = ay + ah + gap;
+				if (below + th <= (float)sh - 8.f) ty = below;
+			}
+		}
+	}
+	if (ty + th > (float)sh - 8.f) ty = (float)sh - th - 8.f;
+	if (ty < 8.f) ty = 8.f;
+	r.HudPanel(tx, ty, tw, th, RGBA8(16, 18, 32, 238), RGBA8(210, 180, 110));
+	r.HudTextBox(text, tx + pad, ty + pad * 0.65f, inner, th - pad * 1.3f, px, RGBA8(232, 234, 242));
+}
+inline int SplitJobPath(Renderer& r, const CharData& c, float maxW, float px, int maxLines, wchar_t lines[][120])
+{
+	if (maxLines < 1 || maxW < 8.f) return 0;
+	if (maxLines > 8) maxLines = 8;
+	wchar_t hist[900];
+	JobPathText(c, hist, 900);
+	if (!hist[0]) return 0;
+	wchar_t full[980];
+	swprintf_s(full, L"%s  %s", TT(TX_JOB_HIST), hist);
+	int n = 0;
+	const wchar_t* p = full;
+	wchar_t cur[120];
+	cur[0] = 0;
+	while (*p && n < maxLines) {
+		const wchar_t* arrow = wcsstr(p, L" → ");
+		size_t ntok = arrow ? (size_t)(arrow - p) : wcslen(p);
+		wchar_t tok[100];
+		if (ntok > 96) ntok = 96;
+		memcpy(tok, p, ntok * sizeof(wchar_t));
+		tok[ntok] = 0;
+		wchar_t trial[120];
+		if (!cur[0]) wcscpy_s(trial, tok);
+		else swprintf_s(trial, L"%s → %s", cur, tok);
+		if (cur[0] && r.TextWidth(trial, px, 0) > maxW) {
+			wcscpy_s(lines[n++], cur);
+			if (n >= maxLines) {
+				size_t L = wcslen(lines[n - 1]);
+				if (L + 1 < 118) wcscat_s(lines[n - 1], L"…");
+				cur[0] = 0;
+				break;
+			}
+			wcscpy_s(cur, tok);
+		} else wcscpy_s(cur, trial);
+		if (!arrow) break;
+		p = arrow + 3;
+	}
+	if (cur[0] && n < maxLines) wcscpy_s(lines[n++], cur);
+	else if (cur[0] && n > 0) {
+		size_t L = wcslen(lines[n - 1]);
+		if (L + 1 < 118) wcscat_s(lines[n - 1], L"…");
+	}
+	return n;
+}
+inline float DrawJobPath(Renderer& r, const CharData& c, float x, float y, float w, float px, DWORD col, int maxLines)
+{
+	wchar_t lines[8][120];
+	int n = SplitJobPath(r, c, w, px, maxLines, lines);
+	float lh = px + 4.f;
+	for (int i = 0; i < n; i++)
+		r.HudText(lines[i], x, y + lh * ((float)i + 0.5f), px, col, 0, 0);
+	return n * lh;
+}
 
 } // namespace otac

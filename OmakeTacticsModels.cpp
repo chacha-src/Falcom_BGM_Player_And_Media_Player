@@ -2272,9 +2272,23 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
 	float y = human ? 1.32f : 1.12f;
-	float z = human ? 0.16f : 0.32f;
-	float x = human ? 0.14f : 0.18f;
+	float z = human ? 0.10f : 0.32f;
+	float x = human ? 0.10f : 0.18f;
 	float yaw = human ? -0.40f : -0.55f;
+	if (human) {
+		// 根元の球を背中の面へ埋める。固定の +Z だと服との間に隙間が残る。
+		int ava = a.avatar;
+		if (ava <= 0) {
+			const BOOL mal = strncmp(m.name, "HumM", 4) == 0 || !strcmp(m.name, "HumAdventurer") || !strcmp(m.name, "HumKing");
+			const BOOL fem = strncmp(m.name, "HumF", 4) == 0 || !strcmp(m.name, "HumMedieval") || !strcmp(m.name, "HumWitch");
+			if (mal) ava = 9;
+			else if (fem) ava = 12;
+		}
+		float back = ava > 0 ? r.AvatarClothBack(a.model, ava, y) : -1e9f;
+		if (back < -10.f && ava > 0) back = r.AvatarClothBack(a.model, ava, y - 0.10f);
+		if (back > -10.f) z = back - 0.025f;
+		else z = MInverse(m.invBind[cj]).m[14] + 0.045f;
+	}
 	float rest = human ? 0.20f : 0.35f;
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
@@ -2285,7 +2299,8 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		DrawParams dw = dp;
 		dw.hue = 0;
 		dw.twoSided = 1;
-		r.DrawStatic(lib.wing[dr][side], w, dw);
+		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
+		r.DrawStatic(lib.wing[dr][1 - side], w, dw);
 	}
 }
 

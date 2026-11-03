@@ -824,6 +824,52 @@ void Game::StartBattle(int stage)
 	TacSfx(TS_START);
 }
 
+static int NextJobGate(int lv)
+{
+	for (int t = 1; t < 12; t++) {
+		int g = PromoteLevel(t);
+		if (g > lv) return g;
+	}
+	return TAC_LV_MAX;
+}
+
+// 次の転職レベル（15、35、…）までを1枚にまとめる。経験値が尽きれば途中で止まる。
+static void BurstToGate(Unit& u, int unitIndex, Rng& rng, long long& pool, LevelUpInfo* q, int& qn, int qcap)
+{
+	int guard = 0;
+	while (pool >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX && guard < TAC_LV_MAX) {
+		int gate = NextJobGate(u.ch.lv);
+		if (gate <= u.ch.lv) break;
+		LevelUpInfo* Lp = NULL;
+		if (q && qn < qcap) {
+			Lp = &q[qn++];
+			memset(Lp, 0, sizeof(*Lp));
+			Lp->unit = unitIndex;
+			Lp->oldLv = u.ch.lv;
+			Lp->newLv = u.ch.lv;
+		}
+		int stepped = 0;
+		while (pool >= ExpToNext(u.ch.lv) && u.ch.lv < gate && u.ch.lv < TAC_LV_MAX && guard < TAC_LV_MAX) {
+			pool -= ExpToNext(u.ch.lv);
+			int gains[S_COUNT];
+			memset(gains, 0, sizeof(gains));
+			int learned[4];
+			int nLearn = CharLevelUp(u.ch, rng, gains, learned, 4);
+			if (Lp) {
+				for (int s = 0; s < S_COUNT; s++) Lp->gains[s] += gains[s];
+				for (int k = 0; k < nLearn && Lp->nLearned < 4; k++) Lp->learned[Lp->nLearned++] = learned[k];
+				Lp->newLv = u.ch.lv;
+			}
+			u.hp = min(u.ch.stat[S_HP], u.hp + gains[S_HP]);
+			u.mp = min(u.ch.stat[S_MP], u.mp + gains[S_MP]);
+			u.levelsGained++;
+			stepped++;
+			guard++;
+		}
+		if (!stepped) break;
+	}
+}
+
 void Game::EndBattle(int victory)
 {
 	for (int i = 0; i < m_b.nUnits; i++) {
@@ -834,28 +880,7 @@ void Game::EndBattle(int victory)
 			int bonus = m_battleStage * 5;
 			if (bonus > 0) {
 				long long pool = (long long)u.ch.exp + bonus;
-				int guard = 0;
-				while (pool >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX && guard < TAC_LV_MAX) {
-					pool -= ExpToNext(u.ch.lv);
-					int gains[S_COUNT];
-					int* gp = gains;
-					int learnedBuf[4];
-					LevelUpInfo* Lp = NULL;
-					if (m_lvqN < MAX_PARTY * 4) {
-						Lp = &m_lvq[m_lvqN++];
-						memset(Lp, 0, sizeof(*Lp));
-						Lp->unit = i;
-						Lp->oldLv = u.ch.lv;
-						gp = Lp->gains;
-					}
-					int* learned = Lp ? Lp->learned : learnedBuf;
-					int nLearn = CharLevelUp(u.ch, m_rng, gp, learned, 4);
-					if (Lp) { Lp->nLearned = nLearn; Lp->newLv = u.ch.lv; }
-					u.hp = min(u.ch.stat[S_HP], u.hp + gp[S_HP]);
-					u.mp = min(u.ch.stat[S_MP], u.mp + gp[S_MP]);
-					u.levelsGained++;
-					guard++;
-				}
+				BurstToGate(u, i, m_rng, pool, m_lvq, m_lvqN, MAX_PARTY * 4);
 				if (pool > 2147483647LL) pool = 2147483647LL;
 				u.ch.exp = (int)pool;
 				long long acc = (long long)m_expGain[i] + bonus;
@@ -1597,6 +1622,8 @@ void Game::UpdateHover()
 	}
 	SyncCursorLayer();
 	m_hoverUnit = m_cursorValid ? m_b.UnitAt(m_cx, m_cz, m_cLayer) : -1;
+	// 飛行の味方は見た目が上の床にいるが、占有は deck のまま。カーソルの層が空なら同じマスのユニットを拾う。
+	if (m_hoverUnit < 0 && m_cursorValid) m_hoverUnit = m_b.UnitAt(m_cx, m_cz);
 	if (m_hoverUnit >= 0 && !m_b.u[m_hoverUnit].alive && m_b.u[m_hoverUnit].team != TEAM_PLAYER) m_hoverUnit = -1;
 	if (m_hoverUnit < 0 && m_cursorValid)
 		m_hoverUnit = CorpseAt(m_b, m_cx, m_cz);
@@ -3303,35 +3330,15 @@ void Game::AwardExp()
 		}
 		int fromLv = u.ch.lv;
 		long long pool = (long long)u.ch.exp + g;
-		int steps = 0;
-		while (pool >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX && steps < TAC_LV_MAX) {
-			pool -= ExpToNext(u.ch.lv);
-			int gains[S_COUNT];
-			int* gp = gains;
-			int learnedBuf[4];
-			int nLearn = 0;
-			int oldLv = u.ch.lv;
-			LevelUpInfo* Lp = NULL;
-			if (m_lvqN < MAX_PARTY * 4) {
-				Lp = &m_lvq[m_lvqN++];
-				memset(Lp, 0, sizeof(*Lp));
-				Lp->unit = i;
-				Lp->oldLv = oldLv;
-				gp = Lp->gains;
-			}
-			int* learned = Lp ? Lp->learned : learnedBuf;
-			nLearn = CharLevelUp(u.ch, m_rng, gp, learned, 4);
-			if (Lp) { Lp->nLearned = nLearn; Lp->newLv = u.ch.lv; }
-			u.hp = min(u.ch.stat[S_HP], u.hp + gp[S_HP]);
-			u.mp = min(u.ch.stat[S_MP], u.mp + gp[S_MP]);
-			u.levelsGained++;
-			for (int lk = 0; lk < nLearn; lk++) {
+		int q0 = m_lvqN;
+		BurstToGate(u, i, m_rng, pool, m_lvq, m_lvqN, MAX_PARTY * 4);
+		for (int q = q0; q < m_lvqN; q++) {
+			for (int lk = 0; lk < m_lvq[q].nLearned; lk++) {
 				wchar_t nm[40], lvline[120];
 				UnitTitle(u, nm, 40);
-				swprintf_s(lvline, L"%s  %s: %s", nm, TT(TX_BT_LEARNED), SkillLabel(learned[lk]));
+				swprintf_s(lvline, L"%s  %s: %s", nm, TT(TX_BT_LEARNED), SkillLabel(m_lvq[q].learned[lk]));
 				AddLog(lvline, RGBA8(255, 226, 150));
 			}
-			steps++;
 		}
 		if (u.ch.lv >= TAC_LV_MAX) pool = 0;
 		if (pool < 0) pool = 0;
@@ -4688,6 +4695,28 @@ void Game::DrawCutIn3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
 
+// 職歴の行数に合わせたカードの高さ。room を超えない。戻り値の高さと行数は描画側と同じ式。
+static float FitCardH(Renderer& r, const Unit* u, float w, BOOL big, float portrait, float textPad, float base, float linePx, float room, int* outLines)
+{
+	float tw = w - portrait - textPad;
+	if (tw < 48.f) tw = 48.f;
+	float lineH = linePx + 4.f;
+	int maxLines = big ? 6 : 5;
+	if (outLines) *outLines = 0;
+	if (!u || u->team != TEAM_PLAYER) return room > 0.f && base > room ? room : base;
+	for (int lines = maxLines; lines >= 0; --lines) {
+		wchar_t buf[8][120];
+		int n = lines > 0 ? SplitJobPath(r, u->ch, tw, linePx, lines, buf) : 0;
+		float need = base + n * lineH;
+		if (need <= room + 0.5f || lines == 0) {
+			if (outLines) *outLines = n;
+			if (room > 0.f && need > room) need = room;
+			return need;
+		}
+	}
+	return room > 0.f && base > room ? room : base;
+}
+
 // 区切り（" · " と技能欄の空き）で折り返す。1行の高さは px に少し足す。
 static int WrapHeldLines(Renderer& r, const wchar_t* src, float maxW, float px, wchar_t lines[][120], int maxLines)
 {
@@ -4859,12 +4888,22 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		}
 		return;
 	}
-	float h = big ? U(148) : U(112);
+	float ps = big ? U(96.f) : U(78.f);
+	float linePx = U(12);
+	float baseH = big ? U(156.f) : U(132.f);
+	float gapLim = max(6.f, U(12.f));
+	float limitBot = big ? ((float)m_h - m_hud.margin) : (m_hud.logTop - gapLim);
+	float room = limitBot - y;
+	if (room < U(80)) room = U(80);
+	int pathLines = 0;
+	float h = FitCardH(m_r, &u, w, big, ps, U(30), baseH, linePx, room, &pathLines);
+	if (y + h > limitBot) h = max(U(72), limitBot - y);
+	if (ps > h - U(16)) ps = max(U(40), h - U(16));
 	Panel(x, y, w, h);
-	float ps = h - U(20);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
 		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(10), ps, fc);
 	float tx = x + ps + U(20), tw = w - ps - U(30);
+	if (tw < U(48)) tw = U(48);
 	wchar_t nm[96];
 	UnitTitle(u, nm, 64);
 	if (!u.alive) {
@@ -4874,14 +4913,22 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 	}
 	m_r.HudText(nm, tx, y + U(16), U(big ? 17.f : 15.f), u.alive ? RGBA8(255, 255, 255) : RGBA8(255, 176, 168), 0, 1);
 	wchar_t l[128];
+	float cy = y + U(34);
 	if (u.team == TEAM_PLAYER) {
 		int need = ExpToNext(u.ch.lv);
 		int showExp = u.ch.lv >= TAC_LV_MAX ? 0 : u.ch.exp;
 		int showNeed = u.ch.lv >= TAC_LV_MAX ? 0 : need;
 		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNum(u.ch.lv), ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
-		m_r.HudText(l, tx, y + U(34), FitTextPx(l, tw, U(12), 0), RGBA8(255, 226, 150), 0, 0);
-		swprintf_s(l, L"%s %s/%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed));
-		m_r.HudText(l, tx, y + U(48), FitTextPx(l, tw, U(12), 0), RGBA8(180, 220, 255), 0, 0);
+		m_r.HudText(l, tx, cy, FitTextPx(l, tw, U(12), 0), RGBA8(255, 226, 150), 0, 0);
+		cy += U(16);
+		if (pathLines > 0 && cy + U(14) < y + h - U(28)) {
+			cy += DrawJobPath(m_r, u.ch, tx, cy - U(6), tw, linePx, RGBA8(210, 220, 235), pathLines) + U(2);
+		}
+		if (cy + U(12) < y + h - U(8)) {
+			swprintf_s(l, L"%s %s/%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed));
+			m_r.HudText(l, tx, cy, FitTextPx(l, tw, U(12), 0), RGBA8(180, 220, 255), 0, 0);
+			cy += U(16);
+		}
 	} else {
 		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNum(u.ch.lv), ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
 		m_r.HudText(l, tx, y + U(36), FitTextPx(l, tw, U(13), 0), RGBA8(255, 226, 150), 0, 0);
@@ -4891,7 +4938,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (m_r.TextWidth(wk, wfs, 0) > tw && m_r.TextWidth(wk, wfs, 0) > 1.f) wfs = U(10);
 		m_r.HudText(wk, tx, y + U(50), wfs, RGBA8(255, 186, 120), 0, 0);
 	}
-	float by = y + (u.team == TEAM_PLAYER ? U(64) : U(66));
+	float by = u.team == TEAM_PLAYER ? cy : (y + U(66));
 	if (big) {
 		// 左下の欄は数値だけ。バーはログ側へ食い込むので置かない。
 		wchar_t hp[48], mp[48], cp[32];
@@ -4930,14 +4977,14 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 			Bar(tx + tw - bw, by + U(4), bw, U(7), (float)u.mp / max(1, u.ch.stat[S_MP]), RGBA8(110, 170, 255), RGBA8(40, 70, 170));
 		}
 	}
-	if (big) {
-		by += U(18);
+	if (big && by + U(14) < y + h - U(4)) {
+		by += U(16);
 		swprintf_s(l, L"%s%s %s%s %s%s %s%s %s%s %s%s", TT(TX_ST_STR), TacNum(UnitStat(u, S_STR)), TT(TX_ST_MAG), TacNum(UnitStat(u, S_MAG)), TT(TX_ST_DEF), TacNum(UnitStat(u, S_DEF)),
 			TT(TX_ST_RES), TacNum(UnitStat(u, S_RES)), TT(TX_ST_AGI), TacNum(UnitStat(u, S_AGI)), TT(TX_ST_MOV), TacNum(UnitStat(u, S_MOV)));
 		float sfs = U(11);
 		float sw = m_r.TextWidth(l, sfs, 0);
 		if (sw > tw && sw > 1.f) sfs *= tw / sw;
-		m_r.HudText(l, tx, by + U(6), sfs, RGBA8(210, 210, 220), 0, 0);
+		if (by + U(8) < y + h - U(2)) m_r.HudText(l, tx, by + U(6), sfs, RGBA8(210, 210, 220), 0, 0);
 		by += U(16);
 		wchar_t st[160] = L"";
 		if (!(m_seqCut && m_cutStage == 0)) {
@@ -4956,7 +5003,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		}
-		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
+		if (st[0] && by + U(8) < y + h - U(2)) m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
 	}
 }
 
@@ -5647,7 +5694,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 			dist = min(dist, max(abs((src.x + ax) - (t.x + dx)), abs((src.z + az) - (t.z + dz))));
 	if (dist > kItemThrow) return FALSE;
 	if (g->item == IT_RAISE || g->extra == 106)
-		return t.team == src.team && !t.alive && t.killed && dist >= 0;
+		return t.team == src.team && !t.alive && t.hp <= 0 && dist >= 0;
 	if (ItemHarms(g))
 		return t.team != src.team && t.alive && dist >= 1;
 	return t.team == src.team && t.alive;
@@ -5656,7 +5703,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t)
 {
 	if (!ItemThrowOk(g, src, t)) return FALSE;
-	if ((g->item == IT_RAISE || g->extra == 106) && !RaisePlaceable(b, t)) return FALSE;
+	if (g->item == IT_RAISE || g->extra == 106) return TRUE;
 	BOOL hurt = t.alive && t.hp < t.ch.stat[S_HP];
 	BOOL mana = t.alive && t.mp < t.ch.stat[S_MP];
 	BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0;
@@ -5710,7 +5757,10 @@ void Game::UseConsumable(int good, int target)
 	if (target < 0 || target >= m_b.nUnits) return;
 	Unit& self = m_b.u[m_cur];
 	if (!ItemThrowOk(g, self, m_b.u[target])) return;
-	if ((g->item == IT_RAISE || g->extra == 106) && !RaisePlaceable(m_b, m_b.u[target])) return;
+	if ((g->item == IT_RAISE || g->extra == 106) && !RaisePlaceable(m_b, m_b.u[target])) {
+		AddBanner(RaiseNoRoomWord(), NULL, RGBA8(255, 180, 160), 2, 1.8f, MSG_DROP);
+		return;
+	}
 	if (!GoodTake(m_save, good)) return;
 	Unit* dst = &m_b.u[target];
 	if (g->item == IT_ELIXIR) {
@@ -5818,7 +5868,13 @@ void Game::DrawBattleStatus(BOOL edit)
 	}
 	Unit& u = m_b.u[who];
 	float pw = min(U(640.f), (float)m_w - U(40));
-	float ph = min(U(520.f), (float)m_h - U(40));
+	float pathRoom = 0.f;
+	if (u.team == TEAM_PLAYER) {
+		wchar_t jlines[8][120];
+		int jn = SplitJobPath(m_r, u.ch, pw - U(32), U(13), 6, jlines);
+		pathRoom = jn * (U(13) + 4.f);
+	}
+	float ph = min(U(520.f) + pathRoom, (float)m_h - U(24));
 	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
 	if (edit) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
@@ -6040,6 +6096,10 @@ void Game::DrawBattleStatus(BOOL edit)
 		yy += U(36);
 		int a = m_statEqPage * per;
 		int b = min(n, a + per);
+		wchar_t rowTip[480];
+		rowTip[0] = 0;
+		float rtx = 0, rty = 0;
+		BOOL rowHot = FALSE;
 		for (int s = 0; s < b - a; s++) {
 			int ix = a + s;
 			wchar_t row[180];
@@ -6049,6 +6109,17 @@ void Game::DrawBattleStatus(BOOL edit)
 				wchar_t cp[24];
 				CraftCostText(ids[ix] - 1, cp, 24);
 				swprintf_s(row, L"%s  %s  %s%s", CraftName(ids[ix] - 1), CraftShapeName(sd.area, sd.shape), cp, IsCraftSuper(CRAFT_BASE + ids[ix] - 1) ? L" ★" : L"");
+			}
+			if (m_mouseSeen && Hit(px + U(16), yy, pw - U(32), U(32))) {
+				if (gearKind >= 0) {
+					const GearDef* gg = GearOf(m_save.gearId[ids[ix]]);
+					wchar_t body[360];
+					body[0] = 0;
+					if (gg) GearTipText(gg, body, 360);
+					swprintf_s(rowTip, L"%s%s%s", row, body[0] ? L"\n" : L"", body);
+				} else wcsncpy_s(rowTip, CraftDesc(ids[ix] - 1), _TRUNCATE);
+				rowHot = rowTip[0] != 0;
+				rtx = px + U(16); rty = yy;
 			}
 			m_btnSfx = -2;
 			if (Btn(ID_BT_EQROW + s, px + U(16), yy, pw - U(32), U(32), row, TRUE, FALSE, U(13))) {
@@ -6061,6 +6132,7 @@ void Game::DrawBattleStatus(BOOL edit)
 			}
 			yy += U(36);
 		}
+		if (rowHot) DrawHoverNote(m_r, rtx, rty, pw - U(32), U(32), m_ui, m_w, m_h, rowTip);
 		if (pages > 1) {
 			wchar_t pg[32];
 			swprintf_s(pg, L"%d / %d", m_statEqPage + 1, pages);
@@ -6071,54 +6143,58 @@ void Game::DrawBattleStatus(BOOL edit)
 		if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) m_statEq = 0;
 		return;
 	}
-	CharData view = u.ch;
 	int fightPlus[S_COUNT];
-	for (int s = 0; s < S_COUNT; s++) {
-		int fight = UnitStat(u, s);
-		fightPlus[s] = fight - u.ch.stat[s];
-		if (s == S_HP || s == S_MP) view.stat[s] = fight;
-	}
-	fightPlus[S_HP] = 0;
-	fightPlus[S_MP] = 0;
-	DrawStatLines(view, px + U(16), py + U(48), pw - U(32), fightPlus, u.hp, u.mp);
+	for (int s = 0; s < S_COUNT; s++) fightPlus[s] = UnitStat(u, s) - u.ch.stat[s];
 	float yy = py + ph - U(276);
+	float statY = py + U(44);
+	if (u.team == TEAM_PLAYER) {
+		float lineH = U(13) + 4.f;
+		float statH = U(20) * 5.f + U(8);
+		float budget = yy - U(8) - statY - statH;
+		int maxLines = (int)(budget / lineH);
+		if (maxLines < 0) maxLines = 0;
+		if (maxLines > 6) maxLines = 6;
+		if (maxLines > 0) {
+			float pathH = DrawJobPath(m_r, u.ch, px + U(16), statY, pw - U(32), U(13), RGBA8(210, 220, 235), maxLines);
+			if (pathH > 0) statY += pathH + U(4);
+		}
+	}
+	if (statY + U(20) < yy - U(4))
+		DrawStatLines(u.ch, px + U(16), statY, pw - U(32), fightPlus, u.hp, u.mp);
 	const GearDef* wpn = GearOf(u.ch.reserved[6]);
 	const GearDef* arm = GearOf(u.ch.reserved[7]);
 	wchar_t gl[96];
-	wchar_t slotBuf[240];
+	wchar_t slotBuf[520];
 	const wchar_t* slotTip = NULL;
+	float slotAx = 0, slotAy = 0, slotAw = 0;
 	auto slot = [&](int id, float sx, float sy, float sw, const wchar_t* s, int eq) {
 		if (m_mouseSeen && Hit(sx, sy, sw, U(32))) {
 			slotBuf[0] = 0;
-			if (eq == 1) { if (wpn) wcsncpy_s(slotBuf, GearRole(wpn), _TRUNCATE); }
-			else if (eq == 2) { if (arm) wcsncpy_s(slotBuf, GearRole(arm), _TRUNCATE); }
-			else if (eq == 9 || eq == 10) {
-				int acc = EquippedAccId(u.ch, eq == 9 ? 0 : 1);
-				if (acc > 0) {
-					wchar_t bits[120];
-					bits[0] = 0;
-					for (int st = 0; st <= S_MOV; st++) {
-						int v = AccStat(acc, st);
-						if (!v) continue;
-						wchar_t one[24];
-						swprintf_s(one, L" %s%+d", TT(TX_ST_HP + st), v);
-						wcscat_s(bits, one);
-					}
-					swprintf_s(slotBuf, L"%s%s", AccName(acc), bits);
-				}
-			} else if (eq == 3 || eq == 4 || eq == 7 || eq == 8) {
+			if (eq == 1 && wpn) {
+				wchar_t body[360];
+				GearTipText(wpn, body, 360);
+				swprintf_s(slotBuf, L"%s%s%s", GearName(u.ch.reserved[6]), body[0] ? L"\n" : L"", body);
+			} else if (eq == 2 && arm) {
+				wchar_t body[360];
+				GearTipText(arm, body, 360);
+				swprintf_s(slotBuf, L"%s%s%s", GearName(u.ch.reserved[7]), body[0] ? L"\n" : L"", body);
+			} else if (eq == 9 || eq == 10) AccTipText(EquippedAccId(u.ch, eq == 9 ? 0 : 1), slotBuf, 520);
+			else if (eq == 3 || eq == 4 || eq == 7 || eq == 8) {
 				int beadSlot = eq == 3 ? 0 : eq == 4 ? 1 : eq == 7 ? 2 : 3;
 				int bead = EquippedBeadId(u.ch, beadSlot);
-				if (bead > 0) wcsncpy_s(slotBuf, CraftDesc(bead - 1), _TRUNCATE);
+				if (bead > 0) {
+					swprintf_s(slotBuf, L"%s\n%s", CraftName(bead - 1), CraftDesc(bead - 1));
+				}
 			} else if (eq == 5 || eq == 6) {
 				int pas = EquippedPasId(u.ch, eq == 5 ? 0 : 1);
-				if (pas > 0) wcsncpy_s(slotBuf, PasDesc(pas), _TRUNCATE);
+				if (pas > 0) swprintf_s(slotBuf, L"%s\n%s", PasName(pas), PasDesc(pas));
 			} else if (eq == 11 || eq == 12) {
 				int sm = EquippedSummonId(u.ch, eq == 11 ? 0 : 1);
-				if (sm > 0) wcsncpy_s(slotBuf, SummonDesc(sm), _TRUNCATE);
+				if (sm > 0) swprintf_s(slotBuf, L"%s\n%s", SummonName(sm), SummonDesc(sm));
 			}
 			if (!slotBuf[0]) wcsncpy_s(slotBuf, TT(TX_PT_NONE), _TRUNCATE);
 			slotTip = slotBuf;
+			slotAx = sx; slotAy = sy; slotAw = sw;
 		}
 		if (!edit) {
 			m_r.HudGlass(sx, sy, sw, U(32), RGBA8(44, 48, 72, 230), RGBA8(120, 108, 78), 1.f);
@@ -6157,7 +6233,7 @@ void Game::DrawBattleStatus(BOOL edit)
 	swprintf_s(gl, L"%s2: %s", SummonWord(), EquippedSummonName(u.ch, 1));
 	slot(ID_BT_EQSUM1, px + pw * .52f, yy, pw * .44f, gl, 12);
 	if (slotTip && slotTip[0])
-		m_r.HudTextBox(slotTip, px + U(16), py + U(8), pw - U(32), U(36), U(12), RGBA8(230, 236, 246));
+		DrawHoverNote(m_r, slotAx, slotAy, slotAw, U(32), m_ui, m_w, m_h, slotTip);
 	if (edit && Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
 }
 
@@ -6401,9 +6477,8 @@ void Game::DrawCommandMenu()
 		const GoodDef* gd = GoodAt(m_itemAim);
 		int tg[64], tn = 0;
 		for (int i = 0; i < m_b.nUnits && tn < 64; i++) {
-			if (gd && ItemThrowOk(gd, u, m_b.u[i])) {
-				if ((gd->item == IT_RAISE || gd->extra == 106) && !RaisePlaceable(m_b, m_b.u[i])) continue;
-				tg[tn++] = i;
+				if (gd && ItemThrowOk(gd, u, m_b.u[i])) {
+					tg[tn++] = i;
 			}
 		}
 		iw = min(U(460.f), (float)m_w - U(24));
@@ -7004,12 +7079,10 @@ void Game::DrawPromoteOffer()
 		tgt[nt++] = opt[k].target;
 	}
 	if (grace && u.ch.trialFrom != u.ch.cls) revert = u.ch.trialFrom;
-	wchar_t hist[640];
-	JobPathText(u.ch, hist, 640);
-	if (hist[0]) wcscat_s(hist, L" →");
-	int pn = JobPathCount(u.ch);
-	if (pn < 1) pn = 1;
-	float histH = hist[0] ? (pn > 4 ? U(56.f) : U(36.f)) : 0.f;
+	float wPre = min(U(760.f), (float)m_w - U(24));
+	wchar_t jlines[8][120];
+	int jn = SplitJobPath(m_r, u.ch, wPre - U(36), U(13), 8, jlines);
+	float histH = jn > 0 ? jn * (U(13) + 4.f) + U(8) : 0.f;
 	int rows = nt + (revert >= 0 ? 1 : 0);
 	float w = min(U(760.f), (float)m_w - U(24));
 	float row = U(150);
@@ -7025,9 +7098,8 @@ void Game::DrawPromoteOffer()
 	m_r.HudText(who, x + w * .5f, y + U(54), FitTextPx(who, w - U(24), U(15), 0), RGBA8(230, 230, 240), 1, 0);
 	m_r.HudText(TT(TX_EV_GRACE), x + w * .5f, y + U(74), U(13), RGBA8(170, 220, 170), 1, 0);
 	float ty = y + U(96);
-	if (hist[0]) {
-		m_r.HudTextBox(hist, x + U(18), ty, w - U(36), histH - U(4), U(13), RGBA8(210, 220, 235));
-		ty += histH;
+	if (jn > 0) {
+		ty += DrawJobPath(m_r, u.ch, x + U(18), ty, w - U(36), U(13), RGBA8(210, 220, 235), 8) + U(6);
 	}
 	auto take = [&](int pick) {
 		int oldHp = u.ch.stat[S_HP], oldMp = u.ch.stat[S_MP];
@@ -7525,6 +7597,26 @@ void Game::DrawBattleUi()
 		for (int i = 0; i < m_b.nUnits && nP < MAX_PARTY; i++) if (m_b.u[i].team == TEAM_PLAYER) ids[nP++] = i;
 		float x0 = U(10);
 		float top = m_hud.partyT;
+		{
+			float gap0 = max(6.f, U(12));
+			float panelX0 = m_hud.margin;
+			float room0 = m_hud.col - gap0 - panelX0;
+			if (room0 < 48.f) room0 = max(32.f, m_hud.col - panelX0 - 4.f);
+			float panelW0 = min(U(460.f), max(min(U(220.f), room0), room0 * .46f));
+			if (panelW0 > room0) panelW0 = room0;
+			int nFit = 0;
+			for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].team == TEAM_PLAYER) nFit++;
+			float minRow = max(16.f, U(18));
+			float listNeed = nFit * minRow;
+			float roomCard = (float)m_h - m_hud.margin - (top + listNeed);
+			if (roomCard < U(120)) roomCard = U(120);
+			const Unit* curU = (m_cur >= 0 && m_cur < m_b.nUnits) ? &m_b.u[m_cur] : NULL;
+			float cardH = FitCardH(m_r, curU, panelW0, TRUE, U(96), U(30), U(156), U(12), roomCard, NULL);
+			float topLim = (float)m_h - m_hud.margin - cardH;
+			if (topLim < top + 8.f) topLim = top + 8.f;
+			m_hud.panelH = (float)m_h - m_hud.margin - topLim;
+			m_hud.panelTop = topLim;
+		}
 		float bot = m_hud.panelTop - 4.f;
 		if (bot < top + 16.f) bot = top + 16.f;
 		float limit = m_hud.col - U(8);
@@ -7824,11 +7916,29 @@ void Game::DrawBattleUi()
 	float logTop = m_hud.logTop;
 	float logH = m_hud.logH;
 	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO && (m_b.u[m_cur].alive || m_b.u[m_cur].team == TEAM_PLAYER)) DrawUnitPanel(m_b.u[m_cur], panelX, panelTop, panelW, TRUE);
+	float hoverTop = -1.f;
 	if (m_hoverUnit >= 0 && m_hoverUnit != m_cur && m_phase != PH_ACTION && (m_b.u[m_hoverUnit].alive || m_b.u[m_hoverUnit].team == TEAM_PLAYER)) {
-		float hw = min(U(320.f), max(80.f, logW));
-		float hh = min(U(112.f), logTop - m_hud.partyB - 12.f);
+		float hw = min(U(360.f), max(U(220.f), logW));
+		float roomH = logTop - gap - (m_hud.stageB + 4.f);
+		if (roomH < U(80)) roomH = U(80);
+		float hh = FitCardH(m_r, &m_b.u[m_hoverUnit], hw, FALSE, U(78), U(30), U(132), U(12), roomH, NULL);
 		float hy = logTop - gap - hh;
-		if (hh >= 32.f) DrawUnitPanel(m_b.u[m_hoverUnit], logX, hy, hw, FALSE);
+		float hx = logX;
+		BOOL besideParty = FALSE;
+		if (hy < m_hud.partyB && hx < m_hud.partyR) {
+			float alt = m_hud.partyR + gap;
+			if (alt + hw <= m_hud.col - 4.f) { hx = alt; besideParty = TRUE; }
+		}
+		if (!besideParty && hy < m_hud.partyB) {
+			float top = m_hud.partyB + 4.f;
+			float bot = logTop - gap;
+			if (bot - top >= U(88)) hy = top;
+		}
+		if (hy < m_hud.stageB + 4.f && hx < m_hud.stageR) hy = m_hud.stageB + 4.f;
+		if (hy + U(80) > logTop - gap) hy = logTop - gap - U(80);
+		if (hy < 4.f) hy = 4.f;
+		hoverTop = hy;
+		DrawUnitPanel(m_b.u[m_hoverUnit], hx, hy, hw, FALSE);
 	}
 	DrawBattleLog(logX, logTop, logW, logH);
 	if (m_seqCut && m_cutStage == 4) DrawCutInUi();
@@ -7863,12 +7973,17 @@ void Game::DrawBattleUi()
 			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, c.h);
 		float tw = m_r.TextWidth(l, U(13), 0) + U(24);
 		float ty = logTop - U(34);
-		if (m_hoverUnit >= 0 && m_hoverUnit != m_cur) ty = min(ty, logTop - gap - min(U(112.f), logTop - m_hud.partyB - 12.f) - U(34));
-		if (ty < m_hud.partyB + 2.f) ty = max(4.f, logTop - U(34));
+		if (hoverTop >= 0.f) ty = hoverTop - U(34);
+		if (ty < 4.f) ty = 4.f;
+		if (hoverTop >= 0.f && ty + U(32) > hoverTop - 2.f) ty = -1.f;
 		float tx = m_hud.col - gap - tw;
+		if (tx < panelX + panelW + 4.f && ty + U(32) > panelTop) tx = panelX + panelW + 4.f;
 		if (tx < panelX) { tx = panelX; tw = max(40.f, m_hud.col - gap - tx); }
-		m_r.HudPanel(tx, ty, tw, U(30), RGBA8(16, 20, 36, 210), RGBA8(150, 128, 86));
-		m_r.HudText(l, tx + U(12), ty + U(15), U(13), RGBA8(236, 236, 240), 0, 0);
+		if (ty >= 0.f && tx + 40.f < m_hud.col) {
+			if (tx + tw > m_hud.col - 4.f) tw = m_hud.col - 4.f - tx;
+			m_r.HudPanel(tx, ty, tw, U(30), RGBA8(16, 20, 36, 210), RGBA8(150, 128, 86));
+			m_r.HudText(l, tx + U(12), ty + U(15), FitTextPx(l, tw - U(20), U(13), 0), RGBA8(236, 236, 240), 0, 0);
+		}
 	}
 	if (partyLook >= 0 && !m_statOpen) {
 		float pw = min(U(640.f), (float)m_w - U(40));

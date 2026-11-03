@@ -2463,12 +2463,17 @@ BOOL COggApp::InitInstance()
 	SongParams_ConvertKeysIfNeeded();
 
 	// モード選択画面やメイン画面を開く前に更新を確認する。
-	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
+	// サイレント更新も同じ簡易UIで見せ、無ければすぐ閉じて起動へ。
+	UpdateBusyShowCheck();
 	RunStartupUpdateCheck();
 	OfflineHelpEnsureAvailable();
 	EnsureD3dCompilerAvailable();
 	EnsureOggHost32Available();
 	EnsureTacticsOggAvailable();
+	KpiInstall_SilentUpdateKbsasami(karento2);
+	KpiInstall_SilentUpdateFmpmd(karento2);
+	KpiInstall_SilentUpdateFmMonKpis(karento2);
+	UpdateBusyCloseUi();
 
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
 	if (savedata.startupAsk) {
