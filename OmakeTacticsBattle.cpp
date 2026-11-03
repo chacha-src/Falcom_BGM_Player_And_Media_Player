@@ -1147,6 +1147,7 @@ void Game::ComputeOverlays()
 {
 	memset(m_ovMove, 0, sizeof(m_ovMove));
 	memset(m_ovAtk, 0, sizeof(m_ovAtk));
+	memset(m_ovAtkLay, 0, sizeof(m_ovAtkLay));
 	memset(m_ovThreat, 0, sizeof(m_ovThreat));
 	m_ovDirty = TRUE;
 	if (m_cur < 0) return;
@@ -1158,15 +1159,21 @@ void Game::ComputeOverlays()
 			m_ovMove[z][x] = 1;
 		}
 		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-			if (!m_ovMove[z][x]) continue;
-			for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
-				int d = abs(dx) + abs(dz);
-				if (d < rmin || d > rmax) continue;
-				int tx = x + dx, tz = z + dz;
-				if (!Map::In(tx, tz) || m_ovMove[tz][tx]) continue;
-				const Cell& c = m_b.map.At(tx, tz);
-				if (c.t == T_CHASM) continue;
-				m_ovAtk[tz][tx] = 1;
+			for (int Ls = 0; Ls < LAY_N; Ls++) {
+				if (!ReachCanStopLayer(m_reach, x, z, Ls)) continue;
+				for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
+					int d = abs(dx) + abs(dz);
+					if (d < rmin || d > rmax) continue;
+					int tx = x + dx, tz = z + dz;
+					if (!Map::In(tx, tz)) continue;
+					for (int Lt = 0; Lt < LAY_N; Lt++) {
+						if (ReachCanStopLayer(m_reach, tx, tz, Lt)) continue;
+						if (!AttackReachLayer(m_b, x, z, Ls, rmin, rmax, tx, tz, Lt, false)) continue;
+						if (LayerTr(m_b.map.At(tx, tz), Lt) == T_CHASM) continue;
+						m_ovAtkLay[tz][tx] |= (BYTE)(1 << Lt);
+						if (!m_ovAtk[tz][tx]) m_ovAtk[tz][tx] = 1;
+					}
+				}
 			}
 		}
 		if (m_phase == PH_P_MOVE && u.team == TEAM_PLAYER) {
@@ -1178,32 +1185,43 @@ void Game::ComputeOverlays()
 		}
 	} else if (m_phase == PH_P_TARGET || m_phase == PH_P_CMD) {
 		int rmin = UnitRangeMin(u), rmax = UnitRangeMax(u);
+		int aL = LayerOn(m_b.map.At(u.x, u.z), u.deck) ? u.deck : 0;
 		for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
-			int d = abs(dx) + abs(dz);
-			if (d < rmin || d > rmax) continue;
 			int tx = u.x + dx, tz = u.z + dz;
 			if (!Map::In(tx, tz)) continue;
-			if (!InAttackRange(m_b, u.x, u.z, rmin, rmax, tx, tz, true)) continue;
+			BYTE bits = 0;
+			for (int L = 0; L < LAY_N; L++)
+				if (AttackReachLayer(m_b, u.x, u.z, aL, rmin, rmax, tx, tz, L, true)) bits |= (BYTE)(1 << L);
+			if (!bits) continue;
+			m_ovAtkLay[tz][tx] |= bits;
 			m_ovAtk[tz][tx] = m_phase == PH_P_CMD ? 2 : 1;
 		}
 	} else if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
 		int rmin = SkillCastRangeMin(u, m_cmdSkill), rmax = SkillCastRangeMax(u, m_cmdSkill);
+		int aL = LayerOn(m_b.map.At(u.x, u.z), u.deck) ? u.deck : 0;
 		if (sd.rMax == 0) {
 			for (int dz = -sd.area; dz <= sd.area; dz++) for (int dx = -sd.area; dx <= sd.area; dx++) {
 				if (abs(dx) + abs(dz) > sd.area) continue;
 				int tx = u.x + dx, tz = u.z + dz;
-				if (Map::In(tx, tz)) m_ovAtk[tz][tx] = 3;
+				if (!Map::In(tx, tz)) continue;
+				BYTE bits = 0;
+				for (int L = 0; L < LAY_N; L++) if (LayerOn(m_b.map.At(tx, tz), L)) bits |= (BYTE)(1 << L);
+				if (!bits) bits = 1;
+				m_ovAtkLay[tz][tx] |= bits;
+				m_ovAtk[tz][tx] = 3;
 			}
 		} else {
 			BOOL friendly = sd.kind == SK_HEAL || sd.kind == SK_BUFF;
 			for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
-				int d = abs(dx) + abs(dz);
-				if (d < rmin || d > rmax) continue;
 				int tx = u.x + dx, tz = u.z + dz;
 				if (!Map::In(tx, tz)) continue;
-				if (!friendly && !InAttackRange(m_b, u.x, u.z, rmin, rmax, tx, tz, true)) continue;
 				if (IsFormSkill(m_cmdSkill) && !FormFits(m_b, m_cur, m_cmdSkill, tx, tz)) continue;
+				BYTE bits = 0;
+				for (int L = 0; L < LAY_N; L++)
+					if (AttackReachLayer(m_b, u.x, u.z, aL, rmin, rmax, tx, tz, L, friendly ? false : true)) bits |= (BYTE)(1 << L);
+				if (!bits) continue;
+				m_ovAtkLay[tz][tx] |= bits;
 				m_ovAtk[tz][tx] = friendly ? 4 : 1;
 			}
 			if (sd.effect == EF_RAISE) {
@@ -1338,6 +1356,27 @@ void Game::BuildOverlayQuads()
 		if (m_cLayer <= 0 || !Map::In(x, z) || !LayerOn(m.At(x, z), m_cLayer)) return -999.f;
 		return m.WalkY(x, z, m_cLayer);
 	};
+	auto paintAtk = [&](int x, int z, DWORD c, float lift) {
+		BYTE bits = m_ovAtkLay[z][x];
+		if (!bits) {
+			quad(x, z, c, lift, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+			return;
+		}
+		for (int L = 0; L < LAY_N; L++) {
+			if (!(bits & (BYTE)(1 << L)) || !LayerOn(m.At(x, z), L)) continue;
+			quad(x, z, c, lift, m.WalkY(x, z, L), L, 4);
+		}
+	};
+	auto paintOpen = [&](int x, int z, DWORD c, float lift) {
+		int aL = (m_cur >= 0 && LayerOn(m.At(u.x, u.z), u.deck)) ? u.deck : 0;
+		int n = 0;
+		for (int L = 0; L < LAY_N; L++) {
+			if (!LayerOn(m.At(x, z), L) || LayerRangeCost(aL, L) < 0) continue;
+			quad(x, z, c, lift, m.WalkY(x, z, L), L, 4);
+			n++;
+		}
+		if (!n) quad(x, z, c, lift, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+	};
 	BOOL showMove = m_phase == PH_P_MOVE || m_phase == PH_E_SHOW || m_phase == PH_E_MOVE;
 	auto paintMove = [&](int x, int z, int L) -> BOOL {
 		if (ReachCostAt(m_reach, L, x, z) < 0 || !LayerOn(m.At(x, z), L)) return FALSE;
@@ -1369,7 +1408,7 @@ void Game::BuildOverlayQuads()
 				quad(x, z, moveCol, .03f, m.WalkY(x, z, L), L, 4);
 			}
 		}
-		if (m_ovAtk[z][x] == 6) quad(x, z, RGBA8(255, 210, 80, 210), .05f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+		if (m_ovAtk[z][x] == 6) paintAtk(x, z, RGBA8(255, 210, 80, 210), .05f);
 		else if (!showMove && m_ovAtk[z][x]) {
 			DWORD c;
 			switch (m_ovAtk[z][x]) {
@@ -1380,7 +1419,7 @@ void Game::BuildOverlayQuads()
 			default: c = RGBA8(255, 80, 60, 125); break;
 			}
 			if (showMove && u.team != TEAM_PLAYER) c = RGBA8(255, 120, 60, 90);
-			quad(x, z, c, .033f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+			paintAtk(x, z, c, .033f);
 		}
 	}
 	// 経路
@@ -1399,15 +1438,20 @@ void Game::BuildOverlayQuads()
 		if (sd.rMax == 0) {
 			int ar = sd.area > 0 ? sd.area : 0;
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
-				if (Dist(x, z, u.x, u.z) <= ar) quad(x, z, RGBA8(255, 210, 70, 160), .04f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+				if (Dist(x, z, u.x, u.z) <= ar) paintOpen(x, z, RGBA8(255, 210, 70, 160), .04f);
 		} else {
 			for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
 				int d = abs(dx) + abs(dz);
 				if (d < rmin || d > rmax) continue;
 				int tx = u.x + dx, tz = u.z + dz;
 				if (!Map::In(tx, tz)) continue;
-				if (!friendly && !InAttackRange(m_b, u.x, u.z, rmin, rmax, tx, tz, true)) continue;
-				quad(tx, tz, aim, .033f, layY(tx, tz), layY(tx, tz) > -900.f ? m_cLayer : -1, 4);
+				if (!friendly) {
+					int aL = LayerOn(m.At(u.x, u.z), u.deck) ? u.deck : 0;
+					BOOL ok = FALSE;
+					for (int L = 0; L < LAY_N; L++) if (AttackReachLayer(m_b, u.x, u.z, aL, rmin, rmax, tx, tz, L, true)) ok = TRUE;
+					if (!ok) continue;
+				}
+				paintOpen(tx, tz, aim, .033f);
 			}
 			int ax = u.x, az = u.z;
 			if (m_cursorValid) {
@@ -1417,7 +1461,7 @@ void Game::BuildOverlayQuads()
 			int len = sd.area > 0 ? sd.area : (sd.shape != SH_RADIUS ? 1 : 0);
 			if (len > 0 || sd.shape != SH_RADIUS) {
 				for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
-					if (ShapeCell(sd.shape, len, u.x, u.z, ax, az, x, z)) quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+					if (ShapeCell(sd.shape, len, u.x, u.z, ax, az, x, z)) paintOpen(x, z, RGBA8(255, 210, 70, 170), .045f);
 			}
 		}
 	}
@@ -1428,7 +1472,7 @@ void Game::BuildOverlayQuads()
 			int len = sd.area > 0 ? sd.area : 1;
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 				if (!ShapeCell(sd.shape, len, u.x, u.z, m_cx, m_cz, x, z)) continue;
-				quad(x, z, RGBA8(255, 210, 70, 170), .045f, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+				paintOpen(x, z, RGBA8(255, 210, 70, 170), .045f);
 			}
 		}
 	}
@@ -1445,7 +1489,7 @@ void Game::BuildOverlayQuads()
 			if (!Map::In(ox, oz) || (ox == u.x && oz == u.z)) continue;
 			int who = m_b.UnitAt(ox, oz);
 			BOOL filled = who >= 0 && who != m_cur && m_b.u[who].alive && m_b.u[who].team == u.team;
-			quad(ox, oz, filled ? RGBA8(70, 210, 110, 200) : RGBA8(240, 190, 50, 170), .055f, layY(ox, oz), layY(ox, oz) > -900.f ? m_cLayer : -1, 4);
+			paintOpen(ox, oz, filled ? RGBA8(70, 210, 110, 200) : RGBA8(240, 190, 50, 170), .055f);
 		}
 	}
 	{
@@ -3617,6 +3661,8 @@ void Game::DrawBattle3D()
 {
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
+	m_r.SetSceneShift(MIdent());
+	m_r.SetCutDeck(-1);
 	Env e;
 	ThemeEnv(m_b.map.theme, e);
 	V3 target = m_camTarget + v3(0, .4f, 0);
@@ -4418,8 +4464,7 @@ void Game::DrawCutIn3D()
 	m_r.SetStageId(m_b.stage);
 	Env e;
 	ThemeEnv(m_b.map.theme, e);
-	const SkillDef* sd = m_seqSkill >= 0 ? &SkillInfo(m_seqSkill) : NULL;
-	DWORD ec = sd ? ElemColor(sd->element) : RGBA8(255, 240, 200);
+	DWORD ec = m_seqSkill >= 0 ? ElemColor(SkillInfo(m_seqSkill).element) : RGBA8(255, 240, 200);
 	V3 look, eye;
 	float t = m_time;
 	auto centerOf = [&](const V3* p, int n) {
@@ -4563,13 +4608,93 @@ void Game::DrawCutIn3D()
 		eye.y += lift;
 	}
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
-	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 120.f);
+	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 160.f);
 	m_r.SetCamera(view, proj, eye, m_time);
-	float fogNear = 10.f, fogFar = 40.f;
-	if (max(m_cutAllyN, m_cutFoeN) > 6) { fogNear = 14.f; fogFar = 72.f; }
-	m_r.SetFog(fogNear, fogFar, 0, e.skyBot);
-	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb + .1f, e.hard);
-	m_r.SetLight(Norm(v3(-.4f, .8f, -.45f)), v3(0, 0, 0), 5.f);
+	float ax = 0.f, az = 0.f, ay = 0.f;
+	int an = 0;
+	auto addAnchor = [&](int id) {
+		if (id < 0 || id >= m_b.nUnits) return;
+		ax += m_b.u[id].px;
+		az += m_b.u[id].pz;
+		an++;
+	};
+	addAnchor(m_cutA);
+	if (m_cutD >= 0) addAnchor(m_cutD);
+	if (an > 0) { ax /= (float)an; az /= (float)an; }
+	int atx = (int)floorf(ax), atz = (int)floorf(az);
+	if (Map::In(atx, atz)) ay = m_b.map.StandY(atx, atz);
+	else if (m_cutA >= 0 && m_cutA < m_b.nUnits) ay = m_b.map.StandY(m_b.u[m_cutA].x, m_b.u[m_cutA].z);
+	float face = 0.f;
+	if (m_cutA >= 0 && m_cutA < m_b.nUnits && m_cutD >= 0 && m_cutD < m_b.nUnits) {
+		float dx = m_b.u[m_cutD].px - m_b.u[m_cutA].px;
+		float dz = m_b.u[m_cutD].pz - m_b.u[m_cutA].pz;
+		face = (dx * dx + dz * dz > 0.04f) ? atan2f(dx, dz) : m_b.u[m_cutA].face;
+	} else if (m_cutA >= 0 && m_cutA < m_b.nUnits) face = m_b.u[m_cutA].face;
+	// 敵が立つ +X へ、マップ上の相手の方向を回す。床は戦闘地点の高さ。
+	M4 scene = MMul(MTrans(-ax, -ay, -az), MRotY(PI * 0.5f - face));
+	m_r.SetSceneShift(scene);
+	float sightXz[32];
+	int sightN = 0;
+	for (int i = 0; i < m_cutAllyN && sightN < 16; i++) {
+		V3 sp = CutStand(0, i);
+		sightXz[sightN * 2] = sp.x;
+		sightXz[sightN * 2 + 1] = sp.z;
+		sightN++;
+	}
+	if (sightN <= 0) { sightXz[0] = 0.f; sightXz[1] = 0.f; sightN = 1; }
+	m_r.SetSight(sightXz, sightN, (float)TacSightTiles(m_b.weather));
+	int fadeAbove = -1, fadeX = -1, fadeZ = -1;
+	if (m_cutA >= 0 && m_cutA < m_b.nUnits && Map::In(m_b.u[m_cutA].x, m_b.u[m_cutA].z)) {
+		const Unit& au = m_b.u[m_cutA];
+		if ((int)m_b.map.At(au.x, au.z).nLay > au.deck + 1) { fadeAbove = au.deck; fadeX = au.x; fadeZ = au.z; }
+	}
+	m_r.SetFadeAbove(fadeAbove, fadeX, fadeZ);
+	float fogNear = 12.f, fogFar = 52.f;
+	if (max(m_cutAllyN, m_cutFoeN) > 6) { fogNear = 16.f; fogFar = 78.f; }
+	m_r.SetFog(fogNear, fogFar, 0.18f, e.fog);
+	float amb = e.amb;
+	int hr = TacHour(m_b.weather);
+	if (hr == HR_NIGHT || hr == HR_MOON || hr == HR_STAR) amb *= 0.92f;
+	else if (hr == HR_DEEP) amb *= 0.88f;
+	else if (hr == HR_ECLIPSE) amb *= 0.94f;
+	else if (hr == HR_DUSK || hr == HR_DAWN) amb *= 0.97f;
+	m_r.SetAmbient(e.ambSky, e.ambGnd, amb, e.hard);
+	m_r.SetLight(e.light, look, 16.f);
+	{
+		// 戦闘している層以外の床は描かない。視線の手前は、焦点のキャラより前だけ抜く。
+		int deck = 0;
+		if (m_cutA >= 0 && m_cutA < m_b.nUnits) deck = m_b.u[m_cutA].deck;
+		if (deck < 0) deck = 0;
+		if (deck > 4) deck = 4;
+		m_r.SetCutDeck(deck);
+		V3 fwd = Norm(look - eye);
+		if (Len(fwd) < 0.01f) fwd = v3(0, 0, 1);
+		float nearSub = Dot(look - eye, fwd);
+		auto takeId = [&](int id) {
+			if (id < 0 || id >= m_b.nUnits) return;
+			V3 p = ActorPos(id);
+			float h = m_act[id].height;
+			if (h < 0.4f) h = 0.9f;
+			if (m_act[id].proc != 3 && h > 1.32f) h = 1.32f;
+			float d = Dot(p + v3(0, h * 0.45f, 0) - eye, fwd);
+			if (d > 0.35f && d < nearSub) nearSub = d;
+		};
+		takeId(m_cutA);
+		takeId(m_cutD);
+		if (m_sumOn && !m_sumHide) {
+			float h = m_sumAct.height > 0.4f ? m_sumAct.height : 1.2f;
+			float d = Dot(m_sumPos + v3(0, h * 0.4f, 0) - eye, fwd);
+			if (d > 0.35f && d < nearSub) nearSub = d;
+		}
+		if (nearSub < 0.6f) nearSub = Len(look - eye);
+		// キャラの少し奥まで抜く。壁の向こう側だけ残す。
+		float solid = nearSub + 0.35f;
+		float hide = solid - 1.55f;
+		if (hide < 0.18f) hide = 0.18f;
+		if (solid < hide + 0.45f) solid = hide + 0.45f;
+		m_r.SetCamNear(hide, solid);
+		m_r.SetCamFwd(fwd.x, fwd.y, fwd.z);
+	}
 	int ids[CUT_ALLY_MAX + CUT_FOE_MAX];
 	int nId = 0;
 	int idCap = CUT_ALLY_MAX + CUT_FOE_MAX;
@@ -4591,11 +4716,8 @@ void Game::DrawCutIn3D()
 	auto sumWorld = [&]() {
 		return ActorWorld(m_sumAct, m_sumPos, m_sumYaw);
 	};
-	DrawParams gp;
-	gp.tint = e.ground;
-	gp.rim = 0;
-	M4 gw = MMul(MScale(9.f, .02f, 9.f), MTrans(0, -.02f, 0));
 	m_r.BeginShadowPass();
+	m_r.DrawTerrain();
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
 		DrawParams dp;
@@ -4607,22 +4729,21 @@ void Game::DrawCutIn3D()
 		ActorDraw(m_r, m_lib, m_sumAct, sumWorld(), dp, m_time);
 	}
 	m_r.BeginMainPass();
-	DWORD top = e.skyTop, bot = e.skyBot;
-	if (sd) {
-		top = RGBA8(((ec & 255) * 2) / 5, (((ec >> 8) & 255) * 2) / 5, (((ec >> 16) & 255) * 2) / 5);
-		bot = RGBA8(((ec & 255) * 4) / 5 + 40, (((ec >> 8) & 255) * 4) / 5 + 40, (((ec >> 16) & 255) * 4) / 5 + 40);
+	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
+	{
+		float rip[TAC_RIPN * 4];
+		float c = scene.m[0], s = scene.m[8];
+		for (int i = 0; i < TAC_RIPN; i++) {
+			float rx = m_rip[i][0] - ax, rz = m_rip[i][2] - az;
+			rip[i * 4] = rx * c + rz * s;
+			rip[i * 4 + 1] = m_rip[i][1];
+			rip[i * 4 + 2] = -rx * s + rz * c;
+			rip[i * 4 + 3] = m_rip[i][3];
+		}
+		m_r.SetLiquidRipples(rip, TAC_RIPN);
 	}
-	if (m_cutKind == 2) {
-		top = RGBA8(10, 24, 58);
-		bot = RGBA8(36, 78, 130);
-	} else if (m_cutKind == 1 && sd) {
-		top = RGBA8((ec & 255) / 2, ((ec >> 8) & 255) / 2, ((ec >> 16) & 255) / 2);
-		bot = RGBA8(min(255, (ec & 255) + 30), min(255, ((ec >> 8) & 255) + 24), min(255, ((ec >> 16) & 255) + 16));
-	}
-	int lines = (m_cutStage == 1 && m_cutKind != 0) ? 0 : 1;
-	DWORD lineC = m_cutKind == 2 ? RGBA8(150, 210, 255) : (m_cutKind == 1 ? ec : RGBA8(255, 255, 255));
-	m_r.DrawSky(top, bot, lines, lineC);
-	m_r.DrawStatic(m_lib.orb, gw, gp);
+	m_r.DrawTerrain();
+	m_r.DrawWater();
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
 		const Unit& u = m_b.u[ids[k]];
@@ -4692,10 +4813,13 @@ void Game::DrawCutIn3D()
 			m_r.DrawStatic(m_lib.orb, w, sig);
 		}
 	}
-	m_r.DrawParticles(m_parts.data(), m_parts.size());
+	m_r.DrawParticles(m_parts.data(), (int)m_parts.size(), &scene);
+	m_r.SetSceneShift(MIdent());
+	m_r.SetCutDeck(-1);
 }
 
 // 職歴の行数に合わせたカードの高さ。room を超えない。戻り値の高さと行数は描画側と同じ式。
+static int WrapHeldLines(Renderer& r, const wchar_t* src, float maxW, float px, wchar_t lines[][120], int maxLines);
 static float FitCardH(Renderer& r, const Unit* u, float w, BOOL big, float portrait, float textPad, float base, float linePx, float room, int* outLines)
 {
 	float tw = w - portrait - textPad;
@@ -4703,7 +4827,20 @@ static float FitCardH(Renderer& r, const Unit* u, float w, BOOL big, float portr
 	float lineH = linePx + 4.f;
 	int maxLines = big ? 6 : 5;
 	if (outLines) *outLines = 0;
-	if (!u || u->team != TEAM_PLAYER) return room > 0.f && base > room ? room : base;
+	if (!u) return room > 0.f && base > room ? room : base;
+	if (u->team != TEAM_PLAYER) {
+		wchar_t held[480];
+		held[0] = 0;
+		UnitHeldText(*u, held, 480);
+		wchar_t sk[8][120];
+		int nSk = WrapHeldLines(r, held, tw, linePx, sk, 8);
+		float need = base;
+		if (nSk > 0) need += 8.f + nSk * (linePx + 6.f);
+		float minH = portrait + 24.f;
+		if (need < minH) need = minH;
+		if (room > 0.f && need > room) need = room;
+		return need;
+	}
 	for (int lines = maxLines; lines >= 0; --lines) {
 		wchar_t buf[8][120];
 		int n = lines > 0 ? SplitJobPath(r, u->ch, tw, linePx, lines, buf) : 0;
@@ -4809,12 +4946,24 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		float gapSk = nSk > 0 ? (U(6) + nSk * U(15)) : 0;
 		float span = U(12) + gapN + gapRow + gapRow + gapHp + gapMp + gapStat + gapSt + gapSk + U(12);
 		float h = max(ps + U(16), span);
-		float bottom = y + (big ? U(148.f) : U(112.f));
-		y = bottom - h;
-		if (y < U(8)) y = U(8);
+		if (big) {
+			float limitBot = (float)m_h - m_hud.margin;
+			float avail = limitBot - y;
+			if (avail < U(72)) avail = U(72);
+			if (h > avail) h = avail;
+		} else {
+			float bottom = y + U(112.f);
+			y = bottom - h;
+			if (y < U(8)) y = U(8);
+		}
+		float pad = U(8);
+		if (ps > h - pad * 2.f) ps = max(U(40), h - pad * 2.f);
+		tx = x + ps + pad + U(8);
+		tw = w - (tx - x) - pad;
+		if (tw < U(72)) tw = U(72);
 		Panel(x, y, w, h);
 		DWORD fc = u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90);
-		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(8), ps, fc);
+		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
 		float cy = y + U(12);
 		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? RGBA8(255, 255, 255) : RGBA8(255, 176, 168), 0, 1);
 		cy += gapN;
@@ -6833,7 +6982,7 @@ void Game::DrawCommandMenu()
 			int shapeHave[6] = {};
 			int elHave[9] = {};
 			for (int s = 0; s < SKL_COUNT; s++) {
-				if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+				if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
 				const SkillDef& sd = SkillInfo(s);
 				if (!tabKind(sd)) continue;
 				int sh = atkShape(sd);
@@ -6854,7 +7003,7 @@ void Game::DrawCommandMenu()
 			if (m_skillShape && m_skillEl) {
 				int both = 0;
 				for (int s = 0; s < SKL_COUNT; s++) {
-					if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+					if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
 					const SkillDef& sd = SkillInfo(s);
 					if (!tabKind(sd)) continue;
 					if (atkShape(sd) == m_skillShape && sd.element == m_skillEl) both++;
@@ -6862,7 +7011,7 @@ void Game::DrawCommandMenu()
 				if (!both) { m_skillEl = 0; m_skillPage = 0; }
 			}
 			for (int s = 0; s < SKL_COUNT; s++) {
-				if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+				if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
 				const SkillDef& sd = SkillInfo(s);
 				if (!tabKind(sd)) continue;
 				int sh = atkShape(sd);
@@ -7611,7 +7760,8 @@ void Game::DrawBattleUi()
 			float roomCard = (float)m_h - m_hud.margin - (top + listNeed);
 			if (roomCard < U(120)) roomCard = U(120);
 			const Unit* curU = (m_cur >= 0 && m_cur < m_b.nUnits) ? &m_b.u[m_cur] : NULL;
-			float cardH = FitCardH(m_r, curU, panelW0, TRUE, U(96), U(30), U(156), U(12), roomCard, NULL);
+			float cardPort = (curU && curU->team != TEAM_PLAYER) ? U(118.f) : U(96.f);
+			float cardH = FitCardH(m_r, curU, panelW0, TRUE, cardPort, U(30), U(156), U(12), roomCard, NULL);
 			float topLim = (float)m_h - m_hud.margin - cardH;
 			if (topLim < top + 8.f) topLim = top + 8.f;
 			m_hud.panelH = (float)m_h - m_hud.margin - topLim;

@@ -4729,8 +4729,11 @@ static int LayerOpen(const Cell& to, int L, int moveType)
 static int LayerLegal(const Cell& to, int L, int fromH, int fromLayer, int moveType)
 {
 	if (!LayerOpen(to, L, moveType)) return 0;
+	int dl = L - fromLayer;
+	if (dl < 0) dl = -dl;
+	// 直上・直下の層は、高さの段差があっても渡れる。同じ層の崖は段差で止める。
+	if (dl == 1) return 1;
 	if (abs(LayerHt(to, L) - fromH) > StepRise(moveType)) return 0;
-	(void)fromLayer;
 	return 1;
 }
 
@@ -4995,6 +4998,23 @@ bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, 
 		return dh <= 4;
 	}
 	return !needLos || LineOfSight(b.map, ax, az, tx, tz);
+}
+
+bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, int rMax, int tx, int tz, int toLayer, bool needLos)
+{
+	if (!Map::In(ax, az) || !Map::In(tx, tz)) return false;
+	if (toLayer < 0 || toLayer >= LAY_N) return false;
+	const Cell& tc = b.map.At(tx, tz);
+	if (!LayerOn(tc, toLayer)) return false;
+	if (fromLayer < 0 || fromLayer >= LAY_N || !LayerOn(b.map.At(ax, az), fromLayer)) fromLayer = 0;
+	int add = LayerRangeCost(fromLayer, toLayer);
+	if (add < 0) return false;
+	int d = Dist(ax, az, tx, tz) + add;
+	if (d < rMin || d > rMax) return false;
+	if (!needLos) return true;
+	int ah = LayerHt(b.map.At(ax, az), fromLayer);
+	int th = LayerHt(tc, toLayer);
+	return LineOfSightY(b.map, ax, az, ah * kHStep + 0.6f, tx, tz, th * kHStep + 0.6f);
 }
 
 static int FootDist(int ax, int az, int as, int bx, int bz, int bs)

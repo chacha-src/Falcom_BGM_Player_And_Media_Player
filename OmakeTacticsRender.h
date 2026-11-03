@@ -387,15 +387,19 @@ public:
 	void DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp);
 	void DrawSkinned(const Model& m, const Pose& p, const M4& world, const DrawParams& dp);
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
+	void SetSceneShift(const M4& m) { m_sceneShift = m; }
+	void SetCamNear(float hide, float solid) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; }
+	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; m_fcb.camFwd[3] = 1.f; }
 	void DrawTerrain();
 	void SetFadeAbove(int layer, int x = -1, int z = -1) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; }
+	void SetCutDeck(int deck) { m_cutDeck = deck; }
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
 	void SetDepthTest(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsOff, 0); }
 	void DrawWater();
 	void SetLiquidRipples(const float* rip, int n);
 	void SetStageId(int stage);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
-	void DrawParticles(const Particle* ps, int n);
+	void DrawParticles(const Particle* ps, int n, const M4* mapXform = NULL);
 	void DrawRibbon(const Buf<VtxP>& v);
 
 	// 地形
@@ -411,7 +415,7 @@ public:
 	SceneryPuff SceneryPuffAt(int i) const
 	{
 		SceneryPuff s = {};
-		if (i >= 0 && i < m_puffN && i < 16) s = m_puff[i];
+		if (i >= 0 && i < m_puffN && i < 24) s = m_puff[i];
 		return s;
 	}
 
@@ -448,7 +452,7 @@ public:
 	int FailStage() const { return m_failStage; }
 
 	DWORD m_frame;
-	M4 m_view, m_proj, m_vp;
+	M4 m_view, m_proj, m_vp, m_sceneShift;
 	V3 m_eye;
 	float m_time;
 
@@ -684,6 +688,7 @@ private:
 	GpuMesh m_cover3[16];
 	GpuMesh m_cover4[16];
 	int m_fadeAbove, m_fadeX, m_fadeZ;
+	int m_cutDeck;
 	GpuMesh m_water;
 	GpuMesh m_lava;
 	struct PropBatch { GpuMesh mesh; float hue; float mat; };
@@ -693,7 +698,7 @@ private:
 	int m_stageId;
 	int m_wx;
 	int m_hour;
-	SceneryPuff m_puff[16];
+	SceneryPuff m_puff[24];
 	int m_puffN;
 
 	// フレーム定数
@@ -702,6 +707,8 @@ private:
 		float eye[4], light[4], fog[4], fogColor[4], screen[4], skyAmb[4], gndAmb[4], q[4];
 		float sight[4];
 		float ally[16][4];
+		float camNear[4];
+		float camFwd[4];
 	} m_fcb;
 	M4 m_lightVP;
 

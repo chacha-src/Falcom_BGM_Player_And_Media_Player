@@ -55,6 +55,18 @@ float GustAmtT()
 	return burst;
 }
 
+float3 FallLeanT(float3 w, float3 n, float amount)
+{
+	float g = GustAmtT();
+	float hgt = saturate((w.y + 9.0) / 30.0);
+	float2 dir = float2(cos(Eye.w * 0.23), sin(Eye.w * 0.23));
+	w.x += dir.x * g * hgt * amount;
+	w.z += dir.y * g * hgt * amount * 0.82;
+	float flutter = sin(w.y * 1.85 + Eye.w * 3.4 + w.x * 0.45);
+	w += n * flutter * (0.03 + g * 0.11) * saturate(amount * 1.4);
+	return w;
+}
+
 float3 Sway(float3 w, float amt)
 {
 	if (amt <= 0.001) return w;
@@ -74,25 +86,37 @@ TC VST(VSIn v)
 	float3 n = normalize(mul(v.n, (float3x3)World));
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
 	if (Params.y > 0.5 && Params.y < 1.5) {
-		float t = Eye.w;
-		float th = FogColor.a;
-		float amp = 0.045;
-		if (th > 2.5 && th < 3.5) amp = 0.012;
-		else if (th > 5.5 && th < 6.5) amp = 0.022;
-		else if (th > 8.5 && th < 9.5) amp = 0.08;
-		else if (th > 7.5 && th < 8.5) amp = 0.016;
-		else if (th > 6.5) amp = 0.012;
-		amp *= 1.0 + GustAmtT() * 1.8;
-		float2 flow = v.c.rg * 2.0 - 1.0;
-		float rush = saturate(v.c.b * 1.35);
-		float spd = lerp(0.45, 2.6, rush);
-		float2 xz = w.xz - flow * t * spd;
-		w.y += sin(xz.x * 1.35 + xz.y * 0.34 - t * 1.15) * amp;
-		w.y += sin(xz.x * -0.84 + xz.y * 2.4 - t * 1.7) * amp * 0.55;
-		w.y += sin(xz.x * 0.82 - xz.y * 4.1 - t * 2.3) * amp * 0.28 * (1.0 + rush);
+		if (n.y > 0.45) {
+			float t = Eye.w;
+			float th = FogColor.a;
+			float amp = 0.045;
+			if (th > 2.5 && th < 3.5) amp = 0.012;
+			else if (th > 5.5 && th < 6.5) amp = 0.022;
+			else if (th > 8.5 && th < 9.5) amp = 0.08;
+			else if (th > 7.5 && th < 8.5) amp = 0.016;
+			else if (th > 6.5) amp = 0.012;
+			amp *= 1.0 + GustAmtT() * 1.8;
+			float2 flow = v.c.rg * 2.0 - 1.0;
+			float rush = saturate(v.c.b * 1.35);
+			float spd = lerp(0.45, 2.6, rush);
+			float2 xz = w.xz - flow * t * spd;
+			w.y += sin(xz.x * 1.35 + xz.y * 0.34 - t * 1.15) * amp;
+			w.y += sin(xz.x * -0.84 + xz.y * 2.4 - t * 1.7) * amp * 0.55;
+			w.y += sin(xz.x * 0.82 - xz.y * 4.1 - t * 2.3) * amp * 0.28 * (1.0 + rush);
+		} else {
+			w = FallLeanT(w, n, 0.74);
+			w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmtT() * 0.08);
+		}
 	} else if (Params.y > 1.5 && Params.y < 2.5) {
-		float t = Eye.w;
-		w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * (0.018 + GustAmtT() * 0.016);
+		if (n.y > 0.45) {
+			float t = Eye.w;
+			w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * (0.018 + GustAmtT() * 0.016);
+		} else {
+			w = FallLeanT(w, n, 0.16);
+			w.x += sin(w.y * 0.45 - Eye.w * 0.32 + w.z * 0.2) * 0.11;
+			w.z += cos(w.y * 0.38 - Eye.w * 0.28) * 0.07;
+			w.y -= 0.04 * sin(Eye.w * 0.4 + w.x);
+		}
 	}
 	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c;
 	return o;
@@ -138,6 +162,15 @@ PSIn DST(TF factors, float3 b : SV_DomainLocation, const OutputPatch<TC, 3> p)
 	if (Params.y > 0.5) ph *= 0.3;
 	float3 w = lerp(flat, curved, ph);
 	float3 n = normalize(n0 * b.x + n1 * b.y + n2 * b.z);
+	if (Params.y > 0.5 && Params.y < 1.5 && n.y < 0.45) {
+		w = FallLeanT(w, n, 0.74);
+		w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmtT() * 0.08);
+	} else if (Params.y > 1.5 && Params.y < 2.5 && n.y < 0.45) {
+		w = FallLeanT(w, n, 0.16);
+		w.x += sin(w.y * 0.45 - Eye.w * 0.32 + w.z * 0.2) * 0.11;
+		w.z += cos(w.y * 0.38 - Eye.w * 0.28) * 0.07;
+		w.y -= 0.04 * sin(Eye.w * 0.4 + w.x);
+	}
 	if (Q.z > 0.001) {
 		float h = fbm2(w.xz * 2.4 + w.y * 1.3) - 0.5;
 		float h2 = fbm2(w.xz * 7.5) - 0.5;

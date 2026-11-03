@@ -35,11 +35,12 @@ int Rig::FindClip(const char* n) const
 Renderer::Renderer()
 {
 	m_frame = 0;
-	m_view = m_proj = m_vp = MIdent();
+	m_view = m_proj = m_vp = m_sceneShift = MIdent();
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_fadeAbove = -1;
+	m_cutDeck = -1;
 	m_fadeX = m_fadeZ = -1;
 	m_w = m_h = 0; m_quality = 1; m_gpu = 0; m_allowTess = TRUE; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
@@ -1049,17 +1050,17 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 	static const BYTE kTop[TH_COUNT][3] = {
 		{ 84, 146, 228 }, { 112, 146, 214 }, { 66, 128, 172 }, { 128, 160, 214 }, { 98, 162, 232 },
 		{ 40, 24, 34 }, { 70, 92, 82 }, { 58, 56, 120 }, { 36, 110, 150 }, { 150, 188, 214 },
-		{ 6, 8, 22 }, { 18, 22, 36 }, { 28, 18, 48 }, { 40, 48, 90 }
+		{ 18, 24, 58 }, { 18, 22, 36 }, { 48, 32, 72 }, { 40, 48, 90 }
 	};
 	static const BYTE kHor[TH_COUNT][3] = {
 		{ 206, 228, 246 }, { 246, 206, 164 }, { 176, 214, 194 }, { 232, 238, 248 }, { 252, 228, 176 },
 		{ 170, 66, 40 }, { 156, 166, 132 }, { 206, 170, 204 }, { 140, 206, 214 }, { 226, 232, 236 },
-		{ 18, 28, 58 }, { 70, 90, 110 }, { 90, 70, 110 }, { 210, 200, 230 }
+		{ 48, 62, 110 }, { 70, 90, 110 }, { 140, 110, 150 }, { 210, 200, 230 }
 	};
 	static const BYTE kGnd[TH_COUNT][3] = {
 		{ 110, 170, 80 }, { 170, 120, 80 }, { 70, 120, 60 }, { 230, 236, 246 }, { 220, 194, 140 },
 		{ 80, 70, 68 }, { 80, 96, 60 }, { 160, 156, 140 }, { 48, 110, 100 }, { 90, 140, 80 },
-		{ 48, 54, 68 }, { 90, 98, 108 }, { 150, 146, 158 }, { 186, 190, 210 }
+		{ 70, 80, 108 }, { 90, 98, 108 }, { 168, 158, 176 }, { 186, 190, 210 }
 	};
 	static const float kSun[TH_COUNT][3] = {
 		{ .45f, .82f, .35f }, { .55f, .7f, .3f }, { .35f, .85f, .4f }, { .4f, .7f, .5f }, { .5f, .85f, .2f },
@@ -1119,11 +1120,11 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 		if (y > 0.02f && TNoise(theme * 3, x * 80.f, z * 80.f) > 0.97f) { r += 0.9f; g += 0.95f; b += 1.f; }
 		if (theme == TH_ORBIT && y > 0.2f) {
 			float neb = TNoise(21, x * 2.2f + 3.f, z * 2.2f);
-			if (neb > 0.55f) { r = Lerpf(r, 0.35f, 0.25f); g = Lerpf(g, 0.2f, 0.2f); b = Lerpf(b, 0.55f, 0.35f); }
+			if (neb > 0.55f) { r = Lerpf(r, 0.52f, 0.28f); g = Lerpf(g, 0.32f, 0.22f); b = Lerpf(b, 0.82f, 0.38f); }
 		}
 		if (theme == TH_STATION && y > 0.15f && TNoise(8, x * 18.f, z * 6.f) > 0.82f) { r += 0.15f; g += 0.45f; b += 0.55f; }
 	}
-	if (theme == TH_CITADEL && y > 0.25f && TNoise(11, x * 12.f, z * 12.f) > 0.72f) { r = Lerpf(r, 0.55f, 0.2f); g = Lerpf(g, 0.35f, 0.15f); b = Lerpf(b, 0.7f, 0.25f); }
+	if (theme == TH_CITADEL && y > 0.25f && TNoise(11, x * 12.f, z * 12.f) > 0.72f) { r = Lerpf(r, 0.72f, 0.28f); g = Lerpf(g, 0.48f, 0.18f); b = Lerpf(b, 0.88f, 0.32f); }
 	if (theme == TH_LANTERN && y > 0.05f) {
 		float moon = expf((y - 0.85f) * 8.f);
 		r += moon * 0.35f; g += moon * 0.4f; b += moon * 0.55f;
@@ -7474,6 +7475,9 @@ void Renderer::BeginFrame()
 	m_fcb.q[3] = dof;
 	m_fcb.sight[0] = m_fcb.sight[1] = m_fcb.sight[2] = m_fcb.sight[3] = 0;
 	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
+	m_fcb.camNear[0] = m_fcb.camNear[1] = m_fcb.camNear[2] = m_fcb.camNear[3] = 0;
+	m_fcb.camFwd[0] = m_fcb.camFwd[1] = m_fcb.camFwd[2] = m_fcb.camFwd[3] = 0;
+	m_cutDeck = -1;
 	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
 	if (m_cbRipple) {
@@ -7789,7 +7793,7 @@ void Renderer::DrawTerrain()
 	DrawParams dp;
 	dp.rim = 0;
 	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : m_psTheme;
-	if (m_terrain.vb) DrawStatic(m_terrain, MIdent(), dp);
+	if (m_terrain.vb) DrawStatic(m_terrain, m_sceneShift, dp);
 	int gx = -99, gz = -99;
 	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
 	GpuMesh* coverSet[4] = { m_cover1, m_cover2, m_cover3, m_cover4 };
@@ -7797,10 +7801,12 @@ void Renderer::DrawTerrain()
 		for (int ch = 0; ch < 16; ch++) {
 			GpuMesh& cover = coverSet[ci][ch];
 			if (!cover.vb) continue;
+			int layer = ci + 1;
+			if (m_cutDeck >= 0 && layer != m_cutDeck) continue;
 			int cx = ch & 3, cz = ch >> 2;
-			int above = gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && (ci + 1) > m_fadeAbove;
+			int above = m_cutDeck < 0 && gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && layer > m_fadeAbove;
 			if (m_pass == PASS_SHADOW) {
-				if (!above) DrawStatic(cover, MIdent(), dp);
+				if (!above) DrawStatic(cover, m_sceneShift, dp);
 				continue;
 			}
 			DrawParams cd = dp;
@@ -7809,7 +7815,7 @@ void Renderer::DrawTerrain()
 				cd.tint = 0x78FFFFFF;
 				m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 			}
-			DrawStatic(cover, MIdent(), cd);
+			DrawStatic(cover, m_sceneShift, cd);
 			if (above) m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 		}
 	}
@@ -7821,13 +7827,14 @@ void Renderer::DrawTerrain()
 		dp.hue = 0;
 		dp.rim = 0.02f;
 		dp.outline = 0;
-		DrawStatic(b.mesh, MIdent(), dp);
+		DrawStatic(b.mesh, m_sceneShift, dp);
 	}
 	m_psOverride = m_psLava;
 	if (m_lava.vb) {
 		DrawParams lp;
 		lp.mode = 2.f;
-		DrawStatic(m_lava, MIdent(), lp);
+		lp.twoSided = 1;
+		DrawStatic(m_lava, m_sceneShift, lp);
 	}
 	m_psOverride = NULL;
 }
@@ -7860,10 +7867,10 @@ void Renderer::DrawWater()
 	DrawParams dp;
 	dp.mode = 1.f;
 	dp.twoSided = 1;
-	dp.tint = (m_waterColor & 0xFFFFFF) | 0xF0000000;
+	dp.tint = (m_waterColor & 0xFFFFFF) | 0xFA000000;
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_psOverride = m_psWater;
-	DrawStatic(m_water, MIdent(), dp);
+	DrawStatic(m_water, m_sceneShift, dp);
 	m_psOverride = NULL;
 	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 }
@@ -7919,7 +7926,22 @@ void Renderer::DrawRibbon(const Buf<VtxP>& v)
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
-void Renderer::DrawParticles(const Particle* ps, int nPart)
+static V3 XformPt(V3 p, const M4& m)
+{
+	return v3(
+		p.x * m.m[0] + p.y * m.m[4] + p.z * m.m[8] + m.m[12],
+		p.x * m.m[1] + p.y * m.m[5] + p.z * m.m[9] + m.m[13],
+		p.x * m.m[2] + p.y * m.m[6] + p.z * m.m[10] + m.m[14]);
+}
+static V3 XformDir(V3 p, const M4& m)
+{
+	return v3(
+		p.x * m.m[0] + p.y * m.m[4] + p.z * m.m[8],
+		p.x * m.m[1] + p.y * m.m[5] + p.z * m.m[9],
+		p.x * m.m[2] + p.y * m.m[6] + p.z * m.m[10]);
+}
+
+void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 {
 	ClearTess();
 	if (!ps || nPart <= 0 || m_pass == PASS_SHADOW) return;
@@ -7932,12 +7954,18 @@ void Renderer::DrawParticles(const Particle* ps, int nPart)
 	for (int pi = 0; pi < nPart; pi++) {
 		const Particle& p = ps[pi];
 		if (p.life <= 0) continue;
+		V3 pos = p.p;
+		V3 vel = p.v;
+		if (mapXform && p.wxHit != 0) {
+			pos = XformPt(p.p, *mapXform);
+			vel = XformDir(p.v, *mapXform);
+		}
 		float t = 1.f - p.life / max(1e-4f, p.max);
 		float sz = Lerpf(p.size, p.size1, t);
 		float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 		V3 ax = right * sz, ay = up * sz;
 		if (p.stretch > 0) {
-			V3 vd = p.v;
+			V3 vd = vel;
 			float sp = Len(vd);
 			if (sp > 1e-3f) {
 				vd = vd * (1.f / sp);
@@ -7947,7 +7975,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart)
 			}
 		}
 		VtxP q[4];
-		V3 c[4] = { p.p - ax - ay, p.p - ax + ay, p.p + ax + ay, p.p + ax - ay };
+		V3 c[4] = { pos - ax - ay, pos - ax + ay, pos + ax + ay, pos + ax - ay };
 		float uv[4][2] = { { 0, 1 }, { 0, 0 }, { 1, 0 }, { 1, 1 } };
 		for (int k = 0; k < 4; k++) {
 			q[k].p[0] = c[k].x; q[k].p[1] = c[k].y; q[k].p[2] = c[k].z;
@@ -8127,7 +8155,7 @@ static unsigned CellHash(int x, int z, int salt)
 
 static void AddPuff(Renderer::SceneryPuff* p, int& n, int kind, float x, float y, float z, float minD)
 {
-	if (n >= 16) return;
+	if (n >= 24) return;
 	float md = minD * minD;
 	for (int i = 0; i < n; i++) {
 		if (p[i].kind != kind) continue;
@@ -8310,9 +8338,9 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if (wet && (h % 7) == 0) AddPuff(puff, puffN, 14, px, py + 0.35f, pz, 10.f);
 			break; }
 		case TH_ORBIT:
-			if ((h % 6) == 0) AddBox(mb, v3(px, py + 0.08f, pz), v3(0.18f + u * 0.12f, 0.05f, 0.1f), RGBA8(70, 78, 90), -1);
-			if ((h % 13) == 0) AddBox(mb, v3(px, py + 0.22f, pz), v3(0.16f, 0.16f, 0.16f), RGBA8(120, 150, 190), -1);
-			if ((h % 19) == 0) AddPuff(puff, puffN, 10, px, py + 1.2f, pz, 14.f);
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.08f, pz), v3(0.18f + u * 0.12f, 0.05f, 0.1f), RGBA8(90, 108, 140), -1);
+			if ((h % 9) == 0) AddBox(mb, v3(px, py + 0.24f, pz), v3(0.18f, 0.18f, 0.18f), RGBA8(150, 185, 255), -1);
+			if ((h % 11) == 0) AddPuff(puff, puffN, 10, px, py + 1.2f, pz, 10.f);
 			break;
 		case TH_STATION:
 			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.2f, pz), v3(0.04f, 0.2f, 0.04f), RGBA8(140, 150, 160), -1);
@@ -8320,9 +8348,15 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if ((h % 17) == 0) AddPuff(puff, puffN, 11, px, py + 0.5f, pz, 12.f);
 			break;
 		case TH_CITADEL:
-			if ((h % 7) == 0) AddBox(mb, v3(px, py + 0.35f, pz), v3(0.12f, 0.35f, 0.12f), RGBA8(186, 180, 196), -1);
-			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.72f, pz), v3(0.2f, 0.04f, 0.2f), RGBA8(90, 70, 110), -1);
-			if ((h % 19) == 0) AddPuff(puff, puffN, 12, px, py + 0.8f, pz, 14.f);
+			if ((h % 6) == 0) AddBox(mb, v3(px, py + 0.38f, pz), v3(0.13f, 0.38f, 0.13f), RGBA8(210, 198, 224), -1);
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.78f, pz), v3(0.22f, 0.045f, 0.22f), RGBA8(110, 78, 140), -1);
+			if ((h % 9) == 0) {
+				AddBox(mb, v3(px, py + 0.55f, pz), v3(0.025f, 0.52f, 0.025f), RGBA8(92, 70, 48), -1);
+				AddBox(mb, v3(px, py + 1.12f, pz), v3(0.08f, 0.07f, 0.08f), RGBA8(255, 196, 110), -1);
+				AddPuff(puff, puffN, 12, px, py + 1.15f, pz, 8.f);
+			}
+			if ((h % 13) == 0) AddBox(mb, v3(px, py + 0.42f, pz), v3(0.1f, 0.16f, 0.04f), RGBA8(170, 90, 230), -1);
+			if ((h % 11) == 0) AddPuff(puff, puffN, 12, px, py + 0.9f, pz, 10.f);
 			break;
 		case TH_LANTERN:
 			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.45f, pz), v3(0.02f, 0.4f, 0.02f), RGBA8(210, 200, 170), -1);
@@ -8368,13 +8402,19 @@ static DWORD LiquidFlow(const Map& m, int x, int z, int liquid)
 	static const int dz[4] = { 0, 0, 1, -1 };
 	for (int k = 0; k < 4; k++) {
 		int nx = x + dx[k], nz = z + dz[k];
-		if (!Map::In(nx, nz)) continue;
+		BOOL in = Map::In(nx, nz);
+		int nbT = in ? m.At(nx, nz).t : T_VOID;
+		if (!in || nbT == T_VOID || nbT == T_CHASM) {
+			if (liquid == T_WATER && m.theme != TH_SEABED) { fx += (float)dx[k] * 2.2f; fz += (float)dz[k] * 2.2f; rush = 1.f; }
+			if (liquid == T_LAVA) { fx += (float)dx[k] * 1.4f; fz += (float)dz[k] * 1.4f; rush = max(rush, 0.9f); }
+			continue;
+		}
 		const Cell& nb = m.At(nx, nz);
 		if (nb.t == liquid) {
 			float drop = y0 - m.StandY(nx, nz);
 			if (drop > 0.012f) { fx += dx[k] * drop; fz += dz[k] * drop; }
 		}
-		if (liquid == T_WATER && m.theme != TH_SEABED && nb.t != T_VOID && y0 - m.TopY(nx, nz) > 0.85f) {
+		if (liquid == T_WATER && m.theme != TH_SEABED && y0 - m.TopY(nx, nz) > 0.85f) {
 			fx += (float)dx[k] * 1.8f;
 			fz += (float)dz[k] * 1.8f;
 			rush = 1.f;
@@ -8382,6 +8422,11 @@ static DWORD LiquidFlow(const Map& m, int x, int z, int liquid)
 		if (liquid == T_LAVA && nb.t == T_LAVA) {
 			float drop = y0 - m.StandY(nx, nz);
 			if (drop > 0.02f) rush = max(rush, 0.55f);
+		}
+		if (liquid == T_LAVA && nb.t != T_LAVA && y0 - m.TopY(nx, nz) > 0.9f) {
+			fx += (float)dx[k] * 1.6f;
+			fz += (float)dz[k] * 1.6f;
+			rush = max(rush, 0.85f);
 		}
 	}
 	if (m.theme == TH_FALLS && liquid == T_WATER) { fx += 0.9f; rush = max(rush, 0.72f); }
@@ -8440,6 +8485,53 @@ static void EdgePoint(int x, int z, int dir, float t, float& px, float& pz)
 	else if (dir == 1) { px = (float)x; pz = (float)z + 1.f - t; }
 	else if (dir == 2) { px = (float)x + 1.f - t; pz = (float)z + 1.f; }
 	else { px = (float)x + t; pz = (float)z; }
+}
+
+static DWORD FallTint(DWORD flow, int fromSky)
+{
+	return (flow & 0x00FFFFFF) | (fromSky ? 0xA0000000 : 0xFF000000);
+}
+
+static void EmitCurtain(MeshBuild& mb, float x0, float z0, float x1, float z1, float top, float bot, float nx, float nz, float off, DWORD col)
+{
+	float ox = nx * off, oz = nz * off;
+	V3 n = v3(nx, 0, nz);
+	mb.Quad(v3(x0 + ox, top, z0 + oz), v3(x1 + ox, top, z1 + oz),
+		v3(x1 + ox, bot, z1 + oz), v3(x0 + ox, bot, z0 + oz),
+		n, 0, 0, 1, 1, -1, col);
+}
+
+static BOOL InteriorPool(const Map& m, int x, int z)
+{
+	if (x <= 0 || z <= 0 || x >= MAPN - 1 || z >= MAPN - 1) return FALSE;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int k = 0; k < 4; k++) {
+		int nx = x + dx[k], nz = z + dz[k];
+		if (!Map::In(nx, nz)) return FALSE;
+		int t = m.At(nx, nz).t;
+		if (t == T_VOID || t == T_CHASM) return FALSE;
+	}
+	return TRUE;
+}
+
+static void EmitCeilingFall(MeshBuild& wb, Renderer::SceneryPuff* puff, int& puffN, const Map& m, int x, int z)
+{
+	float surf = m.StandY(x, z);
+	float ceilY = 20.f;
+	float bot = surf + 0.12f;
+	DWORD col = FallTint(LiquidFlow(m, x, z, T_WATER), 1);
+	unsigned h = CellHash(x, z, 91);
+	float cx = x + 0.5f, cz = z + 0.5f;
+	float half = 0.4f;
+	if (h & 16) {
+		EmitCurtain(wb, cx - half, cz, cx + half, cz, ceilY, bot, 0, 1, 0.08f, col);
+		EmitCurtain(wb, cx - half, cz, cx + half, cz, ceilY, bot, 0, 1, -0.08f, col);
+	} else {
+		EmitCurtain(wb, cx, cz - half, cx, cz + half, ceilY, bot, 1, 0, 0.08f, col);
+		EmitCurtain(wb, cx, cz - half, cx, cz + half, ceilY, bot, 1, 0, -0.08f, col);
+	}
+	AddPuff(puff, puffN, 1, cx, (ceilY + surf) * 0.5f, cz, 8.f);
+	AddPuff(puff, puffN, 16, cx, surf + 0.08f, cz, 5.f);
 }
 
 static void EmitEdgeWall(MeshBuild& geo, const Map& m, int x, int z, int dir, int kind, int layer, float drop, float floorY, int useFloor, DWORD col)
@@ -8621,14 +8713,41 @@ BOOL Renderer::BuildTerrain(const Map& m)
 					float ex0, ez0, ex1, ez1;
 					EdgePoint(x, z, k, 0.f, ex0, ez0);
 					EdgePoint(x, z, k, 1.f, ex1, ez1);
-					V3 n = v3((float)dx[k], 0, (float)dz[k]);
-					float ox = n.x * 0.06f, oz = n.z * 0.06f;
+					float nxn = (float)dx[k], nzn = (float)dz[k];
 					float fallBot = offMap ? -9.f : ny + 0.15f;
 					if (nbIn && (nbT == T_CHASM || nbT == T_VOID)) fallBot = -9.f;
-					wb.Quad(v3(ex0 + ox, surf, ez0 + oz), v3(ex1 + ox, surf, ez1 + oz),
-						v3(ex1 + ox, fallBot, ez1 + oz), v3(ex0 + ox, fallBot, ez0 + oz),
-						n, 0, 0, 1, 1, -1, LiquidFlow(m, x, z, T_WATER));
-					AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (surf + fallBot) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
+					DWORD wc = FallTint(LiquidFlow(m, x, z, T_WATER), 0);
+					EmitCurtain(wb, ex0, ez0, ex1, ez1, surf, fallBot, nxn, nzn, 0.08f, wc);
+					EmitCurtain(wb, ex0, ez0, ex1, ez1, surf, fallBot, nxn, nzn, 0.18f, wc);
+					float mxOut = (ex0 + ex1) * 0.5f + nxn * 0.14f, mzOut = (ez0 + ez1) * 0.5f + nzn * 0.14f;
+					AddPuff(m_puff, m_puffN, 1, mxOut, (surf + fallBot) * 0.5f, mzOut, 5.f);
+					AddPuff(m_puff, m_puffN, 16, mxOut, surf + 0.05f, mzOut, 4.f);
+					if (fallBot > -8.f)
+						AddPuff(m_puff, m_puffN, 16, mxOut, fallBot + 0.1f, mzOut, 4.f);
+				}
+				if (c.t == T_LAVA && (offMap || (nbIn && (nbT == T_CHASM || nbT == T_VOID)))) {
+					float ex0, ez0, ex1, ez1;
+					EdgePoint(x, z, k, 0.f, ex0, ez0);
+					EdgePoint(x, z, k, 1.f, ex1, ez1);
+					float nxn = (float)dx[k], nzn = (float)dz[k];
+					float fallBot = offMap ? -9.f : ny + 0.12f;
+					if (nbIn && (nbT == T_CHASM || nbT == T_VOID)) fallBot = -9.f;
+					DWORD lc = LiquidFlow(m, x, z, T_LAVA);
+					EmitCurtain(lb, ex0, ez0, ex1, ez1, surf + 0.04f, fallBot, nxn, nzn, 0.1f, lc);
+					EmitCurtain(lb, ex0, ez0, ex1, ez1, surf + 0.02f, fallBot + 0.35f, nxn, nzn, 0.2f, lc);
+					unsigned h = CellHash(x, z, k + 17);
+					int drips = 2 + (int)(h % 3);
+					for (int d = 0; d < drips; d++) {
+						float t0 = (d + 0.18f) / (float)drips;
+						float t1 = t0 + 0.16f;
+						if (t1 > 1.f) t1 = 1.f;
+						float dx0, dz0, dx1, dz1;
+						EdgePoint(x, z, k, t0, dx0, dz0);
+						EdgePoint(x, z, k, t1, dx1, dz1);
+						float extra = 0.6f + ((h >> (d * 3)) & 7) * 0.22f;
+						EmitCurtain(lb, dx0, dz0, dx1, dz1, surf, fallBot - extra, nxn, nzn, 0.16f, lc);
+					}
+					AddPuff(m_puff, m_puffN, 8, (ex0 + ex1) * 0.5f, (surf + fallBot) * 0.5f, (ez0 + ez1) * 0.5f, 6.f);
 				}
 			}
 		}
@@ -8636,6 +8755,8 @@ BOOL Renderer::BuildTerrain(const Map& m)
 			EmitCurved(wb, m, x, z, 1, T_WATER, LiquidFlow(m, x, z, T_WATER));
 		else if (c.t == T_LAVA)
 			EmitCurved(lb, m, x, z, 1, T_LAVA, LiquidFlow(m, x, z, T_LAVA));
+		if (m.theme != TH_SEABED && c.t == T_WATER && InteriorPool(m, x, z) && (CellHash(x, z, 91) % 10) == 0)
+			EmitCeilingFall(wb, m_puff, m_puffN, m, x, z);
 		for (int L = 1; L <= 4; L++) {
 			if ((int)c.nLay < L + 1) continue;
 			int ch = ((z >> 4) << 2) + (x >> 4);
@@ -8646,24 +8767,6 @@ BOOL Renderer::BuildTerrain(const Map& m)
 				if (Map::In(nx, nz) && m.At(nx, nz).t != T_VOID) continue;
 				EmitEdgeWall(dk, m, x, z, k, 2, L, 0.72f, 0.f, 0, 0xFFFFFFFF);
 			}
-		}
-	}
-	if (m.theme == TH_FALLS) {
-		int fx = -1, fz = -1;
-		for (int z = 36; z < 56 && fx < 0; z++) for (int x = 4; x < 18; x++) {
-			if (m.At(x, z).t != T_WATER) continue;
-			if (!Map::In(x + 1, z) || m.At(x + 1, z).t != T_WATER) continue;
-			fx = x; fz = z;
-			break;
-		}
-		if (fx >= 0) {
-			float x0 = (float)fx, x1 = (float)fx + 2.f;
-			float z0 = (float)fz, z1 = (float)fz + 1.f;
-			float top = 22.f;
-			float bot = m.StandY(fx, fz);
-			wb.Quad(v3(x0, top, z0), v3(x1, top, z0), v3(x1, bot, z0), v3(x0, bot, z0), v3(0, 0, 1), 0, 0, 1, 1, -1, 0xFFFFFFFF);
-			wb.Quad(v3(x0, top, z1), v3(x0, top, z0), v3(x0, bot, z0), v3(x0, bot, z1), v3(-1, 0, 0), 0, 0, 1, 1, -1, 0xFFFFFFFF);
-			AddPuff(m_puff, m_puffN, 1, x0 + 1.f, (top + bot) * 0.5f, z0, 4.f);
 		}
 	}
 	ScatterTheme(m, sceneMb, lb, m_puff, m_puffN);
@@ -8682,10 +8785,10 @@ BOOL Renderer::BuildTerrain(const Map& m)
 	case TH_SNOW: m_waterColor = RGBA8(110, 160, 210); break;
 	case TH_DESERT: m_waterColor = RGBA8(50, 150, 170); break;
 	case TH_SEABED: m_waterColor = RGBA8(20, 70, 90); break;
-	case TH_FALLS: m_waterColor = RGBA8(170, 210, 230); break;
-	case TH_ORBIT: m_waterColor = RGBA8(40, 60, 120); break;
+	case TH_FALLS: m_waterColor = RGBA8(190, 222, 245); break;
+	case TH_ORBIT: m_waterColor = RGBA8(70, 100, 170); break;
 	case TH_STATION: m_waterColor = RGBA8(40, 140, 170); break;
-	case TH_CITADEL: m_waterColor = RGBA8(40, 28, 70); break;
+	case TH_CITADEL: m_waterColor = RGBA8(90, 62, 130); break;
 	case TH_LANTERN: m_waterColor = RGBA8(170, 186, 220); break;
 	default: m_waterColor = RGBA8(55, 125, 190); break;
 	}
@@ -8815,9 +8918,9 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 		else if (m.theme == TH_CANYON) { r = 150; g = 115; b = 80; }
 		else if (m.theme == TH_SEABED) { r = 70; g = 140; b = 120; }
 		else if (m.theme == TH_FALLS) { r = 90; g = 150; b = 80; }
-		else if (m.theme == TH_ORBIT) { r = 50; g = 58; b = 78; }
+		else if (m.theme == TH_ORBIT) { r = 82; g = 96; b = 132; }
 		else if (m.theme == TH_STATION) { r = 90; g = 100; b = 112; }
-		else if (m.theme == TH_CITADEL) { r = 130; g = 120; b = 145; }
+		else if (m.theme == TH_CITADEL) { r = 158; g = 140; b = 172; }
 		else if (m.theme == TH_LANTERN) { r = 190; g = 196; b = 214; }
 		else { r = 105; g = 165; b = 80; }
 		break;

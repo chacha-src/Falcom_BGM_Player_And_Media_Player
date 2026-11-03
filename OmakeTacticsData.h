@@ -715,15 +715,16 @@ int  ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int m
 bool CanStep(const Map& m, int fromX, int fromZ, int toX, int toZ, int moveType, int jump);
 bool LineOfSight(const Map& m, int ax, int az, int bx, int bz);
 bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, int tz, bool needLos);
+bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, int rMax, int tx, int tz, int toLayer, bool needLos);
 bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos);
 int  Dist(int ax, int az, int bx, int bz);
 // 層差の距離。2層以上は届かない。1つ上は重い、1つ下は軽い。届かないとき -1。
 inline int LayerRangeCost(int fromL, int toL)
 {
 	if (fromL < 0) fromL = 0;
-	if (fromL > 2) fromL = 2;
+	if (fromL >= LAY_N) fromL = LAY_N - 1;
 	if (toL < 0) toL = 0;
-	if (toL > 2) toL = 2;
+	if (toL >= LAY_N) toL = LAY_N - 1;
 	int up = toL - fromL;
 	if (up >= 2 || up <= -2) return -1;
 	if (up > 0) return 4;

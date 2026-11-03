@@ -68,9 +68,9 @@ void ThemeEnv(int th, Env& e)
 		{ { 58, 56, 120 }, { 206, 170, 204 }, { 166, 144, 176 }, { 150, 140, 190 }, { 110, 90, 90 }, .6f, .6f, .35f, .52f, .6f, { 160, 156, 140 } },
 		{ { 36, 110, 150 }, { 140, 206, 214 }, { 90, 168, 186 }, { 110, 186, 200 }, { 40, 80, 90 }, .4f, .62f, .28f, .55f, .4f, { 48, 110, 100 } },
 		{ { 150, 188, 214 }, { 226, 232, 236 }, { 200, 214, 220 }, { 170, 190, 200 }, { 80, 100, 80 }, .4f, .8f, .3f, .58f, .55f, { 90, 140, 80 } },
-		{ { 6, 8, 22 }, { 18, 28, 58 }, { 12, 16, 36 }, { 40, 50, 80 }, { 20, 22, 32 }, .2f, .35f, .9f, .28f, .75f, { 48, 54, 68 } },
+		{ { 18, 24, 58 }, { 48, 62, 110 }, { 28, 36, 70 }, { 80, 95, 140 }, { 36, 40, 58 }, .25f, .45f, .85f, .46f, .7f, { 70, 80, 108 } },
 		{ { 18, 22, 36 }, { 70, 90, 110 }, { 40, 50, 70 }, { 80, 100, 120 }, { 40, 44, 52 }, .55f, .7f, .25f, .42f, .7f, { 90, 98, 108 } },
-		{ { 28, 18, 48 }, { 90, 70, 110 }, { 60, 48, 80 }, { 90, 70, 120 }, { 50, 40, 60 }, .35f, .55f, .7f, .4f, .55f, { 150, 146, 158 } },
+		{ { 48, 32, 72 }, { 140, 110, 150 }, { 90, 70, 110 }, { 130, 100, 150 }, { 70, 55, 78 }, .4f, .62f, .65f, .52f, .52f, { 168, 158, 176 } },
 		{ { 40, 48, 90 }, { 210, 200, 230 }, { 160, 170, 200 }, { 180, 190, 220 }, { 90, 90, 110 }, .25f, .8f, .4f, .5f, .45f, { 186, 190, 210 } },
 	};
 	const T& t = k[Clampi(th, 0, TH_COUNT - 1)];
@@ -2108,6 +2108,9 @@ void Game::UpdateParticles(float dt)
 		m_sceneAcc += dt;
 		float step = (m_save.quality == 4) ? 0.3f : 0.12f;
 		int ticks = 0;
+		int puffTh = 0;
+		if (m_screen == SC_BATTLE) puffTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+		else puffTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
 		while (m_sceneAcc >= step && ticks < 3) {
 			m_sceneAcc -= step;
 			ticks++;
@@ -2115,44 +2118,116 @@ void Game::UpdateParticles(float dt)
 			for (int i = 0; i < pn; i++) {
 				Renderer::SceneryPuff s = m_r.SceneryPuffAt(i);
 				V3 p = v3(s.x, s.y, s.z);
+				float pwx = 0.f, pwz = 0.f, plift = 0.f;
+				WindField(m_time, s.x, s.z, pwx, pwz, plift, puffTh);
 				if (s.kind == 0) {
 					Burst(p, 4, 3.4f, 0.14f, 1.35f, 1.f, 0.32f, 0.05f, 2, 1, 7.5f, 0.08f, 2.1f, 0.03f);
 					Burst(p, 2, 2.2f, 0.1f, 1.1f, 0.45f, 0.28f, 0.22f, 3, 1, 9.f, 0, 1.6f, 0.04f);
 					Burst(p + v3(0, 0.2f, 0), 1, 0.7f, 0.55f, 2.4f, 0.28f, 0.26f, 0.24f, 0, 1, -0.35f, 0.02f, 2.6f, 0.95f);
 				} else if (s.kind == 1) {
-					Burst(p, 1, 0.35f, 0.5f, 1.7f, 0.92f, 0.96f, 1.f, 0, 1, -0.18f, 0, 1.4f, 0.75f);
+					Burst(p, 2, 0.4f, 0.7f, 1.8f, 0.9f, 0.96f, 1.f, 0, 1, -0.1f, 0, 1.2f, 1.0f);
+					int drops = (m_save.quality == 4) ? 2 : 5;
+					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.35f, 0.35f), m_rng.F(-1.8f, 1.6f), m_rng.F(-0.35f, 0.35f));
+						q.v = v3(pwx * 0.22f + m_rng.F(-0.25f, 0.25f), m_rng.F(-4.8f, -1.6f), pwz * 0.22f + m_rng.F(-0.25f, 0.25f));
+						q.life = q.max = m_rng.F(0.7f, 1.4f);
+						q.size = m_rng.F(0.035f, 0.07f); q.size1 = q.size * 0.22f;
+						q.r = 0.9f; q.g = 0.96f; q.b = 1.f; q.a = 1;
+						q.shape = 1; q.add = 1; q.grav = 11.f; q.drag = 0.28f; q.stretch = 0.055f;
+						q.wxHit = 8; q.nHit = 9;
+						m_parts.push_back(q);
+					}
+				} else if (s.kind == 16) {
+					Burst(p, 4, 1.6f, 0.06f, 0.55f, 0.92f, 0.97f, 1.f, 1, 1, 14.f, 0.03f, 2.4f, 0.02f);
+					Burst(p, 2, 0.7f, 0.45f, 1.1f, 0.88f, 0.94f, 1.f, 0, 0, -0.08f, 0, 1.8f, 0.7f);
+					int drops = (m_save.quality == 4) ? 3 : 7;
+					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
+						float ang = m_rng.F(0.f, 6.2831853f);
+						float sp = m_rng.F(1.1f, 3.2f);
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.15f, 0.15f), m_rng.F(0.02f, 0.12f), m_rng.F(-0.15f, 0.15f));
+						q.v = v3(cosf(ang) * sp + pwx * 0.35f, m_rng.F(1.4f, 3.6f) + plift * 0.25f, sinf(ang) * sp + pwz * 0.35f);
+						q.life = q.max = m_rng.F(0.35f, 0.75f);
+						q.size = m_rng.F(0.03f, 0.055f); q.size1 = q.size * 0.2f;
+						q.r = 0.92f; q.g = 0.97f; q.b = 1.f; q.a = 1;
+						q.shape = 0; q.add = 1; q.grav = 16.f; q.drag = 0.4f; q.stretch = 0.03f;
+						q.wxHit = 8; q.nHit = 16;
+						m_parts.push_back(q);
+					}
 				} else if (s.kind == 2) {
-					Burst(p, 2, 0.45f, 0.08f, 2.8f, 0.72f, 0.94f, 1.f, 1, 1, -1.4f, 0, 5.f, 0.03f);
+					for (int k = 0; k < 2 && (int)m_parts.size() < 3600; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.08f, 0.08f), m_rng.F(0.02f, 0.18f), m_rng.F(-0.08f, 0.08f));
+						q.v = v3(pwx * 0.12f + m_rng.F(-0.08f, 0.08f), m_rng.F(0.18f, 0.45f) + plift * 0.08f, pwz * 0.12f + m_rng.F(-0.08f, 0.08f));
+						q.life = q.max = m_rng.F(2.0f, 3.2f);
+						q.size = 0.022f; q.size1 = 0.01f;
+						q.r = 0.72f; q.g = 0.94f; q.b = 1.f; q.a = 1;
+						q.shape = 1; q.add = 1; q.grav = -1.4f; q.drag = 0.7f;
+						q.wxHit = 8; q.nHit = 8;
+						m_parts.push_back(q);
+					}
 				} else if (s.kind == 3) {
 					Burst(p, 1, 0.22f, 0.55f, 2.6f, 0.62f, 0.82f, 0.48f, 0, 1, -0.15f, 0, 1.2f, 0.9f);
 					Burst(p, 1, 0.8f, 0.06f, 1.8f, 0.85f, 1.f, 0.45f, 1, 1, -0.4f, 0, 2.f, 0.02f);
 				} else if (s.kind == 4) {
-					Burst(p + v3(0, 0.4f, 0), 2, 1.6f, 0.07f, 2.2f, 0.95f, 0.82f, 0.35f, 2, 1, 0.6f, 0, 0.4f, 0.02f);
+					Burst(p + v3(0, 0.55f, 0), 1, 0.32f, 0.1f, 3.6f, 0.96f, 0.9f, 0.62f, 0, 0, 0.12f, 0, 0.55f, 0.14f);
 				} else if (s.kind == 5) {
 					Burst(p, 2, 0.9f, 0.42f, 2.4f, 0.72f, 0.58f, 0.38f, 0, 1, -0.25f, 0, 2.8f, 0.7f);
 				} else if (s.kind == 6) {
 					Burst(p + v3(0, 0.6f, 0), 2, 0.55f, 0.05f, 2.6f, 0.75f, 1.f, 0.45f, 1, 1, -0.2f, 0, 1.6f, 0.02f);
 				} else if (s.kind == 7) {
-					for (int k = 0; k < 3; k++) {
+					for (int k = 0; k < 3 && (int)m_parts.size() < 3600; k++) {
 						Particle q = {};
 						q.p = p + v3(m_rng.F(-1.2f, 1.2f), m_rng.F(6.f, 9.f), m_rng.F(-1.2f, 1.2f));
-						q.v = v3(m_rng.F(-0.3f, 0.3f), m_rng.F(-1.6f, -0.7f), m_rng.F(-0.2f, 0.2f));
+						q.v = v3(pwx * 0.18f + m_rng.F(-0.3f, 0.3f), m_rng.F(-1.6f, -0.7f), pwz * 0.18f + m_rng.F(-0.2f, 0.2f));
 						q.life = q.max = m_rng.F(2.2f, 3.4f);
-						q.size = 0.06f; q.size1 = 0.02f;
+						q.size = 0.022f; q.size1 = 0.012f;
 						q.r = 0.92f; q.g = 0.96f; q.b = 1.f; q.a = 1;
 						q.shape = 2; q.add = 1; q.grav = 0.4f; q.drag = 0.3f;
+						q.wxHit = 8; q.nHit = 3;
 						m_parts.push_back(q);
 					}
 				} else if (s.kind == 8) {
-					Burst(p, 3, 2.8f, 0.08f, 1.3f, 0.86f, 0.72f, 0.42f, 3, 1, 2.4f, 0.1f, 0.25f, 0.02f);
+					Burst(p, 3, 2.8f, 0.035f, 1.3f, 0.86f, 0.72f, 0.42f, 3, 1, 2.4f, 0.1f, 0.25f, 0.02f);
 				} else if (s.kind == 9) {
 					Burst(p, 1, 0.4f, 0.08f, 2.4f, 0.65f, 0.82f, 1.f, 1, 1, -0.7f, 0, 2.2f, 0.03f);
 				} else if (s.kind == 10) {
-					Burst(p, 2, 0.55f, 0.04f, 3.2f, 0.75f, 0.85f, 1.f, 1, 1, 0.f, 0, 0.2f, 0.02f);
+					for (int k = 0; k < 3 && (int)m_parts.size() < 3600; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.35f, 0.35f), m_rng.F(0.05f, 0.55f), m_rng.F(-0.35f, 0.35f));
+						q.v = v3(pwx * 0.35f + m_rng.F(-0.12f, 0.12f), m_rng.F(-0.04f, 0.08f) + plift * 0.05f, pwz * 0.35f + m_rng.F(-0.12f, 0.12f));
+						q.life = q.max = m_rng.F(2.8f, 4.2f);
+						q.size = 0.022f; q.size1 = 0.01f;
+						q.r = 0.9f; q.g = 0.94f; q.b = 1.f; q.a = 1;
+						q.shape = 1; q.add = 1; q.grav = 0; q.drag = 0.22f;
+						q.wxHit = 8; q.nHit = 10;
+						m_parts.push_back(q);
+					}
 				} else if (s.kind == 11) {
-					Burst(p + v3(0, 0.2f, 0), 2, 0.35f, 0.05f, 2.4f, 0.7f, 0.88f, 1.f, 1, 1, -0.4f, 0, 1.6f, 0.7f);
+					for (int k = 0; k < 2 && (int)m_parts.size() < 3600; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.12f, 0.12f), m_rng.F(0.05f, 0.28f), m_rng.F(-0.12f, 0.12f));
+						q.v = v3(pwx * 0.2f + m_rng.F(-0.08f, 0.08f), m_rng.F(0.12f, 0.32f), pwz * 0.2f);
+						q.life = q.max = m_rng.F(1.8f, 2.6f);
+						q.size = 0.02f; q.size1 = 0.01f;
+						q.r = 0.7f; q.g = 0.88f; q.b = 1.f; q.a = 1;
+						q.shape = 1; q.add = 1; q.grav = -0.4f; q.drag = 0.7f;
+						q.wxHit = 8; q.nHit = 11;
+						m_parts.push_back(q);
+					}
 				} else if (s.kind == 12) {
-					Burst(p + v3(0, 0.5f, 0), 2, 0.28f, 0.045f, 3.0f, 0.55f, 0.48f, 0.7f, 0, 1, -0.12f, 0, 1.4f, 0.8f);
+					for (int k = 0; k < 2 && (int)m_parts.size() < 3600; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-0.15f, 0.15f), m_rng.F(0.1f, 0.55f), m_rng.F(-0.15f, 0.15f));
+						q.v = v3(pwx * 0.28f + m_rng.F(-0.08f, 0.08f), m_rng.F(0.04f, 0.16f), pwz * 0.28f);
+						q.life = q.max = m_rng.F(2.4f, 3.4f);
+						q.size = 0.022f; q.size1 = 0.01f;
+						q.r = (k & 1) ? 1.f : 0.82f; q.g = (k & 1) ? 0.78f : 0.55f; q.b = (k & 1) ? 0.4f : 1.f; q.a = 1;
+						q.shape = 0; q.add = 1; q.grav = -0.08f; q.drag = 0.9f;
+						q.wxHit = 8; q.nHit = 12;
+						m_parts.push_back(q);
+					}
 				} else if (s.kind == 13) {
 					Burst(p + v3(0, 0.4f, 0), 1, 0.22f, 0.035f, 2.8f, 1.f, 0.82f, 0.42f, 1, 1, -0.08f, 0, 0.6f, 0.85f);
 				} else if (s.kind == 14) {
@@ -2196,6 +2271,7 @@ void Game::UpdateParticles(float dt)
 					q.r = r; q.g = g; q.b = b; q.a = 1;
 					q.shape = shape; q.add = 1; q.grav = grav; q.drag = drag;
 					q.wxHit = 8; q.nHit = mode;
+					q.add = (mode == 15) ? 0 : 1;
 					m_parts.push_back(q);
 					amb++;
 				};
@@ -2238,11 +2314,11 @@ void Game::UpdateParticles(float dt)
 				for (int n = 0; n < nSpawn; n++) {
 					if (theme == TH_PLAINS) {
 						if ((n & 1) == 0) {
-							if (!onLand(16.f, 2.2f, 5.2f, at)) continue;
-							born(0, at, v3(wx * 0.35f, m_rng.F(0.15f, 0.7f), wz * 0.35f), 3.4f, 0.04f, 0.95f, 0.9f, 0.45f, 1, 0.35f, 0.9f);
+							if (!onLand(16.f, 1.6f, 4.2f, at)) continue;
+							born(15, at, v3(wx * 0.28f, m_rng.F(0.08f, 0.28f), wz * 0.28f), 4.6f, 0.09f, 0.96f, 0.9f, 0.58f, 0, 0.12f, 0.55f);
 						} else {
-							if (!onLand(16.f, 0.06f, 0.28f, at)) continue;
-							born(4, at, v3(wx * 0.4f, 0.08f, wz * 0.4f), 1.8f, 0.022f, 0.82f, 0.72f, 0.4f, 3, 5.5f, 0.4f);
+							if (!onLand(16.f, 0.08f, 0.32f, at)) continue;
+							born(4, at, v3(wx * 0.22f, 0.04f, wz * 0.22f), 2.2f, 0.028f, 0.72f, 0.64f, 0.38f, 3, 4.2f, 0.45f);
 						}
 					} else if (theme == TH_CANYON || theme == TH_DESERT) {
 						if (!onLand(16.f, 0.08f, 0.35f, at)) continue;
@@ -2262,10 +2338,10 @@ void Game::UpdateParticles(float dt)
 					} else if (theme == TH_SNOW) {
 						if (!onLand(16.f, 0.2f, 0.8f, at)) continue;
 						at.y += m_rng.F(4.2f, 8.5f);
-						born(3, at, v3(wx * 0.12f, m_rng.F(-0.6f, -0.2f), wz * 0.12f), 3.6f, 0.038f, 0.96f, 0.98f, 1.f, 2, 0.55f, 1.6f);
+						born(3, at, v3(wx * 0.12f, m_rng.F(-0.6f, -0.2f), wz * 0.12f), 3.6f, 0.022f, 0.96f, 0.98f, 1.f, 2, 0.55f, 1.6f);
 					} else if (theme == TH_VOLCANO) {
 						if (!onLand(16.f, 0.12f, 0.4f, at)) continue;
-						born(5, at, v3(m_rng.F(-0.3f, 0.3f), m_rng.F(1.2f, 2.6f), m_rng.F(-0.3f, 0.3f)), 2.2f, 0.04f, 1.f, m_rng.F(0.25f, 0.5f), 0.05f, 5, -1.5f, 0.45f);
+						born(5, at, v3(m_rng.F(-0.3f, 0.3f), m_rng.F(1.2f, 2.6f), m_rng.F(-0.3f, 0.3f)), 2.2f, 0.022f, 1.f, m_rng.F(0.25f, 0.5f), 0.05f, 5, -1.5f, 0.45f);
 					} else if (theme == TH_SWAMP) {
 						if (!onLand(16.f, 0.04f, 0.18f, at)) continue;
 						born(6, at, v3(m_rng.F(-0.15f, 0.15f), 0.35f, m_rng.F(-0.1f, 0.1f)), 2.4f, 0.038f, 0.7f, 0.95f, 0.55f, 1, -0.9f, 0.5f);
@@ -2274,24 +2350,27 @@ void Game::UpdateParticles(float dt)
 						born(0, at, v3(wx * 0.1f, 0.15f, wz * 0.1f), 3.2f, 0.032f, 0.7f, 0.75f, 0.85f, 1, 0.2f, 1.2f);
 					} else if (theme == TH_SEABED) {
 						if (!onLand(16.f, 0.25f, 2.2f, at)) continue;
-						born((n & 1) ? 8 : 6, at, v3(m_rng.F(-0.1f, 0.15f), 0.25f, m_rng.F(-0.1f, 0.1f)), 3.4f, 0.038f, 0.55f, 0.82f, 1.f, 1, (n & 1) ? 0.15f : -0.7f, 0.7f);
+						born((n & 1) ? 8 : 6, at, v3(m_rng.F(-0.1f, 0.15f), 0.25f, m_rng.F(-0.1f, 0.1f)), 3.4f, 0.022f, 0.55f, 0.82f, 1.f, 1, (n & 1) ? 0.15f : -0.7f, 0.7f);
 					} else if (theme == TH_FALLS) {
 						if ((n & 1) == 0) {
 							if (!onLand(16.f, 0.08f, 0.28f, at)) continue;
-							born(7, at, v3(wx * 0.08f, 0.08f, wz * 0.08f), 2.2f, 0.07f, 0.85f, 0.92f, 1.f, 0, 0.05f, 0.8f);
+							born(7, at, v3(wx * 0.22f, 0.12f, wz * 0.22f), 2.6f, 0.11f, 0.9f, 0.96f, 1.f, 0, 0.04f, 0.7f);
 						} else {
-							if (!onLand(16.f, 2.4f, 5.5f, at)) continue;
-							born(9, at, v3(wx * 0.05f, m_rng.F(-1.2f, -0.4f), wz * 0.05f), 1.8f, 0.04f, 0.88f, 0.95f, 1.f, 1, 4.2f, 0.35f);
+							if (!onLand(16.f, 2.4f, 6.5f, at)) continue;
+							born(9, at, v3(wx * 0.18f, m_rng.F(-1.6f, -0.5f), wz * 0.18f), 2.1f, 0.055f, 0.92f, 0.97f, 1.f, 1, 4.6f, 0.32f);
 						}
 					} else if (theme == TH_ORBIT) {
-						if (!onLand(16.f, 1.2f, 4.5f, at)) continue;
-						born(10, at, v3(m_rng.F(-0.4f, 0.5f), m_rng.F(-0.1f, 0.15f), m_rng.F(-0.3f, 0.3f)), 4.f, 0.032f, 0.8f, 0.86f, 1.f, 1, 0.f, 0.25f);
+						if (!onLand(16.f, 0.4f, 1.8f, at)) continue;
+						born(10, at, v3(m_rng.F(-0.4f, 0.5f), m_rng.F(-0.1f, 0.15f), m_rng.F(-0.3f, 0.3f)), 4.6f, 0.024f, 0.95f, 0.94f, 1.f, 1, 0.f, 0.22f);
 					} else if (theme == TH_STATION) {
 						if (!onLand(16.f, 0.5f, 2.2f, at)) continue;
-						born(11, at, v3(m_rng.F(-0.1f, 0.2f), 0.4f, m_rng.F(-0.1f, 0.1f)), 2.2f, 0.045f, 0.75f, 0.9f, 1.f, 1, -0.55f, 0.6f);
+						born(11, at, v3(m_rng.F(-0.1f, 0.2f), 0.4f, m_rng.F(-0.1f, 0.1f)), 2.2f, 0.022f, 0.75f, 0.9f, 1.f, 1, -0.55f, 0.6f);
 					} else if (theme == TH_CITADEL) {
-						if (!onLand(16.f, 1.4f, 3.6f, at)) continue;
-						born(12, at, v3(wx * 0.4f, 0.05f, wz * 0.4f), 2.6f, 0.045f, 0.35f, 0.32f, 0.4f, 2, 0.15f, 0.5f);
+						if (!onLand(16.f, 0.6f, 1.8f, at)) continue;
+						if ((n & 1) == 0)
+							born(12, at, v3(wx * 0.35f, 0.08f, wz * 0.35f), 3.2f, 0.026f, 0.82f, 0.55f, 1.f, 0, 0.12f, 0.45f);
+						else
+							born(13, at, v3(m_rng.F(-0.15f, 0.15f), 0.22f, m_rng.F(-0.12f, 0.12f)), 2.8f, 0.024f, 1.f, 0.78f, 0.38f, 1, -0.1f, 0.7f);
 					} else if (theme == TH_LANTERN) {
 						if (!onLand(16.f, 0.9f, 2.6f, at)) continue;
 						born(13, at, v3(m_rng.F(-0.2f, 0.2f), 0.25f, m_rng.F(-0.15f, 0.15f)), 2.8f, 0.035f, 1.f, 0.82f, 0.45f, 1, -0.15f, 0.8f);
@@ -2307,14 +2386,19 @@ void Game::UpdateParticles(float dt)
 					int sheetN = (q == 4) ? 6 : 16;
 					for (int i = 0; i < sheetN; i++) {
 						V3 p;
-						if (!onLand(18.f, 0.08f, 0.9f, p)) continue;
-						born(sheet, p, v3(wx * 0.25f, 0.3f + burst, wz * 0.25f), 2.2f, sheet == 4 ? 0.028f : 0.045f, 0.9f, 0.88f, 0.7f, sheet == 2 ? 2 : 1, sheet == 4 ? 5.f : 0.6f, 0.7f);
+						if (theme == TH_PLAINS) {
+							if (!onLand(18.f, 1.2f, 3.4f, p)) continue;
+							born(15, p, v3(wx * 0.38f, 0.18f + burst * 0.22f, wz * 0.38f), 3.8f, 0.12f, 0.96f, 0.9f, 0.58f, 0, 0.1f, 0.5f);
+						} else {
+							if (!onLand(18.f, 0.08f, 0.9f, p)) continue;
+							born(sheet, p, v3(wx * 0.25f, 0.3f + burst, wz * 0.25f), 2.2f, sheet == 4 ? 0.028f : 0.045f, 0.9f, 0.88f, 0.7f, sheet == 2 ? 2 : 1, sheet == 4 ? 5.f : 0.6f, 0.7f);
+						}
 					}
 				} else if (burst < 0.18f) gustLatched = 0;
-				if (theme == TH_FALLS || theme == TH_VOLCANO || theme == TH_SWAMP || theme == TH_SEABED || theme == TH_LANTERN || theme == TH_FOREST) {
+				{
 					int cx = (int)floorf(m_camTarget.x), cz = (int)floorf(m_camTarget.z);
 					int extra = 0;
-					for (int dz = -8; dz <= 8 && extra < 5; dz += 4) for (int dx = -8; dx <= 8 && extra < 5; dx += 4) {
+					for (int dz = -8; dz <= 8 && extra < 6; dz += 4) for (int dx = -8; dx <= 8 && extra < 6; dx += 4) {
 						int x = cx + dx, z = cz + dz;
 						if (!Map::In(x, z)) continue;
 						int t = map.At(x, z).t;
@@ -2323,11 +2407,17 @@ void Game::UpdateParticles(float dt)
 						V3 to = ep - m_eye;
 						float along = to.x * camF.x + to.y * camF.y + to.z * camF.z;
 						if (along > 0.2f && (to.x * to.x + to.y * to.y + to.z * to.z) < 9.f) continue;
-						if ((theme == TH_FALLS || theme == TH_SWAMP || theme == TH_SEABED) && t == T_WATER) {
-							born(theme == TH_FALLS ? 9 : 6, ep, v3(wx * 0.05f, theme == TH_FALLS ? m_rng.F(1.4f, 2.8f) : 0.4f, wz * 0.05f), 1.6f, 0.04f, 0.85f, 0.94f, 1.f, 1, theme == TH_FALLS ? 3.5f : -0.8f, 0.4f);
+						BOOL abyss = FALSE;
+						static const int edx[4] = { 1, -1, 0, 0 }, edz[4] = { 0, 0, 1, -1 };
+						for (int k = 0; k < 4; k++) {
+							int nx = x + edx[k], nz = z + edz[k];
+							if (!Map::In(nx, nz) || map.At(nx, nz).t == T_VOID || map.At(nx, nz).t == T_CHASM) abyss = TRUE;
+						}
+						if (t == T_WATER && theme != TH_SEABED && (abyss || theme == TH_FALLS || theme == TH_SWAMP)) {
+							born(theme == TH_FALLS || abyss ? 9 : 6, ep + v3(0, abyss ? m_rng.F(1.2f, 4.5f) : 0, 0), v3(wx * (abyss ? 0.22f : 0.05f), abyss || theme == TH_FALLS ? m_rng.F(-1.8f, -0.4f) : 0.4f, wz * (abyss ? 0.22f : 0.05f)), 1.8f, abyss ? 0.07f : 0.04f, 0.88f, 0.95f, 1.f, 1, abyss || theme == TH_FALLS ? 4.2f : -0.8f, 0.35f);
 							extra++;
-						} else if (theme == TH_VOLCANO && t == T_LAVA) {
-							born(5, ep + v3(0, 0.08f, 0), v3(m_rng.F(-0.2f, 0.2f), m_rng.F(1.4f, 2.8f), m_rng.F(-0.2f, 0.2f)), 1.8f, 0.038f, 1.f, 0.35f, 0.05f, 5, -1.6f, 0.4f);
+						} else if (t == T_LAVA && (abyss || theme == TH_VOLCANO)) {
+							born(5, ep + v3(0, abyss ? 0.2f : 0.08f, 0), v3(m_rng.F(-0.12f, 0.12f), abyss ? m_rng.F(-0.55f, -0.12f) : m_rng.F(1.4f, 2.8f), m_rng.F(-0.12f, 0.12f)), 2.4f, abyss ? 0.06f : 0.038f, 1.f, abyss ? 0.45f : 0.35f, 0.05f, 5, abyss ? 1.1f : -1.6f, 0.35f);
 							extra++;
 						} else if (theme == TH_LANTERN && (t == T_ROAD || t == T_RUINS || t == T_PLAIN)) {
 							ep.y += m_rng.F(0.8f, 1.8f);
@@ -2336,6 +2426,10 @@ void Game::UpdateParticles(float dt)
 						} else if (theme == TH_FOREST && t == T_FOREST) {
 							ep.y += m_rng.F(3.f, 6.f);
 							born(2, ep, v3(wx * 0.1f, m_rng.F(-0.3f, 0.05f), wz * 0.1f), 3.f, 0.05f, 0.5f, 0.78f, 0.32f, 2, 1.1f, 1.f);
+							extra++;
+						} else if (theme == TH_CITADEL && (t == T_RUINS || t == T_ROAD || t == T_PLAIN)) {
+							ep.y += m_rng.F(0.6f, 1.6f);
+							born(12, ep, v3(wx * 0.2f, 0.12f, wz * 0.2f), 3.f, 0.024f, 0.85f, 0.58f, 1.f, 0, 0.1f, 0.5f);
 							extra++;
 						}
 					}
@@ -2545,11 +2639,21 @@ void Game::UpdateParticles(float dt)
 			} else if (mode == 6) {
 				p.v.x += sinf(m_time * 2.2f + p.p.y * 1.5f) * dt * 0.8f;
 				p.v.z += cosf(m_time * 1.8f + p.p.y) * dt * 0.5f;
+			} else if (mode == 7) {
+				p.v.x += wx * dt * 0.95f;
+				p.v.z += wz * dt * 0.8f;
+				p.v.y += sinf(m_time * 3.1f + p.p.x) * dt * 0.28f;
 			} else if (mode == 8) {
 				p.v.x += sinf(m_time * 1.1f + p.p.y * 2.f) * dt * 0.35f;
 				p.v.y += sinf(m_time * 0.9f + p.p.x) * dt * 0.22f;
 			} else if (mode == 9) {
-				p.v.x += sinf(m_time * 8.f + p.p.z) * dt * 0.4f;
+				p.v.x += wx * dt * 1.05f + sinf(m_time * 8.f + p.p.z) * dt * 0.4f;
+				p.v.z += wz * dt * 0.9f;
+				p.v.y += lift * dt * 0.15f;
+			} else if (mode == 16) {
+				p.v.x += wx * dt * 1.35f;
+				p.v.z += wz * dt * 1.15f;
+				p.v.y += lift * dt * 0.45f;
 			} else if (mode == 10) {
 				p.grav = 0.f;
 				p.v.y += sinf(m_time * 0.7f + p.p.x) * dt * 0.25f;
@@ -2564,6 +2668,11 @@ void Game::UpdateParticles(float dt)
 				p.v.x += cosf(m_time * 2.4f + p.p.z) * dt * 0.9f;
 				p.v.z += sinf(m_time * 2.1f + p.p.x) * dt * 0.9f;
 				p.v.y += sinf(m_time * 3.3f + p.p.x + p.p.z) * dt * 0.35f;
+			} else if (mode == 15) {
+				p.v.x += (wx * 0.55f - p.v.x) * dt * 0.7f;
+				p.v.z += (wz * 0.55f - p.v.z) * dt * 0.7f;
+				p.v.y += (0.16f + lift * 0.12f - p.v.y * 0.35f) * dt;
+				p.v.x += sinf(m_time * 0.55f + p.p.z * 0.28f) * dt * 0.16f;
 			}
 		} else {
 			float gust = TacBurst(m_time);
@@ -2588,12 +2697,14 @@ void Game::UpdateParticles(float dt)
 						float want = gy + 0.32f;
 						p.p.y += (want - p.p.y) * min(1.f, dt * 3.f);
 						p.v.y *= 0.4f;
+					} else if (p.nHit == 15) {
+						if (p.p.y < gy + 0.18f) p.v.y = max(p.v.y, 0.12f);
 					} else if (p.nHit != 6 && p.nHit != 11 && prev.y > gy + 0.02f && p.p.y <= gy + 0.03f) {
 						p.p.y = gy + 0.04f;
 						float burst = TacBurst(m_time);
 						if (p.nHit == 4) p.v.y = 0.85f + burst * 2.2f;
 						else if (p.nHit == 1) p.v.y = 0.7f + burst * 1.4f;
-						else if (p.nHit == 5 || p.nHit == 9) p.life = 0.04f;
+						else if (p.nHit == 5 || p.nHit == 9 || p.nHit == 16) p.life = 0.04f;
 						else {
 							p.v.y = 0.f;
 							p.grav = 0.f;
