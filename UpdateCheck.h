@@ -14,9 +14,6 @@ void EnsureD3dCompilerAvailable();
 /* exe 隣に ogghost32.exe が無いとき更新 ZIP から展開→KpiHost32 削除→再起動（成功時は exit） */
 void EnsureOggHost32Available();
 
-/* exe 横の tacticsbgm の tactics*.ogg を、サーバ単体ファイルの更新日時が新しければ取得する（失敗しても起動は続ける） */
-void EnsureTacticsOggAvailable();
-
 /* 起動時サイレント更新用。自動更新と同じ CUpdateBusyWnd。オフラインなら何もしない。 */
 void UpdateBusyShowCheck();
 void UpdateBusyBeginFile(LPCTSTR fileName);

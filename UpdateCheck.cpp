@@ -2396,7 +2396,8 @@ static void EnsureTacticsBgmFolder()
 	}
 }
 
-void EnsureTacticsOggAvailable()
+// おまけからタクティクスの画像を取るときに呼ぶ。起動時は触らない。
+static void EnsureTacticsOggAvailable(bool refreshIfNewer)
 {
 	EnsureTacticsBgmFolder();
 	const CString dir = TacticsBgmFolder();
@@ -2406,29 +2407,71 @@ void EnsureTacticsOggAvailable()
 	if (!InternetGetConnectedState(&dwFlags, 0))
 		return;
 
-	TCHAR tempPath[MAX_PATH] = { 0 };
-	GetTempPath(MAX_PATH, tempPath);
-	CStringA batBody = "@echo off\r\n";
-	int pending = 0;
-	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i) {
+	const int nName = (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0]));
+	bool want[32] = {};
+	time_t serverT[32] = {};
+	int nWant = 0;
+	for (int i = 0; i < nName && i < 32; ++i) {
 		const CString dest = dir + _T("\\") + kTacOggNames[i];
+		const bool have = FileStartsWithOggS(dest);
+		if (!have) {
+			want[i] = true;
+			nWant++;
+			continue;
+		}
+		if (!refreshIfNewer)
+			continue;
 		const CString url = CString(TACTICS_OGG_URL_BASE) + kTacOggNames[i];
 		const time_t server = HttpGetLastModified(url);
 		if (server == 0)
 			continue;
-		const time_t local = FileWriteTimeUtc(dest);
-		if (FileStartsWithOggS(dest) && local + 2 >= server)
+		serverT[i] = server;
+		if (FileWriteTimeUtc(dest) + 2 >= server)
 			continue;
+		want[i] = true;
+		nWant++;
+	}
+	if (nWant < 1)
+		return;
+
+	CString start;
+	start.Format(LL14(
+		L"タクティクスの曲を受け取っています…\n0%%",
+		L"Receiving tactics music…\n0%%",
+		L"Réception des musiques de tactique…\n0%%",
+		L"Ricezione delle musiche di tattica…\n0%%",
+		L"Recibiendo música de táctica…\n0%%",
+		L"택틱스 곡을 받는 중…\n0%%",
+		L"正在接收战术曲目…\n0%%",
+		L"جارٍ استلام موسيقى التكتيك…\n0%%",
+		L"Получение музыки тактики…\n0%%",
+		L"Taktik-Musik wird empfangen…\n0%%",
+		L"A receber músicas de tática…\n0%%",
+		L"Tactiekmuziek ontvangen…\n0%%",
+		L"Odbieranie muzyki taktyki…\n0%%",
+		L"Taktik müzikleri alınıyor…\n0%%"));
+	UpdateBusyShow(start, 0);
+
+	TCHAR tempPath[MAX_PATH] = { 0 };
+	GetTempPath(MAX_PATH, tempPath);
+	CStringA batBody = "@echo off\r\n";
+	int pending = 0;
+	for (int i = 0; i < nName && i < 32; ++i) {
+		if (!want[i]) continue;
+		const CString dest = dir + _T("\\") + kTacOggNames[i];
+		const CString url = CString(TACTICS_OGG_URL_BASE) + kTacOggNames[i];
 		CString tmp;
 		tmp.Format(_T("%stacbgm_%d.ogg"), tempPath, i);
 		if (!HttpDownloadToFile(url, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
 			DeleteFile(tmp);
 			continue;
 		}
-		SetFileWriteTimeUtc(tmp, server);
+		if (serverT[i] != 0)
+			SetFileWriteTimeUtc(tmp, serverT[i]);
 		SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
 		if (CopyFile(tmp, dest, FALSE) && FileStartsWithOggS(dest)) {
-			SetFileWriteTimeUtc(dest, server);
+			if (serverT[i] != 0)
+				SetFileWriteTimeUtc(dest, serverT[i]);
 			DeleteFile(tmp);
 			continue;
 		}
@@ -2442,8 +2485,10 @@ void EnsureTacticsOggAvailable()
 		batBody += line;
 		pending++;
 	}
-	if (pending < 1)
+	if (pending < 1) {
+		UpdateBusyClose();
 		return;
+	}
 	{
 		CStringA dirA(dir);
 		CStringA mk;
@@ -2454,12 +2499,15 @@ void EnsureTacticsOggAvailable()
 	TCHAR batPath[MAX_PATH] = { 0 };
 	_stprintf_s(batPath, _T("%stactics_ogg_place.bat"), tempPath);
 	CFile bat;
-	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+		UpdateBusyClose();
 		return;
+	}
 	batBody += "del \"%~f0\"\r\n";
 	bat.Write(batBody, batBody.GetLength());
 	bat.Close();
 	ShellExecute(NULL, _T("runas"), batPath, NULL, tempPath, SW_HIDE);
+	UpdateBusyClose();
 }
 
 void EnsureD3dCompilerAvailable()
@@ -2966,7 +3014,10 @@ bool EnsureBonusImages(int kind)
 		AfxMessageBox(msg);
 		return false;
 	}
-	if (have && saved > 0 && remote <= saved) return true;
+	if (have && saved > 0 && remote <= saved) {
+		if (kind == 2) EnsureTacticsOggAvailable(false);
+		return true;
+	}
 	CString tmp = root + _T("\\_fetch.7z");
 	CString start;
 	start.Format(LL14(
@@ -3010,5 +3061,6 @@ bool EnsureBonusImages(int kind)
 		return false;
 	}
 	BonusWriteUtc(utcPath, remote);
+	if (kind == 2) EnsureTacticsOggAvailable(true);
 	return true;
 }

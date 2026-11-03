@@ -2469,7 +2469,6 @@ BOOL COggApp::InitInstance()
 	OfflineHelpEnsureAvailable();
 	EnsureD3dCompilerAvailable();
 	EnsureOggHost32Available();
-	EnsureTacticsOggAvailable();
 	KpiInstall_SilentUpdateKbsasami(karento2);
 	KpiInstall_SilentUpdateFmpmd(karento2);
 	KpiInstall_SilentUpdateFmMonKpis(karento2);
