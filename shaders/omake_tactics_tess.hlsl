@@ -85,7 +85,7 @@ TC VST(VSIn v)
 	float3 w = mul(float4(v.p, 1), World).xyz;
 	float3 n = normalize(mul(v.n, (float3x3)World));
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
-	if (Params.y > 0.5 && Params.y < 1.5) {
+	if (OutlineColor.a < 1.5 && Params.y > 0.5 && Params.y < 1.5) {
 		if (n.y > 0.45) {
 			float t = Eye.w;
 			float th = FogColor.a;
@@ -107,7 +107,7 @@ TC VST(VSIn v)
 			w = FallLeanT(w, n, 0.74);
 			w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmtT() * 0.08);
 		}
-	} else if (Params.y > 1.5 && Params.y < 2.5) {
+	} else if (OutlineColor.a < 1.5 && Params.y > 1.5 && Params.y < 2.5) {
 		if (n.y > 0.45) {
 			float t = Eye.w;
 			w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * (0.018 + GustAmtT() * 0.016);
@@ -186,10 +186,10 @@ PSIn DST(TF factors, float3 b : SV_DomainLocation, const OutputPatch<TC, 3> p)
 	if (Params.y > 0.5) ph *= 0.3;
 	float3 w = lerp(flat, curved, ph);
 	float3 n = normalize(n0 * b.x + n1 * b.y + n2 * b.z);
-	if (Params.y > 0.5 && Params.y < 1.5 && n.y < 0.45) {
+	if (OutlineColor.a < 1.5 && Params.y > 0.5 && Params.y < 1.5 && n.y < 0.45) {
 		w = FallLeanT(w, n, 0.74);
 		w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmtT() * 0.08);
-	} else if (Params.y > 1.5 && Params.y < 2.5 && n.y < 0.45) {
+	} else if (OutlineColor.a < 1.5 && Params.y > 1.5 && Params.y < 2.5 && n.y < 0.45) {
 		w = FallLeanT(w, n, 0.16);
 		w.x += sin(w.y * 0.45 - Eye.w * 0.32 + w.z * 0.2) * 0.11;
 		w.z += cos(w.y * 0.38 - Eye.w * 0.28) * 0.07;

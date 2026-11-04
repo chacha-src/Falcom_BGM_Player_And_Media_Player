@@ -1165,6 +1165,12 @@ void Game::RaiseStampede()
 // ============================================================ 範囲表示
 static int CorpseAt(const Battle& b, int x, int z);
 
+// 地図の外は奈落で、どのユニットも止まれない。射程の色は置かない。
+static BOOL TacOffMap(const Cell& c)
+{
+	return c.t == T_VOID;
+}
+
 void Game::ComputeOverlays()
 {
 	memset(m_ovMove, 0, sizeof(m_ovMove));
@@ -1187,7 +1193,7 @@ void Game::ComputeOverlays()
 					int d = abs(dx) + abs(dz);
 					if (d < rmin || d > rmax) continue;
 					int tx = x + dx, tz = z + dz;
-					if (!Map::In(tx, tz)) continue;
+					if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
 					for (int Lt = 0; Lt < LAY_N; Lt++) {
 						if (ReachCanStopLayer(m_reach, tx, tz, Lt)) continue;
 						if (!AttackReachLayer(m_b, x, z, Ls, rmin, rmax, tx, tz, Lt, false)) continue;
@@ -1204,13 +1210,27 @@ void Game::ComputeOverlays()
 				int tx = u.x + cdx[k], tz = u.z + cdz[k];
 				if (CanTerrace(m_b, m_cur, tx, tz)) m_ovAtk[tz][tx] = 5;
 			}
+			for (int i = 0; i < m_b.nUnits; i++) {
+				if (!CanTarget(m_cur, i, -1)) continue;
+				const Unit& e = m_b.u[i];
+				int sp = UnitSpan(e);
+				if (sp < 1) sp = 1;
+				int L = e.deck;
+				if (L < 0 || L >= LAY_N || !LayerOn(m_b.map.At(e.x, e.z), L)) L = 0;
+				for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
+					int tx = e.x + dx, tz = e.z + dz;
+					if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
+					m_ovAtkLay[tz][tx] |= (BYTE)(1 << L);
+					m_ovAtk[tz][tx] = 7;
+				}
+			}
 		}
 	} else if (m_phase == PH_P_TARGET || m_phase == PH_P_CMD) {
 		int rmin = UnitRangeMin(u), rmax = UnitRangeMax(u);
 		int aL = LayerOn(m_b.map.At(u.x, u.z), u.deck) ? u.deck : 0;
 		for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
 			int tx = u.x + dx, tz = u.z + dz;
-			if (!Map::In(tx, tz)) continue;
+			if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
 			BYTE bits = 0;
 			for (int L = 0; L < LAY_N; L++)
 				if (AttackReachLayer(m_b, u.x, u.z, aL, rmin, rmax, tx, tz, L, true)) bits |= (BYTE)(1 << L);
@@ -1226,10 +1246,10 @@ void Game::ComputeOverlays()
 			for (int dz = -sd.area; dz <= sd.area; dz++) for (int dx = -sd.area; dx <= sd.area; dx++) {
 				if (abs(dx) + abs(dz) > sd.area) continue;
 				int tx = u.x + dx, tz = u.z + dz;
-				if (!Map::In(tx, tz)) continue;
+				if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
 				BYTE bits = 0;
-				for (int L = 0; L < LAY_N; L++) if (LayerOn(m_b.map.At(tx, tz), L)) bits |= (BYTE)(1 << L);
-				if (!bits) bits = 1;
+				for (int L = 0; L < LAY_N; L++) if (LayerOn(m_b.map.At(tx, tz), L) && LayerTr(m_b.map.At(tx, tz), L) != T_VOID) bits |= (BYTE)(1 << L);
+				if (!bits) continue;
 				m_ovAtkLay[tz][tx] |= bits;
 				m_ovAtk[tz][tx] = 3;
 			}
@@ -1237,7 +1257,7 @@ void Game::ComputeOverlays()
 			BOOL friendly = sd.kind == SK_HEAL || sd.kind == SK_BUFF;
 			for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
 				int tx = u.x + dx, tz = u.z + dz;
-				if (!Map::In(tx, tz)) continue;
+				if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
 				if (IsFormSkill(m_cmdSkill) && !FormFits(m_b, m_cur, m_cmdSkill, tx, tz)) continue;
 				BYTE bits = 0;
 				for (int L = 0; L < LAY_N; L++)
@@ -1278,7 +1298,7 @@ void Game::ComputeOverlays()
 					int d = abs(dx) + abs(dz);
 					if (d < rmin || d > rmax) continue;
 					int tx = x + dx, tz = z + dz;
-					if (!Map::In(tx, tz)) continue;
+					if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
 					if (m_b.map.At(tx, tz).t == T_CHASM) continue;
 					m_ovThreat[tz][tx] = 1;
 				}
@@ -1362,7 +1382,7 @@ int Game::AppendOverlayQuad(VtxS* dst, int n, int cap, int x, int z, DWORD c, fl
 		return base + (TacVisY(m, x, z, px, pz, kind, ly) - mid) + lift + 0.1f;
 	};
 	if (segs < 1) segs = 1;
-	if (segs > 4) segs = 4;
+	if (segs > 8) segs = 8;
 	float in = 0.012f;
 	if (segs > 1) {
 		float y0 = hy((float)x + in, (float)z + in);
@@ -1374,8 +1394,8 @@ int Game::AppendOverlayQuad(VtxS* dst, int n, int cap, int x, int z, DWORD c, fl
 		if (y2 < lo) lo = y2; if (y2 > hi) hi = y2;
 		if (y3 < lo) lo = y3; if (y3 > hi) hi = y3;
 		float span = hi - lo;
-		if (span < 0.05f) segs = 1;
-		else if (span < 0.22f && segs > 2) segs = 2;
+	if (span < 0.02f) segs = 1;
+	else if (span < 0.08f && segs > 4) segs = 4;
 	}
 	for (int j = 0; j < segs; j++) for (int i = 0; i < segs; i++) {
 		if (n + 4 > cap) return n;
@@ -1412,15 +1432,26 @@ int Game::BuildRangeBand(int z0, int z1, const BYTE* block, VtxS* dst, int cap) 
 	for (int z = z0; z < z1; z++) for (int x = 0; x < MAPN; x++) {
 		if (showMove) {
 			for (int L = 0; L < LAY_N; L++) {
-				if (ReachCostAt(m_reach, L, x, z) < 0 || !LayerOn(m.At(x, z), L)) continue;
+				if (ReachCostAt(m_reach, L, x, z) < 0 || !LayerOn(m.At(x, z), L) || TacOffMap(m.At(x, z))) continue;
 				int a = (L == m_cLayer) ? 188 : 110;
 				int blocked = block[((L * MAPN + z) * MAPN) + x];
 				DWORD moveCol = blocked ? RGBA8(220, 36, 36, a)
 					: (u.team == TEAM_PLAYER ? RGBA8(70, 150, 255, a) : RGBA8(255, 90, 150, a));
-				n = AppendOverlayQuad(dst, n, cap, x, z, moveCol, .03f, m.WalkY(x, z, L), L, 4);
+				n = AppendOverlayQuad(dst, n, cap, x, z, moveCol, .03f, m.WalkY(x, z, L), L, 6);
 			}
 		}
-		if (m_ovAtk[z][x] == 6) {
+		if (showMove && m_ovAtk[z][x] == 7 && !TacOffMap(m.At(x, z))) {
+			BYTE bits = m_ovAtkLay[z][x];
+			DWORD col = RGBA8(255, 78, 36, 210);
+			if (!bits) {
+				float y = (m_cLayer > 0 && Map::In(x, z) && LayerOn(m.At(x, z), m_cLayer)) ? m.WalkY(x, z, m_cLayer) : -999.f;
+				n = AppendOverlayQuad(dst, n, cap, x, z, col, .05f, y, y > -900.f ? m_cLayer : -1, 6);
+			} else for (int L = 0; L < LAY_N; L++) {
+				if (!(bits & (BYTE)(1 << L)) || !LayerOn(m.At(x, z), L)) continue;
+				n = AppendOverlayQuad(dst, n, cap, x, z, col, .05f, m.WalkY(x, z, L), L, 6);
+			}
+		}
+		if (!TacOffMap(m.At(x, z)) && m_ovAtk[z][x] == 6) {
 			BYTE bits = m_ovAtkLay[z][x];
 			if (!bits) {
 				float y = (m_cLayer > 0 && Map::In(x, z) && LayerOn(m.At(x, z), m_cLayer)) ? m.WalkY(x, z, m_cLayer) : -999.f;
@@ -1429,7 +1460,7 @@ int Game::BuildRangeBand(int z0, int z1, const BYTE* block, VtxS* dst, int cap) 
 				if (!(bits & (BYTE)(1 << L)) || !LayerOn(m.At(x, z), L)) continue;
 				n = AppendOverlayQuad(dst, n, cap, x, z, RGBA8(255, 210, 80, 210), .05f, m.WalkY(x, z, L), L, 4);
 			}
-		} else if (!showMove && m_ovAtk[z][x]) {
+		} else if (!showMove && m_ovAtk[z][x] && !TacOffMap(m.At(x, z))) {
 			DWORD col;
 			switch (m_ovAtk[z][x]) {
 			case 2: col = RGBA8(255, 90, 60, 70); break;
@@ -1623,6 +1654,7 @@ void Game::BuildOverlayQuads()
 		return m.WalkY(x, z, m_cLayer);
 	};
 	auto paintOpen = [&](int x, int z, DWORD c, float lift) {
+		if (!Map::In(x, z) || TacOffMap(m.At(x, z))) return;
 		int aL = (m_cur >= 0 && LayerOn(m.At(u.x, u.z), u.deck)) ? u.deck : 0;
 		int n = 0;
 		for (int L = 0; L < LAY_N; L++) {
@@ -1753,9 +1785,9 @@ void Game::BuildOverlayQuads()
 	if (TacGridOn(m_save) && m_cursorValid && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)) {
 		for (int dz = -4; dz <= 4; dz++) for (int dx = -4; dx <= 4; dx++) {
 			int tx = m_cx + dx, tz = m_cz + dz;
-			if (!Map::In(tx, tz) || m_ovMove[tz][tx] || m_ovAtk[tz][tx]) continue;
+			if (!Map::In(tx, tz) || TacOffMap(m.At(tx, tz)) || m_ovMove[tz][tx] || m_ovAtk[tz][tx]) continue;
 			int a = 50 - (abs(dx) + abs(dz)) * 6;
-			if (a > 0) quad(tx, tz, RGBA8(255, 255, 255, a), .03f, layY(tx, tz), layY(tx, tz) > -900.f ? m_cLayer : -1, 4);
+			if (a > 0) quad(tx, tz, RGBA8(255, 255, 255, a), .03f, layY(tx, tz), layY(tx, tz) > -900.f ? m_cLayer : -1, 6);
 		}
 	}
 	s_keyD = keyD;
@@ -4001,6 +4033,17 @@ void Game::DrawBattle3D()
 	};
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
+	{
+		int model[MAX_UNITS], ava[MAX_UNITS], cup[MAX_UNITS], n = 0;
+		for (int i = 0; i < m_b.nUnits && n < MAX_UNITS; i++) {
+			if (foeGone(i) || m_b.u[i].dissolve >= .5f || !nearCam(m_b.u[i]) || !inLight(m_b.u[i])) continue;
+			const Actor& a = m_act[i];
+			if (a.avatar <= 0 || a.model < 0) continue;
+			model[n] = a.model; ava[n] = a.avatar; cup[n] = a.bust; n++;
+		}
+		int pend = m_r.CountPendingAvatars(n, model, ava, cup);
+		m_r.BeginAvaBatch(pend > 0 ? pend : 1);
+	}
 	m_r.BeginInstBatch();
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
@@ -4160,83 +4203,85 @@ void Game::DrawBattle3D()
 		if (ghost) m_r.SetDepthTest(TRUE);
 	}
 	m_r.EndInstBatch();
-	for (int pass = 0; pass < 2; pass++) for (int i = 0; i < m_b.nUnits; i++) {
-		const Unit& u = m_b.u[i];
-		BOOL ghost = offLayer(i);
-		if ((pass == 0) != ghost) continue;
-		if (foeGone(i) || u.dissolve >= 1.f || !nearCam(u)) continue;
-		DrawParams dp;
-		dp.outline = .013f;
-		if (u.team == TEAM_ENEMY && u.alert == 2) dp.tint = RGBA8(255, 176, 72);
-		else if (!u.alert && u.team == TEAM_ENEMY) dp.tint = RGBA8(150, 160, 190);
-		dp.dissolve = u.dissolve;
-		dp.flash = u.flash;
-		dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
-		if (m_hoverUnit == i && m_phase != PH_ACTION) dp.rim = .9f;
-		if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && CanTarget(m_cur, i, m_phase == PH_P_TARGET ? -1 : m_cmdSkill))
-			dp.flash = max(dp.flash, .25f + .2f * sinf(m_time * 7.f));
-		if (u.alive) {
-			if (u.freeze > 0) {
-				dp.tint = RGBA8(225, 242, 255);
-				dp.flash = 0.84f;
-				dp.emissive = 0.65f;
-				dp.rim = 0.15f;
-			} else if (u.burn > 0) {
-				dp.tint = RGBA8(255, 110, 28);
-				dp.emissive = 1.25f;
-				dp.flash = max(dp.flash, 0.12f + 0.08f * sinf(m_time * 14.f));
-				dp.rim = 1.f;
-			} else if (u.poison > 0) {
-				dp.tint = RGBA8(150, 255, 90);
-				dp.emissive = 0.45f;
-				dp.rim = 0.7f;
-			} else if (u.bleed > 0) {
-				dp.tint = RGBA8(255, 70, 70);
-				dp.emissive = 0.35f;
-			} else if (u.silence > 0) {
-				dp.tint = RGBA8(190, 140, 255);
-				dp.emissive = 0.4f;
-			} else if (u.blind > 0) {
-				dp.tint = RGBA8(70, 70, 80);
-				dp.emissive = 0.05f;
-			} else if (u.slow > 0) {
-				dp.tint = RGBA8(170, 140, 90);
-			} else if (u.confuse > 0) {
-				dp.tint = RGBA8(230, 140, 255);
-				dp.emissive = 0.25f;
+	for (int pass = 0; pass < 2; pass++) {
+		if (pass == 1) m_r.BeginInstBatch();
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			BOOL ghost = offLayer(i);
+			if ((pass == 0) != ghost) continue;
+			if (foeGone(i) || u.dissolve >= 1.f || !nearCam(u)) continue;
+			DrawParams dp;
+			dp.outline = .013f;
+			if (u.team == TEAM_ENEMY && u.alert == 2) dp.tint = RGBA8(255, 176, 72);
+			else if (!u.alert && u.team == TEAM_ENEMY) dp.tint = RGBA8(150, 160, 190);
+			dp.dissolve = u.dissolve;
+			dp.flash = u.flash;
+			dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
+			if (m_hoverUnit == i && m_phase != PH_ACTION) dp.rim = .9f;
+			if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && CanTarget(m_cur, i, m_phase == PH_P_TARGET ? -1 : m_cmdSkill))
+				dp.flash = max(dp.flash, .25f + .2f * sinf(m_time * 7.f));
+			if (u.alive) {
+				if (u.freeze > 0) {
+					dp.tint = RGBA8(225, 242, 255);
+					dp.flash = 0.84f;
+					dp.emissive = 0.65f;
+					dp.rim = 0.15f;
+				} else if (u.burn > 0) {
+					dp.tint = RGBA8(255, 110, 28);
+					dp.emissive = 1.25f;
+					dp.flash = max(dp.flash, 0.12f + 0.08f * sinf(m_time * 14.f));
+					dp.rim = 1.f;
+				} else if (u.poison > 0) {
+					dp.tint = RGBA8(150, 255, 90);
+					dp.emissive = 0.45f;
+					dp.rim = 0.7f;
+				} else if (u.bleed > 0) {
+					dp.tint = RGBA8(255, 70, 70);
+					dp.emissive = 0.35f;
+				} else if (u.silence > 0) {
+					dp.tint = RGBA8(190, 140, 255);
+					dp.emissive = 0.4f;
+				} else if (u.blind > 0) {
+					dp.tint = RGBA8(70, 70, 80);
+					dp.emissive = 0.05f;
+				} else if (u.slow > 0) {
+					dp.tint = RGBA8(170, 140, 90);
+				} else if (u.confuse > 0) {
+					dp.tint = RGBA8(230, 140, 255);
+					dp.emissive = 0.25f;
+				}
 			}
+			V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
+			if (!ghost && u.deck > 0) drawPos.y += 0.04f;
+			if (ghost) {
+				dp.tint = (dp.tint & 0x00FFFFFF) | 0xA0000000;
+				m_r.SetDepthTest(FALSE);
+			}
+			ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+			if (u.alive && u.freeze > 0 && m_lib.ice.vb) {
+				DrawParams ip;
+				ip.noTess = 1;
+				ip.tint = RGBA8(236, 248, 255, 210);
+				ip.emissive = 0.75f;
+				ip.twoSided = 1;
+				ip.outline = 0.02f;
+				ip.outlineColor = RGBA8(255, 255, 255);
+				float h = m_act[i].height > 0.4f ? m_act[i].height : 1.3f;
+				int spn = UnitSpan(u);
+				float wide = max(h * 0.95f, (float)spn * 0.9f);
+				m_r.DrawStatic(m_lib.ice, MMul(MMul(MScale(wide, h * 1.15f, wide), MRotY(i * 0.35f)), MTrans(drawPos.x, drawPos.y, drawPos.z)), ip);
+			}
+			if (u.boss && u.alive) {
+				DrawParams cp;
+				cp.noTess = 1;
+				cp.emissive = .6f;
+				cp.outline = .008f;
+				if (ghost) cp.tint = 0xA0FFFFFF;
+				V3 hp = drawPos + v3(0, m_act[i].height + .22f + sinf(m_time * 2.f) * .04f, 0);
+				m_r.DrawStatic(m_lib.crown, MMul(MMul(MScale(.9f, .9f, .9f), MRotY(m_time)), MTrans(hp.x, hp.y, hp.z)), cp);
+			}
+			if (ghost) m_r.SetDepthTest(TRUE);
 		}
-		V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
-		if (!ghost && u.deck > 0) drawPos.y += 0.04f;
-		if (ghost) {
-			dp.tint = (dp.tint & 0x00FFFFFF) | 0xA0000000;
-			m_r.SetDepthTest(FALSE);
-		}
-		if (!ghost) m_r.BeginInstBatch();
-		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
-		if (u.alive && u.freeze > 0 && m_lib.ice.vb) {
-			DrawParams ip;
-			ip.noTess = 1;
-			ip.tint = RGBA8(236, 248, 255, 210);
-			ip.emissive = 0.75f;
-			ip.twoSided = 1;
-			ip.outline = 0.02f;
-			ip.outlineColor = RGBA8(255, 255, 255);
-			float h = m_act[i].height > 0.4f ? m_act[i].height : 1.3f;
-			int spn = UnitSpan(u);
-			float wide = max(h * 0.95f, (float)spn * 0.9f);
-			m_r.DrawStatic(m_lib.ice, MMul(MMul(MScale(wide, h * 1.15f, wide), MRotY(i * 0.35f)), MTrans(drawPos.x, drawPos.y, drawPos.z)), ip);
-		}
-		if (u.boss && u.alive) {
-			DrawParams cp;
-			cp.noTess = 1;
-			cp.emissive = .6f;
-			cp.outline = .008f;
-			if (ghost) cp.tint = 0xA0FFFFFF;
-			V3 hp = drawPos + v3(0, m_act[i].height + .22f + sinf(m_time * 2.f) * .04f, 0);
-			m_r.DrawStatic(m_lib.crown, MMul(MMul(MScale(.9f, .9f, .9f), MRotY(m_time)), MTrans(hp.x, hp.y, hp.z)), cp);
-		}
-		if (ghost) m_r.SetDepthTest(TRUE);
 	}
 	m_r.EndInstBatch();
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
@@ -5007,11 +5052,11 @@ void Game::DrawCutIn3D()
 			if (d > 0.35f && d < nearSub) nearSub = d;
 		}
 		if (nearSub < 0.6f) nearSub = Len(look - eye);
-		// キャラの少し奥まで抜く。壁の向こう側だけ残す。
-		float solid = nearSub + 0.35f;
-		float hide = solid - 1.55f;
-		if (hide < 0.18f) hide = 0.18f;
-		if (solid < hide + 0.45f) solid = hide + 0.45f;
+		// 体と手元の武器より手前の床・壁だけ抜く。境界を体の奥に置くと胸が穴になる。
+		float solid = nearSub - 0.85f;
+		float hide = solid - 1.25f;
+		if (hide < 0.06f) hide = 0.06f;
+		if (solid < hide + 0.35f) solid = hide + 0.35f;
 		m_r.SetCamNear(hide, solid);
 		m_r.SetCamFwd(fwd.x, fwd.y, fwd.z);
 	}
@@ -5036,8 +5081,10 @@ void Game::DrawCutIn3D()
 	auto sumWorld = [&]() {
 		return ActorWorld(m_sumAct, m_sumPos, m_sumYaw);
 	};
+	m_r.SetCutActors(TRUE);
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
+	m_r.ResetActorPipe();
 	m_r.BeginInstBatch();
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
@@ -5054,6 +5101,7 @@ void Game::DrawCutIn3D()
 		m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 		m_r.DrawTerrain();
 		m_r.DrawWater();
+		m_r.ResetActorPipe();
 		m_r.BeginInstBatch();
 		for (int k = 0; k < nId; k++) {
 			if (ids[k] < 0) continue;
@@ -5087,6 +5135,7 @@ void Game::DrawCutIn3D()
 	}
 	m_r.DrawTerrain();
 	m_r.DrawWater();
+	m_r.ResetActorPipe();
 	m_r.BeginInstBatch();
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
@@ -5159,6 +5208,7 @@ void Game::DrawCutIn3D()
 		}
 	}
 	m_r.DrawParticles(m_parts.data(), (int)m_parts.size(), &scene);
+	m_r.SetCutActors(FALSE);
 	m_r.SetSceneShift(MIdent());
 	m_r.SetCutDeck(-1);
 }
@@ -7179,11 +7229,16 @@ void Game::DrawCommandMenu()
 			}
 		}
 		BOOL canAtk = HasAttackTarget(m_cur);
-		if (!canAtk) {
+		BOOL chest = FALSE;
+		{
 			int rmax = UnitRangeMax(u);
-			for (int dz = -rmax; dz <= rmax && !canAtk; dz++) for (int dx = -rmax; dx <= rmax; dx++)
-				if (ChestInRange(m_cur, u.x + dx, u.z + dz)) canAtk = TRUE;
+			for (int dz = -rmax; dz <= rmax && !chest; dz++) for (int dx = -rmax; dx <= rmax; dx++)
+				if (ChestInRange(m_cur, u.x + dx, u.z + dz)) chest = TRUE;
 		}
+		if (chest) canAtk = TRUE;
+		const wchar_t* atkLb = chest
+			? LangPick14(L"攻撃/宝箱回収", L"Attack/Chest", L"Attaque/Coffre", L"Attacco/Forziere", L"Ataque/Cofre", L"공격/보물회수", L"攻击/宝箱回收", L"هجوم/صندوق", L"Атака/Сундук", L"Angriff/Truhe", L"Ataque/Baú", L"Aanval/Kist", L"Atak/Skrzynia", L"Saldırı/Sandık")
+			: TT(TX_BT_ATTACK);
 		float yy = y;
 		if (stuckMove) {
 			m_btnSfx = -2;
@@ -7196,8 +7251,27 @@ void Game::DrawCommandMenu()
 		auto mark = [&](int id, float by, int tx) {
 			if ((m_navMode && m_focusId == id) || (!m_navMode && m_mouseSeen && Hit(x, by, cw, bh))) desc = tx;
 		};
-		mark(ID_BT_ATTACK, yy, TX_BTD_ATTACK);
-		if (Btn(ID_BT_ATTACK, x, yy, cw, bh, TT(TX_BT_ATTACK), canAtk)) {
+		{
+			BOOL atkHov = (m_navMode && m_focusId == ID_BT_ATTACK) || (!m_navMode && m_mouseSeen && Hit(x, yy, cw, bh));
+			if (atkHov && chest)
+				descW = LangPick14(
+					L"射程内の敵を攻撃するか、宝箱を回収します。",
+					L"Attack an enemy in range, or take a chest.",
+					L"Attaque un ennemi à portée, ou prend un coffre.",
+					L"Attacca un nemico nel raggio, o prendi un forziere.",
+					L"Ataca a un enemigo a alcance, o recoge un cofre.",
+					L"사거리 안의 적을 공격하거나 보물상자를 회수합니다.",
+					L"攻击射程内的敌人，或回收宝箱。",
+					L"هاجم عدوًا ضمن المدى، أو خذ الصندوق.",
+					L"Атака по врагу в зоне, или забрать сундук.",
+					L"Greif einen Feind in Reichweite an, oder nimm eine Truhe.",
+					L"Ataque um inimigo no alcance, ou recolha um baú.",
+					L"Val een vijand binnen bereik aan, of neem een kist.",
+					L"Atakuj wroga w zasięgu albo zbierz skrzynię.",
+					L"Menzildeki düşmana saldır, ya da sandığı topla.");
+			else if (atkHov) desc = TX_BTD_ATTACK;
+		}
+		if (Btn(ID_BT_ATTACK, x, yy, cw, bh, atkLb, canAtk)) {
 			m_phase = PH_P_TARGET; m_target = -1; ComputeOverlays(); m_navMode = FALSE;
 			m_cursorValid = FALSE;
 			for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, -1)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
@@ -8629,7 +8703,7 @@ void Game::DrawBattleUi()
 			{
 				wchar_t vs[16];
 				swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
-				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs)) TacSetVsync(m_save, TacVsync(m_save) + d);
+				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs)) { TacSetVsync(m_save, TacVsync(m_save) + d); m_syncRun = -1; m_syncArmN = 0; }
 			}
 			oy += U(34);
 			if (Sel(ID_BT_OPT_WIN, bx, oy, bw, U(32), TT(TX_SET_WIN), TT(TacWinTx(TacWinMode(m_save))))) TacSetWinMode(m_save, TacWinMode(m_save) ^ 1);

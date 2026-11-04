@@ -1,4 +1,4 @@
-﻿// Soft3DTextD2D.cpp — Direct2D/DirectWrite text bake for Soft3D race/maze HUD
+// Soft3DTextD2D.cpp — Direct2D/DirectWrite text bake for Soft3D race/maze HUD
 #include "stdafx.h"
 #include "Soft3DTextD2D.h"
 
@@ -46,7 +46,23 @@ struct Soft3DTextD2DCanvas {
 	IWICBitmapLock* lock;
 	const BYTE* bits;
 	UINT stride;
+	int shared;
+	int drawing;
 };
+
+// 描画先の作成が 1 文字列ごとの主な費用なので、1 枚を使い回す。
+// 使う範囲だけを切り抜いて消し、その範囲だけを読む（範囲外へは描かれない）。
+static Soft3DTextD2DCanvas s_shared;
+static int s_sharedW = 0, s_sharedH = 0, s_sharedBusy = 0;
+
+static void Soft3DTextD2D_DropShared()
+{
+	SAFE_RELEASE(s_shared.lock);
+	SAFE_RELEASE(s_shared.rt);
+	SAFE_RELEASE(s_shared.bitmap);
+	s_sharedW = s_sharedH = 0;
+	s_sharedBusy = 0;
+}
 
 static void Soft3DTextD2D_ClearFmtCache()
 {
@@ -103,6 +119,7 @@ BOOL Soft3DTextD2D_Ensure()
 
 void Soft3DTextD2D_Shutdown()
 {
+	Soft3DTextD2D_DropShared();
 	Soft3DTextD2D_ClearFmtCache();
 	s_faceReady = 0;
 	SAFE_RELEASE(s_wic);
@@ -179,10 +196,46 @@ Soft3DTextD2DCanvas* Soft3DTextD2D_Begin(int w, int h)
 {
 	if (w < 8 || h < 8) return NULL;
 	if (!Soft3DTextD2D_Ensure()) return NULL;
+	if (!s_sharedBusy) {
+		if (!s_shared.rt || w > s_sharedW || h > s_sharedH) {
+			int nw = max(w, s_sharedW), nh = max(h, s_sharedH);
+			nw = (nw + 255) & ~255;
+			nh = (nh + 63) & ~63;
+			Soft3DTextD2D_DropShared();
+			IWICBitmap* bm = NULL;
+			ID2D1RenderTarget* rt = NULL;
+			if (SUCCEEDED(s_wic->CreateBitmap(nw, nh, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &bm)) && bm) {
+				D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+					D2D1_RENDER_TARGET_TYPE_DEFAULT,
+					D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+				if (FAILED(s_d2d->CreateWicBitmapRenderTarget(bm, props, &rt)) || !rt) { SAFE_RELEASE(bm); }
+			}
+			if (bm && rt) {
+				s_shared.bitmap = bm;
+				s_shared.rt = rt;
+				s_sharedW = nw;
+				s_sharedH = nh;
+			}
+		}
+		if (s_shared.rt) {
+			Soft3DTextD2DCanvas* c = &s_shared;
+			c->w = w; c->h = h;
+			c->lock = NULL; c->bits = NULL; c->stride = 0;
+			c->shared = 1;
+			c->drawing = 1;
+			s_sharedBusy = 1;
+			c->rt->BeginDraw();
+			c->rt->PushAxisAlignedClip(D2D1::RectF(0, 0, (float)w, (float)h), D2D1_ANTIALIAS_MODE_ALIASED);
+			c->rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+			c->rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+			c->rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+			return c;
+		}
+	}
 	Soft3DTextD2DCanvas* c = new (std::nothrow) Soft3DTextD2DCanvas();
 	if (!c) return NULL;
 	c->bitmap = NULL; c->rt = NULL; c->w = w; c->h = h;
-	c->lock = NULL; c->bits = NULL; c->stride = 0;
+	c->lock = NULL; c->bits = NULL; c->stride = 0; c->shared = 0;
 	HRESULT hr = s_wic->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &c->bitmap);
 	if (FAILED(hr) || !c->bitmap) { delete c; return NULL; }
 	D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
@@ -265,9 +318,20 @@ void Soft3DTextD2D_DrawTextShadow(Soft3DTextD2DCanvas* c, const wchar_t* text, f
 BOOL Soft3DTextD2D_End(Soft3DTextD2DCanvas* c, const BYTE** outBits, UINT* outStride)
 {
 	if (!c || !c->rt || !c->bitmap) return FALSE;
-	HRESULT hr = c->rt->EndDraw();
-	SAFE_RELEASE(c->rt);
-	if (FAILED(hr)) return FALSE;
+	HRESULT hr;
+	if (c->shared) {
+		c->drawing = 0;
+		c->rt->PopAxisAlignedClip();
+		hr = c->rt->EndDraw();
+		if (FAILED(hr)) {
+			SAFE_RELEASE(c->rt);
+			return FALSE;
+		}
+	} else {
+		hr = c->rt->EndDraw();
+		SAFE_RELEASE(c->rt);
+		if (FAILED(hr)) return FALSE;
+	}
 	WICRect rc = { 0, 0, c->w, c->h };
 	hr = c->bitmap->Lock(&rc, WICBitmapLockRead, &c->lock);
 	if (FAILED(hr) || !c->lock) return FALSE;
@@ -287,6 +351,17 @@ void Soft3DTextD2D_Release(Soft3DTextD2DCanvas* c)
 {
 	if (!c) return;
 	SAFE_RELEASE(c->lock);
+	if (c->shared) {
+		if (c->drawing && c->rt) {
+			c->rt->PopAxisAlignedClip();
+			if (FAILED(c->rt->EndDraw())) SAFE_RELEASE(c->rt);
+		}
+		c->drawing = 0;
+		c->bits = NULL;
+		s_sharedBusy = 0;
+		if (!c->rt) Soft3DTextD2D_DropShared();
+		return;
+	}
 	SAFE_RELEASE(c->rt);
 	SAFE_RELEASE(c->bitmap);
 	delete c;

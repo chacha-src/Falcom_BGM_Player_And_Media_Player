@@ -153,7 +153,8 @@ struct DrawParams {
 	int noTess;          // 1 ならテッセレーションしない。重ね着や髪は数 mm の隙間しかなく、曲面化と変位で層が入れ替わる
 	float fly;           // 0〜1。宙に浮いている人間。スカートは脚から離れて世界の下へ垂れる
 	int cape;            // 1 なら背中にマントがある。髪はマントの厚みの外を流す
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0) {}
+	float girth;         // 体型の胴の太さ（標準 1）。髪は太った胴・首・腕の外を流す
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -199,6 +200,14 @@ public:
 	void SetLoadPulse(TacLoadPulseFn fn, void* user) { m_loadFn = fn; m_loadUser = user; }
 	void LoadPulse(int cur, int total) { if (m_loadFn && total > 0) m_loadFn(cur, total, m_loadUser); }
 	BOOL LoadAssets();
+	int CountAssetPulses() const;
+	int CountGearMeshes() const;
+	void FlashAvaPct(int pct);
+	void NoteAvaPhase(int phase, int phases, int i, int n);
+	void FlashAvaLocal(int local);
+	void BeginAvaBatch(int n);
+	int CountPendingAvatars(int n, const int* model, const int* avatar, const int* cup) const;
+	BOOL ConsumeAvaFlash() { BOOL f = m_avaFlashed; m_avaFlashed = FALSE; return f; }
 	void LoadCreaturePack();
 	void LoadGearPack();
 	Fix<Rig, 192> rigs;
@@ -343,6 +352,13 @@ public:
 	int m_avaSegN;
 	int m_avaHide;
 	int m_avaLoading;
+	int m_avaPct;
+	int m_avaShown;
+	int m_avaBatchN;
+	int m_avaBatchI;
+	int m_avaBatchFrame;
+	BOOL m_avaFlashed;
+	int AvatarLoadPct() const { return m_avaPct; }
 	// 衣装ごとに、最初に頼んだフレーム。別のキャラが待ちを消さない。
 	struct AvaWait { int model, cos, cup, frame; };
 	AvaWait m_avaWait[32];
@@ -419,6 +435,9 @@ public:
 	void DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void BeginInstBatch();
 	void EndInstBatch();
+	// カットシーンのキャラ描画前。滝の定数と分割を捨て、布も置き直す。
+	void ResetActorPipe();
+	void SetCutActors(BOOL on) { m_cutActors = on; }
 	BOOL InPortrait() const { return m_inPortrait; }
 	// m の索引で、頂点だけ v に差し替えて描く（毎フレーム CPU で動かす髪など）。
 	void DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp);
@@ -460,6 +479,7 @@ public:
 	enum { PORTRAIT_N = 24, PORTRAIT_PX = 256 };
 	BOOL BeginPortrait(int slot);
 	void EndPortrait();
+	void FinishPortraits();
 	ID3D11ShaderResourceView* PortraitSrv() { return m_srvPortrait; }
 
 	// HUD
@@ -711,12 +731,15 @@ private:
 	ID3D11Buffer* m_hairScratchSB;
 	ID3D11UnorderedAccessView* m_hairScratchUAV;
 	ID3D11ShaderResourceView* m_hairScratchSRV;
-	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape);
+	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth = 1.f);
 	void ReleaseHairInst();
 	int m_scalpModel; // m_capDraw を作った体
 	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
 	Buf<VtxS> m_capBind;
 	GpuMesh m_capDraw;
+	enum { TAC_SCALP_CACHE = 32 };
+	struct ScalpEntry { int model; GpuMesh draw; Buf<VtxS> bind; };
+	ScalpEntry m_scalps[TAC_SCALP_CACHE];
 	ID3D11InputLayout* m_ilS;
 	ID3D11InputLayout* m_ilB;
 	ID3D11InputLayout* m_ilK;
@@ -732,6 +755,8 @@ private:
 	ID3D11Buffer* m_vbInst;
 	ID3D11Buffer* m_ibQuad;
 	UINT m_vbDynBytes;
+	UINT m_dynPos, m_dynOff, m_hudPos;
+	void* DynMap(UINT bytes, UINT& off);
 	ID3D11SamplerState* m_sLin;
 	ID3D11SamplerState* m_sCmp;
 	ID3D11SamplerState* m_sClamp;
@@ -772,6 +797,8 @@ private:
 	int m_fadeAbove, m_fadeX, m_fadeZ;
 	int m_cutDeck;
 	GpuMesh m_water;
+	BOOL m_cutActors;
+	unsigned m_cutActorGen;
 	GpuMesh m_lava;
 	struct PropBatch { GpuMesh mesh; float hue; float mat; };
 	Fix<PropBatch, 16> m_props;
@@ -794,8 +821,10 @@ private:
 		float wxPack[4];
 		M4 reflectVP;
 		float reflectInfo[4];
+		M4 invVP;
 	} m_fcb;
 	M4 m_lightVP;
+	M4 m_refSavedInv;
 
 	// HUD
 	Fix<VtxH, 24576> m_hud;
@@ -803,6 +832,7 @@ private:
 	enum { TAC_TEXTN = 512, TAC_TEXTK = 192 };
 	struct TextSlot { wchar_t key[TAC_TEXTK]; TextSprite sp; int live; };
 	TextSlot m_text[TAC_TEXTN];
+	UINT m_textHash[TAC_TEXTN];
 	BOOL m_inPortrait;
 	BOOL m_instOn;
 	int m_portraitSlot;

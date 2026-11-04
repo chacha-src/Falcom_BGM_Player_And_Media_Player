@@ -20,6 +20,7 @@ cbuffer Frame : register(b0)
 	float4 Wx;       // x=天候 y=時刻。地面の反射に使う
 	row_major float4x4 ReflectVP;
 	float4 ReflectInfo; // x=映す y=床の高さ z=反射パス(1=上面を捨てる 2=上面も残す) w=ぼかし幅
+	row_major float4x4 InvVP;
 };
 cbuffer Obj : register(b1)
 {
@@ -118,7 +119,7 @@ float vnoise(float2 p)
 	float2 u = f * f * (3. - 2. * f);
 	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
-float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
+float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 6; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
 
 float2 Curl2(float2 p)
 {
@@ -127,6 +128,26 @@ float2 Curl2(float2 p)
 	float nx = fbm2(p + float2(e, 0));
 	float ny = fbm2(p + float2(0, e));
 	return float2(n0 - ny, nx - n0);
+}
+
+// 画面の位置から、カメラの世界視線を作る。空・奈落・ポストの模様はすべてこれに乗せる。
+float3 WorldRay(float2 uv)
+{
+	float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.99, 1.0);
+	float4 wp = mul(clip, InvVP);
+	float3 p = wp.xyz / max(abs(wp.w), 1e-5);
+	float3 d = p - Eye.xyz;
+	float l = length(d);
+	return l > 1e-5 ? d / l : float3(0, 0, 1);
+}
+
+// 視線が高さ h の水平面を貫く世界座標 xz。カメラを回しても地面や空の層に固定される。
+float2 PlaneXZ(float3 rd, float h, float minSlope)
+{
+	float dy = rd.y;
+	float s = abs(dy) < minSlope ? (dy < 0 ? -minSlope : minSlope) : dy;
+	float dist = clamp((h - Eye.y) / s, -220.0, 220.0);
+	return Eye.xz + rd.xz * dist;
 }
 
 float Sparkle(float2 xz, float t, float dens, float cut)
@@ -138,9 +159,9 @@ float Sparkle(float2 xz, float t, float dens, float cut)
 
 float CausAt(float2 xz, float t)
 {
-	float2 c1 = xz * 0.8 + t * float2(0.15, 0.05);
-	float2 c2 = xz * 1.3 - t * float2(0.07, 0.12);
-	float2 c3 = xz * 2.15 + t * float2(-0.09, 0.11);
+	float2 c1 = xz * 1.7 + t * float2(0.22, 0.08);
+	float2 c2 = xz * 2.6 - t * float2(0.11, 0.18);
+	float2 c3 = xz * 4.2 + t * float2(-0.14, 0.16);
 	float a = saturate(sin(c1.x * 6.2) * sin(c1.y * 5.4) + sin(c2.x * 4.8) * sin(c2.y * 5.1));
 	float b = saturate(sin(c3.x * 7.1) * sin(c3.y * 6.4));
 	return pow(a, 2) + pow(b, 2) * 0.45;
@@ -214,7 +235,8 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 	float3 w = mul(float4(v.p, 1), WM).xyz;
 	float3 n = normalize(mul(v.n, (float3x3)WM));
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
-	if (Params.y > 0.5 && Params.y < 1.5) {
+	// 体は noTess で OutlineColor.a=2。滝の mode が定数に残っても、人や敵の頂点は流さない。
+	if (OutlineColor.a < 1.5 && Params.y > 0.5 && Params.y < 1.5) {
 		if (n.y > 0.45) {
 			float t = Eye.w;
 			float th = FogColor.a;
@@ -233,7 +255,7 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 			w = FallLean(w, n, 0.74);
 			w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmt() * 0.08);
 		}
-	} else if (Params.y > 1.5 && Params.y < 2.5) {
+	} else if (OutlineColor.a < 1.5 && Params.y > 1.5 && Params.y < 2.5) {
 		if (n.y > 0.45) {
 			float t = Eye.w;
 			float2 flow = v.c.rg * 2.0 - 1.0;
@@ -575,9 +597,9 @@ void CamShell(float4 spos, float3 w)
 	float a0 = CamNear.x;
 	float a1 = CamNear.y;
 	if (a1 <= a0 + 0.001) return;
-	// 視点が大きな岩の中に入ったとき、レンズ周りの殻は奥の壁より手前なのでここで消す。
-	if (length(w - Eye.xyz) < 1.15) { clip(-1); return; }
 	float d = dot(w - Eye.xyz, CamFwd.xyz);
+	// 視点が岩にめり込んだときのレンズ周りの殻だけ消す。寄りカットの体は奥にあるので残す。
+	if (d < a0 && length(w - Eye.xyz) < 0.28) { clip(-1); return; }
 	float keep = saturate((d - a0) / (a1 - a0));
 	keep = keep * keep;
 	if (keep > 0.985) return;
@@ -868,6 +890,8 @@ void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, f
 GOut PSWater(PSIn i)
 {
 	CamShell(i.pos, i.w);
+	// カットインは寄りなので、滝や淵の縦幕が体を横切ると胸や裾が抜けて見える。水面だけ残す。
+	if (i.n.y < 0.45 && CamNear.y > CamNear.x + 0.001) discard;
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.45) discard;
 	float3 v = normalize(Eye.xyz - i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
@@ -1003,6 +1027,7 @@ GOut LavaFall(PSIn i)
 GOut PSLava(PSIn i)
 {
 	CamShell(i.pos, i.w);
+	if (i.n.y < 0.45 && CamNear.y > CamNear.x + 0.001) discard;
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
 	float3 v = normalize(Eye.xyz - i.w);
 	float t = Eye.w;
@@ -1040,6 +1065,163 @@ GOut PSLava(PSIn i)
 		col += float3(1, 0.25, 0.02) * heat * 0.08;
 	}
 	return Emit(float4(col, 1), i.w);
+}
+
+// 14マップそれぞれの地表エフェクト。キャラと移動マスは別で描くので、地面の上はある程度重なってもよい。
+void GroundSurfaceLayer(float theme, float3 w, float3 n, float cliff, float t, float gust, inout float3 albedo, inout float3 nLit, inout float rough, inout float3 glow)
+{
+	float up = saturate((n.y - 0.55) * 3.0) * (1.0 - cliff);
+	if (up < 0.02) return;
+	float2 xz = w.xz;
+	if (theme < 0.5) {
+		float2 windP = xz * float2(0.55, 0.22) - float2(t * (1.6 + gust * 1.4), t * 0.35);
+		float wave = fbm2(windP) * fbm2(windP * 2.1 + 3.7);
+		float2 bladeG = xz * 18.0 + Curl2(xz * 0.9 - t * 0.4) * 1.6;
+		float blade = smoothstep(0.58, 0.88, fbm2(bladeG));
+		float2 petG = xz * 2.8 - float2(t * 0.9, t * 0.25);
+		float2 petC = floor(petG);
+		float2 petF = frac(petG) - 0.5 - (hash22(petC) - 0.5) * 0.45;
+		float petal = smoothstep(0.11, 0.02, length(petF)) * step(0.82, hash21(petC));
+		albedo = lerp(albedo, float3(0.46, 0.72, 0.26), blade * up * 0.38);
+		albedo = lerp(albedo, float3(0.78, 0.92, 0.48), smoothstep(0.28, 0.62, wave) * up * 0.42);
+		albedo = lerp(albedo, float3(1.0, 0.92, 0.58), petal * up * 0.65);
+		glow += float3(0.65, 0.88, 0.32) * smoothstep(0.38, 0.72, wave) * up * 0.22;
+		glow += float3(1.0, 0.95, 0.62) * petal * up * 0.38;
+	} else if (theme < 1.5) {
+		float2 dp = xz * float2(0.48, 0.95) - float2(t * (1.2 + gust * 1.1), t * 0.28);
+		float3 c = float3(fbm2(dp), fbm2(dp * 2.3 + 5.1), fbm2(xz * 6.5 - t * 2.2));
+		float devil = smoothstep(0.42, 0.78, c.x * 0.65 + c.y * 0.55);
+		float2 v = VoronoiGap(xz * 3.4);
+		float crack = 1.0 - smoothstep(0.015, 0.055, v.y);
+		albedo = lerp(albedo, float3(0.32, 0.18, 0.1), crack * up * 0.55);
+		albedo = lerp(albedo, float3(0.92, 0.64, 0.38), devil * up * 0.52);
+		glow += float3(1.0, 0.66, 0.32) * devil * (0.28 + c.z * 0.24) * up;
+	} else if (theme < 2.5) {
+		float2 rootV = VoronoiGap(xz * 1.35 + Curl2(xz * 0.4) * 0.35);
+		float root = 1.0 - smoothstep(0.03, 0.11, rootV.y);
+		float2 canP = xz * 0.72 + float2(sin(t * 0.35) * 0.4, cos(t * 0.28) * 0.4);
+		float sunPatch = pow(saturate(fbm2(canP) * 1.35 - 0.25), 2.2);
+		float2 spG = xz * 3.6 + float2(sin(t * 0.4 + xz.y), cos(t * 0.35 - xz.x)) * 0.35;
+		float2 spC = floor(spG);
+		float spore = smoothstep(0.14, 0.02, length(frac(spG) - 0.5 - (hash22(spC) - 0.5) * 0.4)) * step(0.76, hash21(spC));
+		albedo = lerp(albedo, float3(0.18, 0.34, 0.14), root * up * 0.55);
+		albedo = lerp(albedo, float3(0.58, 0.84, 0.34), sunPatch * up * 0.38);
+		glow += float3(0.82, 1.0, 0.42) * sunPatch * up * 0.28;
+		glow += float3(0.55, 1.0, 0.48) * spore * up * 0.52;
+	} else if (theme < 3.5) {
+		float2 sp = xz * float2(0.85, 0.32) - float2(t * (1.8 + gust * 1.6), t * 0.4);
+		float spindrift = smoothstep(0.38, 0.76, fbm2(sp) * 0.65 + fbm2(sp * 2.7) * 0.5);
+		float2 v1 = VoronoiGap(xz * 1.8);
+		float2 v2 = VoronoiGap(xz * 4.2 + 2.3);
+		float fracLine = (1.0 - smoothstep(0.01, 0.045, v1.y)) + (1.0 - smoothstep(0.012, 0.05, v2.y)) * 0.6;
+		albedo = lerp(albedo, float3(0.52, 0.78, 0.96), saturate(fracLine) * up * 0.48);
+		albedo = lerp(albedo, float3(0.96, 0.98, 1.0), spindrift * up * 0.54);
+		rough = lerp(rough, 0.06, saturate(fracLine * 0.5) * up);
+		glow += float3(0.78, 0.92, 1.0) * (spindrift * 0.26 + saturate(fracLine) * 0.22) * up;
+	} else if (theme < 4.5) {
+		float2 rp = xz * float2(6.2, 1.4) + sin(xz.yx * 1.8) * 0.65;
+		float ridge = 0.5 + 0.5 * sin(rp.x - t * 0.8 + fbm2(xz * 2.0) * 3.0);
+		float2 streamP = xz * float2(0.55, 2.2) - float2(t * (2.4 + gust * 1.8), t * 0.4);
+		float stream = smoothstep(0.42, 0.78, fbm2(streamP) * 0.7 + fbm2(streamP * 2.4) * 0.45);
+		albedo = lerp(albedo, float3(0.96, 0.78, 0.46), ridge * up * 0.34);
+		albedo = lerp(albedo, float3(1.0, 0.88, 0.58), stream * up * 0.52);
+		nLit = normalize(nLit + float3(cos(rp.x) * 0.22, 0, sin(rp.x) * 0.08) * up);
+		glow += float3(1.0, 0.8, 0.38) * stream * up * 0.26;
+	} else if (theme < 5.5) {
+		float2 v1 = VoronoiGap(xz * 1.15 + Curl2(xz * 0.35) * 0.25);
+		float2 v2 = VoronoiGap(xz * 2.8 - float2(t * 0.04, 0));
+		float magma = (1.0 - smoothstep(0.018, 0.085, v1.y)) + (1.0 - smoothstep(0.015, 0.06, v2.y)) * 0.55;
+		float ash = smoothstep(0.36, 0.74, fbm2(xz * 0.9 - float2(t * 0.45, t * 0.22)));
+		float throb = 0.72 + 0.28 * sin(t * 2.6 + v1.x * 8.0);
+		albedo = lerp(albedo, float3(0.12, 0.09, 0.08), ash * up * 0.58);
+		albedo = lerp(albedo, float3(1.0, 0.32, 0.04), saturate(magma) * up * 0.62);
+		glow += float3(1.0, 0.36, 0.04) * saturate(magma) * throb * up * 0.78;
+	} else if (theme < 6.5) {
+		float2 mp = xz * 0.68 + Curl2(xz * 0.4 + t * 0.08) * 0.85;
+		float miasma = smoothstep(0.34, 0.72, fbm2(mp + float2(t * 0.22, -t * 0.14)));
+		float2 rg = xz * 2.4;
+		float2 rc = floor(rg);
+		float2 rf = frac(rg) - 0.5 - (hash22(rc) - 0.5) * 0.35;
+		float ph = frac(t * 0.45 + hash21(rc));
+		float ring = exp(-abs(length(rf) - ph * 0.42) * 28.0) * (1.0 - ph) * step(0.58, hash21(rc + 4.1));
+		albedo = lerp(albedo, float3(0.24, 0.44, 0.18), miasma * up * 0.52);
+		rough = lerp(rough, 0.08, miasma * up * 0.6);
+		glow += float3(0.38, 0.92, 0.28) * (miasma * 0.26 + ring * 0.85) * up;
+	} else if (theme < 7.5) {
+		float2 tile = frac(xz) - 0.5;
+		float2 tid = floor(xz);
+		float th = hash21(tid);
+		float r = length(tile);
+		float circ = exp(-abs(r - 0.36) * 42.0) + exp(-abs(r - 0.22) * 48.0) * 0.7;
+		float spoke = exp(-abs( sin(atan2(tile.y, tile.x) * 4.0 + th * 6.0) ) * 16.0) * step(r, 0.36);
+		float sigil = saturate(circ + spoke * 0.65) * step(0.62, th) * (0.55 + 0.45 * sin(t * 1.8 + th * 12.0));
+		float dust = smoothstep(0.42, 0.76, fbm2(xz * 0.85 + float2(t * 0.18, -t * 0.12)));
+		albedo = lerp(albedo, float3(0.52, 0.78, 1.0), sigil * up * 0.48);
+		glow += float3(0.42, 0.76, 1.0) * sigil * up * 0.72;
+		glow += float3(0.55, 0.7, 0.95) * dust * up * 0.18;
+	} else if (theme < 8.5) {
+		float c1 = CausAt(xz * 1.35 + Curl2(xz * 0.5 + t * 0.1) * 0.35, t * 1.2);
+		float c2 = CausAt(xz * 2.6 - float2(t * 0.18, t * 0.11), t * 0.85);
+		float net = saturate(c1 * 0.7 + c2 * 0.55);
+		float2 bg = xz * 3.8 + float2(sin(t * 0.6 + xz.y), cos(t * 0.5 - xz.x)) * 0.25;
+		float2 bc = floor(bg);
+		float bio = smoothstep(0.12, 0.015, length(frac(bg) - 0.5 - (hash22(bc) - 0.5) * 0.4)) * step(0.68, hash21(bc));
+		albedo = lerp(albedo, float3(0.28, 0.78, 0.95), net * up * 0.45);
+		glow += float3(0.24, 0.82, 1.0) * net * up * 0.42;
+		glow += float3(0.15, 1.0, 0.78) * bio * (0.6 + 0.4 * sin(t * 3.0 + hash21(bc) * 20.0)) * up * 0.65;
+	} else if (theme < 9.5) {
+		float2 sp = xz * float2(1.4, 0.65) - float2(0, t * 1.8);
+		float mist = smoothstep(0.32, 0.72, fbm2(sp) * 0.65 + fbm2(sp * 2.4 + 1.9) * 0.5);
+		float2 rg = xz * 3.2;
+		float2 rc = floor(rg);
+		float ph = frac(t * 0.85 + hash21(rc));
+		float ring = exp(-abs(length(frac(rg) - 0.5) - ph * 0.44) * 32.0) * (1.0 - ph);
+		albedo = lerp(albedo, float3(0.86, 0.95, 1.0), mist * up * 0.5);
+		rough = lerp(rough, 0.08, up * 0.55);
+		glow += float3(0.78, 0.92, 1.0) * (mist * 0.28 + ring * 0.48) * up;
+	} else if (theme < 10.5) {
+		float2 np = xz * 0.52 + Curl2(xz * 0.28 - t * 0.05) * 0.6;
+		float neb = smoothstep(0.34, 0.74, fbm2(np + t * 0.08));
+		float2 hex = abs(frac(xz * 2.0) - 0.5);
+		float grid = smoothstep(0.45, 0.495, max(hex.x, hex.y));
+		float pulse = 0.5 + 0.5 * sin(t * 2.2 - length(xz - 32.0) * 0.45);
+		float3 nCol = lerp(float3(0.52, 0.18, 0.95), float3(0.15, 0.65, 1.0), fbm2(np * 1.9 + 3.0));
+		albedo = lerp(albedo, nCol, neb * up * 0.46);
+		glow += nCol * neb * up * 0.38;
+		glow += float3(0.45, 0.82, 1.0) * grid * (0.35 + pulse * 0.65) * up * 0.55;
+	} else if (theme < 11.5) {
+		float2 g1 = abs(frac(xz) - 0.5);
+		float2 g4 = abs(frac(xz * 4.0) - 0.5);
+		float seam = smoothstep(0.465, 0.495, max(g1.x, g1.y));
+		float trace = smoothstep(0.45, 0.49, min(g4.x, g4.y)) * step(0.55, hash21(floor(xz * 4.0)));
+		float wave = pow(0.5 + 0.5 * sin(xz.x * 0.55 + xz.y * 0.35 - t * 2.4), 6.0);
+		float steam = smoothstep(0.46, 0.78, fbm2(xz * 0.9 + float2(t * 0.35, -t * 0.18)));
+		albedo = lerp(albedo, float3(0.18, 0.24, 0.3), seam * up * 0.55);
+		glow += float3(0.2, 0.88, 1.0) * (trace * (0.4 + wave * 0.8) + seam * wave * 0.45) * up * 0.65;
+		glow += float3(0.65, 0.8, 0.92) * steam * up * 0.2;
+	} else if (theme < 12.5) {
+		float2 tile = frac(xz * 0.5) - 0.5;
+		float2 tid = floor(xz * 0.5);
+		float r = length(tile);
+		float tracery = exp(-abs(r - 0.38) * 36.0) + exp(-abs(abs(tile.x) - abs(tile.y)) * 42.0) * step(r, 0.38);
+		float glass = smoothstep(0.38, 0.74, fbm2(xz * 0.65 + float2(0.08, 0.05) * t));
+		float3 gCol = lerp(float3(0.75, 0.32, 1.0), float3(1.0, 0.72, 0.28), fbm2(xz * 0.9 + 4.2));
+		albedo = lerp(albedo, gCol, glass * up * 0.36);
+		glow += gCol * glass * up * 0.32;
+		glow += float3(0.88, 0.68, 1.0) * saturate(tracery) * (0.55 + 0.45 * sin(t * 1.6 + hash21(tid) * 8.0)) * up * 0.52;
+	} else {
+		float2 g = xz * 1.25 + float2(sin(t * 0.25 + xz.y * 0.2), cos(t * 0.2 - xz.x * 0.2)) * 0.25;
+		float2 lc = floor(g);
+		float2 lf = frac(g) - 0.5 - (hash22(lc) - 0.5) * 0.35;
+		float lh = hash21(lc);
+		float pool = exp(-dot(lf, lf) * 14.0) * step(0.52, lh);
+		float2 mistP = xz * 0.62 + Curl2(xz * 0.35 + t * 0.08) * 0.55;
+		float mist = smoothstep(0.36, 0.74, fbm2(mistP - float2(t * 0.16, t * 0.08)));
+		albedo = lerp(albedo, float3(1.0, 0.76, 0.36), pool * up * 0.45);
+		albedo = lerp(albedo, float3(0.72, 0.78, 0.96), mist * up * 0.38);
+		glow += float3(1.0, 0.74, 0.32) * pool * (0.75 + 0.25 * sin(t * 2.4 + lh * 15.0)) * up * 0.72;
+		glow += float3(0.95, 0.82, 0.55) * mist * up * 0.22;
+	}
 }
 
 GOut GroundPS(PSIn i, float theme)
@@ -1282,6 +1464,7 @@ GOut GroundPS(PSIn i, float theme)
 		nLit = normalize(nLit + float3(curl.x, 0.03, curl.y) * 0.06);
 	}
 	float tier = StageTier();
+	GroundSurfaceLayer(theme, i.w, n, cliff, Eye.w, burst, albedo, nLit, rough, glow);
 	if (tier > 0.5 || dedicated) {
 		float rep = dedicated ? (cliff > 0.5 ? 0.36 : 0.5) : (cliff > 0.5 ? 0.22 : 0.15);
 		float2 puv = i.w.xz * rep;
@@ -1402,8 +1585,11 @@ GOut GroundPS(PSIn i, float theme)
 		float3 H = normalize(L + v);
 		float sp = pow(saturate(dot(nLit, H)), Q.x > 5.5 ? 52. : 30.);
 		col += float3(1, 0.98, 0.92) * sp * saturate(dot(nLit, L)) * (Q.x > 5.5 ? 0.09 : 0.045);
-		float micro = fbm2(i.w.xz * (Q.x > 5.5 ? 14. : 8.));
-		col *= 0.94 + micro * (Q.x > 5.5 ? 0.12 : 0.07);
+	}
+	{
+		float microF = (Q.x > 5.5) ? 28.0 : ((Q.x > 2.5) ? 18.0 : 11.0);
+		float micro = fbm2(i.w.xz * microF + i.w.y * 2.0);
+		col *= 0.95 + micro * ((Q.x > 4.5) ? 0.09 : 0.05);
 	}
 	if (StageTier() > 1.5) {
 		float gloss = FloorGloss(theme, nLit.y, i.w.xz);
@@ -1493,26 +1679,34 @@ GOut PSO(PSIn i)
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
 		clip(nz - (Extra.x * 1.1 - 0.05));
 	}
-	return Emit(float4(lerp(OutlineColor.rgb, float3(1, 1, 1), Extra.y), OutlineColor.a * Tint.a), i.w);
+	float oa = OutlineColor.a > 1.5 ? 1.0 : OutlineColor.a;
+	return Emit(float4(lerp(OutlineColor.rgb, float3(1, 1, 1), Extra.y), oa * Tint.a), i.w);
 }
 
 GOut PSOV(PSIn i)
 {
-	// 移動・攻撃範囲セル。uv=セル内座標
+	// 移動・攻撃範囲。セル座標と世界座標の二重模様。タイル自体は透けて読める。
 	float2 g = abs(i.uv - 0.5) * 2.;
 	float edge = max(g.x, g.y);
 	float t = Eye.w;
-	float pulse = 0.82 + 0.18 * sin(t * 4.0 + (i.w.x + i.w.z) * 0.6);
-	float border = smoothstep(0.72, 0.96, edge);
-	float inner = 0.42 + 0.25 * smoothstep(0.0, 0.9, edge);
-	float a = (inner + border * 0.9) * i.c.a * Tint.a * pulse;
-	float3 c = i.c.rgb * Tint.rgb * (1. + border * 0.6);
+	float pulse = 0.92 + 0.08 * sin(t * 4.2 + (i.w.x + i.w.z) * 0.8);
+	float2 cell = abs(frac(i.w.xz * 12.0) - 0.5);
+	float hair = smoothstep(0.41, 0.49, max(cell.x, cell.y));
+	float2 fine = abs(frac(i.w.xz * 28.0) - 0.5);
+	float grain = smoothstep(0.45, 0.5, max(fine.x, fine.y)) * 0.32;
+	float2 d2 = abs(frac(float2(i.w.x + i.w.z, i.w.x - i.w.z) * 5.0) - 0.5);
+	float fil = smoothstep(0.45, 0.495, min(d2.x, d2.y)) * 0.25;
+	float corner = smoothstep(0.68, 0.74, g.x) * smoothstep(0.68, 0.74, g.y);
+	float border = smoothstep(0.89, 0.96, edge) * (1.0 - smoothstep(0.985, 1.0, edge));
+	float innerLine = smoothstep(0.76, 0.81, edge) * (1.0 - smoothstep(0.82, 0.86, edge)) * 0.45;
+	float inner = 0.24 + 0.16 * smoothstep(0.18, 0.9, edge);
+	float a = (inner + hair * 0.2 + grain + fil + innerLine + border * 0.88 + corner * border * 0.25) * i.c.a * Tint.a * pulse;
+	float3 c = i.c.rgb * Tint.rgb * (0.84 + hair * 0.26 + fil * 0.35 + (border + innerLine) * 0.58);
 	if (Params.y > 0.5) {
-		// カーソル: 角だけ光る枠
-		float corner = step(0.62, g.x) * step(0.62, g.y);
-		float frame = smoothstep(0.82, 0.9, edge) * (1. - smoothstep(0.98, 1.0, edge));
-		a = (frame * (0.55 + corner * 0.45) + 0.12) * i.c.a * Tint.a;
-		c = i.c.rgb * Tint.rgb * (1.2 + corner);
+		float cnr = step(0.7, g.x) * step(0.7, g.y);
+		float frame = smoothstep(0.89, 0.95, edge) * (1.0 - smoothstep(0.985, 1.0, edge));
+		a = (frame * (0.72 + cnr * 0.28) + hair * 0.1 + fil * 0.12) * i.c.a * Tint.a;
+		c = i.c.rgb * Tint.rgb * (1.16 + cnr * 0.28 + hair * 0.22);
 	}
 	return Emit(float4(c, saturate(a)), i.w);
 }
@@ -1626,6 +1820,191 @@ QOut VSQ(uint id : SV_VertexID)
 	o.uv = p;
 	return o;
 }
+// 空の天井と、盤面の下に広がる奈落。すべてカメラの視線 rd の世界座標で描く。
+void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
+{
+	float yaw = atan2(rd.x, rd.z);
+	float up = saturate(rd.y * 2.2 + 0.15);
+	float down = saturate(-rd.y * 2.4 + 0.2);
+	float rim = exp(-abs(rd.y) * 5.5);
+	float2 skyXZ = rd.xz / max(abs(rd.y) + 0.16, 0.16) * 14.0;
+	float2 pit1 = PlaneXZ(rd, -8.0, 0.09) * 0.14;
+	float2 pit2 = PlaneXZ(rd, -22.0, 0.09) * 0.07;
+	float2 pit3 = PlaneXZ(rd, -44.0, 0.09) * 0.035;
+	if (ths < 0.5) {
+		float c1 = fbm2(skyXZ * 0.22 + float2(-t * (0.18 + gust * 0.22), t * 0.04));
+		float c2 = fbm2(skyXZ * 0.52 + float2(-t * 0.32, -t * 0.08) + 3.1);
+		float cloud = smoothstep(0.36, 0.76, c1 * 0.6 + c2 * 0.5);
+		c = lerp(c, float3(0.98, 0.99, 1.0), cloud * up * 0.55);
+		float sea1 = fbm2(pit1 + float2(-t * 0.25, t * 0.08));
+		float sea2 = fbm2(pit2 * 1.8 + float2(-t * 0.14, -t * 0.05));
+		float billow = smoothstep(0.3, 0.74, sea1 * 0.6 + sea2 * 0.5);
+		float3 abyss = lerp(float3(0.32, 0.52, 0.74), float3(0.88, 0.95, 1.0), billow);
+		float shaft = pow(0.5 + 0.5 * sin(yaw * 9.0 - t * 0.35 + sea1 * 3.0), 8.0);
+		abyss += float3(1.0, 0.96, 0.78) * shaft * 0.28;
+		c = lerp(c, abyss, down * 0.88);
+		c += float3(0.85, 0.94, 1.0) * rim * 0.22;
+	} else if (ths < 1.5) {
+		float mesa = fbm2(float2(yaw * 3.5, 1.2)) * 0.18;
+		float ridge = smoothstep(mesa + 0.06, mesa - 0.02, abs(rd.y + 0.04));
+		c = lerp(c, float3(0.36, 0.16, 0.08), ridge * rim * 0.65);
+		float d1 = fbm2(pit1 * 1.4 - float2(t * 0.38, t * 0.12));
+		float d2 = fbm2(pit2 * 2.6 + float2(t * 0.22, -t * 0.18));
+		float strata = 0.5 + 0.5 * sin(rd.y * 48.0 + d1 * 5.0);
+		float3 gorge = lerp(float3(0.18, 0.07, 0.03), float3(0.78, 0.38, 0.16), saturate(d1 * 0.7 + strata * 0.35));
+		gorge += float3(1.0, 0.58, 0.22) * pow(saturate(d2), 2.4) * 0.42;
+		c = lerp(c, gorge, down * 0.9);
+		c += float3(1.0, 0.56, 0.24) * rim * 0.28;
+	} else if (ths < 2.5) {
+		float can = fbm2(skyXZ * 0.38 + float2(t * 0.04, 0));
+		float ray = pow(0.5 + 0.5 * sin(yaw * 14.0 + can * 2.5 - t * 0.18), 10.0);
+		c += float3(0.72, 1.0, 0.45) * ray * (up + rim * 0.6) * 0.32;
+		float2 rv1 = VoronoiGap(pit1 * 2.2);
+		float2 rv2 = VoronoiGap(pit2 * 3.4 + 1.7);
+		float roots = (1.0 - smoothstep(0.02, 0.09, rv1.y)) + (1.0 - smoothstep(0.025, 0.1, rv2.y)) * 0.6;
+		float mist = fbm2(pit1 * 1.2 + float2(t * 0.12, -t * 0.09));
+		float2 sp = floor(pit1 * 9.0 + float2(0, t * 0.8));
+		float fly = step(0.95, hash21(sp)) * (0.5 + 0.5 * sin(t * 4.0 + hash21(sp) * 20.0));
+		float3 deep = lerp(float3(0.03, 0.1, 0.05), float3(0.16, 0.42, 0.22), mist);
+		deep = lerp(deep, float3(0.22, 0.16, 0.09), saturate(roots) * 0.65);
+		deep += float3(0.62, 1.0, 0.38) * (ray * 0.22 + fly * 0.65);
+		c = lerp(c, deep, down * 0.92);
+	} else if (ths < 3.5) {
+		float2 ap = float2(yaw * 2.2 + t * 0.06, rd.y * 3.4);
+		float a1 = fbm2(ap + float2(0, fbm2(ap * 1.8) * 0.8));
+		float a2 = fbm2(ap * 2.1 - float2(t * 0.04, 1.7));
+		float aur = pow(saturate(a1 * 0.62 + a2 * 0.52), 1.4) * up;
+		c += lerp(float3(0.12, 0.92, 0.58), float3(0.38, 0.45, 1.0), a2) * aur * 0.55;
+		float2 cv1 = VoronoiGap(pit1 * 2.6);
+		float2 cv2 = VoronoiGap(pit2 * 4.0);
+		float rift = (1.0 - smoothstep(0.015, 0.07, cv1.y)) + (1.0 - smoothstep(0.02, 0.08, cv2.y)) * 0.65;
+		float3 crev = lerp(float3(0.03, 0.09, 0.18), float3(0.22, 0.58, 0.86), fbm2(pit1 * 1.6));
+		crev += float3(0.55, 0.88, 1.0) * saturate(rift) * 0.62;
+		c = lerp(c, crev, down * 0.92);
+	} else if (ths < 4.5) {
+		float mir = fbm2(float2(yaw * 4.0 - t * 0.22, rd.y * 12.0));
+		c += float3(1.0, 0.78, 0.38) * (rim * 0.32 + mir * up * 0.16);
+		float w1 = fbm2(pit1 * 1.8 - float2(t * 0.55, t * 0.18));
+		float w2 = fbm2(pit2 * 3.2 - float2(t * 0.85, -t * 0.24));
+		float swirl = sin(atan2(pit1.y, pit1.x) * 3.0 + length(pit1) * 1.4 - t * 1.6) * 0.5 + 0.5;
+		float3 sea = lerp(float3(0.26, 0.16, 0.06), float3(0.88, 0.66, 0.32), saturate(w1 * 0.65 + w2 * 0.45));
+		sea += float3(1.0, 0.82, 0.42) * pow(swirl * w1, 2.0) * 0.38;
+		c = lerp(c, sea, down * 0.9);
+	} else if (ths < 5.5) {
+		float ash = fbm2(skyXZ * 0.35 - float2(t * 0.12, t * 0.28));
+		c = lerp(c, float3(0.14, 0.05, 0.03), ash * up * 0.55);
+		c += float3(1.0, 0.3, 0.04) * pow(ash, 2.4) * (up * 0.35 + rim * 0.45);
+		float2 mv1 = VoronoiGap(pit1 * 1.9 + float2(t * 0.05, -t * 0.03));
+		float2 mv2 = VoronoiGap(pit2 * 3.4 - float2(t * 0.08, t * 0.04));
+		float vein1 = 1.0 - smoothstep(0.015, 0.09, mv1.y);
+		float vein2 = 1.0 - smoothstep(0.018, 0.08, mv2.y);
+		float3 cald = float3(0.07, 0.02, 0.01);
+		cald += float3(1.0, 0.28, 0.02) * vein1 * 1.15;
+		cald += float3(1.0, 0.65, 0.12) * vein2 * 0.65;
+		cald += float3(1.0, 0.22, 0.02) * pow(fbm2(pit3 * 2.0 - t * 0.2), 2.2) * 0.55;
+		c = lerp(c, cald, down * 0.95);
+	} else if (ths < 6.5) {
+		float gas = fbm2(skyXZ * 0.32 + Curl2(skyXZ * 0.18 + t * 0.05) * 0.6);
+		c += float3(0.38, 0.88, 0.28) * pow(gas, 2.0) * (up * 0.28 + rim * 0.35);
+		float m1 = fbm2(pit1 * 1.5 + Curl2(pit1 * 0.8 + t * 0.1));
+		float m2 = fbm2(pit2 * 2.8 - float2(t * 0.16, t * 0.12));
+		float2 wc = floor(pit1 * 4.5);
+		float2 wf = frac(pit1 * 4.5) - 0.5 - (hash22(wc) - 0.5) * 0.4;
+		float orb = exp(-dot(wf, wf) * 18.0) * step(0.72, hash21(wc)) * (0.5 + 0.5 * sin(t * 2.4 + hash21(wc) * 16.0));
+		float3 bog = lerp(float3(0.03, 0.08, 0.03), float3(0.22, 0.48, 0.16), saturate(m1 * 0.65 + m2 * 0.45));
+		bog += float3(0.48, 1.0, 0.35) * orb * 0.95;
+		c = lerp(c, bog, down * 0.92);
+	} else if (ths < 7.5) {
+		float r = length(pit1);
+		float a = atan2(pit1.y, pit1.x);
+		float ring1 = exp(-abs(frac(r * 0.35 - t * 0.05) - 0.5) * 22.0);
+		float ring2 = exp(-abs(frac(r * 0.7 + t * 0.04) - 0.5) * 26.0);
+		float glyph = step(0.65, sin(a * 12.0 + floor(r * 0.7) * 2.3 + t * 0.4));
+		float3 sanc = lerp(float3(0.04, 0.05, 0.12), float3(0.14, 0.22, 0.44), fbm2(pit2 * 1.6));
+		sanc += float3(0.45, 0.78, 1.0) * (ring1 * 0.55 + ring2 * glyph * 0.75);
+		c = lerp(c, sanc, down * 0.92);
+		float skyR = exp(-abs(rd.y - 0.32) * 18.0) * (0.5 + 0.5 * sin(yaw * 8.0 - t * 0.3));
+		c += float3(0.45, 0.72, 1.0) * skyR * up * 0.38;
+	} else if (ths < 8.5) {
+		float2 cp = skyXZ * 0.42 + float2(t * 0.14, -t * 0.09);
+		float ca = CausAt(cp * 0.6, t * 0.8);
+		float shaft = pow(0.5 + 0.5 * sin(yaw * 10.0 + fbm2(cp) * 3.0 - t * 0.25), 8.0);
+		c += float3(0.2, 0.75, 1.0) * (ca * 0.38 + shaft * 0.32) * (up + rim * 0.5);
+		float2 bc1 = floor(pit1 * 6.0);
+		float2 bc2 = floor(pit2 * 11.0);
+		float b1 = exp(-length(frac(pit1 * 6.0) - 0.5) * 9.0) * step(0.74, hash21(bc1));
+		float b2 = exp(-length(frac(pit2 * 11.0) - 0.5) * 10.0) * step(0.78, hash21(bc2));
+		float3 trench = lerp(float3(0.01, 0.05, 0.12), float3(0.04, 0.24, 0.42), fbm2(pit1 * 1.2 + t * 0.08));
+		trench += float3(0.15, 0.95, 0.82) * (b1 * 0.75 + b2 * 0.55);
+		trench += float3(0.22, 0.68, 1.0) * CausAt(pit1 * 0.8, t) * 0.28;
+		c = lerp(c, trench, down * 0.94);
+	} else if (ths < 9.5) {
+		float fall = fbm2(float2(yaw * 18.0, rd.y * 6.0 - t * 1.8));
+		float sheet = pow(0.5 + 0.5 * sin(yaw * 22.0 + fall * 2.0), 4.0);
+		float mist = fbm2(pit1 * 1.4 - float2(0, t * 0.65));
+		float bowA = exp(-pow((rd.y + 0.18) * 5.5, 2.0));
+		float3 bow = lerp(float3(1, 0.38, 0.38), lerp(float3(0.38, 1, 0.52), float3(0.38, 0.58, 1), saturate(rd.y * 3.0 + 0.8)), saturate(rd.y * 2.0 + 0.5));
+		float3 plunge = lerp(float3(0.14, 0.32, 0.48), float3(0.82, 0.94, 1.0), saturate(mist * 0.65 + sheet * 0.45));
+		plunge += bow * bowA * 0.38;
+		c = lerp(c, plunge, down * 0.9);
+		c += bow * exp(-pow((rd.y - 0.18) * 6.0, 2.0)) * up * 0.28;
+	} else if (ths < 10.5) {
+		float3 sd = normalize(rd);
+		float2 u1 = float2(atan2(sd.x, sd.z) * 1.8, sd.y * 2.4);
+		float n1 = fbm2(u1 + t * 0.02);
+		float n2 = fbm2(u1 * 2.3 - t * 0.015 + 3.4);
+		float neb = smoothstep(0.28, 0.78, n1 * 0.58 + n2 * 0.52);
+		float3 cosmos = float3(0.02, 0.02, 0.06);
+		cosmos += lerp(float3(0.55, 0.12, 0.88), float3(0.12, 0.58, 1.0), n2) * neb * 0.72;
+		float2 sg1 = float2(yaw * 95.0, rd.y * 140.0);
+		float2 sg2 = float2(yaw * 210.0, rd.y * 310.0);
+		float s1 = step(0.988, hash21(floor(sg1))) * saturate(1.0 - length(frac(sg1) - 0.5) * 5.2);
+		float s2 = step(0.992, hash21(floor(sg2))) * saturate(1.0 - length(frac(sg2) - 0.5) * 6.0);
+		cosmos += float3(0.92, 0.96, 1.0) * (s1 + s2 * 0.8);
+		float vortex = exp(-abs(length(pit1) * 0.18 - 1.2) * 2.5) * fbm2(pit1 * 0.8 - t * 0.2);
+		cosmos += float3(0.42, 0.78, 1.0) * vortex * down * 0.55;
+		c = lerp(c, cosmos, saturate(up * 0.75 + down * 0.96));
+	} else if (ths < 11.5) {
+		float2 g1 = abs(frac(pit1 * 2.0) - 0.5);
+		float2 g2 = abs(frac(pit2 * 4.0) - 0.5);
+		float strut1 = smoothstep(0.43, 0.49, max(g1.x, g1.y));
+		float strut2 = smoothstep(0.45, 0.495, max(g2.x, g2.y));
+		float pulse1 = step(0.75, hash21(floor(pit1 * 2.0))) * (0.4 + 0.6 * sin(t * 3.0 + hash21(floor(pit1 * 2.0)) * 12.0));
+		float scan = pow(0.5 + 0.5 * sin(pit1.x * 1.5 + pit1.y * 1.5 - t * 2.2), 8.0);
+		float3 core = float3(0.03, 0.05, 0.09);
+		core += float3(0.18, 0.72, 0.95) * (strut1 * 0.55 + strut2 * 0.45 + scan * 0.35);
+		core += float3(1.0, 0.48, 0.14) * pulse1 * strut1 * 0.85;
+		c = lerp(c, core, down * 0.94);
+		float2 sg = abs(frac(skyXZ * 0.45) - 0.5);
+		c += float3(0.22, 0.82, 1.0) * smoothstep(0.46, 0.495, max(sg.x, sg.y)) * up * 0.32;
+	} else if (ths < 12.5) {
+		float2 a1 = abs(frac(pit1 * 1.5) - 0.5);
+		float arch = smoothstep(0.42, 0.49, max(a1.x, a1.y));
+		float rose = exp(-abs(length(frac(pit1 * 0.5) - 0.5) - 0.32) * 28.0);
+		float candle = step(0.84, hash21(floor(pit1 * 3.0))) * exp(-length(frac(pit1 * 3.0) - 0.5) * 9.0);
+		float3 nave = lerp(float3(0.06, 0.03, 0.11), float3(0.24, 0.12, 0.38), fbm2(pit2 * 1.4));
+		nave += float3(0.78, 0.52, 1.0) * (arch * 0.48 + rose * 0.65);
+		nave += float3(1.0, 0.76, 0.34) * candle * 0.9;
+		c = lerp(c, nave, down * 0.94);
+	} else {
+		float2 l1 = pit1 * 1.8 + float2(sin(t * 0.25), cos(t * 0.2)) * 0.4;
+		float2 l2 = pit2 * 3.2 - float2(cos(t * 0.18), sin(t * 0.22)) * 0.5;
+		float2 c1 = floor(l1), c2 = floor(l2);
+		float2 f1 = frac(l1) - 0.5 - (hash22(c1) - 0.5) * 0.4;
+		float2 f2 = frac(l2) - 0.5 - (hash22(c2) - 0.5) * 0.4;
+		float o1 = exp(-dot(f1, f1) * 16.0) * step(0.55, hash21(c1));
+		float o2 = exp(-dot(f2, f2) * 18.0) * step(0.58, hash21(c2));
+		float3 sea = lerp(float3(0.06, 0.05, 0.14), float3(0.22, 0.18, 0.38), fbm2(pit1 * 0.9 + t * 0.05));
+		sea += float3(1.0, 0.74, 0.32) * (o1 * 1.05 + o2 * 0.75);
+		c = lerp(c, sea, down * 0.94);
+		float2 sL = skyXZ * 0.45 + float2(t * 0.06, -t * 0.03);
+		float2 sc = floor(sL);
+		float2 sf = frac(sL) - 0.5 - (hash22(sc) - 0.5) * 0.4;
+		float skyOrb = exp(-dot(sf, sf) * 16.0) * step(0.58, hash21(sc));
+		c += float3(1.0, 0.74, 0.34) * skyOrb * up * 0.65;
+	}
+}
+
 GOut PSSKY(QOut i)
 {
 	float3 top = Tint.rgb, bot = Extra.rgb;
@@ -1754,6 +2133,8 @@ GOut PSSKY(QOut i)
 			float orb = exp(-dot(lf, lf) * 10.0) * step(0.62, lh);
 			c += float3(1.0, 0.72, 0.38) * orb * skyA * 0.45;
 		}
+		if (ths > -0.5)
+			AbyssAndSky(c, WorldRay(i.uv), ths, t, gustS);
 	}
 	return EmitZ(float4(c, 1), 1);
 }
@@ -1834,7 +2215,7 @@ float3 FarBend(float3 col, float2 uv, float t, float mask, float amp)
 	return col;
 }
 
-// マップごとに一つの画面技法。近い画素（キャラ・移動マス）には掛けない。
+// マップごとに一つの空間技法。すべて世界座標の視線と平面に乗せる。近い画素（キャラ・移動マス）には掛けない。
 void StageSignature(inout float3 col, float2 uv, float th, float t, float z, float sky, float far, float presence)
 {
 	if (th < 0) return;
@@ -1849,90 +2230,106 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		float nearC = 1.0 - smoothstep(0.05, 0.22, z);
 		room = saturate(1.0 - max(front, nearC * 0.94));
 	}
-	float clear = smoothstep(0.16, 0.46, z);
+	float clear = smoothstep(0.16, 0.44, z);
 	float veil = max(sky * clear, far * room) * saturate(presence);
 	if (veil < 0.02) return;
 	float gust = GustAmt();
+	float3 rd = WorldRay(uv);
+	float yaw = atan2(rd.x, rd.z);
+	float3 wpos = Eye.xyz + rd * (max(z, 0.45) * max(Fog.y, 60.0));
+	float2 wxz = wpos.xz;
 	if (th < 0.5) {
-		float rib = pow(0.5 + 0.5 * sin(uv.x * 7.0 - t * (0.35 + gust * 0.4) + uv.y * 2.2), 6.0);
-		rib *= pow(0.5 + 0.5 * sin(uv.y * 18.0 + t * 0.15), 2.0);
-		col += float3(0.95, 0.98, 0.72) * rib * veil * 0.42;
+		float2 p = wxz * float2(0.18, 0.07) - float2(t * (0.9 + gust * 0.8), t * 0.2);
+		float rib = smoothstep(0.42, 0.78, fbm2(p) * 0.65 + fbm2(p * 2.3 + 1.9) * 0.5);
+		float2 sg = wxz * 0.85 - float2(t * 1.4, t * 0.35);
+		float2 sc = floor(sg);
+		float seed = smoothstep(0.12, 0.02, length(frac(sg) - 0.5 - (hash22(sc) - 0.5) * 0.4)) * step(0.78, hash21(sc));
+		col += float3(0.95, 0.98, 0.72) * (rib * 0.38 + seed * 0.55) * veil;
 	} else if (th < 1.5) {
-		float colm = pow(saturate(sin(uv.x * 11.0 + fbm2(float2(uv.y * 4.0 - t * 0.5, t * 0.1)) * 3.0)), 10.0);
+		float2 dp = wxz * float2(0.14, 0.28) - float2(t * 0.75, t * 0.18);
+		float colm = smoothstep(0.4, 0.78, fbm2(dp) * 0.65 + fbm2(dp * 2.4) * 0.5);
 		col = FarBend(col, uv, t * 0.7, veil * 0.85, 0.006);
-		col += float3(1.0, 0.42, 0.12) * colm * veil * 0.38;
+		col += float3(1.0, 0.48, 0.16) * colm * veil * 0.44;
 	} else if (th < 2.5) {
-		float spoke = pow(0.5 + 0.5 * sin(atan2(uv.y - 0.15, uv.x - 0.22) * 9.0 + t * 0.15), 14.0);
-		spoke *= smoothstep(0.02, 0.2, length(uv - float2(0.22, 0.15)));
-		col += float3(0.72, 1.0, 0.48) * spoke * veil * 0.5;
+		float ray = pow(0.5 + 0.5 * sin(yaw * 16.0 + fbm2(wxz * 0.08 + t * 0.05) * 2.5 - t * 0.2), 8.0);
+		float2 fg = wxz * 0.65 + float2(sin(t * 0.5), cos(t * 0.4)) * 0.5;
+		float2 fc = floor(fg);
+		float spore = smoothstep(0.14, 0.02, length(frac(fg) - 0.5 - (hash22(fc) - 0.5) * 0.4)) * step(0.75, hash21(fc));
+		col += float3(0.72, 1.0, 0.48) * (ray * 0.42 + spore * 0.55) * veil;
 	} else if (th < 3.5) {
-		float2 ap = float2(uv.x * 2.2 + t * 0.04, uv.y * 1.3);
+		float2 ap = float2(yaw * 2.6 + t * 0.05, rd.y * 3.2);
 		float a = fbm2(ap);
-		float b = fbm2(ap * 1.7 + 4.0);
-		float curtain = pow(saturate(a * 0.6 + b * 0.5), 1.6) * smoothstep(0.55, 0.05, uv.y);
-		col += lerp(float3(0.15, 0.85, 0.55), float3(0.35, 0.4, 1.0), b) * curtain * veil * 0.55;
+		float b = fbm2(ap * 1.9 + 4.0);
+		float curtain = pow(saturate(a * 0.6 + b * 0.5), 1.5);
+		float2 dg = wxz * 1.1 - float2(t * 1.6, t * 0.4);
+		float diamond = step(0.94, hash21(floor(dg))) * (0.5 + 0.5 * sin(t * 6.0 + hash21(floor(dg)) * 30.0));
+		col += lerp(float3(0.15, 0.88, 0.58), float3(0.38, 0.45, 1.0), b) * curtain * veil * 0.52;
+		col += float3(0.88, 0.96, 1.0) * diamond * veil * 0.45;
 	} else if (th < 4.5) {
 		col = FarBend(col, uv, t * 1.15, veil, 0.012);
-		float lip = pow(saturate(1.0 - abs(uv.y - 0.42) * 6.0), 2.0);
-		col += float3(1.0, 0.78, 0.35) * lip * veil * 0.28;
+		float2 sp = wxz * float2(0.16, 0.45) - float2(t * 1.3, t * 0.25);
+		float veilS = smoothstep(0.38, 0.76, fbm2(sp) * 0.65 + fbm2(sp * 2.3) * 0.5);
+		col += float3(1.0, 0.78, 0.35) * veilS * veil * 0.42;
 	} else if (th < 5.5) {
-		float y = frac(uv.y * 9.0 - t * 0.22);
-		float ember = pow(saturate(1.0 - abs(y - 0.2) * 8.0), 3.0);
-		ember *= step(0.72, hash21(floor(uv * float2(28.0, 9.0))));
-		col += float3(1.0, 0.28, 0.04) * ember * veil * 0.7;
-		col += float3(0.45, 0.05, 0.0) * veil * 0.18;
+		float2 eg = float2(yaw * 18.0 + sin(t * 0.6 + wpos.y * 0.2), wpos.y * 0.45 - t * 1.1);
+		float2 ec = floor(eg);
+		float2 ef = frac(eg) - 0.5 - (hash22(ec) - 0.5) * 0.4;
+		float ember = smoothstep(0.14, 0.02, length(ef)) * step(0.7, hash21(ec));
+		float plume = smoothstep(0.4, 0.78, fbm2(wxz * 0.12 - float2(t * 0.2, t * 0.35)));
+		col += float3(1.0, 0.32, 0.04) * (ember * 0.85 + plume * 0.32) * veil;
 	} else if (th < 6.5) {
-		float sheet = fbm2(float2(uv.x * 1.4 + t * 0.04, uv.y * 3.5));
-		float low = sheet * smoothstep(0.15, 0.55, uv.y) * far * room;
-		col = lerp(col, float3(0.28, 0.46, 0.22), saturate(low) * 0.55);
+		float2 mp = wxz * 0.14 + Curl2(wxz * 0.08 + t * 0.06) * 0.8;
+		float sheet = smoothstep(0.34, 0.74, fbm2(mp + float2(t * 0.14, -t * 0.09)));
+		float2 wg = wxz * 0.45;
+		float2 wc = floor(wg);
+		float wisp = exp(-length(frac(wg) - 0.5 - (hash22(wc) - 0.5) * 0.35) * 10.0) * step(0.74, hash21(wc));
+		col = lerp(col, float3(0.26, 0.48, 0.2), saturate(sheet * far * room) * 0.52);
+		col += float3(0.45, 1.0, 0.35) * wisp * veil * 0.55;
 	} else if (th < 7.5) {
-		float2 q = (uv - float2(0.5, 0.2)) * float2(1.35, 1.7);
-		float ring = abs(length(q) - 0.22);
-		float rune = exp(-ring * ring * 280.0);
-		float spin = 0.5 + 0.5 * sin(atan2(q.y, q.x) * 6.0 - t * 0.4);
-		col += float3(0.45, 0.7, 1.0) * rune * spin * sky * clear * 0.65;
+		float2 p = PlaneXZ(rd, 18.0, 0.12) - float2(32.0, 32.0);
+		float r = length(p) * 0.045;
+		float ring = exp(-abs(frac(r * 2.5 - t * 0.06) - 0.5) * 24.0);
+		float spin = 0.5 + 0.5 * sin(atan2(p.y, p.x) * 8.0 - t * 0.45);
+		col += float3(0.45, 0.75, 1.0) * ring * spin * veil * 0.58;
 	} else if (th < 8.5) {
-		float2 g = uv * float2(14.0, 9.0) + float2(t * 0.15, -t * 0.08);
-		float c1 = pow(0.5 + 0.5 * sin(g.x * 6.2 + g.y * 2.1), 8.0);
-		float c2 = pow(0.5 + 0.5 * sin(g.y * 5.4 - g.x * 1.7), 8.0);
-		col += float3(0.15, 0.65, 1.0) * c1 * c2 * far * room * 0.55;
-		float shaft = pow(saturate(sin(uv.x * 8.0 + t * 0.1)), 18.0) * sky * clear;
-		col += float3(0.45, 0.8, 1.0) * shaft * 0.35;
+		float c1 = CausAt(wxz * 0.24 + float2(t * 0.12, -t * 0.08), t);
+		float shaft = pow(0.5 + 0.5 * sin(yaw * 12.0 + t * 0.2), 10.0);
+		col += float3(0.18, 0.72, 1.0) * (c1 * 0.45 + shaft * 0.35) * veil;
 	} else if (th < 9.5) {
-		float ang = atan2(uv.y - 0.55, (uv.x - 0.5) * (Screen.x * Screen.w));
-		float arc = exp(-pow(ang - 0.55, 2.0) * 18.0) * smoothstep(0.08, 0.22, length(uv - float2(0.5, 0.62)));
-		float hue = saturate(ang * 0.8);
-		float3 bow = lerp(float3(1, 0.35, 0.35), lerp(float3(0.4, 1, 0.45), float3(0.35, 0.5, 1), hue), hue);
-		col += bow * arc * sky * clear * 0.55;
+		float ang = atan2(rd.y + 0.08, sin(yaw - 0.6));
+		float rad = length(float2(sin(yaw - 0.6), rd.y + 0.08));
+		float arc = exp(-pow((rad - 0.42) * 9.0, 2.0));
+		float3 bow = lerp(float3(1, 0.35, 0.35), lerp(float3(0.4, 1, 0.45), float3(0.35, 0.55, 1), saturate(ang)), saturate(ang));
+		float spray = smoothstep(0.38, 0.76, fbm2(wxz * 0.18 - float2(0, t * 0.8)));
+		col += (bow * arc * 0.55 + float3(0.82, 0.94, 1.0) * spray * 0.32) * veil;
 	} else if (th < 10.5) {
-		float n = fbm2(uv * float2(1.6, 1.15) + t * 0.015);
-		col += lerp(float3(0.45, 0.1, 0.75), float3(0.08, 0.32, 0.95), n) * n * n * sky * clear * 0.62;
-		float2 sg = uv * float2(420, 240);
-		float2 sf = frac(sg) - 0.5;
-		float sh = hash21(floor(sg));
-		col += step(0.992, sh) * saturate(1.0 - length(sf) * 6.0) * sky * clear * float3(0.9, 0.95, 1);
+		float2 u = float2(yaw * 2.0, rd.y * 2.6);
+		float n = fbm2(u + t * 0.02) * 0.6 + fbm2(u * 2.2 - t * 0.015) * 0.5;
+		float2 sg = float2(yaw * 120.0, rd.y * 180.0);
+		float star = step(0.99, hash21(floor(sg))) * saturate(1.0 - length(frac(sg) - 0.5) * 5.5);
+		col += lerp(float3(0.48, 0.12, 0.82), float3(0.1, 0.45, 1.0), saturate(n)) * n * veil * 0.58;
+		col += float3(0.92, 0.96, 1.0) * star * veil * 0.85;
 	} else if (th < 11.5) {
-		float scan = pow(0.5 + 0.5 * sin(uv.y * 90.0 + t * 1.4), 18.0);
-		col += float3(0.25, 0.7, 0.85) * scan * sky * clear * 0.22;
-		float2 cell = floor(uv * float2(18, 8));
-		float blink = step(0.82, hash21(cell)) * (0.35 + 0.65 * step(0.5, frac(t * 0.7 + hash21(cell + 9.0))));
-		float2 f = frac(uv * float2(18, 8)) - 0.5;
-		col += float3(0.3, 0.95, 1.0) * blink * saturate(1.0 - length(f) * 3.2) * sky * clear * 0.8;
+		float2 g = abs(frac(wxz * 0.35) - 0.5);
+		float grid = smoothstep(0.45, 0.495, max(g.x, g.y));
+		float scan = pow(0.5 + 0.5 * sin(wpos.y * 2.5 - t * 2.4), 10.0);
+		float2 bc = floor(wxz * 0.35);
+		float blink = step(0.8, hash21(bc)) * (0.4 + 0.6 * sin(t * 3.2 + hash21(bc) * 14.0));
+		col += float3(0.25, 0.88, 1.0) * (grid * 0.45 + scan * 0.28 + blink * grid * 0.55) * veil;
 	} else if (th < 12.5) {
-		float2 md = (uv - float2(0.78, 0.16)) * float2(1.6, 2.2);
-		float moon = exp(-dot(md, md) * 9.0);
-		float beam = pow(saturate(1.0 - abs(uv.x - 0.78) * 14.0), 2.4) * saturate(0.55 - uv.y);
-		col += float3(0.92, 0.86, 1.0) * moon * sky * clear * 0.85;
-		col += float3(0.62, 0.45, 1.0) * beam * sky * clear * 0.4;
+		float3 moonDir = normalize(float3(0.45, 0.38, 0.8));
+		float md = saturate(dot(rd, moonDir));
+		float moon = pow(md, 180.0) + pow(md, 16.0) * 0.35;
+		float ray = pow(0.5 + 0.5 * sin(yaw * 14.0 + t * 0.15), 10.0);
+		col += (float3(0.92, 0.86, 1.0) * moon * 0.75 + float3(0.68, 0.48, 1.0) * ray * 0.35) * veil;
 	} else {
-		float2 g = uv * float2(4.0, 3.0);
-		float2 cell = floor(g);
-		float2 f = frac(g) - 0.5;
-		float h = hash21(cell);
-		float2 ctr = (hash22(cell) - 0.5) * 0.6;
-		float orb = exp(-dot(f - ctr, f - ctr) * 28.0) * step(0.55, h);
-		float bob = 0.5 + 0.5 * sin(t * 0.6 + h * 12.0);
-		col += float3(1.0, 0.72, 0.38) * orb * bob * sky * clear * 0.75;
+		float2 lg = wxz * 0.28 + float2(sin(t * 0.2), cos(t * 0.18)) * 0.35;
+		float2 lc = floor(lg);
+		float2 lf = frac(lg) - 0.5 - (hash22(lc) - 0.5) * 0.4;
+		float lh = hash21(lc);
+		float orb = exp(-dot(lf, lf) * 16.0) * step(0.56, lh);
+		float bob = 0.55 + 0.45 * sin(t * 1.4 + lh * 12.0);
+		col += float3(1.0, 0.74, 0.36) * orb * bob * veil * 0.82;
 	}
 }
 

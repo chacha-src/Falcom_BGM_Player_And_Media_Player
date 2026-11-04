@@ -1,6 +1,7 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "Soft3DGameSfx.h"
+#include "OmakeTacticsAudio.h"
 #include <math.h>
 #include <dsound.h>
 
@@ -11,7 +12,7 @@
 enum { S3SFX_RATE = 44100, S3SFX_ENG = 12, S3SFX_SHOT = 12 };
 
 struct S3SfxEng {
-	float phPulse, phSaw, phSub;
+	float loopPos;
 	float gain, hz;
 	float x, y, z;
 	int alive, colorIdx, isPlayer;
@@ -19,10 +20,10 @@ struct S3SfxEng {
 };
 struct S3SfxShot {
 	int kind, on, param, centered;
-	float t, dur;
+	float pos, rate;
 	float x, y, z;
-	unsigned rng;
 };
+struct S3Clip { short* pcm; int frames; int loop; };
 
 static LPDIRECTSOUND8 s_ownDs;
 static LPDIRECTSOUNDBUFFER s_buf;
@@ -34,14 +35,6 @@ static int s_started;
 static float s_lx, s_ly, s_lz, s_yaw;
 static S3SfxEng s_eng[S3SFX_ENG];
 static S3SfxShot s_shot[S3SFX_SHOT];
-static unsigned s_rng = 0xA341316Cu;
-
-static unsigned S3sRng()
-{
-	s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5;
-	return s_rng;
-}
-
 static void S3sReleaseBuf()
 {
 	if (s_buf) { s_buf->Stop(); s_buf->Release(); s_buf = NULL; }
@@ -142,55 +135,105 @@ void Soft3DSfxEngine(int slot, int alive, float x, float y, float z,
 	if (e.gain < 0.0004f && !e.alive) e.gain = 0.f;
 }
 
-static float S3sDur(int kind)
+static short g_s3pcm[2 * 1024 * 1024];
+static int g_s3used;
+static S3Clip g_clip[S3SFX_N];
+static S3Clip g_eng;
+static int g_baked;
+
+static const char* const kS3Mml[S3SFX_N] = {
+	// 迷路。石の廊下。足音、拾う光、鍵、扉、階段、転移、壁、錠、棘、スライム、氷、闇、ゴール。
+	"t170 l32 o2 v12 @34 c | t170 l32 o2 v8 @31 c",
+	"t210 l32 o5 v11 @9 e a >d | t210 l32 o6 v5 @32 r16 a",
+	"t190 l32 o5 v12 @21 c e g >c | t190 l16 o4 v7 @5 r8 c",
+	"t78 l8 o2 v13 @34 s-12 c4 | t88 l8 o1 v11 @31 r8 c4 | t100 l16 o3 v6 @27 s-8 c",
+	"t128 l8 o3 v9 @27 s12 c4 | t148 l16 o3 v11 @34 r8 c e g",
+	"t128 l16 o4 v11 @13 c e g >c e | t128 l16 o5 v7 @26 r8 c e g >c | t128 l8 o3 v8 @0 r4 [ceg]4",
+	// レースのカウントは矩形。GO、周回、ゴール、表彰、コースアウト、加速、減速は後で。
+	"t180 l16 o4 v13 @6 c | t180 l16 o5 v6 @5 c",
+	"t148 l8 o4 v13 @4 c8 e g >c4 | t148 l8 o4 v10 @6 e g >c e4 | t148 l8 o2 v12 @31 c c",
+	"t220 l32 o5 v12 @26 g >c e | t220 l32 o6 v6 @8 r16 c",
+	"t128 l8 o4 v12 @4 c e g >c e g4 | t128 l8 o3 v10 @4 c g >c e g c4 | t128 l8 o5 v7 @26 r4 c e g4",
+	"t108 l8 o5 v12 @0 c e g >c g e4 | t108 l8 o4 v8 @21 r4 e g >c4 | t108 l4 o3 v10 @31 c c2",
+	"t118 l8 o4 v12 @2 s-12 g4 c4 <g4 | t118 l8 o3 v8 @23 g4 c4",
+	"t190 l16 o4 v13 @5 s16 c8 >c8 >c4 | t210 l32 o5 v8 @12 r8 c g >c | t190 l16 o3 v7 @27 s12 c8",
+	"t116 l8 o4 v12 @2 s-12 e4 c4 <g4 | t116 l8 o3 v8 @6 e4 c4",
+	"t168 l16 o2 v14 @24 c8 | t176 l16 o3 v11 @7 s-6 c8 | t200 l32 o4 v7 @28 c",
+	"t146 l16 o4 v12 @6 a- e- | t146 l16 o3 v8 @6 r16 a- e-",
+	"t92 l8 o4 v11 @2 g e c <a4 | t92 l8 o3 v8 @14 g e c4 | t92 l4 o2 v10 @31 c2",
+	"t200 l32 o2 v14 @24 c | t220 l64 o3 v8 @34 c",
+	"t146 l32 o4 v12 @5 c c <g c | t166 l32 o3 v8 @23 r16 c c c",
+	"t240 l32 o5 v12 @18 c >c | t220 l16 o4 v8 @7 s-10 c",
+	"t88 l8 o2 v12 @16 s8 c s-6 e- s8 c | t96 l8 o3 v6 @25 c4",
+	"t200 l32 o6 v11 @11 c e g >c | t176 l16 o5 v6 @26 r16 e",
+	"t80 l4 o2 v12 @14 c2 | t80 l4 o2 v8 @31 c2 | t90 l8 o3 v5 @33 [ca-]2",
+	"t136 l8 o4 v12 @4 c e g >c4 | t136 l8 o3 v9 @9 c e g >c4 | t136 l8 o2 v10 @31 c r8 c",
+};
+static const float kS3Gain[S3SFX_N] = {
+	0.70f, 0.78f, 0.82f, 0.88f, 0.80f, 0.90f,
+	0.72f, 0.95f, 0.80f, 0.98f, 1.00f, 0.84f, 0.90f, 0.82f, 0.92f, 0.78f, 0.90f,
+	0.72f, 0.76f, 0.84f, 0.80f, 0.78f, 0.86f, 0.96f
+};
+static const char* const kS3Eng =
+	"t110 l2 o2 v11 @6 c2 | t110 l2 o3 v5 @28 c2 | t110 l2 o1 v8 @4 c2";
+
+static int S3sBakeOne(S3Clip& c, const char* mml, float gain, int loopTail)
 {
-	switch (kind) {
-	case S3SFX_STEP: return 0.11f;
-	case S3SFX_ITEM: return 0.20f;
-	case S3SFX_KEY: return 0.28f;
-	case S3SFX_DOOR: return 0.42f;
-	case S3SFX_STAIR: return 0.38f;
-	case S3SFX_PORTAL: return 0.55f;
-	case S3SFX_COUNT: return 0.13f;
-	case S3SFX_GO: return 0.48f;
-	case S3SFX_LAP: return 0.32f;
-	case S3SFX_FINISH: return 0.98f;
-	case S3SFX_PODIUM: return 1.15f;
-	case S3SFX_COURSEOUT: return 0.40f;
-	case S3SFX_BOOST: return 0.34f;
-	case S3SFX_SLOW: return 0.34f;
-	case S3SFX_HIT: return 0.16f;
-	case S3SFX_WRONG: return 0.46f;
-	case S3SFX_GAMEOVER: return 0.88f;
-	case S3SFX_BUMP: return 0.10f;
-	case S3SFX_LOCKED: return 0.22f;
-	case S3SFX_SPIKE: return 0.22f;
-	case S3SFX_SLIME: return 0.30f;
-	case S3SFX_ICE: return 0.26f;
-	case S3SFX_DARK: return 0.42f;
-	case S3SFX_GOAL: return 0.95f;
-	default: return 0.22f;
+	c.pcm = NULL; c.frames = 0; c.loop = 0;
+	int room = (int)(sizeof(g_s3pcm) / sizeof(g_s3pcm[0]) / 2) - g_s3used;
+	if (room < 32 || !mml) return 0;
+	int cap = room > S3SFX_RATE * 3 ? S3SFX_RATE * 3 : room;
+	short* dst = g_s3pcm + g_s3used * 2;
+	int n = YmMmlRender(mml, dst, cap, gain);
+	if (n < 8) return 0;
+	c.pcm = dst;
+	c.frames = n;
+	c.loop = n - loopTail;
+	if (c.loop < n / 2) c.loop = n;
+	g_s3used += n;
+	return n;
+}
+static void S3sBake()
+{
+	if (g_baked) return;
+	g_baked = 1;
+	g_s3used = 0;
+	for (int i = 0; i < S3SFX_N; i++) S3sBakeOne(g_clip[i], kS3Mml[i], kS3Gain[i], 0);
+	S3sBakeOne(g_eng, kS3Eng, 0.85f, (int)(0.12f * S3SFX_RATE));
+}
+static float S3sRate(int kind, int param)
+{
+	if (kind == S3SFX_COUNT) {
+		if (param >= 3) return 0.8409f;
+		if (param == 2) return 1.f;
+		return 1.1892f;
 	}
+	if (kind == S3SFX_LAP) {
+		int n = param < 1 ? 1 : param;
+		if (n > 8) n = 8;
+		return 1.f + (n - 1) * 0.035f;
+	}
+	return 1.f;
 }
 
 void Soft3DSfxOneShotP(int kind, float x, float y, float z, int param)
 {
 	if (kind < 0 || kind >= S3SFX_N) return;
+	S3sBake();
 	int slot = 0;
 	float oldest = 0.f;
 	for (int i = 0; i < S3SFX_SHOT; i++) {
 		if (!s_shot[i].on) { slot = i; break; }
-		if (s_shot[i].t >= oldest) { oldest = s_shot[i].t; slot = i; }
+		if (s_shot[i].pos >= oldest) { oldest = s_shot[i].pos; slot = i; }
 	}
 	S3SfxShot& s = s_shot[slot];
 	s.on = 1;
 	s.kind = kind;
 	s.param = param;
 	s.centered = 0;
-	s.t = 0.f;
+	s.pos = 0.f;
+	s.rate = S3sRate(kind, param);
 	s.x = x; s.y = y; s.z = z;
-	s.rng = S3sRng();
-	s.dur = S3sDur(kind);
 }
 
 void Soft3DSfxOneShot(int kind, float x, float y, float z)
@@ -202,7 +245,7 @@ void Soft3DSfxUi(int kind, int param)
 {
 	Soft3DSfxOneShotP(kind, s_lx, s_ly, s_lz, param);
 	for (int i = 0; i < S3SFX_SHOT; i++) {
-		if (s_shot[i].on && s_shot[i].kind == kind && s_shot[i].t < 1e-4f) {
+		if (s_shot[i].on && s_shot[i].kind == kind && s_shot[i].pos < 1e-4f) {
 			s_shot[i].centered = 1;
 			break;
 		}
@@ -231,179 +274,62 @@ static void S3sPanAtten(float x, float y, float z, int centered, float& gL, floa
 	gR = att * sinf(a);
 }
 
-static float S3sShotSample(S3SfxShot& s, float dt, float& nHold)
+static void S3sStereoAt(const S3Clip& c, float pos, float& oL, float& oR)
 {
-	s.t += dt;
-	if (s.t >= s.dur) { s.on = 0; return 0.f; }
-	float u = s.t / s.dur;
-	float env = (u < 0.08f) ? (u / 0.08f) : (1.f - (u - 0.08f) / 0.92f);
-	if (env < 0.f) env = 0.f;
-	s.rng ^= s.rng << 13; s.rng ^= s.rng >> 17; s.rng ^= s.rng << 5;
-	float n = ((s.rng & 0xffff) * (1.f / 32768.f)) - 1.f;
-	nHold = nHold * 0.86f + n * 0.14f;
-	float t = s.t;
-	const float tw = (float)(M_PI * 2);
-	switch (s.kind) {
-	case S3SFX_STEP: {
-		float thud = sinf(t * 78.f * tw) * (1.f - u);
-		return (thud * 0.55f + nHold * 0.45f) * env * 0.55f;
-	}
-	case S3SFX_ITEM: {
-		float hz = 880.f + 520.f * u;
-		return (sinf(t * hz * tw) + 0.35f * sinf(t * hz * 2.f * tw)) * env * 0.42f;
-	}
-	case S3SFX_KEY: {
-		float a = sinf(t * 520.f * tw);
-		float b = sinf(t * 784.f * tw);
-		return (a * 0.55f + b * 0.45f + nHold * 0.12f) * env * 0.40f;
-	}
-	case S3SFX_DOOR: {
-		float hz = 180.f - 110.f * u;
-		return (sinf(t * hz * tw) * 0.35f + nHold * 0.65f) * env * 0.48f;
-	}
-	case S3SFX_STAIR: {
-		float whoosh = nHold * (0.35f + 0.65f * (1.f - u));
-		float thud = sinf(t * 92.f * tw) * (1.f - u);
-		return (whoosh * 0.7f + thud * 0.45f) * env * 0.46f;
-	}
-	case S3SFX_COUNT: {
-		int step = s.param;
-		if (step >= 4) return 0.f;
-		float hz = 659.f;
-		float ph = t * hz; ph -= (float)(int)ph; if (ph < 0.f) ph += 1.f;
-		float sq = (ph < 0.5f) ? 1.f : -1.f;
-		float click = (u < 0.18f) ? (1.f - u / 0.18f) : 0.f;
-		return (sq * 0.55f + nHold * 0.12f) * env * 0.52f + click * n * 0.08f;
-	}
-	case S3SFX_GO: {
-		float a = sinf(t * 523.f * tw);
-		float b = sinf(t * 784.f * tw);
-		float c = sinf(t * 1046.f * tw) * u;
-		return (a * 0.40f + b * 0.38f + c * 0.28f) * env * 0.58f;
-	}
-	case S3SFX_LAP: {
-		float hz = (u < 0.45f) ? 880.f : 1320.f;
-		return (sinf(t * hz * tw) * 0.7f + nHold * 0.15f) * env * 0.48f;
-	}
-	case S3SFX_FINISH: {
-		const float notes[4] = { 523.f, 659.f, 784.f, 1046.f };
-		int ni = (int)(u * 4.f); if (ni > 3) ni = 3;
-		float tone = sinf(t * notes[ni] * tw) + 0.35f * sinf(t * notes[ni] * 2.f * tw);
-		return tone * env * 0.46f;
-	}
-	case S3SFX_PODIUM: {
-		float bell = sinf(t * (784.f + 220.f * sinf(t * 6.f)) * tw);
-		float swell = sinf(t * 196.f * tw) * (0.35f + 0.65f * u);
-		return (bell * 0.45f + swell * 0.40f + nHold * 0.08f) * env * 0.42f;
-	}
-	case S3SFX_COURSEOUT: {
-		float hz = 420.f - 280.f * u;
-		return (sinf(t * hz * tw) * 0.35f + nHold * 0.55f) * env * 0.50f;
-	}
-	case S3SFX_BOOST: {
-		float hz = 360.f + 720.f * u;
-		return (sinf(t * hz * tw) + 0.3f * sinf(t * hz * 2.f * tw)) * env * 0.46f;
-	}
-	case S3SFX_SLOW: {
-		float hz = 640.f - 420.f * u;
-		return (sinf(t * hz * tw) * 0.7f + nHold * 0.2f) * env * 0.44f;
-	}
-	case S3SFX_HIT: {
-		float thud = sinf(t * 70.f * tw) * (1.f - u);
-		return (thud * 0.55f + nHold * 0.70f) * env * 0.58f;
-	}
-	case S3SFX_WRONG: {
-		float hz = ((int)(t * 8.f) & 1) ? 311.f : 277.f;
-		float ph = t * hz; ph -= (float)(int)ph; if (ph < 0.f) ph += 1.f;
-		float sq = (ph < 0.5f) ? 1.f : -1.f;
-		return sq * env * 0.38f;
-	}
-	case S3SFX_GAMEOVER: {
-		float hz = 392.f - 220.f * u;
-		return (sinf(t * hz * tw) + 0.4f * sinf(t * hz * 1.5f * tw)) * env * 0.44f;
-	}
-	case S3SFX_BUMP: {
-		float thud = sinf(t * 110.f * tw) * (1.f - u);
-		return (thud * 0.6f + nHold * 0.45f) * env * 0.50f;
-	}
-	case S3SFX_LOCKED: {
-		float a = sinf(t * 240.f * tw);
-		float rattle = nHold * ((int)(t * 28.f) & 1 ? 1.f : 0.35f);
-		return (a * 0.35f + rattle * 0.55f) * env * 0.42f;
-	}
-	case S3SFX_SPIKE: {
-		float sting = sinf(t * (1400.f - 800.f * u) * tw);
-		return (sting * 0.45f + nHold * 0.50f) * env * 0.50f;
-	}
-	case S3SFX_SLIME: {
-		float blorp = sinf(t * (90.f + 40.f * sinf(t * 9.f)) * tw);
-		return (blorp * 0.55f + nHold * 0.35f) * env * 0.44f;
-	}
-	case S3SFX_ICE: {
-		float glass = sinf(t * (2100.f - 900.f * u) * tw);
-		return (glass * 0.40f + nHold * 0.28f) * env * 0.40f;
-	}
-	case S3SFX_DARK: {
-		float drone = sinf(t * 55.f * tw);
-		return (drone * 0.45f + nHold * 0.50f) * env * 0.46f;
-	}
-	case S3SFX_GOAL: {
-		const float notes[5] = { 523.f, 659.f, 784.f, 988.f, 1174.f };
-		int ni = (int)(u * 5.f); if (ni > 4) ni = 4;
-		float tone = sinf(t * notes[ni] * tw) + 0.28f * sinf(t * notes[ni] * 2.f * tw);
-		return tone * env * 0.46f;
-	}
-	default: {
-		float hz = 220.f + 680.f * u;
-		float sw = sinf(t * hz * tw);
-		return (sw * 0.55f + nHold * 0.4f) * env * 0.44f;
-	}
-	}
+	oL = oR = 0.f;
+	if (!c.pcm || c.frames < 2) return;
+	if (pos < 0.f) pos = 0.f;
+	int i0 = (int)pos;
+	if (i0 >= c.frames) return;
+	int i1 = i0 + 1;
+	if (i1 >= c.frames) i1 = i0;
+	float f = pos - (float)i0;
+	oL = c.pcm[i0 * 2] * (1.f - f) + c.pcm[i1 * 2] * f;
+	oR = c.pcm[i0 * 2 + 1] * (1.f - f) + c.pcm[i1 * 2 + 1] * f;
+	oL *= (1.f / 32767.f);
+	oR *= (1.f / 32767.f);
 }
 
 static void S3sRender(short* dst, int frames)
 {
-	const float dt = 1.f / (float)S3SFX_RATE;
 	const int mute = (savedata.s3_pcm_sfx == 0) ? 1 : 0;
-	float shotN[S3SFX_SHOT] = {};
+	S3sBake();
+	const float engRef = 65.406f;
 	for (int i = 0; i < frames; i++) {
 		float L = 0.f, R = 0.f;
 		for (int e = 0; e < S3SFX_ENG; e++) {
 			S3SfxEng& en = s_eng[e];
 			if (en.gain <= 0.0003f && !en.alive) continue;
-			float duty = 0.20f + en.throttle * 0.20f + (float)(en.colorIdx % 5) * 0.012f;
-			en.phPulse += en.hz * dt;
-			en.phSaw += en.hz * 0.5f * dt;
-			en.phSub += en.hz * 0.5f * dt;
-			if (en.phPulse >= 1.f) en.phPulse -= (float)(int)en.phPulse;
-			if (en.phSaw >= 1.f) en.phSaw -= (float)(int)en.phSaw;
-			if (en.phSub >= 1.f) en.phSub -= (float)(int)en.phSub;
-			if (mute || en.gain <= 0.0003f) continue;
+			float step = en.hz / engRef;
+			if (step < 0.35f) step = 0.35f;
+			if (step > 3.2f) step = 3.2f;
+			int loop = g_eng.loop > 32 ? g_eng.loop : g_eng.frames;
+			en.loopPos += step;
+			if (loop > 32 && en.loopPos >= (float)loop) en.loopPos -= (float)loop;
+			if (mute || en.gain <= 0.0003f || g_eng.frames < 8) continue;
 			float gL, gR, nearK;
 			S3sPanAtten(en.x, en.y, en.z, en.isPlayer, gL, gR, nearK);
 			gL *= en.gain; gR *= en.gain;
-			float pulse = (en.phPulse < duty) ? 1.f : -0.42f;
-			float saw = en.phSaw * 2.f - 1.f;
-			float sub = sinf(en.phSub * (float)(M_PI * 2));
-			s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5;
-			float n = ((s_rng & 0xffff) * (1.f / 32768.f)) - 1.f;
-			float buzz = pulse * (0.22f + (float)(en.colorIdx % 3) * 0.04f) * nearK
-				+ saw * (0.14f + (float)((en.colorIdx / 3) % 3) * 0.03f) * nearK
-				+ n * (0.025f + (float)(en.colorIdx & 1) * 0.012f) * nearK;
-			float body = sub * (0.42f + en.throttle * 0.38f);
-			float v = buzz + body;
-			L += v * gL;
-			R += v * gR;
+			float eL, eR;
+			S3sStereoAt(g_eng, en.loopPos, eL, eR);
+			float body = 0.55f + en.throttle * 0.45f;
+			L += eL * body * gL;
+			R += eR * body * gR;
 		}
 		for (int k = 0; k < S3SFX_SHOT; k++) {
-			if (!s_shot[k].on) continue;
-			float v = S3sShotSample(s_shot[k], dt, shotN[k]);
+			S3SfxShot& sh = s_shot[k];
+			if (!sh.on) continue;
+			const S3Clip& c = g_clip[sh.kind];
+			if (c.frames < 2 || sh.pos >= (float)(c.frames - 1)) { sh.on = 0; continue; }
+			float sL, sR;
+			S3sStereoAt(c, sh.pos, sL, sR);
+			sh.pos += sh.rate > 0.2f ? sh.rate : 1.f;
 			if (mute) continue;
 			float gL, gR, nearK;
-			S3sPanAtten(s_shot[k].x, s_shot[k].y, s_shot[k].z, s_shot[k].centered, gL, gR, nearK);
+			S3sPanAtten(sh.x, sh.y, sh.z, sh.centered, gL, gR, nearK);
 			(void)nearK;
-			L += v * gL;
-			R += v * gR;
+			L += sL * gL;
+			R += sR * gR;
 		}
 		if (L > 0.95f) L = 0.95f; else if (L < -0.95f) L = -0.95f;
 		if (R > 0.95f) R = 0.95f; else if (R < -0.95f) R = -0.95f;

@@ -1639,6 +1639,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_cssoft.cso" />
     <None Include="res\cso\tac_cssoftw.cso" />
     <None Include="res\cso\tac_dst.cso" />
+    <None Include="res\cso\tac_gsp.cso" />
     <None Include="res\cso\tac_hst.cso" />
     <None Include="res\cso\tac_psbloom.cso" />
     <None Include="res\cso\tac_psblur.cso" />
@@ -1669,9 +1670,14 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_pswater.cso" />
     <None Include="res\cso\tac_vsh.cso" />
     <None Include="res\cso\tac_vsk.cso" />
+    <None Include="res\cso\tac_vsksh.cso" />
     <None Include="res\cso\tac_vsp.cso" />
+    <None Include="res\cso\tac_vspt.cso" />
     <None Include="res\cso\tac_vsq.cso" />
     <None Include="res\cso\tac_vss.cso" />
+    <None Include="res\cso\tac_vssb.cso" />
+    <None Include="res\cso\tac_vssbsh.cso" />
+    <None Include="res\cso\tac_vsssh.cso" />
     <None Include="res\cso\tac_vst.cso" />
     <None Include="res\tactics\tac_assets.bin" />
     <None Include="res\tactics\tac_ava.bin" />

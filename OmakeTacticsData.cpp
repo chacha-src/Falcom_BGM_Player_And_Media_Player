@@ -9584,12 +9584,17 @@ bool SaveLoad(SaveData& s)
 
 bool SaveWrite(const SaveData& s)
 {
+	DatArc_FlushSuspend(TRUE);
 	CString path = DatArc_Path(TacLeafSave());
 	FILE* fp = NULL;
-	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return false;
+	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) {
+		DatArc_FlushSuspend(FALSE);
+		return false;
+	}
 	bool ok = fwrite(&s, 1, sizeof(s), fp) == sizeof(s);
 	fclose(fp);
 	if (ok) { TrophySave(); CraftPrune(s); CraftSave(); DatArc_Commit(TacLeafSave()); }
+	DatArc_FlushSuspend(FALSE);
 	return ok;
 }
 

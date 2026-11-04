@@ -34,12 +34,12 @@ struct ClothN
 	uint4 nb;   // 上・下・左・右（無ければ範囲外）
 	uint4 j;    // 脚に付いていくときの骨（格子の上でならした重み）
 	float4 w;   // その重み
-	float4 q;   // x=脚に付いていく割合 y=静止時に脚の形へ潜っている深さ
+	float4 q;   // x=脚に付いていく割合 y=静止時に脚の形へ潜っている深さ z=両脇の開いた布の前 1・後ろ 2 w=別に垂らす割合
 };
 
 struct ClothV
 {
-	uint4 a;    // x=メッシュの頂点 y,z=格子の点 4 つ（16bit ずつ）
+	uint4 a;    // x=メッシュの頂点 y,z=格子の点 4 つ（16bit ずつ） w=下 2bit 前 1・後ろ 2、上の 8bit 別に垂らす割合
 	float4 w;   // 4 点の重み
 	float4 p;   // バインドの位置 w=動く割合（腰の上 0 → 下 1）
 	float4 n;   // バインドの法線 w=静止時に脚の形へ潜っている深さ
@@ -91,9 +91,10 @@ int Inside(float3 p, float allow)
 	return -1;
 }
 
-// 脚の中だけを、面の外へ少し出す。厚く押すと裾が袋になる。1 回は 4cm まで、数回に分ける。
+// 脚の中だけを、面の外へ少し出す。厚く押すと裾が袋になる。1 回は 6.5cm まで、数回に分ける。
 // useFeet が 0 のときは靴のカプセルを見ない。離した裾を靴の表面へ戻さないため。
-float3 CollideBody(float3 p, float allow, float useFeet)
+// pan が 1（前布）のときは脚の前面（+u）側へ、2（後ろ布）のときは後面（-u）側へ出し、布がすねを前後に貫かないようにする。
+float3 CollideBody(float3 p, float allow, float useFeet, uint pan)
 {
 	uint ns = min(Cnt.y, useFeet > 0.5 ? 6u : 4u);
 	[loop] for (int rep = 0; rep < 8; rep++) {
@@ -109,27 +110,45 @@ float3 CollideBody(float3 p, float allow, float useFeet)
 			if (t < Seg[s * 4 + 1].w - 0.02 || t > t1) continue;
 			float tc = clamp(t, 0, 1);
 			float3 rv = q - ax * (tc * len);
+			float3 u = Seg[s * 4 + 2].xyz;
+			float3 w = Seg[s * 4 + 3].xyz;
+			float fu = dot(rv, u);
+			float fw = dot(rv, w);
 			float dist = length(rv);
 			float k = Seg[s * 4 + 2].w > 0 ? smoothstep(0, 1, (tc - Seg[s * 4 + 1].w) / max(Seg[s * 4 + 2].w, 1e-4)) : 1;
-			float phi = atan2(dot(rv, Seg[s * 4 + 3].xyz), dot(rv, Seg[s * 4 + 2].xyz));
+			float fuPhi = (pan == 1u && s < 4u) ? max(fu, 0.01) : ((pan == 2u && s < 4u) ? min(fu, -0.01) : fu);
+			float phi = atan2(fw, fuPhi);
 			float R = ProfR(s, tc, phi) * k - allow + 0.008;
 			if (R < 0.026) R = 0.026;
-			if (dist >= R) continue;
-			float pen = R - dist;
-			float3 n = dist > 1e-3 ? mul(rv, (float3x3)Pal[s]) : float3(0, 0, -1);
+			float pen = 0;
+			float3 dirLocal = rv;
+			if (pan == 1u && s < 4u && fu < 0 && abs(fw) < R) {
+				pen = R * sqrt(max(1.0 - (fw / R) * (fw / R), 0.0)) - fu;
+				dirLocal = u * max(-fu, 0.02) + w * (fw * 0.25);
+			} else if (pan == 2u && s < 4u && fu > 0 && abs(fw) < R) {
+				pen = R * sqrt(max(1.0 - (fw / R) * (fw / R), 0.0)) + fu;
+				dirLocal = -u * max(fu, 0.02) + w * (fw * 0.25);
+			} else if (dist < R) {
+				pen = R - dist;
+				if (pan == 1u && s < 4u && fu < 0.015) dirLocal = u * 0.03 + w * fw;
+				else if (pan == 2u && s < 4u && fu > -0.015) dirLocal = -u * 0.03 + w * fw;
+			}
+			if (pen <= 0) continue;
+			float dl = length(dirLocal);
+			float3 n = dl > 1e-4 ? mul(dirLocal / dl, (float3x3)Pal[s]) : float3(0, 0, pan == 2u ? 1 : -1);
 			float nl = length(n);
-			n = nl > 1e-5 ? n / nl : float3(0, 0, -1);
+			n = nl > 1e-5 ? n / nl : float3(0, 0, pan == 2u ? 1 : -1);
 			if (pen > bestPen) { bestPen = pen; bestN = n; }
 		}
 		if (bestPen <= 0) break;
-		float step = min(bestPen + 0.004, 0.055);
+		float step = min(bestPen + 0.004, 0.065);
 		p += bestN * step * Sim.w;
 	}
 	return p;
 }
 float3 Collide(float3 p, float allow)
 {
-	return CollideBody(p, allow, 1);
+	return CollideBody(p, allow, 1, 0u);
 }
 
 // 腰とお腹。脚の形は付け根を空けてあるので、そこを軸から外へ出す。
@@ -142,7 +161,7 @@ float3 HipOut(float3 p)
 	float top = Grav.w;
 	if (y > top + 0.04 || y < top - 0.52) return p;
 	float t = saturate((top - y) / 0.36);
-	float R = lerp(0.145, 0.175, t);
+	float R = lerp(0.152, 0.185, t);
 	if (rl >= R || rl < 1e-4) return p;
 	d *= (R + 0.010) / rl;
 	ph.x = Mode.y + d.x;
@@ -180,6 +199,39 @@ float3 HipHung(ClothN c)
 		h += GravDown() * sag;
 	}
 	return h * Sim.w;
+}
+
+// 両脇スリットの前布。腰の輪の位置を今の腰へ置き、そこから重力の向きへ上端からの丈だけ垂らす。
+// バインドの脚は足首ほど後ろへ傾いているのでその分を前へ戻し、飛行停止で脚が前へ出ているときは脚より奥へ引かない。
+float3 FrontHang(float3 x, float3 skinned)
+{
+	float drop = max(Grav.w - x.y, 0);
+	float3 a = float3(x.x, Grav.w, x.z - 0.038 * saturate(drop / 0.45));
+	float3 hung = (mul(float4(a, 1), Hips).xyz + GravDown() * drop) * Sim.w;
+	float3 ph = mul(float4(hung / max(Sim.w, 1e-4), 1), HipInv).xyz;
+	float3 ps = mul(float4(skinned / max(Sim.w, 1e-4), 1), HipInv).xyz;
+	if (ps.z < ph.z) {
+		ph.z = ps.z;
+		hung = mul(float4(ph, 1), Hips).xyz * Sim.w;
+	}
+	return hung;
+}
+
+// 両脇スリットの後ろ布。スリット上端（ySlit）までは脚に沿わせて段を作らず、そこから下は重力で垂らし、
+// 左右の脚の間（中央）は脚と脚の谷間へ落とす。
+float3 BackSlitOffset(float3 x, float ySlit)
+{
+	float drop = max(ySlit - x.y, 0);
+	float t = smoothstep(0.0, 0.28, drop);
+	float mid = 1.0 - smoothstep(0.01, 0.11, abs(x.x - Mode.y));
+	float3 local = float3((Mode.y - x.x) * (0.20 * t), 0, -0.068 * mid * t);
+	return (mul(local, (float3x3)Hips) + GravDown() * (drop * (0.26 + 0.22 * mid))) * Sim.w;
+}
+
+// 腰に付いた最上段から 12cm かけて垂らし始める。上端で折れない。
+float HangIn(float y)
+{
+	return smoothstep(0.0, 0.12, Grav.w - y);
 }
 
 float ShoePin(float3 p)
@@ -239,7 +291,8 @@ float FlyDrape(ClothN c, float3 skinned)
 	if (fly < 0.001 || Mode.x > 0.35) return 0;
 	float belowKnee = saturate((Grav.w - 0.32 - c.x.y) / 0.28);
 	float free = saturate(Clearance(skinned) / 0.04);
-	return belowKnee * belowKnee * free * 0.10 * Sim.w * fly;
+	// 前後に分かれた布は PanelHang が丈いっぱいに垂らしているので、さらに伸ばさない。
+	return belowKnee * belowKnee * free * 0.10 * Sim.w * fly * (1 - saturate(c.q.w));
 }
 float3 NodeTarget(ClothN c)
 {
@@ -254,7 +307,15 @@ float3 NodeTarget(ClothN c)
 	}
 	h *= Sim.w;
 	float fly = saturate(Wind.w);
-	if (fly > 0.001 && Mode.x < 0.35 && c.p.w < 0.5) {
+	if (fly > 0.001 && Mode.x < 0.35 && c.p.w < 0.5 && c.q.w > 0.001) {
+		if (c.q.z < 1.5) {
+			h = lerp(h, FrontHang(c.x.xyz, h), fly * saturate(c.q.w) * HangIn(c.x.y));
+		} else {
+			float ySlit = Grav.w - max(c.q.z - 2.0, 0.0);
+			h += BackSlitOffset(c.x.xyz, ySlit) * (fly * saturate(c.q.w));
+		}
+	} else if (fly > 0.001 && Mode.x < 0.35 && c.p.w < 0.5) {
+		// 一周つながったスカート。後ろは脚に付いたまま、前だけ靴に運ばれた分を腰の垂れへ戻す。
 		float front = smoothstep(0.02, 0.10, Mode.z - c.x.z);
 		float low = saturate((Grav.w - 0.26 - c.x.y) / 0.20);
 		float pin = ShoePin(h);
@@ -428,9 +489,11 @@ void CSClothRelax(uint id : SV_GroupIndex)
 	gP[id] = (on && !fixed) ? St[2 * NMAX + id].xyz : t;
 	GroupMemoryBarrierWithGroupSync();
 	// 余り布だけ垂らしてから、脚の中は体が勝つように押し出す。
+	uint nodePan = c.q.z > 1.5 ? 2u : (c.q.z > 0.5 ? 1u : 0u);
+	float nodeFeet = (nodePan > 0u && Wind.w > 0.5 && Mode.x < 0.35 && c.q.w > 0.5) ? 0 : 1;
 	float3 goal = t + down * (fixed ? 0 : FlyDrape(c, t));
 	if (!fixed) goal += WindPush(c);
-	if (!fixed) goal = Collide(goal, c.q.y);
+	if (!fixed) goal = CollideBody(goal, c.q.y, nodeFeet, nodePan);
 	gG[id] = goal;
 	GroupMemoryBarrierWithGroupSync();
 	for (int it = 0; it < 16; it++) {
@@ -463,7 +526,7 @@ void CSClothRelax(uint id : SV_GroupIndex)
 	}
 	if (!on) return;
 	float3 p = gP[id];
-	if (!fixed) p = HipOut(Collide(p, c.q.y));
+	if (!fixed) p = HipOut(CollideBody(p, c.q.y, nodeFeet, nodePan));
 	St[id] = float4(p, 0);
 	St[3 * NMAX + id] = float4(p - BonePos(c) * Sim.w, 0);
 }
@@ -485,7 +548,29 @@ void CSClothWrite(uint id : SV_DispatchThreadID)
 	float3 base = s;
 	float fly = saturate(Wind.w);
 	float leftShoe = 0;
-	if (fly > 0.001 && Mode.x < 0.35 && c.p.w > 0.25) {
+	uint pan = c.a.w & 3u;
+	float panW = (pan > 0u && fly > 0.001 && Mode.x < 0.35) ? fly * ((float)((c.a.w >> 8) & 255u) / 255.0) : 0;
+	if (pan == 1u && panW > 0.001) {
+		// 両脇スリットの前布。腰から重力で真下へ垂らし、格子の揺れだけを足す。
+		panW *= HangIn(c.p.y);
+		float3 dyn = float3(0, 0, 0);
+		[unroll] for (int kk = 0; kk < 4; kk++) {
+			uint q = min(k4[kk], (uint)(NMAX - 1));
+			dyn += (St[q].xyz - NodeTarget(Cn[q])) * c.w[kk];
+		}
+		base = lerp(s, FrontHang(c.p.xyz, s) + dyn * c.p.w - pull, panW);
+		leftShoe = panW > 0.5 ? 1 : 0;
+	} else if (pan == 2u && panW > 0.001) {
+		// 両脇スリットの後ろ布。スリット上端から連続して下へ垂らし、中央は脚と脚の間へ落とす。
+		float ySlit = Grav.w - (float)(c.a.w >> 16) * 0.001;
+		float3 dyn = float3(0, 0, 0);
+		[unroll] for (int kk = 0; kk < 4; kk++) {
+			uint q = min(k4[kk], (uint)(NMAX - 1));
+			dyn += (St[q].xyz - NodeTarget(Cn[q])) * c.w[kk];
+		}
+		base = s + BackSlitOffset(c.p.xyz, ySlit) * panW + dyn * (c.p.w * panW) - pull * panW;
+		leftShoe = panW > 0.5 ? 1 : 0;
+	} else if (fly > 0.001 && Mode.x < 0.35 && c.p.w > 0.25) {
 		float front = smoothstep(0.0, 0.07, Mode.z - c.p.z);
 		float low = saturate((Grav.w - 0.20 - c.p.y) / 0.16);
 		float3 hung = mul(float4(c.p.xyz, 1), Hips).xyz;
@@ -500,7 +585,7 @@ void CSClothWrite(uint id : SV_DispatchThreadID)
 		leftShoe = length(base - s) > 0.02 ? 1 : 0;
 	}
 	// 靴から離した裾は、靴のカプセルで表面へ戻さない。太ももとすねには当たる。
-	float3 p = HipOut(CollideBody(base + pull, c.n.w, leftShoe > 0.5 ? 0 : 1));
+	float3 p = HipOut(CollideBody(base + pull, c.n.w, leftShoe > 0.5 ? 0 : 1, pan));
 	float3 nr = sn;
 	float l = dot(nr, nr);
 	if (l > 1e-8) nr *= rsqrt(l);

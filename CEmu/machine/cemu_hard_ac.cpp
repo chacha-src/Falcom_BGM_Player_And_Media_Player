@@ -88,6 +88,20 @@ static uint8_t* BlandiaExtra(unsigned addr)
 	return 0;
 }
 
+/* utoukond の X1-010。メンバにすると他 obj とクラスサイズがずれる。 */
+static CChip* sUtoX1 = NULL;
+static const CHardAc* sUtoOwner = NULL;
+
+static int AcUtoukondRom(const uint8_t* m)
+{
+	return m && m[0] == 0xf3 && m[1] == 0x31 && m[2] == 0x00 && m[3] == 0xf0;
+}
+
+CChip* CHardAc::UtoX1() const
+{
+	return (sUtoOwner == this) ? sUtoX1 : NULL;
+}
+
 CHardAc::CHardAc()
 	: board_(CEMU_AC_BOARD_UNKNOWN)
 	, cpuHz_(4000000)
@@ -450,11 +464,12 @@ static int CEmuAcIsT5182(const CEmuGameEntry* ge)
 	return 0;
 }
 
-/* MAME sunelectronics/shangha3.cpp heberpop / blocken: Z80+YM3438+OKI。Seibu ではない。 */
+/* MAME sunelectronics/shangha3.cpp heberpop / blocken: Z80+YM3438+OKI。
+   utoukond もラッチ C0 + YM3438 I/O 00/01。作業 RAM は E000（別ゲート）。Seibu ではない。 */
 static int CEmuAcIsHeberpop(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
-	static const char* const kNames[] = { "heberpop", "blocken" };
+	static const char* const kNames[] = { "heberpop", "blocken", "utoukond" };
 	for (unsigned i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++) {
 		const size_t n = strlen(kNames[i]);
 		if (ge->subtype && ge->subtype[0] && _stricmp(ge->subtype, kNames[i]) == 0)
@@ -1036,7 +1051,8 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "ultraman",   CEMU_AC_BOARD_TECHNOS_DDRAGON2 },
 	/* --- Konami: 68000 + K054539×2 + K056800（System GX 族） --- */
 	{ "zr107",      CEMU_AC_BOARD_KONAMI_GX },
-	{ "polycomm",   CEMU_AC_BOARD_KONAMI_GX },
+	/* plygonet: Z80 F3 ED 56 C3 86 + K054539 @E000。68000 GX に渡すと先頭がベクタになり 2 秒で切れる。 */
+	{ "polycomm",   CEMU_AC_BOARD_KONAMI_PCM },
 
 	/* --- Taito: Z80 + YM2151 または YM2203 --- */
 	{ "arkanoid",   CEMU_AC_BOARD_TAITO_OPM },
@@ -1374,7 +1390,8 @@ static int CEmuAcIsKonamiK054539Sub(const char* sub)
 {
 	if (!sub || !sub[0]) return 0;
 	static const char* const kSubs[] = {
-		"lethal", "gaiapolis", "martchmp", "premsocr", "prmrsocr"
+		"lethal", "gaiapolis", "martchmp", "premsocr", "prmrsocr",
+		"polycomm"
 	};
 	for (unsigned i = 0; i < sizeof(kSubs) / sizeof(kSubs[0]); i++)
 		if (_stricmp(sub, kSubs[i]) == 0) return 1;
@@ -4425,15 +4442,25 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 				vsIoKind_ = 1;
 		}
 	} else if (board_ == CEMU_AC_BOARD_HEBERPOP) {
-		/* MAME shangha3.cpp heberpop: Z80 48/8=6 MHz、YM3438 48/6=8 MHz、OKI 1.056 MHz PIN7 High。 */
+		/* MAME shangha3.cpp heberpop: Z80 48/8=6 MHz、YM3438 48/6=8 MHz、OKI 1.056 MHz PIN7 High。
+		   utoukond は同じ YM ポートで、PCM は OKI ではなく X1-010（16 MHz）。 */
 		cpuHz_ = 6000000;
 		opmHz_ = 8000000;
 		chip_ = CEmuChipYm2612Create(8000000u, sampleRate_);
 		mainIsYm2612_ = 1;
 		chip2_ = NULL;
-		pcm_ = CEmuChipOki6295Create(1056000u, sampleRate_);
 		pcm2_ = NULL;
-		pcmKind_ = 2;
+		if (ge && ge->archive && _stricmp(ge->archive, "utoukond") == 0) {
+			pcm_ = NULL;
+			pcmKind_ = 0;
+			if (sUtoX1)
+				CEmuChipX1010Destroy(sUtoX1);
+			sUtoX1 = CEmuChipX1010Create(16000000u, sampleRate_);
+			sUtoOwner = this;
+		} else {
+			pcm_ = CEmuChipOki6295Create(1056000u, sampleRate_);
+			pcmKind_ = 2;
+		}
 	} else if (board_ == CEMU_AC_BOARD_BIONICC) {
 		/* MAME bionicc: Z80 / YM2151 14.31818/4。MCU はラッチ+NMI に畳む。 */
 		cpuHz_ = 3579545;
@@ -4510,7 +4537,11 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			|| CEmuAcIsKonamiK054539Sub(ge->subtype) || hasK054539
 			|| CEmuAcIsPrmrsocr(ge)) ? 1 : 0;
 		/* mystwarr.cpp sound_map は同じ 4 MB サンプル ROM 上で K054539 #1 を E000-E22F、#2 を E400-E62F。単チップ基板（bucky/moomesa/xexex）は最初の窓だけ埋める。 */
-		const int isK054539x2 = (_stricmp(ge->subtype, "054539x2") == 0) ? 1 : 0;
+		/* gaiapolis / dadandan は XML の type が 054539x2 ではないが、音源マップは
+		   mystwarr と同じく K054539 が E000 と E400。2 本目が無いと E4xx の初期化が RAM に落ちる。 */
+		const int isK054539x2 = (_stricmp(ge->subtype, "054539x2") == 0
+			|| _stricmp(ge->subtype, "gaiapolis") == 0
+			|| _stricmp(ge->subtype, "dadandan") == 0) ? 1 : 0;
 		/* K053260（parodius/simpsons/…）: Z80+YM2151+K053260 @ 3.579545 MHz。カタログ既定 YM@F800 / PCM@FC00（ssriders 級は FA00）。Bucky/Moo/X-Men K054539: YM@EC00、PCM@E000、バンク@F800、K054321@F000。 */
 		cpuHz_ = isK054539 ? 8000000 : 3579545;
 		opmHz_ = isK054539 ? 4000000 : 3579545;
@@ -4718,6 +4749,12 @@ void CHardAc::Shutdown()
 	if (pcm_) {
 		CEmuAcDestroyPcmChip(this, pcm_);
 		pcm_ = NULL;
+	}
+	if (sUtoOwner == this) {
+		if (sUtoX1)
+			CEmuChipX1010Destroy(sUtoX1);
+		sUtoX1 = NULL;
+		sUtoOwner = NULL;
 	}
 	if (chip3_) {
 		/* chip3 は AY（SJ #3 / msisaac AY2）。starforce だけ SN×3 の 3 本目。auxKind_ は使わない（FLSTORY msisaac は MSM chip2 用に auxKind_=4 を保つ）。 */
@@ -6935,7 +6972,11 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		}
 		if (!slotted) {
 			mem_[0xe000] = cmd;
-			mem_[0xe001] = cmd;
+			/* harddunk/scross/titlef（F3 C3 00 01）は E001!=0 を
+			   「消費済み」として E000 を読まない。長さバイトは 0 のまま。 */
+			if (!(mem_[0] == 0xf3 && mem_[1] == 0xc3
+				&& mem_[2] == 0x00 && mem_[3] == 0x01))
+				mem_[0xe001] = cmd;
 		}
 		mem_[0xffff] = 0;
 		Sys32SignalIrq(1);
@@ -7860,6 +7901,9 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 			return;
 		}
 		if (p == 0x80) {
+			/* utoukond の OUT 80 は X1 制御。OKI に渡すと無音サンプルを叩く。 */
+			if (mem_[0] == 0xf3 && mem_[1] == 0x31 && mem_[2] == 0x00 && mem_[3] == 0xf0)
+				return;
 			if (pcm_)
 				pcm_->Write(0, data);
 			return;
@@ -8303,7 +8347,9 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 				}
 				if (!slotted) {
 					mem_[0xe000] = cmd;
-					mem_[0xe001] = cmd;
+					if (!(mem_[0] == 0xf3 && mem_[1] == 0xc3
+						&& mem_[2] == 0x00 && mem_[3] == 0x01))
+						mem_[0xe001] = cmd;
 				}
 				Sys32SignalIrq(1);
 			}
@@ -9093,6 +9139,17 @@ void CHardAc::RaizingPostCommand(uint8_t cmd, uint8_t data)
 void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 {
 	if (board_ == CEMU_AC_BOARD_HEBERPOP) {
+		/* utoukond: DI; LD SP,F000。作業 RAM は E000-EFFF。F000-FFFF は X1-010。 */
+		if (AcUtoukondRom(mem_)) {
+			if (addr >= 0xf000) {
+				if (sUtoOwner == this && sUtoX1)
+					CEmuChipX1010Write(sUtoX1, (unsigned)(addr - 0xf000), data);
+				return;
+			}
+			if (addr >= 0xe000)
+				mem_[addr] = data;
+			return;
+		}
 		/* 0000-F7FF ROM。F800-FFFF 2K RAM（スタックは SP=0000 で FFFE へラップ）。 */
 		if (addr >= 0xf800)
 			mem_[addr] = data;
@@ -11114,6 +11171,11 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			pcm2_->Write(addr - konamiPcm2Addr_, data);
 			return;
 		}
+		/* plygonet: 2 個目の K054539 は未実装。E400 を RAM にすると読戻しがチップ在席に見え、シーケンサがそこで止まる。 */
+		if (pcmKind_ == 4 && !pcm2_ && addr >= 0xe400u && addr <= 0xe62fu
+			&& mem_ && mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[2] == 0x56
+			&& mem_[3] == 0xc3 && mem_[4] == 0x86)
+			return;
 		if (KonamiPrmrsocrMap() && pcm && addr >= 0xe000u && addr <= 0xe22fu) {
 			const unsigned off = addr - 0xe000u;
 			const unsigned reg = ((off & 0x100u) << 1) | (off & 0xffu);
@@ -11492,6 +11554,8 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 /* メモリ 8bit 読込 */
 uint8_t CHardAc::MemRead(uint16_t addr)
 {
+	if (sUtoOwner == this && sUtoX1 && addr >= 0xf000)
+		return CEmuChipX1010Read(sUtoX1, (unsigned)(addr - 0xf000));
 	if (board_ == CEMU_AC_BOARD_BIONICC) {
 		if (addr == 0x8000 || addr == 0x8001) {
 			/* 014B は (8001) bit7 busy 待ち。0038 は RRA で Timer A bit0。busy は sticky なので落とす。 */
@@ -12901,8 +12965,19 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 			&& (addr == 0xf000 || addr == 0xf001))
 			return chip_->ReadStatus();
 		if (pcm2_ && konamiPcm2Addr_
-			&& addr >= konamiPcm2Addr_ && addr < konamiPcm2Addr_ + pcmWin)
+			&& addr >= konamiPcm2Addr_ && addr < konamiPcm2Addr_ + pcmWin) {
+			/* mystwarr 族はチャンネルレジスタを読み戻す。ReadStatus（22c）だと
+			   ROM バンクや音量が決まらず、キーは動いても波形が 0 のまま。 */
+			if (mem_ && mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[2] == 0x56
+				&& mem_[3] == 0xc3 && (mem_[4] == 0x86 || mem_[4] == 0x88 || mem_[4] == 0x8a))
+				return CEmuChipK054539PeekReg(pcm2_, addr - konamiPcm2Addr_);
 			return pcm2_->ReadStatus();
+		}
+		/* plygonet: 不在の 2 個目 K054539。オープンバス。 */
+		if (pcmKind_ == 4 && !pcm2_ && addr >= 0xe400u && addr <= 0xe62fu
+			&& mem_ && mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[2] == 0x56
+			&& mem_[3] == 0xc3 && mem_[4] == 0x86)
+			return 0xff;
 		if (KonamiPrmrsocrMap() && pcmKind_ == 4 && addr >= 0xe000u && addr <= 0xe22fu) {
 			CChip* pcm = pcm_ ? pcm_ : chip_;
 			if (!pcm) return 0x00;
@@ -12915,7 +12990,10 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 			if (!pcm) return 0x00;
 			if (pcmKind_ == 3)
 				return CEmuChipK053260Read(pcm, addr - pcmBase);
-			if (KonamiJoeMap())
+			if (KonamiJoeMap()
+				|| (mem_ && mem_[0] == 0xf3 && mem_[1] == 0xed && mem_[2] == 0x56
+					&& mem_[3] == 0xc3
+					&& (mem_[4] == 0x86 || mem_[4] == 0x88 || mem_[4] == 0x8a)))
 				return CEmuChipK054539PeekReg(pcm, addr - pcmBase);
 			return pcm->ReadStatus();
 		}
@@ -16990,8 +17068,27 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		return LoadRomsRaizing(fs, ge);
 	if (board_ == CEMU_AC_BOARD_T5182)
 		return LoadRomsT5182(fs, ge);
-	if (board_ == CEMU_AC_BOARD_HEBERPOP)
-		return LoadRomsHeberpop(fs, ge);
+	if (board_ == CEMU_AC_BOARD_HEBERPOP) {
+		const int ok = LoadRomsHeberpop(fs, ge);
+		/* utoukond の 1MB は X1 サンプル。heberpop ローダは 512KB OKI しか見ない。 */
+		if (ok && sUtoOwner == this && sUtoX1 && fs) {
+			for (int i = 0; i < fs->fileCount; i++) {
+				const unsigned sz = fs->files[i].size;
+				const uint8_t* d = fs->files[i].data;
+				if (!d || sz < 0x80000u || d[0] == 0xf3)
+					continue;
+				uint8_t* p = (uint8_t*)malloc(sz);
+				if (!p) break;
+				memcpy(p, d, sz);
+				if (pcmRom_) free(pcmRom_);
+				pcmRom_ = p;
+				pcmRomSize_ = sz;
+				sUtoX1->SetPcmRom(pcmRom_, pcmRomSize_);
+				break;
+			}
+		}
+		return ok;
+	}
 	if (board_ == CEMU_AC_BOARD_BIONICC)
 		return LoadRomsBionicc(fs, ge);
 	if (board_ == CEMU_AC_BOARD_SEIBU_OPL)

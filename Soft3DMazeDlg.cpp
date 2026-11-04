@@ -9156,8 +9156,13 @@ void CSoft3DMazeDlg::OnDestroy()
 
 void CSoft3DMazeDlg::RequestDestroyWindow()
 {
-	if (GetSafeHwnd())
+	HWND parent = NULL;
+	if (GetSafeHwnd()) {
+		parent = ::GetParent(m_hWnd);
 		ShowWindow(SW_HIDE);
+		if (parent && ::IsWindow(parent) && ::IsWindowVisible(parent) && !::IsIconic(parent))
+			::SetForegroundWindow(parent);
+	}
 	Soft3DLoopRequestStop();
 	Soft3DDeferPresent(1);
 	m_view.m_ready = FALSE;

@@ -3,6 +3,7 @@
 #include "stdafx.h"
 #include "resource.h"
 #include "OmakeTacticsRender.h"
+#include "OmakeTacticsText.h"
 #include "Soft3DTexRes.h"
 #include "Soft3DTextD2D.h"
 #include <d3dcompiler.h>
@@ -36,6 +37,7 @@ struct TacDrawCmd {
 	ID3D11DepthStencilState* depth;
 	UINT nIdx;
 	UINT stride;
+	UINT vbOff;
 	DXGI_FORMAT ibFmt;
 	D3D11_PRIMITIVE_TOPOLOGY topo;
 	TacObjCB obj;
@@ -71,7 +73,8 @@ static void TacFillObj(TacObjCB& o, const M4& world, const DrawParams& dp, float
 	o.params[0] = outlineW; o.params[1] = dp.mode; o.params[2] = dp.emissive; o.params[3] = dp.hue;
 	o.extra[0] = dp.dissolve; o.extra[1] = dp.flash; o.extra[2] = dp.rim; o.extra[3] = dp.sway;
 	o.oc[0] = (dp.outlineColor & 255) / 255.f; o.oc[1] = ((dp.outlineColor >> 8) & 255) / 255.f; o.oc[2] = ((dp.outlineColor >> 16) & 255) / 255.f; o.oc[3] = ((dp.outlineColor >> 24) & 255) / 255.f;
-	if (dp.noTess && outlineW <= 0.f) o.oc[3] = 2.f;
+	// 輪郭パスも同じ印。滝の mode が残っても、体・装備・髪の頂点は流さない。
+	if (dp.noTess && dp.mode < 0.5f) o.oc[3] = 2.f;
 }
 
 static void TacBindObjBuf(ID3D11DeviceContext* ctx, ID3D11Buffer* b)
@@ -129,6 +132,8 @@ Renderer::Renderer()
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_fadeAbove = -1;
 	m_cutDeck = -1;
+	m_cutActors = FALSE;
+	m_cutActorGen = 0;
 	m_fadeX = m_fadeZ = -1;
 	m_w = m_h = 0; m_quality = 1; m_gpu = 0; m_allowTess = TRUE; m_tessOn = FALSE; m_bindKey = -1; m_hudPipe = 0; m_lastPsSrv = NULL; m_dsWant = NULL; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_ctx1 = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
@@ -168,8 +173,9 @@ Renderer::Renderer()
 	memset(m_hairVN, 0, sizeof(m_hairVN));
 	m_scalpModel = -1;
 	m_capC = RGBA8(70, 70, 70);
+	for (int s = 0; s < TAC_SCALP_CACHE; s++) m_scalps[s].model = -1;
 	m_ilS = m_ilB = m_ilK = m_ilH = m_ilP = m_ilPT = NULL;
-	m_cbFrame = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0;
+	m_cbFrame = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u;
 	m_sLin = m_sCmp = m_sClamp = NULL;
 	m_rsBack = m_rsFront = m_rsNone = m_rsShadow = m_rsHud = NULL;
 	m_dsWrite = m_dsRead = m_dsOff = NULL;
@@ -195,9 +201,15 @@ Renderer::Renderer()
 	m_hudSrv = NULL;
 	m_inPortrait = FALSE; m_portraitSlot = 0;
 	m_avaSegN = 0;
-	m_avaHide = m_avaLoading = 0;
+	m_avaHide = m_avaLoading = m_avaPct = 0;
+	m_avaShown = -1;
+	m_avaBatchN = 1;
+	m_avaBatchI = 0;
+	m_avaBatchFrame = -1;
+	m_avaFlashed = FALSE;
 	memset(m_avaWait, 0xFF, sizeof(m_avaWait));
 	memset(m_text, 0, sizeof(m_text));
+	memset(m_textHash, 0, sizeof(m_textHash));
 }
 
 Renderer::~Renderer() { Release(); }
@@ -225,7 +237,7 @@ void Renderer::Release()
 	m_gearShown = 0;
 	m_avaReady = 0;
 	ClearMonPack();
-	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; }
+	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
 	m_terrain.Release();
 	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); m_cover3[i].Release(); m_cover4[i].Release(); }
 	m_water.Release(); m_lava.Release();
@@ -971,11 +983,14 @@ BOOL Renderer::CreateStates()
 	bd.ByteWidth = 64 * MAXJ;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbBones))) return FALSE;
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	bd.ByteWidth = sizeof(VtxH) * 6 * 4096;
+	bd.ByteWidth = sizeof(VtxH) * 6 * 4096 * 4;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbHud))) return FALSE;
-	m_vbDynBytes = 4u * 1024u * 1024u;
+	m_vbDynBytes = 16u * 1024u * 1024u;
 	bd.ByteWidth = m_vbDynBytes;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbDyn))) return FALSE;
+	m_dynPos = 0xFFFFFFF0u;
+	m_dynOff = 0;
+	m_hudPos = 0xFFFFFFF0u;
 	bd.ByteWidth = 64u * 64u;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbInst))) return FALSE;
 	{
@@ -1707,9 +1722,11 @@ BOOL Renderer::CreateProcTextures()
 
 BOOL Renderer::LoadPngTex(const BYTE* data, UINT len, int slot)
 {
-	IWICImagingFactory* f = NULL;
-	HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
-	if (FAILED(hr) || !f) return FALSE;
+	static IWICImagingFactory* f = NULL;
+	if (!f) {
+		HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
+		if (FAILED(hr) || !f) return FALSE;
+	}
 	IWICStream* st = NULL; IWICBitmapDecoder* dec = NULL; IWICBitmapFrameDecode* fr = NULL; IWICFormatConverter* cv = NULL;
 	BOOL ok = FALSE;
 	if (SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE*)data, len))
@@ -1725,7 +1742,7 @@ BOOL Renderer::LoadPngTex(const BYTE* data, UINT len, int slot)
 				ok = MakeTex(m_dev, m_ctx, px.data(), w, h, TRUE, &m_tex[slot], &m_srv[slot]);
 		}
 	}
-	TAC_REL(cv); TAC_REL(fr); TAC_REL(dec); TAC_REL(st); TAC_REL(f);
+	TAC_REL(cv); TAC_REL(fr); TAC_REL(dec); TAC_REL(st);
 	return ok;
 }
 
@@ -1814,6 +1831,213 @@ static void ModelSetupJoints(Model& m, const Rig* r)
 }
 
 static int g_avaNeedReset = 0;
+
+int Renderer::CountAssetPulses() const
+{
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_ASSETS, &data, &size)) return 40;
+	if (!data || size < 32 || memcmp(data, "TAC1", 4) != 0) return 40;
+	Reader rd(data + 4, size - 4);
+	UINT ver = rd.U32(), nTex = rd.U32(), nRig = rd.U32(), nMod = rd.U32(), nAtt = rd.U32(), nSt = rd.U32();
+	if (ver != 1 || nTex > 12 || nRig > 8 || nMod > 32 || nAtt > 64 || nSt > 48) return 40;
+	int nJnt[8] = {};
+	int n = 0;
+	for (UINT i = 0; i < nTex; i++) {
+		UINT len = rd.U32();
+		if (!rd.Bytes(len)) return n > 0 ? n : 40;
+		rd.Align4();
+		n++;
+	}
+	for (UINT r = 0; r < nRig && r < 8; r++) {
+		UINT nj = rd.U32();
+		if (nj < 1 || nj > MAXJ) return n > 0 ? n : 40;
+		nJnt[r] = (int)nj;
+		if (!rd.Bytes((size_t)nj * 28)) return n > 0 ? n : 40;
+		UINT nc = rd.U32();
+		if (nc > 40) return n > 0 ? n : 40;
+		if (nc == 0) n++;
+		for (UINT c = 0; c < nc; c++) {
+			if (!rd.Bytes(32)) return n > 0 ? n : 40;
+			UINT nf = rd.U32();
+			rd.F32(); rd.U32();
+			if (nf == 0 || nf > 4000) return n > 0 ? n : 40;
+			if (!rd.Bytes((size_t)nf * nj * 8)) return n > 0 ? n : 40;
+			if (!rd.Bytes((size_t)nf * 12)) return n > 0 ? n : 40;
+			n++;
+		}
+	}
+	for (UINT mi = 0; mi < nMod; mi++) {
+		if (!rd.Bytes(32)) return n > 0 ? n : 40;
+		UINT rig = rd.U32(); rd.U32();
+		int nj = (rig < 8) ? nJnt[rig] : 0;
+		if (nj < 1) return n > 0 ? n : 40;
+		if (!rd.Bytes((size_t)nj * 40 + 64 + (size_t)nj * 64)) return n > 0 ? n : 40;
+		UINT np = rd.U32();
+		if (np == 0) n++;
+		for (UINT p = 0; p < np; p++) {
+			if (!rd.Bytes(32)) return n > 0 ? n : 40;
+			rd.U32();
+			UINT nv = rd.U32(), ni = rd.U32();
+			if (!rd.Bytes((size_t)nv * 40)) return n > 0 ? n : 40;
+			if (!rd.Bytes((size_t)ni * 2)) return n > 0 ? n : 40;
+			rd.Align4();
+			n++;
+		}
+	}
+	for (UINT ai = 0; ai < nAtt; ai++) {
+		if (!rd.Bytes(32 + 24)) return n > 0 ? n : 40;
+		rd.U32();
+		UINT nv = rd.U32(), ni = rd.U32();
+		if (!rd.Bytes((size_t)nv * 32)) return n > 0 ? n : 40;
+		if (!rd.Bytes((size_t)ni * 2)) return n > 0 ? n : 40;
+		rd.Align4();
+		n++;
+	}
+	for (UINT si = 0; si < nSt; si++) {
+		if (!rd.Bytes(32)) return n > 0 ? n : 40;
+		rd.U32();
+		UINT nv = rd.U32(), ni = rd.U32();
+		if (!rd.Bytes(24)) return n > 0 ? n : 40;
+		if (!rd.Bytes((size_t)nv * 32)) return n > 0 ? n : 40;
+		if (!rd.Bytes((size_t)ni * 2)) return n > 0 ? n : 40;
+		rd.Align4();
+		n++;
+	}
+	n++;
+	return n > 0 ? n : 40;
+}
+
+int Renderer::CountGearMeshes() const
+{
+	const BYTE* data = NULL;
+	DWORD size = 0;
+	if (!LockPack(IDR_TAC_GEAR, &data, &size)) return 1;
+	if (!data || size < 12) return 1;
+	if (memcmp(data, "TACQ", 4) != 0 && memcmp(data, "TACG", 4) != 0) return 1;
+	UINT n = 0;
+	memcpy(&n, data + 4, 4);
+	if (n < 1) return 1;
+	if (n > 256) n = 256;
+	return (int)n;
+}
+
+void Renderer::NoteAvaPhase(int phase, int phases, int i, int n)
+{
+	if (phases < 1) phases = 1;
+	if (n < 1) n = 1;
+	if (phase < 0) phase = 0;
+	if (phase >= phases) phase = phases - 1;
+	if (i < 0) i = 0;
+	if (i > n) i = n;
+	int local = (int)(((long long)phase * n + i) * 99 / ((long long)phases * n));
+	if (local < 1) local = 1;
+	if (local > 99) local = 99;
+	FlashAvaLocal(local);
+}
+
+void Renderer::FlashAvaLocal(int local)
+{
+	int n = m_avaBatchN < 1 ? 1 : m_avaBatchN;
+	int i = m_avaBatchI;
+	if (i < 0) i = 0;
+	if (i >= n) i = n - 1;
+	if (local < 0) local = 0;
+	if (local > 100) local = 100;
+	int pct;
+	if (local >= 100 && i + 1 >= n) pct = 100;
+	else {
+		int piece = local > 99 ? 99 : local;
+		pct = (int)(((long long)i * 100 + piece) / n);
+		if (pct < 1 && local > 0) pct = 1;
+		if (pct > 99) pct = 99;
+	}
+	if (pct > m_avaPct || pct >= 100) FlashAvaPct(pct);
+}
+
+void Renderer::BeginAvaBatch(int n)
+{
+	m_avaBatchN = n < 1 ? 1 : n;
+	m_avaBatchI = 0;
+	m_avaBatchFrame = m_frame;
+}
+
+int Renderer::CountPendingAvatars(int n, const int* model, const int* avatar, const int* cup) const
+{
+	if (!model || !avatar || !cup || n < 1 || m_avaSegN <= 0) return 0;
+	int keys[64][3];
+	int nk = 0;
+	int cnt = 0;
+	for (int i = 0; i < n; i++) {
+		int mdI = model[i], av = avatar[i], cp = cup[i];
+		if (mdI < 0 || mdI >= (int)models.size() || av <= 0) continue;
+		const Model& md = models[mdI];
+		const AvaModel* am = NULL;
+		for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { am = &x; break; }
+		if (!am) {
+			const BOOL fem = strncmp(md.name, "HumF", 4) == 0;
+			const BOOL mal = strncmp(md.name, "HumM", 4) == 0;
+			if (fem || mal) {
+				const char* ref = fem ? "HumF0" : "HumM0";
+				for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, ref)) { am = &x; break; }
+			}
+		}
+		if (!am) continue;
+		int ci = -1;
+		for (int k = 0, c = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++c == av) { ci = k; break; }
+		if (ci < 0) continue;
+		int cupK = 0;
+		if (am->gender >= 0 && am->gender < 2 && !m_avaBody[am->gender].m.dmax.empty() && !m_avaCos[ci].m.dmax.empty())
+			cupK = Clampi(cp, 0, BUST_N - 1);
+		BOOL seen = FALSE;
+		for (int k = 0; k < nk; k++) if (keys[k][0] == mdI && keys[k][1] == ci && keys[k][2] == cupK) seen = TRUE;
+		if (seen) continue;
+		if (nk < 64) { keys[nk][0] = mdI; keys[nk][1] = ci; keys[nk][2] = cupK; nk++; }
+		BOOL have = FALSE;
+		for (const AvaCache& x : m_avaCache) if (x.model == mdI && x.cos == ci && x.cup == cupK) { have = TRUE; break; }
+		if (!have) cnt++;
+	}
+	return cnt;
+}
+
+void Renderer::FlashAvaPct(int pct)
+{
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	m_avaPct = pct;
+	if (m_inPortrait || !m_ctx || !m_bbRtv || !m_swap || m_w < 8 || m_h < 8) return;
+	if (pct == m_avaShown) return;
+	m_avaShown = pct;
+	m_avaFlashed = TRUE;
+	ID3D11RenderTargetView* oldRT = NULL;
+	ID3D11DepthStencilView* oldDS = NULL;
+	m_ctx->OMGetRenderTargets(1, &oldRT, &oldDS);
+	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
+	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
+	m_ctx->RSSetViewports(1, &vp);
+	float cc[4] = { 0.06f, 0.07f, 0.14f, 1.f };
+	m_ctx->ClearRenderTargetView(m_bbRtv, cc);
+	m_hud.clear();
+	m_hudSrv = m_srv[TEX_WHITE];
+	m_hudPipe = 0;
+	wchar_t line[96];
+	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_AVA_WAIT), pct);
+	HudText(line, m_w * .5f, m_h * .46f, 28.f, RGBA8(255, 236, 210), 1, 1);
+	float bw = m_w * .62f;
+	if (bw > 520.f) bw = 520.f;
+	float bx = (m_w - bw) * .5f;
+	float by = m_h * .54f;
+	HudRect(bx, by, bw, 18.f, RGBA8(40, 36, 28, 230));
+	float fill = bw * (pct / 100.f);
+	if (fill < 2.f) fill = 2.f;
+	HudRect(bx, by, fill, 18.f, RGBA8(255, 214, 120, 240));
+	EndHud();
+	m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
+	ID3D11RenderTargetView* rt = oldRT ? oldRT : m_bbRtv;
+	m_ctx->OMSetRenderTargets(1, &rt, oldDS);
+	if (oldRT) oldRT->Release();
+	if (oldDS) oldDS->Release();
+}
 
 BOOL Renderer::LoadAssets()
 {
@@ -2195,6 +2419,18 @@ static BOOL SkipTackRec(Reader& rd, char* name, float* foot)
 		if (!rd.Bytes((size_t)nf * nJ * 8)) return FALSE;
 		if (!rd.Bytes((size_t)nf * 12)) return FALSE;
 	}
+	// 目録は足幅を測らない。姿勢も頂点も中身を読まず、同じバイト数だけ進める。
+	if (!foot) {
+		if (!rd.Bytes((size_t)nJ * 40 + 64 + (size_t)nJ * 64)) return FALSE;
+		UINT nv = rd.U32(), ni = rd.U32();
+		if (!nv || !ni || nv > 70000 || ni > 200000) return FALSE;
+		if (!rd.Bytes(24)) return FALSE;
+		if (!rd.Bytes((size_t)nv * 23)) return FALSE;
+		rd.Align4();
+		if (!rd.Bytes((size_t)ni * 2)) return FALSE;
+		rd.Align4();
+		return !rd.bad;
+	}
 	for (UINT j = 0; j < nJ; j++) {
 		float t[10];
 		for (int k = 0; k < 10; k++) t[k] = rd.F32();
@@ -2475,6 +2711,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				cl.hips.resize(cl.nFrames);
 				if (cl.hips.size() != cl.nFrames || !cl.hips.data()) return Bail();
 				for (int f = 0; f < cl.nFrames; f++) cl.hips[f] = v3(h[f * 3], h[f * 3 + 1], -h[f * 3 + 2]);
+				R.LoadPulse((int)c + 1, (int)nc + 8);
 			}
 			strncpy_s(m.name, name, 31);
 			m.rig = rSlot;
@@ -2530,7 +2767,12 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				d.n[2] = -(ns[k * 3 + 2] / 32767.f);
 				d.c = RGBA8(rgb[k * 3], rgb[k * 3 + 1], rgb[k * 3 + 2]);
 				for (int c = 0; c < 4; c++) { d.j[c] = jj[k * 4 + c]; d.w[c] = ww[k * 4 + c]; }
-				if ((k & 8191u) == 0) R.LoadPulse((int)k, (int)nv > 0 ? (int)nv * 2 : 1);
+				if ((k & 2047u) == 0) {
+					int denom = (int)nc + 8;
+					int at = (int)nc + 1 + (int)((nv > 0) ? ((unsigned long long)k * 6 / nv) : 0);
+					if (at > denom - 1) at = denom - 1;
+					R.LoadPulse(at, denom);
+				}
 				VtxS& s = poseV[k];
 				s.p[0] = d.p[0]; s.p[1] = d.p[1]; s.p[2] = d.p[2];
 				s.n[0] = d.n[0]; s.n[1] = d.n[1]; s.n[2] = d.n[2];
@@ -2716,9 +2958,9 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				skin.extR = max(hx, max(hy, hz));
 			}
 			BuildBaldIB(R.Dev(), skin, idx.data(), ni);
-			R.LoadPulse(1, 2);
+			R.LoadPulse((int)nc + 7, (int)nc + 8);
 			if (!R.MakeMesh(gm, poseV.data(), sizeof(VtxS), nv, idx.data(), ni)) return Bail();
-			R.LoadPulse(2, 2);
+			R.LoadPulse((int)nc + 8, (int)nc + 8);
 			gm.tex = R.TexWhite();
 			ModelSetupJoints(m, &g);
 			if (strncmp(name, "Hum", 3) == 0 && m.nJ > 1 && nv > 80) {
@@ -3039,6 +3281,11 @@ void Renderer::LoadBattleCreatures(const int* pack, int n)
 	for (int c = m_keepCreatures; c < nRel; c++) {
 		if (c < (int)m_creatures.size()) m_creatures[c].Release();
 		if (c >= (int)m_skins.size()) continue;
+		const int rm = m_skins[c].model;
+		if (rm >= 0) {
+			if (m_scalpModel == rm) { m_scalpModel = -1; m_capDraw.ib = NULL; m_capDraw.nIdx = 0; m_capBind.clear(); }
+			for (int s = 0; s < TAC_SCALP_CACHE; s++) if (m_scalps[s].model == rm) { m_scalps[s].model = -1; m_scalps[s].draw.Release(); m_scalps[s].bind.clear(); }
+		}
 		ReleaseSkinGpu(m_skins[c]);
 		TAC_REL(m_skins[c].baldIB);
 		m_skins[c].baldN = 0;
@@ -3083,7 +3330,10 @@ void Renderer::LoadBattleCreatures(const int* pack, int n)
 void Renderer::DrawCreature(int i, const M4& world, const DrawParams& dp)
 {
 	if (i < 0 || i >= (int)m_creatures.size()) return;
-	DrawStatic(m_creatures[i], world, dp);
+	DrawParams d = dp;
+	d.noTess = 1;
+	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	DrawStatic(m_creatures[i], world, d);
 }
 
 void Renderer::DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner)
@@ -3569,6 +3819,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		memcpy(&u, &dp.bodyScale, 4); key ^= u;
 		float am = jig ? amt : 0.f;
 		memcpy(&u, &am, 4); key ^= u;
+		key ^= m_cutActorGen * 0x85EBCA6Bu;
 	}
 	SkinOut* so = owner ? TakeSkinOut(owner, src) : NULL;
 	ID3D11Buffer* outVB = (so && so->vb) ? so->vb : src.outVB;
@@ -3581,6 +3832,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		base.stride = sizeof(VtxS);
 		DrawParams d = dp;
 		d.noTess = 1;
+		if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
 		DrawStatic(base, world, d);
 		base.vb = saved;
 		base.stride = savedStride;
@@ -3595,11 +3847,11 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	if (faceOn) UpdateFaceGpu(src, dp.face);
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
-	memset(ms.pData, 0, 64u * (unsigned)MAXJ);
 	int nj = pose.nJ;
 	if (nj < 0) nj = 0;
 	if (nj > MAXJ) nj = MAXJ;
 	if (nj) memcpy(ms.pData, pose.palette, sizeof(M4) * (size_t)nj);
+	if (nj < MAXJ) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(MAXJ - nj));
 	m_ctx->Unmap(m_cbSkinBone, 0);
 	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; };
 	static_assert(sizeof(Parm) == 96, "SkinParm");
@@ -3614,10 +3866,13 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 				float dx = x - src.bustPrev[0], dy = y - src.bustPrev[1], dz = z - src.bustPrev[2];
 				if (dx * dx + dy * dy + dz * dz < 0.08f * 0.08f) {
 					const float u = Clampf(amt / 7.f, 0.f, 1.f);
-					const float inert = Lerpf(0.42f, 1.05f, u);
-					const float k = Lerpf(0.40f, 0.13f, u);
-					const float damp = Lerpf(0.80f, 0.90f, u);
-					const float maxL = Lerpf(0.007f, 0.026f, u);
+					// 女性は下着の無い柔らかい乳房。大きいほど重く、ゆっくり大きく揺れて長く残る。
+					// 男性は胸板の筋肉。硬いばねで小さく速く戻る。厚いほど少し大きい。
+					const BOOL pec = !strncmp(models[src.model].name, "HumM", 4);
+					const float inert = pec ? Lerpf(0.22f, 0.50f, u) : Lerpf(0.58f, 1.35f, u);
+					const float k = pec ? Lerpf(0.55f, 0.40f, u) : Lerpf(0.30f, 0.095f, u);
+					const float damp = pec ? 0.76f : Lerpf(0.84f, 0.925f, u);
+					const float maxL = pec ? Lerpf(0.003f, 0.010f, u) : Lerpf(0.010f, 0.036f, u);
 					float tgt[3] = { -dx * inert, -dy * inert * 1.15f, -dz * inert };
 					for (int a = 0; a < 3; a++) {
 						src.bustVel[a] += tgt[a] + (0.f - src.bustLag[a]) * k;
@@ -3686,13 +3941,6 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	m_ctx->CSSetUnorderedAccessViews(0, 1, &outUAV, &cnt);
 	m_ctx->CSSetShader(m_csSkin, NULL, 0);
 	m_ctx->Dispatch(((UINT)src.gpuNv + 63u) / 64u, 1, 1);
-	ID3D11UnorderedAccessView* nou = NULL;
-	ID3D11ShaderResourceView* nos[3] = { NULL, NULL, NULL };
-	ID3D11Buffer* nob[3] = { NULL, NULL, NULL };
-	m_ctx->CSSetUnorderedAccessViews(0, 1, &nou, NULL);
-	m_ctx->CSSetShaderResources(0, 3, nos);
-	m_ctx->CSSetConstantBuffers(0, 3, nob);
-	m_ctx->CSSetShader(NULL, NULL, 0);
 	if (cloth && owner) {
 		ID3D11Buffer* keepVB = src.outVB;
 		ID3D11UnorderedAccessView* keepUAV = src.outUAV;
@@ -3700,6 +3948,10 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		RunCloth(*cloth, owner, src, pose, world, dp);
 		src.outVB = keepVB;
 		src.outUAV = keepUAV;
+	}
+	{
+		ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
 	}
 	if (so) { so->frame = m_frame; so->key = key; }
 	else {
@@ -3818,10 +4070,12 @@ void Renderer::SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* jig, f
 		DrawStatic(base, world, d);
 		return;
 	}
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, v.data(), v.size() * sizeof(VtxS));
+	UINT dynOff = 0;
+	void* dst = DynMap((UINT)(v.size() * sizeof(VtxS)), dynOff);
+	if (!dst) return;
+	memcpy(dst, v.data(), v.size() * sizeof(VtxS));
 	m_ctx->Unmap(m_vbDyn, 0);
+	m_dynOff = dynOff;
 	ID3D11Buffer* saved = base.vb;
 	base.vb = m_vbDyn;
 	UINT savedStride = base.stride;
@@ -4139,6 +4393,12 @@ static int CmpU64(const void* a, const void* b)
 	unsigned long long x = *(const unsigned long long*)a, y = *(const unsigned long long*)b;
 	return (x > y) - (x < y);
 }
+struct EdgeTri { unsigned long long e; int t; };
+static int CmpEdgeTri(const void* a, const void* b)
+{
+	unsigned long long x = ((const EdgeTri*)a)->e, y = ((const EdgeTri*)b)->e;
+	return (x > y) - (x < y);
+}
 
 // 胸の形を作る基準。左右の乳首（体の頂点。0=-X 側）と、胴の縦軸（乳首の中点 x0、乳首の高さの胴の前後の中点 z0）。
 // HumF1/F2 はバインドが +X へ寄るので、軸は x=0 ではなく左右の乳首の中点にする。
@@ -4172,6 +4432,8 @@ static int FindU64(const Buf<unsigned long long>& A, unsigned long long k)
 // 頂点は [体][体の新][服][服の新] に並べ直す（元の体の頂点の番号は変わらない）。体の元の三角形 t の子は bTri の
 // bOff[t]〜bOff[t+1]、服の三角形は cTri（服の中の番号）。増やせる頂点は maxAdd まで（超える段は割る辺の下限を上げる）。
 // 胸の差分が無い体は割らずに写すだけ。FALSE は確保の失敗。
+static Renderer* g_avaPlate = NULL;
+
 static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& bn, int nb, int nv, const Buf<WORD>& bodyTri,
 	const Buf<BYTE>& keep, const Buf<WORD>& cosTri, const BYTE* armJ, int maxAdd,
 	Buf<int>& bOff, Buf<WORD>& bTri, Buf<WORD>& cTri, int& nbA, int& nvA, BustRef& br)
@@ -4249,8 +4511,9 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 			hk.fill(cap, ~0ull);
 			hv.resize(cap);
 			if (hk.size() < cap || hv.size() < cap) return FALSE;
-			for (int k = 0; k < n; k++) {
-				unsigned long long key = part[k];
+		for (int k = 0; k < n; k++) {
+			if (g_avaPlate && (k & 63) == 0) g_avaPlate->NoteAvaPhase(1, 5, k, n);
+			unsigned long long key = part[k];
 				for (int a = 0; a < 3; a++) {
 					float f = V[k].p[a] * 1e4f;
 					long long q = (long long)(f < 0.f ? f - .5f : f + .5f) + (1 << 20);
@@ -4291,26 +4554,97 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 			if (M.size() > 1) qsort(M.data(), M.size(), sizeof(unsigned long long), CmpU64);
 			for (int i = 0; i < M.size(); i++) if (nM == 0 || M[i] != M[nM - 1]) M[nM++] = M[i];
 			M.resize(nM);
-			// 2 辺に印がある三角形は 3 辺目にも印を付ける。増えなくなるまで。
-			for (;;) {
-				add.clear();
+			// 印の有無は表で見る。閉じ終わってから一度だけ並べ、辺の番号は今までと同じ。
+			int hcap = 1024;
+			int need = nT > 0 ? nT * 8 + 8 : 1024;
+			if (need < 1024) need = 1024;
+			if (need > (1 << 22)) need = 1 << 22;
+			while (hcap < need) hcap *= 2;
+			static Buf<unsigned long long> hk;
+			hk.fill(hcap, ~0ull);
+			if (hk.size() < hcap) return FALSE;
+			auto putK = [&](unsigned long long key) {
+				unsigned h = (unsigned)(key * 11400714819323198485ull);
+				for (int s = 0; s < hcap; s++) {
+					int slot = (int)((h + (unsigned)s) & (unsigned)(hcap - 1));
+					if (hk[slot] == ~0ull || hk[slot] == key) { hk[slot] = key; return; }
+				}
+			};
+			auto hasK = [&](unsigned long long key) -> BOOL {
+				unsigned h = (unsigned)(key * 11400714819323198485ull);
+				for (int s = 0; s < hcap; s++) {
+					int slot = (int)((h + (unsigned)s) & (unsigned)(hcap - 1));
+					if (hk[slot] == ~0ull) return FALSE;
+					if (hk[slot] == key) return TRUE;
+				}
+				return FALSE;
+			};
+			for (int i = 0; i < nM; i++) putK(M[i]);
+			// 印の付いた辺に触る三角形だけを見る。閉じた辺の集合は、全三角形を波ごとになでるのと同じ。
+			{
+				static Buf<EdgeTri> adj;
+				static Buf<unsigned long long> que;
+				adj.clear();
+				if (nT > 0 && nT < 10000000 / 3) adj.reserve(nT * 3);
 				for (int i = 0; i < nT; i++) {
 					const int* q = &T[i * 3];
-					unsigned long long k3[3];
-					int c = 0, miss = -1;
 					for (int e = 0; e < 3; e++) {
-						k3[e] = EdgeKey(root[q[e]], root[q[(e + 1) % 3]]);
-						if (FindU64(M, k3[e]) >= 0) c++; else miss = e;
+						EdgeTri et;
+						et.e = EdgeKey(root[q[e]], root[q[(e + 1) % 3]]);
+						et.t = i;
+						adj.push_back(et);
 					}
-					if (c == 2) add.push_back(k3[miss]);
 				}
-				if (add.empty()) break;
-				for (int i = 0; i < add.size(); i++) M.push_back(add[i]);
-				nM = 0;
-				qsort(M.data(), M.size(), sizeof(unsigned long long), CmpU64);
-				for (int i = 0; i < M.size(); i++) if (nM == 0 || M[i] != M[nM - 1]) M[nM++] = M[i];
-				M.resize(nM);
+				if (adj.size() >= nT * 3) {
+					if (adj.size() > 1) qsort(adj.data(), adj.size(), sizeof(EdgeTri), CmpEdgeTri);
+					que.clear();
+					for (int i = 0; i < nM; i++) que.push_back(M[i]);
+					for (int qi = 0; qi < que.size(); qi++) {
+						const unsigned long long e = que[qi];
+						int lo = 0, hi = adj.size();
+						while (lo < hi) {
+							const int mid = (lo + hi) >> 1;
+							if (adj[mid].e < e) lo = mid + 1; else hi = mid;
+						}
+						for (int u = lo; u < adj.size() && adj[u].e == e; u++) {
+							const int* q = &T[adj[u].t * 3];
+							unsigned long long k3[3];
+							int c = 0, miss = -1;
+							for (int ee = 0; ee < 3; ee++) {
+								k3[ee] = EdgeKey(root[q[ee]], root[q[(ee + 1) % 3]]);
+								if (hasK(k3[ee])) c++; else miss = ee;
+							}
+							if (c == 2 && !hasK(k3[miss])) {
+								putK(k3[miss]);
+								M.push_back(k3[miss]);
+								que.push_back(k3[miss]);
+							}
+						}
+					}
+				} else {
+					int guard = 0;
+					for (;;) {
+						add.clear();
+						if (++guard > nT + 2) break;
+						for (int i = 0; i < nT; i++) {
+							const int* q = &T[i * 3];
+							unsigned long long k3[3];
+							int c = 0, miss = -1;
+							for (int e = 0; e < 3; e++) {
+								k3[e] = EdgeKey(root[q[e]], root[q[(e + 1) % 3]]);
+								if (hasK(k3[e])) c++; else miss = e;
+							}
+							if (c == 2 && !hasK(k3[miss])) add.push_back(k3[miss]);
+						}
+						if (add.empty()) break;
+						for (int i = 0; i < add.size(); i++) { putK(add[i]); M.push_back(add[i]); }
+					}
+				}
 			}
+			nM = 0;
+			if (M.size() > 1) qsort(M.data(), M.size(), sizeof(unsigned long long), CmpU64);
+			for (int i = 0; i < M.size(); i++) if (nM == 0 || M[i] != M[nM - 1]) M[nM++] = M[i];
+			M.resize(nM);
 			// 割る辺の生の頂点の組（継ぎ目の両側は別の頂点になる）。
 			R.clear();
 			for (int i = 0; i < nT; i++) {
@@ -4441,6 +4775,77 @@ static BOOL RefineBust(Renderer::CreatureSkin& sk, Buf<float>& bx, Buf<float>& b
 // ・山: 上は丸い山を縁で滑らかに胸へ溶かし、下は乳房下の折れ目（大きいほど締まり、真下だけ）。乳輪と乳首を載せ、
 //   垂れの分だけ下げる。押し出す向きは胴の外向きを正面へ寄せたもの。腕・肩・首から 3cm 以内は弱める。
 // ・服 [nb, ne) は、近い体（腹側・同じ左右）の山の動きだけをガウスで写し、中央の谷も胸の頂の高さに少し引き上げる。
+// 半径以内の点だけを見る。セルは半径の半分、周囲は 3 セルまで見るので取りこぼさない。
+// 作業バッファは使い回す。呼び出しごとに arena へ捨てない。
+static Buf<int> gNearHead, gNearNext, gNearHit;
+struct NearGrid {
+	float org[3], inv, r2;
+	int dim[3], ncell, stride;
+	const float* p;
+	const int* id;
+	BOOL ok;
+	void build(const float* pts, int str, const int* ids, int n, float radius, float limit2) {
+		ok = FALSE;
+		p = pts; stride = str; id = ids;
+		if (n <= 0 || radius <= 1e-8f || !pts || !ids) return;
+		inv = 2.f / radius;
+		r2 = limit2;
+		org[0] = org[1] = org[2] = 1e9f;
+		float hi[3] = { -1e9f, -1e9f, -1e9f };
+		for (int i = 0; i < n; i++) {
+			const float* q = pts + (size_t)ids[i] * str;
+			for (int a = 0; a < 3; a++) { if (q[a] < org[a]) org[a] = q[a]; if (q[a] > hi[a]) hi[a] = q[a]; }
+		}
+		ncell = 1;
+		for (int a = 0; a < 3; a++) {
+			int d = (int)((hi[a] - org[a]) * inv) + 1;
+			if (d < 1) d = 1;
+			if (d > 512) return;
+			dim[a] = d;
+			if (ncell > 2000000 / d) return;
+			ncell *= d;
+		}
+		gNearHead.fill(ncell, -1);
+		gNearNext.resize(n);
+		if (gNearHead.size() < ncell || gNearNext.size() < n) return;
+		for (int i = 0; i < n; i++) {
+			const float* q = pts + (size_t)ids[i] * str;
+			int c[3];
+			for (int a = 0; a < 3; a++) {
+				c[a] = (int)((q[a] - org[a]) * inv);
+				if (c[a] < 0) c[a] = 0;
+				if (c[a] >= dim[a]) c[a] = dim[a] - 1;
+			}
+			int cell = c[0] + dim[0] * (c[1] + dim[1] * c[2]);
+			gNearNext[i] = gNearHead[cell];
+			gNearHead[cell] = i;
+		}
+		ok = TRUE;
+	}
+	void gather(const float* q) {
+		gNearHit.clear();
+		if (!ok) return;
+		int c[3];
+		for (int a = 0; a < 3; a++) c[a] = (int)((q[a] - org[a]) * inv);
+		for (int dz = -3; dz <= 3; dz++) for (int dy = -3; dy <= 3; dy++) for (int dx = -3; dx <= 3; dx++) {
+			int x = c[0] + dx, y = c[1] + dy, z = c[2] + dz;
+			if (x < 0 || y < 0 || z < 0 || x >= dim[0] || y >= dim[1] || z >= dim[2]) continue;
+			for (int i = gNearHead[x + dim[0] * (y + dim[1] * z)]; i >= 0; i = gNearNext[i]) {
+				const float* b = p + (size_t)id[i] * stride;
+				const float dxp = b[0] - q[0], dyp = b[1] - q[1], dzp = b[2] - q[2];
+				if (dxp * dxp + dyp * dyp + dzp * dzp <= r2) gNearHit.push_back(id[i]);
+			}
+		}
+	}
+};
+
+static_assert(sizeof(Renderer::CSkinV) == 36, "near grid stride");
+static int CmpAscI(const void* a, const void* b)
+{
+	int x = *(const int*)a, y = *(const int*)b;
+	return (x > y) - (x < y);
+}
+
 static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* bn, int cup, const BustRef& br,
 	const WORD* bodyTri, int nBodyTri, const BYTE* armJ, const WORD* idx, int nIdx, float* jig)
 {
@@ -4466,6 +4871,7 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		hv.resize(cap);
 		if (hk.size() < cap || hv.size() < cap) return;
 		for (int k = 0; k < nb; k++) {
+			if (g_avaPlate && (k & 63) == 0) g_avaPlate->NoteAvaPhase(2, 5, k, nb);
 			unsigned long long key = 0;
 			for (int a = 0; a < 3; a++) {
 				float f = v[k].p[a] * 1e4f;
@@ -4525,11 +4931,20 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 			for (int c = 1; c < 4; c++) if (v[k].w[c] > v[k].w[m]) m = c;
 			if (arm[k] && armJ[v[k].j[m]] == 1 && root[k] == k && p[0] > lo[0] - .05f && p[0] < hi[0] + .05f && p[1] > lo[1] - .05f && p[1] < hi[1] + .05f && p[2] > lo[2] - .05f && p[2] < hi[2] + .05f) cand.push_back(k);
 		}
+		NearGrid armG;
+		armG.build(v[0].p, (int)(sizeof(Renderer::CSkinV) / sizeof(float)), cand.data(), cand.size(), .05f, .05f * .05f);
 		for (int k = 0; k < nb; k++) {
 			if (!in[k]) continue;
 			if (arm[k]) continue;
 			float d2 = .05f * .05f;
-			for (int i = 0; i < cand.size(); i++) {
+			if (armG.ok) {
+				armG.gather(v[k].p);
+				for (int i = 0; i < gNearHit.size(); i++) {
+					const float* q = v[gNearHit[i]].p;
+					const float dx = q[0] - v[k].p[0], dy = q[1] - v[k].p[1], dz = q[2] - v[k].p[2];
+					d2 = fminf(d2, dx * dx + dy * dy + dz * dz);
+				}
+			} else for (int i = 0; i < cand.size(); i++) {
 				const float* q = v[cand[i]].p;
 				const float dx = q[0] - v[k].p[0], dy = q[1] - v[k].p[1], dz = q[2] - v[k].p[2];
 				d2 = fminf(d2, dx * dx + dy * dy + dz * dz);
@@ -4538,8 +4953,10 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		}
 		for (int k = 0; k < nb; k++) tw[k] = tw[root[k]];
 	}
-	// 胸壁 Wl。S = p + bn には乳首の周りだけ 4.5cm 突き出た狭い突起が残っていて、そのまま山 D を足すと二重盛りでロケット状になる。
-	// 外の輪（|th| < 1.35, r = 1.10〜1.65）と胸骨（|th| < 0.14）に 2 次曲面 rW(u, v) を当て、既存の狭い突起を滑らかな胸板 Wl に戻す。
+	// 胸壁 Wl。S = p + bn には乳首の周りだけ 4.5cm 突き出た狭い突起や乳房下の段が残っていて、そのまま山 D を足すと二重盛りや横皺になる。
+	// 外の輪（|th| < 1.35, r = 1.10〜1.65）と胸骨（|th| < 0.14）に 2 次曲面 rW(u, v) を当て、体も服も既存の段を滑らかな胸板に戻してから山を載せる。
+	double cfS[2][6] = {};
+	BOOL cfOk[2] = { FALSE, FALSE };
 	for (int s = 0; s < 2; s++) {
 		const float sgn = s ? 1.f : -1.f;
 		double A[6][7] = {};
@@ -4571,19 +4988,30 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 			}
 		}
 		if (!nr) continue;
-		double cf[6];
-		for (int i = 0; i < 6; i++) cf[i] = A[i][6] / A[i][i];
-		for (int k = 0; k < nb; k++) {
+		cfOk[s] = TRUE;
+		for (int i = 0; i < 6; i++) cfS[s][i] = A[i][6] / A[i][i];
+	}
+	if (cfOk[0] || cfOk[1]) {
+		const float rhM = 0.5f * (rhN[0] + rhN[1]);
+		for (int pass = 0; pass < 2; pass++) for (int k = 0; k < nb; k++) {
+			if (tw[k] <= 0.f) continue;
 			const float* p = &S[k * 3];
-			const float th = atan2f(p[0] - x0, z0 - p[2]), y = p[1];
-			float u, vv;
-			const float r = rad(th, y, s, W7, 1.f, &u, &vv);
-			const float wf = Smooth01((1.35f - r) / .35f) * Smooth01(th * sgn * rhN[s] / .012f) * tw[k];
+			const float* q = pass ? &Wl[k * 3] : p;
+			const float th = atan2f(q[0] - x0, z0 - q[2]), y = p[1];
+			float u0, v0, u1, v1;
+			const float r0 = rad(th, y, 0, W7, 1.f, &u0, &v0);
+			const float r1 = rad(th, y, 1, W7, 1.f, &u1, &v1);
+			const float r = fminf(r0, r1);
+			const float wf = Smooth01((1.35f - r) / .35f) * tw[k];
 			if (wf <= 0.f) continue;
-			const float rW = (float)(cf[0] + cf[1] * u + cf[2] * vv + cf[3] * u * u + cf[4] * u * vv + cf[5] * vv * vv);
+			const float w1 = cfOk[0] && cfOk[1] ? Smooth01((th * rhM + 0.018f) / 0.036f) : (cfOk[1] ? 1.f : 0.f);
+			const double* c0 = cfS[0]; const double* c1 = cfS[1];
+			const float rw0 = (float)(c0[0] + c0[1] * u0 + c0[2] * v0 + c0[3] * u0 * u0 + c0[4] * u0 * v0 + c0[5] * v0 * v0);
+			const float rw1 = (float)(c1[0] + c1[1] * u1 + c1[2] * v1 + c1[3] * u1 * u1 + c1[4] * u1 * v1 + c1[5] * v1 * v1);
+			const float rW = rw0 + (rw1 - rw0) * w1;
 			if (!(rW > 0.04f) || rW > 0.28f) continue;
 			const float tg[3] = { x0 + rW * sinf(th), y, z0 - rW * cosf(th) };
-			for (int a = 0; a < 3; a++) Wl[k * 3 + a] += wf * (tg[a] - Wl[k * 3 + a]);
+			for (int a = 0; a < 3; a++) Wl[k * 3 + a] = p[a] + wf * (tg[a] - p[a]);
 		}
 	}
 	for (int k = 0; k < nb; k++) for (int a = 0; a < 3; a++) Wl[k * 3 + a] = Wl[root[k] * 3 + a];
@@ -4649,59 +5077,109 @@ static void ShapeCup(Renderer::CSkinV* v, int nv, int nb, int ne, const float* b
 		}
 	}
 	if (ne > nb) {
-		// 服にも S と同じ狭い突起が焼き込まれているので、素体の完成形との差（P - S = 突起消去 + 広いドーム）を写す。
-		// 揺れの重み jig には山の成分 D を写す。
+		// 服の dmin は胸の上半分だけ引かれていて、乳房の下（y=1.26〜1.29）に元の膨らみの段が残る。
+		// 体の S との差（P - S）を足すとその段がそのまま残り、胸の中央に横の折れ目が出る。
+		// 服も外の輪の厚みを保った滑らかな胸壁へ一度戻し、その上から同じ滑らかな胸壁の上で揃えた山 D を載せる。
+		float drC[2] = { 0.0065f, 0.0065f };
+		for (int s = 0; s < 2; s++) if (cfOk[s]) {
+			const float sgn = s ? 1.f : -1.f;
+			const double* cf = cfS[s];
+			double sum = 0., wsum = 0.;
+			for (int k = nb; k < ne; k++) {
+				int m = 0;
+				for (int c = 1; c < 4; c++) if (v[k].w[c] > v[k].w[m]) m = c;
+				if (armJ[v[k].j[m]]) continue;
+				const float* p = &P[k * 3];
+				if (p[2] > z0) continue;
+				const float th = atan2f(p[0] - x0, z0 - p[2]), y = p[1];
+				float u, vv;
+				const float r = rad(th, y, s, W7, 1.f, &u, &vv);
+				if (!(fabsf(th) < 1.25f && th * sgn > 0.f && r > 1.08f && r < 1.50f)) continue;
+				const float rW = (float)(cf[0] + cf[1] * u + cf[2] * vv + cf[3] * u * u + cf[4] * u * vv + cf[5] * vv * vv);
+				const float rC = sqrtf((p[0] - x0) * (p[0] - x0) + (p[2] - z0) * (p[2] - z0));
+				const float d = rC - rW;
+				if (d > 0.001f && d < 0.025f) { sum += d; wsum += 1.; }
+			}
+			if (wsum >= 8.) drC[s] = Clampf((float)(sum / wsum), 0.0060f, 0.013f);
+		}
 		const float TR = 0.020f, inv2 = 1.f / (2.f * TR * TR), cut = 20.f * TR * TR;
 		const float yMid = 0.5f * (yN[0] + yN[1]);
-		const float dzPeak = 0.5f * ((P[br.kn[0] * 3 + 2] - S[br.kn[0] * 3 + 2]) + (P[br.kn[1] * 3 + 2] - S[br.kn[1] * 3 + 2]));
-		const float dyPeak = 0.5f * ((P[br.kn[0] * 3 + 1] - S[br.kn[0] * 3 + 1]) + (P[br.kn[1] * 3 + 1] - S[br.kn[1] * 3 + 1]));
+		const float dzPeak = 0.5f * (D[br.kn[0] * 3 + 2] + D[br.kn[1] * 3 + 2]);
+		const float dyPeak = 0.5f * (D[br.kn[0] * 3 + 1] + D[br.kn[1] * 3 + 1]);
 		float cMin = 1e9f;
 		for (int k = nb; k < ne; k++) if (P[k * 3 + 1] < cMin) cMin = P[k * 3 + 1];
 		float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
 		cand.clear();
 		for (int k = 0; k < nb; k++) {
-			if (!in[k] || S[k * 3 + 2] > z0 + 0.02f) continue;
+			if (!in[k] || Wl[k * 3 + 2] > z0 + 0.02f) continue;
 			cand.push_back(k);
-			for (int a = 0; a < 3; a++) { lo[a] = fminf(lo[a], S[k * 3 + a]); hi[a] = fmaxf(hi[a], S[k * 3 + a]); }
+			for (int a = 0; a < 3; a++) { lo[a] = fminf(lo[a], Wl[k * 3 + a]); hi[a] = fmaxf(hi[a], Wl[k * 3 + a]); }
 		}
 		for (int a = 0; a < 3; a++) { lo[a] -= 3.f * TR; hi[a] += 3.f * TR; }
+		NearGrid clothG;
+		clothG.build(Wl.data(), 3, cand.data(), cand.size(), sqrtf(cut), cut);
 		for (int k = nb; k < ne; k++) {
-			const float* c = &P[k * 3];
+			float* c = &P[k * 3];
 			if (!(c[0] > lo[0] && c[0] < hi[0] && c[1] > lo[1] && c[1] < hi[1] && c[2] > lo[2] && c[2] < hi[2])) continue;
-			const float thC = atan2f(c[0] - x0, z0 - c[2]);
-			const float fade = Smooth01((1.15f - fabsf(thC)) / 0.30f) * Smooth01((z0 + 0.012f - c[2]) / 0.024f);
+			int m = 0;
+			for (int j = 1; j < 4; j++) if (v[k].w[j] > v[k].w[m]) m = j;
+			const float wArmC = armJ[v[k].j[m]] == 1 ? 0.f : 1.f;
+			const float th0 = atan2f(c[0] - x0, z0 - c[2]);
+			const float fade = Smooth01((1.32f - fabsf(th0)) / 0.28f) * Smooth01((z0 + 0.012f - c[2]) / 0.024f) * wArmC;
 			if (fade <= 0.f) continue;
-			const float sx = c[0] - x0;
-			float sw = 0.f, w3[3] = {}, d3[3] = {};
-			for (int i = 0; i < cand.size(); i++) {
-				const int q = cand[i];
-				if (sx * (S[q * 3] - x0) < 0.f && fabsf(sx) > 0.012f) continue;
-				const float dx = S[q * 3] - c[0], dy = S[q * 3 + 1] - c[1], dz = S[q * 3 + 2] - c[2];
-				const float d2 = dx * dx + dy * dy + dz * dz;
-				if (d2 > cut) continue;
-				const float g = expf(-d2 * inv2);
-				sw += g;
-				for (int a = 0; a < 3; a++) {
-					w3[a] += g * (P[q * 3 + a] - S[q * 3 + a]);
-					d3[a] += g * D[q * 3 + a];
+			const float pOrig[3] = { c[0], c[1], c[2] };
+			if (cfOk[0] || cfOk[1]) {
+				const float rhM = 0.5f * (rhN[0] + rhN[1]);
+				for (int pass = 0; pass < 2; pass++) {
+					const float th = atan2f(c[0] - x0, z0 - c[2]), y = pOrig[1];
+					float u0, v0, u1, v1;
+					const float r0 = rad(th, y, 0, W7, 1.f, &u0, &v0);
+					const float r1 = rad(th, y, 1, W7, 1.f, &u1, &v1);
+					const float r = fminf(r0, r1);
+					const float wf = Smooth01((1.35f - r) / .35f) * fade;
+					if (wf <= 0.f) continue;
+					const float w1 = cfOk[0] && cfOk[1] ? Smooth01((th * rhM + 0.018f) / 0.036f) : (cfOk[1] ? 1.f : 0.f);
+					const double* cf0 = cfS[0]; const double* cf1 = cfS[1];
+					const float rw0 = (float)(cf0[0] + cf0[1] * u0 + cf0[2] * v0 + cf0[3] * u0 * u0 + cf0[4] * u0 * v0 + cf0[5] * v0 * v0) + drC[0];
+					const float rw1 = (float)(cf1[0] + cf1[1] * u1 + cf1[2] * v1 + cf1[3] * u1 * u1 + cf1[4] * u1 * v1 + cf1[5] * v1 * v1) + drC[1];
+					const float rW = rw0 + (rw1 - rw0) * w1;
+					if (!(rW > 0.04f) || rW > 0.29f) continue;
+					const float tg[3] = { x0 + rW * sinf(th), y, z0 - rW * cosf(th) };
+					for (int a = 0; a < 3; a++) c[a] = pOrig[a] + wf * (tg[a] - pOrig[a]);
 				}
 			}
+			const float sx = c[0] - x0;
+			float sw = 0.f, d3[3] = {};
+			auto take = [&](int q) {
+				if (sx * (Wl[q * 3] - x0) < 0.f && fabsf(sx) > 0.012f) return;
+				const float dx = Wl[q * 3] - c[0], dy = Wl[q * 3 + 1] - c[1], dz = Wl[q * 3 + 2] - c[2];
+				const float d2 = dx * dx + dy * dy + dz * dz;
+				if (d2 > cut) return;
+				const float g = expf(-d2 * inv2);
+				sw += g;
+				for (int a = 0; a < 3; a++) d3[a] += g * D[q * 3 + a];
+			};
+			if (clothG.ok) {
+				clothG.gather(c);
+				if (gNearHit.size() > 1) qsort(gNearHit.data(), gNearHit.size(), sizeof(int), CmpAscI);
+				for (int i = 0; i < gNearHit.size(); i++) take(gNearHit[i]);
+			} else for (int i = 0; i < cand.size(); i++) take(cand[i]);
 			if (sw < 1e-6f) continue;
 			const float inv = fade / sw;
-			for (int a = 0; a < 3; a++) { w3[a] *= inv; d3[a] *= inv; }
+			for (int a = 0; a < 3; a++) d3[a] *= inv;
 			// 水着は胸から股で終わる（yMin > 0.70）ので谷間を見せる。シャツやドレスは谷の布も前へ渡す。
 			const float wMid = (cMin < 0.65f ? 1.f : 0.f) * (1.f - Smooth01(fabsf(sx) / 0.048f))
 				* Smooth01((c[1] - (yMid - 0.44f * W)) / 0.035f) * Smooth01((yMid + 0.055f - c[1]) / 0.035f) * fade;
 			if (wMid > 0.f && dzPeak < 0.f) {
 				const float zSpan = dzPeak * 0.58f * wMid;
-				if (zSpan < w3[2]) {
-					w3[2] = zSpan;
-					w3[1] = fminf(w3[1], dyPeak * 0.50f * wMid);
+				if (zSpan < d3[2]) {
+					d3[2] = zSpan;
+					d3[1] = fminf(d3[1], dyPeak * 0.50f * wMid);
 				}
 			}
 			for (int a = 0; a < 3; a++) {
 				D[k * 3 + a] = d3[a];
-				P[k * 3 + a] = c[a] + w3[a];
+				P[k * 3 + a] = c[a] + d3[a];
 			}
 		}
 	}
@@ -5590,22 +6068,30 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			for (int d = 1; d <= PF / 2 && r <= 0.f; d++) r = fmaxf(P[ti * PF + (pi + d) % PF], P[ti * PF + (pi - d + PF) % PF]);
 			if (r <= 0.f && pass > 0) r = fmaxf(ti > 0 ? P[(ti - 1) * PF + pi] : 0.f, ti < PT - 1 ? P[(ti + 1) * PF + pi] : 0.f);
 		}
-		for (int i = 0; i < PN; i++) if (P[i] > 0.f) P[i] += foot ? 0.010f : 0.006f;
+		if (!foot) {
+			float Q[PN];
+			for (int ti = 0; ti < PT; ti++) for (int pi = 0; pi < PF; pi++) {
+				float m = P[ti * PF + pi];
+				m = fmaxf(m, P[ti * PF + (pi + 1) % PF]);
+				m = fmaxf(m, P[ti * PF + (pi + PF - 1) % PF]);
+				Q[ti * PF + pi] = m;
+			}
+			memcpy(P, Q, sizeof(Q));
+		}
+		for (int i = 0; i < PN; i++) if (P[i] > 0.f) P[i] += foot ? 0.010f : 0.009f;
 		if (foot) for (int i = 0; i < PN; i++) if (P[i] < 0.04f) P[i] = 0.050f;
 		nc.segJ[s][0] = ja; nc.segJ[s][1] = jb;
 		float* G = &nc.segG[s][0][0];
 		G[0] = A[0]; G[1] = A[1]; G[2] = A[2]; G[3] = L;
-		// G[7] は当たりを始める t。太ももは股より下（最上段の 4cm 下）から。付け根から上の当たりは
+		// G[7] は当たりを始める t。太ももは股より下から。付け根から上の当たりは
 		// 脚を振ると付け根を軸に逆向きに回り、腰の布を左右で前と後ろへ押してねじる。
-		// そこの体は布の下で消してあるので当たらなくてよい。
-		// G[11] は当たりを始めてから太さが全部になるまでの t。いきなり全部の太さで始めると、そこから下の布だけが
-		// 押し出されて段が付き、段の隙間から中が見える。12cm かけて 0 から太くする。
+		// G[11] は当たりを始めてから太さが全部になるまでの t。6cm かけて 0 から太くする。
 		const BOOL thigh = ja == jUL[0] || ja == jUL[1];
-		const float yTop = hipY - 0.07f, dy = A[1] - B[1];
+		const float yTop = hipY - 0.04f, dy = A[1] - B[1];
 		const BOOL taper = thigh && dy > 0.05f;
 		G[4] = ax.x; G[5] = ax.y; G[6] = ax.z;
 		G[7] = taper ? Clampf((A[1] - yTop) / dy, 0.f, 0.5f) : -0.15f;
-		G[8] = u.x; G[9] = u.y; G[10] = u.z; G[11] = taper ? 0.12f / dy : 0.f;
+		G[8] = u.x; G[9] = u.y; G[10] = u.z; G[11] = taper ? 0.06f / dy : 0.f;
 		G[12] = w.x; G[13] = w.y; G[14] = w.z; G[15] = 0.f;
 		nc.segN++;
 	};
@@ -5768,10 +6254,143 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		id[0] = r0 * K + s0; id[1] = r0 * K + s1; id[2] = (r0 + 1) * K + s0; id[3] = (r0 + 1) * K + s1;
 		w[0] = (1.f - fs) * (1.f - fr); w[1] = fs * (1.f - fr); w[2] = (1.f - fs) * fr; w[3] = fs * fr;
 	};
-	BYTE armBone[256] = {};
+	// 両脇のスリット。段ごとに布の三角形が覆う角度を 64 分割で塗り、真横から ±40° に布の無い角度が裾から 2 段以上続けば、その脇は開いている。
+	// 前と後ろの両方に布がある段だけ数える（前後で丈の違う裾を開きと見ない）。開いた段は前と後ろを別の布にし、
+	// となりの点をつながず、頂点は自分の側の点だけから受ける。角度は atan2(x, z)：0 が背中、±π が前、負が左脇。
+	enum { SLIT_AB = 64, SLIT_R = Renderer::CLOTH_NODES / Renderer::CLOTH_SECT };
+	float gapA[SLIT_R][2];
+	int slitTop[2] = { M + 1, M + 1 };
+	for (int r = 0; r < SLIT_R; r++) gapA[r][0] = gapA[r][1] = 0.f;
+	{
+		Buf<BYTE> cov;
+		cov.arena = 1;
+		cov.fill((M + 1) * SLIT_AB, 0);
+		if (cov.size() == (M + 1) * SLIT_AB && M + 1 <= SLIT_R) {
+			const float rowH = span / (float)M;
+			for (int t = 0; t + 2 < cosTri.size(); t += 3) {
+				const int id3[3] = { cosTri[t], cosTri[t + 1], cosTri[t + 2] };
+				if (id3[0] >= n || id3[1] >= n || id3[2] >= n) continue;
+				if (!isSk[id3[0]] || !isSk[id3[1]] || !isSk[id3[2]]) continue;
+				float a[3], ylo = 1e9f, yhi = -1e9f;
+				for (int e = 0; e < 3; e++) {
+					const float* p = V[nb + id3[e]].p;
+					a[e] = atan2f(p[0] - cx, p[2] - cz);
+					ylo = fminf(ylo, p[1]);
+					yhi = fmaxf(yhi, p[1]);
+				}
+				float lo = a[0], hi = a[0];
+				for (int e = 1; e < 3; e++) {
+					float d = a[e] - a[0];
+					if (d > PI2 * 0.5f) d -= PI2;
+					else if (d < -PI2 * 0.5f) d += PI2;
+					lo = fminf(lo, a[0] + d);
+					hi = fmaxf(hi, a[0] + d);
+				}
+				// 軸のすぐ近くの三角形は角度が大きく開く。塗ると脇の切れ目まで埋まる。
+				if (hi - lo > PI2 * 0.42f) continue;
+				const int b0 = (int)floorf((lo / PI2 + 0.5f) * SLIT_AB), b1 = (int)floorf((hi / PI2 + 0.5f) * SLIT_AB);
+				for (int r = 0; r <= M; r++) {
+					const float yr = y0 - rowH * (float)r;
+					if (yr < ylo - rowH * 0.25f || yr > yhi + rowH * 0.25f) continue;
+					for (int b = b0; b <= b1; b++) cov[r * SLIT_AB + ((b % SLIT_AB) + SLIT_AB) % SLIT_AB] = 1;
+				}
+			}
+			BYTE gap[SLIT_R][2] = {};
+			for (int r = 1; r <= M; r++) {
+				const BYTE* c = &cov[r * SLIT_AB];
+				BOOL fr = FALSE, bk = FALSE;
+				for (int b = 0; b < SLIT_AB; b++) {
+					if (!c[b]) continue;
+					const float ang = fabsf(((float)b + 0.5f) / (float)SLIT_AB - 0.5f) * PI2;
+					if (ang > 2.3f) fr = TRUE;
+					if (ang < 0.85f) bk = TRUE;
+				}
+				if (!fr || !bk) continue;
+				for (int sd = 0; sd < 2; sd++) {
+					const float sa = sd ? PI2 * 0.25f : -PI2 * 0.25f;
+					float sumA = 0.f;
+					int cntA = 0;
+					for (int b = 0; b < SLIT_AB; b++) {
+						if (c[b]) continue;
+						const float a = (((float)b + 0.5f) / (float)SLIT_AB - 0.5f) * PI2;
+						if (fabsf(a - sa) < 0.70f) { sumA += a; cntA++; }
+					}
+					if (cntA > 0) {
+						gap[r][sd] = 1;
+						gapA[r][sd] = sumA / (float)cntA;
+					}
+				}
+			}
+			// 裾の段は縁の三角形が覆うことや前後の丈の差で片側だけ残ることがあるので、一つ上から数え始めてよい。
+			// 切れ目の無かった段にも一番近い開いた段の角度を入れておき、裾（r=M）や境の段で角度が 0 に飛ばないようにする。
+			for (int sd = 0; sd < 2; sd++) {
+				int top = M + 1, cnt = 0;
+				for (int r = M; r >= 1; r--) {
+					if (gap[r][sd]) { top = r; cnt++; }
+					else if (cnt > 0 || r < M - 1) break;
+				}
+				if (cnt >= 2) {
+					slitTop[sd] = top;
+					for (int r = 0; r <= M; r++) {
+						if (gap[r][sd]) continue;
+						int bestR = -1, bestD = 999;
+						for (int r2 = 1; r2 <= M; r2++) if (gap[r2][sd]) {
+							const int d = r > r2 ? r - r2 : r2 - r;
+							if (d < bestD) { bestD = d; bestR = r2; }
+						}
+						if (bestR >= 0) gapA[r][sd] = gapA[bestR][sd];
+					}
+				}
+			}
+		}
+	}
+	const int topBoth = slitTop[0] > slitTop[1] ? slitTop[0] : slitTop[1];
+	const float ySlit = topBoth <= M ? y0 - span * (float)topBoth / (float)M : yMin;
+	auto gapOf = [&](int r, int sd) { return fabsf(gapA[Clampi(r, 0, M)][sd]); };
+	auto cutRow = [&](int r, int sd) { return slitTop[sd] <= M && r >= slitTop[sd]; };
+	auto nodeAng = [&](int s) { return ((float)s / (float)K - 0.5f) * PI2; };
+	// 開いた脇をまたぐとなりか。
+	auto cutBetween = [&](int r, int s, int s2) -> BOOL {
+		const int sd = nodeAng(s) + nodeAng(s2) < 0.f ? 0 : 1;
+		if (!cutRow(r, sd)) return FALSE;
+		const float g = gapOf(r, sd);
+		return (fabsf(nodeAng(s)) > g) != (fabsf(nodeAng(s2)) > g);
+	};
+	// 切れ目の向こうの点から受けている重みを、同じ側の点へ移す。
+	auto slitFix = [&](const float* p, int* id, float* w) {
+		const float ang = atan2f(p[0] - cx, p[2] - cz);
+		const int sd = ang < 0.f ? 0 : 1;
+		for (int h = 0; h < 2; h++) {
+			const int r = id[h * 2] / K;
+			if (!cutRow(r, sd)) continue;
+			const float g = gapOf(r, sd);
+			const BOOL fv = fabsf(ang) > g;
+			const BOOL f0 = fabsf(nodeAng(id[h * 2] % K)) > g, f1 = fabsf(nodeAng(id[h * 2 + 1] % K)) > g;
+			if (f0 != fv && f1 == fv) { w[h * 2 + 1] += w[h * 2]; w[h * 2] = 0.f; id[h * 2] = id[h * 2 + 1]; }
+			else if (f1 != fv && f0 == fv) { w[h * 2] += w[h * 2 + 1]; w[h * 2 + 1] = 0.f; id[h * 2 + 1] = id[h * 2]; }
+		}
+	};
+	BYTE armBone[256] = {}, footL[256] = {}, footR[256] = {};
 	for (int j = 0; j < md.nJ && j < 256; j++) {
 		for (int a = j, g = 0; a >= 0 && a < md.nJ && g < 64; a = md.parent[a], g++) {
 			if (a == jUA[0] || a == jUA[1] || a == jHd[0] || a == jHd[1]) { armBone[j] = 1; break; }
+		}
+		for (int a = j, g = 0; a >= 0 && a < md.nJ && g < 64; a = md.parent[a], g++) {
+			if (a == jFt[0]) { footL[j] = 1; break; }
+			if (a == jFt[1]) { footR[j] = 1; break; }
+		}
+	}
+	// 長いスカートの裾に足首・つま先の骨が混ざっていると、飛行でつま先を伸ばしたときに踵側の裾が上へ折れ、前も靴に貼り付く。
+	// 靴は別の部品（isSk==0）なので触らず、スカートの頂点だけすねの骨へ移す。
+	for (int i = 0; i < n; i++) {
+		if (!isSk[i]) continue;
+		Renderer::CSkinV& s = V[nb + i];
+		for (int c = 0; c < 4; c++) {
+			if (!s.w[c] || s.j[c] >= 256) continue;
+			int rep = -1;
+			if (footL[s.j[c]] && jLL[0] >= 0 && jLL[0] < 256) rep = jLL[0];
+			else if (footR[s.j[c]] && jLL[1] >= 0 && jLL[1] < 256) rep = jLL[1];
+			if (rep >= 0) s.j[c] = (unsigned char)rep;
 		}
 	}
 	// 点の半径と、脚に沿わせるときの骨の重みは、その点へ寄る頂点の平均。
@@ -5786,6 +6405,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		if (s.p[1] > y0 + span / (float)M * 0.5f) continue;
 		int id[4]; float w[4];
 		lattice(s.p, id, w);
+		slitFix(s.p, id, w);
 		const float rad = sqrtf((s.p[0] - cx) * (s.p[0] - cx) + (s.p[2] - cz) * (s.p[2] - cz));
 		for (int e = 0; e < 4; e++) {
 			if (w[e] <= 0.f) continue;
@@ -5832,7 +6452,9 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		for (int it = 0; it < 6; it++) {
 			for (int r = 0; r <= M; r++) for (int s = 0; s < K; s++) {
 				const int q = r * K + s;
-				const int nq[4] = { r > 0 ? q - K : q, r < M ? q + K : q, r * K + (s + K - 1) % K, r * K + (s + 1) % K };
+				int nq[4] = { r > 0 ? q - K : q, r < M ? q + K : q, r * K + (s + K - 1) % K, r * K + (s + 1) % K };
+				if (cutBetween(r, s, (s + K - 1) % K)) nq[2] = q;
+				if (cutBetween(r, s, (s + 1) % K)) nq[3] = q;
 				for (int j = 0; j < NJW; j++) {
 					float a = tmp[q * NJW + j] * 0.5f;
 					for (int e = 0; e < 4; e++) a += tmp[nq[e] * NJW + j] * 0.125f;
@@ -5865,6 +6487,18 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		o.p[1] = 0.12f - 0.09f * t;
 		o.p[2] = 0.35f + 0.65f * t;
 		o.p[3] = r == 0 ? 1.f : 0.f;
+		// 両脇スリット：前（1）は腰から真下へ垂らし、後ろ（2）はスリット上端（ySlit）から下で脚の間へ落とす。
+		// q.z に 2 + (y0 - ySlit) を入れてスリット上端の高さも渡す。
+		if (topBoth <= M && r > 0) {
+			const BOOL isFront = fabsf(th) > gapOf(r, th < 0.f ? 0 : 1);
+			if (isFront) {
+				o.q[2] = 1.f;
+				o.q[3] = 1.f;
+			} else if (r >= topBoth) {
+				o.q[2] = 2.f + fmaxf(y0 - ySlit, 0.f);
+				o.q[3] = Smooth01((float)(r - topBoth + 1) / 2.f);
+			}
+		}
 		const float* J = &jw[q * NJW];
 		float sum = 0.f;
 		for (int e = 0; e < 4; e++) {
@@ -5885,7 +6519,9 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 	}
 	for (int r = 0; r <= M; r++) for (int s = 0; s < K; s++) {
 		const int q = r * K + s;
-		const int nq[4] = { r > 0 ? q - K : -1, r < M ? q + K : -1, r * K + (s + K - 1) % K, r * K + (s + 1) % K };
+		int nq[4] = { r > 0 ? q - K : -1, r < M ? q + K : -1, r * K + (s + K - 1) % K, r * K + (s + 1) % K };
+		if (cutBetween(r, s, (s + K - 1) % K)) nq[2] = -1;
+		if (cutBetween(r, s, (s + 1) % K)) nq[3] = -1;
 		for (int e = 0; e < 4; e++) nodes[q].nb[e] = nq[e] >= 0 ? (unsigned)nq[e] : 0xFFFFFFFFu;
 	}
 	// 脚に当たった布は頂点だけ外へ出すので、頂点の間の三角形の面は脚の丸みに食い込む（弦と弧の差）。
@@ -5907,12 +6543,12 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			}
 		}
 	}
-	// 格子の点がもともと脚の筒の中にあるときは、その深さを allow に足して静止時の筒の押し出しを消す。
-	// 長いドレスの背中は脚の筒に触れていて、点を外へ押し出すと St[3*NMAX] が膨らみ、同じ所をもう一度 Collide して裾が波打つ。
+	// 頂点の間の三角形の面が脚の丸みに食い込まない分だけ脚から離す。筒の中へ沈むのを許すと太ももで肌が出る。
 	auto allowOf = [&](float c, float e) {
+		(void)c;
 		const float r = 0.07f, h = fminf(e * 0.5f, r);
 		const float margin = Clampf(r - sqrtf(r * r - h * h), 0.004f, 0.018f);
-		return -margin + (c < 0.008f ? 0.008f - c : 0.f);
+		return -margin;
 	};
 	for (int q = 0; q < NN; q++) nodes[q].q[1] = allowOf(nodes[q].q[1], span / (float)M);
 
@@ -5939,6 +6575,16 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		memset(&o, 0, sizeof(o));
 		int id[4];
 		lattice(s.p, id, o.w);
+		slitFix(s.p, id, o.w);
+		// a.w の下 2bit は前 1・後ろ 2、次の 8bit は重み、上の 16bit はスリット上端までの丈（mm）。
+		if (topBoth <= M) {
+			const float ang = atan2f(s.p[0] - cx, s.p[2] - cz);
+			const int r = Clampi((int)floorf((y0 - s.p[1]) / span * (float)M + 0.5f), 0, M);
+			const unsigned lab = fabsf(ang) > gapOf(r, ang < 0.f ? 0 : 1) ? 1u : 2u;
+			const float pw = lab == 1u ? Smooth01((y0 - s.p[1]) / 0.12f) : Smooth01((ySlit - s.p[1]) / 0.14f);
+			const unsigned slitMm = (unsigned)Clampi((int)(fmaxf(y0 - ySlit, 0.f) * 1000.f + 0.5f), 0, 65535);
+			o.a[3] = lab | ((unsigned)Clampi((int)(pw * 255.f + 0.5f), 0, 255) << 8) | (slitMm << 16);
+		}
 		o.a[0] = (unsigned)(nb + i);
 		o.a[1] = (unsigned)id[0] | ((unsigned)id[1] << 16);
 		o.a[2] = (unsigned)id[2] | ((unsigned)id[3] << 16);
@@ -5996,9 +6642,11 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			const BOOL isArm = d >= 0 && d < 256 && armBone[d];
 			if (!isLeg && !isArm) continue;
 			const float* p = V[k].p;
-			// スカートの内側の脚も下から見たときに欠けないよう描く。股の付け根（腰と混ざる帯）だけ残さず、靴やタイツが 8mm 以内に密着する所だけ 1 にする。
+			// スカートの内側の脚も下から見たときに欠けないよう描く。スリットより上の閉じた腰回りは 1 にして内へ下げ、横から太ももが突き抜けないようにする。
 			if (isLeg) {
-				if (p[1] > hipY - 0.14f) continue;
+				const float legShowY = topBoth <= M ? fminf(hipY - 0.16f, ySlit + 0.01f) : fminf(hipY - 0.18f, yMin + 0.22f);
+				if (p[1] > hipY - 0.06f) continue;
+				if (p[1] > legShowY) { expose[k] = 1; continue; }
 			}
 			int lw = 0;
 			const BYTE* bone = isLeg ? legJ : armBone;
@@ -6096,8 +6744,9 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 	for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
 	if (ci < 0) return FALSE;
 	if (!EnsureAvaCos(m_avaCos[ci])) return FALSE;
-	// 胸の差分が無い体（男性）は大きさで形が変わらないので、一つだけ作る。
-	const int cupK = (!m_avaBody[am->gender].m.dmax.empty() && !m_avaCos[ci].m.dmax.empty()) ? Clampi(cup, 0, BUST_N - 1) : 0;
+	// 胸の差分が無い体は大きさで形が変わらないので、一つだけ作る。男性は胸板の厚み（筋肉の量）で作り分ける。
+	const BOOL maleAva = !strncmp(md.name, "HumM", 4);
+	const int cupK = ((!m_avaBody[am->gender].m.dmax.empty() && !m_avaCos[ci].m.dmax.empty()) || maleAva) ? Clampi(cup, 0, BUST_N - 1) : 0;
 	AvaCache* ac = NULL;
 	for (AvaCache& x : m_avaCache) if (x.model == model && x.cos == ci && x.cup == cupK) { ac = &x; break; }
 	if (!ac) {
@@ -6105,6 +6754,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		auto holdBare = [&]() -> BOOL {
 			m_avaHide = 1;
 			m_avaLoading = 1;
+			if (m_avaPct < 0) m_avaPct = 0;
 			return FALSE;
 		};
 		int cap = 40;
@@ -6116,6 +6766,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		}
 		const BOOL armed = slot >= 0 && m_avaWait[slot].frame != m_frame;
 		if (!armed) {
+			m_avaPct = 0;
 			if (slot < 0) slot = freeSlot >= 0 ? freeSlot : 0;
 			m_avaWait[slot].model = model;
 			m_avaWait[slot].cos = ci;
@@ -6123,6 +6774,10 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			m_avaWait[slot].frame = m_frame;
 			return holdBare();
 		}
+		struct PlateHold {
+			PlateHold(Renderer* r) { g_avaPlate = r; }
+			~PlateHold() { g_avaPlate = NULL; }
+		} plateHold(this);
 		if (TacAvaBad()) { g_avaNeedReset = 1; return holdBare(); }
 		while ((int)m_avaCache.size() >= cap) {
 			int drop = -1;
@@ -6133,6 +6788,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			m_avaCache.eraseAt(drop);
 		}
 		if (g_avaNeedReset) return holdBare();
+		FlashAvaLocal(8);
 		const AvaBody& body = m_avaBody[am->gender];
 		const AvaCos& cos = m_avaCos[ci];
 		const Rig& rg = rigs[md.rig];
@@ -6210,6 +6866,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, "HumF0")) { amShape = &x; break; }
 		}
 		for (size_t k = 0; k < nv; k++) {
+			if ((k & 63) == 0) NoteAvaPhase(0, 5, (int)k, (int)nv);
 			const BOOL isBody = k < nb;
 			const AvaMesh& src = isBody ? body.m : cos.m;
 			const size_t q = isBody ? k : k - nb;
@@ -6255,6 +6912,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		int nbA = (int)nb, nvA = (int)nv;
 		{
 			const int maxAdd = 65000 - (int)nv;
+			FlashAvaLocal(28);
 			if (!RefineBust(sk, bx, bn, (int)nb, (int)nv, body.bodyTri, cos.keep, cos.tri, armJ, maxAdd, bOff, bTri, cTri, nbA, nvA, br)) {
 				g_avaNeedReset = 1;
 				return holdBare();
@@ -6292,8 +6950,76 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			const int nAll = (int)sk.bind.size();
 			nc.jig.resize(nAll * 3);
 			if (nc.jig.size() < nAll * 3 || bn.size() < nAll * 3) { g_avaNeedReset = 1; return holdBare(); }
+			FlashAvaLocal(52);
 			ShapeCup(sk.bind.data(), nAll, nbA, nvA, bn.data(), cupK, br,
 				bTri.data(), bTri.size() / 3, armJ, idx.data(), (int)idx.size(), nc.jig.data());
+		} else if (maleAva && chestSeg >= 0 && chestSeg < ns && segJ[chestSeg] >= 0 && segJ[chestSeg] < md.nJ) {
+			// 男性の胸板。0〜7 は筋肉の量で、未設定の 2 は形を変えない。胸の関節の前の左右の大胸筋に、体と服を同じだけ前へ盛る。
+			// 1/2 系は区間行列で体が横へ寄っているので、中心 C は骨ではなく体の Chest 頂点から取る。
+			static const float kPec[BUST_N] = { -0.004f, -0.002f, 0.f, 0.005f, 0.010f, 0.016f, 0.022f, 0.030f };
+			const float depth = kPec[Clampi(cupK, 0, BUST_N - 1)];
+			float cxSum = 0.f, cySum = 0.f, czLo = 1e9f, czHi = -1e9f;
+			int nCh = 0;
+			for (int k = 0; k < nbA; k++) {
+				const CSkinV& d = sk.bind[k];
+				if (DomJoint(d) != chestSeg) continue;
+				cxSum += d.p[0]; cySum += d.p[1];
+				if (d.p[2] < czLo) czLo = d.p[2];
+				if (d.p[2] > czHi) czHi = d.p[2];
+				nCh++;
+			}
+			const float C[3] = { nCh > 8 ? cxSum / (float)nCh : 0.f, nCh > 8 ? cySum / (float)nCh : 1.30f, nCh > 8 ? 0.5f * (czLo + czHi) : 0.f };
+			// 左右の胸のいちばん前の点を、胸の骨に付いた体から探す。
+			float P[2][3] = { { C[0] - 0.075f, C[1], C[2] - 0.10f }, { C[0] + 0.075f, C[1], C[2] - 0.10f } };
+			BOOL got[2] = { FALSE, FALSE };
+			for (int k = 0; k < nbA; k++) {
+				const CSkinV& d = sk.bind[k];
+				if (DomJoint(d) != chestSeg) continue;
+				const float ax = fabsf(d.p[0] - C[0]);
+				if (ax < 0.040f || ax > 0.12f || d.p[1] < C[1] - 0.08f || d.p[1] > C[1] + 0.14f || d.p[2] > C[2] - 0.03f) continue;
+				const int s = d.p[0] < C[0] ? 0 : 1;
+				if (!got[s] || d.p[2] < P[s][2]) { P[s][0] = d.p[0]; P[s][1] = d.p[1]; P[s][2] = d.p[2]; got[s] = TRUE; }
+			}
+			if (got[0] && got[1]) {
+				const float py = 0.5f * (P[0][1] + P[1][1]);
+				const float px = Clampf(0.5f * (P[1][0] - P[0][0]), 0.060f, 0.095f);
+				const float mass = 0.020f + (depth > 0.f ? depth : 0.f);
+				const int nAllM = (int)sk.bind.size();
+				nc.jig.fill(nAllM * 3, 0.f);
+				if (nc.jig.size() == nAllM * 3) {
+					for (int k = 0; k < nAllM; k++) {
+						CSkinV& d = sk.bind[k];
+						int aw = 0;
+						for (int c = 0; c < 4; c++) if (d.w[c] && d.j[c] < 256 && armJ[d.j[c]] == 1) aw += d.w[c];
+						const float wArm = 1.f - Smooth01((float)aw / 120.f);
+						const float wz = Smooth01((C[2] - 0.02f - d.p[2]) / 0.05f) * wArm;
+						if (wz <= 0.f) continue;
+						const int s = d.p[0] >= C[0] ? 1 : 0;
+						const float cleav = Smooth01((fabsf(d.p[0] - C[0]) - 0.004f) / 0.018f);
+						const float hy = d.p[1] < py ? 0.075f : 0.095f;
+						const float ex = (d.p[0] - (C[0] + (s ? px : -px))) / 0.085f, ey = (d.p[1] - py) / hy;
+						const float r2 = ex * ex + ey * ey;
+						if (r2 >= 1.f || cleav <= 0.f) continue;
+						const float q = 1.f - r2;
+						const float f = q * q * cleav;
+						const float fx = -4.f * q * ex / 0.085f * cleav;
+						const float fy = -4.f * q * ey / hy * cleav;
+						const float D = depth * f * wz;
+						d.p[1] -= D * 0.12f;
+						d.p[2] -= D;
+						// 盛った面の傾きを法線へ。前を向いた面だけ。
+						const float facing = Clampf(-d.n[2], 0.f, 1.f);
+						d.n[0] -= depth * wz * fx * facing * 0.65f;
+						d.n[1] -= depth * wz * fy * facing * 0.65f;
+						const float nl = sqrtf(d.n[0] * d.n[0] + d.n[1] * d.n[1] + d.n[2] * d.n[2]);
+						if (nl > 1e-6f) { d.n[0] /= nl; d.n[1] /= nl; d.n[2] /= nl; }
+						const float jm = mass * f * wz;
+						nc.jig[k * 3] = 0.f;
+						nc.jig[k * 3 + 1] = -0.18f * jm;
+						nc.jig[k * 3 + 2] = -jm;
+					}
+				}
+			}
 		}
 		// 体は各バインド、胸の差分は Chest だけで載せる（首ウェイトでデコルテが潰れない）。
 		float Lr[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
@@ -6312,6 +7038,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			}
 		}
 		for (int k = 0; k < nvA; k++) {
+			if ((k & 63) == 0) NoteAvaPhase(3, 5, k, nvA);
 			CSkinV& d = sk.bind[k];
 			if (amShape != am) {
 				float A0[12] = {}, Am[12] = {};
@@ -6372,6 +7099,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			}
 		}
 		for (int k = 0; k < nvA; k++) {
+			if ((k & 63) == 0) NoteAvaPhase(4, 5, k, nvA);
 			CSkinV& d = sk.bind[k];
 			for (int c = 0; c < 4; c++)
 				d.j[c] = (unsigned char)(d.j[c] < ns ? segJ[d.j[c]] : segJ[0]);
@@ -6615,8 +7343,17 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		Buf<SoftGpuN> softN;
 		Buf<SoftGpuV> softV;
 		softN.arena = softV.arena = 1;
-		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ.data(), m_avaSeg, ns, md, nc.jig.empty() ? NULL : nc.jig.data(), clothN, clothV, clothP, expose, softN, softV);
+		FlashAvaLocal(74);
+		// 男性の胸板の揺れの重みは、女性の胸の下の布の張りや胸の球には使わない。
+		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ.data(), m_avaSeg, ns, md, (nc.jig.empty() || maleAva) ? NULL : nc.jig.data(), clothN, clothV, clothP, expose, softN, softV);
+		FlashAvaLocal(90);
 		if (expose.size() == nbA) {
+			// 服が 1cm ほどの所で覆っている肌（1）は 3.5mm 内へ下げる。揺れや布の遅れ、関節の曲げで面が少しずれても、肌が服を突き抜けない。
+			for (int k = 0; k < nbA; k++) {
+				if (expose[k] != 1) continue;
+				CSkinV& d = sk.bind[k];
+				d.p[0] -= d.n[0] * 0.0035f; d.p[1] -= d.n[1] * 0.0035f; d.p[2] -= d.n[2] * 0.0035f;
+			}
 			BYTE outArm[256] = {};
 			{
 				const int ua[2] = { SegJoint(segJ.data(), m_avaSeg, ns, "UpperArm.L"), SegJoint(segJ.data(), m_avaSeg, ns, "UpperArm.R") };
@@ -6788,6 +7525,8 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				}
 			}
 		} else nc.softN = nc.softVN = 0;
+		FlashAvaLocal(100);
+		if (m_avaBatchI + 1 < (m_avaBatchN < 1 ? 1 : m_avaBatchN)) m_avaBatchI++;
 		m_avaCache.push_back(std::move(nc));
 		ac = &m_avaCache.back();
 	}
@@ -6870,8 +7609,14 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	if (!reset) {
 		delta = MMul(ci->world, MInverse(world));
 		const float* t = &delta.m[12];
-		if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
+		float dx = world.m[12] - ci->world.m[12];
+		float dy = world.m[13] - ci->world.m[13];
+		float dz = world.m[14] - ci->world.m[14];
+		if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f
+			|| dx * dx + dy * dy + dz * dz > 0.75f * 0.75f
+			|| dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
 	}
+	if (m_cutActors) reset = 1;
 	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
 	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
 	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
@@ -6977,13 +7722,6 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	}
 	m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
 	m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
-	ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
-	ID3D11ShaderResourceView* nos[3] = { NULL, NULL, NULL };
-	ID3D11Buffer* nob[2] = { NULL, NULL };
-	m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
-	m_ctx->CSSetShaderResources(0, 3, nos);
-	m_ctx->CSSetConstantBuffers(0, 2, nob);
-	m_ctx->CSSetShader(NULL, NULL, 0);
 	}
 	}
 	}
@@ -7077,13 +7815,6 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 				}
 				m_ctx->CSSetShader(m_csSoft[1], NULL, 0);
 				m_ctx->Dispatch(((UINT)ac.softVN + 63u) / 64u, 1, 1);
-				ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
-				ID3D11ShaderResourceView* nos[2] = { NULL, NULL };
-				ID3D11Buffer* nob = NULL;
-				m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
-				m_ctx->CSSetShaderResources(0, 2, nos);
-				m_ctx->CSSetConstantBuffers(0, 1, &nob);
-				m_ctx->CSSetShader(NULL, NULL, 0);
 			}
 		}
 	}
@@ -7123,10 +7854,11 @@ void Renderer::ReleaseHair()
 	m_hairNv = 0;
 	m_scalpModel = -1;
 	m_capBind.clear();
-	m_capDraw.Release();
+	m_capDraw.ib = NULL; m_capDraw.nIdx = 0;
+	for (int s = 0; s < TAC_SCALP_CACHE; s++) { m_scalps[s].model = -1; m_scalps[s].draw.Release(); m_scalps[s].bind.clear(); }
 }
 
-void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape)
+void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth)
 {
 	ID3D11UnorderedAccessView* dst = vertUAV ? vertUAV : m_hairUAV;
 	if (style < 1 || style > 15 || m_hairVN[style] <= 0 || !m_csHair[0] || !m_csHair[1] || !m_cbHairSim || !m_hairGuide || !m_hairVert || !dst) return;
@@ -7206,6 +7938,9 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	TacWind(m_time, world, velUse, 0.52f, cb.wind);
 	cb.wind[3] = cape > 0.5f ? 1.f : 0.f;
 	TacGrav(world, 4.6f, cb.grav);
+	// 体型の太さ。胴はそのまま、首と腕は肉の付き方が半分ほど。
+	const float gT = Clampf(girth > 0.1f ? girth : 1.f, 0.8f, 1.4f), gL = 1.f + (gT - 1.f) * 0.6f;
+	cb.grav[3] = gT;
 	for (int i = 0; i < 8; i++) { cb.capA[i][3] = -1.f; cb.capB[i][3] = -1.f; }
 	const Model* md = (model >= 0 && model < (int)models.size()) ? &models[model] : NULL;
 	const int rig = md ? md->rig : -1;
@@ -7248,14 +7983,14 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	const int jHandL = jointOr("Hand.L", md ? md->handL : -1);
 	const int jHandR = jointOr("Hand.R", md ? md->handR : -1);
 	// 頭側を 8cm にすると、球が髪型全体を頭蓋へ押し潰して兜になる。首の太さだけにする。
-	cap(jNeck, headJ, 0.048f, 0.032f);
-	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.090f, 0.125f);
-	cap(findJ("Shoulder.L"), findJ("UpperArm.L"), 0.060f, 0.054f);
-	cap(findJ("Shoulder.R"), findJ("UpperArm.R"), 0.060f, 0.054f);
-	cap(findJ("UpperArm.L"), findJ("LowerArm.L"), 0.056f, 0.048f);
-	cap(findJ("UpperArm.R"), findJ("LowerArm.R"), 0.056f, 0.048f);
-	cap(findJ("LowerArm.L"), jHandL, 0.040f, 0.034f);
-	cap(findJ("LowerArm.R"), jHandR, 0.040f, 0.034f);
+	cap(jNeck, headJ, 0.048f * gL, 0.032f);
+	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.090f * gT, 0.125f * gT);
+	cap(findJ("Shoulder.L"), findJ("UpperArm.L"), 0.060f * gL, 0.054f * gL);
+	cap(findJ("Shoulder.R"), findJ("UpperArm.R"), 0.060f * gL, 0.054f * gL);
+	cap(findJ("UpperArm.L"), findJ("LowerArm.L"), 0.056f * gL, 0.048f * gL);
+	cap(findJ("UpperArm.R"), findJ("LowerArm.R"), 0.056f * gL, 0.048f * gL);
+	cap(findJ("LowerArm.L"), jHandL, 0.040f * gL, 0.034f * gL);
+	cap(findJ("LowerArm.R"), jHandR, 0.040f * gL, 0.034f * gL);
 	float body[3] = { pal.m[12], pal.m[13] - 0.22f, pal.m[14] };
 	float tmp[3];
 	if (at(jTorso, tmp)) { body[0] = tmp[0]; body[1] = tmp[1]; body[2] = tmp[2]; }
@@ -7284,13 +8019,6 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	}
 	m_ctx->CSSetShader(m_csHair[1], NULL, 0);
 	m_ctx->Dispatch(((UINT)m_hairVN[style] + 63u) / 64u, 1, 1);
-	ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
-	ID3D11ShaderResourceView* nos[2] = { NULL, NULL };
-	ID3D11Buffer* nob[2] = { NULL, NULL };
-	m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
-	m_ctx->CSSetShaderResources(0, 2, nos);
-	m_ctx->CSSetConstantBuffers(0, 2, nob);
-	m_ctx->CSSetShader(NULL, NULL, 0);
 	hi->frame = m_frame;
 	if (step) { hi->time = m_time; hi->world = world; hi->valid = 1; }
 }
@@ -7580,8 +8308,16 @@ void Renderer::LoadHairPack()
 void Renderer::EnsureScalp(int model, int headJ)
 {
 	if (model == m_scalpModel && m_capDraw.ib) return;
+	for (int s = 0; s < TAC_SCALP_CACHE; s++) {
+		if (m_scalps[s].model == model && m_scalps[s].draw.ib) {
+			m_scalpModel = model;
+			m_capDraw = m_scalps[s].draw;
+			m_capBind = m_scalps[s].bind;
+			return;
+		}
+	}
 	m_scalpModel = -1;
-	m_capDraw.Release();
+	m_capDraw.ib = NULL; m_capDraw.nIdx = 0;
 	m_capBind.clear();
 	if (!m_dev || !m_ctx || headJ < 0) return;
 	const CreatureSkin* sk = NULL;
@@ -7647,6 +8383,12 @@ void Renderer::EnsureScalp(int model, int headJ)
 					m_capDraw.tex = -1;
 					m_capDraw.i32 = 0;
 					m_scalpModel = model;
+					int slot = -1;
+					for (int s = 0; s < TAC_SCALP_CACHE; s++) if (m_scalps[s].model < 0) { slot = s; break; }
+					if (slot < 0) { slot = model & (TAC_SCALP_CACHE - 1); m_scalps[slot].draw.Release(); }
+					m_scalps[slot].model = model;
+					m_scalps[slot].draw = m_capDraw;
+					m_scalps[slot].bind = m_capBind;
 				}
 			}
 		}
@@ -7663,6 +8405,26 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		EnsureScalp(model, headJ);
 		if (!(m_capDraw.ib && m_capBind.size() >= 3)) return FALSE;
 		const M4& B = pose.palette[headJ];
+		struct CapOnlyMem { const void* owner; unsigned frame; int n; DWORD tint; Buf<VtxS> v; };
+		static CapOnlyMem capOnlyMem[48];
+		CapOnlyMem* got = NULL;
+		if (owner) {
+			for (int i = 0; i < 48; i++)
+				if (capOnlyMem[i].owner == owner && capOnlyMem[i].frame == m_frame && capOnlyMem[i].tint == dp.tint && capOnlyMem[i].n == (int)m_capBind.size() && capOnlyMem[i].v.size() == capOnlyMem[i].n) {
+					got = &capOnlyMem[i];
+					break;
+				}
+		}
+		DrawParams dc = dp;
+		dc.outline = 0.f;
+		dc.twoSided = 1;
+		dc.sway = 0.f;
+		dc.rim = 0.02f;
+		dc.noTess = 1;
+		if (got) {
+			DrawStaticVerts(m_capDraw, got->v.data(), (UINT)got->n, world, dc);
+			return TRUE;
+		}
 		static Buf<VtxS> capPosed;
 		capPosed.resize(m_capBind.size());
 		if (capPosed.size() != m_capBind.size()) return FALSE;
@@ -7681,13 +8443,19 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			d.c = dp.tint;
 			capPosed[i] = d;
 		}
-		DrawParams dc = dp;
-		dc.outline = 0.f;
-		dc.twoSided = 1;
-		dc.sway = 0.f;
-		dc.rim = 0.02f;
-		dc.noTess = 1;
 		DrawStaticVerts(m_capDraw, capPosed.data(), (UINT)capPosed.size(), world, dc);
+		if (owner) {
+			int slot = -1;
+			for (int i = 0; i < 48; i++) if (capOnlyMem[i].owner == owner || capOnlyMem[i].owner == NULL) { slot = i; break; }
+			if (slot < 0) slot = (int)(m_frame % 48u);
+			capOnlyMem[slot].owner = owner;
+			capOnlyMem[slot].frame = m_frame;
+			capOnlyMem[slot].tint = dp.tint;
+			capOnlyMem[slot].n = (int)capPosed.size();
+			capOnlyMem[slot].v.resize(capOnlyMem[slot].n);
+			if (capOnlyMem[slot].v.size() == capOnlyMem[slot].n)
+				memcpy(capOnlyMem[slot].v.data(), capPosed.data(), (size_t)capOnlyMem[slot].n * sizeof(VtxS));
+		}
 		return TRUE;
 	}
 	const Model& md = models[model];
@@ -7718,8 +8486,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	if (!am || headSeg < 0 || am->M.size() < (size_t)(headSeg + 1) * 12) return FALSE;
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
-	memset(ms.pData, 0, 64u * (unsigned)MAXJ);
 	if (nj) memcpy(ms.pData, pose.palette, sizeof(M4) * (size_t)nj);
+	if (nj < 63) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(63 - nj));
 	float* slot = ((float*)ms.pData) + 63 * 16;
 	const float* seg = &am->M[(size_t)headSeg * 12];
 	// 区間行列は列ベクトル（平行移動は 3,7,11）。髪のコンピュートは行ベクトルなので転置して載せる。
@@ -7803,24 +8571,21 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	m_ctx->CSSetUnorderedAccessViews(0, 1, &hairUAV, &cnt);
 	m_ctx->CSSetShader(m_csSkin, NULL, 0);
 	m_ctx->Dispatch((m_hairNv + 63u) / 64u, 1, 1);
-	ID3D11UnorderedAccessView* nou = NULL;
-	ID3D11ShaderResourceView* nos[3] = { NULL, NULL, NULL };
-	ID3D11Buffer* nob[3] = { NULL, NULL, NULL };
-	m_ctx->CSSetUnorderedAccessViews(0, 1, &nou, NULL);
-	m_ctx->CSSetShaderResources(0, 3, nos);
-	m_ctx->CSSetConstantBuffers(0, 3, nob);
-	m_ctx->CSSetShader(NULL, NULL, 0);
 	if (style >= 1 && style < 16 && m_hairVN[style] > 0 && m_csHair[0] && m_csHair[1] && m_hairGuide && m_hairVert)
-		RunHair(model, style, headJ, pose, world, owner, hairPlace, pose.palette[headJ], hairUAV, (float)dp.cape);
+		RunHair(model, style, headJ, pose, world, owner, hairPlace, pose.palette[headJ], hairUAV, (float)dp.cape, dp.girth);
+	{
+		ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
+	}
 	if (ho) { ho->frame = m_frame; ho->key = hkey; hairVB = ho->vb; }
 	}
 	if (m_capDraw.ib && m_capBind.size() >= 3 && headJ < pose.nJ) {
 		const M4& B = pose.palette[headJ];
-		struct CapMem { const void* owner; unsigned frame; int n; Buf<VtxS> v; };
-		static CapMem capMem[24];
+		struct CapMem { const void* owner; unsigned frame; int n; Buf<VtxS> v; VtxS dome[25]; int domeOk; };
+		static CapMem capMem[48];
 		CapMem* got = NULL;
 		if (owner) {
-			for (int i = 0; i < 24; i++)
+			for (int i = 0; i < 48; i++)
 				if (capMem[i].owner == owner && capMem[i].frame == m_frame && capMem[i].n == (int)m_capBind.size() && capMem[i].v.size() == capMem[i].n) {
 					got = &capMem[i];
 					break;
@@ -7854,14 +8619,16 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			DrawStaticVerts(m_capDraw, posed.data(), (UINT)posed.size(), world, dc);
 			if (owner) {
 				int slot = -1;
-				for (int i = 0; i < 24; i++) if (capMem[i].owner == owner || capMem[i].owner == NULL) { slot = i; break; }
-				if (slot < 0) slot = (int)(m_frame % 24u);
+				for (int i = 0; i < 48; i++) if (capMem[i].owner == owner || capMem[i].owner == NULL) { slot = i; break; }
+				if (slot < 0) slot = (int)(m_frame % 48u);
 				capMem[slot].owner = owner;
 				capMem[slot].frame = m_frame;
 				capMem[slot].n = (int)posed.size();
+				capMem[slot].domeOk = 0;
 				capMem[slot].v.resize(capMem[slot].n);
 				if (capMem[slot].v.size() == capMem[slot].n)
 					memcpy(capMem[slot].v.data(), posed.data(), (size_t)capMem[slot].n * sizeof(VtxS));
+				got = &capMem[slot];
 			}
 		}
 		} else {
@@ -7874,38 +8641,9 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			dc.noTess = 1;
 			DrawStaticVerts(m_capDraw, got->v.data(), (UINT)got->n, world, dc);
 		}
-	}
-	// ポニーテールの渦はカードが地肌と同じ深さで、頭頂だけ地肌が残る。頭蓋の外 8mm の笠でその穴を塞ぐ。
-	if (hs && hs->crownOk && hs->skullC[1] > 0.4f && headJ < pose.nJ) {
-		float c[3] = { hs->skullC[0], hs->skullC[1], hs->skullC[2] };
-		float up[3] = { hs->crown[0] - c[0], hs->crown[1] - c[1], hs->crown[2] - c[2] };
-		float rl = sqrtf(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
-		if (rl > 0.04f) {
-			up[0] /= rl; up[1] /= rl; up[2] /= rl;
-			float side[3] = { up[1] * 1.f - up[2] * 0.f, up[2] * 0.f - up[0] * 1.f, up[0] * 0.f - up[1] * 0.f };
-			float sl = sqrtf(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
-			if (sl < 0.2f) { side[0] = 0.f; side[1] = up[2]; side[2] = -up[1]; sl = sqrtf(side[1] * side[1] + side[2] * side[2]); }
-			side[0] /= sl; side[1] /= sl; side[2] /= sl;
-			float fwd[3] = { side[1] * up[2] - side[2] * up[1], side[2] * up[0] - side[0] * up[2], side[0] * up[1] - side[1] * up[0] };
-			const float R = rl + 0.008f;
+		// ポニーテールの渦はカードが地肌と同じ深さで、頭頂だけ地肌が残る。頭蓋の外 8mm の笠でその穴を塞ぐ。
+		if (hs && hs->crownOk && hs->skullC[1] > 0.4f) {
 			const int N = 12;
-			const M4& B = pose.palette[headJ];
-			auto put = [&](float x, float y, float z, float nx, float ny, float nz) -> VtxS {
-				VtxS d;
-				memset(&d, 0, sizeof(d));
-				d.p[0] = x * B.m[0] + y * B.m[4] + z * B.m[8] + B.m[12];
-				d.p[1] = x * B.m[1] + y * B.m[5] + z * B.m[9] + B.m[13];
-				d.p[2] = x * B.m[2] + y * B.m[6] + z * B.m[10] + B.m[14];
-				float nnx = nx * B.m[0] + ny * B.m[4] + nz * B.m[8];
-				float nny = nx * B.m[1] + ny * B.m[5] + nz * B.m[9];
-				float nnz = nx * B.m[2] + ny * B.m[6] + nz * B.m[10];
-				float nl = sqrtf(nnx * nnx + nny * nny + nnz * nnz);
-				if (nl > 1e-6f) { nnx /= nl; nny /= nl; nnz /= nl; }
-				d.n[0] = nnx; d.n[1] = nny; d.n[2] = nnz;
-				d.c = m_capC;
-				return d;
-			};
-			static Buf<VtxS> domeV;
 			static GpuMesh domeM;
 			static int domeReady = 0;
 			if (!domeReady && m_dev) {
@@ -7930,22 +8668,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 				}
 			}
 			if (domeReady) {
-				domeV.resize(1 + N * 2);
-				if (domeV.size() == 1 + N * 2) {
-					float tx = c[0] + up[0] * R, ty = c[1] + up[1] * R, tz = c[2] + up[2] * R;
-					domeV[0] = put(tx, ty, tz, up[0], up[1], up[2]);
-					const float ang[2] = { 0.42f, 0.85f };
-					for (int ring = 0; ring < 2; ring++) {
-						float ca = cosf(ang[ring]), sa = sinf(ang[ring]);
-						for (int i = 0; i < N; i++) {
-							float a = i * 6.2831853f / N;
-							float cs = cosf(a), sn = sinf(a);
-							float dx = up[0] * ca + (side[0] * cs + fwd[0] * sn) * sa;
-							float dy = up[1] * ca + (side[1] * cs + fwd[1] * sn) * sa;
-							float dz = up[2] * ca + (side[2] * cs + fwd[2] * sn) * sa;
-							domeV[1 + ring * N + i] = put(c[0] + dx * R, c[1] + dy * R, c[2] + dz * R, dx, dy, dz);
-						}
-					}
+				if (got && got->domeOk) {
 					DrawParams dc = dp;
 					dc.outline = 0.f;
 					dc.twoSided = 1;
@@ -7953,7 +8676,64 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 					dc.rim = 0.02f;
 					dc.mode = 7.f;
 					dc.noTess = 1;
-					DrawStaticVerts(domeM, domeV.data(), (UINT)domeV.size(), world, dc);
+					DrawStaticVerts(domeM, got->dome, 1 + N * 2, world, dc);
+				} else {
+					float c[3] = { hs->skullC[0], hs->skullC[1], hs->skullC[2] };
+					float up[3] = { hs->crown[0] - c[0], hs->crown[1] - c[1], hs->crown[2] - c[2] };
+					float rl = sqrtf(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+					if (rl > 0.04f) {
+						up[0] /= rl; up[1] /= rl; up[2] /= rl;
+						float side[3] = { up[1] * 1.f - up[2] * 0.f, up[2] * 0.f - up[0] * 1.f, up[0] * 0.f - up[1] * 0.f };
+						float sl = sqrtf(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
+						if (sl < 0.2f) { side[0] = 0.f; side[1] = up[2]; side[2] = -up[1]; sl = sqrtf(side[1] * side[1] + side[2] * side[2]); }
+						side[0] /= sl; side[1] /= sl; side[2] /= sl;
+						float fwd[3] = { side[1] * up[2] - side[2] * up[1], side[2] * up[0] - side[0] * up[2], side[0] * up[1] - side[1] * up[0] };
+						const float R = rl + 0.008f;
+						auto put = [&](float x, float y, float z, float nx, float ny, float nz) -> VtxS {
+							VtxS d;
+							memset(&d, 0, sizeof(d));
+							d.p[0] = x * B.m[0] + y * B.m[4] + z * B.m[8] + B.m[12];
+							d.p[1] = x * B.m[1] + y * B.m[5] + z * B.m[9] + B.m[13];
+							d.p[2] = x * B.m[2] + y * B.m[6] + z * B.m[10] + B.m[14];
+							float nnx = nx * B.m[0] + ny * B.m[4] + nz * B.m[8];
+							float nny = nx * B.m[1] + ny * B.m[5] + nz * B.m[9];
+							float nnz = nx * B.m[2] + ny * B.m[6] + nz * B.m[10];
+							float nl = sqrtf(nnx * nnx + nny * nny + nnz * nnz);
+							if (nl > 1e-6f) { nnx /= nl; nny /= nl; nnz /= nl; }
+							d.n[0] = nnx; d.n[1] = nny; d.n[2] = nnz;
+							d.c = m_capC;
+							return d;
+						};
+						VtxS dv[1 + N * 2];
+						float tx = c[0] + up[0] * R, ty = c[1] + up[1] * R, tz = c[2] + up[2] * R;
+						dv[0] = put(tx, ty, tz, up[0], up[1], up[2]);
+						static const float kCa[2] = { 0.913089f, 0.659983f };
+						static const float kSa[2] = { 0.407760f, 0.751280f };
+						static const float kCs[N] = { 1.f, 0.8660254f, 0.5f, 0.f, -0.5f, -0.8660254f, -1.f, -0.8660254f, -0.5f, 0.f, 0.5f, 0.8660254f };
+						static const float kSn[N] = { 0.f, 0.5f, 0.8660254f, 1.f, 0.8660254f, 0.5f, 0.f, -0.5f, -0.8660254f, -1.f, -0.8660254f, -0.5f };
+						for (int ring = 0; ring < 2; ring++) {
+							float ca = kCa[ring], sa = kSa[ring];
+							for (int i = 0; i < N; i++) {
+								float cs = kCs[i], sn = kSn[i];
+								float dx = up[0] * ca + (side[0] * cs + fwd[0] * sn) * sa;
+								float dy = up[1] * ca + (side[1] * cs + fwd[1] * sn) * sa;
+								float dz = up[2] * ca + (side[2] * cs + fwd[2] * sn) * sa;
+								dv[1 + ring * N + i] = put(c[0] + dx * R, c[1] + dy * R, c[2] + dz * R, dx, dy, dz);
+							}
+						}
+						if (got) {
+							memcpy(got->dome, dv, sizeof(dv));
+							got->domeOk = 1;
+						}
+						DrawParams dc = dp;
+						dc.outline = 0.f;
+						dc.twoSided = 1;
+						dc.sway = 0.f;
+						dc.rim = 0.02f;
+						dc.mode = 7.f;
+						dc.noTess = 1;
+						DrawStaticVerts(domeM, dv, 1 + N * 2, world, dc);
+					}
 				}
 			}
 		}
@@ -8008,7 +8788,10 @@ float Renderer::AvatarClothBack(int model, int avatar, float y)
 void Renderer::DrawGear(int i, const M4& world, const DrawParams& dp)
 {
 	if (i < 0 || i >= (int)m_gear.size()) return;
-	DrawStatic(m_gear[i], world, dp);
+	DrawParams d = dp;
+	d.noTess = 1;
+	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	DrawStatic(m_gear[i], world, d);
 }
 
 int Renderer::FindModel(const char* n) const
@@ -8122,6 +8905,7 @@ void Renderer::BeginFrame()
 {
 	FlushQueuedDraws();
 	m_avaLoading = 0;
+	m_avaFlashed = FALSE;
 	if (g_avaNeedReset) {
 		g_avaNeedReset = 0;
 		ReleaseAvatarCache();
@@ -8172,6 +8956,7 @@ void Renderer::SetCamera(const M4& view, const M4& proj, V3 eye, float time)
 {
 	m_view = view; m_proj = proj; m_vp = MMul(view, proj); m_eye = eye; m_time = time;
 	m_fcb.vp = m_vp;
+	if (!m_inPortrait) m_fcb.invVP = MInverse(m_vp);
 	m_fcb.eye[0] = eye.x; m_fcb.eye[1] = eye.y; m_fcb.eye[2] = eye.z; m_fcb.eye[3] = time;
 }
 
@@ -8253,6 +9038,7 @@ BOOL Renderer::BeginReflectPass(float planeY, V3 lookAt)
 	m_reflecting = 1;
 	m_pass = PASS_MAIN;
 	m_refSavedVp = m_fcb.vp;
+	m_refSavedInv = m_fcb.invVP;
 	m_refSavedEyeY = m_fcb.eye[1];
 	m_refSavedSx = m_fcb.screen[0];
 	m_refSavedSy = m_fcb.screen[1];
@@ -8272,6 +9058,7 @@ BOOL Renderer::BeginReflectPass(float planeY, V3 lookAt)
 	m_refSavedCull = m_vp;
 	m_vp = m_fcb.reflectVP;
 	m_fcb.vp = m_fcb.reflectVP;
+	m_fcb.invVP = MInverse(m_fcb.reflectVP);
 	m_fcb.eye[1] = reye.y;
 	m_fcb.screen[0] = (float)m_refW;
 	m_fcb.screen[1] = (float)m_refH;
@@ -8303,6 +9090,7 @@ void Renderer::EndReflectPass()
 	m_reflecting = 0;
 	m_vp = m_refSavedCull;
 	m_fcb.vp = m_refSavedVp;
+	m_fcb.invVP = m_refSavedInv;
 	m_fcb.eye[1] = m_refSavedEyeY;
 	m_fcb.screen[0] = m_refSavedSx;
 	m_fcb.screen[1] = m_refSavedSy;
@@ -8332,18 +9120,16 @@ void Renderer::BeginMainPass()
 	PollStageLook();
 	m_pass = m_inPortrait ? PASS_PORTRAIT : PASS_MAIN;
 	if (m_inPortrait) {
-		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
 		int sx = (m_portraitSlot % 6) * PORTRAIT_PX, sy = (m_portraitSlot / 6) * PORTRAIT_PX;
 		D3D11_VIEWPORT vp = { (float)sx, (float)sy, (float)PORTRAIT_PX, (float)PORTRAIT_PX, 0, 1 };
 		m_ctx->RSSetViewports(1, &vp);
-		m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 		// 枠の色は消さないと、選択順で枠が入れ替わったとき前の髪が残る。
 		if (m_ctx1) {
 			float zc[4] = { 0, 0, 0, 0 };
 			D3D11_RECT rc;
 			rc.left = sx; rc.top = sy; rc.right = sx + PORTRAIT_PX; rc.bottom = sy + PORTRAIT_PX;
 			m_ctx1->ClearView(m_ptRtv, zc, &rc, 1);
-		}
+		} else m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 	} else {
 		BOOL mrt = TacQFx(m_quality) && m_zRtv && m_zSrv;
 		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
@@ -8362,17 +9148,19 @@ void Renderer::BeginMainPass()
 	m_fcb.screen[0] = m_inPortrait ? (float)PORTRAIT_PX : (float)m_w;
 	m_fcb.screen[1] = m_inPortrait ? (float)PORTRAIT_PX : (float)m_h;
 	UpdateFrameCB();
-	ID3D11ShaderResourceView* sh = (m_shSrv && m_fcb.light[3] > .5f) ? m_shSrv : NULL;
-	m_ctx->PSSetShaderResources(1, 1, &sh);
-	if (m_groundSrv) m_ctx->PSSetShaderResources(3, 1, &m_groundSrv);
-	if (m_matSrv) m_ctx->PSSetShaderResources(4, 1, &m_matSrv);
-	if (m_photoSrv) m_ctx->PSSetShaderResources(5, 1, &m_photoSrv);
-	if (m_sphereSrv) m_ctx->PSSetShaderResources(6, 1, &m_sphereSrv);
-	if (m_envSrv) m_ctx->PSSetShaderResources(7, 1, &m_envSrv);
-	if (m_refSrv && m_fcb.reflectInfo[0] > 0.5f) m_ctx->PSSetShaderResources(8, 1, &m_refSrv);
-	else {
-		ID3D11ShaderResourceView* refOff = NULL;
-		m_ctx->PSSetShaderResources(8, 1, &refOff);
+	if (!m_inPortrait || m_portraitSlot < 0) {
+		ID3D11ShaderResourceView* sh = (m_shSrv && m_fcb.light[3] > .5f) ? m_shSrv : NULL;
+		m_ctx->PSSetShaderResources(1, 1, &sh);
+		if (m_groundSrv) m_ctx->PSSetShaderResources(3, 1, &m_groundSrv);
+		if (m_matSrv) m_ctx->PSSetShaderResources(4, 1, &m_matSrv);
+		if (m_photoSrv) m_ctx->PSSetShaderResources(5, 1, &m_photoSrv);
+		if (m_sphereSrv) m_ctx->PSSetShaderResources(6, 1, &m_sphereSrv);
+		if (m_envSrv) m_ctx->PSSetShaderResources(7, 1, &m_envSrv);
+		if (m_refSrv && m_fcb.reflectInfo[0] > 0.5f) m_ctx->PSSetShaderResources(8, 1, &m_refSrv);
+		else {
+			ID3D11ShaderResourceView* refOff = NULL;
+			m_ctx->PSSetShaderResources(8, 1, &refOff);
+		}
 	}
 }
 
@@ -8409,7 +9197,15 @@ void Renderer::BindForPass(BOOL skinned, BOOL outline)
 	int key = (tess ? 1 : 0) | (skinned ? 2 : 0) | (outline ? 4 : 0)
 		| ((int)m_pass << 3) | (m_inPortrait ? 64 : 0) | (m_reflecting ? 128 : 0)
 		| (m_psOverride ? 256 : 0) | (m_quality << 9);
-	if (key == m_bindKey) return;
+	if (key == m_bindKey) {
+		if (!tess && m_tessOn) {
+			m_ctx->HSSetShader(NULL, NULL, 0);
+			m_ctx->DSSetShader(NULL, NULL, 0);
+			m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			m_tessOn = FALSE;
+		}
+		return;
+	}
 	m_bindKey = key;
 	m_ctx->IASetInputLayout(skinned ? m_ilK : m_ilS);
 	if (tess) {
@@ -8474,13 +9270,38 @@ void Renderer::DrawSky(DWORD top, DWORD bottom, int lines, DWORD lineColor)
 	m_dsWant = m_dsWrite;
 }
 
+// m_vbDyn は追記リング。満杯で DISCARD し、それまでは NO_OVERWRITE で後ろへ足す（大きな頂点バッファの改名を毎回起こさない）。
+// DISCARD は以前の領域を無効にするため、描画待ちキューにそのバッファが残っていたら先に吐き出す。
+static void* TacRingMap(ID3D11DeviceContext* ctx, ID3D11Buffer* b, UINT cap, UINT& pos, UINT bytes, UINT& off)
+{
+	if (!b || !ctx || !bytes || bytes > cap) return NULL;
+	UINT at = (pos + 15u) & ~15u;
+	D3D11_MAP mt = D3D11_MAP_WRITE_NO_OVERWRITE;
+	if (pos > cap || at > cap || bytes > cap - at) { at = 0; mt = D3D11_MAP_WRITE_DISCARD; }
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (FAILED(ctx->Map(b, 0, mt, 0, &ms)) || !ms.pData) return NULL;
+	pos = at + bytes;
+	off = at;
+	return (BYTE*)ms.pData + at;
+}
+
+void* Renderer::DynMap(UINT bytes, UINT& off)
+{
+	UINT at = (m_dynPos + 15u) & ~15u;
+	if ((m_dynPos > m_vbDynBytes || at > m_vbDynBytes || bytes > m_vbDynBytes - at) && TacQueueUses(m_vbDyn))
+		FlushQueuedDraws();
+	return TacRingMap(m_ctx, m_vbDyn, m_vbDynBytes, m_dynPos, bytes, off);
+}
+
 void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp)
 {
 	if (!m.ib || !v || !nv || !m_vbDyn || nv * sizeof(VtxS) > m_vbDynBytes) { DrawStatic(m, world, dp); return; }
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, v, nv * sizeof(VtxS));
+	UINT off = 0;
+	void* dst = DynMap(nv * (UINT)sizeof(VtxS), off);
+	if (!dst) return;
+	memcpy(dst, v, nv * sizeof(VtxS));
 	m_ctx->Unmap(m_vbDyn, 0);
+	m_dynOff = off;
 	GpuMesh d = m;
 	d.vb = m_vbDyn;
 	d.stride = sizeof(VtxS);
@@ -8493,7 +9314,7 @@ void Renderer::FlushQueuedDraws()
 	g_drawFlush = TRUE;
 	ID3D11Buffer* vb = NULL;
 	ID3D11Buffer* ib = NULL;
-	UINT stride = 0xFFFFFFFFu;
+	UINT stride = 0xFFFFFFFFu, vbOff = 0xFFFFFFFFu;
 	DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN;
 	ID3D11ShaderResourceView* srv = (ID3D11ShaderResourceView*)1;
 	ID3D11VertexShader* vs = (ID3D11VertexShader*)1;
@@ -8523,11 +9344,12 @@ void Renderer::FlushQueuedDraws()
 			srv = c.srv;
 			m_lastPsSrv = c.srv;
 		}
-		if (c.vb != vb || c.stride != stride) {
-			UINT off = 0, st = c.stride;
+		if (c.vb != vb || c.stride != stride || c.vbOff != vbOff) {
+			UINT off = c.vbOff, st = c.stride;
 			m_ctx->IASetVertexBuffers(0, 1, &c.vb, &st, &off);
 			vb = c.vb;
 			stride = c.stride;
+			vbOff = c.vbOff;
 		}
 		if (c.ib != ib || c.ibFmt != ibFmt) {
 			m_ctx->IASetIndexBuffer(c.ib, c.ibFmt, 0);
@@ -8539,6 +9361,13 @@ void Renderer::FlushQueuedDraws()
 	}
 	g_drawN = 0;
 	g_drawFlush = FALSE;
+	if (m_tessOn) {
+		m_ctx->HSSetShader(NULL, NULL, 0);
+		m_ctx->DSSetShader(NULL, NULL, 0);
+		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_ctx->VSSetShader(m_vsS, NULL, 0);
+		m_tessOn = FALSE;
+	}
 	m_bindKey = -1;
 	m_lastPsSrv = NULL;
 }
@@ -8553,6 +9382,7 @@ void Renderer::EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams
 	c.ib = m.ib;
 	c.nIdx = m.nIdx;
 	c.stride = m.stride;
+	c.vbOff = (m.vb == m_vbDyn) ? m_dynOff : 0;
 	c.ibFmt = m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 	BOOL tess = !outline && m_allowTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
 		&& TacQRich(m_quality) && m_vsT && m_hsT && m_dsT;
@@ -8589,7 +9419,7 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 	if (!m.vb || !m.ib) return;
 	if (m_dsWant) m_ctx->OMSetDepthStencilState(m_dsWant, 0);
 	m_allowTess = !(dp.outline > 0.f) && !dp.noTess;
-	UINT st = m.stride, off = 0;
+	UINT st = m.stride, off = (m.vb == m_vbDyn) ? m_dynOff : 0;
 	m_ctx->IASetVertexBuffers(0, 1, &m.vb, &st, &off);
 	m_ctx->IASetIndexBuffer(m.ib, m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
 	if (m_pass == PASS_SHADOW) {
@@ -8658,6 +9488,34 @@ static BOOL SameInstDp(const DrawParams& a, const DrawParams& b)
 		&& a.outline == b.outline && a.mode == b.mode && a.emissive == b.emissive
 		&& a.hue == b.hue && a.dissolve == b.dissolve && a.flash == b.flash
 		&& a.rim == b.rim && a.sway == b.sway && a.noTess == b.noTess;
+}
+
+void Renderer::ResetActorPipe()
+{
+	if (!m_ctx) return;
+	if (m_instOn) EndInstBatch();
+	FlushQueuedDraws();
+	ClearTess();
+	m_psOverride = NULL;
+	g_objValid = FALSE;
+	g_cbBound = NULL;
+	m_bindKey = -1;
+	m_lastPsSrv = NULL;
+	m_ctx->GSSetShader(NULL, NULL, 0);
+	m_ctx->IASetInputLayout(m_ilS);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_ctx->VSSetShader(m_vsS, NULL, 0);
+	if (m_cutActors) m_cutActorGen++;
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+	m_dsWant = m_dsWrite;
+	if (m_pass == PASS_SHADOW) {
+		m_ctx->RSSetState(m_rsShadow);
+		m_ctx->PSSetShader(NULL, NULL, 0);
+	} else {
+		m_ctx->RSSetState(m_inPortrait ? m_rsNone : (m_reflecting ? m_rsFront : m_rsBack));
+		m_ctx->PSSetShader(m_psM, NULL, 0);
+	}
 }
 
 void Renderer::BeginInstBatch()
@@ -8817,7 +9675,7 @@ void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& d
 {
 	if (!m.vb || !m.ib || !m_ctx) return;
 	m_allowTess = !(dp.outline > 0.f) && !dp.noTess;
-	if (g_drawFlush || m.vb == m_vbDyn || m.vb == m_hairVB) {
+	if (g_drawFlush || m.vb == m_hairVB) {
 		if (!g_drawFlush) FlushQueuedDraws();
 		DrawStaticNow(m, world, dp);
 		return;
@@ -8883,7 +9741,10 @@ void Renderer::DrawAttach(const Attach& a, const Pose& p, int joint, const M4& w
 	if (joint < 0 || joint >= p.nJ) return;
 	M4 w = MMul(p.global[joint], world);
 	if (extra) w = MMul(*extra, w);
-	DrawStatic(a.mesh, w, dp);
+	DrawParams d = dp;
+	d.noTess = 1;
+	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	DrawStatic(a.mesh, w, d);
 }
 
 void Renderer::DrawTerrain()
@@ -8894,42 +9755,47 @@ void Renderer::DrawTerrain()
 	if (m_terrain.vb) DrawStatic(m_terrain, m_sceneShift, dp);
 	int gx = -99, gz = -99;
 	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
-	if (m_reflecting) {
-		m_fcb.reflectInfo[2] = 2.f;
-		UpdateFrameCB();
-		m_ctx->OMSetDepthStencilState(m_dsRead, 0);
-		m_dsWant = m_dsRead;
-	}
+	BOOL hasCover = FALSE;
 	GpuMesh* coverSet[4] = { m_cover1, m_cover2, m_cover3, m_cover4 };
-	for (int ci = 0; ci < 4; ci++) {
-		for (int ch = 0; ch < 16; ch++) {
-			GpuMesh& cover = coverSet[ci][ch];
-			if (!cover.vb) continue;
-			int layer = ci + 1;
-			if (m_cutDeck >= 0 && layer != m_cutDeck) continue;
-			int cx = ch & 3, cz = ch >> 2;
-			if (!InView(v3(cx * 16.f + 8.f, 3.f, cz * 16.f + 8.f), 14.f)) continue;
-			int above = !m_reflecting && m_cutDeck < 0 && gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && layer > m_fadeAbove;
-			if (m_pass == PASS_SHADOW) {
-				if (!above) DrawStatic(cover, m_sceneShift, dp);
-				continue;
-			}
-			DrawParams cd = dp;
-			cd.twoSided = 1;
-			if (above) {
-				cd.tint = 0x78FFFFFF;
-				m_ctx->OMSetDepthStencilState(m_dsRead, 0);
-				m_dsWant = m_dsRead;
-			}
-			DrawStatic(cover, m_sceneShift, cd);
-			if (above) { m_ctx->OMSetDepthStencilState(m_dsWrite, 0); m_dsWant = m_dsWrite; }
+	for (int ci = 0; ci < 4 && !hasCover; ci++)
+		for (int ch = 0; ch < 16; ch++) if (coverSet[ci][ch].vb) { hasCover = TRUE; break; }
+	if (hasCover) {
+		if (m_reflecting) {
+			m_fcb.reflectInfo[2] = 2.f;
+			UpdateFrameCB();
+			m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+			m_dsWant = m_dsRead;
 		}
-	}
-	if (m_reflecting) {
-		m_fcb.reflectInfo[2] = 1.f;
-		UpdateFrameCB();
-		m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
-		m_dsWant = m_dsWrite;
+		for (int ci = 0; ci < 4; ci++) {
+			for (int ch = 0; ch < 16; ch++) {
+				GpuMesh& cover = coverSet[ci][ch];
+				if (!cover.vb) continue;
+				int layer = ci + 1;
+				if (m_cutDeck >= 0 && layer != m_cutDeck) continue;
+				int cx = ch & 3, cz = ch >> 2;
+				if (!InView(v3(cx * 16.f + 8.f, 3.f, cz * 16.f + 8.f), 14.f)) continue;
+				int above = !m_reflecting && m_cutDeck < 0 && gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && layer > m_fadeAbove;
+				if (m_pass == PASS_SHADOW) {
+					if (!above) DrawStatic(cover, m_sceneShift, dp);
+					continue;
+				}
+				DrawParams cd = dp;
+				cd.twoSided = 1;
+				if (above) {
+					cd.tint = 0x78FFFFFF;
+					m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+					m_dsWant = m_dsRead;
+				}
+				DrawStatic(cover, m_sceneShift, cd);
+				if (above) { m_ctx->OMSetDepthStencilState(m_dsWrite, 0); m_dsWant = m_dsWrite; }
+			}
+		}
+		if (m_reflecting) {
+			m_fcb.reflectInfo[2] = 1.f;
+			UpdateFrameCB();
+			m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+			m_dsWant = m_dsWrite;
+		}
 	}
 	m_psOverride = m_psProp;
 	dp.twoSided = 1;
@@ -8946,6 +9812,7 @@ void Renderer::DrawTerrain()
 		DrawParams lp;
 		lp.mode = 2.f;
 		lp.twoSided = 1;
+		lp.noTess = 1;
 		DrawStatic(m_lava, m_sceneShift, lp);
 	}
 	m_psOverride = NULL;
@@ -8967,10 +9834,15 @@ void Renderer::SetLiquidRipples(const float* rip, int n)
 		if (n > 48) n = 48;
 		memcpy(z, rip, (size_t)n * 16u);
 	}
+	static float s_lastRip[48 * 4];
+	static ID3D11Buffer* s_lastBuf = NULL;
+	if (s_lastBuf == m_cbRipple && memcmp(s_lastRip, z, sizeof(z)) == 0) return;
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbRipple, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
 	memcpy(ms.pData, z, sizeof(z));
 	m_ctx->Unmap(m_cbRipple, 0);
+	memcpy(s_lastRip, z, sizeof(z));
+	s_lastBuf = m_cbRipple;
 }
 
 void Renderer::DrawWater()
@@ -8979,6 +9851,7 @@ void Renderer::DrawWater()
 	DrawParams dp;
 	dp.mode = 1.f;
 	dp.twoSided = 1;
+	dp.noTess = 1;
 	dp.tint = (m_waterColor & 0xFFFFFF) | 0xFA000000;
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_dsWant = m_dsRead;
@@ -9015,9 +9888,9 @@ void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 			if (cnt > cap) cnt = cap;
 			cnt -= cnt % 3;
 			if (cnt <= 0) break;
-			D3D11_MAPPED_SUBRESOURCE ms;
-			if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-			AvxCopy(ms.pData, src + base, (size_t)cnt * sizeof(VtxS));
+			void* dst = DynMap((UINT)cnt * (UINT)sizeof(VtxS), off);
+			if (!dst) return;
+			AvxCopy(dst, src + base, (size_t)cnt * sizeof(VtxS));
 			m_ctx->Unmap(m_vbDyn, 0);
 			m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
 			m_ctx->Draw((UINT)cnt, 0);
@@ -9034,9 +9907,8 @@ void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 		for (int base = 0; base < quads; base += per) {
 			int cnt = quads - base;
 			if (cnt > per) cnt = per;
-			D3D11_MAPPED_SUBRESOURCE ms;
-			if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-			VtxS* dst = (VtxS*)ms.pData;
+			VtxS* dst = (VtxS*)DynMap((UINT)cnt * 6u * (UINT)sizeof(VtxS), off);
+			if (!dst) return;
 			for (int k = 0; k < cnt; ++k) {
 				const VtxS* src = q + (base + k) * 4;
 				for (int t = 0; t < 6; ++t) dst[k * 6 + t] = src[kOrd[t]];
@@ -9058,11 +9930,11 @@ void Renderer::DrawRibbon(const Buf<VtxP>& v)
 	if (v.empty() || m_pass == PASS_SHADOW) return;
 	size_t bytes = v.size() * sizeof(VtxP);
 	if (bytes > m_vbDynBytes) return;
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, v.data(), bytes);
-	m_ctx->Unmap(m_vbDyn, 0);
 	UINT st = sizeof(VtxP), off = 0;
+	void* dst = DynMap((UINT)bytes, off);
+	if (!dst) return;
+	memcpy(dst, v.data(), bytes);
+	m_ctx->Unmap(m_vbDyn, 0);
 	m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
 	m_ctx->IASetInputLayout(m_ilP);
 	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -9150,11 +10022,11 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			if (vn[b] <= 0) continue;
 			UINT bytes = (UINT)vn[b] * (UINT)sizeof(PPt);
 			if (bytes > m_vbDynBytes) continue;
-			D3D11_MAPPED_SUBRESOURCE ms;
-			if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) continue;
-			memcpy(ms.pData, buf[b], bytes);
-			m_ctx->Unmap(m_vbDyn, 0);
 			UINT st = sizeof(PPt), off = 0;
+			void* dst = DynMap(bytes, off);
+			if (!dst) continue;
+			memcpy(dst, buf[b], bytes);
+			m_ctx->Unmap(m_vbDyn, 0);
 			m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
 			m_ctx->OMSetBlendState(b ? m_bsAdd : m_bsPremul, NULL, 0xFFFFFFFF);
 			m_ctx->Draw((UINT)vn[b], 0);
@@ -9219,17 +10091,17 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 	for (int b = 0; b < 2; b++) {
 		if (vn[b] <= 0) continue;
 		size_t bytes = min((size_t)vn[b] * sizeof(VtxP), (size_t)m_vbDynBytes);
-		D3D11_MAPPED_SUBRESOURCE ms;
-		if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+		UINT st = sizeof(VtxP), off = 0;
+		void* dst = DynMap((UINT)bytes, off);
+		if (!dst) {
 			if (mrt) {
 				ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
 				m_ctx->OMSetRenderTargets(2, rt, m_dsv);
 			}
 			return;
 		}
-		memcpy(ms.pData, buf[b], bytes);
+		memcpy(dst, buf[b], bytes);
 		m_ctx->Unmap(m_vbDyn, 0);
-		UINT st = sizeof(VtxP), off = 0;
 		m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
 		m_ctx->IASetInputLayout(m_ilP);
 		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -10352,7 +11224,21 @@ BOOL Renderer::CreaturePosedExtent(int model, const Pose& pose, float& cx, float
 BOOL Renderer::BeginPortrait(int slot)
 {
 	if (!m_ptRtv || !m_ptDsv || slot < 0 || slot >= PORTRAIT_N) return FALSE;
-	m_inPortrait = TRUE;
+	FlushQueuedDraws();
+	if (!m_inPortrait) {
+		m_inPortrait = TRUE;
+		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
+		m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
+		ID3D11ShaderResourceView* sh = NULL;
+		m_ctx->PSSetShaderResources(1, 1, &sh);
+		if (m_groundSrv) m_ctx->PSSetShaderResources(3, 1, &m_groundSrv);
+		if (m_matSrv) m_ctx->PSSetShaderResources(4, 1, &m_matSrv);
+		if (m_photoSrv) m_ctx->PSSetShaderResources(5, 1, &m_photoSrv);
+		if (m_sphereSrv) m_ctx->PSSetShaderResources(6, 1, &m_sphereSrv);
+		if (m_envSrv) m_ctx->PSSetShaderResources(7, 1, &m_envSrv);
+		ID3D11ShaderResourceView* refOff = NULL;
+		m_ctx->PSSetShaderResources(8, 1, &refOff);
+	}
 	m_portraitSlot = slot;
 	return TRUE;
 }
@@ -10360,12 +11246,12 @@ BOOL Renderer::BeginPortrait(int slot)
 void Renderer::EndPortrait()
 {
 	FlushQueuedDraws();
+}
+
+void Renderer::FinishPortraits()
+{
+	FlushQueuedDraws();
 	m_inPortrait = FALSE;
-	BOOL mrt = TacQFx(m_quality) && m_zRtv && m_zSrv;
-	ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
-	m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
-	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
-	m_ctx->RSSetViewports(1, &vp);
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
 }
 
@@ -10459,6 +11345,8 @@ BOOL Renderer::ApplyPost()
 void Renderer::BeginHud()
 {
 	FlushQueuedDraws();
+	m_inPortrait = FALSE;
+	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
 	ClearTess();
 	if (!ApplyPost() && m_msaa > 1 && m_msTex && m_bb)
 		m_ctx->ResolveSubresource(m_bb, 0, m_msTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
@@ -10492,11 +11380,11 @@ void Renderer::FlushHud()
 	size_t off = 0;
 	while (off < (size_t)m_hud.size()) {
 		size_t n = min(maxV, (size_t)m_hud.size() - off);
-		D3D11_MAPPED_SUBRESOURCE ms;
-		if (FAILED(m_ctx->Map(m_vbHud, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) break;
-		memcpy(ms.pData, m_hud.data() + off, n * sizeof(VtxH));
-		m_ctx->Unmap(m_vbHud, 0);
 		UINT st = sizeof(VtxH), o = 0;
+		void* dst = TacRingMap(m_ctx, m_vbHud, (UINT)(sizeof(VtxH) * 6 * 4096 * 4), m_hudPos, (UINT)(n * sizeof(VtxH)), o);
+		if (!dst) break;
+		memcpy(dst, m_hud.data() + off, n * sizeof(VtxH));
+		m_ctx->Unmap(m_vbHud, 0);
 		m_ctx->IASetVertexBuffers(0, 1, &m_vbHud, &st, &o);
 		m_ctx->Draw((UINT)n, 0);
 		off += n;
@@ -10583,11 +11471,11 @@ void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD bo
 		{ x, y, 0, 0, fc }, { x + w, y, 1, 0, fc }, { x + w, y + h, 1, 1, fc },
 		{ x, y, 0, 0, fc }, { x + w, y + h, 1, 1, fc }, { x, y + h, 0, 1, fc },
 	};
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_vbHud, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, v, sizeof(v));
-	m_ctx->Unmap(m_vbHud, 0);
 	UINT st = sizeof(VtxH), o = 0;
+	void* dst = TacRingMap(m_ctx, m_vbHud, (UINT)(sizeof(VtxH) * 6 * 4096 * 4), m_hudPos, (UINT)sizeof(v), o);
+	if (!dst) return;
+	memcpy(dst, v, sizeof(v));
+	m_ctx->Unmap(m_vbHud, 0);
 	m_ctx->IASetVertexBuffers(0, 1, &m_vbHud, &st, &o);
 	m_ctx->Draw(6, 0);
 }
@@ -10618,11 +11506,17 @@ TextSprite* Renderer::GetText(const wchar_t* s, float px, int bold, int shadow, 
 	if (!s || !s[0]) return NULL;
 	wchar_t key[TAC_TEXTK];
 	_snwprintf_s(key, _TRUNCATE, L"%d|%d|%d|%d|%d|%s", (int)(px * 4), bold, shadow, box ? (int)boxW : 0, box ? (int)boxH : 0, s);
+	UINT hv = 2166136261u;
+	for (const wchar_t* p = key; *p; p++) { hv ^= (UINT)*p; hv *= 16777619u; }
+	if (!hv) hv = 1;
+	for (int ti = 0; ti < TAC_TEXTN; ti++) {
+		if (m_textHash[ti] != hv || !m_text[ti].live) continue;
+		if (!wcscmp(m_text[ti].key, key)) { m_text[ti].sp.lastFrame = m_frame; return &m_text[ti].sp; }
+	}
 	int slot = -1, oldest = -1;
 	DWORD oldestF = 0;
 	for (int ti = 0; ti < TAC_TEXTN; ti++) {
 		if (!m_text[ti].live) { if (slot < 0) slot = ti; continue; }
-		if (!wcscmp(m_text[ti].key, key)) { m_text[ti].sp.lastFrame = m_frame; return &m_text[ti].sp; }
 		if (oldest < 0 || m_text[ti].sp.lastFrame < oldestF) { oldest = ti; oldestF = m_text[ti].sp.lastFrame; }
 	}
 	if (slot < 0) slot = oldest >= 0 ? oldest : 0;
@@ -10663,6 +11557,7 @@ TextSprite* Renderer::GetText(const wchar_t* s, float px, int bold, int shadow, 
 	m_text[slot].live = 1;
 	wcsncpy_s(m_text[slot].key, key, _TRUNCATE);
 	m_text[slot].sp = ts;
+	m_textHash[slot] = hv;
 	return &m_text[slot].sp;
 }
 
@@ -10723,7 +11618,7 @@ void Renderer::EndFrameTextGc()
 	if (live < 400) return;
 	for (int ti = 0; ti < TAC_TEXTN; ti++) {
 		if (!m_text[ti].live) continue;
-		if (m_frame - m_text[ti].sp.lastFrame > 300) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; }
+		if (m_frame - m_text[ti].sp.lastFrame > 300) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
 	}
 }
 

@@ -90,6 +90,7 @@ public:
 	void ClearClose() { m_wantClose = FALSE; }
 	void GoHomeFromBattle();
 	SaveData& Save() { return m_save; }
+	int PaceHz() const;
 	void Persist();
 
 	void OnMouseMove(int x, int y);
@@ -123,6 +124,9 @@ private:
 	BOOL LoadEverything();
 	void NoteLoad(int permille);
 	void BeginLoadSpan(int a, int b);
+	int MeasureLoadUnits(int& showUnits);
+	void OpenLoadSlice(int units);
+	void CloseLoadSlice();
 	BOOL PaintLoadScreen();
 	void DrawLoadHud();
 	static void LoadPulseCb(int cur, int n, void* user);
@@ -131,6 +135,8 @@ private:
 	void ApplyQualityNow(int q);
 	void PickQuality(int delta);
 	int QualityNow() const;
+	// 保存の拍は利用者の選択のまま。自動の保険（標準未満で 1/30 など）は実行時だけ上書きする。
+	int SyncNow() const;
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
@@ -343,10 +349,12 @@ private:
 	Library m_lib;
 	SaveData m_save;
 	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz, m_qSlots;
-	int m_syncArm, m_syncArmN;
+	int m_syncArm, m_syncArmN, m_syncRun;
 	BOOL m_qDrew;
 	float m_qCoolT, m_syncLock;
 	float m_fps;
+	float m_fpsSpan[5];
+	int m_fpsN, m_fpsI;
 	LARGE_INTEGER m_fpsAt;
 	HWND m_hwnd;
 	int m_w, m_h;
@@ -362,6 +370,10 @@ private:
 	unsigned m_loadPaint;
 	int m_loadA, m_loadB;
 	BOOL m_loadLive;
+	int m_loadUnits;
+	int m_loadHave;
+	int m_sliceBase;
+	int m_sliceUnits;
 	float m_renderDt, m_lastRenderTime;
 	int m_recoverTries;
 	Rng m_rng;

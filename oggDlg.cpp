@@ -30834,8 +30834,10 @@ void timerog1(UINT nIDEvent)
 		{
 			HWND fg = ::GetForegroundWindow();
 			DWORD fgpid = 0;
-			::GetWindowThreadProcessId(fg, &fgpid);
-			if (fgpid != ::GetCurrentProcessId()) {
+			if (fg)
+				::GetWindowThreadProcessId(fg, &fgpid);
+			/* 前面が無い（子窓を壊した直後）は他アプリではない。MP へ戻す。 */
+			if (fg && fgpid != ::GetCurrentProcessId()) {
 				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0);
 				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1);
 				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2);
@@ -30851,9 +30853,25 @@ void timerog1(UINT nIDEvent)
 			if (IsSoft3DMazeActive() || IsSoft3DRaceActive() || IsOmakeTacticsActive())
 				return;
 		}
-		if (maini)
-			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		/* MP モードでは og は非表示のオーナー。HWND_TOP で前面化すると
+		   見えない窓がフォアグラウンドになり、MP の次のクリック（終了など）が
+		   活性化に消費されて 2 回押すまで届かない。 */
+		extern CMediaPlayerDlg* mp;
+		HWND hMp = NULL;
+		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd())
+			&& ::IsWindowVisible(mp->GetSafeHwnd()) && !::IsIconic(mp->GetSafeHwnd()))
+			hMp = mp->GetSafeHwnd();
+		if (hMp) {
+			::SetWindowPos(hMp, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			::SetForegroundWindow(hMp);
+			/* 非表示の og が非アクティブになると 4924 がホットキーを外す。
+			   この直後に付け直すので、その解除は捨てる。 */
+			og->KillTimer(4924);
+		} else {
+			if (maini)
+				::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		}
 		og->SetTimer(4930, 10, NULL);
 		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
 		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);

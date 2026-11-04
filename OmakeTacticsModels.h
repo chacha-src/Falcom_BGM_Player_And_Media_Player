@@ -54,6 +54,7 @@ struct Actor {
 	int avatar;         // アバター (0=なし)
 	int bust;           // 胸の大きさ 0=A〜7=H
 	float htScale;      // 身長。体は CS、武具と髪は同じ倍率
+	float girth;        // 体型の胴の太さ。標準の体型で 1
 	DWORD avaTint;      // 0 は服の染め色のまま
 	float scale, hue;
 	DWORD tint;

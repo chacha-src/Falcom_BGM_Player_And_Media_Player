@@ -254,8 +254,9 @@ private:
 
 	uint8_t Read8(uint32_t addr) const
 	{
-		if (reg_[0x22e] == 0x80)
-			return ram_[addr & (sizeof(ram_) - 1)];
+		/* ボイスは常にサンプル ROM（MAME read_byte）。22e=0x80 は CPU の
+		   データポート 22d がリバーブ RAM を読むときだけで、ここを見ると
+		   rungun のように 22e を 0x80 のまま鳴らす曲の波形が 0 になる。 */
 		if (!rom_ || romSize_ == 0)
 			return 0x80;
 		return rom_[addr % romSize_];

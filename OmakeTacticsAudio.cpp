@@ -639,6 +639,15 @@ static short* MmlMix(const char* src, int& frames, float gain)
 	frames = total;
 	return dst;
 }
+int YmMmlRender(const char* src, short* dst, int capFrames, float gain)
+{
+	int frames = 0;
+	short* p = MmlMix(src, frames, gain);
+	if (!p || frames < 1 || !dst || capFrames < 1) return 0;
+	if (frames > capFrames) frames = capFrames;
+	memcpy(dst, p, (size_t)frames * 2 * sizeof(short));
+	return frames;
+}
 static const char* const kMml[TS_N] = {
 	// UI。カーソルは小さなクリック、決定は上がる二音、取消は下がる二音。どれも戦闘の音より奥に置く。
 	"t240 l64 o5 v10 @35 a | t240 l64 o6 v4 @34 e",

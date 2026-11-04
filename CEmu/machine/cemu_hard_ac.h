@@ -124,6 +124,7 @@ public:
 	int SeibuCabal() const { return (board_ == CEMU_AC_BOARD_SEIBU_OPL && seibuSongOr80_ == 5) ? 1 : 0; }
 	int T5182() const { return board_ == CEMU_AC_BOARD_T5182; }
 	int Heberpop() const { return board_ == CEMU_AC_BOARD_HEBERPOP; }
+	CChip* UtoX1() const;
 	int Bionicc() const { return board_ == CEMU_AC_BOARD_BIONICC; }
 	int StreetFighter1() const { return board_ == CEMU_AC_BOARD_TAITO_OPM && taitoOpmMap_ == 18; }
 	int HexionMap() const { return board_ == CEMU_AC_BOARD_KONAMI_K7232 && konamiK7232Map_ == 7; }

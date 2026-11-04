@@ -71,11 +71,41 @@ static BOOL CALLBACK TacEnumPads(const DIDEVICEINSTANCEW* inst, void*)
 		return DIENUM_CONTINUE;
 	return DIENUM_STOP;
 }
+// 未接続時の列挙は 1 回で 100ms 超かかることがあり、UI スレッドで 1.5 秒ごとに回すと周期的に止まる。
+// 有無の確認だけを別スレッドの別インスタンスで行い、見つかったときだけ UI スレッドで開く。
+static volatile LONG g_padProbe = 0;
+static volatile LONG g_padSeen = 0;
+static BOOL CALLBACK TacSeePads(const DIDEVICEINSTANCEW*, void* p)
+{
+	if (p) *(LONG*)p = 1;
+	return DIENUM_STOP;
+}
+static DWORD WINAPI TacPadProbe(LPVOID)
+{
+	IDirectInput8W* di = NULL;
+	LONG seen = 0;
+	if (SUCCEEDED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&di, NULL)) && di) {
+		di->EnumDevices(DI8DEVCLASS_GAMECTRL, TacSeePads, &seen, DIEDFL_ATTACHEDONLY);
+		TacReleaseDi(di);
+	}
+	if (seen) InterlockedExchange(&g_padSeen, 1);
+	InterlockedExchange(&g_padProbe, 0);
+	return 0;
+}
 static void TacTryOpenPad(HWND hw)
 {
 	if (g_tacPad) return;
+	if (InterlockedCompareExchange(&g_padProbe, 0, 0) != 0) return;
 	const DWORD now = GetTickCount();
-	if (g_tacRetryAt != 0 && (LONG)(now - g_tacRetryAt) < 0) return;
+	if (InterlockedExchange(&g_padSeen, 0) == 0) {
+		if (g_tacRetryAt != 0 && (LONG)(now - g_tacRetryAt) < 0) return;
+		g_tacRetryAt = now + 1500;
+		InterlockedExchange(&g_padProbe, 1);
+		HANDLE th = CreateThread(NULL, 64 * 1024, TacPadProbe, NULL, 0, NULL);
+		if (th) CloseHandle(th);
+		else InterlockedExchange(&g_padProbe, 0);
+		return;
+	}
 	g_tacRetryAt = now + 1500;
 	if (!g_tacDi) {
 		if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_tacDi, NULL)) || !g_tacDi)
@@ -527,7 +557,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	if (dt < 0) dt = 0;
 	if (dt > 0.1f) dt = 0.1f;
 	m_tickAt = now;
-	int hz = otac::TacVsyncHz(m_game.Save());
+	int hz = m_game.PaceHz();
 	if (hz < 30) hz = 30;
 	m_paceHz = hz;
 	m_fg = (::GetForegroundWindow() == m_hWnd);
@@ -550,7 +580,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 			m_game.ClearClose();
 			m_inPace = FALSE;
 			InterlockedExchange(&m_pacePosted, 0);
-			PostMessage(WM_CLOSE);
+			RequestDestroyWindow();
 			return 0;
 		}
 	}
@@ -878,6 +908,7 @@ void COmakeTacticsDlg::OnDestroy()
 		m_gameOk = FALSE;
 	}
 	TacReleasePadAll();
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
 	CCustomBlurDialogBase::OnDestroy();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->SetTimer(4923, 20, NULL);
@@ -889,7 +920,10 @@ void COmakeTacticsDlg::RequestDestroyWindow()
 	m_destroying = TRUE;
 	HideImeEdit();
 	if (GetSafeHwnd()) {
+		HWND parent = ::GetParent(m_hWnd);
 		ShowWindow(SW_HIDE);
+		if (parent && ::IsWindow(parent) && ::IsWindowVisible(parent) && !::IsIconic(parent))
+			::SetForegroundWindow(parent);
 		if (!::PostMessage(m_hWnd, WM_TAC_DESTROY, 0, 0))
 			OnTacDestroy(0, 0);
 	}

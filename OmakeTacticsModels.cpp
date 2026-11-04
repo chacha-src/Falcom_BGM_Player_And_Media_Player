@@ -1050,7 +1050,7 @@ static void BuildIce(Renderer& r, GpuMesh& out)
 BOOL BuildLibrary(Renderer& r, Library& lib)
 {
 	ReleaseLibrary(lib);
-	int stepN = 4 + B_COUNT * (HAIR_STYLES - 1) + 4 + 3;
+	int stepN = 12;
 	int stepI = 0;
 	auto step = [&]() {
 		stepI++;
@@ -1074,16 +1074,9 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	lib.procModel[LK_BAT] = MakeBat(r); step();
 	lib.procModel[LK_WYVERN] = MakeWyvern(r); step();
 	lib.procModel[LK_GOLEM] = MakeGolem(r); step();
-	for (int b = 0; b < B_COUNT; b++)
-		for (int s = 1; s < HAIR_STYLES; s++) { BuildHair(r, r.models[lib.bodyModel[b]], s, lib.hair[b][s]); step(); }
+	// 素体の髪型は、その髪型を描くときだけ作る。起動では焼かない。
 	lib.humHairN = 0;
-	for (int i = 0; i < (int)r.models.size() && lib.humHairN < HUM_HAIR_N; i++) {
-		if (strncmp(r.models[i].name, "Hum", 3) != 0 || r.models[i].headJ < 0) continue;
-		int slot = lib.humHairN++;
-		lib.humHairModel[slot] = i;
-		stepN += HAIR_STYLES - 1;
-		for (int s = 1; s < HAIR_STYLES; s++) { BuildHair(r, r.models[i], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]); step(); }
-	}
+	// 人間の髪型は、着ているものだけ後で作る。起動で全髪型を焼かない。
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) { BuildWing(r, d, l, lib.wing[d][l]); step(); }
 	BuildCrown(r, lib.crown); step();
 	BuildRing(r, lib.ring); step();
@@ -1145,6 +1138,7 @@ static void ActorInit(Actor& a)
 	a.hair = 0;
 	a.scale = 1;
 	a.htScale = 1.f;
+	a.girth = 1.f;
 	a.tint = 0xFFFFFFFF;
 	a.height = 1.f;
 	a.clip = CL_IDLE; a.prev = CL_IDLE;
@@ -1177,6 +1171,21 @@ static void AddWeapons(Actor& a, const Renderer& r, int wl)
 	}
 }
 
+static void EnsureHumHair(Library& lib, Renderer& r, int model, int style)
+{
+	if (style <= 0 || style >= HAIR_STYLES) return;
+	if (model < 0 || model >= (int)r.models.size() || r.models[model].headJ < 0) return;
+	int slot = -1;
+	for (int s = 0; s < lib.humHairN; s++) if (lib.humHairModel[s] == model) { slot = s; break; }
+	if (slot < 0) {
+		if (lib.humHairN >= HUM_HAIR_N) return;
+		slot = lib.humHairN++;
+		lib.humHairModel[slot] = model;
+	}
+	if (lib.humHair[slot][style].vb && !lib.humHairV[slot][style].empty()) return;
+	BuildHair(r, r.models[model], style, lib.humHair[slot][style], 2.2f, &lib.humHairV[slot][style], &lib.humHairPivot[slot][style]);
+}
+
 void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 {
 	ActorInit(a);
@@ -1205,18 +1214,8 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 			a.mods.Reset(r.models[hi].nJ);
 		}
 	}
-	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0 && lib.humHairN < HUM_HAIR_N) {
-		int have = 0;
-		for (int k = 0; k < lib.humHairN; k++) if (lib.humHairModel[k] == a.model) have = 1;
-		if (!have) {
-			int slot = lib.humHairN++;
-			lib.humHairModel[slot] = a.model;
-			for (int s = 1; s < HAIR_STYLES; s++) {
-				BuildHair(r, r.models[a.model], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]);
-				r.LoadPulse(s, HAIR_STYLES - 1);
-			}
-		}
-	}
+	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0)
+		EnsureHumHair(lib, r, a.model, Clampi(c.hair, 0, HAIR_STYLES - 1));
 	{
 		int tier = ClassInfo(c.cls).tier;
 		if (tier > 1) a.scale *= 1.f + (tier - 1) * .02f;
@@ -1227,7 +1226,8 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	a.blinkSeed = HumanBlinkSeed(CharModel(c), a.face, c.gender, CharBust(c));
 	a.avatar = CharAvatar(c);
 	if (a.proc != 3 || a.avatar > r.AvatarCount(a.female ? 1 : 0)) a.avatar = 0;
-	a.bust = a.female ? CharBust(c) : 2;
+	// 男性は胸板の厚み（筋肉の量）。保存の値は女性と同じ欄で、未設定は 2。
+	a.bust = CharBust(c);
 	a.hairCol = HairColor(c.hairColor);
 	a.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
 	if (!a.avatar) {
@@ -1347,7 +1347,9 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		mulOwn("Hips", bd, 1.f, bd * (woman ? 1.04f : 1.f)); mulOwn("hips", bd, 1.f, bd * (woman ? 1.04f : 1.f));
 		mulOwn("Chest", chest, 1.f, bd); mulOwn("chest", chest, 1.f, bd);
 		mulOwn("Abdomen", ws, 1.f, ws * 0.96f); mulOwn("abdomen", ws, 1.f, ws * 0.96f);
-		mulOwn("Torso", ws, 1.f, ws); mulOwn("torso", ws, 1.f, ws);
+		// 胸の下半分は Torso の重みが約半分混ざる。Torso を腹（ws）と同じだけ奥へ絞ると乳房の下だけ急にくびれて服が潰れるので、胸と腹の中間にする。
+		const float tx = 0.5f * (ws + chest), tz = 0.35f * ws + 0.65f * bd;
+		mulOwn("Torso", tx, 1.f, tz); mulOwn("torso", tx, 1.f, tz);
 		mulOwn("Spine", ws, 1.f, ws * 0.94f); mulOwn("spine", ws, 1.f, ws * 0.94f);
 		mulOwn("UpperLeg.L", lg, 1.f, lg); mulOwn("upperleg.l", lg, 1.f, lg);
 		mulOwn("UpperLeg.R", lg, 1.f, lg); mulOwn("upperleg.r", lg, 1.f, lg);
@@ -1357,6 +1359,18 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		mulOwn("UpperArm.R", lm, 1.f, lm); mulOwn("upperarm.r", lm, 1.f, lm);
 		mulOwn("LowerArm.L", lm, 1.f, lm); mulOwn("lowerarm.l", lm, 1.f, lm);
 		mulOwn("LowerArm.R", lm, 1.f, lm); mulOwn("lowerarm.r", lm, 1.f, lm);
+		// 肉付きは首・手・足先にも少し出る（鎖骨の骨は局所 Z が縦向きなので拡縮するとデコルテが歪むため触らない）。未設定の体型（1）で 1。
+		{
+			const float nk = 1.f + (bd / kBody[woman][1] - 1.f) * 0.55f;
+			const float hd = 1.f + (lm / kArm[woman][1] - 1.f) * 0.35f;
+			const float ft = 1.f + (lg / kLeg[woman][1] - 1.f) * 0.25f;
+			mulOwn("Neck", nk, 1.f, nk); mulOwn("neck", nk, 1.f, nk);
+			mulOwn("Hand.L", hd, 1.f, hd); mulOwn("hand.l", hd, 1.f, hd);
+			mulOwn("Hand.R", hd, 1.f, hd); mulOwn("hand.r", hd, 1.f, hd);
+			mulOwn("Foot.L", ft, 1.f, ft); mulOwn("foot.l", ft, 1.f, ft);
+			mulOwn("Foot.R", ft, 1.f, ft); mulOwn("foot.r", ft, 1.f, ft);
+			a.girth = bd / kBody[woman][1];
+		}
 		if (a.female && !a.avatar) {
 			// A〜H。旧 5 段の値は A・B・C・E・G に残し、間を埋める。
 			static const float kBx[BUST_N] = { .94f, .98f, 1.04f, 1.07f, 1.10f, 1.13f, 1.16f, 1.19f };
@@ -2293,6 +2307,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 			dw.hue = 0;
 			dw.twoSided = 1;
 			dw.noTess = 1;
+			dw.mode = 0.f;
 			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], hit->w[side], dw);
 		}
 		return;
@@ -2337,6 +2352,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		dw.hue = 0;
 		dw.twoSided = 1;
 		dw.noTess = 1;
+		dw.mode = 0.f;
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
 		r.DrawStatic(lib.wing[dr][1 - side], w, dw);
 		hit->w[side] = w;
@@ -2611,6 +2627,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			// 髪型「標準」(0) は髪色の地毛。どの頭も同じ。
 			int hairStyle = a.hair > 0 ? Clampi(a.hair, 1, HAIR_STYLES - 1) : 0;
 			dh0.cape = 0;
+			dh0.girth = a.girth;
 			for (int ci = 0; ci < a.nAtt; ci++) {
 				int ai = a.att[ci];
 				if (ai < 0 || ai >= (int)r.attaches.size()) continue;
@@ -2630,13 +2647,11 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			static V3 fbP[HAIR_STYLES];
 			if (!mesh || !mesh->vb || !hv || hv->empty()) {
 				if (fbModel != a.model) {
-					for (int s = 1; s < HAIR_STYLES; s++) {
-						fbMesh[s].Release();
-						fbV[s].clear();
-						BuildHair(r, *humM, s, fbMesh[s], 2.2f, &fbV[s], &fbP[s]);
-					}
+					for (int s = 1; s < HAIR_STYLES; s++) { fbMesh[s].Release(); fbV[s].clear(); }
 					fbModel = a.model;
 				}
+				if (!fbMesh[style].vb || fbV[style].empty())
+					BuildHair(r, *humM, style, fbMesh[style], 2.2f, &fbV[style], &fbP[style]);
 				if (fbMesh[style].vb && !fbV[style].empty()) {
 					mesh = &fbMesh[style];
 					hv = &fbV[style];
@@ -2723,9 +2738,10 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 	}
 	if (a.proc == 2) {
 		M4 w = MMul(LocoXform(a, time), world);
-		DrawParams d = dp;
-		d.tint = dp.tint;
-		r.DrawCreature(a.model, w, d);
+	DrawParams d = dp;
+	d.tint = dp.tint;
+	d.noTess = 1;
+	r.DrawCreature(a.model, w, d);
 		return TRUE;
 	}
 	if (a.model < 0 || a.model >= (int)r.models.size()) return TRUE;
@@ -2751,10 +2767,13 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 	for (int i = 0; i < a.nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ)
 		r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], drawW), da);
 	if (!a.proc && a.hair > 0 && m.headJ >= 0) {
-		const GpuMesh& h = lib.hair[a.body][a.hair];
-		if (h.vb) {
+	if (!a.proc && a.hair > 0 && m.headJ >= 0 && a.body >= 0 && a.body < B_COUNT) {
+		GpuMesh& h = const_cast<Library&>(lib).hair[a.body][a.hair];
+		if (!h.vb) BuildHair(r, m, a.hair, h);
 			DrawParams dh = dp;
 			int al = (dp.tint >> 24) & 255;
+			dh.noTess = 1;
+			dh.mode = 0.f;
 			int hr = (a.hairCol & 255) * (dp.tint & 255) / 255, hg = ((a.hairCol >> 8) & 255) * ((dp.tint >> 8) & 255) / 255;
 			int hb = ((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255;
 			dh.tint = RGBA8(hr, hg, hb, al);

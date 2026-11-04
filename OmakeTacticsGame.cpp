@@ -102,6 +102,7 @@ Game::Game()
 	m_loadPaint = 0;
 	m_loadA = m_loadB = 0;
 	m_loadLive = FALSE;
+	m_loadUnits = m_loadHave = m_sliceBase = m_sliceUnits = 0;
 	m_renderDt = 1.f / 60.f;
 	m_lastRenderTime = 0;
 	m_qApply = -1;
@@ -113,9 +114,13 @@ Game::Game()
 	m_qSlots = 1;
 	m_syncArm = -1;
 	m_syncArmN = 0;
+	m_syncRun = -1;
 	m_qDrew = FALSE;
 	m_syncLock = 0;
 	m_fps = 0;
+	ZeroMemory(m_fpsSpan, sizeof(m_fpsSpan));
+	m_fpsN = 0;
+	m_fpsI = 0;
 	m_fpsAt.QuadPart = 0;
 	m_recoverTries = 0;
 	m_mx = m_my = 0;
@@ -384,7 +389,7 @@ void Game::DrawLoadHud()
 	if (pct > 100) pct = 100;
 	m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, U(40), RGBA8(255, 230, 160), 1, 1);
 	wchar_t line[80];
-	swprintf_s(line, L"%s  %d%%", TT(TX_MISC_LOADING), pct);
+	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
 	m_r.HudText(line, m_w * .5f, m_h * .50f, U(20), RGBA8(230, 230, 240), 1, 0);
 	float bw = min(U(520.f), (float)m_w * .62f);
 	float bh = U(22);
@@ -417,10 +422,55 @@ void Game::NoteLoad(int permille)
 	int pct = m_loadPm / 10;
 	unsigned now = GetTickCount();
 	if (pct == m_loadShown && permille < 1000) return;
-	if (permille < 1000 && m_loadShown >= 0 && now - m_loadPaint < 50) return;
+	if (permille < 1000 && m_loadShown >= 0 && now - m_loadPaint < 80) return;
 	if (!PaintLoadScreen()) return;
 	m_loadShown = pct;
 	m_loadPaint = now;
+}
+
+int Game::MeasureLoadUnits(int& showUnits)
+{
+	int nBody = 0;
+	char seen[MAX_PARTY][16];
+	int nShow = 0;
+	for (int i = 0; i < MAX_PARTY; i++) {
+		int ri = m_save.party[i];
+		if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
+		nShow++;
+		const CharData& c = m_save.roster[ri];
+		char nm[16];
+		sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
+		int have = 0;
+		for (int k = 0; k < nBody; k++) if (!strcmp(seen[k], nm)) have = 1;
+		if (!have && nBody < MAX_PARTY) { sprintf_s(seen[nBody], "%s", nm); nBody++; }
+	}
+	showUnits = 16 + nShow * 4;
+	int n = m_r.CountAssetPulses() + 12 + nBody * 48 + m_r.CountGearMeshes() + 8 + 24 + 4 + showUnits;
+	return n > 0 ? n : 1;
+}
+
+void Game::OpenLoadSlice(int units)
+{
+	if (units < 1) units = 1;
+	if (m_loadUnits < 1) m_loadUnits = 1;
+	if (m_loadHave < 0) m_loadHave = 0;
+	if (m_loadHave > m_loadUnits) m_loadHave = m_loadUnits;
+	m_sliceBase = m_loadHave;
+	m_sliceUnits = units;
+	int a = (int)((long long)m_sliceBase * 1000 / m_loadUnits);
+	int b = (int)((long long)(m_sliceBase + units) * 1000 / m_loadUnits);
+	if (b > 1000) b = 1000;
+	if (b < a) b = a;
+	BeginLoadSpan(a, b);
+}
+
+void Game::CloseLoadSlice()
+{
+	m_loadHave = m_sliceBase + m_sliceUnits;
+	if (m_loadHave > m_loadUnits) m_loadHave = m_loadUnits;
+	if (m_loadUnits < 1) m_loadUnits = 1;
+	NoteLoad((int)((long long)m_loadHave * 1000 / m_loadUnits));
+	m_sliceUnits = 0;
 }
 
 BOOL Game::LoadEverything()
@@ -429,41 +479,55 @@ BOOL Game::LoadEverything()
 	m_loadPm = 0;
 	m_loadShown = -1;
 	m_loadPaint = 0;
+	m_loadHave = 0;
+	m_sliceBase = m_sliceUnits = 0;
 	NoteLoad(0);
-	BeginLoadSpan(0, 300);
+	int showUnits = 0;
+	m_loadUnits = MeasureLoadUnits(showUnits);
+	int assetN = m_r.CountAssetPulses();
+	int gearN = m_r.CountGearMeshes();
+	int bodyUnits = m_loadUnits - (assetN + 12 + gearN + 8 + 24 + 4 + showUnits);
+	if (bodyUnits < 0) bodyUnits = 0;
+	OpenLoadSlice(assetN);
 	if (!m_r.LoadAssets()) { m_r.SetLoadPulse(NULL, NULL); m_loadLive = FALSE; return FALSE; }
-	NoteLoad(300);
-	BeginLoadSpan(300, 450);
+	CloseLoadSlice();
+	OpenLoadSlice(12);
 	if (!BuildLibrary(m_r, m_lib)) { m_r.SetLoadPulse(NULL, NULL); m_loadLive = FALSE; return FALSE; }
-	NoteLoad(450);
-	int slot[MAX_PARTY], nb = 0;
-	for (int i = 0; i < MAX_PARTY; i++) {
-		int ri = m_save.party[i];
-		if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
-		slot[nb++] = ri;
+	CloseLoadSlice();
+	{
+		char seen[MAX_PARTY][16];
+		int nSeen = 0;
+		for (int i = 0; i < MAX_PARTY; i++) {
+			int ri = m_save.party[i];
+			if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
+			const CharData& c = m_save.roster[ri];
+			char nm[16];
+			sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
+			int have = 0;
+			for (int k = 0; k < nSeen; k++) if (!strcmp(seen[k], nm)) have = 1;
+			if (have) continue;
+			if (nSeen < MAX_PARTY) sprintf_s(seen[nSeen++], "%s", nm);
+			OpenLoadSlice(48);
+			m_r.EnsureBody(nm);
+			CloseLoadSlice();
+		}
+		if (bodyUnits > nSeen * 48) {
+			OpenLoadSlice(bodyUnits - nSeen * 48);
+			CloseLoadSlice();
+		}
 	}
-	if (nb < 1) NoteLoad(650);
-	for (int k = 0; k < nb; k++) {
-		BeginLoadSpan(450 + 200 * k / nb, 450 + 200 * (k + 1) / nb);
-		const CharData& c = m_save.roster[slot[k]];
-		char nm[16];
-		sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
-		m_r.EnsureBody(nm);
-		NoteLoad(m_loadB);
-	}
-	BeginLoadSpan(650, 710);
+	OpenLoadSlice(gearN);
 	m_r.LoadGearPack();
-	NoteLoad(710);
-	BeginLoadSpan(710, 740);
+	CloseLoadSlice();
+	OpenLoadSlice(8);
 	m_r.LoadFacePack();
-	NoteLoad(740);
-	BeginLoadSpan(740, 820);
+	CloseLoadSlice();
+	OpenLoadSlice(24);
 	m_r.LoadAvatarPack();
-	NoteLoad(820);
-	BeginLoadSpan(820, 850);
+	CloseLoadSlice();
+	OpenLoadSlice(4);
 	m_r.LoadHairPack();
-	NoteLoad(850);
-	m_r.SetLoadPulse(NULL, NULL);
+	CloseLoadSlice();
 	m_loaded = TRUE;
 	m_loadLive = FALSE;
 	return TRUE;
@@ -635,6 +699,18 @@ int Game::QualityNow() const
 	return TacQualityWanted(m_save);
 }
 
+int Game::SyncNow() const
+{
+	int v = (m_syncRun >= 0) ? m_syncRun : TacVsync(m_save);
+	return Clampi(v, 0, 4);
+}
+
+int Game::PaceHz() const
+{
+	static const int hz[5] = { 30, 60, 120, 144, 240 };
+	return hz[SyncNow()];
+}
+
 static BOOL TacMidBand(int q) { return q == 0 || q == 1 || q == 2; }
 
 void Game::ApplyQualityNow(int q)
@@ -679,7 +755,7 @@ void Game::PulseQuality(float work, float span)
 {
 	(void)work;
 	if (m_screen == SC_LOADING || !m_loaded || !m_r.Ready()) return;
-	int hz = TacVsyncHz(m_save);
+	int hz = PaceHz();
 	if (hz < 30) hz = 30;
 	if (m_qHz != hz) {
 		m_qHz = hz;
@@ -694,24 +770,23 @@ void Game::PulseQuality(float work, float span)
 		return;
 	}
 	if (span < 0.003f || span >= 0.25f) return;
-	int v = TacVsync(m_save);
-	if (v < 0) v = 0;
-	if (v > 4) v = 4;
+	int user = Clampi(TacVsync(m_save), 0, 4);
+	int v = SyncNow();
 	int qSlot = TacQualityFixedSlot(QualityNow());
 	int stdSlot = TacQualityFixedSlot(1);
-	int desired = v;
+	int desired = user;
 	if (qSlot < stdSlot) desired = 0;
-	else if (v == 0) desired = 1;
+	else if (user == 0) desired = 1;
 	if (desired != v) {
 		m_qMissN = 0;
 		if (m_syncArm != desired) { m_syncArm = desired; m_syncArmN = 0; }
 		m_syncArmN++;
 		if (m_syncLock <= 0.f && m_syncArmN >= 10) {
-			TacSetVsync(m_save, desired);
+			m_syncRun = (desired == user) ? -1 : desired;
 			m_syncArmN = 0;
 			m_syncLock = 1.5f;
 			m_qOkN = 0;
-			m_qHz = TacVsyncHz(m_save);
+			m_qHz = PaceHz();
 		}
 		if (desired < v) return;
 	} else m_syncArmN = 0;
@@ -763,16 +838,21 @@ void Game::Tick(float dt)
 	m_time += dt;
 	if (m_qCoolT > 0) m_qCoolT -= dt;
 	if (m_syncLock > 0) m_syncLock -= dt;
+	BOOL holdGame = FALSE;
 	if (m_screen == SC_LOADING) {
 		if (m_loadFrames++ >= 2) {
 			if (!LoadEverything()) { m_screen = SC_FAIL; m_loadLive = FALSE; }
 			else {
 				m_loadLive = TRUE;
-				BeginLoadSpan(850, 1000);
+				int left = m_loadUnits - m_loadHave;
+				if (left < 1) left = 1;
+				OpenLoadSlice(left);
 				EnterBase();
+				CloseLoadSlice();
 				NoteLoad(1000);
 				m_r.SetLoadPulse(NULL, NULL);
 				m_loadLive = FALSE;
+				holdGame = TRUE;
 			}
 		}
 	}
@@ -793,12 +873,14 @@ void Game::Tick(float dt)
 		if (m_evoT >= 2.75f) m_evoCut = 0;
 	}
 	SyncBgm();
+	if (m_wantClose) return;
 	if (!m_r.Ready()) return;
 	if (!m_r.FrameReady()) return;
+	if (holdGame) return;
 	LARGE_INTEGER t0, t1, freq;
 	QueryPerformanceCounter(&t0);
 	RenderFrame();
-	m_r.Present();
+	if (!m_r.ConsumeAvaFlash()) m_r.Present();
 	if (m_goHome) {
 		m_goHome = FALSE;
 		GoHomeFromBattle();
@@ -813,8 +895,13 @@ void Game::Tick(float dt)
 	if (m_fpsAt.QuadPart && freq.QuadPart) {
 		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
 		if (span >= 0.003f && span < 0.25f) {
-			float inst = 1.f / span;
-			m_fps = (m_fps < 1.f) ? inst : (m_fps * 0.82f + inst * 0.18f);
+			m_fpsSpan[m_fpsI] = span;
+			m_fpsI = (m_fpsI + 1) % 5;
+			if (m_fpsN < 5) m_fpsN++;
+			float sum = 0.f;
+			for (int i = 0; i < m_fpsN; i++) sum += m_fpsSpan[i];
+			span = sum / (float)m_fpsN;
+			m_fps = 1.f / span;
 		}
 	}
 	m_fpsAt = t1;
@@ -945,7 +1032,6 @@ void Game::RenderFrame()
 		DrawShowcase3D();
 		break;
 	case SC_CREATE:
-		DrawShowcase3D();
 		DrawCreate3D();
 		break;
 	case SC_BATTLE:
@@ -991,7 +1077,9 @@ void Game::RenderFrame()
 	}
 	if (m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(8, 10, 18, 150));
-		m_r.HudText(TT(TX_AVA_WAIT), m_w * .5f, m_h * .5f, U(28), RGBA8(255, 236, 210), 1, 1);
+		wchar_t wait[96];
+		swprintf_s(wait, L"%s  %d%%/100%%", TT(TX_AVA_WAIT), m_r.AvatarLoadPct());
+		m_r.HudText(wait, m_w * .5f, m_h * .5f, U(28), RGBA8(255, 236, 210), 1, 1);
 	}
 	BOOL homeBare = m_screen == SC_BASE && !m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi
 		&& m_jobRedo != 1 && m_jobRedo != 3 && !m_showHelp;
@@ -1406,6 +1494,8 @@ void Game::OnBecameActive()
 	m_qOkN = 0;
 	if (m_qCoolT < 0.6f) m_qCoolT = 0.6f;
 	m_fpsAt.QuadPart = 0;
+	m_fpsN = 0;
+	m_fpsI = 0;
 }
 
 void Game::ReleaseInput()
@@ -2244,11 +2334,6 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	M4 proj = MPerspLH(.6f, 1.f, zn, max(50.f, d * 6.f));
 	if (!m_r.BeginPortrait(slot)) return FALSE;
 	m_r.SetCamera(view, proj, eye, m_time);
-	m_r.SetSight(NULL, 0, 0);
-	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
-	m_r.SetAmbient(RGBA8(206, 192, 178), RGBA8(148, 116, 94), .58f, .55f);
-	m_r.SetLight(Norm(v3(.42f, .84f, -.40f)), look, 3.5f);
-	m_r.SetShadowEnabled(FALSE);
 	DrawParams dp;
 	dp.outline = 0;
 	dp.rim = .22f;
@@ -2264,6 +2349,11 @@ void Game::RenderPortraits()
 	M4 camView = m_r.m_view, camProj = m_r.m_proj;
 	V3 camEye = m_r.m_eye;
 	float camT = m_r.m_time;
+	m_r.SetSight(NULL, 0, 0);
+	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
+	m_r.SetAmbient(RGBA8(206, 192, 178), RGBA8(148, 116, 94), .58f, .55f);
+	m_r.SetLight(Norm(v3(.42f, .84f, -.40f)), v3(0, 0, 0), 3.5f);
+	m_r.SetShadowEnabled(FALSE);
 	auto look = [](const CharData& c) -> unsigned {
 		unsigned h = (unsigned)c.gender;
 		h = h * 16777619u ^ (unsigned)c.cls;
@@ -2336,6 +2426,7 @@ void Game::RenderPortraits()
 		if (!paint(s, want)) continue;
 		m_portraitKey[s] = want;
 	}
+	m_r.FinishPortraits();
 	m_r.SetCamera(camView, camProj, camEye, camT);
 }
 
@@ -2358,19 +2449,27 @@ void Game::PrepareMenuPortraits()
 		idx[n++] = r;
 	};
 	if (m_screen == SC_BASE) {
-		int cap = PartyCap();
-		for (int i = 0; i < cap; i++) add(m_save.party[i]);
+		if (m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3) {
+			int cap = PartyCap();
+			for (int i = 0; i < cap; i++) add(m_save.party[i]);
+		}
 	} else if (m_screen == SC_PARTY) {
 		add(m_partySel);
 		int begin = m_rosterPage * 20;
 		int cap = RosterCap();
 		for (int i = 0; i < 20 && begin + i < cap; i++) add(begin + i);
 	} else if (m_screen == SC_EVOLVE) {
-		add(m_evMain);
-		add(m_evPartner[0]);
-		add(m_evPartner[1]);
-		int cap = RosterCap();
-		for (int i = 0; i < cap; i++) add(i);
+		if (m_jobRedo == 2 || m_jobRedo == 3) {
+			add(m_jobWho);
+		} else if (m_evoCut) {
+			add(m_evoRoster);
+		} else {
+			add(m_evMain);
+			add(m_evPartner[0]);
+			add(m_evPartner[1]);
+			int cap = RosterCap();
+			for (int i = 0; i < cap; i++) add(i);
+		}
 	} else if (m_screen == SC_RESULT) {
 		for (int i = 0; i < m_resultN; i++) add(m_resultRoster[i]);
 	} else if (m_screen == SC_CREATE && m_editIdx >= 0) {
@@ -3382,6 +3481,7 @@ void Game::BuildShowcase()
 		m_r.BuildTerrain(m_showMap);
 		m_showBuilt = TRUE;
 		m_showStage = st;
+		if (m_loadLive && m_loadB > m_loadA) NoteLoad(m_loadA + (m_loadB - m_loadA) / 4);
 	}
 	m_showN = 0;
 	int want = 0;
@@ -3529,6 +3629,16 @@ void Game::DrawShowcase3D()
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
+	{
+		int model[MAX_PARTY], ava[MAX_PARTY], cup[MAX_PARTY], n = 0;
+		for (int i = 0; i < showN && n < MAX_PARTY; i++) {
+			const Actor& a = m_showAct[i];
+			if (a.avatar <= 0 || a.model < 0) continue;
+			model[n] = a.model; ava[n] = a.avatar; cup[n] = a.bust; n++;
+		}
+		int pend = m_r.CountPendingAvatars(n, model, ava, cup);
+		m_r.BeginAvaBatch(pend > 0 ? pend : 1);
+	}
 	m_r.BeginInstBatch();
 	for (int i = 0; i < showN; i++) {
 		Actor& a = m_showAct[i];
@@ -6197,7 +6307,7 @@ void Game::DrawBaseUi()
 			wchar_t vs[16];
 			swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
 			mark(ID_BASE_SYNC, TX_BSH_SYNC, bx, oy, bw, bhOpt);
-			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs)) TacSetVsync(m_save, TacVsync(m_save) + d);
+			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs)) { TacSetVsync(m_save, TacVsync(m_save) + d); m_syncRun = -1; m_syncArmN = 0; }
 		}
 		oy = take();
 		mark(ID_BASE_WIN, TX_BSH_WIN, bx, oy, bw, bhOpt);
@@ -6212,7 +6322,7 @@ void Game::DrawBaseUi()
 	mark(ID_BASE_HELP, TX_BSH_HELP, bx, helpY, bw * .48f, helpH);
 	mark(ID_BASE_CLOSE, TX_BSH_CLOSE, bx + bw * .52f, helpY, bw * .48f, helpH);
 	if (Btn(ID_BASE_HELP, bx, helpY, bw * .48f, helpH, TT(TX_BT_HELP))) m_showHelp = TRUE;
-	if (Btn(ID_BASE_CLOSE, bx + bw * .52f, helpY, bw * .48f, helpH, TT(TX_BASE_CLOSE))) { Persist(); m_wantClose = TRUE; }
+	if (Btn(ID_BASE_CLOSE, bx + bw * .52f, helpY, bw * .48f, helpH, TT(TX_BASE_CLOSE))) m_wantClose = TRUE;
 	const wchar_t* hint = NULL;
 	if (RosterCount() == 0) hint = TT(TX_BASE_HINT_NOCHAR);
 	else if (np == 0) hint = TT(TX_BASE_HINT_NOPARTY);
@@ -6719,11 +6829,13 @@ void Game::DrawCreateUi()
 	}
 	note(ID_CR_FIG, TX_CRH_FIG);
 	yy += rh + gap;
-	if (m_edit.gender) {
-		if (int d = Sel(ID_CR_BUST, bx, yy, bw, rh, TT(TX_CR_BUST), TT(TX_BUST_0 + CharBust(m_edit)))) {
+	// 女性は胸の大きさ、男性は胸板の厚み。保存は同じ欄。
+	{
+		const BOOL fem = m_edit.gender != 0;
+		if (int d = Sel(ID_CR_BUST, bx, yy, bw, rh, TT(fem ? TX_CR_BUST : TX_CR_PEC), TT((fem ? TX_BUST_0 : TX_PEC_0) + CharBust(m_edit)))) {
 			CharSetBust(m_edit, (CharBust(m_edit) + d + BUST_N) % BUST_N); changed = TRUE;
 		}
-		note(ID_CR_BUST, TX_CRH_BUST);
+		note(ID_CR_BUST, fem ? TX_CRH_BUST : TX_CRH_PEC);
 		yy += rh + gap;
 	}
 	if (Sel(ID_CR_HAT, bx, yy, bw, rh, TT(TX_CR_HAT), TT(m_edit.hat ? TX_CR_ON : TX_CR_OFF))) { m_edit.hat = !m_edit.hat; changed = TRUE; }

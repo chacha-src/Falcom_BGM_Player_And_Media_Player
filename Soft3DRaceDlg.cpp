@@ -8600,8 +8600,13 @@ void CSoft3DRaceDlg::OnStart() { StartRace(); }
 void CSoft3DRaceDlg::OnGen() { GenerateCourse(); PersistUi(); }
 void CSoft3DRaceDlg::RequestDestroyWindow()
 {
-	if (GetSafeHwnd())
+	HWND parent = NULL;
+	if (GetSafeHwnd()) {
+		parent = ::GetParent(m_hWnd);
 		ShowWindow(SW_HIDE);
+		if (parent && ::IsWindow(parent) && ::IsWindowVisible(parent) && !::IsIconic(parent))
+			::SetForegroundWindow(parent);
+	}
 	Soft3DLoopRequestStop();
 	Soft3DDeferPresent(1);
 	m_view.m_ready = FALSE;

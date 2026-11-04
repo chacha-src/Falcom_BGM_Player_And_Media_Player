@@ -2883,6 +2883,12 @@
     <None Include="res\cso\tac_psdofh.cso" />
     <None Include="res\cso\tac_psdofu.cso" />
     <None Include="res\cso\tac_psgx.cso" />
+    <None Include="res\cso\tac_vssb.cso" />
+    <None Include="res\cso\tac_vspt.cso" />
+    <None Include="res\cso\tac_gsp.cso" />
+    <None Include="res\cso\tac_vsssh.cso" />
+    <None Include="res\cso\tac_vssbsh.cso" />
+    <None Include="res\cso\tac_vsksh.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

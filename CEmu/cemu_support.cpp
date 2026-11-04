@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4733; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4739; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -168,8 +168,11 @@
                   + kpastel_98 (OPN; M1.DAT / M2.DAT / M3.DAT stay audible for 8s)
                   + wingforc (Kaneko Z80+YM2151+MSM6295; same ports as blazeon plus OKI at 0A, 16/16)
                   + cybertnk (Coreland Z80+Y8950x2 FM via YM3812; command mailbox at 9000, 8/8)
+                  + utoukond (Banpresto Z80+YM3438+X1-010; latch at C0, work RAM at E000, X1 window at F000, 14/14)
                   + cos68snd/illumi68snd/kounai68snd/korosi368snd_fix (X68k tank IRQ6 stays on the glue $40C wrapper)
                   + gktz68snd (X68k DOS INTVCS takes the vector and handler from the stack)
+                  + kobe68snd (X68k OPMDRV flag wait gets one IRQ6 so the timer can start)
+                  + mahoudai68snd (X68k three OPM songs already meet the bar)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -2089,6 +2092,7 @@ static const char* const kSupported[] = {
 	"intrud_98",
 	"intruder_98",
 	"intruder_msx",
+	"inufuku",
 	"invest_at",
 	"ippatu_j_98",
 	"irium_98",
@@ -2281,6 +2285,7 @@ static const char* const kSupported[] = {
 	"knightsofthesky_at",
 	"knither",
 	"kobe",
+	"kobe68snd",
 	"kod",
 	"kof2000",
 	"kof2001",
@@ -2592,6 +2597,7 @@ static const char* const kSupported[] = {
 	"mags68snd",
 	"magtr_msx",
 	"mahabara_98",
+	"mahoudai68snd",
 	"mahretsu",
 	"mai68snd",
 	"mai_98",
@@ -3173,6 +3179,7 @@ static const char* const kSupported[] = {
 	"pinky2_98",
 	"pinky368snd",
 	"pinky3_98",
+	"pipedrm",
 	"pipedrm88",
 	"pipedrm98",
 	"pipibibs",
@@ -4028,6 +4035,7 @@ static const char* const kSupported[] = {
 	"spnd2_98",
 	"spstg_98",
 	"spuls68snd",
+	"spy",
 	"sq3_at",
 	"sqr68snd",
 	"srdarwin",
@@ -4460,6 +4468,7 @@ static const char* const kSupported[] = {
 	"usas_msx",
 	"usodom_98",
 	"utopia_at",
+	"utoukond",
 	"v_btr_98",
 	"v_ctr_98",
 	"v_gts_98",

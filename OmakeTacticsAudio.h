@@ -126,6 +126,8 @@ void TacAudioPump();
 // 1 なら供給は TIME_CRITICAL の専用スレッド。UI タイマーは呼ばない。
 int TacAudioOnThread();
 void TacSfx(int id);
+// 迷路・レースと同じ FM+SSG。dst はステレオ short。焼けたフレーム数を返す。
+int YmMmlRender(const char* src, short* dst, int capFrames, float gain);
 // 召喚の登場・攻撃・退場。phase は 0,1,2。fx は SUM_FX_*。
 void TacSfxSummon(int phase, int fx);
 // 魔法の詠唱（属性ごと）。

@@ -15,7 +15,7 @@ cbuffer HairParm : register(b0)
 	float4 CapA[8];            // カプセル始点 xyz、w=半径。w<0 で無効
 	float4 CapB[8];            // 終点 xyz、w=終点の半径
 	uint4 Cnt;                 // x=書く頂点の先頭 y=髪型 z=カプセルの数 w=書く頂点の数
-	float4 Grav;               // モデル空間の重力加速度（世界の下）
+	float4 Grav;               // xyz=モデル空間の重力加速度（世界の下） w=胴の太さ（体型。標準 1）
 };
 
 // 頭蓋。omake_tactics_skin.hlsl の HairCloth と同じ並び。
@@ -154,11 +154,13 @@ float3 Part(float3 p, float pick)
 	float f = dot(radial, fwd);
 	float s = dot(radial, side);
 	float t = saturate(-dy / 0.50);
+	// 体型で胴は太る。ふくよかな体ほど断面を広げ、毛が胴の中を通らないようにする。
+	float gz = Grav.w > 0.1 ? Grav.w : 1.0;
 	// HumF0。胸の関節から、最大の胸が前 19cm、ドレスの前が 21cm。
-	float front = lerp(0.200, 0.175, t);
+	float front = lerp(0.200, 0.175, t) * lerp(1.0, gz, 0.7);
 	// 背中の 16〜18cm はマントの布。マントが無いときは胴の後ろだけにする。
-	float rear = lerp(lerp(0.100, 0.118, t), lerp(0.160, 0.185, t), step(0.5, Wind.w));
-	float halfS = lerp(0.185, 0.200, t);
+	float rear = lerp(lerp(0.100, 0.118, t) * gz, lerp(0.160, 0.185, t) * lerp(1.0, gz, 0.5), step(0.5, Wind.w));
+	float halfS = lerp(0.185, 0.200, t) * gz;
 	float rf = f >= 0.0 ? front : rear;
 	float e = (s * s) / (halfS * halfS) + (f * f) / (rf * rf);
 	if (e < 1.0 && e > 1e-6) {
@@ -178,8 +180,9 @@ float3 Part(float3 p, float pick)
 		if (pf < need) p += fwd * (need - pf);
 	}
 	if (dy < 0.06 && dy > -0.20) {
-		p = BustOut(p, chest + fwd * 0.108 + side * 0.070 - up * 0.038, 0.132, fwd, side);
-		p = BustOut(p, chest + fwd * 0.108 - side * 0.070 - up * 0.038, 0.132, fwd, side);
+		float gb = lerp(1.0, gz, 0.7);
+		p = BustOut(p, chest + fwd * (0.108 * gb) + side * (0.070 * gz) - up * 0.038, 0.132 * gb, fwd, side);
+		p = BustOut(p, chest + fwd * (0.108 * gb) - side * (0.070 * gz) - up * 0.038, 0.132 * gb, fwd, side);
 	}
 	return p;
 }
@@ -334,7 +337,8 @@ void CSHairWrite(uint id : SV_DispatchThreadID)
 	}
 	float w = saturate((c.p.w - 0.05) / 0.22);
 	float3 p = rest + d * w;
-	if (w > 0.45) p = BodyHit(p, StrandFace(k4[0]));
+	// 根元寄りの頂点も、案内点と案内点の間の面も、首・肩・胴の外へ出す。頭蓋より上は BodyHit が触らない。
+	p = BodyHit(p, StrandFace(k4[0]));
 	float3 nrm = asfloat(Vout.Load3(o + 12));
 	float nl = dot(nrm, nrm);
 	if (nl > 1e-8) nrm *= rsqrt(nl);

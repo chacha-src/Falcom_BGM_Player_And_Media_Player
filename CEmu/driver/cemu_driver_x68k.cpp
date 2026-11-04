@@ -472,9 +472,21 @@ static void CDriverX68kApplyIrq(CHardX68k* hw, CChip* chip, int hold)
 	}
 	if (chip && chip->Irq())
 		m68k_set_irq(M68K_IRQ_6);
-	else if (hw && hw->MfpIrqPending())
-		m68k_set_irq(M68K_IRQ_2);
-	else
+	else if (hw) {
+		/* タイマーをまだ書いていない OPMDRV は tst.b $24xx / bne.s で IRQ6 を待つ。
+		   最初の ISR がレジスタ $14 を書いてタイマーが回り始める。 */
+		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+		const unsigned addr = hw->Read32(pc + 2u) & 0xffffffu;
+		const unsigned isr = hw->Read32(0x10cu) & 0xffffffu;
+		if (hw->Read16(pc) == 0x4A39u && hw->Read16(pc + 6u) == 0x66F8u
+			&& addr >= 0x2000u && addr < 0x100000u && hw->Read8(addr) != 0
+			&& isr >= 0x8000u && isr < 0xf00000u && hw->Read16(isr) == 0x48e7u)
+			m68k_set_irq(M68K_IRQ_6);
+		else if (hw->MfpIrqPending())
+			m68k_set_irq(M68K_IRQ_2);
+		else
+			m68k_set_irq(M68K_IRQ_NONE);
+	} else
 		m68k_set_irq(M68K_IRQ_NONE);
 }
 
