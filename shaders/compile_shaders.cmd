@@ -58,6 +58,10 @@ call :job cs_5_0 CSGridCount shaders\soft3d_race.hlsl race_CSGridCount race_csgr
 call :job cs_5_0 CSGridWrite shaders\soft3d_race.hlsl race_CSGridWrite race_csgridw
 
 call :job vs_5_0 VSS shaders\omake_tactics.hlsl tac_VSS tac_vss
+call :job vs_5_0 VSSB shaders\omake_tactics.hlsl tac_VSSB tac_vssb
+call :job vs_5_0 VSSSh shaders\omake_tactics.hlsl tac_VSSSh tac_vsssh
+call :job vs_5_0 VSSBSh shaders\omake_tactics.hlsl tac_VSSBSh tac_vssbsh
+call :job vs_5_0 VSKSh shaders\omake_tactics.hlsl tac_VSKSh tac_vsksh
 call :job vs_5_0 VSK shaders\omake_tactics.hlsl tac_VSK tac_vsk
 call :job ps_5_0 PSM shaders\omake_tactics.hlsl tac_PSM tac_psm
 call :job ps_5_0 PSO shaders\omake_tactics.hlsl tac_PSO tac_pso
@@ -65,6 +69,8 @@ call :job ps_5_0 PSOV shaders\omake_tactics.hlsl tac_PSOV tac_psov
 call :job vs_5_0 VSH shaders\omake_tactics.hlsl tac_VSH tac_vsh
 call :job ps_5_0 PSH shaders\omake_tactics.hlsl tac_PSH tac_psh
 call :job vs_5_0 VSP shaders\omake_tactics.hlsl tac_VSP tac_vsp
+call :job vs_5_0 VSPT shaders\omake_tactics.hlsl tac_VSPT tac_vspt
+call :job gs_5_0 GSP shaders\omake_tactics.hlsl tac_GSP tac_gsp
 call :job ps_5_0 PSP shaders\omake_tactics.hlsl tac_PSP tac_psp
 call :job vs_5_0 VSQ shaders\omake_tactics.hlsl tac_VSQ tac_vsq
 call :job ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky

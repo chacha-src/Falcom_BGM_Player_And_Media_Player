@@ -2370,6 +2370,12 @@
 #define IDR_CSO_TAC_CSSOFTW             4957
 #define IDR_CSO_TAC_CSHAIR              4958
 #define IDR_CSO_TAC_CSHAIRW             4959
+#define IDR_CSO_TAC_VSSB                4963
+#define IDR_CSO_TAC_VSPT                4964
+#define IDR_CSO_TAC_GSP                 4965
+#define IDR_CSO_TAC_VSSSH               4966
+#define IDR_CSO_TAC_VSSBSH              4967
+#define IDR_CSO_TAC_VSKSH               4968
 #define IDR_TAC_PH0                     4970
 #define IDR_TAC_PH1                     4971
 #define IDR_TAC_PH2                     4972

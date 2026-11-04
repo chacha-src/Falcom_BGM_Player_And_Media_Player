@@ -3,6 +3,8 @@
 #include "stdafx.h"
 #include "OmakeTacticsData.h"
 #include "DatArchive.h"
+#include "Soft3DGfxQuality.h"
+#include "Soft3DGpuInfo.h"
 #include <stdio.h>
 #include <math.h>
 #include <zstd.h>
@@ -1558,7 +1560,7 @@ static void StampLandmarks(Map& m, Rng& r, int th, BYTE taken[MAPN][MAPN])
 		for (int dz = 0; dz < fp.d; dz++) for (int dx = 0; dx < fp.w; dx++) {
 			Cell& c = m.c[z0 + dz][x0 + dx];
 			int rim = (dx == 0 || dz == 0 || dx == fp.w - 1 || dz == fp.d - 1);
-			c.t = (BYTE)((th == TH_VOLCANO && !rim && fp.w >= 2 && fp.d >= 2) ? T_LAVA : T_MOUNTAIN);
+			c.t = T_MOUNTAIN;
 			c.h = (BYTE)Clampi(baseH + (rim ? 1 : 2), 1, MAXH);
 			c.prop = PK_NONE;
 			c.gparam = 0;
@@ -4093,11 +4095,15 @@ void JobPathText(const CharData& c, wchar_t* out, int cap)
 	if (!out || cap <= 0) return;
 	out[0] = 0;
 	int n = JobPathCount(c);
+	int steps = JobStepsForLevel(c.lv);
+	if (steps < 1) steps = 1;
+	if (n > steps) n = steps;
 	int cls[JOB_PATH_N];
 	int cn = 0;
 	for (int i = 0; i < n && cn < JOB_PATH_N; i++) cls[cn++] = c.jobPath[i];
 	if (cn == 0 || cls[cn - 1] != c.cls) {
 		if (cn < JOB_PATH_N) cls[cn++] = c.cls;
+		else cls[cn - 1] = c.cls;
 	}
 	for (int i = 0; i < cn; i++) {
 		const wchar_t* nm = ClassTitle(cls[i]);
@@ -4606,7 +4612,23 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
 		// 味方のこれから先の成長が倍になった。敵はHPだけ同じ倍率にする。攻撃力は上げない。
-		if (s == S_HP) v *= 2;
+		if (s == S_HP) {
+			v *= 2;
+			int bulk = 0;
+			if (u.ch.lv >= 12) {
+				bulk = 12 + (u.ch.lv - 12);
+				if (bulk > 90) bulk = 90;
+			}
+			v = v * (100 + bulk) / 100;
+		}
+		if (s == S_DEF || s == S_RES) {
+			int db = 0;
+			if (u.ch.lv >= 12) {
+				db = 8 + (u.ch.lv - 12) * 2 / 3;
+				if (db > 55) db = 55;
+			}
+			v = v * (100 + db) / 100;
+		}
 		if (s != S_MOV && s != S_JMP && s != S_RNG && s != S_MP) v += r.Range(-1, 1);
 		u.ch.stat[s] = max(StatFloor(s), v);
 	}
@@ -4695,9 +4717,16 @@ bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jum
 {
 	if (!Map::In(tx, tz)) return false;
 	const Cell& t = m.At(tx, tz);
-	if (moveType == MV_FLY) return TerrainInfo(t.t).flyOk != 0;
-	if (TerrainInfo(t.t).costFoot >= 99) return false;
 	const Cell& f = m.At(fx, fz);
+	if (moveType == MV_FLY) return TerrainInfo(t.t).flyOk != 0;
+	if (TerrainInfo(t.t).costFoot >= 99) {
+		// 大きな岩の中にいるユニットは、岩の上を渡って外へ出られる。外からは入れない。
+		if ((f.t == T_MOUNTAIN || f.t == T_ROCK) && (t.t == T_MOUNTAIN || t.t == T_ROCK))
+			return abs((int)t.h - (int)f.h) <= jump;
+		return false;
+	}
+	// 溶岩と水は周囲より低い。立ったまま段差を許さないと、向こうのこぶへ出られない。
+	if (f.t == T_LAVA || t.t == T_LAVA || f.t == T_WATER || t.t == T_WATER) return true;
 	return abs((int)t.h - (int)f.h) <= jump;
 }
 
@@ -4726,24 +4755,30 @@ static int LayerOpen(const Cell& to, int L, int moveType)
 	return TerrainInfo(tr).costFoot < 99;
 }
 
-static int LayerLegal(const Cell& to, int L, int fromH, int fromLayer, int moveType)
+static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, int moveType)
 {
 	if (!LayerOpen(to, L, moveType)) return 0;
 	int dl = L - fromLayer;
 	if (dl < 0) dl = -dl;
 	// 直上・直下の層は、高さの段差があっても渡れる。同じ層の崖は段差で止める。
 	if (dl == 1) return 1;
-	if (abs(LayerHt(to, L) - fromH) > StepRise(moveType)) return 0;
+	int fromL = LayerOn(from, fromLayer) ? fromLayer : 0;
+	int fromTr = LayerTr(from, fromL);
+	int toTr = LayerTr(to, L);
+	if (fromTr == T_LAVA || toTr == T_LAVA || fromTr == T_WATER || toTr == T_WATER) return 1;
+	if (abs(LayerHt(to, L) - LayerHt(from, fromL)) > StepRise(moveType)) return 0;
 	return 1;
 }
 
-static int ChooseLayer(const Cell& to, int fromH, int fromLayer, int jump, int moveType)
+static int ChooseLayer(const Cell& from, int fromLayer, const Cell& to, int jump, int moveType)
 {
 	(void)jump;
 	int n = CellLayN(to);
 	int best = -1, bestScore = 9999;
+	int fromL = LayerOn(from, fromLayer) ? fromLayer : 0;
+	int fromH = LayerHt(from, fromL);
 	for (int L = 0; L < n; L++) {
-		if (!LayerLegal(to, L, fromH, fromLayer, moveType)) continue;
+		if (!LayerLegal(from, fromL, to, L, moveType)) continue;
 		int dh = abs(LayerHt(to, L) - fromH);
 		int score = dh * 10 + (L == fromLayer ? 0 : 3);
 		if (score < bestScore) { bestScore = score; best = L; }
@@ -4763,7 +4798,7 @@ static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 		const Cell& f = b.map.At(sx, sz);
 		const Cell& t = b.map.At(tx, tz);
 		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
-		if (!LayerLegal(t, toLayer, LayerHt(f, fromL), fromL, mt)) return false;
+		if (!LayerLegal(f, fromL, t, toLayer, mt)) return false;
 		for (int L = 0; L < LAY_N; L++) {
 			int o = b.UnitAt(tx, tz, L);
 			if (o < 0 || o == ui || !b.u[o].alive) continue;
@@ -4788,7 +4823,7 @@ static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 		const Cell& f = b.map.At(sx, sz);
 		const Cell& t = b.map.At(tx, tz);
 		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
-		int lay = ChooseLayer(t, LayerHt(f, fromL), fromL, jp, mt);
+		int lay = ChooseLayer(f, fromL, t, jp, mt);
 		if (lay < 0) return false;
 		if (ix == 0 && iz == 0) layer = lay;
 		else if (lay != layer) return false;
@@ -5918,8 +5953,13 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 			int toL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
 			int add = LayerRangeCost(fromL, toL);
 			if (add < 0) continue;
-			int reach = (s.rMax == 0) ? max(0, s.area) : SkillCastRangeMax(c, skill);
-			if (FootDist(c.x, c.z, UnitSpan(c), t.x, t.z, UnitSpan(t)) + add > reach) continue;
+			if (s.area > 0) {
+				int blast = FootDist(cx, cz, 1, t.x, t.z, UnitSpan(t));
+				if (blast + add > max(0, s.area)) continue;
+			} else {
+				int reach = (s.rMax == 0) ? 0 : SkillCastRangeMax(c, skill);
+				if (FootDist(c.x, c.z, UnitSpan(c), t.x, t.z, UnitSpan(t)) + add > reach) continue;
+			}
 		}
 		if (!UnitOnShape(s, c, cx, cz, t)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
@@ -5942,11 +5982,21 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 		if (frac > 1.0) frac = 1.0;
 	}
 	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
-	double e = (12.0 + (double)stage) * (0.35 + 0.65 * frac) * lvK;
+	double e = (8.0 + (double)stage * 0.48) * (0.38 + 0.32 * frac) * lvK;
 	if (d.boss) e *= 1.25;
 	if (e < 1.0) return 1;
 	if (e > 2000000000.0) return 2000000000;
 	return (int)(e + 0.5);
+}
+long long ExpShareAoe(long long e, int nHit)
+{
+	if (e <= 0) return 0;
+	if (nHit <= 1) return e;
+	if (nHit > 32) nHit = 32;
+	double s = 1.0 / sqrt((double)nHit);
+	long long o = (long long)((double)e * s + 0.5);
+	if (o < (long long)nHit) o = nHit;
+	return o;
 }
 
 /* ステージ1で Lv1、19で 30、以後同じ傾き。9999で約1.6万。 */
@@ -7351,15 +7401,14 @@ bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ)
 	if (pdx == 0 && pdz == 0) return false;
 	int nx = d.x + pdx, nz = d.z + pdz;
 	int fromL = LayerOn(b.map.At(d.x, d.z), d.deck) ? d.deck : 0;
-	int fromH = LayerHt(b.map.At(d.x, d.z), fromL);
-	int lay = ChooseLayer(b.map.At(nx, nz), fromH, fromL, UnitJump(d), UnitMoveType(d));
+	int lay = ChooseLayer(b.map.At(d.x, d.z), fromL, b.map.At(nx, nz), UnitJump(d), UnitMoveType(d));
 	if (lay < 0) return false;
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		int x = nx + ix, z = nz + iz;
 		if (!Map::In(x, z)) return false;
 		const Cell& cell = b.map.At(x, z);
 		int t = LayerOn(cell, lay) ? LayerTr(cell, lay) : cell.t;
-		bool pit = (t == T_CHASM || t == T_LAVA);
+		bool pit = (t == T_CHASM || t == T_LAVA || t == T_WATER);
 		if (!pit && TerrainInfo(t).costFoot >= 99) return false;
 		int o = b.UnitAt(x, z, lay);
 		if (o >= 0 && o != ti) return false;
@@ -7375,9 +7424,8 @@ void DoShove(Battle& b, int ui, int ti)
 	if (!CanShove(b, ui, ti, &nx, &nz)) return;
 	Unit& d = b.u[ti];
 	int fromL = LayerOn(b.map.At(d.x, d.z), d.deck) ? d.deck : 0;
-	int fromH = LayerHt(b.map.At(d.x, d.z), fromL);
+	int lay = ChooseLayer(b.map.At(d.x, d.z), fromL, b.map.At(nx, nz), UnitJump(d), UnitMoveType(d));
 	d.x = nx; d.z = nz;
-	int lay = ChooseLayer(b.map.At(nx, nz), fromH, fromL, UnitJump(d), UnitMoveType(d));
 	d.deck = lay < 0 ? 0 : lay;
 	d.face = atan2f((float)(d.x - b.u[ui].x), (float)(d.z - b.u[ui].z));
 	int pit = 0;
@@ -8860,6 +8908,45 @@ void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price)
 	if (name && nameN > 0) TrophyWriteName(name, nameN, id);
 }
 
+int TacQualitySuggestFromGpu()
+{
+	static const int kMap[10] = { 4, 4, 0, 1, 1, 2, 3, 5, 5, 6 };
+	int s3 = S3GfxQualitySuggestFromGpu();
+	if (s3 < 0) s3 = 0;
+	if (s3 > 9) s3 = 9;
+	return kMap[s3];
+}
+
+static int TacGpuNameHash()
+{
+	S3GpuProbe p = {};
+	S3GpuProbePrimary(&p);
+	unsigned h = 2166136261u;
+	for (const wchar_t* n = p.name; n && *n; n++) {
+		h ^= (unsigned)*n;
+		h *= 16777619u;
+	}
+	if (h == 0) h = 1;
+	return (int)h;
+}
+
+void TacQualityEnsureAutoDefault(SaveData& s)
+{
+	if (s.quality == TAC_Q_AUTO || s.spare[0] == 1) {
+		int gpu = TacQualitySuggestFromGpu();
+		int tag = TacGpuNameHash();
+		BOOL newGpu = (s.spare[1] == 0 || s.spare[1] != tag);
+		s.quality = TAC_Q_AUTO;
+		s.spare[0] = 1;
+		s.spare[1] = tag;
+		s.spare[3] = gpu;
+		if (newGpu || s.spare[2] < 0 || s.spare[2] > 6)
+			s.spare[2] = gpu;
+		return;
+	}
+	if (s.quality < 0 || s.quality > 6) s.quality = 1;
+}
+
 void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
@@ -8868,7 +8955,8 @@ void SaveDefaults(SaveData& s)
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
-	s.quality = 1;
+	s.quality = TAC_Q_AUTO;
+	s.spare[0] = 1;
 	s.showGrid = 1;
 	s.uidNext = 1;
 	s.bgmVol = 6;
@@ -8876,6 +8964,7 @@ void SaveDefaults(SaveData& s)
 	s.optInit = 1;
 	s.partyCap = 5;
 	s.rosterCap = 20;
+	TacQualityEnsureAutoDefault(s);
 }
 
 #pragma pack(push, 4)
@@ -9478,6 +9567,7 @@ bool SaveLoad(SaveData& s)
 	s.stageSel = Clampi(s.stageSel, 1, min(TAC_STAGE_MAX, s.stageCleared + 1));
 	if (s.uidNext == 0) s.uidNext = 1;
 	s.camSpeed = Clampi(s.camSpeed, 0, 2);
+	TacQualityEnsureAutoDefault(s);
 	if (s.optInit != 1) { s.bgmVol = 6; s.seVol = 8; s.optInit = 1; }
 	else { s.bgmVol = Clampi(s.bgmVol, 0, 10); s.seVol = Clampi(s.seVol, 0, 10); }
 	if (s.gold < 0) s.gold = 0;

@@ -2,6 +2,7 @@
 // おまけタクティクス: DirectX11 描画（アセット・GPU スキニング・地形・粒子・HUD）
 
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <dxgi1_2.h>
 #include "OmakeTacticsData.h"
 
@@ -151,7 +152,8 @@ struct DrawParams {
 	float blink;         // 0開 1閉。人間のまぶた
 	int noTess;          // 1 ならテッセレーションしない。重ね着や髪は数 mm の隙間しかなく、曲面化と変位で層が入れ替わる
 	float fly;           // 0〜1。宙に浮いている人間。スカートは脚から離れて世界の下へ垂れる
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0) {}
+	int cape;            // 1 なら背中にマントがある。髪はマントの厚みの外を流す
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -190,7 +192,7 @@ public:
 	int W() const { return m_w; }
 	int H() const { return m_h; }
 	ID3D11Device* Dev() { return m_dev; }
-	void SetQuality(int q);
+	BOOL SetQuality(int q);
 
 	// アセット
 	typedef void (*TacLoadPulseFn)(int cur, int total, void* user);
@@ -244,6 +246,9 @@ public:
 		float bustPrev[3] = {};
 		int bustPrevOk = 0;
 		unsigned bustFrame = 0;
+		unsigned gpuSkinFrame = 0;
+		unsigned gpuSkinKey = 0;
+		const void* gpuSkinOwner = NULL;
 		float crown[3]; // 頭ボーン頂点の天辺。読み込み時に一度測り、描画中はバインドを読み直さない
 		int crownOk;
 		// 頭蓋の外形。中心 skullC から方位 16 × 仰角 8 の向きごとの最大半径。髪のカードをこの外へ出す。
@@ -256,6 +261,31 @@ public:
 		}
 	};
 	Fix<CreatureSkin, 160> m_skins;
+	enum { TAC_SKIN_OUT = 96, TAC_HAIR_OUT = 40 };
+	struct SkinOut {
+		const void* owner;
+		CreatureSkin* src;
+		ID3D11Buffer* vb;
+		ID3D11UnorderedAccessView* uav;
+		int nv;
+		DWORD frame;
+		unsigned key;
+		DWORD stamp;
+	};
+	struct HairOut {
+		const void* owner;
+		ID3D11Buffer* vb;
+		ID3D11UnorderedAccessView* uav;
+		int nv;
+		DWORD frame;
+		unsigned key;
+		DWORD stamp;
+	};
+	SkinOut m_skinOut[TAC_SKIN_OUT];
+	HairOut m_hairOut[TAC_HAIR_OUT];
+	DWORD m_outStamp;
+	SkinOut* TakeSkinOut(const void* owner, CreatureSkin& src);
+	HairOut* TakeHairOut(const void* owner);
 	// 顔の型（性別ごと）。頭の頂点ごとの位置差・法線・色
 	struct FaceSet { int nFace, nv; Buf<short> d; Buf<signed char> n; Buf<DWORD> c; FaceSet() : nFace(0), nv(0) {} };
 	FaceSet m_faces[2];
@@ -350,7 +380,7 @@ public:
 		if (m_monN > 0) return (i >= 0 && i < m_monN) ? m_monModel[i] : -1;
 		return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1;
 	}
-	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
+	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner = NULL);
 	int GearCount() const { return (int)m_gearShown; }
 	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearGrip.size() && m_gearGrip[i] == GRIP_BOW; }
 	int GearGrip(int i) const { return i >= 0 && i < (int)m_gearGrip.size() ? m_gearGrip[i] : GRIP_NONE; }
@@ -376,6 +406,10 @@ public:
 	void SetAmbient(DWORD sky, DWORD ground, float strength, float hard);
 	void BeginShadowPass();
 	void BeginMainPass();
+	// 標準以上。床へキャラ・敵・上位レイヤーを映す。失敗したら本描画だけ。
+	BOOL BeginReflectPass(float planeY, V3 lookAt);
+	void EndReflectPass();
+	void ReuseReflect(float planeY);
 	void DrawSky(DWORD top, DWORD bottom, int speedLines, DWORD lineColor);
 	void ClearDepth();
 	void CommitFrame() { UpdateFrameCB(); }
@@ -383,6 +417,9 @@ public:
 	Pass CurPass() const { return m_pass; }
 
 	void DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp);
+	void BeginInstBatch();
+	void EndInstBatch();
+	BOOL InPortrait() const { return m_inPortrait; }
 	// m の索引で、頂点だけ v に差し替えて描く（毎フレーム CPU で動かす髪など）。
 	void DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp);
 	void DrawSkinned(const Model& m, const Pose& p, const M4& world, const DrawParams& dp);
@@ -403,7 +440,7 @@ public:
 	void DrawRibbon(const Buf<VtxP>& v);
 
 	// 地形
-	BOOL BuildTerrain(const Map& m);
+	BOOL BuildTerrain(Map& m);
 	void BuildMinimap(const Map& m);
 	ID3D11ShaderResourceView* MinimapSrv(int layer = 0) {
 		if (layer < 0 || layer >= 3) layer = 0;
@@ -440,12 +477,15 @@ public:
 	void HudTextBox(const wchar_t* s, float x, float y, float w, float h, float px, DWORD c, int bold = 0);
 	void EndHud();
 	void Present();
+	void Present(int slots, int wantHz);
 	void EndFrameTextGc();
 	BOOL FrameReady();             // 待機オブジェクト（ブロックしない）
+	BOOL PresentBusy() const { return m_presentBusy; }
 	BOOL RefreshSurface();         // 表示後にスワップチェインを付け直す
 	BOOL DeviceLost() const { return m_lost; }
 
 	BOOL ProjectToScreen(V3 p, float& sx, float& sy) const;
+	BOOL InView(V3 p, float radius) const;
 	void ScreenRay(float sx, float sy, V3& org, V3& dir) const;
 
 	HRESULT LastError() const { return m_lastHr; }
@@ -461,6 +501,13 @@ private:
 	BOOL CreateStates();
 	BOOL CreateTargets();
 	void ReleaseTargets();
+	void ParkTargets(int fp);
+	BOOL TakeTargets(int fp);
+	void DropTargetCache();
+	void WarmTargets();
+	void WarmLooks(int theme);
+	void BindLooks();
+	void DropLooks();
 	BOOL ApplyPost();
 	BOOL CreateProcTextures();
 	void PollStageLook();
@@ -471,6 +518,9 @@ private:
 	void SetObj(const M4& world, const DrawParams& dp, float outlineW);
 	void BindForPass(BOOL skinned, BOOL outline);
 	void ClearTess();
+	void FlushQueuedDraws();
+	void EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams& dp, float outlineW, BOOL outline);
+	void DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void ReleaseSkinGpu(CreatureSkin& src);
 	BOOL EnsureSkinGpu(CreatureSkin& src, const float* jig);
 	void UpdateFaceGpu(CreatureSkin& src, int face);
@@ -503,12 +553,19 @@ private:
 	HANDLE m_wait;
 	BOOL m_lost;
 	BOOL m_presented;
+	BOOL m_presentBusy;
+	BOOL m_occluded;
 	DWORD m_waitStuck;   // 退役待ちが始まった時刻。0 は待ちなし
 	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
 	int m_w, m_h;
 	int m_quality;
 	int m_gpu; // 0不明 1NVIDIA 2AMD 3Intel
 	BOOL m_allowTess;
+	BOOL m_tessOn;
+	int m_bindKey;
+	int m_hudPipe;
+	ID3D11ShaderResourceView* m_lastPsSrv;
+	ID3D11DepthStencilState* m_dsWant;
 	int m_msaa;
 	HRESULT m_lastHr;
 	int m_failStage;
@@ -519,6 +576,7 @@ private:
 
 	ID3D11Device* m_dev;
 	ID3D11DeviceContext* m_ctx;
+	ID3D11DeviceContext1* m_ctx1;
 	IDXGISwapChain1* m_swap;
 	ID3D11RenderTargetView* m_bbRtv;
 	ID3D11Texture2D* m_bb;
@@ -529,6 +587,19 @@ private:
 	ID3D11Texture2D* m_sceneTex;
 	ID3D11RenderTargetView* m_sceneRtv;
 	ID3D11ShaderResourceView* m_sceneSrv;
+	ID3D11Texture2D* m_refTex;
+	ID3D11RenderTargetView* m_refRtv;
+	ID3D11ShaderResourceView* m_refSrv;
+	ID3D11Texture2D* m_refDs;
+	ID3D11DepthStencilView* m_refDsv;
+	int m_refW, m_refH;
+	float m_refBlur;
+	int m_reflecting;
+	M4 m_refSavedVp;
+	M4 m_refSavedCull;
+	float m_refSavedEyeY, m_refSavedSx, m_refSavedSy;
+	float m_refSavedNear0, m_refSavedNear1;
+	int m_refSavedDeck;
 	ID3D11Texture2D* m_blA;
 	ID3D11RenderTargetView* m_blARtv;
 	ID3D11ShaderResourceView* m_blASrv;
@@ -554,6 +625,10 @@ private:
 	ID3D11DepthStencilView* m_ptDsv;
 
 	ID3D11VertexShader* m_vsS;
+	ID3D11VertexShader* m_vsSh;
+	ID3D11VertexShader* m_vsB;
+	ID3D11VertexShader* m_vsBSh;
+	ID3D11VertexShader* m_vsKSh;
 	ID3D11VertexShader* m_vsK;
 	ID3D11PixelShader* m_psM;
 	ID3D11PixelShader* m_psO;
@@ -561,6 +636,8 @@ private:
 	ID3D11VertexShader* m_vsH;
 	ID3D11PixelShader* m_psH;
 	ID3D11VertexShader* m_vsP;
+	ID3D11VertexShader* m_vsPT;
+	ID3D11GeometryShader* m_gsP;
 	ID3D11PixelShader* m_psP;
 	ID3D11VertexShader* m_vsQ;
 	ID3D11PixelShader* m_psSky;
@@ -624,7 +701,8 @@ private:
 		DWORD frame; float time; M4 world; int valid;
 		float vel[3];
 		int slot;
-		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1) {
+		int capeBit;
+		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1), capeBit(-1) {
 			world = MIdent();
 			vel[0] = vel[1] = vel[2] = 0.f;
 		}
@@ -633,22 +711,26 @@ private:
 	ID3D11Buffer* m_hairScratchSB;
 	ID3D11UnorderedAccessView* m_hairScratchUAV;
 	ID3D11ShaderResourceView* m_hairScratchSRV;
-	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal);
+	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape);
 	void ReleaseHairInst();
 	int m_scalpModel; // m_capDraw を作った体
 	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
 	Buf<VtxS> m_capBind;
 	GpuMesh m_capDraw;
 	ID3D11InputLayout* m_ilS;
+	ID3D11InputLayout* m_ilB;
 	ID3D11InputLayout* m_ilK;
 	ID3D11InputLayout* m_ilH;
 	ID3D11InputLayout* m_ilP;
+	ID3D11InputLayout* m_ilPT;
 	ID3D11Buffer* m_cbFrame;
 	ID3D11Buffer* m_cbRipple;
 	ID3D11Buffer* m_cbObj;
 	ID3D11Buffer* m_cbBones;
 	ID3D11Buffer* m_vbHud;
 	ID3D11Buffer* m_vbDyn;
+	ID3D11Buffer* m_vbInst;
+	ID3D11Buffer* m_ibQuad;
 	UINT m_vbDynBytes;
 	ID3D11SamplerState* m_sLin;
 	ID3D11SamplerState* m_sCmp;
@@ -709,6 +791,9 @@ private:
 		float ally[16][4];
 		float camNear[4];
 		float camFwd[4];
+		float wxPack[4];
+		M4 reflectVP;
+		float reflectInfo[4];
 	} m_fcb;
 	M4 m_lightVP;
 
@@ -719,7 +804,10 @@ private:
 	struct TextSlot { wchar_t key[TAC_TEXTK]; TextSprite sp; int live; };
 	TextSlot m_text[TAC_TEXTN];
 	BOOL m_inPortrait;
+	BOOL m_instOn;
 	int m_portraitSlot;
+	BOOL PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp);
+	void FlushInst();
 };
 
 } // namespace otac

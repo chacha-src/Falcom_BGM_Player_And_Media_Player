@@ -1155,6 +1155,8 @@ static void ActorInit(Actor& a)
 	a.gripClip = -1;
 	a.poseHold = 0;
 	a.blinkSave = -1.f;
+	a.frameClip = -1;
+	a.frameModel = -1;
 }
 
 static void AddWeapons(Actor& a, const Renderer& r, int wl)
@@ -1843,8 +1845,10 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 			r.FinishPose(m, a.pose, &a.mods);
 		}
 		a.poseValid = 1;
+		a.poseFrame = r.m_frame;
 	} else if (a.proc == 2) {
 		a.poseValid = 1;
+		a.poseFrame = r.m_frame;
 		return;
 	} else {
 		if (a.model < 0 || a.model >= (int)r.models.size()) return;
@@ -1871,6 +1875,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 			r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
 		}
 		a.poseValid = 1;
+		a.poseFrame = r.m_frame;
 	}
 	ApplyFlyTrail(a, r);
 	ApplyDownPose(a, r);
@@ -2266,6 +2271,32 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	const Model& m = r.models[a.model];
 	int cj = m.chestJ;
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return;
+	struct WMem { const Actor* a; unsigned frame; unsigned wh; M4 w[2]; int mesh[2]; int n; };
+	static WMem tab[64];
+	unsigned wh = (unsigned)a.poseFrame * 16777619u;
+	wh ^= (unsigned)(world.m[0] * 1000.f) * 3u;
+	wh ^= (unsigned)(world.m[5] * 1000.f) * 5u;
+	wh ^= (unsigned)(world.m[10] * 1000.f) * 7u;
+	wh ^= (unsigned)(world.m[12] * 1000.f) * 11u;
+	wh ^= (unsigned)(world.m[13] * 1000.f) * 13u;
+	wh ^= (unsigned)(world.m[14] * 1000.f) * 17u;
+	wh ^= (unsigned)(time * 1000.f);
+	WMem* hit = NULL;
+	int freeSlot = -1;
+	for (int i = 0; i < 64; i++) {
+		if (tab[i].a == &a) { hit = &tab[i]; break; }
+		if (freeSlot < 0 && tab[i].a == NULL) freeSlot = i;
+	}
+	if (hit && hit->frame == r.m_frame && hit->wh == wh && hit->n == 2) {
+		for (int side = 0; side < 2; side++) {
+			DrawParams dw = dp;
+			dw.hue = 0;
+			dw.twoSided = 1;
+			dw.noTess = 1;
+			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], hit->w[side], dw);
+		}
+		return;
+	}
 	int dr = a.wings == 2 ? 1 : 0;
 	float flapSp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
 	float ph = sinf(time * flapSp);
@@ -2290,6 +2321,12 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		else z = MInverse(m.invBind[cj]).m[14] + 0.045f;
 	}
 	float rest = human ? 0.20f : 0.35f;
+	if (!hit) {
+		if (freeSlot < 0) freeSlot = (int)(r.m_frame & 63);
+		hit = &tab[freeSlot];
+		hit->a = &a;
+	}
+	hit->n = 0;
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
 		M4 fl = MRotZ(s * flap);
@@ -2299,9 +2336,31 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		DrawParams dw = dp;
 		dw.hue = 0;
 		dw.twoSided = 1;
+		dw.noTess = 1;
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
 		r.DrawStatic(lib.wing[dr][1 - side], w, dw);
+		hit->w[side] = w;
+		hit->mesh[side] = dr * 2 + (1 - side);
+		hit->n++;
 	}
+	if (hit) { hit->frame = r.m_frame; hit->wh = wh; }
+}
+
+static M4 CachedBind(const Model& m, int j)
+{
+	struct Slot { const Model* m; M4 inv[MAXJ]; int nJ; };
+	static Slot tab[64];
+	static int n = 0;
+	if (j < 0) j = 0;
+	if (j >= MAXJ) j = MAXJ - 1;
+	for (int i = 0; i < n; i++) if (tab[i].m == &m) return tab[i].inv[j];
+	if (n >= 64) n = 63;
+	Slot& s = tab[n++];
+	s.m = &m;
+	s.nJ = m.nJ < MAXJ ? m.nJ : MAXJ;
+	for (int k = 0; k < s.nJ; k++) s.inv[k] = MInverse(m.invBind[k]);
+	for (int k = s.nJ; k < MAXJ; k++) s.inv[k] = MIdent();
+	return s.inv[j];
 }
 
 BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
@@ -2313,7 +2372,6 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		BOOL hum = a.model >= 0 && a.model < (int)r.models.size() && strncmp(r.models[a.model].name, "Hum", 3) == 0;
 		if (hum) {
 			d.outline = 0;
-			// 作成画面のリム 0.55 を足すと、順光 1.4 倍の上に白が乗り髪も鎧も金属になる。
 			d.rim = 0.04f;
 			// 服の色は染め色の頂点だけ。シェーダの色相回転は肌まで回すので使わない。
 			d.hue = 0;
@@ -2366,13 +2424,14 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (!ava) {
 			d.clothTint = 0;
 			if (!hum) d.twoSided = 1;
-			r.DrawSkinnedCreature(a.model, a.pose, world, d);
+			r.DrawSkinnedCreature(a.model, a.pose, world, d, &a);
 		}
 		const int nAtt = (ava && !bareBase) ? a.wepAtt : a.nAtt, nGear = (ava && !bareBase) ? a.wepGear : a.nGear;
 		DrawParams da = dp;
+		da.noTess = 1;
 		if (hum) da.rim = 0.06f;
 		auto bindOf = [&](int j) -> M4 {
-			if (humM && j >= 0 && j < humM->nJ) return MInverse(humM->invBind[j]);
+			if (humM && j >= 0 && j < humM->nJ) return CachedBind(*humM, j);
 			return a.pose.global[j];
 		};
 		// 握りの中心は拳のメッシュ。中指の関節は指の付け根から先に並び、柄の通る掌の中からは外れる。
@@ -2400,7 +2459,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				sprintf_s(nm, "Middle%d%s", k, dot);
 				int mj = rg.Find(nm);
 				if (mj < 0 || mj >= humM->nJ) continue;
-				M4 b = MInverse(humM->invBind[mj]);
+				M4 b = CachedBind(*humM, mj);
 				s = s + v3(b.m[12], b.m[13], b.m[14]);
 				n++;
 			}
@@ -2412,12 +2471,52 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			if (!humM || a.rig < 0 || a.rig >= (int)r.rigs.size()) return FALSE;
 			const Rig& rg = r.rigs[a.rig];
 			for (int j = 0; j < rg.nJ && j < humM->nJ; j++) if (!strcmp(rg.names[j], nm)) {
-				M4 b = MInverse(humM->invBind[j]);
+				M4 b = CachedBind(*humM, j);
 				out = v3(b.m[12], b.m[13], b.m[14]);
 				return TRUE;
 			}
 			return FALSE;
 		};
+		struct GItem { int kind, idx, twoSided; M4 w; };
+		struct GBag { const Actor* a; unsigned frame, wh; GItem it[16]; int n, ready; };
+		static GBag gbagTab[48];
+		unsigned gwh = (unsigned)a.poseFrame * 16777619u;
+		gwh ^= (unsigned)(wGear.m[0] * 997.f);
+		gwh ^= (unsigned)(wGear.m[5] * 991.f) * 3u;
+		gwh ^= (unsigned)(wGear.m[10] * 983.f) * 5u;
+		gwh ^= (unsigned)(wGear.m[12] * 977.f) * 7u;
+		gwh ^= (unsigned)(wGear.m[13] * 971.f) * 11u;
+		gwh ^= (unsigned)(wGear.m[14] * 967.f) * 13u;
+		GBag* gbag = NULL;
+		int gfree = -1;
+		for (int gi = 0; gi < 48; gi++) {
+			if (gbagTab[gi].a == &a) { gbag = &gbagTab[gi]; break; }
+			if (gfree < 0 && gbagTab[gi].a == NULL) gfree = gi;
+		}
+		if (!gbag) {
+			if (gfree < 0) gfree = (int)(r.m_frame % 48u);
+			gbag = &gbagTab[gfree];
+			gbag->a = &a;
+			gbag->ready = 0;
+		}
+		BOOL greplay = gbag->ready && gbag->frame == r.m_frame && gbag->wh == gwh;
+		auto gnote = [&](int kind, int idx, const M4& w, int two) {
+			if (gbag->n >= 16) return;
+			GItem& it = gbag->it[gbag->n++];
+			it.kind = kind; it.idx = idx; it.twoSided = two; it.w = w;
+		};
+		if (greplay) {
+			for (int gi = 0; gi < gbag->n; gi++) {
+				DrawParams d = da;
+				d.twoSided = gbag->it[gi].twoSided;
+				if (gbag->it[gi].kind == 0) r.DrawGear(gbag->it[gi].idx, gbag->it[gi].w, d);
+				else if (gbag->it[gi].idx >= 0 && gbag->it[gi].idx < (int)r.attaches.size())
+					r.DrawStatic(r.attaches[gbag->it[gi].idx].mesh, gbag->it[gi].w, d);
+			}
+		} else {
+			gbag->n = 0;
+			gbag->frame = r.m_frame;
+			gbag->wh = gwh;
 		for (int i = 0; i < nAtt; i++) {
 			const char* nm = r.attaches[a.att[i]].name;
 			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
@@ -2437,7 +2536,13 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				DrawParams dc = da;
 				if (NameHas(nm, "Cape")) dc.twoSided = 1;
 				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, dc, &fit);
-			} else r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, da);
+				if (a.attJ[i] >= 0 && a.attJ[i] < a.pose.nJ)
+					gnote(1, a.att[i], MMul(fit, MMul(a.pose.global[a.attJ[i]], wGear)), dc.twoSided);
+			} else {
+				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, da);
+				if (a.attJ[i] >= 0 && a.attJ[i] < a.pose.nJ)
+					gnote(1, a.att[i], MMul(a.pose.global[a.attJ[i]], wGear), da.twoSided);
+			}
 		}
 		for (int i = 0; i < nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ) {
 			const char* jn = (hum && a.rig >= 0 && a.gearJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.gearJ[i]] : NULL;
@@ -2473,8 +2578,16 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				V3 gl, ax;
 				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl, ax);
 				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL, neoB, hasGrip ? &ax : NULL);
-				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear), da);
-			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], wGear), da);
+				M4 gw = MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear);
+				r.DrawGear(a.gearM[i], gw, da);
+				gnote(0, a.gearM[i], gw, da.twoSided);
+			} else {
+				M4 gw = MMul(a.pose.global[a.gearJ[i]], wGear);
+				r.DrawGear(a.gearM[i], gw, da);
+				gnote(0, a.gearM[i], gw, da.twoSided);
+			}
+		}
+		gbag->ready = 1;
 		}
 		const BOOL whiteBase = digitBody && humM && humM->name[4] == '0';
 		// 標準(0)は地毛。白人だけでなく、地毛の無いアジア・黒人の頭にも同じ笠を被せる。
@@ -2497,6 +2610,12 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 			// 髪型「標準」(0) は髪色の地毛。どの頭も同じ。
 			int hairStyle = a.hair > 0 ? Clampi(a.hair, 1, HAIR_STYLES - 1) : 0;
+			dh0.cape = 0;
+			for (int ci = 0; ci < a.nAtt; ci++) {
+				int ai = a.att[ci];
+				if (ai < 0 || ai >= (int)r.attaches.size()) continue;
+				if (NameHas(r.attaches[ai].name, "Cape")) { dh0.cape = 1; break; }
+			}
 			if (!r.DrawHumanHair(a.model, hairStyle, humM->headJ, a.pose, wGear, dh0, a.avatar, &a) && a.hair > 0 && !digitBody) {
 			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
 			int slot = -1;

@@ -129,9 +129,33 @@ float EdgeFactor(float3 a, float3 b)
 	return max(lerp(tf, 1, saturate((d - 8) / 42)), 1);
 }
 
+bool PatchOut(float4 a, float4 b, float4 c)
+{
+	if (a.w <= 0 && b.w <= 0 && c.w <= 0) return true;
+	if (a.w <= 0 || b.w <= 0 || c.w <= 0) return false;
+	float ax = a.x / a.w, ay = a.y / a.w, az = a.z / a.w;
+	float bx = b.x / b.w, by = b.y / b.w, bz = b.z / b.w;
+	float cx = c.x / c.w, cy = c.y / c.w, cz = c.z / c.w;
+	const float m = 1.2;
+	if (ax < -m && bx < -m && cx < -m) return true;
+	if (ax > m && bx > m && cx > m) return true;
+	if (ay < -m && by < -m && cy < -m) return true;
+	if (ay > m && by > m && cy > m) return true;
+	if (az < -0.05 && bz < -0.05 && cz < -0.05) return true;
+	if (az > 1.05 && bz > 1.05 && cz > 1.05) return true;
+	return false;
+}
+
 TF HPC(InputPatch<TC, 3> p)
 {
 	TF o;
+	float4 c0 = mul(float4(p[0].w, 1), VP);
+	float4 c1 = mul(float4(p[1].w, 1), VP);
+	float4 c2 = mul(float4(p[2].w, 1), VP);
+	if (PatchOut(c0, c1, c2)) {
+		o.e[0] = o.e[1] = o.e[2] = o.i = 0;
+		return o;
+	}
 	o.e[0] = EdgeFactor(p[1].w, p[2].w);
 	o.e[1] = EdgeFactor(p[2].w, p[0].w);
 	o.e[2] = EdgeFactor(p[0].w, p[1].w);

@@ -325,6 +325,18 @@ IDR_CSO_MAZE_CSSUB      RCDATA                  "res\\cso\\maze_cssub.cso"
 
 IDR_CSO_TAC_VSS         RCDATA                  "res\\cso\\tac_vss.cso"
 
+IDR_CSO_TAC_VSSB        RCDATA                  "res\\cso\\tac_vssb.cso"
+
+IDR_CSO_TAC_VSPT        RCDATA                  "res\\cso\\tac_vspt.cso"
+
+IDR_CSO_TAC_GSP         RCDATA                  "res\\cso\\tac_gsp.cso"
+
+IDR_CSO_TAC_VSSSH       RCDATA                  "res\\cso\\tac_vsssh.cso"
+
+IDR_CSO_TAC_VSSBSH      RCDATA                  "res\\cso\\tac_vssbsh.cso"
+
+IDR_CSO_TAC_VSKSH       RCDATA                  "res\\cso\\tac_vsksh.cso"
+
 IDR_CSO_TAC_VSK         RCDATA                  "res\\cso\\tac_vsk.cso"
 
 IDR_CSO_TAC_PSM         RCDATA                  "res\\cso\\tac_psm.cso"
@@ -3083,7 +3095,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1628
+ FILEVERSION 0,9,1,1630
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3101,10 +3113,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.03 v1628 s6"
-            VALUE "FileVersion", "0.9.1.1628"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.04 v1630 s6"
+            VALUE "FileVersion", "0.9.1.1630"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.03"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.04"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

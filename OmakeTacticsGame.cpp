@@ -28,7 +28,7 @@ enum {
 	ID_SHOP_SELLJUNK = 1920, ID_SHOP_ARM0 = 1930, ID_SHOP_ARM_SELL = 1948, ID_SHOP_ARM_NO = 1949,
 	ID_SHOP_ASK_YES = 1950, ID_SHOP_ASK_NO, ID_SHOP_FIT_KEEP, ID_SHOP_TO_PARTY, ID_SHOP_DET0 = 1960,
 	ID_SELL_M10 = 1972, ID_SELL_M1, ID_SELL_P1, ID_SELL_P10, ID_SELL_MAX, ID_SELL_OK, ID_SELL_NO,
-	ID_BASE_AI = 1870, ID_BASE_SYNC, ID_BASE_WIN,
+	ID_BASE_AI = 1870, ID_BASE_SYNC, ID_BASE_WIN, ID_BASE_FPS,
 	ID_SHOP_SLOT0 = 1984, ID_SHOP_SLOT1, ID_SHOP_SLOT2, ID_SHOP_SLOT_NO,
 	ID_PT_BEAD2 = 1988, ID_PT_BEAD3, ID_SHOP_ART, ID_SHOP_OUGI, ID_PT_SUM0, ID_PT_SUM1,
 	ID_BASE_SET = 945, ID_BASE_THREAT = 949, ID_PT_EVO = 363,
@@ -94,6 +94,7 @@ Game::Game()
 	m_time = 0;
 	m_screen = SC_LOADING;
 	m_wantClose = FALSE;
+	m_goHome = FALSE;
 	m_loaded = FALSE;
 	m_loadFrames = 0;
 	m_loadPm = 0;
@@ -103,6 +104,19 @@ Game::Game()
 	m_loadLive = FALSE;
 	m_renderDt = 1.f / 60.f;
 	m_lastRenderTime = 0;
+	m_qApply = -1;
+	m_qHold = -1;
+	m_qMissN = 0;
+	m_qOkN = 0;
+	m_qCoolT = 0;
+	m_qHz = 0;
+	m_qSlots = 1;
+	m_syncArm = -1;
+	m_syncArmN = 0;
+	m_qDrew = FALSE;
+	m_syncLock = 0;
+	m_fps = 0;
+	m_fpsAt.QuadPart = 0;
 	m_recoverTries = 0;
 	m_mx = m_my = 0;
 	m_mouseSeen = FALSE;
@@ -118,6 +132,10 @@ Game::Game()
 	m_navMode = FALSE;
 	m_selDelta = 0;
 	m_textFocus = 0;
+	m_textCaret = 0;
+	m_imeComp[0] = 0;
+	m_textBox[0] = m_textBox[1] = m_textBox[2] = m_textBox[3] = 0;
+	m_textPx = 16.f;
 	m_keyShift = FALSE;
 	memset(&m_padPrev, 0, sizeof(m_padPrev));
 	m_padRepeat = 0; m_padDirPrev = -1; m_padTrig = 0;
@@ -229,8 +247,14 @@ Game::Game()
 	m_wxMesh = 0;
 	memset(m_cover, 0, sizeof(m_cover));
 	m_eye = v3(0, 10, 0);
-	for (int i = 0; i < Renderer::PORTRAIT_N; i++) { m_portraitKey[i] = -1; m_portraitWant[i] = 0; }
+	for (int i = 0; i < Renderer::PORTRAIT_N; i++) {
+		m_portraitKey[i] = -1;
+		m_portraitWant[i] = 0;
+		m_ptCacheWant[i] = -1;
+		m_ptCacheLook[i] = 0;
+	}
 	memset(&m_ptActor, 0, sizeof(m_ptActor));
+	memset(m_ptCache, 0, sizeof(m_ptCache));
 	memset(&m_showMap, 0, sizeof(m_showMap));
 	m_showBuilt = FALSE;
 	m_showStage = 0;
@@ -325,7 +349,9 @@ BOOL Game::Init(HWND view, int w, int h)
 	m_screen = SC_LOADING;
 	m_loadFrames = 0;
 	m_ui = Clampf(min(m_w / 1280.f, m_h / 720.f), .62f, 2.2f);
-	if (!m_r.Init(view, m_save.quality)) { m_screen = SC_FAIL; return FALSE; }
+	m_qApply = TacQualityWanted(m_save);
+	m_qCoolT = 0.8f;
+	if (!m_r.Init(view, m_qApply)) { m_screen = SC_FAIL; return FALSE; }
 	return TRUE;
 }
 
@@ -458,7 +484,8 @@ BOOL Game::Recover()
 	ReleaseLibrary(m_lib);
 	m_r.Release();
 	m_loaded = FALSE;
-	if (!m_r.Init(m_hwnd, m_save.quality)) return FALSE;
+	m_qApply = TacQualityWanted(m_save);
+	if (!m_r.Init(m_hwnd, m_qApply)) return FALSE;
 	if (!LoadEverything()) return FALSE;
 	InvalidatePortraits();
 	if (m_screen == SC_BATTLE || m_screen == SC_RESULT) {
@@ -602,6 +629,126 @@ void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 }
 
 // ============================================================ メインループ
+int Game::QualityNow() const
+{
+	if (m_qApply >= 0) return m_qApply;
+	return TacQualityWanted(m_save);
+}
+
+static BOOL TacMidBand(int q) { return q == 0 || q == 1 || q == 2; }
+
+void Game::ApplyQualityNow(int q)
+{
+	q = Clampi(q, 0, 6);
+	int prev = m_qApply;
+	if (q == m_qApply) {
+		m_r.SetQuality(q);
+		return;
+	}
+	m_qApply = q;
+	BOOL rebuilt = m_r.SetQuality(q);
+	float cool = rebuilt ? 1.0f : 0.28f;
+	if (prev >= 0 && TacMidBand(prev) && TacMidBand(q)) cool = 2.0f;
+	m_qCoolT = cool;
+	m_qMissN = 0;
+	m_qOkN = 0;
+}
+
+void Game::PickQuality(int delta)
+{
+	int q = TacQualityAt(TacQualitySlot(m_save.quality) + delta);
+	m_qHold = -1;
+	m_qMissN = 0;
+	m_qOkN = 0;
+	if (q == TAC_Q_AUTO) {
+		m_save.quality = TAC_Q_AUTO;
+		m_save.spare[0] = 1;
+		m_save.spare[1] = 0;
+		m_save.spare[2] = -1;
+		TacQualityEnsureAutoDefault(m_save);
+		ApplyQualityNow(TacQualityWanted(m_save));
+	} else {
+		m_save.quality = q;
+		TacQualityUserLock(m_save);
+		ApplyQualityNow(q);
+	}
+	InvalidatePortraits();
+}
+
+void Game::PulseQuality(float work, float span)
+{
+	(void)work;
+	if (m_screen == SC_LOADING || !m_loaded || !m_r.Ready()) return;
+	int hz = TacVsyncHz(m_save);
+	if (hz < 30) hz = 30;
+	if (m_qHz != hz) {
+		m_qHz = hz;
+		m_qMissN = 0;
+		m_qOkN = 0;
+	}
+	// 表示間隔だけを見る。1/60 が底。標準以上で 1/30 には落とさない。
+	// Present は待たない。1/120 に届かないからと拍を 1/60 にすると、描画が早く終わっても次まで待ち、CPU も GPU も余ったまま 60 で止まる。
+	// 標準を下回ったら保険として 1/30 にする。
+	if (m_qCoolT > 0) {
+		if (m_fps >= (float)hz * 0.98f) { m_qOkN++; m_qMissN = 0; }
+		return;
+	}
+	if (span < 0.003f || span >= 0.25f) return;
+	int v = TacVsync(m_save);
+	if (v < 0) v = 0;
+	if (v > 4) v = 4;
+	int qSlot = TacQualityFixedSlot(QualityNow());
+	int stdSlot = TacQualityFixedSlot(1);
+	int desired = v;
+	if (qSlot < stdSlot) desired = 0;
+	else if (v == 0) desired = 1;
+	if (desired != v) {
+		m_qMissN = 0;
+		if (m_syncArm != desired) { m_syncArm = desired; m_syncArmN = 0; }
+		m_syncArmN++;
+		if (m_syncLock <= 0.f && m_syncArmN >= 10) {
+			TacSetVsync(m_save, desired);
+			m_syncArmN = 0;
+			m_syncLock = 1.5f;
+			m_qOkN = 0;
+			m_qHz = TacVsyncHz(m_save);
+		}
+		if (desired < v) return;
+	} else m_syncArmN = 0;
+	float period = 1.f / (float)hz;
+	BOOL shownOk = (m_fps >= (float)hz * 0.98f) || (span <= period * 1.08f);
+	BOOL holdQ = (!shownOk && qSlot >= stdSlot && hz > 60 && m_fps >= 54.f);
+	if (shownOk) { m_qOkN++; m_qMissN = 0; }
+	else if (holdQ) { m_qMissN = 0; }
+	else { m_qMissN++; m_qOkN = 0; }
+
+	const int needMiss = 10;
+	const int needOk = (m_fps >= (float)hz) ? 8 : 20;
+
+	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
+	int now = QualityNow();
+	int slot = TacQualityFixedSlot(now);
+	int cap = autoOn ? 6 : ((m_qHold >= 0) ? m_qHold : TacQualityWanted(m_save));
+	if (cap < 0 || cap > 6) cap = now;
+	int capSlot = TacQualityFixedSlot(cap);
+	int floorSlot = autoOn ? 0 : (capSlot - 2);
+	if (floorSlot < 0) floorSlot = 0;
+
+	int next = now;
+	if (m_qMissN >= needMiss) {
+		if (slot > floorSlot) next = TacQualityFixedAt(slot - 1);
+		m_qMissN = 0;
+		if (!autoOn && m_qHold < 0) m_qHold = TacQualityWanted(m_save);
+	} else if (m_qOkN >= needOk) {
+		if (slot < capSlot) next = TacQualityFixedAt(slot + 1);
+		m_qOkN = 0;
+		if (!autoOn && m_qHold >= 0 && next == m_qHold) m_qHold = -1;
+	}
+	if (autoOn && next != TacQualityWanted(m_save))
+		m_save.spare[2] = next;
+	if (next != now) ApplyQualityNow(next);
+}
+
 void Game::Tick(float dt)
 {
 	if (m_slotBusy) return;
@@ -614,6 +761,8 @@ void Game::Tick(float dt)
 	}
 	dt = Clampf(dt, 0, .1f);
 	m_time += dt;
+	if (m_qCoolT > 0) m_qCoolT -= dt;
+	if (m_syncLock > 0) m_syncLock -= dt;
 	if (m_screen == SC_LOADING) {
 		if (m_loadFrames++ >= 2) {
 			if (!LoadEverything()) { m_screen = SC_FAIL; m_loadLive = FALSE; }
@@ -646,7 +795,30 @@ void Game::Tick(float dt)
 	SyncBgm();
 	if (!m_r.Ready()) return;
 	if (!m_r.FrameReady()) return;
+	LARGE_INTEGER t0, t1, freq;
+	QueryPerformanceCounter(&t0);
 	RenderFrame();
+	m_r.Present();
+	if (m_goHome) {
+		m_goHome = FALSE;
+		GoHomeFromBattle();
+	}
+	QueryPerformanceCounter(&t1);
+	QueryPerformanceFrequency(&freq);
+	m_r.EndFrameTextGc();
+	float work = 0.f;
+	float span = 0.f;
+	if (freq.QuadPart)
+		work = (float)((double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
+	if (m_fpsAt.QuadPart && freq.QuadPart) {
+		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
+		if (span >= 0.003f && span < 0.25f) {
+			float inst = 1.f / span;
+			m_fps = (m_fps < 1.f) ? inst : (m_fps * 0.82f + inst * 0.18f);
+		}
+	}
+	m_fpsAt = t1;
+	PulseQuality(work, span);
 }
 
 	static_assert(TAC_BGM_LANTERN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
@@ -739,7 +911,11 @@ void Game::SyncBgm()
 	} else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) {
 		scene = TAC_BGM_MAKE;
 	}
-	TacBgmScene(scene);
+	static int lastScene = -999;
+	if (scene != lastScene) {
+		TacBgmScene(scene);
+		lastScene = scene;
+	}
 	TacBgmTempo(1.f);
 }
 
@@ -764,7 +940,6 @@ void Game::RenderFrame()
 		AssignBattlePortraits();
 		BindImportedActors();
 	} else if (m_loaded) PrepareMenuPortraits();
-	if (m_loaded) RenderPortraits();
 	switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_RESULT:
 		DrawShowcase3D();
@@ -783,6 +958,7 @@ void Game::RenderFrame()
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	} break;
 	}
+	if (m_loaded) RenderPortraits();
 	m_r.BeginHud();
 	m_btns.clear();
 	if (m_uiHoverScreen != m_screen || m_uiHoverShop != (m_shop != 0)) {
@@ -826,14 +1002,13 @@ void Game::RenderFrame()
 	if (m_showHelp) DrawHelpOverlay();
 	else if (m_statTip >= 0) DrawStatTip();
 	else if (m_skillTip >= 0) DrawSkillTip();
+	DrawPerfHud();
 	if (m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
 	if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
 		m_click = FALSE;
 		BattleClick(m_clickX, m_clickY);
 	}
 	m_r.EndHud();
-	m_r.Present();
-	m_r.EndFrameTextGc();
 	m_btnsPrev = m_btns;
 	if (m_uiHoverHit) {
 		if (m_uiHoverCand != m_uiHover && !m_click && m_activateId < 0)
@@ -1059,8 +1234,145 @@ void Game::OnWheel(int delta)
 	}
 }
 
+static int TacWLen(const wchar_t* s) { return s ? (int)wcslen(s) : 0; }
+
+static void TacCaretStr(wchar_t* dst, int dstN, const wchar_t* s, int caret, const wchar_t* comp, BOOL blink)
+{
+	if (!dst || dstN < 2) return;
+	if (!s) s = L"";
+	if (!comp) comp = L"";
+	int n = TacWLen(s);
+	if (caret < 0 || caret > n) caret = n;
+	int o = 0;
+	auto put = [&](wchar_t ch) { if (o + 1 < dstN) dst[o++] = ch; };
+	for (int i = 0; i < caret; i++) put(s[i]);
+	for (int i = 0; comp[i]; i++) put(comp[i]);
+	if (blink) put(L'|');
+	for (int i = caret; s[i]; i++) put(s[i]);
+	dst[o] = 0;
+}
+
+static void TacInsertAt(wchar_t* s, int maxLen, int& caret, wchar_t ch)
+{
+	if (!s || maxLen < 2 || ch < 32) return;
+	int n = TacWLen(s);
+	if (n + 1 >= maxLen) return;
+	if (caret < 0 || caret > n) caret = n;
+	memmove(s + caret + 1, s + caret, (size_t)(n - caret + 1) * sizeof(wchar_t));
+	s[caret++] = ch;
+}
+
+static void TacDeleteAt(wchar_t* s, int& caret, BOOL back)
+{
+	if (!s) return;
+	int n = TacWLen(s);
+	if (caret < 0 || caret > n) caret = n;
+	if (back) {
+		if (caret <= 0) return;
+		memmove(s + caret - 1, s + caret, (size_t)(n - caret + 1) * sizeof(wchar_t));
+		caret--;
+	} else {
+		if (caret >= n) return;
+		memmove(s + caret, s + caret + 1, (size_t)(n - caret) * sizeof(wchar_t));
+	}
+}
+
+static void TacMarkBox(float* box, float x, float y, float w, float h)
+{
+	if (!box) return;
+	box[0] = x; box[1] = y; box[2] = w; box[3] = h;
+}
+
+void Game::ClearTextFocus()
+{
+	m_textFocus = 0;
+	m_imeComp[0] = 0;
+}
+
+BOOL Game::TextLive(wchar_t*& buf, int& maxLen)
+{
+	buf = NULL;
+	maxLen = 0;
+	if (m_textFocus == 1) { buf = m_edit.name; maxLen = NAME_LEN; return TRUE; }
+	if (m_textFocus == 2) { buf = m_slotEdit; maxLen = TAC_SLOT_NAME; return TRUE; }
+	if (m_textFocus == 4) { buf = m_monFind; maxLen = 24; return TRUE; }
+	return FALSE;
+}
+
+void Game::SetTextCaret(int caret)
+{
+	wchar_t* buf = NULL;
+	int maxLen = 0;
+	int n = 0;
+	if (TextLive(buf, maxLen) && buf) n = TacWLen(buf);
+	if (caret < 0) caret = 0;
+	if (caret > n) caret = n;
+	m_textCaret = caret;
+}
+
+void Game::SetImeComp(const wchar_t* s)
+{
+	if (!s || !s[0]) { m_imeComp[0] = 0; return; }
+	wcsncpy_s(m_imeComp, s, _TRUNCATE);
+}
+
+void Game::TextBoxRect(RECT& rc) const
+{
+	rc.left = (LONG)m_textBox[0];
+	rc.top = (LONG)m_textBox[1];
+	rc.right = (LONG)(m_textBox[0] + m_textBox[2]);
+	rc.bottom = (LONG)(m_textBox[1] + m_textBox[3]);
+}
+
+void Game::SetSellFromText(const wchar_t* s)
+{
+	int v = 0;
+	if (s) {
+		for (int i = 0; s[i]; i++) {
+			if (s[i] < L'0' || s[i] > L'9') continue;
+			v = v * 10 + (int)(s[i] - L'0');
+			if (v > m_sellMax) { v = m_sellMax; break; }
+		}
+	}
+	if (v < 1) v = m_sellFresh ? 1 : 1;
+	if (v < 1) v = 1;
+	if (v > m_sellMax) v = m_sellMax;
+	m_sellN = v;
+	m_sellFresh = 0;
+}
+
+void Game::SellToText(wchar_t* s, int n) const
+{
+	if (!s || n < 2) return;
+	swprintf_s(s, n, L"%d", m_sellN < 1 ? 1 : m_sellN);
+}
+
+void Game::NotifyFindChanged()
+{
+	m_codexPage = 0;
+}
+
+float Game::TextCaretPx()
+{
+	const wchar_t* s = L"";
+	if (m_textFocus == 1) s = m_edit.name;
+	else if (m_textFocus == 2) s = m_slotEdit;
+	else if (m_textFocus == 4) s = m_monFind;
+	int n = TacWLen(s);
+	int caret = m_textCaret;
+	if (caret < 0 || caret > n) caret = n;
+	wchar_t pre[96];
+	int o = 0;
+	for (int i = 0; i < caret && o + 1 < 96; i++) pre[o++] = s[i];
+	for (int i = 0; m_imeComp[i] && o + 1 < 96; i++) pre[o++] = m_imeComp[i];
+	pre[o] = 0;
+	float px = m_textPx > 1.f ? m_textPx : 16.f;
+	return m_r.TextWidth(pre, px, 1);
+}
+
 void Game::OnChar(wchar_t ch)
 {
+	if (ch == 127) ch = 8;
 	if (m_textFocus == 3 && m_sellAsk) {
 		if (ch == 8) { m_sellN /= 10; if (m_sellN < 1) m_sellN = 1; m_sellFresh = 0; return; }
 		if (ch >= L'0' && ch <= L'9') {
@@ -1073,52 +1385,79 @@ void Game::OnChar(wchar_t ch)
 		}
 		return;
 	}
-	if (m_textFocus == 4) {
-		size_t n = wcslen(m_monFind);
-		if (ch == 8) { if (n > 0) m_monFind[n - 1] = 0; m_codexPage = 0; return; }
-		if (ch == 13 || ch == 27 || ch == 9) { m_textFocus = 0; return; }
-		if (ch < 32) return;
-		if (n + 1 < 24) { m_monFind[n] = ch; m_monFind[n + 1] = 0; m_codexPage = 0; }
+	if (ch == 13 || ch == 27 || ch == 9) {
+		if (m_textFocus == 2 && ch == 13) CommitSlotName();
+		else m_textFocus = 0;
+		m_imeComp[0] = 0;
 		return;
 	}
-	if (m_textFocus == 2) {
-		size_t n = wcslen(m_slotEdit);
-		if (ch == 8) { if (n > 0) m_slotEdit[n - 1] = 0; return; }
-		if (ch == 13) { CommitSlotName(); return; }
-		if (ch == 27 || ch == 9) { m_textFocus = 0; return; }
-		if (ch < 32) return;
-		if (n + 1 < TAC_SLOT_NAME) { m_slotEdit[n] = ch; m_slotEdit[n + 1] = 0; }
-		return;
-	}
-	if (!m_textFocus || m_screen != SC_CREATE) return;
-	size_t n = wcslen(m_edit.name);
-	if (ch == 8) { if (n > 0) m_edit.name[n - 1] = 0; return; }
-	if (ch == 13 || ch == 27 || ch == 9) { m_textFocus = 0; return; }
+	wchar_t* buf = NULL;
+	int maxLen = 0;
+	if (!TextLive(buf, maxLen) || !buf) return;
+	if (ch == 8) { TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; return; }
 	if (ch < 32) return;
-	if (n + 1 < NAME_LEN) { m_edit.name[n] = ch; m_edit.name[n + 1] = 0; }
+	TacInsertAt(buf, maxLen, m_textCaret, ch);
+	if (m_textFocus == 4) m_codexPage = 0;
+}
+
+void Game::OnBecameActive()
+{
+	m_qMissN = 0;
+	m_qOkN = 0;
+	if (m_qCoolT < 0.6f) m_qCoolT = 0.6f;
+	m_fpsAt.QuadPart = 0;
+}
+
+void Game::ReleaseInput()
+{
+	m_lDown = FALSE;
+	m_rDown = FALSE;
+	m_mDown = FALSE;
+	m_dragRot = FALSE;
+	m_dragPan = FALSE;
+	m_downUi = FALSE;
+	m_previewDrag = FALSE;
+	m_previewPanDrag = FALSE;
+	m_monDrag = FALSE;
+	m_click = FALSE;
+	m_rclick = FALSE;
+	m_keyShift = FALSE;
+	m_fastFwd = FALSE;
+	m_padRepeat = 0;
+	m_padDirPrev = -1;
+	m_padTrig = 0;
+	memset(&m_padPrev, 0, sizeof(m_padPrev));
 }
 
 void Game::OnKey(int vk, BOOL down)
 {
 	if (vk == VK_SHIFT) { m_keyShift = down; m_fastFwd = down; }
 	if (!down) return;
+	if (vk == VK_PROCESSKEY) return;
 	if (m_textFocus == 3 && m_sellAsk) {
-		if (vk == VK_ESCAPE) { m_sellAsk = 0; m_textFocus = 0; TacSfx(TS_CANCEL); }
+		if (vk == VK_ESCAPE) { m_sellAsk = 0; m_textFocus = 0; m_imeComp[0] = 0; TacSfx(TS_CANCEL); }
 		else if (vk == VK_RETURN) m_sellGo = 1;
-		else if (vk == VK_BACK) { m_sellN /= 10; if (m_sellN < 1) m_sellN = 1; m_sellFresh = 0; }
+		else if (vk == VK_BACK || vk == VK_DELETE) { m_sellN /= 10; if (m_sellN < 1) m_sellN = 1; m_sellFresh = 0; }
 		return;
 	}
-	if (m_textFocus == 4) {
-		if (vk == VK_RETURN || vk == VK_ESCAPE) { m_textFocus = 0; TacSfx(TS_CANCEL); }
-		return;
-	}
-	if (m_textFocus == 2) {
-		if (vk == VK_RETURN) CommitSlotName();
-		else if (vk == VK_ESCAPE) m_textFocus = 0;
-		return;
-	}
-	if (m_textFocus && m_screen == SC_CREATE) {
-		if (vk == VK_RETURN || vk == VK_ESCAPE || vk == VK_TAB) m_textFocus = 0;
+	if (m_textFocus == 1 || m_textFocus == 2 || m_textFocus == 4) {
+		wchar_t* buf = NULL;
+		int maxLen = 0;
+		TextLive(buf, maxLen);
+		int n = buf ? TacWLen(buf) : 0;
+		if (m_textCaret < 0 || m_textCaret > n) m_textCaret = n;
+		if (vk == VK_RETURN) {
+			if (m_textFocus == 2) CommitSlotName();
+			else { m_textFocus = 0; m_imeComp[0] = 0; }
+			return;
+		}
+		if (vk == VK_ESCAPE || vk == VK_TAB) { m_textFocus = 0; m_imeComp[0] = 0; if (vk == VK_ESCAPE) TacSfx(TS_CANCEL); return; }
+		if (vk == VK_BACK) { if (buf) TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; return; }
+		if (vk == VK_DELETE) { if (buf) TacDeleteAt(buf, m_textCaret, FALSE); if (m_textFocus == 4) m_codexPage = 0; return; }
+		if (vk == VK_LEFT) { if (m_textCaret > 0) m_textCaret--; return; }
+		if (vk == VK_RIGHT) { if (m_textCaret < n) m_textCaret++; return; }
+		if (vk == VK_HOME) { m_textCaret = 0; return; }
+		if (vk == VK_END) { m_textCaret = n; return; }
 		return;
 	}
 	if (m_showHelp) {
@@ -1826,7 +2165,10 @@ float Game::DrawStatLines(const CharData& c, float x, float y, float w, const in
 // ============================================================ ポートレート
 void Game::InvalidatePortraits()
 {
-	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitKey[i] = -1;
+	for (int i = 0; i < Renderer::PORTRAIT_N; i++) {
+		m_portraitKey[i] = -1;
+		m_ptCacheWant[i] = -1;
+	}
 }
 
 BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody, BOOL live)
@@ -1837,7 +2179,8 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		if (len < 0.25f) len = 1.6f;
 		a.t = fmodf(m_time * 0.9f + slot * 0.41f, len);
 	}
-	ActorPose(a, m_lib, m_r);
+	if (!live || !a.poseValid || a.poseFrame != m_r.m_frame)
+		ActorPose(a, m_lib, m_r);
 	M4 world = ActorWorld(a, v3(0, 0, 0), PI);
 	V3 look;
 	float d;
@@ -1849,7 +2192,15 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	if (fitBody) {
 		float cx = 0, cy = 0, cz = 0, cr = 0;
 		float posedR = 0.f;
-		BOOL posed = a.proc == 3 && a.poseValid && m_r.CreaturePosedExtent(a.model, a.pose, cx, cy, cz, cr);
+		BOOL posed = FALSE;
+		if (a.proc == 3 && a.poseValid) {
+			if (a.frameModel == a.model && a.frameClip == a.clip && a.frameR > 0.15f) {
+				cx = a.frameC[0]; cy = a.frameC[1]; cz = a.frameC[2]; cr = a.frameR; posed = TRUE;
+			} else if (m_r.CreaturePosedExtent(a.model, a.pose, cx, cy, cz, cr)) {
+				a.frameC[0] = cx; a.frameC[1] = cy; a.frameC[2] = cz; a.frameR = cr;
+				a.frameClip = a.clip; a.frameModel = a.model; posed = TRUE;
+			}
+		}
 		if (posed) posedR = cr * fabsf(a.scale);
 		// バインド寸法は数センチのまま、描画は骨格の倍率で広がる。その寸法で枠を切るとカメラが体内に入る。
 		float h = a.height > 0.25f ? a.height : 1.2f;
@@ -1893,6 +2244,7 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	M4 proj = MPerspLH(.6f, 1.f, zn, max(50.f, d * 6.f));
 	if (!m_r.BeginPortrait(slot)) return FALSE;
 	m_r.SetCamera(view, proj, eye, m_time);
+	m_r.SetSight(NULL, 0, 0);
 	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
 	m_r.SetAmbient(RGBA8(206, 192, 178), RGBA8(148, 116, 94), .58f, .55f);
 	m_r.SetLight(Norm(v3(.42f, .84f, -.40f)), look, 3.5f);
@@ -1909,7 +2261,42 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 
 void Game::RenderPortraits()
 {
-	auto paint = [&](int s, int want, BOOL live) -> BOOL {
+	M4 camView = m_r.m_view, camProj = m_r.m_proj;
+	V3 camEye = m_r.m_eye;
+	float camT = m_r.m_time;
+	auto look = [](const CharData& c) -> unsigned {
+		unsigned h = (unsigned)c.gender;
+		h = h * 16777619u ^ (unsigned)c.cls;
+		h = h * 16777619u ^ (unsigned)c.body;
+		h = h * 16777619u ^ (unsigned)c.hair;
+		h = h * 16777619u ^ (unsigned)c.hairColor;
+		h = h * 16777619u ^ (unsigned)c.outfit;
+		h = h * 16777619u ^ (unsigned)c.hat;
+		h = h * 16777619u ^ (unsigned)c.cape;
+		h = h * 16777619u ^ (unsigned)c.lv;
+		h = h * 16777619u ^ (unsigned)c.reserved[6];
+		h = h * 16777619u ^ (unsigned)c.reserved[7];
+		return h;
+	};
+	auto showOf = [&](int roster) -> Actor* {
+		int idx = 0;
+		for (int i = 0; i < MAX_PARTY && idx < m_showN; i++) {
+			int r = m_save.party[i];
+			if (r < 0 || r >= MAX_ROSTER || !m_save.roster[r].used) continue;
+			if (r == roster) return &m_showAct[idx];
+			idx++;
+		}
+		return NULL;
+	};
+	auto fillChar = [&](int s, int want, const CharData& c) {
+		unsigned lk = look(c);
+		if (m_ptCacheWant[s] != want || m_ptCacheLook[s] != (int)lk) {
+			ActorFromChar(m_ptCache[s], m_lib, m_r, c);
+			m_ptCacheWant[s] = want;
+			m_ptCacheLook[s] = (int)lk;
+		}
+	};
+	auto paint = [&](int s, int want) -> BOOL {
 		if (want >= 100 && want < 100 + MAX_UNITS) {
 			int ui = want - 100;
 			const Unit& u = m_b.u[ui];
@@ -1919,34 +2306,37 @@ void Game::RenderPortraits()
 				return RenderActorPortrait(s, m_act[ui], bg0, bg1, u.team != TEAM_PLAYER, TRUE);
 			}
 			if (u.team == TEAM_PLAYER) {
-				ActorFromChar(m_ptActor, m_lib, m_r, u.ch);
-				return RenderActorPortrait(s, m_ptActor, RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
+				fillChar(s, want, u.ch);
+				return RenderActorPortrait(s, m_ptCache[s], RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
 			}
 			const MonsterDef& md = MonsterInfo(u.monster);
-			ActorFromMonster(m_ptActor, m_lib, m_r, u.monster, u.boss);
-			if (md.look == LK_MESH && m_ptActor.proc != 3) return FALSE;
-			return RenderActorPortrait(s, m_ptActor, u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60), RGBA8(50, 14, 20), 1, FALSE);
+			if (m_ptCacheWant[s] != want || m_ptCacheLook[s] != u.monster) {
+				ActorFromMonster(m_ptCache[s], m_lib, m_r, u.monster, u.boss);
+				m_ptCacheWant[s] = want;
+				m_ptCacheLook[s] = u.monster;
+			}
+			if (md.look == LK_MESH && m_ptCache[s].proc != 3) return FALSE;
+			return RenderActorPortrait(s, m_ptCache[s], u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60), RGBA8(50, 14, 20), 1, FALSE);
 		}
 		if (want >= 1 && want <= MAX_ROSTER) {
 			const CharData& c = m_save.roster[want - 1];
 			if (!c.used) return FALSE;
-			ActorFromChar(m_ptActor, m_lib, m_r, c);
-			return RenderActorPortrait(s, m_ptActor, RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
+			Actor* sh = showOf(want - 1);
+			if (sh && sh->model >= 0 && sh->poseValid) {
+				return RenderActorPortrait(s, *sh, RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, TRUE);
+			}
+			fillChar(s, want, c);
+			return RenderActorPortrait(s, m_ptCache[s], RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
 		}
 		return FALSE;
 	};
-	int shown = 0;
-	for (int s = 0; s < Renderer::PORTRAIT_N; s++) if (m_portraitWant[s] > 0) shown++;
-	int budget = shown > 0 ? shown : 1;
-	if (budget > 16) budget = 16;
-	for (int s = 0; s < Renderer::PORTRAIT_N && budget > 0; s++) {
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		int want = m_portraitWant[s];
 		if (want <= 0) { m_portraitKey[s] = want; continue; }
-		BOOL live = want >= 100 && want < 100 + MAX_UNITS && m_portraitKey[s] == want;
-		if (!paint(s, want, live)) continue;
+		if (!paint(s, want)) continue;
 		m_portraitKey[s] = want;
-		budget--;
 	}
+	m_r.SetCamera(camView, camProj, camEye, camT);
 }
 
 int Game::RosterPortrait(int roster) const
@@ -2106,7 +2496,7 @@ void Game::UpdateParticles(float dt)
 	static float sVX = 1e9f, sVZ = 1e9f;
 	if (m_r.SceneryPuffCount() > 0 && m_parts.size() < 2800) {
 		m_sceneAcc += dt;
-		float step = (m_save.quality == 4) ? 0.3f : 0.12f;
+		float step = (QualityNow() == 4) ? 0.3f : 0.12f;
 		int ticks = 0;
 		int puffTh = 0;
 		if (m_screen == SC_BATTLE) puffTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
@@ -2126,7 +2516,7 @@ void Game::UpdateParticles(float dt)
 					Burst(p + v3(0, 0.2f, 0), 1, 0.7f, 0.55f, 2.4f, 0.28f, 0.26f, 0.24f, 0, 1, -0.35f, 0.02f, 2.6f, 0.95f);
 				} else if (s.kind == 1) {
 					Burst(p, 2, 0.4f, 0.7f, 1.8f, 0.9f, 0.96f, 1.f, 0, 1, -0.1f, 0, 1.2f, 1.0f);
-					int drops = (m_save.quality == 4) ? 2 : 5;
+					int drops = (QualityNow() == 4) ? 2 : 5;
 					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
 						Particle q = {};
 						q.p = p + v3(m_rng.F(-0.35f, 0.35f), m_rng.F(-1.8f, 1.6f), m_rng.F(-0.35f, 0.35f));
@@ -2141,7 +2531,7 @@ void Game::UpdateParticles(float dt)
 				} else if (s.kind == 16) {
 					Burst(p, 4, 1.6f, 0.06f, 0.55f, 0.92f, 0.97f, 1.f, 1, 1, 14.f, 0.03f, 2.4f, 0.02f);
 					Burst(p, 2, 0.7f, 0.45f, 1.1f, 0.88f, 0.94f, 1.f, 0, 0, -0.08f, 0, 1.8f, 0.7f);
-					int drops = (m_save.quality == 4) ? 3 : 7;
+					int drops = (QualityNow() == 4) ? 3 : 7;
 					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
 						float ang = m_rng.F(0.f, 6.2831853f);
 						float sp = m_rng.F(1.1f, 3.2f);
@@ -2253,7 +2643,7 @@ void Game::UpdateParticles(float dt)
 			static float airAcc = 0.f;
 			const Map& map = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
 			int theme = Clampi(map.theme, 0, TH_COUNT - 1);
-			int q = m_save.quality;
+			int q = QualityNow();
 			float step = (q == 4) ? 0.22f : ((q <= 0) ? 0.12f : ((q >= 5) ? 0.05f : 0.08f));
 			int ambCap = (q == 4) ? 40 : ((q <= 0) ? 80 : ((q >= 5) ? 180 : 120));
 			int amb = 0;
@@ -2449,8 +2839,8 @@ void Game::UpdateParticles(float dt)
 		else if (wx == WX_PETAL) rate = 22.f;
 		else if (wx == WX_FOG) rate = 16.f;
 		else if (wx == WX_HEAT) rate = 18.f;
-		if (m_save.quality <= 0) rate *= 0.45f;
-		else if (m_save.quality == 4) rate *= 0.3f;
+		if (QualityNow() <= 0) rate *= 0.45f;
+		else if (QualityNow() == 4) rate *= 0.3f;
 		m_wxAcc += dt * rate;
 		V3 eye = m_eye;
 		V3 fwd = m_camTarget - eye;
@@ -3021,6 +3411,15 @@ void Game::BuildShowcase()
 	if (slicing) { m_loadA = spanA; m_loadB = spanB; }
 }
 
+void Game::GoHomeFromBattle()
+{
+	if (m_screen != SC_BATTLE) return;
+	QueueSuspend(2);
+	Persist();
+	m_menuConfirm = 0;
+	EnterBase();
+}
+
 void Game::EnterBase()
 {
 	m_r.LoadBattleCreatures(NULL, 0);
@@ -3119,30 +3518,36 @@ void Game::DrawShowcase3D()
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, target, 22.f);
 	m_r.SetFadeAbove(-1);
+	float faceYaw[MAX_PARTY];
+	float fx = 32.f, fz = 32.f;
+	if (m_showMap.nE > 0) { fx = m_showMap.eStartX[0] + .5f; fz = m_showMap.eStartZ[0] + .5f; }
+	int showN = m_showN;
+	if (showN > MAX_PARTY) showN = MAX_PARTY;
+	if (showN < 0) showN = 0;
+	for (int i = 0; i < showN; i++)
+		faceYaw[i] = atan2f(fx - m_showPos[i].x, fz - m_showPos[i].z);
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
-	for (int i = 0; i < m_showN; i++) {
+	m_r.BeginInstBatch();
+	for (int i = 0; i < showN; i++) {
 		Actor& a = m_showAct[i];
-		ActorPose(a, m_lib, m_r);
-		float fx = 32.f, fz = 32.f;
-		if (m_showMap.nE > 0) { fx = m_showMap.eStartX[0] + .5f; fz = m_showMap.eStartZ[0] + .5f; }
-		float face = atan2f(fx - m_showPos[i].x, fz - m_showPos[i].z);
-		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], face), dp, m_time);
+		if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
+		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], faceYaw[i]), dp, m_time);
 	}
+	m_r.EndInstBatch();
 	m_r.BeginMainPass();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawTerrain();
 	m_r.DrawWater();
-	for (int i = 0; i < m_showN; i++) {
+	m_r.BeginInstBatch();
+	for (int i = 0; i < showN; i++) {
 		Actor& a = m_showAct[i];
-		float fx = 32.f, fz = 32.f;
-		if (m_showMap.nE > 0) { fx = m_showMap.eStartX[0] + .5f; fz = m_showMap.eStartZ[0] + .5f; }
-		float face = atan2f(fx - m_showPos[i].x, fz - m_showPos[i].z);
 		DrawParams d = dp;
 		d.outline = .014f;
-		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], face), d, m_time);
+		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], faceYaw[i]), d, m_time);
 	}
+	m_r.EndInstBatch();
 	if (m_screen == SC_BATTLE || m_screen == SC_BASE || m_screen == SC_RESULT)
 		m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
@@ -3527,20 +3932,24 @@ void Game::DrawMonStage()
 	m_r.DrawTerrain();
 	DrawParams dp;
 	V3 pos = c;
+	m_r.BeginInstBatch();
 	if (m_monShown >= 0) {
 		pos.y += m_monAct.hover;
 		ActorPose(m_monAct, m_lib, m_r);
 		ActorDraw(m_r, m_lib, m_monAct, ActorWorld(m_monAct, pos, m_monYaw), dp, m_time);
 	}
+	m_r.EndInstBatch();
 	m_r.BeginMainPass();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawTerrain();
 	m_r.DrawWater();
+	m_r.BeginInstBatch();
 	if (m_monShown >= 0) {
 		DrawParams d = dp;
 		d.outline = .014f;
 		ActorDraw(m_r, m_lib, m_monAct, ActorWorld(m_monAct, pos, m_monYaw), d, m_time);
 	}
+	m_r.EndInstBatch();
 }
 
 void Game::DrawMonCodex()
@@ -3556,15 +3965,24 @@ void Game::DrawMonCodex()
 	float gap = U(6);
 	float clearW = U(36);
 	float findW = w - U(32) - clearW - gap;
-	wchar_t box[40];
+	wchar_t box[48];
 	BOOL finding = m_textFocus == 4;
-	if (m_monFind[0]) swprintf_s(box, L"%s%s", m_monFind, (finding && ((int)(m_time * 2.f) & 1)) ? L"|" : L"");
-	else wcscpy_s(box, finding ? L"|" : LangPick14(L"名前で絞る", L"Filter by name", L"Filtrer par nom", L"Filtra per nome", L"Filtrar por nombre", L"이름으로 찾기", L"按名字筛选", L"تصفية بالاسم", L"Фильтр по имени", L"Nach Name filtern", L"Filtrar por nome", L"Filter op naam", L"Filtruj po nazwie", L"Ada göre süz"));
-	if (Btn(ID_MON_FIND, x + U(16), fy, findW, bh, box, TRUE, finding, U(13))) m_textFocus = 4;
+	TacMarkBox(m_textBox, x + U(16), fy, findW, bh);
+	m_textPx = U(13);
+	if (finding) TacCaretStr(box, 48, m_monFind, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
+	else if (m_monFind[0]) wcsncpy_s(box, m_monFind, _TRUNCATE);
+	else wcscpy_s(box, LangPick14(L"名前で絞る", L"Filter by name", L"Filtrer par nom", L"Filtra per nome", L"Filtrar por nombre", L"이름으로 찾기", L"按名字筛选", L"تصفية بالاسم", L"Фильтр по имени", L"Nach Name filtern", L"Filtrar por nome", L"Filter op naam", L"Filtruj po nazwie", L"Ada göre süz"));
+	if (Btn(ID_MON_FIND, x + U(16), fy, findW, bh, box, TRUE, finding, U(13))) {
+		m_textFocus = 4;
+		m_textCaret = TacWLen(m_monFind);
+		m_imeComp[0] = 0;
+	}
 	if (Btn(ID_MON_CLEAR, x + U(16) + findW + gap, fy, clearW, bh, L"×", m_monFind[0] != 0, FALSE, U(16))) {
 		m_monFind[0] = 0;
 		m_codexPage = 0;
 		m_textFocus = 4;
+		m_textCaret = 0;
+		m_imeComp[0] = 0;
 	}
 	fy += bh + gap;
 	static const wchar_t* bandL[8] = { L"", L"Lv 1–10", L"Lv 11–20", L"Lv 21–40", L"Lv 41–60", L"Lv 61–100", L"Lv 101–200", L"Lv 201+" };
@@ -5091,6 +5509,10 @@ void Game::DrawShop()
 		else nm = GearName(m_sellId);
 		m_r.HudText(nm, px + pw * .5f, py + U(28), U(16), RGBA8(255, 226, 150), 1, 1);
 		wchar_t num[32];
+		if (m_textFocus == 3) {
+			TacMarkBox(m_textBox, px + U(80), py + U(48), pw - U(160), U(32));
+			m_textPx = U(22);
+		}
 		swprintf_s(num, L"%d / %d", m_sellN, m_sellMax);
 		m_r.HudText(num, px + pw * .5f, py + U(64), U(22), RGBA8(255, 255, 255), 1, 1);
 		float bw = (pw - U(48)) / 5.f;
@@ -5127,6 +5549,10 @@ static void KeepAppSettings(SaveData& dst, const SaveData& src)
 	dst.winSizeVer = src.winSizeVer;
 	dst.camSpeed = src.camSpeed;
 	dst.quality = src.quality;
+	dst.spare[0] = src.spare[0];
+	dst.spare[1] = src.spare[1];
+	dst.spare[2] = src.spare[2];
+	dst.spare[3] = src.spare[3];
 	dst.showGrid = src.showGrid;
 	dst.battleAnim = src.battleAnim;
 	dst.bgmVol = src.bgmVol;
@@ -5177,7 +5603,8 @@ void Game::AdoptActiveSlot(BOOL leaveBattle)
 		SlotClearRuntime();
 	}
 	ApplyAudio();
-	m_r.SetQuality(m_save.quality);
+	m_qHold = -1;
+	ApplyQualityNow(TacQualityWanted(m_save));
 	if (leaveBattle || m_screen == SC_BATTLE || m_screen == SC_RESULT) EnterBase();
 	else {
 		ProbeSuspend();
@@ -5360,9 +5787,14 @@ void Game::DrawSlotUi()
 			wchar_t info[48];
 			if (m_slotClear[i] < 0) wcsncpy_s(info, TT(TX_SLOT_EMPTY), _TRUNCATE);
 			else swprintf_s(info, L"%s %d", TT(TX_BASE_STAGE), m_slotClear[i]);
+			wchar_t shown[64];
+			if (editing) {
+				TacMarkBox(m_textBox, x + pad, top + rowH * i, w - pad * 2.f, rowH - U(3));
+				m_textPx = U(15);
+				TacCaretStr(shown, 64, m_slotEdit, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
+			} else wcsncpy_s(shown, nm, _TRUNCATE);
 			wchar_t line[160];
-			swprintf_s(line, L"%d   %s%s    %s%s%s", i + 1,
-				editing ? m_slotEdit : nm, editing ? L"_" : L"",
+			swprintf_s(line, L"%d   %s    %s%s%s", i + 1, shown,
 				info, (i == SlotCurrent()) ? L"    " : L"", (i == SlotCurrent()) ? TT(TX_SLOT_NOW) : L"");
 			BOOL en = !(mode == 4 && i == m_slotPick);
 			BOOL sel = (mode == 1) ? (i == m_slotPick) : FALSE;
@@ -5427,6 +5859,8 @@ void Game::DrawSlotUi()
 			if (Btn(ID_SLOT_REN, bx + (bw5 + gap), btnY, bw5, btnH, TT(TX_SLOT_REN), TRUE, m_textFocus == 2, U(14))) {
 				SlotTitle(m_slotPick, m_slotEdit, TAC_SLOT_NAME);
 				m_textFocus = 2;
+				m_textCaret = TacWLen(m_slotEdit);
+				m_imeComp[0] = 0;
 			}
 			if (Btn(ID_SLOT_COPY, bx + (bw5 + gap) * 2.f, btnY, bw5, btnH, TT(TX_SLOT_COPY), TRUE, FALSE, U(14))) {
 				if (m_textFocus == 2) CommitSlotName();
@@ -5484,6 +5918,103 @@ void Game::DrawSlotUi()
 	m_click = FALSE;
 	m_rclick = FALSE;
 	m_activateId = -1;
+}
+
+void Game::DrawPerfHud()
+{
+	if (!TacFpsOn(m_save)) return;
+	if (m_screen == SC_LOADING || m_screen == SC_FAIL) return;
+	if (m_fps < 1.f) return;
+	int fps = (int)(m_fps + 0.5f);
+	if (fps < 15) fps = 15;
+	if (fps > 240) fps = 240;
+	int q = QualityNow();
+	wchar_t line[96];
+	if (m_save.quality == TAC_Q_AUTO)
+		swprintf_s(line, L"%dfps  %s %s", fps, TT(TX_SET_Q_AUTO), TT(TacQualityTx(q)));
+	else
+		swprintf_s(line, L"%dfps  %s", fps, TT(TacQualityTx(q)));
+	float px = U(13);
+	if (px < 11.f) px = 11.f;
+	float pad = U(8);
+	float tw = m_r.TextWidth(line, px, 0);
+	float th = px + U(8);
+	float bw = tw + pad * 2.f;
+	float x = (float)m_w - bw - U(10);
+	float y = U(8);
+	if (m_screen == SC_BATTLE && m_hud.col > 80.f) {
+		float gapTop = m_orderBottom + U(6);
+		float gapBot = (float)m_h - m_hud.margin;
+		if (m_miniHitN > 0) {
+			float topMini = m_miniY[0];
+			for (int i = 1; i < m_miniHitN && i < 3; i++) if (m_miniY[i] < topMini) topMini = m_miniY[i];
+			gapBot = topMini - U(4);
+		}
+		float colX = m_hud.orderX;
+		float colW = m_hud.orderW > 8.f ? m_hud.orderW : (m_hud.col > 0.f ? (float)m_w - m_hud.col : bw);
+		if (gapBot - gapTop >= th + 2.f && colW >= 48.f) {
+			float fit = colW - U(4);
+			if (bw > fit && fit > 36.f) {
+				px = px * fit / bw;
+				if (px < 9.f) px = 9.f;
+				tw = m_r.TextWidth(line, px, 0);
+				th = px + U(6);
+				bw = tw + pad * 2.f;
+			}
+			x = colX + max(0.f, (colW - bw) * 0.5f);
+			y = gapTop;
+			if (x + bw > colX + colW - 2.f) x = colX + colW - bw - 2.f;
+		} else {
+			x = m_hud.margin;
+			y = m_hud.panelTop - th - U(6);
+			if (y < m_hud.partyB + U(4)) y = m_hud.partyB + U(4);
+			float right = m_hud.col - U(8);
+			if (x + bw > right) {
+				px = max(9.f, px * (right - x) / max(bw, 1.f));
+				tw = m_r.TextWidth(line, px, 0);
+				th = px + U(6);
+				bw = tw + pad * 2.f;
+				y = m_hud.panelTop - th - U(6);
+				if (y < m_hud.partyB + U(4)) y = m_hud.partyB + U(4);
+			}
+			if (y + th > m_hud.panelTop - 2.f) {
+				x = m_hud.stageR + U(6);
+				y = m_hud.margin;
+				if (x + bw > m_hud.col - U(4)) x = max(m_hud.margin, m_hud.col - U(4) - bw);
+			}
+		}
+	} else if (m_screen == SC_BASE && m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3) {
+		float margin = max(8.f, min(U(20), (float)m_w * .02f));
+		float pw = min(U(330), (float)m_w - margin * 2.f);
+		float ph = min((float)m_h - margin * 2.f, (float)m_h - 8.f);
+		float titleH = min(U(24), ph * .045f);
+		float titleCy = margin + titleH + 8.f;
+		float titleW = m_r.TextWidth(TT(TX_TITLE), titleH, 1);
+		float titleR = margin + pw * .5f + titleW * .5f + U(8);
+		float right = margin + pw - U(8);
+		float free = right - titleR;
+		if (free < bw && free > 48.f) {
+			px = max(9.f, px * free / bw);
+			tw = m_r.TextWidth(line, px, 0);
+			th = px + U(6);
+			bw = tw + pad * 2.f;
+		}
+		if (bw <= free) {
+			x = right - bw;
+			y = titleCy - th * .5f;
+		} else {
+			x = margin + U(8);
+			y = titleCy + titleH * .5f + U(2);
+			float btnTop = margin + titleH * 2.f + 14.f;
+			if (y + th > btnTop - 2.f) y = max(titleCy + titleH * .5f + 1.f, btnTop - th - 2.f);
+		}
+	}
+	if (x < U(4)) x = U(4);
+	if (y < U(4)) y = U(4);
+	if (x + bw > (float)m_w - U(4)) x = (float)m_w - U(4) - bw;
+	if (y + th > (float)m_h - U(4)) y = (float)m_h - U(4) - th;
+	Panel(x, y, bw, th, 0.82f);
+	m_r.HudText(line, x + pad + tw, y + th * .5f, px, RGBA8(236, 238, 244), 2, 0);
 }
 
 void Game::DrawBaseUi()
@@ -5632,7 +6163,7 @@ void Game::DrawBaseUi()
 	}
 	by += bh + Ku(12);
 	if (m_baseOpt) {
-		const int nOpt = 10;
+		const int nOpt = 11;
 		float room = helpY - 8.f - by;
 		if (room < 8.f) room = 8.f;
 		float rowH = room / (float)nOpt;
@@ -5642,10 +6173,12 @@ void Game::DrawBaseUi()
 		auto take = [&]() { float y0 = by; by += rowH; return y0; };
 		float oy = take();
 		mark(ID_BASE_QUALITY, TX_BSH_QUALITY, bx, oy, bw, bhOpt);
-		if (int q = Sel(ID_BASE_QUALITY, bx, oy, bw, bhOpt, TT(TX_SET_QUALITY), TT(TacQualityTx(m_save.quality)))) {
-			m_save.quality = TacQualityAt(TacQualitySlot(m_save.quality) + q);
-			m_r.SetQuality(m_save.quality);
-			InvalidatePortraits();
+		wchar_t qv[72];
+		if (m_save.quality == TAC_Q_AUTO)
+			swprintf_s(qv, L"%s  %s", TT(TX_SET_Q_AUTO), TT(TacQualityTx(QualityNow())));
+		else wcscpy_s(qv, TT(TacQualityTx(m_save.quality)));
+		if (int q = Sel(ID_BASE_QUALITY, bx, oy, bw, bhOpt, TT(TX_SET_QUALITY), qv)) {
+			PickQuality(q);
 		}
 		oy = take();
 		mark(ID_BASE_ANIM, TX_BSH_ANIM, bx, oy, bw, bhOpt);
@@ -5669,6 +6202,9 @@ void Game::DrawBaseUi()
 		oy = take();
 		mark(ID_BASE_WIN, TX_BSH_WIN, bx, oy, bw, bhOpt);
 		if (Sel(ID_BASE_WIN, bx, oy, bw, bhOpt, TT(TX_SET_WIN), TT(TacWinTx(TacWinMode(m_save))))) TacSetWinMode(m_save, TacWinMode(m_save) ^ 1);
+		oy = take();
+		mark(ID_BASE_FPS, TX_BSH_FPS, bx, oy, bw, bhOpt);
+		if (Sel(ID_BASE_FPS, bx, oy, bw, bhOpt, TT(TX_SET_FPS), TT(TacFpsOn(m_save) ? TX_CR_ON : TX_CR_OFF))) TacSetFps(m_save, !TacFpsOn(m_save));
 		float kSound = U(34) > 1.f ? rowH / U(34) : k;
 		by = DrawSoundOpts(bx, by, bw, kSound, &tipTx, &tipAy, &tipAx, &tipAw, &tipAh);
 	}
@@ -6020,10 +6556,14 @@ void Game::DrawCreate3D()
 	dp.outline = .01f;
 	dp.rim = .55f;
 	m_r.BeginShadowPass();
+	m_r.BeginInstBatch();
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
+	m_r.EndInstBatch();
 	m_r.BeginMainPass();
 	m_r.DrawSky(RGBA8(22, 28, 48), RGBA8(58, 64, 88), 0, 0);
+	m_r.BeginInstBatch();
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
+	m_r.EndInstBatch();
 }
 
 void Game::DrawCreateUi()
@@ -6045,13 +6585,21 @@ void Game::DrawCreateUi()
 		BOOL foc = m_textFocus != 0;
 		UiBtn b = { ID_CR_NAME, bx, yy, nw, rh, 1, 0 };
 		m_btns.push_back(b);
-		if (ClickIn(bx, yy, nw, rh) || m_activateId == ID_CR_NAME) { m_textFocus = 1; m_activateId = -1; }
+		if (ClickIn(bx, yy, nw, rh) || m_activateId == ID_CR_NAME) {
+			m_textFocus = 1;
+			m_textCaret = TacWLen(m_edit.name);
+			m_imeComp[0] = 0;
+			m_activateId = -1;
+		}
 		BOOL nf = m_navMode && m_focusId == ID_CR_NAME;
+		TacMarkBox(m_textBox, bx + U(70), yy, nw - U(70), rh);
+		m_textPx = U(17);
 		m_r.HudRect(bx, yy, nw, rh, foc ? RGBA8(40, 46, 80, 240) : RGBA8(20, 24, 44, 230));
 		m_r.HudFrame(bx, yy, nw, rh, U(1.5f), foc || nf ? RGBA8(255, 230, 150) : RGBA8(120, 104, 74));
 		m_r.HudText(TT(TX_CR_NAME), bx + U(8), yy + rh * .5f, U(13), RGBA8(200, 190, 160), 0, 0);
-		wchar_t nm[NAME_LEN + 4];
-		swprintf_s(nm, L"%s%s", m_edit.name, (foc && fmodf(m_time, 1.f) < .5f) ? L"|" : L"");
+		wchar_t nm[NAME_LEN + 48];
+		if (foc) TacCaretStr(nm, NAME_LEN + 48, m_edit.name, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
+		else wcsncpy_s(nm, m_edit.name, _TRUNCATE);
 		m_r.HudText(nm[0] ? nm : TT(TX_CR_NAMEHINT), bx + U(70), yy + rh * .5f, U(17), nm[0] ? RGBA8(255, 255, 255) : RGBA8(140, 140, 150), 0, 1);
 		if (Btn(ID_CR_RANDOM, bx + nw + U(8), yy, U(102), rh, TT(TX_CR_RANDOM), TRUE, FALSE, U(14))) RandomName(m_edit.name, m_edit.gender, m_rng);
 		BOOL onRand = (m_mouseSeen && !m_navMode && Hit(bx + nw + U(8), yy, U(102), rh)) || (m_navMode && m_focusId == ID_CR_RANDOM);

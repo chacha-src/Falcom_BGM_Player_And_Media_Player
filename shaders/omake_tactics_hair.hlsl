@@ -10,7 +10,7 @@ cbuffer HairParm : register(b0)
 	row_major float4x4 Pal;    // 頭の骨（バインドから今の姿勢へ）。頭蓋の当たり用
 	row_major float4x4 PalInv;
 	float4 Sim;                // x=dt y=歩数 z=1 で置き直し w=時刻
-	float4 Wind;
+	float4 Wind;               // xyz=風 w=1 で背中にマントがある
 	float4 Body;               // xyz=胴の中心 w=身長
 	float4 CapA[8];            // カプセル始点 xyz、w=半径。w<0 で無効
 	float4 CapB[8];            // 終点 xyz、w=終点の半径
@@ -156,7 +156,8 @@ float3 Part(float3 p, float pick)
 	float t = saturate(-dy / 0.50);
 	// HumF0。胸の関節から、最大の胸が前 19cm、ドレスの前が 21cm。
 	float front = lerp(0.200, 0.175, t);
-	float rear = lerp(0.160, 0.185, t);
+	// 背中の 16〜18cm はマントの布。マントが無いときは胴の後ろだけにする。
+	float rear = lerp(lerp(0.100, 0.118, t), lerp(0.160, 0.185, t), step(0.5, Wind.w));
 	float halfS = lerp(0.185, 0.200, t);
 	float rf = f >= 0.0 ? front : rear;
 	float e = (s * s) / (halfS * halfS) + (f * f) / (rf * rf);

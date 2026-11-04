@@ -718,7 +718,7 @@ bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, 
 bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, int rMax, int tx, int tz, int toLayer, bool needLos);
 bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos);
 int  Dist(int ax, int az, int bx, int bz);
-// 層差の距離。2層以上は届かない。1つ上は重い、1つ下は軽い。届かないとき -1。
+// 層差の距離。2層以上は届かない。1層差は範囲技が隣接なら届く。届かないとき -1。
 inline int LayerRangeCost(int fromL, int toL)
 {
 	if (fromL < 0) fromL = 0;
@@ -727,7 +727,7 @@ inline int LayerRangeCost(int fromL, int toL)
 	if (toL >= LAY_N) toL = LAY_N - 1;
 	int up = toL - fromL;
 	if (up >= 2 || up <= -2) return -1;
-	if (up > 0) return 4;
+	if (up > 0) return 1;
 	if (up < 0) return 1;
 	return 0;
 }
@@ -788,6 +788,7 @@ void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int&
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
+long long ExpShareAoe(long long e, int nHit);
 int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
 
 // ---------------- 戦闘全体 ----------------
@@ -863,26 +864,41 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------
 #pragma pack(push, 4)
-// 画質の並び。保存値は 0軽量 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破。
-// 画面では超軽量から限界突破へ回す。肌の瑞々しさは標準から段々強く、テッセレーションは肌に使わない。
+// 画質の並び。保存値は 0軽量 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破 7自動。
+// 画面は自動から限界突破へ回す。肌の瑞々しさは標準から段々強く、テッセレーションは肌に使わない。
+enum { TAC_Q_AUTO = 7 };
 inline int TacQualitySlot(int q)
+{
+	static const int ord[8] = { 7, 4, 0, 1, 2, 3, 5, 6 };
+	for (int i = 0; i < 8; ++i) if (ord[i] == q) return i;
+	return 3;
+}
+inline int TacQualityAt(int slot)
+{
+	static const int ord[8] = { 7, 4, 0, 1, 2, 3, 5, 6 };
+	if (slot < 0) slot += 8;
+	if (slot >= 8) slot %= 8;
+	return ord[slot];
+}
+inline int TacQualityTx(int q)
+{
+	if (q == TAC_Q_AUTO) return TX_SET_Q_AUTO;
+	static const int tx[7] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH, TX_SET_Q_ULTRA, TX_SET_Q_TINY, TX_SET_Q_PEAK, TX_SET_Q_LIMIT };
+	if (q < 0 || q > 6) q = 1;
+	return tx[q];
+}
+inline int TacQualityFixedSlot(int q)
 {
 	static const int ord[7] = { 4, 0, 1, 2, 3, 5, 6 };
 	for (int i = 0; i < 7; ++i) if (ord[i] == q) return i;
 	return 2;
 }
-inline int TacQualityAt(int slot)
+inline int TacQualityFixedAt(int slot)
 {
 	static const int ord[7] = { 4, 0, 1, 2, 3, 5, 6 };
-	if (slot < 0) slot += 7;
-	if (slot >= 7) slot %= 7;
+	if (slot < 0) slot = 0;
+	if (slot > 6) slot = 6;
 	return ord[slot];
-}
-inline int TacQualityTx(int q)
-{
-	static const int tx[7] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH, TX_SET_Q_ULTRA, TX_SET_Q_TINY, TX_SET_Q_PEAK, TX_SET_Q_LIMIT };
-	if (q < 0 || q > 6) q = 1;
-	return tx[q];
 }
 
 struct SaveData {
@@ -894,7 +910,7 @@ struct SaveData {
 	int stageSel;
 	int winX, winY, winW, winH;
 	int camSpeed;
-	int quality;               // 0=軽量 1=標準 2=高 3=超綺麗 4=超軽量 5=最高 6=限界突破
+	int quality;               // 0=軽量 1=標準 2=高 3=超綺麗 4=超軽量 5=最高 6=限界突破 7=自動
 	int showGrid;              // bit0=グリッド bit1=敵の脅威範囲
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
@@ -909,7 +925,7 @@ struct SaveData {
 	int reserved[4];
 	int partyCap;              // 5..15。店の編成拡張券。11体目以降はステージ制限
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
-	int spare[32];             // version 7。まだ未使用
+	int spare[32];             // version 7。[0]=1自動 0固定 [1]=GPU名ハッシュ [2]=自動の現在段 [3]=自動の上限
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
 // version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。
@@ -969,9 +985,30 @@ inline int TacAiTx(int a)
 	return tx[a];
 }
 inline int TacWinTx(int m) { return m ? TX_WIN_FULL : TX_WIN_BOX; }
+// showGrid の bit10。0 が既定で、フレームレート表示は出さない。
+inline int TacFpsOn(const SaveData& s) { return (s.showGrid & (1 << 10)) != 0; }
+inline void TacSetFps(SaveData& s, int on)
+{
+	TacEnsureOpt(s);
+	if (on) s.showGrid |= (1 << 10);
+	else s.showGrid &= ~(1 << 10);
+}
+inline int TacQualityWanted(const SaveData& s)
+{
+	if (s.quality == TAC_Q_AUTO) {
+		int a = s.spare[2];
+		if (a < 0 || a > 6) a = 1;
+		return a;
+	}
+	if (s.quality < 0 || s.quality > 6) return 1;
+	return s.quality;
+}
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);
 bool SaveWrite(const SaveData& s);
+int  TacQualitySuggestFromGpu();
+void TacQualityEnsureAutoDefault(SaveData& s);
+inline void TacQualityUserLock(SaveData& s) { s.spare[0] = 0; }
 
 enum { GEAR_STASH = 12 };
 struct GearDef {

@@ -88,6 +88,7 @@ public:
 	void SyncBgm();
 	BOOL WantsClose() const { return m_wantClose; }
 	void ClearClose() { m_wantClose = FALSE; }
+	void GoHomeFromBattle();
 	SaveData& Save() { return m_save; }
 	void Persist();
 
@@ -101,7 +102,21 @@ public:
 	void ApplyZoomHold(float dt = 0.f);
 	void OnChar(wchar_t ch);
 	void OnPad(const PadState& p, float dt);
+	void ReleaseInput();
+	void OnBecameActive();
 	BOOL WantsTextInput() const { return m_textFocus != 0; }
+	int TextFocus() const { return m_textFocus; }
+	void ClearTextFocus();
+	BOOL TextLive(wchar_t*& buf, int& maxLen);
+	void SetTextCaret(int caret);
+	int TextCaret() const { return m_textCaret; }
+	void SetImeComp(const wchar_t* s);
+	void TextBoxRect(RECT& rc) const;
+	void SetSellFromText(const wchar_t* s);
+	void SellToText(wchar_t* s, int n) const;
+	void NotifyFindChanged();
+	float TextCaretPx();
+	float TextFontPx() const { return m_textPx > 1.f ? m_textPx : 16.f; }
 
 private:
 	// 基盤
@@ -112,6 +127,10 @@ private:
 	void DrawLoadHud();
 	static void LoadPulseCb(int cur, int n, void* user);
 	BOOL Recover();
+	void PulseQuality(float work, float span);
+	void ApplyQualityNow(int q);
+	void PickQuality(int delta);
+	int QualityNow() const;
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
@@ -131,6 +150,7 @@ private:
 	int Sel(int id, float x, float y, float w, float h, const wchar_t* label, const wchar_t* value, int on = 1);
 	BOOL Hit(float x, float y, float w, float h) const;
 	BOOL ClickIn(float x, float y, float w, float h);
+	void DrawPerfHud();
 	void Panel(float x, float y, float w, float h, float alpha = 1.f);
 	void Bar(float x, float y, float w, float h, float frac, DWORD c0, DWORD c1, float ghost = -1);
 	void NavMove(int dx, int dy);
@@ -255,6 +275,10 @@ private:
 	BOOL CheckBattleOver();
 	void ComputeOverlays();
 	void BuildOverlayQuads();
+public:
+	int AppendOverlayQuad(VtxS* dst, int n, int cap, int x, int z, DWORD c, float lift, float yAbs, int layer, int segs) const;
+	int BuildRangeBand(int z0, int z1, const BYTE* block, VtxS* dst, int cap) const;
+private:
 	void ClearRipples();
 	void UpdateCamera(float dt);
 	void UpdateUnitsVisual(float dt);
@@ -318,12 +342,19 @@ private:
 	Renderer m_r;
 	Library m_lib;
 	SaveData m_save;
+	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz, m_qSlots;
+	int m_syncArm, m_syncArmN;
+	BOOL m_qDrew;
+	float m_qCoolT, m_syncLock;
+	float m_fps;
+	LARGE_INTEGER m_fpsAt;
 	HWND m_hwnd;
 	int m_w, m_h;
 	float m_ui;
 	float m_time;
 	Screen m_screen;
 	BOOL m_wantClose;
+	BOOL m_goHome;
 	BOOL m_loaded;
 	int m_loadFrames;
 	int m_loadPm;
@@ -350,6 +381,10 @@ private:
 	BOOL m_navMode;
 	int m_selDelta;     // フォーカス中セレクタの左右入力
 	int m_textFocus;
+	int m_textCaret;
+	wchar_t m_imeComp[48];
+	float m_textBox[4];
+	float m_textPx;
 	BOOL m_keyShift;
 	PadState m_padPrev;
 	float m_padRepeat;
@@ -427,6 +462,9 @@ private:
 	int m_ptSlotUnit[Renderer::PORTRAIT_N];
 	int m_ptForUnit[MAX_UNITS];
 	Actor m_ptActor;
+	Actor m_ptCache[Renderer::PORTRAIT_N];
+	int m_ptCacheWant[Renderer::PORTRAIT_N];
+	int m_ptCacheLook[Renderer::PORTRAIT_N];
 	int m_sortieAsk;
 	int m_midStage;
 	int m_autoStage;

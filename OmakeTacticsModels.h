@@ -82,6 +82,9 @@ struct Actor {
 	int gripClip;       // 人体の Grip クリップ。無ければ -1
 	Pose pose;
 	int poseValid;
+	unsigned poseFrame;     // ActorPose した描画フレーム。同じフレームの再評価を省く
+	float frameC[3], frameR; // 肖像の枠。同じクリップでは使い回す
+	int frameClip, frameModel;
 	const void* modelPtr;   // ActorPose 時に設定
 	int poseHold;           // 0なし 1座り 2寝 3凍結（動き止め）
 	float blinkSave;        // 0未満は未保存。凍結中は瞬きを止める

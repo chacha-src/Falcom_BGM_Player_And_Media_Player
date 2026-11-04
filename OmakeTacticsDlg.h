@@ -11,6 +11,7 @@ class CTacView : public CWnd
 public:
 	COmakeTacticsDlg* m_owner = nullptr;
 	BOOL CreateView(CWnd* parent, const CRect& rc);
+	void ReleaseButtons();
 protected:
 	afx_msg void OnMouseMove(UINT nFlags, CPoint pt);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint pt);
@@ -26,6 +27,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg UINT OnGetDlgCode();
+	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
 	DECLARE_MESSAGE_MAP()
 	void Down(int btn, CPoint pt);
 	void Up(int btn, CPoint pt);
@@ -41,6 +43,7 @@ public:
 
 	void RequestDestroyWindow();
 	BOOL HandleKeyMessage(MSG* pMsg);
+	BOOL Destroying() const { return m_destroying; }
 	otac::Game& GameRef() { return m_game; }
 	BOOL GameReady() const { return m_gameOk; }
 
@@ -51,28 +54,52 @@ protected:
 	virtual void OnOK() {}
 	virtual void OnCancel() { RequestDestroyWindow(); }
 	afx_msg void OnTimer(UINT_PTR id);
+	afx_msg LRESULT OnTacPace(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
+	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+	afx_msg void OnTacCapClose();
+	afx_msg LRESULT OnTacDestroy(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* mmi);
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+	afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg UINT OnGetDlgCode();
 	DECLARE_MESSAGE_MAP()
 
 	void LayoutView();
 	void StoreWindowRect();
 	void ApplyWinMode();
 	void PollPad(float dt);
+	void KickPace();
+	void StartPace();
+	void StopPace();
+	void DrainInput();
+	void ReleaseUiInput();
+	void SyncImeEdit();
+	void PullImeToGame();
+	void PlaceImeWindow();
+	void HideImeEdit();
+	static DWORD WINAPI PaceThread(LPVOID param);
 
 	CTacView m_view;
 	otac::Game m_game;
 	BOOL m_gameOk = FALSE;
 	BOOL m_destroying = FALSE;
 	BOOL m_swapShown = FALSE;
-	LARGE_INTEGER m_qpf = {}, m_last = {};
-	double m_paceNext = 0;
-	int m_paceHz = 0;
+	BOOL m_fg = TRUE;
+	LARGE_INTEGER m_qpf = {}, m_tickAt = {};
+	HANDLE m_paceStop = NULL;
+	HANDLE m_paceThread = NULL;
+	BOOL m_inPace = FALSE;
+	volatile LONG m_pacePosted = 0;
+	volatile LONG m_paceHz = 60;
 	int m_winApplied = -1;
 	int m_viewW = 0, m_viewH = 0;
+	CEdit m_ime;
+	CFont m_imeFont;
+	int m_imeKind = 0;
+	BOOL m_imePush = FALSE;
 };
