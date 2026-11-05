@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4739; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4755; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -169,10 +169,18 @@
                   + wingforc (Kaneko Z80+YM2151+MSM6295; same ports as blazeon plus OKI at 0A, 16/16)
                   + cybertnk (Coreland Z80+Y8950x2 FM via YM3812; command mailbox at 9000, 8/8)
                   + utoukond (Banpresto Z80+YM3438+X1-010; latch at C0, work RAM at E000, X1 window at F000, 14/14)
+                  + poundfor (Irem m99 Z80+YM2151; catalog byte is the latch, Title/Player Out/Game Over requeue, 14/14)
+                  + bbmanw (Irem m99 Z80+YM2151; same latch, short cues and the 14s tails requeue, 27/27)
+                  + buggychl (Taito Z80+AYx2+MSM5232; latch at 5000, 0xFF arms the player, 8/8)
                   + cos68snd/illumi68snd/kounai68snd/korosi368snd_fix (X68k tank IRQ6 stays on the glue $40C wrapper)
                   + gktz68snd (X68k DOS INTVCS takes the vector and handler from the stack)
                   + kobe68snd (X68k OPMDRV flag wait gets one IRQ6 so the timer can start)
                   + mahoudai68snd (X68k three OPM songs already meet the bar)
+                  + mujinto3_98 (PC-98 FM26K 386 prefixes; BGM01 / BGM02 / BGM03 stay audible for 8s)
+                  + burai298 (PC-98 rashin driver relocated off the IVT; BGM 0a7 / 0a8 / 0a9 stay audible for 8s)
+                  + kigen (same rashin entry; title menu / first castle / field stay audible for 8s)
+                  + minrva98 (same rashin entry; snd03 / snd04 / snd05 stay audible for 8s)
+                  + rashin98 (same rashin entry; three arranged songs stay audible for 8s)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -536,6 +544,7 @@ static const char* const kSupported[] = {
 	"bbakraid",
 	"bbird_98",
 	"bblgum",
+	"bbmanw",
 	"bburn_msx",
 	"bchopper",
 	"bd68snd",
@@ -684,6 +693,7 @@ static const char* const kSupported[] = {
 	"bucky",
 	"budokan_at",
 	"bugbomber_at",
+	"buggychl",
 	"bullet",
 	"bullfgt",
 	"bump",
@@ -691,6 +701,7 @@ static const char* const kSupported[] = {
 	"bunka_98",
 	"burai",
 	"burai1_msx",
+	"burai298",
 	"burai2_msx",
 	"burnforc",
 	"burningf",
@@ -2249,6 +2260,7 @@ static const char* const kSupported[] = {
 	"kickoff",
 	"kidniki",
 	"kidsap_98",
+	"kigen",
 	"kikcubic",
 	"kikikai",
 	"kikikaik",
@@ -2728,6 +2740,7 @@ static const char* const kSupported[] = {
 	"mgamescr_98",
 	"mgarms98",
 	"mgarts98",
+	"mgcldtex",
 	"mgear2_msx",
 	"mgear_msx",
 	"mhard_98",
@@ -2769,6 +2782,7 @@ static const char* const kSupported[] = {
 	"minktoy1_98",
 	"minktoy2_98",
 	"minktoy3_98",
+	"minrva98",
 	"mirage2_98",
 	"mirage68snd",
 	"mirage_98",
@@ -2890,6 +2904,7 @@ static const char* const kSupported[] = {
 	"msw98",
 	"msword",
 	"msxfan_msx",
+	"mtlchamp",
 	"mtwins",
 	"mueurope_at",
 	"mug-r_98",
@@ -2898,6 +2913,7 @@ static const char* const kSupported[] = {
 	"mugenya_98",
 	"mugsmash",
 	"mujinto2_98",
+	"mujinto3_98",
 	"mujintou_98",
 	"mule",
 	"mule_msx",
@@ -3136,6 +3152,7 @@ static const char* const kSupported[] = {
 	"pdoll2p_98",
 	"pdoll_98",
 	"pdollp_98",
+	"pdrift",
 	"pduo_98",
 	"pecker_98",
 	"pedge_at",
@@ -3239,6 +3256,7 @@ static const char* const kSupported[] = {
 	"popnpop",
 	"populous_at",
 	"posesso_98",
+	"poundfor",
 	"pow",
 	"power_sl_98",
 	"powerdrift_at",
@@ -3267,6 +3285,7 @@ static const char* const kSupported[] = {
 	"primglex",
 	"priv_rf_at",
 	"privateer_at",
+	"prmrsocr",
 	"prodigy88",
 	"produce88",
 	"progear",
@@ -3435,6 +3454,7 @@ static const char* const kSupported[] = {
 	"rapidrvr",
 	"rarue_98",
 	"rashin68snd",
+	"rashin98",
 	"rastan",
 	"rastan_msx",
 	"raveracw",
@@ -3920,6 +3940,7 @@ static const char* const kSupported[] = {
 	"smanbow_msx",
 	"smariosp",
 	"smars_msx",
+	"smgp",
 	"snatcher",
 	"snatcher_msx",
 	"snoopygc_at",
@@ -4433,6 +4454,8 @@ static const char* const kSupported[] = {
 	"u7p2si_at",
 	"uccops",
 	"uccopsj",
+	"ufo21",
+	"ufo800",
 	"ufomini",
 	"ufosensi",
 	"ukiukiis_98",
@@ -4535,6 +4558,7 @@ static const char* const kSupported[] = {
 	"vimana",
 	"vindctr2",
 	"viofight",
+	"viostorm",
 	"virgin_d_98",
 	"vision2_98",
 	"vision_98",

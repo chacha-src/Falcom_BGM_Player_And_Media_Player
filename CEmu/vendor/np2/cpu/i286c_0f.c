@@ -265,6 +265,9 @@ I286EXT i286c_cts(void) {
 	ip = I286_IP;
 	GET_PCBYTE(op);
 
+	if (pc98_op0f_386(op))
+		return;
+
 	if (op == 0) {
 		if (!(I286_MSW & MSW_PE)) {
 			INT_NUM(6, ip - 1);

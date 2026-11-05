@@ -490,6 +490,7 @@ void Game::DropSuspend(int kind)
 
 void Game::QueueSuspend(int kind)
 {
+	if (m_demo) return;
 	if (m_screen != SC_BATTLE || m_b.nUnits < 1) return;
 	SnapLock();
 	TacSnap* s = (kind == 1) ? g_qMid : g_qAuto;
@@ -946,7 +947,10 @@ void Game::BeginTurn()
 {
 	if (CheckBattleOver()) return;
 	int ui = m_b.NextActor();
-	if (ui < 0) { m_victory = 0; m_phase = PH_OVER; m_overT = 0; TacSfx(TS_LOSE); return; }
+	if (ui < 0) {
+		if (m_demo) { DemoLeave(); return; }
+		m_victory = 0; m_phase = PH_OVER; m_overT = 0; TacSfx(TS_LOSE); return;
+	}
 	m_cur = ui;
 	m_turnOpen = TRUE;
 	Unit& u = m_b.u[ui];
@@ -1028,7 +1032,8 @@ void Game::BeginTurn()
 		m_phase = PH_P_MOVE;
 		m_cx = u.x; m_cz = u.z; m_cLayer = u.deck;
 		m_cursorValid = TRUE;
-		m_navMode = FALSE;
+		// デモ中はマウスの下へカーソルを吸い寄せない。盤の枠だけ後で進める。
+		m_navMode = m_demo ? TRUE : FALSE;
 		m_ai.wild = 0;
 	} else {
 		AiDecide(m_b, ui, m_ai, m_rng, TacAi(m_save));
@@ -1040,8 +1045,33 @@ void Game::BeginTurn()
 	QueueSuspend(2);
 }
 
+BOOL Game::DemoEnding() const
+{
+	if (m_b.AliveCount(TEAM_PLAYER) <= 0) return TRUE;
+	if (m_bossDown) return TRUE;
+	int foes = m_b.AliveCount(TEAM_ENEMY);
+	if (foes <= 0) return TRUE;
+	if (foes > 1) return FALSE;
+	int dead = 0, hp = 1, mx = 1;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& u = m_b.u[i];
+		if (u.team != TEAM_ENEMY) continue;
+		if (!u.alive || u.hp <= 0) { dead++; continue; }
+		hp = u.hp;
+		mx = max(1, u.ch.stat[S_HP]);
+	}
+	// 誰か倒したあとの最後の1体、または最初から1体で体力が半分を切ったら、倒す前に帰る。
+	if (dead > 0) return TRUE;
+	return hp * 2 <= mx;
+}
+
 BOOL Game::CheckBattleOver()
 {
+	if (m_demo) {
+		if (m_demo == 3) return TRUE;
+		if (DemoEnding()) { DemoLeave(); return TRUE; }
+		return FALSE;
+	}
 	if (m_phase == PH_OVER) return TRUE;
 	int win = -1;
 	if (m_bossDown || m_b.AliveCount(TEAM_ENEMY) == 0) win = 1;
@@ -1061,6 +1091,193 @@ BOOL Game::CheckBattleOver()
 		}
 	}
 	return TRUE;
+}
+
+void Game::DemoDrive(float dt)
+{
+	// マウスは動かさない。盤の選択枠と、メニューのハイライトだけを進める。
+	if (m_demo != 2 || m_cur < 0 || m_cur >= m_b.nUnits) return;
+	if (m_phase != m_demoPh) {
+		m_demoPh = (int)m_phase;
+		m_demoTick = 0;
+		m_demoStep = 0;
+		if (m_phase == PH_P_MOVE) m_demoAct = 0;
+	}
+	if (m_phase == PH_LEVELUP) {
+		m_lvqN = 0;
+		m_lvqCur = 0;
+		m_promoAsk = 0;
+		FinishUnitTurn(1);
+		return;
+	}
+	if (m_phase == PH_MOVING || m_phase == PH_ACTION || m_phase == PH_E_MOVE || m_phase == PH_E_SHOW || m_phase == PH_INTRO)
+		return;
+	Unit& u = m_b.u[m_cur];
+	if (u.team != TEAM_PLAYER) return;
+	m_navMode = TRUE;
+	if (m_phase == PH_P_MOVE) {
+		if (m_demoAct == 0) {
+			AiDecide(m_b, m_cur, m_ai, m_rng, 2);
+			m_demoAct = 1;
+			m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
+		}
+		m_demoStep += dt;
+		if (m_demoStep < 0.16f) return;
+		m_demoStep = 0;
+		int gx = m_ai.moveX, gz = m_ai.moveZ;
+		if (!Map::In(gx, gz)) { gx = u.x; gz = u.z; }
+		int n = ReachPath(m_reach, u.x, u.z, gx, gz, m_path, MAPN * 4, u.deck);
+		auto arrive = [&]() {
+			if ((m_cx != u.x || m_cz != u.z) && ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
+				m_moved = 1;
+				StartMove(m_cur, m_cx, m_cz, PH_P_CMD);
+			} else OpenCommand();
+			m_demoAct = 2;
+		};
+		if (n <= 1 || (m_cx == gx && m_cz == gz)) { arrive(); return; }
+		int at = -1;
+		for (int i = 0; i < n; i++) if (PackX(m_path[i]) == m_cx && PackZ(m_path[i]) == m_cz) { at = i; break; }
+		int nxt = at >= 0 ? at + 1 : 1;
+		if (nxt >= n) { arrive(); return; }
+		m_cx = PackX(m_path[nxt]);
+		m_cz = PackZ(m_path[nxt]);
+		m_cLayer = PackDeck(m_path[nxt]);
+		m_cursorValid = TRUE;
+		TacSfx(TS_CURSOR);
+		UpdateHover();
+		V3 cp = CellCenter(m_cx, m_cz);
+		V3 d = cp - v3(u.px, u.py, u.pz);
+		float L = Len(v3(d.x, 0, d.z));
+		if (L > 4.f) m_camPan = v3(d.x, 0, d.z) * ((L - 4.f) / L);
+		else m_camPan = v3(0, 0, 0);
+		return;
+	}
+	if (m_phase == PH_P_CMD) {
+		BOOL skillOk = m_ai.skill >= 0 && !IsSummonId(m_ai.skill) && SkillWorth(m_b, m_cur, m_ai.skill);
+		int choice = skillOk ? 1 : (m_ai.target >= 0 ? 0 : 2);
+		int show = m_demoTick < 2 ? m_demoTick : choice;
+		if (show == 0) m_focusId = ID_BT_ATTACK;
+		else if (show == 1) m_focusId = ID_BT_SKILL;
+		else m_focusId = ID_BT_WAIT;
+		m_demoStep += dt;
+		if (m_demoStep < 0.34f) return;
+		m_demoStep = 0;
+		m_demoTick++;
+		if (m_demoTick < 3) return;
+		if (choice == 1) {
+			int sk = m_ai.skill;
+			m_skillShape = 0;
+			m_skillEl = 0;
+			int before = 0;
+			if (IsCraftId(sk)) {
+				m_skillTab = 2;
+				for (int i = 0; i < CRAFT_SLOT_N; i++) {
+					if (u.craftEq[i] < CRAFT_BASE) continue;
+					if (u.craftEq[i] == sk) break;
+					before++;
+				}
+			} else if (IsFormSkill(sk)) {
+				m_skillTab = 3;
+				before = sk - SKL_FORM0;
+				if (before < 0) before = 0;
+			} else {
+				const SkillDef& sd = SkillInfo(sk);
+				m_skillTab = (sd.kind == SK_HEAL || sd.kind == SK_BUFF) ? 1 : 0;
+				for (int s = 0; s < sk; s++) {
+					if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+					const SkillDef& od = SkillInfo(s);
+					if (od.kind == SK_PASSIVE) continue;
+					if (m_skillTab == 0 && od.kind != SK_PHYS && od.kind != SK_MAGIC) continue;
+					if (m_skillTab == 1 && od.kind != SK_HEAL && od.kind != SK_BUFF) continue;
+					before++;
+				}
+			}
+			int per = 8;
+			float bh = min(U(40.f), max(18.f, (float)m_h * 0.055f));
+			int fit = (int)(((float)m_h - U(220.f)) / (bh + U(4.f)));
+			if (fit < per) per = max(3, fit);
+			if (per < 1) per = 1;
+			m_skillPage = before / per;
+			m_phase = PH_P_SKILLS;
+			m_navMode = TRUE;
+			m_focusId = ID_BT_SKTAB + m_skillTab;
+			return;
+		}
+		if (choice == 0) {
+			m_phase = PH_P_TARGET;
+			m_target = m_ai.target;
+			m_navMode = TRUE;
+			ComputeOverlays();
+			m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
+			return;
+		}
+		if (!m_moved && u.buffDef < 1) u.buffDef = 1;
+		if (!m_moved) {
+			AddPopup(v3(u.px, u.py + 1.f, u.pz), TT(TX_BT_GUARD), RGBA8(180, 210, 255), 1, MSG_FACE);
+			AddLog(TT(TX_BT_GUARD), RGBA8(180, 210, 255));
+		}
+		FinishUnitTurn(0);
+		return;
+	}
+	if (m_phase == PH_P_SKILLS) {
+		int sk = m_ai.skill;
+		int bid = ID_BT_SK0 + sk;
+		if (IsCraftId(sk)) {
+			int slot = 0;
+			for (int i = 0; i < CRAFT_SLOT_N; i++) if (u.craftEq[i] == sk) slot = i;
+			bid = ID_BT_CRAFT0 + slot;
+		} else if (IsFormSkill(sk)) bid = ID_BT_FORM0 + (sk - SKL_FORM0);
+		m_focusId = m_demoTick == 0 ? (ID_BT_SKTAB + m_skillTab) : bid;
+		m_demoStep += dt;
+		if (m_demoStep < 0.42f) return;
+		m_demoStep = 0;
+		m_demoTick++;
+		if (m_demoTick < 2) return;
+		m_cmdSkill = sk;
+		m_phase = PH_P_SKILLTARGET;
+		m_navMode = TRUE;
+		if (IsFormSkill(sk) && !m_cmdFaced) { m_cmdFace0 = u.face; m_cmdFaced = 1; }
+		ComputeOverlays();
+		PickSkillCursor(sk);
+		AimFormFace();
+		m_ai.castX = m_cx;
+		m_ai.castZ = m_cz;
+		m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
+		return;
+	}
+	if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) {
+		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && SkillInfo(m_cmdSkill).rMax == 0) {
+			m_demoStep += dt;
+			if (m_demoStep < 0.28f) return;
+			BattleConfirmCursor();
+			if (m_phase == PH_P_SKILLTARGET) FinishUnitTurn(1);
+			return;
+		}
+		int tx = m_ai.castX, tz = m_ai.castZ;
+		if (m_phase == PH_P_TARGET && m_ai.target >= 0 && m_ai.target < m_b.nUnits) {
+			tx = m_b.u[m_ai.target].x;
+			tz = m_b.u[m_ai.target].z;
+		}
+		if (!Map::In(tx, tz)) { tx = m_cx; tz = m_cz; }
+		m_demoStep += dt;
+		if (m_demoStep < 0.12f) return;
+		m_demoStep = 0;
+		if (m_cx == tx && m_cz == tz) {
+			BattleConfirmCursor();
+			if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) FinishUnitTurn(1);
+			return;
+		}
+		if (m_cx < tx) m_cx++;
+		else if (m_cx > tx) m_cx--;
+		else if (m_cz < tz) m_cz++;
+		else if (m_cz > tz) m_cz--;
+		m_cursorValid = TRUE;
+		TacSfx(TS_CURSOR);
+		UpdateHover();
+		return;
+	}
+	m_demoStep += dt;
+	if (m_demoStep > 1.2f) FinishUnitTurn(1);
 }
 
 void Game::ConfuseSelf(int ui)
@@ -1918,7 +2135,7 @@ void Game::CycleLayer(int dir)
 void Game::UpdateHover()
 {
 	if (m_screen != SC_BATTLE) return;
-	if (m_mouseSeen && !m_navMode && !m_seqCut) {
+	if (m_mouseSeen && !m_navMode && !m_seqCut && !m_demo) {
 		BOOL overUi = FALSE;
 		for (auto& b : m_btnsPrev) if (m_mx >= b.x && m_my >= b.y && m_mx < b.x + b.w && m_my < b.y + b.h) overUi = TRUE;
 		int cx, cz, lay = m_cLayer;
@@ -2075,6 +2292,19 @@ BOOL Game::HasAttackTarget(int ui) const
 		if (ChestInRange(ui, x, z)) return TRUE;
 	}
 	return FALSE;
+}
+
+BOOL Game::CursorInAttackRange() const
+{
+	if (!m_cursorValid || m_cur < 0 || !Map::In(m_cx, m_cz)) return FALSE;
+	if (m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET) return FALSE;
+	int v = m_ovAtk[m_cz][m_cx];
+	if (v != 1 && v != 3 && v != 4 && v != 7) return FALSE;
+	int L = m_cLayer;
+	if (L < 0 || L >= LAY_N) L = 0;
+	BYTE lay = m_ovAtkLay[m_cz][m_cx];
+	if (!lay) return TRUE;
+	return (lay & (BYTE)(1 << L)) != 0;
 }
 
 BOOL Game::CanTarget(int ui, int t, int skill) const
@@ -3517,7 +3747,7 @@ void Game::FinishSeq()
 					if (!m_rng.Chance(chance)) continue;
 					int beforeN = m_save.gearN;
 					int gid = GearTryDrop(m_save, u.ch.lv, u.monster, m_rng);
-					if (m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
+					if (!m_demo && m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
 					if (gid > 0) {
 						AddPopup(v3(u.px, u.py + 1.3f + r * .35f, u.pz), GearName(gid), RGBA8(180, 255, 190), 1, MSG_RISE, .12f * r, 3.6f);
 						AddLog(GearName(gid), RGBA8(180, 255, 190));
@@ -3581,7 +3811,9 @@ void Game::FinishSeq()
 	if (lootSfx) TacSfx(TS_GET);
 	m_b.RebuildOcc();
 	AwardExp();
-	if (m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; }
+	// デモは経験値のカードも転職の確認も出さない。数値は既に入っているので、手番だけ閉じる。
+	if (m_demo) { m_lvqN = 0; m_lvqCur = 0; m_promoAsk = 0; FinishUnitTurn(1); }
+	else if (m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; }
 	else FinishUnitTurn(1);
 }
 
@@ -3873,6 +4105,9 @@ void Game::UpdateCamera(float dt)
 
 void Game::UpdateBattle(float dt)
 {
+	if (m_demo == 3) return;
+	// 装備の確認や売却はデモでは出さない。セーブは戻すので、ここで選ばせない。
+	if (m_demo && (m_stashFull || m_shopFit)) { m_stashFull = 0; m_shopFit = 0; }
 	if (m_stashFull) { UpdateUnitsVisual(dt); return; }
 	m_phaseT += dt;
 	UpdateUnitsVisual(dt);
@@ -3939,8 +4174,9 @@ void Game::UpdateBattle(float dt)
 	default: break;
 	}
 	if (m_screen != SC_BATTLE) return;
+	if (m_demo == 2) DemoDrive(dt);
 	UpdateCamera(dt);
-	if (m_mouseSeen && !m_navMode) UpdateHover();
+	if (m_mouseSeen && !m_navMode && !m_demo) UpdateHover();
 	if (m_flashWhite > 0) m_flashWhite = max(0.f, m_flashWhite - dt * 3.f);
 }
 
@@ -5291,6 +5527,53 @@ static int WrapHeldLines(Renderer& r, const wchar_t* src, float maxW, float px, 
 	return nLine;
 }
 
+// 空白・改行でのみ折る。単語の途中では切らない。入り切らなければ末尾に…。
+static int WrapSpaceLines(Renderer& r, const wchar_t* src, float maxW, float px, wchar_t lines[][180], int maxLines)
+{
+	if (!src || !src[0] || maxLines < 1) return 0;
+	int nLine = 0;
+	int dropped = 0;
+	wchar_t cur[180];
+	cur[0] = 0;
+	const wchar_t* p = src;
+	while (*p && nLine < maxLines) {
+		while (*p == L' ' || *p == L'\t' || *p == 0x3000 || *p == L'\r') p++;
+		if (!*p) break;
+		if (*p == L'\n') {
+			if (cur[0]) {
+				wcscpy_s(lines[nLine++], cur);
+				cur[0] = 0;
+			}
+			p++;
+			continue;
+		}
+		const wchar_t* e = p;
+		while (*e && *e != L' ' && *e != L'\t' && *e != 0x3000 && *e != L'\n' && *e != L'\r') e++;
+		size_t n = (size_t)(e - p);
+		if (n > 178) n = 178;
+		wchar_t tok[180];
+		memcpy(tok, p, n * sizeof(wchar_t));
+		tok[n] = 0;
+		wchar_t trial[180];
+		if (!cur[0]) wcscpy_s(trial, tok);
+		else swprintf_s(trial, L"%s %s", cur, tok);
+		if (cur[0] && maxW > 8.f && r.TextWidth(trial, px, 0) > maxW) {
+			wcscpy_s(lines[nLine++], cur);
+			if (nLine >= maxLines) { dropped = 1; cur[0] = 0; break; }
+			wcscpy_s(cur, tok);
+		} else wcscpy_s(cur, trial);
+		p = e;
+	}
+	if (*p) dropped = 1;
+	if (cur[0] && nLine < maxLines) wcscpy_s(lines[nLine++], cur);
+	else if (cur[0]) dropped = 1;
+	if (dropped && nLine > 0) {
+		size_t len = wcslen(lines[nLine - 1]);
+		if (len + 1 < 178) wcscat_s(lines[nLine - 1], L"…");
+	}
+	return nLine;
+}
+
 // ============================================================ HUD（戦闘）
 void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 {
@@ -5360,6 +5643,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		DWORD fc = u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90);
 		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
 		float cy = y + U(12);
+		float textLim = y + h - U(6);
 		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? RGBA8(255, 255, 255) : RGBA8(255, 176, 168), 0, 1);
 		cy += gapN;
 		m_r.HudText(lv, tx, cy, FitTextPx(lv, tw, U(13), 0), RGBA8(255, 226, 150), 0, 0);
@@ -5394,9 +5678,9 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 			float sfs = U(11);
 			float sw = m_r.TextWidth(sl, sfs, 0);
 			if (sw > tw && sw > 1.f) sfs *= tw / sw;
-			m_r.HudText(sl, tx, cy, sfs, RGBA8(210, 210, 220), 0, 0);
+			if (cy < textLim) m_r.HudText(sl, tx, cy, sfs, RGBA8(210, 210, 220), 0, 0);
 			cy += gapStat;
-			if (st[0]) {
+			if (st[0] && cy < textLim) {
 				m_r.HudText(st, tx, cy, U(11), RGBA8(200, 230, 255), 0, 0);
 				cy += gapSt;
 			}
@@ -5420,9 +5704,10 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 				cy += gapMp;
 			}
 		}
-		if (nSk > 0) {
+		if (nSk > 0 && cy < textLim) {
 			cy += U(6);
 			for (int i = 0; i < nSk; i++) {
+				if (cy > textLim) break;
 				float fs = linePx;
 				float lw = m_r.TextWidth(skLine[i], fs, 0);
 				if (lw > tw && lw > 1.f) fs *= tw / lw;
@@ -5600,6 +5885,19 @@ void Game::DrawTurnOrder()
 		m_ordAnimT = m_time;
 	}
 	float slide = 1.f - Smooth01(Clampf((m_time - m_ordAnimT) / .34f, 0, 1));
+	int aimTg[MAX_UNITS];
+	int aimN = 0;
+	unsigned char aimOn[MAX_UNITS];
+	memset(aimOn, 0, sizeof(aimOn));
+	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cursorValid && CursorInAttackRange()) {
+		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0)
+			aimN = SkillTargets(m_b, m_cur, m_cmdSkill, m_cx, m_cz, aimTg, MAX_UNITS);
+		else {
+			int t = m_b.UnitAt(m_cx, m_cz, m_cLayer);
+			if (t >= 0 && CanTarget(m_cur, t, -1)) aimTg[aimN++] = t;
+		}
+		for (int k = 0; k < aimN; k++) if (aimTg[k] >= 0 && aimTg[k] < MAX_UNITS) aimOn[aimTg[k]] = 1;
+	}
 	float w = m_hud.orderW > 8.f ? m_hud.orderW : min(U(188.f), (float)m_w * 0.4f);
 	float x = m_hud.orderW > 8.f ? m_hud.orderX : (float)m_w - w - 8.f;
 	float y = max(4.f, m_hud.margin > 0.f ? m_hud.margin : U(14));
@@ -5633,7 +5931,18 @@ void Game::DrawTurnOrder()
 		if (now) m_r.HudRect(x + U(4), y0, w - U(8), rh - U(4), RGBA8(255, 220, 120, 60));
 		if (ghost) m_r.HudRect(x + U(4), y0, w - U(8), rh - U(4), RGBA8(255, 190, 60, 50));
 		float ps = max(4.f, rh * 0.72f);
-		DrawPortrait(BattlePortrait(ui), x + U(4) + xoff, y0 + max(1.f, (rh - ps) * .35f), ps, fc);
+		float py = y0 + max(1.f, (rh - ps) * .35f);
+		DrawPortrait(BattlePortrait(ui), x + U(4) + xoff, py, ps, fc);
+		if (ui >= 0 && ui < MAX_UNITS && aimOn[ui] && aimN > 0 && ps >= 12.f) {
+			wchar_t nb[8];
+			swprintf_s(nb, L"%d", aimN);
+			float bs = max(11.f, min(U(16.f), ps * 0.5f));
+			float bx = x + U(4) + xoff + ps - bs * 0.72f;
+			float by = py - bs * 0.12f;
+			m_r.HudRect(bx, by, bs, bs, RGBA8(28, 16, 6, 235));
+			m_r.HudFrame(bx, by, bs, bs, 1.f, RGBA8(255, 214, 90));
+			m_r.HudText(nb, bx + bs * .5f, by + bs * .5f, min(U(12.f), bs * 0.7f), RGBA8(255, 236, 160), 1, 1);
+		}
 		wchar_t nm[64];
 		UnitTitle(u, nm, 64);
 		float nameMax = max(8.f, w - ps - U(28));
@@ -5990,6 +6299,7 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 	if (!Map::In(m_cx, m_cz)) return;
 	const Unit& a = m_b.u[m_cur];
 	if (a.team != TEAM_PLAYER || a.hp <= 0) return;
+	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && !CursorInAttackRange()) return;
 	int skill = m_phase == PH_P_SKILLTARGET ? m_cmdSkill : -1;
 	int ids[MAX_UNITS];
 	int n = 0;
@@ -6104,8 +6414,18 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 	}
 }
 
-void Game::DrawForecast()
+void Game::DrawForecast(float* ox, float* oy, float* ow, float* oh)
 {
+	if (ox) *ox = 0;
+	if (oy) *oy = 0;
+	if (ow) *ow = 0;
+	if (oh) *oh = 0;
+	auto markBox = [&](float bx, float by, float bw, float bh) {
+		if (ox) *ox = bx;
+		if (oy) *oy = by;
+		if (ow) *ow = bw;
+		if (oh) *oh = bh;
+	};
 	long long opt = 0, pes = 0;
 	int showLv = 0, nTg = 0;
 	BOOL combat = FALSE;
@@ -6157,6 +6477,7 @@ void Game::DrawForecast()
 	};
 	if (!combat) {
 		Panel(x, y, w, h, .42f);
+		markBox(x, y, w, h);
 		drawExp(x, y + U(6), w);
 		return;
 	}
@@ -6165,6 +6486,16 @@ void Game::DrawForecast()
 	const Unit& a = m_b.u[m_cur];
 	const Unit& d = m_b.u[t];
 	Panel(x, y, w, h, .42f);
+	markBox(x, y, w, h);
+	auto rowH = [](float px) { return px * 1.75f + 6.f; };
+	float room = h - expBlock - U(8);
+	float title0 = U(14), body0 = U(15), small0 = U(13), tiny0 = U(12);
+	float need = rowH(title0) + rowH(body0) * 2.f + rowH(small0) * 4.f + rowH(tiny0) * 2.f;
+	float sc = (room > 8.f && need > room) ? room / need : 1.f;
+	if (sc < 0.68f) sc = 0.68f;
+	float titlePx = title0 * sc, bodyPx = body0 * sc, smallPx = small0 * sc, tinyPx = tiny0 * sc;
+	float cy = y + U(4);
+	float bot = y + h - expBlock - U(2);
 	{
 		wchar_t ft[96];
 		int wx = WeatherTx(TacWx(m_b.weather));
@@ -6173,58 +6504,71 @@ void Game::DrawForecast()
 		else if (wx) swprintf_s(ft, L"%s  %s", TT(TX_BT_FORECAST), TT(wx));
 		else if (hx) swprintf_s(ft, L"%s  %s", TT(TX_BT_FORECAST), TT(hx));
 		else wcscpy_s(ft, TT(TX_BT_FORECAST));
-		m_r.HudText(ft, x + w * .5f, y + U(16), FitTextPx(ft, w - U(16), U(14), 0), RGBA8(255, 226, 150), 1, 1);
+		m_r.HudText(ft, x + w * .5f, cy + rowH(titlePx) * .5f, FitTextPx(ft, w - U(16), titlePx, 0), RGBA8(255, 226, 150), 1, 1);
+		cy += rowH(titlePx);
 	}
-	auto side = [&](const Unit& u, float cx, int dmg, int hit, int crit, int hits, BOOL can, int enemyHp) {
-		wchar_t nm[64];
-		UnitTitle(u, nm, 64);
-		m_r.HudText(nm, cx, y + U(40), U(15), RGBA8(255, 255, 255), 1, 1);
-		wchar_t l[64];
-		int after = max(0, enemyHp - (can ? dmg * hits : 0));
-		swprintf_s(l, L"%s %s", TT(TX_ST_HP), TacNum(u.hp));
-		m_r.HudText(l, cx, y + U(62), U(13), RGBA8(220, 220, 220), 1, 0);
-		if (!can) { m_r.HudText(TT(TX_BT_NOCOUNTER), cx, y + U(96), U(14), RGBA8(170, 170, 180), 1, 0); return; }
-		if (hits > 1) swprintf_s(l, L"%s %s ×%d", TT(TX_BT_DMG), TacNum(dmg), hits);
-		else swprintf_s(l, L"%s %s", TT(TX_BT_DMG), TacNum(dmg));
-		m_r.HudText(l, cx, y + U(84), U(15), RGBA8(255, 200, 160), 1, 1);
-		swprintf_s(l, L"%s %d%%   %s %d%%", TT(TX_BT_HIT), hit, TT(TX_BT_CRIT), crit);
-		m_r.HudText(l, cx, y + U(106), U(13), RGBA8(220, 230, 255), 1, 0);
-		(void)after;
+	wchar_t nmA[64], nmD[64];
+	UnitTitle(a, nmA, 64);
+	UnitTitle(d, nmD, 64);
+	auto pair = [&](const wchar_t* L, const wchar_t* R, float px, DWORD cL, DWORD cR, int bold) {
+		if (cy + rowH(px) > bot) return;
+		float yy = cy + rowH(px) * .5f;
+		float col = w * .42f;
+		if (L && L[0]) m_r.HudText(L, x + w * .25f, yy, FitTextPx(L, col, px, bold), cL, 1, bold);
+		if (R && R[0]) m_r.HudText(R, x + w * .75f, yy, FitTextPx(R, col, px, bold), cR, 1, bold);
+		cy += rowH(px);
 	};
-	side(a, x + w * .25f, f.dmg, f.hit, f.crit, f.hits, TRUE, d.hp);
-	side(d, x + w * .75f, f.cdmg, f.chit, f.ccrit, f.chits, f.canCounter, a.hp);
-	m_r.HudText(L"VS", x + w * .5f, y + U(70), U(20), RGBA8(255, 226, 150), 1, 1);
-	{
-		int el = skill >= 0 ? SkillInfo(skill).element : EL_NONE;
-		if (AilmentBreak(d, el) > 1.5f)
-			m_r.HudText(L"×2", x + w * .5f, y + U(96), U(16), RGBA8(255, 80, 60), 1, 1);
-	}
+	pair(nmA, nmD, bodyPx, RGBA8(255, 255, 255), RGBA8(255, 255, 255), 1);
+	wchar_t hpA[64], hpD[64];
+	swprintf_s(hpA, L"%s %s", TT(TX_ST_HP), TacNum(a.hp));
+	swprintf_s(hpD, L"%s %s", TT(TX_ST_HP), TacNum(d.hp));
+	pair(hpA, hpD, smallPx, RGBA8(220, 220, 220), RGBA8(220, 220, 220), 0);
+	wchar_t dmgA[80], dmgD[80];
+	if (f.hits > 1) swprintf_s(dmgA, L"%s %s ×%d", TT(TX_BT_DMG), TacNum(f.dmg), f.hits);
+	else swprintf_s(dmgA, L"%s %s", TT(TX_BT_DMG), TacNum(f.dmg));
+	int el = skill >= 0 ? SkillInfo(skill).element : EL_NONE;
+	BOOL weak2 = AilmentBreak(d, el) > 1.5f;
+	if (!f.canCounter) wcscpy_s(dmgD, TT(TX_BT_NOCOUNTER));
+	else if (f.chits > 1) swprintf_s(dmgD, L"%s %s ×%d%s", TT(TX_BT_DMG), TacNum(f.cdmg), f.chits, weak2 ? L"  ×2" : L"");
+	else swprintf_s(dmgD, L"%s %s%s", TT(TX_BT_DMG), TacNum(f.cdmg), weak2 ? L"  ×2" : L"");
+	pair(dmgA, dmgD, bodyPx, RGBA8(255, 200, 160), f.canCounter ? RGBA8(255, 200, 160) : RGBA8(170, 170, 180), 1);
+	wchar_t hitA[64], hitD[64];
+	swprintf_s(hitA, L"%s %d%%   %s %d%%", TT(TX_BT_HIT), f.hit, TT(TX_BT_CRIT), f.crit);
+	if (f.canCounter) swprintf_s(hitD, L"%s %d%%   %s %d%%", TT(TX_BT_HIT), f.chit, TT(TX_BT_CRIT), f.ccrit);
+	else hitD[0] = 0;
+	pair(hitA, hitD, smallPx, RGBA8(220, 230, 255), RGBA8(220, 230, 255), 0);
 	int after = max(0, d.hp - f.dmg * f.hits);
-	wchar_t l[64];
-	swprintf_s(l, L"%s → %s", TacNum(d.hp), TacNum(after));
-	m_r.HudText(l, x + w * .75f, y + U(130), U(13), after == 0 ? RGBA8(255, 120, 100) : RGBA8(200, 200, 200), 1, 1);
 	int aAfter = f.canCounter ? max(0, a.hp - f.cdmg * f.chits) : a.hp;
-	swprintf_s(l, L"%s → %s", TacNum(a.hp), TacNum(aAfter));
-	m_r.HudText(l, x + w * .25f, y + U(130), U(13), aAfter == 0 ? RGBA8(255, 120, 100) : RGBA8(200, 200, 200), 1, 1);
+	wchar_t aftA[64], aftD[64];
+	swprintf_s(aftA, L"%s → %s", TacNum(a.hp), TacNum(aAfter));
+	swprintf_s(aftD, L"%s → %s", TacNum(d.hp), TacNum(after));
+	pair(aftA, aftD, smallPx, aAfter == 0 ? RGBA8(255, 120, 100) : RGBA8(200, 200, 200), after == 0 ? RGBA8(255, 120, 100) : RGBA8(200, 200, 200), 1);
 	if (a.team == TEAM_PLAYER && d.team == TEAM_ENEMY) {
 		int pct = FoeMasteryPct(FoeKills(d.monster));
-		if (pct > 0) {
-			swprintf_s(l, L"%s +%d%%", FoeMasteryWord(), pct);
-			m_r.HudText(l, x + w * .25f, y + U(150), U(12), RGBA8(255, 214, 120), 1, 0);
+		if (pct > 0 && cy + rowH(tinyPx) <= bot) {
+			wchar_t ms[64];
+			swprintf_s(ms, L"%s +%d%%", FoeMasteryWord(), pct);
+			m_r.HudText(ms, x + w * .5f, cy + rowH(tinyPx) * .5f, FitTextPx(ms, w - U(16), tinyPx, 0), RGBA8(255, 214, 120), 1, 0);
+			cy += rowH(tinyPx);
 		}
 	}
-	{
+	if (cy + rowH(smallPx) <= bot) {
+		wchar_t faceL[96];
 		int fp = f.face == 2 ? 25 : (f.face == 1 ? 10 : -10);
 		int hs = BattleHeightSteps(m_b, a.x, a.z, d.x, d.z);
 		const wchar_t* face = TT(f.face == 2 ? TX_BT_FACE_BACK : (f.face == 1 ? TX_BT_FACE_SIDE : TX_BT_FACE_FRONT));
-		if (hs > 0) swprintf_s(l, L"%s %+d%%  %s", face, fp, TT(TX_HIGH));
-		else if (hs < 0) swprintf_s(l, L"%s %+d%%  %s", face, fp, TT(TX_LOW));
-		else swprintf_s(l, L"%s %+d%%", face, fp);
-		m_r.HudText(l, x + w * .5f, y + U(168), U(13), RGBA8(255, 230, 170), 1, 0);
+		if (hs > 0) swprintf_s(faceL, L"%s %+d%%  %s", face, fp, TT(TX_HIGH));
+		else if (hs < 0) swprintf_s(faceL, L"%s %+d%%  %s", face, fp, TT(TX_LOW));
+		else swprintf_s(faceL, L"%s %+d%%", face, fp);
+		m_r.HudText(faceL, x + w * .5f, cy + rowH(smallPx) * .5f, FitTextPx(faceL, w - U(16), smallPx, 0), RGBA8(255, 230, 170), 1, 0);
+		cy += rowH(smallPx);
+	}
+	if (cy + rowH(tinyPx) <= bot) {
 		const TerrainDef& td = TerrainInfo(m_b.map.At(d.x, d.z).t);
 		if (td.defPct || td.avoPct) {
-			swprintf_s(l, L"%s  %s+%d%%  AVO+%d%%", TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct);
-			m_r.HudText(l, x + w * .5f, y + U(186), U(12), RGBA8(200, 220, 200), 1, 0);
+			wchar_t ter[96];
+			swprintf_s(ter, L"%s  %s+%d%%  AVO+%d%%", TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct);
+			m_r.HudText(ter, x + w * .5f, cy + rowH(tinyPx) * .5f, FitTextPx(ter, w - U(16), tinyPx, 0), RGBA8(200, 220, 200), 1, 0);
 		}
 	}
 	if (opt > 0) drawExp(x, y + h - expBlock, w);
@@ -7371,12 +7715,23 @@ void Game::DrawCommandMenu()
 		if (m_moved) m_btnSfx = -2;
 		if (m_moved && Btn(ID_BT_UNDO, x, yy, cw, bh, TT(TX_BT_UNDO))) BattleCancel();
 		float boxTop = (m_moved ? yy + bh : yy - U(6)) + U(8);
-		if (descW) m_r.HudTextBox(descW, x, boxTop, cw, U(46), U(13), RGBA8(230, 230, 236));
-		else if (desc >= 0) m_r.HudTextBox(TT(desc), x, boxTop, cw, U(46), U(13), RGBA8(230, 230, 236));
+		const wchar_t* body = descW ? descW : (desc >= 0 ? TT(desc) : NULL);
+		float used = 0;
+		if (body && body[0]) {
+			wchar_t ls[4][180];
+			float px = U(13);
+			int n = WrapSpaceLines(m_r, body, cw - U(4), px, ls, 4);
+			float lh = px * 1.6f + 4.f;
+			float maxH = max(lh, extra - U(8));
+			for (int i = 0; i < n && used + lh <= maxH + 0.5f; i++) {
+				m_r.HudText(ls[i], x + U(4), boxTop + used + lh * .5f, FitTextPx(ls[i], cw - U(8), px, 0), RGBA8(230, 230, 236), 0, 0);
+				used += lh;
+			}
+		}
 		if (desc == TX_BTD_ATTACK) {
 			wchar_t est[160];
 			if (EstimateText(u, -1, est, 160))
-				m_r.HudText(est, x, boxTop + U(50), FitTextPx(est, cw, U(13), 0), RGBA8(255, 214, 140), 0, 0);
+				m_r.HudText(est, x + U(4), boxTop + used + U(8), FitTextPx(est, cw - U(8), U(13), 0), RGBA8(255, 214, 140), 0, 0);
 		}
 		return;
 	}
@@ -7662,10 +8017,24 @@ void Game::DrawPromoteOffer()
 	float histH = jn > 0 ? jn * (U(13) + 4.f) + U(8) : 0.f;
 	int rows = nt + (revert >= 0 ? 1 : 0);
 	float w = min(U(760.f), (float)m_w - U(24));
-	float row = U(150);
-	float chrome = U(126) + histH + U(56);
+	float briefPx = U(13);
+	float briefLine = briefPx * 1.55f + 4.f;
+	wchar_t briefs[4][4][180];
+	int briefC[4];
+	int briefN = 1;
+	for (int k = 0; k < nt && k < 4; k++) {
+		wchar_t brief[1024];
+		EvoBrief(tgt[k], brief, 1024);
+		briefC[k] = WrapSpaceLines(m_r, brief, w - U(56), briefPx, briefs[k], 4);
+		if (briefC[k] > briefN) briefN = briefC[k];
+	}
+	float chrome = U(110) + histH + U(48);
+	int showN = briefN;
+	while (showN > 1 && rows > 0 && chrome + rows * (U(40) + showN * briefLine + U(8)) > (float)m_h - U(16))
+		showN--;
+	float row = U(40) + showN * briefLine + U(8);
 	float h = chrome + rows * row;
-	if (h > (float)m_h - U(16)) { h = (float)m_h - U(16); row = max(U(108.f), (h - chrome) / max(1, rows)); }
+	if (h > (float)m_h - U(16)) h = (float)m_h - U(16);
 	float x = (m_w - w) * .5f, y = max(U(8), (m_h - h) * .5f);
 	Panel(x, y, w, h, .92f);
 	m_r.HudText(grace ? TT(TX_EV_TRIAL) : TT(TX_EV_JOB), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
@@ -7709,9 +8078,14 @@ void Game::DrawPromoteOffer()
 			take(tgt[k]);
 			return;
 		}
-		wchar_t brief[1024];
-		EvoBrief(tgt[k], brief, 1024);
-		m_r.HudTextBox(brief, x + U(20), ty + U(36), w - U(40), max(U(72.f), row - U(44)), U(13), RGBA8(210, 220, 235));
+		float ly = ty + U(38);
+		int nDraw = k < 4 ? briefC[k] : 0;
+		if (nDraw > showN) nDraw = showN;
+		for (int i = 0; i < nDraw; i++) {
+			if (ly + briefLine > ty + row - U(2)) break;
+			m_r.HudText(briefs[k][i], x + U(20), ly + briefLine * .5f, FitTextPx(briefs[k][i], w - U(40), briefPx, 0), RGBA8(210, 220, 235), 0, 0);
+			ly += briefLine;
+		}
 		ty += row;
 	}
 	if (revert >= 0) {
@@ -7735,26 +8109,46 @@ void Game::DrawLevelUp()
 	}
 	const LevelUpInfo& L = m_lvq[m_lvqCur];
 	const Unit& u = m_b.u[L.unit];
-	float w = min(U(440.f), (float)m_w - U(20));
-	float h = min(U(320) + L.nLearned * U(22), (float)m_h - U(20));
-	float x = (m_w - w) * .5f, y = max(U(8), (m_h - h) * .5f);
+	float w = min(U(460.f), (float)m_w - U(16));
+	int cols = (w - U(28)) >= U(340) ? 4 : 2;
+	float statH = U(cols == 4 ? 20.f : 18.f) * (float)((S_COUNT + cols - 1) / cols);
+	float titlePx = U(22);
+	float namePx = U(16);
+	float lvPx = U(15);
+	float port = U(58);
+	float headH = max(port, namePx + lvPx + U(14));
+	float learnLine = U(20);
+	float learnH = L.nLearned > 0 ? L.nLearned * learnLine + U(4) : 0;
+	float btnH = U(34);
+	float pad = U(10);
+	float h = pad + titlePx + U(8) + headH + U(8) + statH + learnH + U(8) + btnH + pad;
+	float maxH = (float)m_h - U(12);
+	if (h > maxH) h = maxH;
+	float x = (m_w - w) * .5f, y = max(U(6), (m_h - h) * .5f);
 	float in = Smooth01(shown / .25f);
-	y += (1.f - in) * U(40);
+	y += (1.f - in) * U(24);
 	Panel(x, y, w, h, in);
-	m_r.HudText(TT(TX_BT_LEVELUP), x + w * .5f, y + U(30), U(28), RGBA8(255, 230, 100), 1, 1, 1, in);
-	DrawPortrait(BattlePortrait(L.unit), x + U(18), y + U(56), U(80), RGBA8(110, 170, 255));
-	m_r.HudText(u.ch.name, x + U(112), y + U(72), U(18), RGBA8(255, 255, 255), 0, 1);
-	wchar_t l[64];
+	float cy = y + pad;
+	m_r.HudText(TT(TX_BT_LEVELUP), x + w * .5f, cy + titlePx * .5f, titlePx, RGBA8(255, 230, 100), 1, 1, 1, in);
+	cy += titlePx + U(6);
+	DrawPortrait(BattlePortrait(L.unit), x + pad, cy, port, RGBA8(110, 170, 255));
+	float tx = x + pad + port + U(10);
+	float tw = w - (tx - x) - pad;
+	if (tw < U(80)) tw = U(80);
+	m_r.HudText(u.ch.name, tx, cy + namePx * .55f, FitTextPx(u.ch.name, tw, namePx, 1), RGBA8(255, 255, 255), 0, 1);
+	wchar_t l[96];
 	swprintf_s(l, L"%s %s → %s", TT(TX_MISC_LV), TacNum(L.oldLv), TacNum(L.newLv));
-	m_r.HudText(l, x + U(112), y + U(100), FitTextPx(l, w - U(130), U(16), 1), RGBA8(140, 255, 150), 0, 1);
-	float statH = DrawStatLines(u.ch, x + U(20), y + U(146), w - U(40), L.gains, -1, -1);
-	float yy = y + U(146) + statH + U(6);
-	for (int k = 0; k < L.nLearned; k++) {
+	m_r.HudText(l, tx, cy + namePx + U(6) + lvPx * .5f, FitTextPx(l, tw, lvPx, 1), RGBA8(140, 255, 150), 0, 1);
+	cy += headH + U(6);
+	float got = DrawStatLines(u.ch, x + pad, cy, w - pad * 2, L.gains, -1, -1);
+	cy += got + U(4);
+	float lim = y + h - pad - btnH - U(4);
+	for (int k = 0; k < L.nLearned && cy + learnLine <= lim; k++) {
 		swprintf_s(l, L"%s: %s", TT(TX_BT_LEARNED), SkillLabel(L.learned[k]));
-		m_r.HudText(l, x + w * .5f, yy + U(10), U(15), RGBA8(255, 226, 150), 1, 1);
-		yy += U(22);
+		m_r.HudText(l, x + w * .5f, cy + learnLine * .5f, FitTextPx(l, w - pad * 2, U(14), 1), RGBA8(255, 226, 150), 1, 1);
+		cy += learnLine;
 	}
-	if (Btn(ID_BT_LVOK, x + w * .5f - U(60), y + h - U(46), U(120), U(34), L"OK")) AdvanceLevelUp();
+	if (Btn(ID_BT_LVOK, x + w * .5f - U(60), y + h - pad - btnH, U(120), btnH, L"OK")) AdvanceLevelUp();
 }
 
 void Game::AdvanceLevelUp()
@@ -8072,11 +8466,14 @@ void Game::DrawBattleUi()
 {
 	int partyLook = -1;
 	if (m_stashFull) {
-		m_shopFit = 5;
-		DrawShopFit();
-		if (m_shopFit != 5) m_stashFull = 0;
-		m_click = FALSE;
-		return;
+		if (m_demo) { m_stashFull = 0; m_shopFit = 0; }
+		else {
+			m_shopFit = 5;
+			DrawShopFit();
+			if (m_shopFit != 5) m_stashFull = 0;
+			m_click = FALSE;
+			return;
+		}
 	}
 	if (m_slotUi) { DrawSlotUi(); return; }
 	if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) {
@@ -8296,6 +8693,31 @@ void Game::DrawBattleUi()
 	}
 	m_hud.partyR = partyRight;
 	m_hud.partyB = partyBottom;
+	int aimMark[MAX_UNITS];
+	int aimTotal = 0;
+	memset(aimMark, 0, sizeof(aimMark));
+	wchar_t aimCount[48];
+	wchar_t aimTag[2][160];
+	aimCount[0] = aimTag[0][0] = aimTag[1][0] = 0;
+	int aimTagN = 0;
+	float aimSx = 0, aimSy = 0;
+	int aimHold = 0;
+	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cursorValid && CursorInAttackRange()) {
+		int tg[MAX_UNITS];
+		int n = 0;
+		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0)
+			n = SkillTargets(m_b, m_cur, m_cmdSkill, m_cx, m_cz, tg, MAX_UNITS);
+		else {
+			int t = m_b.UnitAt(m_cx, m_cz, m_cLayer);
+			if (t >= 0 && CanTarget(m_cur, t, -1)) tg[n++] = t;
+		}
+		aimTotal = n;
+		for (int k = 0; k < n; k++) if (tg[k] >= 0 && tg[k] < MAX_UNITS) aimMark[tg[k]] = k + 1;
+	}
+	float usedSx[MAX_UNITS], usedSy[MAX_UNITS];
+	int usedN = 0;
+	float barBx[48], barBy[48], barBw[48], barBh[48];
+	int barBn = 0;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (u.team == TEAM_ENEMY && (!u.alive || u.dissolve >= 1.f || !u.alert)) continue;
@@ -8316,10 +8738,35 @@ void Game::DrawBattleUi()
 		float sx, sy;
 		if (!m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + .12f, u.pz), sx, sy)) continue;
 		float bw = U(36);
+		if (sx + bw * .5f > m_hud.orderX - U(4))
+			sx = m_hud.orderX - U(8) - bw * .5f;
+		for (int uix = 0; uix < usedN; uix++) {
+			if (fabsf(sy - usedSy[uix]) < U(16) && fabsf(sx - usedSx[uix]) < bw + U(8))
+				sx += (uix & 1) ? U(22) : -U(22);
+		}
+		if (sx < bw * .5f + U(4)) sx = bw * .5f + U(4);
+		if (usedN < MAX_UNITS) { usedSx[usedN] = sx; usedSy[usedN] = sy; usedN++; }
+		if (barBn < 48) {
+			barBx[barBn] = sx - bw * .5f - U(20);
+			barBy[barBn] = sy - U(20);
+			barBw[barBn] = bw + U(40);
+			barBh[barBn] = U(36);
+			barBn++;
+		}
 		float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
 		DWORD col = !u.alive ? RGBA8(150, 150, 160) : (u.team == TEAM_PLAYER ? RGBA8(80, 220, 120) : (u.boss ? RGBA8(255, 200, 70) : RGBA8(240, 70, 60)));
 		m_r.HudRect(sx - bw * .5f - 1, sy - 1, bw + 2, U(6), RGBA8(8, 8, 12, 200));
 		m_r.HudRect(sx - bw * .5f, sy, bw * Clampf(frac, 0, 1), U(4), col);
+		if (i >= 0 && i < MAX_UNITS && aimMark[i] && aimTotal > 0) {
+			wchar_t nb[8];
+			swprintf_s(nb, L"%d", aimTotal);
+			float bs = U(16);
+			float bx = sx + bw * .5f + U(3);
+			if (bx + bs > m_hud.orderX - U(2)) bx = sx - bw * .5f - bs - U(3);
+			m_r.HudRect(bx, sy - U(2), bs, bs, RGBA8(28, 16, 6, 235));
+			m_r.HudFrame(bx, sy - U(2), bs, bs, 1.f, RGBA8(255, 214, 90));
+			m_r.HudText(nb, bx + bs * .5f, sy - U(2) + bs * .5f, U(11), RGBA8(255, 236, 160), 1, 1);
+		}
 		if (u.ch.stat[S_MP] > 0) {
 			float mf = (float)u.mp / max(1, u.ch.stat[S_MP]);
 			m_r.HudRect(sx - bw * .5f - 1, sy + U(5), bw + 2, U(4), RGBA8(8, 8, 12, 200));
@@ -8361,7 +8808,8 @@ void Game::DrawBattleUi()
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
 		const Unit& atk = m_b.u[m_cur];
 		wchar_t count[48] = L"";
-		BOOL showCount = sd.area > 0;
+		BOOL inRange = CursorInAttackRange();
+		BOOL showCount = inRange && sd.area > 0;
 		if (showCount) {
 			int tg[MAX_UNITS];
 			int nt = SkillTargets(m_b, m_cur, m_cmdSkill, m_cx, m_cz, tg, MAX_UNITS);
@@ -8416,46 +8864,14 @@ void Game::DrawBattleUi()
 			} else wcscpy_s(lines[nLine], trial);
 		}
 		if (lines[0][0]) nLine++;
-		float sx, sy;
-		V3 tagP = v3(m_cx + .5f, m_b.map.WalkY(m_cx, m_cz, m_cLayer) + 1.15f, m_cz + .5f);
-		if ((showCount || nLine > 0) && m_r.ProjectToScreen(tagP, sx, sy)) {
-			float countPx = U(15);
-			float countH = countPx * 1.6f + 6.f;
-			float tagH = tagPx * 1.6f + 6.f;
-			float gap = U(4);
-			float block = 0;
-			if (showCount) block += countH;
-			if (nLine > 0) block += (showCount ? gap : 0.f) + nLine * tagH + (nLine - 1) * gap;
-			float fw = min(U(520.f), (float)m_w - U(16));
-			long long eOpt = 0, ePes = 0;
-			int eLv = 0, eN = 0;
-			BOOL eCombat = FALSE;
-			PreviewBattleExp(eOpt, ePes, eLv, eN, eCombat);
-			(void)ePes; (void)eN;
-			float eBlock = eOpt > 0 ? (eLv ? U(44.f) : U(24.f)) : 0.f;
-			float eBase = min(U(204.f), max(U(148.f), (float)m_h * .42f));
-			float fh = AimPanelH(eBase, U(208.f), eBlock, U(12.f), eCombat);
-			float fx = ((float)m_w - fw) * .5f, fy = U(8);
-			float top = sy - U(10) - block;
-			BOOL underForecast = top < fy + fh && sx > fx - U(40) && sx < fx + fw + U(40);
-			if (underForecast || top < U(4)) top = sy + U(20);
-			float y = top;
-			if (showCount) {
-				int nShown = 0;
-				if (count[0]) {
-					const wchar_t* p = count;
-					while (*p && (*p < L'0' || *p > L'9')) p++;
-					nShown = _wtoi(p);
-				}
-				m_r.HudText(count, sx, y + countH * .5f, countPx, nShown > 0 ? RGBA8(255, 230, 120) : RGBA8(255, 140, 120), 1, 1);
-				y += countH;
-				if (nLine > 0) y += gap;
-			}
-			for (int i = 0; i < nLine; i++) {
-				m_r.HudText(lines[i], sx, y + tagH * .5f, tagPx, RGBA8(255, 230, 170), 1, 0);
-				y += tagH;
-				if (i + 1 < nLine) y += gap;
-			}
+		if (inRange && (showCount || nLine > 0)) {
+			aimHold = 1;
+			wcscpy_s(aimCount, count);
+			aimTagN = 0;
+			if (nLine > 0 && lines[0][0]) { wcscpy_s(aimTag[0], lines[0]); aimTagN = 1; }
+			if (nLine > 1 && lines[1][0]) { wcscpy_s(aimTag[1], lines[1]); aimTagN = 2; }
+			V3 tagP = v3(m_cx + .5f, m_b.map.WalkY(m_cx, m_cz, m_cLayer) + 0.15f, m_cz + .5f);
+			if (!m_r.ProjectToScreen(tagP, aimSx, aimSy)) { aimSx = m_w * .5f; aimSy = m_h * .45f; }
 		}
 	}
 	if (m_b.nUnits > 0) DrawTurnOrder();
@@ -8578,7 +8994,8 @@ void Game::DrawBattleUi()
 		float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
 		if (m_click && m_clickX >= px && m_clickY >= py && m_clickX < px + pw && m_clickY < py + ph) m_click = FALSE;
 	}
-	if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) DrawForecast();
+	float fx = 0, fy = 0, fw = 0, fh = 0;
+	if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) DrawForecast(&fx, &fy, &fw, &fh);
 	if (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON) DrawCommandMenu();
 	if (m_phase == PH_P_SKILLTARGET && m_cur >= 0 && IsFormSkill(m_cmdSkill)) {
 		int tx = m_b.u[m_cur].x, tz = m_b.u[m_cur].z;
@@ -8587,7 +9004,8 @@ void Game::DrawBattleUi()
 	}
 	if (m_statOpen && m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE && m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP) DrawBattleStatus(TRUE);
 	if (m_phase == PH_LEVELUP) DrawLevelUp();
-	// ヒント
+	// ヒント。枠に収まる行数だけ描き、単語の途中では切らない。
+	float hintX = 0, hintY = 0, hintW = 0, hintH = 0;
 	{
 		int tx = -1;
 		switch (m_phase) {
@@ -8602,48 +9020,149 @@ void Game::DrawBattleUi()
 		}
 		if (tx >= 0) {
 			const wchar_t* hs = TT(tx);
-			BOOL wide = (m_phase == PH_P_MOVE);
 			BOOL keys = (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
 			float leftBound = partyRight + U(16);
 			float rightBound = m_hud.col - U(8);
-			float y = U(96);
-			if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) {
-				float fw = U(520), fx0 = ((float)m_w - fw) * .5f, fx1 = fx0 + fw + U(10);
-				float leftRoom = fx0 - U(8) - leftBound;
-				float rightRoom = rightBound - fx1;
-				if (rightRoom >= leftRoom && rightRoom > U(220)) leftBound = fx1;
-				else if (leftRoom > U(220)) rightBound = fx0 - U(8);
-				else {
-					long long eOpt = 0, ePes = 0;
-					int eLv = 0, eN = 0;
-					BOOL eCombat = FALSE;
-					PreviewBattleExp(eOpt, ePes, eLv, eN, eCombat);
-					(void)ePes; (void)eN;
-					float eBlock = eOpt > 0 ? (eLv ? U(44.f) : U(24.f)) : 0.f;
-					float eBase = min(U(204.f), max(U(148.f), (float)m_h * .42f));
-					float ph = AimPanelH(eBase, U(208.f), eBlock, U(12.f), eCombat);
-					if (ph > 0.f) y = U(8) + ph + U(20);
-				}
+			float y = m_hud.stageB + U(8);
+			if (fh > 1.f) {
+				float leftRoom = fx - U(8) - leftBound;
+				float rightRoom = rightBound - (fx + fw + U(8));
+				if (rightRoom >= leftRoom && rightRoom > U(180)) leftBound = fx + fw + U(8);
+				else if (leftRoom > U(180)) rightBound = fx - U(8);
+				else y = max(y, fy + fh + U(8));
 			}
-			float room = max(U(200.f), rightBound - leftBound);
-			float want = wide ? U(820) : (m_r.TextWidth(hs, U(16), 1) + U(40));
-			if (keys) want = max(want, min(U(900.f), room));
+			float room = max(U(160.f), rightBound - leftBound);
+			float want = m_r.TextWidth(hs, U(16), 1) + U(36);
+			if (keys) want = max(want, min(U(720.f), room));
 			float tw = min(want, room);
 			float tx0 = leftBound + max(0.f, (room - tw) * .5f);
 			float unitTop = m_hud.panelTop;
-			if (room < U(300) && partyBottom + U(100) < unitTop) {
-				tw = min(want, max(U(280.f), (float)m_w - partyRight - U(36)));
+			if (room < U(280) && partyBottom + U(80) < unitTop) {
+				tw = min(want, max(U(240.f), (float)m_w - partyRight - U(36)));
 				tx0 = partyRight + U(16);
-				y = partyBottom + U(24);
+				y = max(y, partyBottom + U(8));
 			}
-			float textH = wide ? (tw < U(640) ? U(64) : U(42)) : U(28);
-			float keysH = keys ? U(88) : 0;
-			float top = y - U(8);
-			float th = textH + keysH + U(14);
-			m_r.HudPanel(tx0, top, tw, th, RGBA8(16, 20, 36, 96), RGBA8(150, 128, 86));
-			if (wide) m_r.HudTextBox(hs, tx0 + U(12), top + U(6), tw - U(24), textH, U(15), RGBA8(255, 255, 255), 1);
-			else m_r.HudText(hs, tx0 + tw * .5f, top + U(16), U(16), RGBA8(255, 255, 255), 1, 1);
-			if (keys) m_r.HudTextBox(TT(TX_BT_HINT_KEYS), tx0 + U(12), top + textH + U(6), tw - U(24), keysH, U(12), RGBA8(210, 210, 220), 0);
+			float inner = tw - U(24);
+			if (inner < 40.f) inner = 40.f;
+			float limitB = unitTop - U(6);
+			if (m_hud.logTop > 8.f && m_hud.logTop - U(6) < limitB) limitB = m_hud.logTop - U(6);
+			float pxT = U(15);
+			float pxK = U(12);
+			wchar_t titleL[6][180], keyL[8][180];
+			int nT = 0, nK = 0;
+			float textH = 0, keysH = 0, th = 0, top = 0;
+			for (int attempt = 0; attempt < 4; attempt++) {
+				nT = WrapSpaceLines(m_r, hs, inner, pxT, titleL, 6);
+				nK = keys ? WrapSpaceLines(m_r, TT(TX_BT_HINT_KEYS), inner, pxK, keyL, 8) : 0;
+				if (nT < 1) nT = 1;
+				float tLine = pxT * 1.7f + 4.f;
+				float kLine = pxK * 1.7f + 4.f;
+				textH = nT * tLine;
+				keysH = nK > 0 ? nK * kLine + U(4) : 0;
+				top = y;
+				th = textH + keysH + U(12);
+				if (top + th <= limitB || (pxT <= U(11) && pxK <= U(9))) break;
+				pxT *= 0.88f;
+				pxK *= 0.88f;
+			}
+			if (top + th > limitB) th = max(U(28), limitB - top);
+			m_r.HudPanel(tx0, top, tw, th, RGBA8(16, 20, 36, 200), RGBA8(150, 128, 86));
+			hintX = tx0; hintY = top; hintW = tw; hintH = th;
+			float tLine = pxT * 1.7f + 4.f;
+			float kLine = pxK * 1.7f + 4.f;
+			float ly = top + U(4);
+			for (int i = 0; i < nT; i++) {
+				if (ly + tLine > top + th - U(2)) break;
+				const wchar_t* ln = titleL[i][0] ? titleL[i] : hs;
+				m_r.HudText(ln, tx0 + U(12), ly + tLine * .5f, FitTextPx(ln, inner, pxT, 1), RGBA8(255, 255, 255), 0, 1);
+				ly += tLine;
+			}
+			if (nK > 0) ly += U(2);
+			for (int i = 0; i < nK; i++) {
+				if (ly + kLine > top + th - U(2)) break;
+				m_r.HudText(keyL[i], tx0 + U(12), ly + kLine * .5f, FitTextPx(keyL[i], inner, pxK, 0), RGBA8(210, 210, 220), 0, 0);
+				ly += kLine;
+			}
+		}
+	}
+	if (aimHold && (aimCount[0] || aimTagN > 0)) {
+		float pxC = U(14), pxG = U(12);
+		float lineC = pxC * 1.7f + 4.f;
+		float lineG = pxG * 1.7f + 4.f;
+		float chipW = aimCount[0] ? m_r.TextWidth(aimCount, pxC, 1) + U(28) : U(40);
+		for (int i = 0; i < aimTagN; i++) {
+			float lw = m_r.TextWidth(aimTag[i], pxG, 0) + U(28);
+			if (lw > chipW) chipW = lw;
+		}
+		if (chipW > U(360)) chipW = U(360);
+		float chipH = U(8) + (aimCount[0] ? lineC : 0) + aimTagN * lineG;
+		struct Box { float x, y, w, h; };
+		Box blk[64];
+		int nb = 0;
+		auto addB = [&](float x, float y, float w, float h) {
+			if (w > 2.f && h > 2.f && nb < 64) blk[nb++] = { x, y, w, h };
+		};
+		addB(m_hud.orderX, m_hud.margin, m_hud.orderW, max(0.f, m_orderBottom - m_hud.margin));
+		addB(0, 0, m_hud.stageR, m_hud.stageB);
+		addB(m_hud.margin, m_hud.partyT, max(0.f, m_hud.partyR - m_hud.margin), max(0.f, m_hud.partyB - m_hud.partyT));
+		addB(panelX, panelTop, panelW, max(0.f, (float)m_h - panelTop));
+		addB(fx, fy, fw, fh);
+		addB(hintX, hintY, hintW, hintH);
+		addB(miniLeft, miniTop, ms, (float)nMap * miniStep);
+		addB(aimSx - U(22), aimSy - U(22), U(44), U(44));
+		for (int i = 0; i < barBn; i++) addB(barBx[i], barBy[i], barBw[i], barBh[i]);
+		auto hitArea = [&](float x, float y, float w, float h) -> float {
+			float a = 0.f;
+			if (x < 2.f) a += (2.f - x) * h;
+			if (y < 2.f) a += (2.f - y) * w;
+			if (x + w > (float)m_w - 2.f) a += (x + w - ((float)m_w - 2.f)) * h;
+			if (y + h > (float)m_h - 2.f) a += (y + h - ((float)m_h - 2.f)) * w;
+			for (int i = 0; i < nb; i++) {
+				float x0 = x > blk[i].x ? x : blk[i].x;
+				float y0 = y > blk[i].y ? y : blk[i].y;
+				float x1 = x + w < blk[i].x + blk[i].w ? x + w : blk[i].x + blk[i].w;
+				float y1 = y + h < blk[i].y + blk[i].h ? y + h : blk[i].y + blk[i].h;
+				if (x1 > x0 && y1 > y0) a += (x1 - x0) * (y1 - y0);
+			}
+			return a;
+		};
+		float gap = U(14);
+		float candsX[10], candsY[10];
+		int nc = 0;
+		auto put = [&](float x, float y) { if (nc < 10) { candsX[nc] = x; candsY[nc] = y; nc++; } };
+		put(aimSx - chipW * .5f, aimSy + gap + U(10));
+		put(aimSx - chipW * .5f, aimSy - chipH - gap - U(10));
+		put(aimSx + gap + U(20), aimSy - chipH * .5f);
+		put(aimSx - chipW - gap - U(20), aimSy - chipH * .5f);
+		put(aimSx + gap, aimSy + gap);
+		put(aimSx - chipW - gap, aimSy + gap);
+		put(aimSx + gap, aimSy - chipH - gap);
+		put(aimSx - chipW - gap, aimSy - chipH - gap);
+		put(aimSx - chipW * .5f, aimSy + gap + U(52));
+		put(aimSx - chipW * .5f, aimSy - chipH - gap - U(52));
+		float px = candsX[0], py = candsY[0];
+		float best = hitArea(px, py, chipW, chipH);
+		for (int i = 1; i < nc && best > 0.5f; i++) {
+			float a = hitArea(candsX[i], candsY[i], chipW, chipH);
+			if (a < best) { best = a; px = candsX[i]; py = candsY[i]; }
+		}
+		if (px < 2.f) px = 2.f;
+		if (py < 2.f) py = 2.f;
+		if (px + chipW > (float)m_w - 2.f) px = (float)m_w - 2.f - chipW;
+		if (py + chipH > (float)m_h - 2.f) py = (float)m_h - 2.f - chipH;
+		m_r.HudPanel(px, py, chipW, chipH, RGBA8(16, 18, 28, 220), RGBA8(255, 200, 90));
+		float ly = py + U(3);
+		if (aimCount[0]) {
+			int nShown = 0;
+			const wchar_t* p = aimCount;
+			while (*p && (*p < L'0' || *p > L'9')) p++;
+			nShown = _wtoi(p);
+			m_r.HudText(aimCount, px + chipW * .5f, ly + lineC * .5f, FitTextPx(aimCount, chipW - U(12), pxC, 1), nShown > 0 ? RGBA8(255, 230, 120) : RGBA8(255, 150, 130), 1, 1);
+			ly += lineC;
+		}
+		for (int i = 0; i < aimTagN; i++) {
+			m_r.HudText(aimTag[i], px + chipW * .5f, ly + lineG * .5f, FitTextPx(aimTag[i], chipW - U(12), pxG, 0), RGBA8(255, 230, 170), 1, 0);
+			ly += lineG;
 		}
 	}
 	if (m_phase == PH_INTRO && m_surveyN >= 2 && m_phaseT < kIntroSweep) {

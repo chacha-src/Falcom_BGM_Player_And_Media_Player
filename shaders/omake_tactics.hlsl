@@ -357,10 +357,16 @@ float ShadowAt(float3 w, float3 n)
 			if (d > 0.001 && d < z) { avg += d; cnt += 1; }
 		}
 		if (cnt > 0.5) {
+			if (cnt >= nb - 0.5) {
+				float pen0 = saturate((z - avg / cnt) * ((Q.x > 5.5) ? 36.0 : 22.0));
+				float wide0 = (Q.x > 5.5) ? 3.2 : ((Q.x > 2.5) ? 2.2 : 1.6);
+				float maxOff = t * lerp(0.42, wide0, pen0) * (Q.x > 5.5 ? 2.35 : (Q.x > 4.5 ? 1.75 : 1.0));
+				if (maxOff <= search) return 0;
+			}
 			float pen = saturate((z - avg / cnt) * ((Q.x > 5.5) ? 36.0 : 22.0));
 			float wide = (Q.x > 5.5) ? 3.2 : ((Q.x > 2.5) ? 2.2 : 1.6);
 			t *= lerp(0.42, wide, pen);
-		}
+		} else return 1;
 	}
 	float s = 0;
 	int ntap = taps;
@@ -1711,13 +1717,13 @@ GOut PSOV(PSIn i)
 	return Emit(float4(c, saturate(a)), i.w);
 }
 
-struct HIn { float2 p : POSITION; float2 uv : TEXCOORD0; float4 c : COLOR0; };
-struct HOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 c : TEXCOORD1; };
+struct HIn { float2 p : POSITION; float2 uv : TEXCOORD0; float4 c : COLOR0; float4 p0 : TEXCOORD1; float4 p1 : TEXCOORD2; };
+struct HOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 c : TEXCOORD1; float4 p0 : TEXCOORD2; float4 p1 : TEXCOORD3; };
 HOut VSH(HIn v)
 {
 	HOut o;
 	o.pos = float4(v.p.x * Screen.z * 2. - 1., 1. - v.p.y * Screen.w * 2., 0, 1);
-	o.uv = v.uv; o.c = v.c;
+	o.uv = v.uv; o.c = v.c; o.p0 = v.p0; o.p1 = v.p1;
 	return o;
 }
 float4 PSH(HOut i) : SV_Target
@@ -2400,11 +2406,17 @@ float4 PSGrade(QOut i) : SV_Target
 	float3 shaft = 0;
 	float wsum = 0;
 	int shaftN = (Q.x > 5.5) ? 16 : ((Q.x > 2.5) ? 12 : 8);
-	[loop] for (int k = 1; k <= shaftN; k++) {
-		float t = k / (float)shaftN;
-		float w = 1. - t;
-		shaft += ShadowMap.SampleLevel(SL, i.uv + toSun * t * 0.85, 0).rgb * w;
-		wsum += w;
+	// 筋は太陽が空にあるとき、空の側だけ。盤面へ放射状に広げない。
+	float sky = saturate((0.46 - i.uv.y) * 2.6);
+	float sunUp = saturate((0.4 - suv.y) * 3.2);
+	float shaftMask = Extra.w * saturate(0.7 - dist) * sky * sunUp;
+	if (shaftMask > 1e-4) {
+		[loop] for (int k = 1; k <= shaftN; k++) {
+			float t = k / (float)shaftN;
+			float w = 1. - t;
+			shaft += ShadowMap.SampleLevel(SL, i.uv + toSun * t * 0.85, 0).rgb * w;
+			wsum += w;
+		}
 	}
 	float th = FogColor.a;
 	float3 grade = float3(1, 1, 1);
@@ -2424,13 +2436,10 @@ float4 PSGrade(QOut i) : SV_Target
 	else if (th < 11.5) { grade = float3(0.9, 0.95, 1.04); shaftK = 0.08; }
 	else if (th < 12.5) { grade = float3(1.08, 0.96, 1.14); shaftK = 0.1; }
 	else { grade = float3(0.96, 0.97, 1.06); shaftK = 0.55; }
-	// 筋は太陽が空にあるとき、空の側だけ。盤面へ放射状に広げない。
-	float sky = saturate((0.46 - i.uv.y) * 2.6);
-	float sunUp = saturate((0.4 - suv.y) * 3.2);
 	float gt = Eye.w;
 	float zpix = DepthMap.SampleLevel(SL, i.uv, 0).r;
 	float shaftAmt = 0.22 + saturate(StageTier() / 6.0) * 0.28;
-	float3 shaftAdd = shaft / max(wsum, 1e-3) * Extra.w * saturate(0.7 - dist) * shaftAmt * shaftK * sky * sunUp;
+	float3 shaftAdd = shaft / max(wsum, 1e-3) * shaftMask * shaftAmt * shaftK;
 	float2 px = Screen.zw;
 	float vig = 1;
 	ThemeWorld(col, i.uv, th, gt, zpix);
@@ -2494,11 +2503,13 @@ float4 PSGradeTiny(QOut i) : SV_Target
 	return float4(saturate(scene), 1);
 }
 
-// パネル。uv は矩形内 0..1。頂点色が塗り、Tint が縁。
+// パネル。uv は矩形内 0..1。頂点色が塗り、p0/p1（または定数）が縁と寸法。
 float4 PSUI(HOut i) : SV_Target
 {
-	float2 size = max(Params.xy, float2(2, 2));
-	float rad = max(Params.z, 1);
+	float4 prm = i.p0.x > 0.5 ? i.p0 : Params;
+	float3 brd = i.p0.x > 0.5 ? i.p1.rgb : Tint.rgb;
+	float2 size = max(prm.xy, float2(2, 2));
+	float rad = max(prm.z, 1);
 	float2 p = (i.uv - 0.5) * size;
 	float2 q = abs(p) - (size * 0.5 - rad);
 	float d = length(max(q, 0)) + min(max(q.x, q.y), 0) - rad;
@@ -2510,7 +2521,7 @@ float4 PSUI(HOut i) : SV_Target
 	float3 fill = i.c.rgb;
 	float3 col = fill * (0.92 + sheen * 0.22);
 	col *= 1 - inner * 0.18;
-	col = lerp(col, Tint.rgb, border * 0.85);
-	float a = body * Params.w;
+	col = lerp(col, brd, border * 0.85);
+	float a = body * prm.w;
 	return float4(col * a, a);
 }

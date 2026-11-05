@@ -128,7 +128,7 @@ private:
 	void OpenLoadSlice(int units);
 	void CloseLoadSlice();
 	BOOL PaintLoadScreen();
-	void DrawLoadHud();
+	void DrawLoadHud(int permille = -1);
 	static void LoadPulseCb(int cur, int n, void* user);
 	BOOL Recover();
 	void PulseQuality(float work, float span);
@@ -177,6 +177,7 @@ private:
 
 	// 拠点
 	void EnterBase();
+	void WarmHomeAvatars();
 	void ProbeSuspend();
 	void QueueSuspend(int kind);
 	void ResumeBattle(int kind);
@@ -270,6 +271,7 @@ private:
 	BOOL ChestInRange(int ui, int x, int z) const;
 	BOOL OpenChestAt(int ui, int x, int z);
 	BOOL CanTarget(int ui, int target, int skill) const;
+	BOOL CursorInAttackRange() const;
 	void BeginAttack(int ui, int target, int skill, int cx, int cz);
 	void UpdateSeq(float dt);
 	void SeqImpact(const SeqStep& st, int volley);
@@ -279,6 +281,12 @@ private:
 	void RaiseStampede();
 	void ConfuseSelf(int ui);
 	BOOL CheckBattleOver();
+	void DemoBegin();
+	void DemoLeave();
+	void TickDemo(float dt);
+	void DemoDrive(float dt);
+	BOOL DemoEnding() const;
+	void DrawDemoCurtain();
 	void ComputeOverlays();
 	void BuildOverlayQuads();
 public:
@@ -293,7 +301,7 @@ private:
 	void PickSkillCursor(int skill);
 	void DrawTurnOrder();
 	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big);
-	void DrawForecast();
+	void DrawForecast(float* ox = 0, float* oy = 0, float* ow = 0, float* oh = 0);
 	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
 	void DrawMinimap(float x, float y, float s, int layer = 0);
 	void DrawShowMinimap(float x, float y, float s);
@@ -371,6 +379,7 @@ private:
 	int m_loadA, m_loadB;
 	BOOL m_loadLive;
 	int m_loadUnits;
+	int m_avaLoadUnits;
 	int m_loadHave;
 	int m_sliceBase;
 	int m_sliceUnits;
@@ -549,6 +558,8 @@ private:
 	BOOL m_previewDrag;
 	BOOL m_previewPanDrag;
 	int m_previewMot;  // 0待機 1歩き 2走り 3構え 4攻撃 5別技
+	BOOL m_previewWing;   // 見本だけ。0で翼を描かない
+	BOOL m_previewGround; // 見本だけ。1で翼のない地上の動き
 
 	// 編成
 	int m_partySel;
@@ -675,6 +686,16 @@ private:
 	int m_bossDown;
 	int m_menuConfirm;
 	float m_enemyWait;
+	// 放置デモ。0=なし 1=入り幕 2=再生 3=出幕。マウスは動かさず、盤とメニューの枠だけ進める。
+	int m_demo;
+	float m_demoT;
+	float m_idleT;
+	int m_demoAct;
+	int m_demoTick;
+	float m_demoStep;
+	int m_demoStage;
+	int m_demoPh;
+	SaveData m_demoSave;
 };
 
 inline void AppendStatBit(wchar_t* dst, int cap, int stat, int v)

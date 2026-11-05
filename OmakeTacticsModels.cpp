@@ -2285,30 +2285,23 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	const Model& m = r.models[a.model];
 	int cj = m.chestJ;
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return;
-	struct WMem { const Actor* a; unsigned frame; unsigned wh; M4 w[2]; int mesh[2]; int n; };
+	struct WMem { const Actor* a; unsigned frame; unsigned th; M4 l[2]; int mesh[2]; int n; };
 	static WMem tab[64];
-	unsigned wh = (unsigned)a.poseFrame * 16777619u;
-	wh ^= (unsigned)(world.m[0] * 1000.f) * 3u;
-	wh ^= (unsigned)(world.m[5] * 1000.f) * 5u;
-	wh ^= (unsigned)(world.m[10] * 1000.f) * 7u;
-	wh ^= (unsigned)(world.m[12] * 1000.f) * 11u;
-	wh ^= (unsigned)(world.m[13] * 1000.f) * 13u;
-	wh ^= (unsigned)(world.m[14] * 1000.f) * 17u;
-	wh ^= (unsigned)(time * 1000.f);
+	unsigned th = (unsigned)(time * 1000.f);
 	WMem* hit = NULL;
 	int freeSlot = -1;
 	for (int i = 0; i < 64; i++) {
 		if (tab[i].a == &a) { hit = &tab[i]; break; }
 		if (freeSlot < 0 && tab[i].a == NULL) freeSlot = i;
 	}
-	if (hit && hit->frame == r.m_frame && hit->wh == wh && hit->n == 2) {
+	if (hit && hit->frame == a.poseFrame && hit->th == th && hit->n == 2) {
 		for (int side = 0; side < 2; side++) {
 			DrawParams dw = dp;
 			dw.hue = 0;
 			dw.twoSided = 1;
 			dw.noTess = 1;
 			dw.mode = 0.f;
-			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], hit->w[side], dw);
+			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(hit->l[side], world), dw);
 		}
 		return;
 	}
@@ -2347,19 +2340,19 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		M4 fl = MRotZ(s * flap);
 		M4 base = MMul(MMul(MRotY(s * yaw), MRotZ(s * rest)), MTrans(s * x, y, z));
 		M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
-		M4 w = MMul(ex, MMul(a.pose.global[cj], world));
+		M4 l = MMul(ex, a.pose.global[cj]);
 		DrawParams dw = dp;
 		dw.hue = 0;
 		dw.twoSided = 1;
 		dw.noTess = 1;
 		dw.mode = 0.f;
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
-		r.DrawStatic(lib.wing[dr][1 - side], w, dw);
-		hit->w[side] = w;
+		r.DrawStatic(lib.wing[dr][1 - side], MMul(l, world), dw);
+		hit->l[side] = l;
 		hit->mesh[side] = dr * 2 + (1 - side);
 		hit->n++;
 	}
-	if (hit) { hit->frame = r.m_frame; hit->wh = wh; }
+	if (hit) { hit->frame = a.poseFrame; hit->th = th; }
 }
 
 static M4 CachedBind(const Model& m, int j)
@@ -2493,46 +2486,39 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 			return FALSE;
 		};
-		struct GItem { int kind, idx, twoSided; M4 w; };
-		struct GBag { const Actor* a; unsigned frame, wh; GItem it[16]; int n, ready; };
-		static GBag gbagTab[48];
-		unsigned gwh = (unsigned)a.poseFrame * 16777619u;
-		gwh ^= (unsigned)(wGear.m[0] * 997.f);
-		gwh ^= (unsigned)(wGear.m[5] * 991.f) * 3u;
-		gwh ^= (unsigned)(wGear.m[10] * 983.f) * 5u;
-		gwh ^= (unsigned)(wGear.m[12] * 977.f) * 7u;
-		gwh ^= (unsigned)(wGear.m[13] * 971.f) * 11u;
-		gwh ^= (unsigned)(wGear.m[14] * 967.f) * 13u;
+		struct GItem { int kind, idx, twoSided; M4 l; };
+		struct GBag { const Actor* a; unsigned frame; GItem it[16]; int n, ready; };
+		static GBag gbagTab[64];
 		GBag* gbag = NULL;
 		int gfree = -1;
-		for (int gi = 0; gi < 48; gi++) {
+		for (int gi = 0; gi < 64; gi++) {
 			if (gbagTab[gi].a == &a) { gbag = &gbagTab[gi]; break; }
 			if (gfree < 0 && gbagTab[gi].a == NULL) gfree = gi;
 		}
 		if (!gbag) {
-			if (gfree < 0) gfree = (int)(r.m_frame % 48u);
+			if (gfree < 0) gfree = (int)(r.m_frame % 64u);
 			gbag = &gbagTab[gfree];
 			gbag->a = &a;
 			gbag->ready = 0;
 		}
-		BOOL greplay = gbag->ready && gbag->frame == r.m_frame && gbag->wh == gwh;
-		auto gnote = [&](int kind, int idx, const M4& w, int two) {
+		BOOL greplay = gbag->ready && gbag->frame == a.poseFrame;
+		auto gnote = [&](int kind, int idx, const M4& l, int two) {
 			if (gbag->n >= 16) return;
 			GItem& it = gbag->it[gbag->n++];
-			it.kind = kind; it.idx = idx; it.twoSided = two; it.w = w;
+			it.kind = kind; it.idx = idx; it.twoSided = two; it.l = l;
 		};
 		if (greplay) {
 			for (int gi = 0; gi < gbag->n; gi++) {
 				DrawParams d = da;
 				d.twoSided = gbag->it[gi].twoSided;
-				if (gbag->it[gi].kind == 0) r.DrawGear(gbag->it[gi].idx, gbag->it[gi].w, d);
+				M4 gw = MMul(gbag->it[gi].l, wGear);
+				if (gbag->it[gi].kind == 0) r.DrawGear(gbag->it[gi].idx, gw, d);
 				else if (gbag->it[gi].idx >= 0 && gbag->it[gi].idx < (int)r.attaches.size())
-					r.DrawStatic(r.attaches[gbag->it[gi].idx].mesh, gbag->it[gi].w, d);
+					r.DrawStatic(r.attaches[gbag->it[gi].idx].mesh, gw, d);
 			}
 		} else {
 			gbag->n = 0;
-			gbag->frame = r.m_frame;
-			gbag->wh = gwh;
+			gbag->frame = a.poseFrame;
 		for (int i = 0; i < nAtt; i++) {
 			const char* nm = r.attaches[a.att[i]].name;
 			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
@@ -2553,11 +2539,11 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				if (NameHas(nm, "Cape")) dc.twoSided = 1;
 				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, dc, &fit);
 				if (a.attJ[i] >= 0 && a.attJ[i] < a.pose.nJ)
-					gnote(1, a.att[i], MMul(fit, MMul(a.pose.global[a.attJ[i]], wGear)), dc.twoSided);
+					gnote(1, a.att[i], MMul(fit, a.pose.global[a.attJ[i]]), dc.twoSided);
 			} else {
 				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, da);
 				if (a.attJ[i] >= 0 && a.attJ[i] < a.pose.nJ)
-					gnote(1, a.att[i], MMul(a.pose.global[a.attJ[i]], wGear), da.twoSided);
+					gnote(1, a.att[i], a.pose.global[a.attJ[i]], da.twoSided);
 			}
 		}
 		for (int i = 0; i < nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ) {
@@ -2594,13 +2580,13 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				V3 gl, ax;
 				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl, ax);
 				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL, neoB, hasGrip ? &ax : NULL);
-				M4 gw = MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear);
-				r.DrawGear(a.gearM[i], gw, da);
-				gnote(0, a.gearM[i], gw, da.twoSided);
+				M4 gloc = MMul(fit, a.pose.global[a.gearJ[i]]);
+				r.DrawGear(a.gearM[i], MMul(gloc, wGear), da);
+				gnote(0, a.gearM[i], gloc, da.twoSided);
 			} else {
-				M4 gw = MMul(a.pose.global[a.gearJ[i]], wGear);
-				r.DrawGear(a.gearM[i], gw, da);
-				gnote(0, a.gearM[i], gw, da.twoSided);
+				M4 gloc = a.pose.global[a.gearJ[i]];
+				r.DrawGear(a.gearM[i], MMul(gloc, wGear), da);
+				gnote(0, a.gearM[i], gloc, da.twoSided);
 			}
 		}
 		gbag->ready = 1;

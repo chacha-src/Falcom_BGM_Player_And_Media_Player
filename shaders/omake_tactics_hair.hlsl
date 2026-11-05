@@ -238,9 +238,10 @@ void CSHair(uint id : SV_GroupIndex)
 	gR[id] = rest;
 	float pick = StrandFace(id);
 	float3 home = (id < HA || flop < 0.08) ? rest : BodyHit(rest, pick);
-	// 毛先を風下へ置く。移動は前から後ろ、突風はその倍率。根元は動かさない。
+	// 毛先を風下へ置く。根元から 4 割は頭に残し、突風でも分け目から地肌を出さない。
 	float amp = length(Wind.xyz);
-	float3 lean = (amp > 0.02 && flop >= 0.08) ? (Wind.xyz / amp) * min(amp, 2.2) * flop * 0.10 : 0;
+	float crown = smoothstep(0.16, 0.46, flop);
+	float3 lean = (amp > 0.02 && crown > 0.001) ? (Wind.xyz / amp) * min(amp, 1.5) * crown * 0.085 : 0;
 	home += lean;
 	gH[id] = home;
 	// 根元と短い殻は、頭に付けた位置のまま。押すと頭頂が割れる。
@@ -269,10 +270,11 @@ void CSHair(uint id : SV_GroupIndex)
 		float gust = 0.90 + 0.10 * sin(Sim.w * 0.37 + rest.x * 1.7 + rest.z * 0.8);
 		float3 p = pos + v;
 		p += Grav.xyz * (dt * dt) * flop;
-		// 加速度として足す。普段の風はそのまま、それを超えた突風だけ毛先を大きく流す。
+		// 加速度として足す。普段の風はそのまま、それを超えた突風は毛先だけ大きく流す。
 		float amp = length(Wind.xyz);
-		float gustK = 1.0 + saturate((amp - 0.35) / 0.55) * 2.4;
-		p += Wind.xyz * (dt * dt) * flop * gust * 14.0 * gustK;
+		float gustK = 1.0 + saturate((amp - 0.55) / 0.70) * 1.5;
+		float crown = smoothstep(0.16, 0.46, flop);
+		p += Wind.xyz * (dt * dt) * crown * gust * 14.0 * gustK;
 		float ks = lerp(0.22, 0.012, flop);
 		float k = 1 - pow(saturate(1 - ks), Sim.y);
 		p = lerp(p, home, k);
@@ -313,7 +315,9 @@ void CSHair(uint id : SV_GroupIndex)
 				p = home + lerp(p - home, acc / cnt, 0.28);
 			}
 		}
-		if (flop >= 0.08 && il > 0) p = BodyHit(p, pick);
+		if (flop >= 0.08 && il > 0) p = BodyHit(SkullPush(p), pick);
+		// 頭に近い束は静止位置へ戻す。突風でカードが開いても、笠の外に地肌が出ない。
+		if (flop < 0.42) p = lerp(rest, p, smoothstep(0.10, 0.42, flop));
 		GroupMemoryBarrierWithGroupSync();
 		gP[id] = p;
 		GroupMemoryBarrierWithGroupSync();

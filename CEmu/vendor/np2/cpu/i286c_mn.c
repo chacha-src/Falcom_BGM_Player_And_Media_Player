@@ -28,8 +28,462 @@
 
 // ----
 
+int g_pc98I386Prefix = 0;
+static UINT16 s_pc98Rhi[8];
+
+void CPUCALL i286c_pc98_i386(int on) {
+
+	unsigned i;
+
+	g_pc98I386Prefix = on ? 1 : 0;
+	for (i = 0; i < 8; i++)
+		s_pc98Rhi[i] = 0;
+}
+
+static UINT16* pc98_r16(unsigned n) {
+
+	switch (n & 7) {
+	case 0: return &I286_AX;
+	case 1: return &I286_CX;
+	case 2: return &I286_DX;
+	case 3: return &I286_BX;
+	case 4: return &I286_SP;
+	case 5: return &I286_BP;
+	case 6: return &I286_SI;
+	default: return &I286_DI;
+	}
+}
+
+static UINT32 pc98_r32(unsigned n) {
+
+	return ((UINT32)s_pc98Rhi[n & 7] << 16) | *pc98_r16(n);
+}
+
+static void pc98_w32(unsigned n, UINT32 v) {
+
+	*pc98_r16(n) = (UINT16)v;
+	s_pc98Rhi[n & 7] = (UINT16)(v >> 16);
+}
+
+static UINT8 pc98_r8(unsigned rm) {
+
+	switch (rm & 7) {
+	case 0: return I286_AL;
+	case 1: return I286_CL;
+	case 2: return I286_DL;
+	case 3: return I286_BL;
+	case 4: return I286_AH;
+	case 5: return I286_CH;
+	case 6: return I286_DH;
+	default: return I286_BH;
+	}
+}
+
+static void pc98_push32(UINT32 v) {
+
+	REGPUSH0((UINT16)(v >> 16))
+	REGPUSH0((UINT16)v)
+}
+
+static UINT32 pc98_pop32(void) {
+
+	UINT16 lo;
+	UINT16 hi;
+
+	REGPOP0(lo)
+	REGPOP0(hi)
+	return ((UINT32)hi << 16) | lo;
+}
+
+static UINT32 pc98_pc32(void) {
+
+	UINT b;
+	UINT32 v;
+
+	GET_PCBYTE(b); v = b;
+	GET_PCBYTE(b); v |= (UINT32)b << 8;
+	GET_PCBYTE(b); v |= (UINT32)b << 16;
+	GET_PCBYTE(b); v |= (UINT32)b << 24;
+	return v;
+}
+
+static void pc98_logic32(UINT32 v, int cf) {
+
+	I286_OV = 0;
+	I286_FLAGL &= (UINT8)~(S_FLAG | Z_FLAG | A_FLAG | C_FLAG | P_FLAG);
+	I286_FLAGL |= (UINT8)(BYTESZPF(v & 0xff) & P_FLAG);
+	if (v & 0x80000000u)
+		I286_FLAGL |= S_FLAG;
+	if (!v)
+		I286_FLAGL |= Z_FLAG;
+	if (cf)
+		I286_FLAGL |= C_FLAG;
+}
+
+/* 16-bit EA. 2 = register, 1 = memory, 0 = not used. */
+static int pc98_ea16(UINT32* lin, UINT* modrm) {
+
+	UINT m;
+	UINT mod;
+	UINT rm;
+	UINT16 disp;
+	UINT16 off;
+	UINT32 seg;
+	UINT b;
+
+	GET_PCBYTE(m);
+	*modrm = m;
+	mod = m >> 6;
+	rm = m & 7;
+	if (mod == 3)
+		return 2;
+	disp = 0;
+	if (mod == 1) {
+		GET_PCBYTE(b);
+		disp = (UINT16)(SINT16)(SINT8)b;
+	}
+	else if (mod == 2 || (mod == 0 && rm == 6)) {
+		GET_PCWORD(disp);
+	}
+	off = disp;
+	seg = DS_FIX;
+	switch (rm) {
+	case 0: off = (UINT16)(off + I286_BX + I286_SI); break;
+	case 1: off = (UINT16)(off + I286_BX + I286_DI); break;
+	case 2: off = (UINT16)(off + I286_BP + I286_SI); seg = SS_FIX; break;
+	case 3: off = (UINT16)(off + I286_BP + I286_DI); seg = SS_FIX; break;
+	case 4: off = (UINT16)(off + I286_SI); break;
+	case 5: off = (UINT16)(off + I286_DI); break;
+	case 6:
+		if (mod != 0) {
+			off = (UINT16)(off + I286_BP);
+			seg = SS_FIX;
+		}
+		break;
+	default: off = (UINT16)(off + I286_BX); break;
+	}
+	*lin = seg + off;
+	return 1;
+}
+
+static int pc98_ea32(UINT32* lin, UINT* modrm) {
+
+	UINT m;
+	UINT mod;
+	UINT rm;
+	UINT sib;
+	UINT scale;
+	UINT index;
+	UINT base;
+	UINT b;
+	UINT32 ea;
+	UINT32 seg;
+
+	GET_PCBYTE(m);
+	*modrm = m;
+	mod = m >> 6;
+	rm = m & 7;
+	if (mod == 3)
+		return 0;
+	ea = 0;
+	seg = DS_FIX;
+	if (rm == 4) {
+		GET_PCBYTE(sib);
+		scale = 1u << (sib >> 6);
+		index = (sib >> 3) & 7;
+		base = sib & 7;
+		if (index != 4)
+			ea += pc98_r32(index) * scale;
+		if (base == 5 && mod == 0) {
+			ea += pc98_pc32();
+		}
+		else {
+			ea += pc98_r32(base);
+			if (base == 4 || base == 5)
+				seg = SS_FIX;
+			if (mod == 1) {
+				GET_PCBYTE(b);
+				ea += (UINT32)(SINT32)(SINT8)b;
+			}
+			else if (mod == 2)
+				ea += pc98_pc32();
+		}
+	}
+	else if (mod == 0 && rm == 5) {
+		ea = pc98_pc32();
+	}
+	else {
+		ea = pc98_r32(rm);
+		if (rm == 4 || rm == 5)
+			seg = SS_FIX;
+		if (mod == 1) {
+			GET_PCBYTE(b);
+			ea += (UINT32)(SINT32)(SINT8)b;
+		}
+		else if (mod == 2)
+			ea += pc98_pc32();
+	}
+	*lin = seg + (UINT16)ea;
+	return 1;
+}
+
+static UINT32 pc98_rd32(UINT32 lin) {
+
+	return (UINT32)i286_memoryread(lin)
+		| ((UINT32)i286_memoryread(lin + 1) << 8)
+		| ((UINT32)i286_memoryread(lin + 2) << 16)
+		| ((UINT32)i286_memoryread(lin + 3) << 24);
+}
+
+/* 66h を処理できたら 1。失敗時は IP を 66h の次へ戻す。 */
+static int pc98_op66(void) {
+
+	UINT16 ip0;
+	UINT op;
+	UINT ext;
+	UINT modrm;
+	UINT reg;
+	UINT rm;
+	UINT cnt;
+	UINT kind;
+	UINT32 lin;
+	UINT32 v;
+	UINT32 esp;
+	int ea;
+	int cf;
+
+	ip0 = I286_IP;
+	GET_PCBYTE(op);
+	if (op == 0x24 || op == 0x80 || op == 0x82 || op == 0xC0
+		|| op == 0xF6 || op == 0xFE) {
+		I286_IP = ip0;
+		return 1;
+	}
+	if (op == 0x60) {
+		esp = pc98_r32(4);
+		pc98_push32(pc98_r32(0));
+		pc98_push32(pc98_r32(1));
+		pc98_push32(pc98_r32(2));
+		pc98_push32(pc98_r32(3));
+		pc98_push32(esp);
+		pc98_push32(pc98_r32(5));
+		pc98_push32(pc98_r32(6));
+		pc98_push32(pc98_r32(7));
+		I286_WORKCLOCK(18);
+		return 1;
+	}
+	if (op == 0x61) {
+		pc98_w32(7, pc98_pop32());
+		pc98_w32(6, pc98_pop32());
+		pc98_w32(5, pc98_pop32());
+		(void)pc98_pop32();
+		pc98_w32(3, pc98_pop32());
+		pc98_w32(2, pc98_pop32());
+		pc98_w32(1, pc98_pop32());
+		pc98_w32(0, pc98_pop32());
+		I286_WORKCLOCK(18);
+		return 1;
+	}
+	if (op >= 0x50 && op <= 0x57) {
+		pc98_push32(pc98_r32(op - 0x50));
+		I286_WORKCLOCK(2);
+		return 1;
+	}
+	if (op >= 0x58 && op <= 0x5F) {
+		pc98_w32(op - 0x58, pc98_pop32());
+		I286_WORKCLOCK(4);
+		return 1;
+	}
+	if (op == 0x0F) {
+		GET_PCBYTE(ext);
+		if (ext != 0xB6 && ext != 0xB7) {
+			I286_IP = ip0;
+			return 0;
+		}
+		GET_PCBYTE(modrm);
+		if ((modrm >> 6) != 3) {
+			I286_IP = ip0;
+			return 0;
+		}
+		reg = (modrm >> 3) & 7;
+		rm = modrm & 7;
+		v = (ext == 0xB6) ? pc98_r8(rm) : *pc98_r16(rm);
+		pc98_w32(reg, v);
+		I286_WORKCLOCK(3);
+		return 1;
+	}
+	if (op == 0x8B) {
+		ea = pc98_ea16(&lin, &modrm);
+		reg = (modrm >> 3) & 7;
+		if (ea == 2)
+			pc98_w32(reg, pc98_r32(modrm & 7));
+		else if (ea == 1)
+			pc98_w32(reg, pc98_rd32(lin));
+		else {
+			I286_IP = ip0;
+			return 0;
+		}
+		I286_WORKCLOCK(4);
+		return 1;
+	}
+	if (op == 0xC1) {
+		GET_PCBYTE(modrm);
+		GET_PCBYTE(cnt);
+		if ((modrm >> 6) != 3) {
+			I286_IP = ip0;
+			return 0;
+		}
+		kind = (modrm >> 3) & 7;
+		rm = modrm & 7;
+		cnt &= 31;
+		v = pc98_r32(rm);
+		cf = 0;
+		if (cnt) {
+			if (kind == 0) {
+				v = (v << cnt) | (v >> (32 - cnt));
+				cf = (int)(v & 1);
+			}
+			else if (kind == 1) {
+				v = (v >> cnt) | (v << (32 - cnt));
+				cf = (int)((v >> 31) & 1);
+			}
+			else if (kind == 4) {
+				cf = (int)((v >> (32 - cnt)) & 1);
+				v <<= cnt;
+			}
+			else if (kind == 5) {
+				cf = (int)((v >> (cnt - 1)) & 1);
+				v >>= cnt;
+			}
+			else {
+				I286_IP = ip0;
+				return 0;
+			}
+			pc98_w32(rm, v);
+			pc98_logic32(v, cf);
+		}
+		I286_WORKCLOCK(3);
+		return 1;
+	}
+	I286_IP = ip0;
+	return 0;
+}
+
+static int pc98_op67(void) {
+
+	UINT16 ip0;
+	UINT op;
+	UINT modrm;
+	UINT kind;
+	UINT32 lin;
+	UINT16 t;
+
+	ip0 = I286_IP;
+	GET_PCBYTE(op);
+	if (op != 0x8B && op != 0xFF) {
+		I286_IP = ip0;
+		return 0;
+	}
+	if (!pc98_ea32(&lin, &modrm)) {
+		I286_IP = ip0;
+		return 0;
+	}
+	if (op == 0x8B) {
+		*pc98_r16((modrm >> 3) & 7) = i286_memoryread_w(lin);
+		I286_WORKCLOCK(5);
+		return 1;
+	}
+	kind = (modrm >> 3) & 7;
+	t = i286_memoryread_w(lin);
+	if (kind == 2) {
+		REGPUSH0(I286_IP)
+		I286_IP = t;
+		I286_WORKCLOCK(11);
+		return 1;
+	}
+	if (kind == 4) {
+		I286_IP = t;
+		I286_WORKCLOCK(7);
+		return 1;
+	}
+	I286_IP = ip0;
+	return 0;
+}
+
+static int pc98_jcc(unsigned cc) {
+
+	const int s = (I286_FLAGL & S_FLAG) != 0;
+	const int o = I286_OV != 0;
+	switch (cc & 15) {
+	case 0x0: return o;
+	case 0x1: return !o;
+	case 0x2: return (I286_FLAGL & C_FLAG) != 0;
+	case 0x3: return (I286_FLAGL & C_FLAG) == 0;
+	case 0x4: return (I286_FLAGL & Z_FLAG) != 0;
+	case 0x5: return (I286_FLAGL & Z_FLAG) == 0;
+	case 0x6: return (I286_FLAGL & (Z_FLAG | C_FLAG)) != 0;
+	case 0x7: return (I286_FLAGL & (Z_FLAG | C_FLAG)) == 0;
+	case 0x8: return s;
+	case 0x9: return !s;
+	case 0xA: return (I286_FLAGL & P_FLAG) != 0;
+	case 0xB: return (I286_FLAGL & P_FLAG) == 0;
+	case 0xC: return s != o;
+	case 0xD: return s == o;
+	case 0xE: return (I286_FLAGL & Z_FLAG) != 0 || s != o;
+	default: return (I286_FLAGL & Z_FLAG) == 0 && s == o;
+	}
+}
+
+/* 0Fh の 386 拡張。処理したら 1。 */
+int pc98_op0f_386(UINT op) {
+
+	UINT16 rel;
+	UINT32 lin;
+	UINT modrm;
+	UINT8 src;
+	int ea;
+
+	if (!g_pc98I386Prefix)
+		return 0;
+	if (op >= 0x80 && op <= 0x8F) {
+		GET_PCWORD(rel);
+		if (pc98_jcc(op))
+			I286_IP = (UINT16)(I286_IP + rel);
+		I286_WORKCLOCK(3);
+		return 1;
+	}
+	if (op == 0xBE) {
+		ea = pc98_ea16(&lin, &modrm);
+		if (ea == 2)
+			src = pc98_r8(modrm & 7);
+		else if (ea == 1)
+			src = i286_memoryread(lin);
+		else
+			return 0;
+		*pc98_r16((modrm >> 3) & 7) = (UINT16)(SINT16)(SINT8)src;
+		I286_WORKCLOCK(3);
+		return 1;
+	}
+	return 0;
+}
+
 I286FN _reserved(void) {
 
+	UINT8 pref;
+
+	if (!g_pc98I386Prefix) {
+		INT_NUM(6, I286_IP - 1);
+		return;
+	}
+	pref = i286_memoryread(CS_BASE + (UINT16)(I286_IP - 1));
+	if (pref == 0x66) {
+		if (pc98_op66())
+			return;
+	}
+	else if (pref == 0x67) {
+		if (pc98_op67())
+			return;
+	}
 	INT_NUM(6, I286_IP - 1);
 }
 

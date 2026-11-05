@@ -73,6 +73,9 @@
 typedef void (*I286OP)(void);
 
 extern void CPUCALL i286c_intnum(UINT vect, REG16 IP);
+/* mujinto3 の FM26K.COM だけ。0 のときは 66h/67h は従来どおり #UD。 */
+extern void CPUCALL i286c_pc98_i386(int on);
+extern int pc98_op0f_386(UINT op);
 extern UINT32 i286c_selector(UINT sel);
 
 #if !defined(MEMOPTIMIZE) || (MEMOPTIMIZE < 2)

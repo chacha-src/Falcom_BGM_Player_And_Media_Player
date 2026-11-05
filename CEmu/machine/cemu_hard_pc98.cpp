@@ -92,6 +92,7 @@ static void MpuTrace(uint16_t port, int wr, uint8_t val)
 }
 
 /* CEmuPc98DumpMpuTrace の実装 */
+extern "C" void i286c_pc98_i386(int on);
 extern "C" void CEmuPc98DumpMpuTrace(FILE* f)
 {
 	if (!f) return;
@@ -2127,6 +2128,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 		np2_set_adrsmask(0x000FFFFFu);
 		/* PC-88VA CPU は V30。古典 PC-98 は i286 のまま。V30 パッチは bootcs VA プローブが安定してから任意 — i286 は Falcom SORC stub（SORC98 と同じ）を安定して走る。 */
 		np2_set_v30(0);
+		i286c_pc98_i386(0);
 		uint8_t* mem = np2_mem();
 		if (mem) memset(mem, 0, 0x200000);
 		np2HaveCpu_ = 1;
@@ -5142,6 +5144,51 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 }
 
 /* zip から ROM／曲データを載せる */
+/* 羅針盤 snddrv: エントリは IRET API（AL=1 初期化、AL=2 再生）。曲は CS:即値。
+   カタログ offset 0 を物理 0 に置くと IVT を潰し、既定 CS=0060 がイメージ途中を実行する。 */
+static uint16_t s_rashinSeg;
+static unsigned s_rashinSongOff;
+static unsigned s_rashinBusy;
+
+static int RashinImage(const uint8_t* d, unsigned n, unsigned* songOff, unsigned* busy)
+{
+	if (!d || n < 0x80u)
+		return 0;
+	unsigned info = 0;
+	for (unsigned i = 0; i + 14u < 0x80u && i + 14u < n; i++) {
+		if (d[i] == 0x8C && d[i + 1] == 0xC8 && d[i + 2] == 0x8E
+			&& d[i + 3] == 0xC0 && d[i + 4] == 0xB8 && d[i + 7] == 0xBB
+			&& d[i + 10] == 0xB9 && d[i + 13] == 0xC3) {
+			info = i;
+			break;
+		}
+	}
+	if (!info)
+		return 0;
+	int c0 = 0, c1 = 0, c2 = 0;
+	for (unsigned i = 0; i + 1u < 0x40u && i + 1u < n; i++) {
+		if (d[i] == 0x3C && d[i + 1] == 0x00) c0 = 1;
+		if (d[i] == 0x3C && d[i + 1] == 0x01) c1 = 1;
+		if (d[i] == 0x3C && d[i + 1] == 0x02) c2 = 1;
+	}
+	if (!c0 || !c1 || !c2)
+		return 0;
+	const unsigned song = (unsigned)d[info + 11] | ((unsigned)d[info + 12] << 8);
+	if (song < 0x100u || song >= 0x8000u)
+		return 0;
+	unsigned b = 0;
+	for (unsigned i = 0; i + 6u < n && i < 0x800u; i++) {
+		if (d[i] == 0xA1 && d[i + 3] == 0x85 && d[i + 4] == 0xC0
+			&& d[i + 5] == 0x75 && d[i + 6] == 0xF9) {
+			b = (unsigned)d[i + 1] | ((unsigned)d[i + 2] << 8);
+			break;
+		}
+	}
+	if (songOff) *songOff = song;
+	if (busy) *busy = b;
+	return 1;
+}
+
 int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
@@ -5182,6 +5229,9 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	wolfCtrlCount_ = 0;
 	WolfBridgeReset();
 	dosStubReady_ = 0;
+	s_rashinSeg = 0;
+	s_rashinSongOff = 0;
+	s_rashinBusy = 0;
 
 	/* DOS 分岐前のリズム ROM: 空 ROM の ADPCM-A 読はラップするアキュムレータランプに復号され、FMP/PMD ドラムが全 pc98dos タイトルでのこぎりノイズになった。 */
 	if (opnaMode && chip_)
@@ -5213,7 +5263,20 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		unsigned n = sz;
 		if (off + n > 0x200000u)
 			n = 0x200000u - off;
-		memcpy(mem + off, data, n);
+		unsigned dest = off;
+		if (off == 0) {
+			unsigned song = 0, busy = 0;
+			if (RashinImage(data, n, &song, &busy)) {
+				s_rashinSeg = 0x1000;
+				s_rashinSongOff = song;
+				s_rashinBusy = busy;
+			}
+		}
+		if (s_rashinSeg && off < s_rashinSongOff)
+			dest = 0x10000u + off;
+		if (dest + n > 0x200000u)
+			n = 0x200000u - dest;
+		memcpy(mem + dest, data, n);
 		if (r->name[0] && _strnicmp(r->name, "NOPNDRV", 7) == 0)
 			nopnDrv_ = 1;
 		/* DOFMD_98 と BRANM_98 は INT 45 + host-0x11 再生経路を共有（07D4/07D6 経由 seg:off 曲 ptr）。BRANM は INT 14h を飛ばす。 */
@@ -5535,6 +5598,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	np2_set_adrsmask(0x000FFFFFu);
 	np2_setextsize(0);
 	np2_set_v30(0);
+	i286c_pc98_i386(0);
 
 	/* bootip があるとき bootcs=0 を尊重（SORC98: CS=0000 IP=F000 → 物理 0xF000）。bootcs と bootip が両方未設定／0 のときだけ CS 既定を 0x60。 */
 	uint16_t cs = (uint16_t)((bootCs_ != 0 || bootIp_ != 0) ? bootCs_ : 0x0060);
@@ -5544,6 +5608,12 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	np2_reg_set(NP2_R_DS, cs);
 	np2_reg_set(NP2_R_ES, cs);
 	np2_reg_set(NP2_R_FLAGS, 0x0202); /* IF セット（割り込み許可） */
+	/* 羅針盤は既定 0060:0000 がドライバの途中だった。空の HLT を置き、再生は TriggerPlay。 */
+	if (s_rashinSeg) {
+		mem[0x600] = 0xF4;
+		mem[0x601] = 0xEB;
+		mem[0x602] = 0xFD;
+	}
 
 	extSong_ = (uint16_t)(titleCode & 0xffff);
 	extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
@@ -9747,6 +9817,16 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 }
 
 /* CPU を進める */
+/* FM26K.COM（無人島物語3）は実モードの 386 命令。このイメージのあいだだけ 66h/67h を通す。 */
+static void Pc98ArmFm26k(const unsigned char* image, unsigned imageSize, int isExe)
+{
+	if (isExe || !image || imageSize != 8566u)
+		return;
+	if (image[0] == 0x2E && image[1] == 0x8E && image[2] == 0x06
+		&& image[0x0C2C] == 0x66 && image[0x0C2D] == 0x60)
+		i286c_pc98_i386(1);
+}
+
 int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 {
 	char stripped[256];
@@ -9806,6 +9886,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	int ok = isExe ? dos_.LoadExe(mem, image, imageSize, pspTail)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
+	Pc98ArmFm26k(image, imageSize, isExe);
 	if (s_fukujin3Board && isExe && imageSize == 7428u) {
 		/* 既存 INT43 の seg:001D がトランポリン上で非 0 だと 4C01。ゼロ段落を指して導入させる。 */
 		memset(mem + 0x90000u, 0, 0x40);
@@ -10010,6 +10091,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	np2_set_adrsmask(0x000FFFFFu);
 	np2_setextsize(0);
 	np2_set_v30(0);
+	i286c_pc98_i386(0);
 	memset(mem, 0, 0xA0000);
 
 	dos_.Reset();
@@ -13308,6 +13390,42 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			}
 		}
 		pumpAbortOnMusic_ = 0;
+		return 1;
+	}
+
+	if (s_rashinSeg && s_rashinSongOff) {
+		uint8_t* mem = np2_mem();
+		const unsigned base = (unsigned)s_rashinSeg << 4;
+		if (mem && fileSize_ > 0)
+			LoadSongToAddr(song & 0xff, (int)(base + s_rashinSongOff), fileSize_, 0);
+		if (mem && s_rashinBusy && base + s_rashinBusy + 2u < 0x200000u) {
+			mem[base + s_rashinBusy] = 0;
+			mem[base + s_rashinBusy + 1] = 0;
+		}
+		if (mem) {
+			mem[0x80 * 4 + 0] = 0;
+			mem[0x80 * 4 + 1] = 0;
+			mem[0x80 * 4 + 2] = (uint8_t)(s_rashinSeg & 0xff);
+			mem[0x80 * 4 + 3] = (uint8_t)((s_rashinSeg >> 8) & 0xff);
+			static const uint8_t kGlue[] = {
+				0xB8, 0x01, 0x01,       /* mov ax,0101h  AL=1 AH=1 初期化 */
+				0xCD, 0x80,
+				0xB0, 0x02,             /* mov al,2 再生 */
+				0xCD, 0x80,
+				0xFB,                   /* sti */
+				0xF4,                   /* hlt */
+				0xEB, 0xFD
+			};
+			memcpy(mem + 0x600, kGlue, sizeof(kGlue));
+		}
+		np2_reg_set(NP2_R_CS, 0x0060);
+		np2_reg_set(NP2_R_IP, 0);
+		np2_reg_set(NP2_R_SS, 0x1000);
+		np2_reg_set(NP2_R_SP, 0xFFFE);
+		np2_reg_set(NP2_R_FLAGS, 0x0002);
+		pumpAbortOnMusic_ = 0;
+		if (cpuHz_ > 0)
+			PumpCycles(cpuCycles_ + (uint64_t)cpuHz_ / 10ull);
 		return 1;
 	}
 

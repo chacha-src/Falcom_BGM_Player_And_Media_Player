@@ -751,9 +751,9 @@ def build_costume(gb, parts):
         rgba = clo_colors(c)
         rgb = srgb_to_game(tint(rgba[:, :3], how))
         tr = tris_of([ff for ff in c.f])
-        # 透過（レースの抜き）は面ごとに捨てる
+        # 完全に抜ける面だけ捨てる。頂点の平均で落とすと、縁の半透明が穴になって服が途切れる。
         a = rgba[:, 3]
-        tr = tr[a[tr].mean(1) > 0.35]
+        tr = tr[a[tr].max(1) > 0.15]
         w = (gb.Wm[c.ref] * c.w[:, :, None]).sum(1)
         w = w / np.maximum(w.sum(1, keepdims=True), 1e-9)
         P.append(p); C.append(rgb); T.append(tr + base); W.append(w)

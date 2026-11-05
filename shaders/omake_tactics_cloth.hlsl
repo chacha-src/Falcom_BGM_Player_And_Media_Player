@@ -217,15 +217,25 @@ float3 FrontHang(float3 x, float3 skinned)
 	return hung;
 }
 
-// 両脇スリットの後ろ布。スリット上端（ySlit）までは脚に沿わせて段を作らず、そこから下は重力で垂らし、
-// 左右の脚の間（中央）は脚と脚の谷間へ落とす。
-float3 BackSlitOffset(float3 x, float ySlit)
+// 両脇スリットの後ろ布。上端はスキニングした位置のまま繋ぎ、そこから下は布自身の丈だけ垂らす。
+// スキニング位置へさらに足すと、前より後ろが長くなり、裾に段も出る。中央は脚と脚の間へ寄せる。
+float3 BackHang(float3 x, float ySlit, float3 skinned)
 {
 	float drop = max(ySlit - x.y, 0);
-	float t = smoothstep(0.0, 0.28, drop);
-	float mid = 1.0 - smoothstep(0.01, 0.11, abs(x.x - Mode.y));
-	float3 local = float3((Mode.y - x.x) * (0.20 * t), 0, -0.068 * mid * t);
-	return (mul(local, (float3x3)Hips) + GravDown() * (drop * (0.26 + 0.22 * mid))) * Sim.w;
+	float t = smoothstep(0.0, 0.22, drop);
+	float mid = 1.0 - smoothstep(0.02, 0.13, abs(x.x - Mode.y));
+	float3 a = float3(lerp(x.x, Mode.y, 0.55 * t * mid), ySlit, x.z - 0.045 * mid * t);
+	float3 hung = (mul(float4(a, 1), Hips).xyz + GravDown() * drop) * Sim.w;
+	return lerp(skinned, hung, t);
+}
+
+// 一周つながったスカート。腰の前傾で後ろだけ持ち上がると、同じ丈なのに前が長く見える。
+// 裾は前後とも、腰の高さからバインドの丈だけ重力で垂らして揃える。
+float3 LevelHang(float3 x)
+{
+	float drop = max(Grav.w - x.y, 0);
+	float3 a = float3(x.x, Grav.w, x.z);
+	return (mul(float4(a, 1), Hips).xyz + GravDown() * drop) * Sim.w;
 }
 
 // 腰に付いた最上段から 12cm かけて垂らし始める。上端で折れない。
@@ -312,18 +322,11 @@ float3 NodeTarget(ClothN c)
 			h = lerp(h, FrontHang(c.x.xyz, h), fly * saturate(c.q.w) * HangIn(c.x.y));
 		} else {
 			float ySlit = Grav.w - max(c.q.z - 2.0, 0.0);
-			h += BackSlitOffset(c.x.xyz, ySlit) * (fly * saturate(c.q.w));
+			h = lerp(h, BackHang(c.x.xyz, ySlit, h), fly * saturate(c.q.w));
 		}
 	} else if (fly > 0.001 && Mode.x < 0.35 && c.p.w < 0.5) {
-		// 一周つながったスカート。後ろは脚に付いたまま、前だけ靴に運ばれた分を腰の垂れへ戻す。
-		float front = smoothstep(0.02, 0.10, Mode.z - c.x.z);
-		float low = saturate((Grav.w - 0.26 - c.x.y) / 0.20);
-		float pin = ShoePin(h);
-		if (front > 0.001 && low > 0.001 && pin > 0.20) {
-			float3 hung = HipHung(c);
-			float drag = length(h - hung);
-			if (drag > 0.045) h = lerp(h, hung, front * low * fly);
-		}
+		float hem = saturate((Grav.w - 0.16 - c.x.y) / 0.22);
+		if (hem > 0.001) h = lerp(h, LevelHang(c.x.xyz), hem * fly);
 	}
 	return h;
 }
@@ -561,28 +564,27 @@ void CSClothWrite(uint id : SV_DispatchThreadID)
 		base = lerp(s, FrontHang(c.p.xyz, s) + dyn * c.p.w - pull, panW);
 		leftShoe = panW > 0.5 ? 1 : 0;
 	} else if (pan == 2u && panW > 0.001) {
-		// 両脇スリットの後ろ布。スリット上端から連続して下へ垂らし、中央は脚と脚の間へ落とす。
+		// 両脇スリットの後ろ布。スリット上端から布の丈だけ垂らし、中央は脚と脚の間へ落とす。
 		float ySlit = Grav.w - (float)(c.a.w >> 16) * 0.001;
 		float3 dyn = float3(0, 0, 0);
 		[unroll] for (int kk = 0; kk < 4; kk++) {
 			uint q = min(k4[kk], (uint)(NMAX - 1));
 			dyn += (St[q].xyz - NodeTarget(Cn[q])) * c.w[kk];
 		}
-		base = s + BackSlitOffset(c.p.xyz, ySlit) * panW + dyn * (c.p.w * panW) - pull * panW;
+		base = lerp(s, BackHang(c.p.xyz, ySlit, s), panW) + dyn * (c.p.w * panW) - pull * panW;
 		leftShoe = panW > 0.5 ? 1 : 0;
 	} else if (fly > 0.001 && Mode.x < 0.35 && c.p.w > 0.25) {
-		float front = smoothstep(0.0, 0.07, Mode.z - c.p.z);
-		float low = saturate((Grav.w - 0.20 - c.p.y) / 0.16);
-		float3 hung = mul(float4(c.p.xyz, 1), Hips).xyz;
-		float below = max(Grav.w - c.p.y, 0);
-		float sag = saturate((below - 0.04) / 0.50) * 0.040;
-		hung = (hung + GravDown() * sag) * Sim.w;
-		float3 need = hung - s;
-		float need2 = dot(need, need);
-		float along = need2 > 1e-6 ? dot(pull, need) / need2 : 1;
-		if (front > 0.001 && low > 0.001 && need2 > 0.045 * 0.045 && along < 0.65)
-			base = lerp(s, hung, front * low * fly);
-		leftShoe = length(base - s) > 0.02 ? 1 : 0;
+		// 裾だけ腰の丈に揃える。格子の揺れは足し、骨からのずれは二重に足さない。
+		float hemK = saturate((Grav.w - 0.16 - c.p.y) / 0.22) * fly;
+		if (hemK > 0.001) {
+			float3 dyn = float3(0, 0, 0);
+			[unroll] for (int kk = 0; kk < 4; kk++) {
+				uint q = min(k4[kk], (uint)(NMAX - 1));
+				dyn += (St[q].xyz - NodeTarget(Cn[q])) * c.w[kk];
+			}
+			base = lerp(s, LevelHang(c.p.xyz), hemK) + dyn * (c.p.w * hemK) - pull * hemK;
+		}
+		leftShoe = hemK > 0.45 ? 1 : 0;
 	}
 	// 靴から離した裾は、靴のカプセルで表面へ戻さない。太ももとすねには当たる。
 	float3 p = HipOut(CollideBody(base + pull, c.n.w, leftShoe > 0.5 ? 0 : 1, pan));

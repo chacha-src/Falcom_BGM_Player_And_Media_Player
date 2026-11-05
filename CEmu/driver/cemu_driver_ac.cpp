@@ -708,6 +708,23 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = (uint8_t)lo;
 			songCmdWord_ = (uint16_t)lo;
 		}
+		/* カタログが 0x00.. の未掲載 Model 2A/3。A0 00 xx はコマンド 0 のサブで曲にならない。
+		   既載の lastbrnx / rchase2 はローバイトのまま。skisuprg はローバイトだと
+		   別 id が同じ波形に畳まれるので 0x10xx を試す。 */
+		if (_stricmp(ar, "hotd") == 0 || _stricmp(ar, "doa") == 0
+			|| _stricmp(ar, "dynamcop") == 0 || _stricmp(ar, "fvipers") == 0
+			|| _stricmp(ar, "gunblade") == 0 || _stricmp(ar, "manxtt") == 0
+			|| _stricmp(ar, "overrev") == 0 || _stricmp(ar, "schamp") == 0
+			|| _stricmp(ar, "sgt24h") == 0 || _stricmp(ar, "skytargt") == 0
+			|| _stricmp(ar, "srallyc") == 0 || _stricmp(ar, "vcop2") == 0
+			|| _stricmp(ar, "von") == 0 || _stricmp(ar, "waverunr") == 0
+			|| _stricmp(ar, "bel") == 0 || _stricmp(ar, "lemans24") == 0
+			|| _stricmp(ar, "dirtdvls") == 0 || _stricmp(ar, "magtruck") == 0
+			|| _stricmp(ar, "von2") == 0 || _stricmp(ar, "skisuprg") == 0) {
+			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
+			songCmdWord_ = (uint16_t)(0x1000u | (lo & 0xffu));
+			songCmd_ = (uint8_t)(lo & 0xffu);
+		}
 	}
 	/* K054539（bucky/moomesa 等）: 曲表エントリは 14 バイト。[0]==0 かつ [1] の bit6 クリアは mute/停止行（bucky prefer 0xC0）。単チップセットだけがその表配置。dual K054539 mystwarr 族は BGM 帯全体が 0xCD-0xEC なので、この強制は全曲を 0x01 に静かに置換した。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4
@@ -1156,19 +1173,18 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			else if (c == 0x04u || c == 0x05u || c == 0x03u)
 				songCmd_ = 0x0bu;
 		}
-		else if (!_stricmp(ar, "mgcldtex")) {
-			/* TC0140SYT は 8bit。hoot 0x1A7/0x1A1 は 16bit。同じ titlelist の 8bit BGM へ。 */
-			if (songCmdWord_ == 0x1a7u || c == 0xa7u)
-				songCmd_ = 0x02u; /* Over Drive */
-			else if (songCmdWord_ == 0x1a1u || c == 0xa1u)
-				songCmd_ = 0x09u; /* Brain Drain */
-			else if (songCmdWord_ == 0x1a4u || c == 0xa4u)
-				songCmd_ = 0x06u; /* Summer Face */
-			else if (songCmdWord_ == 0x1adu || c == 0xadu)
-				songCmd_ = 0x0fu; /* Zap Off */
-			else if (songCmdWord_ > 0xffu)
-				songCmd_ = (uint8_t)(songCmdWord_ & 0xffu);
-			songCmdWord_ = songCmd_;
+		/* mgcldtex の 0x1Axx は 16bit の曲番号。8bit BGM へ畳むと別タイトルが同じ波形になる。 */
+	}
+	if (ge && ge->archive[0] && _stricmp(ge->archive, "mgcldtex") == 0) {
+		/* 0x001A ミニゲームは 2 秒で落ち、同じコマンドの再注入は無音。
+		   0x009A 未使用は 4 秒再スタートだと定常音の窓が残る。
+		   隣と違うループ BGM へ。0x1A7 など上位バイト付きはそのまま。 */
+		if (songCmdWord_ == 0x001au) {
+			songCmdWord_ = 0x0002u;
+			songCmd_ = 0x02u;
+		} else if (songCmdWord_ == 0x009au) {
+			songCmdWord_ = 0x0017u;
+			songCmd_ = 0x17u;
 		}
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_ROBOKID && ge && ge->archive
@@ -1501,9 +1517,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			pinned_ = 0;
 		}
 	}
-	/* m99 M72（YM@40）: BGM は 0x20+index。カタログはしばしば生 index/SE */
+	/* m99 M72（YM@40）: BGM は 0x20+index。カタログはしばしば生 index/SE。
+	   poundfor/bbmanw のコードは既にラッチ値（0x10 を 0x30 にすると選択曲がワンショットになる）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt()
-		&& songCmd_ > 0 && songCmd_ < 0x20)
+		&& songCmd_ > 0 && songCmd_ < 0x20
+		&& !(ge && ge->archive && (_stricmp(ge->archive, "poundfor") == 0
+			|| _stricmp(ge->archive, "bbmanw") == 0)))
 		songCmd_ = (uint8_t)(0x20 + (songCmd_ & 0x1fu));
 	/* Sys16B: カタログ先頭はしばしば Stop/Credit/SFX — 最初の BGM 風タイトルを優先（goldnaxe 0x9C credit、cotton 0x01 stop）。曲ハントではない: Open 時の固定カタログ 1 パス。mute/弱いピン（0xC5/0xD7/0xFF）はステージ BGM があれば写す（0xC0-C2、0xD0、低バイト）。
 	   0x90-0x95 は 5358 スポーツ（aceattac/suprleag）の BGM。0xA0-0xAF は sonicbom 系。0x96-0x9F はタイトルデモ（hwchamp）。0x96-0xBF を一括拒否しない — suprleag/sonicbom がボイス SE バイトへ写った。 */
@@ -1818,9 +1837,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 
-	/* ROM ロード後、m72IoAlt_ が嗅ぎ取られることがある — m99 BGM バイアスを再適用 */
+	/* ROM ロード後、m72IoAlt_ が嗅ぎ取られることがある — m99 BGM バイアスを再適用。
+	   poundfor/bbmanw は上と同じく生ラッチ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt()
-		&& songCmd_ > 0 && songCmd_ < 0x20)
+		&& songCmd_ > 0 && songCmd_ < 0x20
+		&& !(ge && ge->archive && (_stricmp(ge->archive, "poundfor") == 0
+			|| _stricmp(ge->archive, "bbmanw") == 0)))
 		songCmd_ = (uint8_t)(0x20 + (songCmd_ & 0x1fu));
 
 	/* Capcom ZN: カタログ先頭はしばしば QSound ロゴ／モノステレオ切替（sfex 0x10、techromn 0xFF04）。固定 titlelist 1 パス — 試行表なし */
@@ -4671,9 +4693,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		/* アイドル（DA00 NMI 許可 @0158）に達してから注入し、NMI が C300 をキュー */
 		for (int i = 0; i < 120 && !hw_->FlstoryNmiEn(); i++)
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
-		/* 0xEF が (C51A) bit7。そのフラグが 0 の間 RST38 ドレイン @0169 は全曲を飛ばす（tokio と同じ EE/EF ゲート）。IM1 がドレイン／tick。nycaptor の 0xEF は E0 制御表経由の C719 bit0 であり CP EF ではない。 */
+		/* 0xEF が (C51A) bit7。そのフラグが 0 の間 RST38 ドレイン @0169 は全曲を飛ばす（tokio と同じ EE/EF ゲート）。IM1 がドレイン／tick。nycaptor の 0xEF は E0 制御表経由の C719 bit0 であり CP EF ではない。
+		   buggychl は 0xFF が 439A bit0（曲の受付）。0xEF は別モードで、bit0 が 0 のまま全曲を捨てる。 */
 		nextGngIrq_ = 0;
-		if (!hw_->MsisaacMap()) {
+		if (hw_->PeekMem(0) == 0x00 && hw_->PeekMem(3) == 0xc3 && hw_->PeekMem(4) == 0xb2) {
+			hw_->SetSoundCommand(0xff);
+			for (int i = 0; i < 30; i++)
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+		} else if (!hw_->MsisaacMap()) {
 			hw_->SetSoundCommand(0xef);
 			for (int i = 0; i < 30; i++)
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -4880,12 +4907,18 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		/* Bucky 自己テスト用。gijoe/lethalen ファームは FA2F に 0x80/0x21 を書く — 0x01 上書きはタイマ bit5 を落として NMI が死ぬ。
-		   plygonet は単チップでタイマ bit5 が NMI 源。0x01 強制は bit5 を落とし、F800 bit4 も立てないので曲が 2 秒で切れる。 */
-		const int plyOne = !hw_->KonamiPcm2()
-			&& hw_->PeekMem(0) == 0xf3u && hw_->PeekMem(1) == 0xedu
+		   JP $0086/$0088（plygonet/rungun/viostorm/mtlchamp）はタイマ bit5 が NMI 源。0x01 は bit5 を落とし曲が切れる。
+		   metamrph だけ RST38 が JP $3B28 で、0x01 のまま 16 秒鳴る。mystwarr は JP $008A なのでここを通さない。 */
+		const int jpKon = hw_->PeekMem(0) == 0xf3u && hw_->PeekMem(1) == 0xedu
 			&& hw_->PeekMem(2) == 0x56u && hw_->PeekMem(3) == 0xc3u
-			&& hw_->PeekMem(4) == 0x86u;
-		if (hw_->PcmChip() && !hw_->KonamiJoeMap() && !hw_->KonamiPrmrsocrMap() && !plyOne)
+			&& (hw_->PeekMem(4) == 0x86u || hw_->PeekMem(4) == 0x88u);
+		const int metaVec = hw_->PeekMem(0x3a) == 0x28u && hw_->PeekMem(0x3b) == 0x3bu;
+		/* polynetw: LD SP,$E000; IM 1; JP $0090。22f=0x01 はタイマ bit5 を落とす。 */
+		const int polyBoot = hw_->PeekMem(0) == 0x31u && hw_->PeekMem(1) == 0x00u
+			&& hw_->PeekMem(2) == 0xe0u && hw_->PeekMem(3) == 0xedu
+			&& hw_->PeekMem(4) == 0x56u && hw_->PeekMem(5) == 0xc3u;
+		if (hw_->PcmChip() && !hw_->KonamiJoeMap() && !hw_->KonamiPrmrsocrMap()
+			&& !(jpKon && !metaVec) && !polyBoot)
 			hw_->PcmChip()->Write(0x22f, 0x01);
 	}
 	/* Toaplan1: 共有 RAM コマンドは YM Timer-A ISR から poll。注入後メールボックスが消えるまで IRQ をポンプ（曲インストール）。snowbros: ブート後ラッチ NMI（古典 Tecmo と同じ理由）。 */
@@ -4942,6 +4975,16 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (sAcScrRep) {
 			nextCmdAt_ = (uint64_t)hw_->Cpu()->time64()
 				+ (uint64_t)cpuHz_ * (uint64_t)sAcScrRep;
+		} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
+			&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(4) == 0x26
+			&& hw_->PeekMem(5) == 0x01 && hw_->PeekMem(0x66) == 0xed
+			&& hw_->PeekMem(0x67) == 0x45
+			&& (songCmdWord_ == 0x001au || songCmdWord_ == 0x000bu
+				|| songCmdWord_ == 0x000cu || songCmdWord_ == 0x0099u
+				|| songCmdWord_ == 0x009au || songCmdWord_ == 0x009bu)) {
+			/* mgcldtex: ラウンドクリアと Game Over は 2 秒。クリア系は 4 秒。 */
+			const unsigned sec = (songCmdWord_ == 0x000bu || songCmdWord_ == 0x000cu) ? 2u : 4u;
+			nextCmdAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ * (uint64_t)sec;
 		} else {
 		const int fast = (hw_->board_ == CEMU_AC_BOARD_IREM_M72
 			|| hw_->board_ == CEMU_AC_BOARD_SYS16B
@@ -5748,6 +5791,13 @@ void CDriverAc::TryInjectCommand()
 			hw_->SetSoundCommandWord(w);
 		else
 			hw_->SetSoundCommand((uint8_t)w);
+	} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
+		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(4) == 0x26
+		&& hw_->PeekMem(5) == 0x01 && hw_->PeekMem(0x66) == 0xed
+		&& hw_->PeekMem(0x67) == 0x45) {
+		/* mgcldtex: カタログは 12bit。SYT は 4 ニブルで下位バイトの次に上位バイト。 */
+		const uint16_t w = songCmdWord_ ? songCmdWord_ : (uint16_t)cmd;
+		hw_->SetSoundCommandWord(w);
 	} else {
 		hw_->SetSoundCommand(cmd);
 	}
@@ -7314,8 +7364,51 @@ void CDriverAc::DeliverIrqs()
 		}
 		return;
 	}
+	/* smgp: 00C0 は (F81E)!=0 までスピン。NMI はブートの EXX 前に消費されると F81E が立たず、
+	   立っても 1 周でまたスピンに戻る。メインループが時基なので、注入後は 60Hz で F81E を立て直す。 */
+	if (booted_ && hw_->AburnerSmgpMap()
+		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xed
+		&& hw_->PeekMem(2) == 0x56 && hw_->PeekMem(3) == 0x31) {
+		const unsigned pc = (unsigned)cpu->r.pc;
+		uint8_t* m = hw_->Mem();
+		if (m && pc >= 0x00c0u && pc <= 0x00c5u && m[0xf81e] == 0) {
+			const uint64_t now = (uint64_t)cpu->time64();
+			static uint64_t sSmgpRel;
+			static uint64_t sSmgpPrev;
+			static uint8_t sSmgpSent;
+			/* 期限の未来時刻と比較すると毎周リセットされる。巻き戻しだけ見る。 */
+			if (now < sSmgpPrev) {
+				sSmgpRel = 0;
+				sSmgpSent = 0;
+			}
+			sSmgpPrev = now;
+			const uint64_t period = (cpuHz_ > 0) ? (uint64_t)cpuHz_ / 60ull : 0;
+			if (period > 0 && now >= sSmgpRel) {
+				/* 起動初期化が F800 を消すことがある。スピンに入ってから 1 回だけ積み直す。
+				   F810 は触らない（00C0 が毎周同じ曲を積み直す）。 */
+				uint8_t cmd = hw_->SoundCommand();
+				/* カタログ 0x00 は操作注記。アドバタイズ（0x81）を鳴らす。 */
+				if (cmd == 0) {
+					cmd = 0x81;
+					if (sSmgpSent != cmd) {
+						m[0xf800] = cmd;
+						sSmgpSent = cmd;
+					}
+				}
+				if (sSmgpSent != cmd && cmd >= 0x80u && m[0xf800] == 0x80u) {
+					m[0xf800] = cmd;
+					sSmgpSent = cmd;
+				}
+				m[0xf81e] = 0x80;
+				sSmgpRel = now + period;
+			}
+		}
+	}
 	if (hw_->IrqPulsePending()) {
-		if (hw_->board_ == CEMU_AC_BOARD_SYS16A
+		if (hw_->AburnerSmgpMap()) {
+			/* 上の周期解放が F810/F81E を書く。NMI は代替レジスタを壊し得るので取らない。 */
+			hw_->TakeIrqPulse();
+		} else if (hw_->board_ == CEMU_AC_BOARD_SYS16A
 			|| hw_->board_ == CEMU_AC_BOARD_ABURNER
 			|| hw_->board_ == CEMU_AC_BOARD_HANGON
 			|| (hw_->board_ == CEMU_AC_BOARD_SYS18 && !hw_->NewufoMap())
@@ -7383,10 +7476,10 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 		return;
 	}
-	/* System16B / OutRun: YM2151 タイマは LEVEL IRQ。IFF1 中だけ届ける（EI;NOP;DI を捕捉）。成功 take をレート制限し、sticky status が RETI 後毎命令で再入しないように。DI 中に周期を進めない — EI 窓を飛ばし goldnaxe が SILENT。Sys16A shinobi は 0038 を空にし YM status を poll（IN A,(01);BIT0）— そこで IM1 を撃たない。 */
+	/* System16B / OutRun: YM2151 タイマは LEVEL IRQ。IFF1 中だけ届ける（EI;NOP;DI を捕捉）。成功 take をレート制限し、sticky status が RETI 後毎命令で再入しないように。DI 中に周期を進めない — EI 窓を飛ばし goldnaxe が SILENT。Sys16A shinobi は 0038 を空にし YM status を poll（IN A,(01);BIT0）— そこで IM1 を撃たない。
+	   smgp の 0038 は CALL 0A38（YM 全初期化）のあと JP 0100。タイマ IRQ を渡すと演奏を毎回消す。時基はメインループの F81E 解放。 */
 	if ((hw_->board_ == CEMU_AC_BOARD_SYS16B
-			|| hw_->board_ == CEMU_AC_BOARD_OUTRUN
-			|| (hw_->board_ == CEMU_AC_BOARD_ABURNER && hw_->AburnerSmgpMap()))
+			|| hw_->board_ == CEMU_AC_BOARD_OUTRUN)
 		&& !hw_->IrqPulsePending()
 		&& chip) {
 		const int st = (chip->ReadStatus() & 0x03) != 0;
@@ -7865,8 +7958,8 @@ void CDriverAc::DecoRunCycles(int cycles)
 			const int used = M6502Execute(m6502, slice);
 			const int step = used > 0 ? used : slice;
 			hw_->AddCpuCycles((uint64_t)step);
-			if (hw_->DecoCpuKind() == 11) {
-				/* disco: CPU 500 kHz、AY 1.5 MHz。matmania の 2 倍には合わせない。 */
+			if (hw_->DecoCpuKind() == 11 || hw_->DecoCpuKind() == 12) {
+				/* disco / btime: CPU 500 kHz、AY 1.5 MHz。matmania の 2 倍には合わせない。 */
 				if (chip) chip->AdvanceClocks((uint64_t)step * 3u);
 				if (ym2203) ym2203->AdvanceClocks((uint64_t)step * 3u);
 			} else {
@@ -9024,6 +9117,14 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	const int lastsurvMix = (hw_->board_ == CEMU_AC_BOARD_ABURNER
 		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(0x2f) == 0x31
 		&& hw_->PeekMem(0x66) == 0x08);
+	/* smgp は F1 テーマ以外の数曲が 32767 に貼り付く。ブート F3 ED 56 31 だけ半分。 */
+	const int smgpMix = (hw_->AburnerSmgpMap()
+		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xed
+		&& hw_->PeekMem(2) == 0x56 && hw_->PeekMem(3) == 0x31);
+	/* pdrift は CALL $1047 の曲エンジン。YM と SegaPCM の和が数曲で 32767 に貼り付く。 */
+	const int pdriftMix = (hw_->board_ == CEMU_AC_BOARD_OUTRUN
+		&& hw_->PeekMem(0x2e) == 0xcd && hw_->PeekMem(0x2f) == 0x47
+		&& hw_->PeekMem(0x30) == 0x10);
 	/* slipstrm: YM2612 と RF5C68 の和が数曲で 32767 に貼り付く。この署名だけ半分にする。 */
 	const int slipstrmMix = (hw_->board_ == CEMU_AC_BOARD_SYS32
 		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xed
@@ -9037,6 +9138,8 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	const int wingforcMix = (hw_->RobokidBlazeonMap()
 		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(4) == 0x00
 		&& hw_->PeekMem(5) == 0x01);
+	/* poundfor/bbmanw は YM2151 を倍にすると 32767 に貼り付く。m72IoAlt だけ半分。 */
+	const int m72AltMix = (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt());
 	/* mystwarr 族は K054539 を 2 本ともフルに足すと Introduction が 32767 に貼り付く。この署名だけ半分。 */
 	const int mystwarrMix = (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4
 		&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xed
@@ -9130,6 +9233,17 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 						/* Fire Shark: Credit は約 2 秒、Game Over は約 4 秒。3 秒の既定だと先頭の無音窓が残る。 */
 						nextCmdAt_ = now + (uint64_t)cpuHz_
 							* (songCmd_ == 0x28u ? 2ull : 4ull);
+						cmdIndex_ = 1;
+					} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
+						&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(4) == 0x26
+						&& hw_->PeekMem(5) == 0x01 && hw_->PeekMem(0x66) == 0xed
+						&& hw_->PeekMem(0x67) == 0x45
+						&& (songCmdWord_ == 0x001au || songCmdWord_ == 0x000bu
+							|| songCmdWord_ == 0x000cu || songCmdWord_ == 0x0099u
+							|| songCmdWord_ == 0x009au || songCmdWord_ == 0x009bu)) {
+						/* mgcldtex: ラウンドクリアと Game Over は 2 秒。クリア系は 4 秒。 */
+						const unsigned sec = (songCmdWord_ == 0x000bu || songCmdWord_ == 0x000cu) ? 2u : 4u;
+						nextCmdAt_ = now + (uint64_t)cpuHz_ * (uint64_t)sec;
 						cmdIndex_ = 1;
 					} else {
 					const int fast = (hw_->board_ == CEMU_AC_BOARD_IREM_M72
@@ -9229,9 +9343,36 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 							&& (hw_->PeekMem(4) == 0x86u || hw_->PeekMem(4) == 0x88u
 								|| hw_->PeekMem(4) == 0x8au);
 						if (mwPin) {
-							if (cmdIndex_ < 1)
-								TryInjectCommand();
-							nextCmdAt_ = (uint64_t)~0ull;
+							/* 同じコマンドを再 IRQ。試行表は歩かない。長いステージはそのまま。
+							   mtlchamp（0x3A=74 46）: タイトル約 8 秒、対戦と挑戦者約 2 秒、
+							   結果と Game Over 約 4 秒、スピーカテスト約 14 秒。
+							   viostorm（0x3A=75 3B）: プロローグ 1 と 2 は約 8 秒、
+							   最終ボス導入は約 14 秒、クリアは約 4 秒、Game Over は約 6 秒。 */
+							unsigned rep = 0;
+							if (hw_->PeekMem(0x3a) == 0x74u && hw_->PeekMem(0x3b) == 0x46u) {
+								if (songCmd_ == 0xdau) rep = 6u;
+								else if (songCmd_ == 0xeau || songCmd_ == 0xdcu || songCmd_ == 0xe0u)
+									rep = 1u;
+								else if (songCmd_ == 0xddu || songCmd_ == 0xdfu)
+									rep = 3u;
+								else if (songCmd_ == 0xedu) rep = 12u;
+							} else if (hw_->PeekMem(0x3a) == 0x75u && hw_->PeekMem(0x3b) == 0x3bu) {
+								if (songCmd_ == 0xe9u) rep = 6u;
+								else if (songCmd_ == 0xe6u) rep = 12u;
+								else if (songCmd_ == 0xeau) rep = 6u;
+								else if (songCmd_ == 0xdfu) rep = 3u;
+								else if (songCmd_ == 0xddu) rep = 5u;
+							}
+							if (rep) {
+								if (cmdIndex_ >= 2)
+									hw_->SetSoundCommand(songCmd_);
+								cmdIndex_ = 2;
+								nextCmdAt_ = now + (uint64_t)cpuHz_ * (uint64_t)rep;
+							} else {
+								if (cmdIndex_ < 1)
+									TryInjectCommand();
+								nextCmdAt_ = (uint64_t)~0ull;
+							}
 						} else {
 							TryInjectCommand();
 							nextCmdAt_ = now + (uint64_t)cpuHz_ / 4;
@@ -9338,6 +9479,54 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 					hw_->SetSoundCommand(songCmd_);
 					const unsigned sec = 2u;
 					nextCmdAt_ = now + (uint64_t)cpuHz_ * (uint64_t)sec;
+				} else if (m72AltMix && hw_->PeekMem(4) == 0x09
+					&& (songCmd_ == 0x0fu || songCmd_ == 0x08u || songCmd_ == 0x01u)) {
+					/* poundfor: Title / Player Out / Game Over は 4–6 秒で落ちる。同じラッチを戻す。 */
+					hw_->SetSoundCommand(songCmd_);
+					nextCmdAt_ = now + (uint64_t)cpuHz_ * 2ull;
+				} else if (m72AltMix && hw_->PeekMem(4) == 0x7e) {
+					/* bbmanw: 短いキューは 2 秒、8–10 秒の曲は落ちる直前、
+					   14 秒で 1 窓欠ける曲は末尾だけ戻す。ループ BGM はここを通さない。 */
+					unsigned sec = 0;
+					switch (songCmd_) {
+					case 0x09: case 0x0a: case 0x14: case 0x0e:
+					case 0x08: case 0x07: case 0x15:
+						sec = 2; break;
+					case 0x12: sec = 6; break;
+					case 0x0c: sec = 8; break;
+					case 0x11: case 0x13: sec = 12; break;
+					default: break;
+					}
+					if (sec) {
+						hw_->SetSoundCommand(songCmd_);
+						nextCmdAt_ = now + (uint64_t)cpuHz_ * (uint64_t)sec;
+					} else {
+						nextCmdAt_ = (uint64_t)~0ull;
+					}
+				} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
+					&& hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(4) == 0x26
+					&& hw_->PeekMem(5) == 0x01 && hw_->PeekMem(0x66) == 0xed
+					&& hw_->PeekMem(0x67) == 0x45
+					&& (songCmdWord_ == 0x001au || songCmdWord_ == 0x000bu
+						|| songCmdWord_ == 0x000cu || songCmdWord_ == 0x0099u
+						|| songCmdWord_ == 0x009au || songCmdWord_ == 0x009bu)) {
+					/* mgcldtex: ラウンドクリアと Game Over は同じ 16bit で戻る。
+					   クリア／成功／未使用はメインに戻らないので PC から入れ直す。
+					   ミニゲームはリセットしても二度目が無音なのでここには乗せない。 */
+					if (songCmdWord_ == 0x0099u || songCmdWord_ == 0x009bu
+						|| songCmdWord_ == 0x009au) {
+						if (uint8_t* m = hw_->Mem())
+							m[0xd230] = 7;
+						if (Ay_Cpu* c = hw_->Cpu()) {
+							c->r.pc = 0x01f7;
+							c->r.sp = 0xe000;
+							c->r.iff1 = 1;
+							c->r.iff2 = 1;
+						}
+					}
+					hw_->SetSoundCommandWord(songCmdWord_);
+					const unsigned sec = (songCmdWord_ == 0x000bu || songCmdWord_ == 0x000cu) ? 2u : 4u;
+					nextCmdAt_ = now + (uint64_t)cpuHz_ * (uint64_t)sec;
 				} else {
 					/* 選んだカタログ／プレイリストコマンドを残す。試行表をハントしない — BGM を最初の試行コードで再開した（sfa song2→song1、CPS/QSound/Taito 等も同じ型）。 */
 					nextCmdAt_ = (uint64_t)~0ull;
@@ -9375,13 +9564,17 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			chip->MixAdd(stereo + i * 2, 1, 320);
 		} else {
 			chip->Render(stereo + i * 2, 1);
-			if (hw_->board_ != CEMU_AC_BOARD_CPS1 && !wingforcMix)
+			if (hw_->board_ != CEMU_AC_BOARD_CPS1 && !wingforcMix && !m72AltMix)
 				AcBoostYamaha(chip, stereo + i * 2, 1);
+			if (m72AltMix) {
+				stereo[i * 2] = (int16_t)((int)stereo[i * 2] / 2);
+				stereo[i * 2 + 1] = (int16_t)((int)stereo[i * 2 + 1] / 2);
+			}
 			if (wingforcMix) {
 				stereo[i * 2] = (int16_t)((int)stereo[i * 2] / 2);
 				stereo[i * 2 + 1] = (int16_t)((int)stereo[i * 2 + 1] / 2);
 			}
-			if (lastsurvMix) {
+			if (lastsurvMix || smgpMix || pdriftMix) {
 				stereo[i * 2] = (int16_t)((int)stereo[i * 2] / 2);
 				stereo[i * 2 + 1] = (int16_t)((int)stereo[i * 2 + 1] / 2);
 			}
@@ -9405,7 +9598,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			   （以前 /256 を外して溢れた）量子化と誤ゲインでノイズになるので使わない。
 			   96/256 ≈ 0.375 は 1ch ピークが MAME 0.30 付近、2ch 同時でも FM の頭が残る。
 			   lastsurv は 90。チップ側が 220 超を 180 に丸めるので、半分は 90。 */
-			const int pcmGain = lastsurvMix ? 90
+			const int pcmGain = (lastsurvMix || smgpMix || pdriftMix) ? 90
 				: (slipstrmMix ? 64
 				: (wingforcMix ? 16
 				: (mystwarrMix ? 128
@@ -9438,6 +9631,33 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			if (r < -32768) r = -32768;
 			stereo[i * 2] = (int16_t)l;
 			stereo[i * 2 + 1] = (int16_t)r;
+		}
+		if (smgpMix) {
+			/* 曲データは有限で、ゲーム側の再送が無いと 6〜14 秒で切れる。
+			   1 秒の無音で F800 が空なら同じ曲をもう一度積む。 */
+			static int sSil;
+			static int sArmed;
+			static uint8_t sPrev;
+			uint8_t cmd = hw_->SoundCommand();
+			if (cmd == 0)
+				cmd = 0x81;
+			if (cmd != sPrev) {
+				sPrev = cmd;
+				sSil = 0;
+				sArmed = 0;
+			}
+			const int al = stereo[i * 2] < 0 ? -stereo[i * 2] : stereo[i * 2];
+			const int ar = stereo[i * 2 + 1] < 0 ? -stereo[i * 2 + 1] : stereo[i * 2 + 1];
+			if (al > 200 || ar > 200) {
+				sSil = 0;
+				sArmed = 1;
+			} else if (sArmed && cmd >= 0x80u && ++sSil >= hostRate_) {
+				sSil = 0;
+				if (uint8_t* m = hw_->Mem()) {
+					if (m[0xf800] == 0x80u)
+						m[0xf800] = cmd;
+				}
+			}
 		}
 		if (!heard_ && (stereo[i * 2] || stereo[i * 2 + 1]
 			|| (mix2 && (mix2[i * 2] || mix2[i * 2 + 1]))

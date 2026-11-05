@@ -77,17 +77,19 @@ static void TacFillObj(TacObjCB& o, const M4& world, const DrawParams& dp, float
 	if (dp.noTess && dp.mode < 0.5f) o.oc[3] = 2.f;
 }
 
-static void TacBindObjBuf(ID3D11DeviceContext* ctx, ID3D11Buffer* b)
+static void TacBindObjBuf(ID3D11DeviceContext* ctx, ID3D11Buffer* b, BOOL tessOn)
 {
 	if (!ctx || !b || g_cbBound == b) return;
 	g_cbBound = b;
 	ctx->VSSetConstantBuffers(1, 1, &b);
 	ctx->PSSetConstantBuffers(1, 1, &b);
-	ctx->HSSetConstantBuffers(1, 1, &b);
-	ctx->DSSetConstantBuffers(1, 1, &b);
+	if (tessOn) {
+		ctx->HSSetConstantBuffers(1, 1, &b);
+		ctx->DSSetConstantBuffers(1, 1, &b);
+	}
 }
 
-static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacObjCB& o)
+static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacObjCB& o, BOOL tessOn = FALSE)
 {
 	if (!ctx || !cb) return;
 	if (g_objValid && g_cbBound && memcmp(&g_objGPU, &o, sizeof(o)) == 0) return;
@@ -101,7 +103,7 @@ static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacOb
 	if (FAILED(ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
 	memcpy(ms.pData, &o, sizeof(o));
 	ctx->Unmap(dst, 0);
-	TacBindObjBuf(ctx, dst);
+	TacBindObjBuf(ctx, dst, tessOn);
 	g_objGPU = o;
 	g_objValid = TRUE;
 }
@@ -136,7 +138,7 @@ Renderer::Renderer()
 	m_cutActorGen = 0;
 	m_fadeX = m_fadeZ = -1;
 	m_w = m_h = 0; m_quality = 1; m_gpu = 0; m_allowTess = TRUE; m_tessOn = FALSE; m_bindKey = -1; m_hudPipe = 0; m_lastPsSrv = NULL; m_dsWant = NULL; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
-	m_dev = NULL; m_ctx = NULL; m_ctx1 = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
+	m_dev = NULL; m_ctx = NULL; m_ctx1 = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_avaPlate = NULL; m_avaPlateW = m_avaPlateH = 0; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_sceneTex = NULL; m_sceneRtv = NULL; m_sceneSrv = NULL;
 	m_refTex = NULL; m_refRtv = NULL; m_refSrv = NULL; m_refDs = NULL; m_refDsv = NULL;
 	m_refW = m_refH = 0; m_refBlur = 0; m_reflecting = 0;
@@ -201,7 +203,7 @@ Renderer::Renderer()
 	m_hudSrv = NULL;
 	m_inPortrait = FALSE; m_portraitSlot = 0;
 	m_avaSegN = 0;
-	m_avaHide = m_avaLoading = m_avaPct = 0;
+	m_avaHide = m_avaLoading = m_avaBuildOnly = m_avaLoadFull = m_avaPct = 0;
 	m_avaShown = -1;
 	m_avaBatchN = 1;
 	m_avaBatchI = 0;
@@ -220,7 +222,7 @@ void Renderer::ReleaseTargets()
 	if (m_ctx) m_ctx->OMSetRenderTargets(0, NULL, NULL);
 	if (m_msRtv == m_bbRtv) m_msRtv = NULL;
 	TAC_REL(m_msRtv); TAC_REL(m_msTex);
-	TAC_REL(m_bbRtv); TAC_REL(m_bb);
+	TAC_REL(m_bbRtv); TAC_REL(m_bb); TAC_REL(m_avaPlate); m_avaPlateW = m_avaPlateH = 0;
 	TAC_REL(m_sceneSrv); TAC_REL(m_sceneRtv); TAC_REL(m_sceneTex);
 	TAC_REL(m_refSrv); TAC_REL(m_refRtv); TAC_REL(m_refTex); TAC_REL(m_refDsv); TAC_REL(m_refDs);
 	TAC_REL(m_blASrv); TAC_REL(m_blARtv); TAC_REL(m_blA);
@@ -774,6 +776,8 @@ BOOL Renderer::CreateShaders()
 			{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 2, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 36, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
 		D3D11_INPUT_ELEMENT_DESC lp[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -782,7 +786,7 @@ BOOL Renderer::CreateShaders()
 		};
 		ok = ok && SUCCEEDED(m_dev->CreateInputLayout(ls, 4, bS->GetBufferPointer(), bS->GetBufferSize(), &m_ilS));
 		ok = ok && SUCCEEDED(m_dev->CreateInputLayout(lk, 5, bK->GetBufferPointer(), bK->GetBufferSize(), &m_ilK));
-		ok = ok && SUCCEEDED(m_dev->CreateInputLayout(lh, 3, bH->GetBufferPointer(), bH->GetBufferSize(), &m_ilH));
+		ok = ok && SUCCEEDED(m_dev->CreateInputLayout(lh, 5, bH->GetBufferPointer(), bH->GetBufferSize(), &m_ilH));
 		ok = ok && SUCCEEDED(m_dev->CreateInputLayout(lp, 3, bP->GetBufferPointer(), bP->GetBufferSize(), &m_ilP));
 	}
 	{
@@ -2000,43 +2004,106 @@ int Renderer::CountPendingAvatars(int n, const int* model, const int* avatar, co
 	return cnt;
 }
 
+void Renderer::GrabAvaPlate()
+{
+	if (!m_bb || !m_dev || !m_ctx) return;
+	D3D11_TEXTURE2D_DESC d = {};
+	m_bb->GetDesc(&d);
+	if (!m_avaPlate || m_avaPlateW != (int)d.Width || m_avaPlateH != (int)d.Height) {
+		TAC_REL(m_avaPlate);
+		d.BindFlags = 0;
+		d.MiscFlags = 0;
+		d.CPUAccessFlags = 0;
+		d.Usage = D3D11_USAGE_DEFAULT;
+		d.MipLevels = 1;
+		d.ArraySize = 1;
+		d.SampleDesc.Count = 1;
+		d.SampleDesc.Quality = 0;
+		if (FAILED(m_dev->CreateTexture2D(&d, NULL, &m_avaPlate)) || !m_avaPlate) return;
+		m_avaPlateW = (int)d.Width;
+		m_avaPlateH = (int)d.Height;
+	}
+	ID3D11RenderTargetView* oldRT = NULL;
+	ID3D11DepthStencilView* oldDS = NULL;
+	m_ctx->OMGetRenderTargets(1, &oldRT, &oldDS);
+	ID3D11RenderTargetView* none = NULL;
+	m_ctx->OMSetRenderTargets(1, &none, NULL);
+	m_ctx->CopyResource(m_avaPlate, m_bb);
+	m_ctx->OMSetRenderTargets(1, oldRT ? &oldRT : &m_bbRtv, oldDS);
+	if (oldRT) oldRT->Release();
+	if (oldDS) oldDS->Release();
+}
+
+void Renderer::RestoreAvaPlate()
+{
+	if (!m_avaPlate || !m_ctx || !m_bb) return;
+	ID3D11RenderTargetView* none = NULL;
+	m_ctx->OMSetRenderTargets(1, &none, NULL);
+	m_ctx->CopyResource(m_bb, m_avaPlate);
+}
+
 void Renderer::FlashAvaPct(int pct)
 {
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
 	m_avaPct = pct;
+	if (m_loadFn) {
+		m_avaShown = pct;
+		m_loadFn(pct, 100, m_loadUser);
+		return;
+	}
 	if (m_inPortrait || !m_ctx || !m_bbRtv || !m_swap || m_w < 8 || m_h < 8) return;
 	if (pct == m_avaShown) return;
 	m_avaShown = pct;
 	m_avaFlashed = TRUE;
-	ID3D11RenderTargetView* oldRT = NULL;
-	ID3D11DepthStencilView* oldDS = NULL;
-	m_ctx->OMGetRenderTargets(1, &oldRT, &oldDS);
-	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
-	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
-	m_ctx->RSSetViewports(1, &vp);
-	float cc[4] = { 0.06f, 0.07f, 0.14f, 1.f };
-	m_ctx->ClearRenderTargetView(m_bbRtv, cc);
-	m_hud.clear();
-	m_hudSrv = m_srv[TEX_WHITE];
-	m_hudPipe = 0;
-	wchar_t line[96];
-	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_AVA_WAIT), pct);
-	HudText(line, m_w * .5f, m_h * .46f, 28.f, RGBA8(255, 236, 210), 1, 1);
-	float bw = m_w * .62f;
-	if (bw > 520.f) bw = 520.f;
-	float bx = (m_w - bw) * .5f;
-	float by = m_h * .54f;
-	HudRect(bx, by, bw, 18.f, RGBA8(40, 36, 28, 230));
+	M4 oldView = m_view, oldProj = m_proj, oldVp = m_vp;
+	V3 oldEye = m_eye;
+	float oldTime = m_time;
+	const BOOL full = m_avaLoadFull != 0;
+	if (full) {
+		V3 dir = v3(0.f, sinf(0.3f), cosf(0.3f));
+		V3 eye = dir * 10.f;
+		SetCamera(MLookAtLH(eye, v3(0, 0, 0), v3(0, 1, 0)), MPerspLH(0.8f, (float)m_w / (float)max(1, m_h), 0.1f, 400.f), eye, m_time);
+		BeginMainPass();
+		DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
+		BeginHud();
+	} else {
+		if (!m_avaPlate) GrabAvaPlate();
+		else RestoreAvaPlate();
+		m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
+		D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
+		m_ctx->RSSetViewports(1, &vp);
+		m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
+		m_fcb.screen[2] = 1.f / (float)m_w; m_fcb.screen[3] = 1.f / (float)m_h;
+		UpdateFrameCB();
+		m_hud.clear();
+		m_hudSrv = m_srv[TEX_WHITE];
+		m_hudPipe = 0;
+	}
+	float ui = (float)m_w / 1280.f;
+	float uiH = (float)m_h / 720.f;
+	if (uiH < ui) ui = uiH;
+	if (ui < 0.62f) ui = 0.62f;
+	if (ui > 2.2f) ui = 2.2f;
+	if (full) HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, 40.f * ui, RGBA8(255, 230, 160), 1, 1);
+	wchar_t line[80];
+	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
+	HudText(line, m_w * .5f, m_h * .50f, 20.f * ui, RGBA8(255, 255, 255), 1, 1, 1);
+	float bw = 520.f * ui;
+	if (bw > m_w * .62f) bw = m_w * .62f;
+	float bh = 22.f * ui;
+	float bx = ((float)m_w - bw) * .5f;
+	float by = m_h * .56f;
+	HudRect(bx, by, bw, bh, RGBA8(40, 28, 18, 220));
 	float fill = bw * (pct / 100.f);
-	if (fill < 2.f) fill = 2.f;
-	HudRect(bx, by, fill, 18.f, RGBA8(255, 214, 120, 240));
+	if (pct > 0 && fill < 2.f) fill = 2.f;
+	if (fill > 0.f) HudRect(bx, by, fill, bh, RGBA8(255, 214, 120, 255));
 	EndHud();
-	m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
-	ID3D11RenderTargetView* rt = oldRT ? oldRT : m_bbRtv;
-	m_ctx->OMSetRenderTargets(1, &rt, oldDS);
-	if (oldRT) oldRT->Release();
-	if (oldDS) oldDS->Release();
+	Present();
+	if (full) {
+		SetCamera(oldView, oldProj, oldEye, oldTime);
+		m_vp = oldVp;
+	}
 }
 
 BOOL Renderer::LoadAssets()
@@ -6390,7 +6457,15 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			int rep = -1;
 			if (footL[s.j[c]] && jLL[0] >= 0 && jLL[0] < 256) rep = jLL[0];
 			else if (footR[s.j[c]] && jLL[1] >= 0 && jLL[1] < 256) rep = jLL[1];
-			if (rep >= 0) s.j[c] = (unsigned char)rep;
+			if (rep < 0) continue;
+			int exist = -1;
+			for (int k = 0; k < 4; k++) if (k != c && s.j[k] == (unsigned char)rep && s.w[k]) exist = k;
+			if (exist >= 0) {
+				int sum = (int)s.w[exist] + (int)s.w[c];
+				if (sum > 255) sum = 255;
+				s.w[exist] = (unsigned char)sum;
+				s.w[c] = 0;
+			} else s.j[c] = (unsigned char)rep;
 		}
 	}
 	// 点の半径と、脚に沿わせるときの骨の重みは、その点へ寄る頂点の平均。
@@ -7530,6 +7605,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		m_avaCache.push_back(std::move(nc));
 		ac = &m_avaCache.back();
 	}
+	if (m_avaBuildOnly) return ac != NULL;
 	// 揺れの大きさはカップ番号（0=A … 7=H）。ばねの硬さと遅れは GpuSkin 側。
 	SkinAndDraw(ac->skin, ac->gm, ac->jig.empty() ? NULL : ac->jig.data(), (float)ac->cup, pose, world, dp,
 		(ac->clothN > 0 || ac->softN > 0) ? ac : NULL, owner);
@@ -8342,10 +8418,10 @@ void Renderer::EnsureScalp(int model, int headJ)
 					cy += sk->bind[ix[c]].p[1];
 					cz += sk->bind[ix[c]].p[2];
 				}
-				// 渦と分け目と耳の上の隙間を髪色で塞ぐ。額と顔（前側 dz < -0.02 で天辺より 5cm 下）は出す。
+				// 渦と分け目と、突風で髪が離れる側頭・後頭を髪色で塞ぐ。額と顔（前側）は出す。
 				const float dy = cy * (1.f / 3.f) - yTop, dz = cz * (1.f / 3.f) - capCz;
-				if (dy < -0.15f) continue;
-				if (dy < -0.048f && dz < -0.015f) continue;
+				if (dy < -0.22f) continue;
+				if (dy < -0.055f && dz < -0.02f) continue;
 				for (int c = 0; c < 3; c++) {
 					int v = ix[c];
 					if (map[v] < 0) {
@@ -8860,11 +8936,29 @@ void Renderer::EvalPose(const Model& m, int ca, float ta, int la, int cb, float 
 	const Clip* A = (g && ca >= 0 && ca < (int)g->clips.size()) ? &g->clips[ca] : NULL;
 	const Clip* B = (g && cb >= 0 && cb < (int)g->clips.size()) ? &g->clips[cb] : NULL;
 	blend = Clampf(blend, 0, 1);
-	for (int j = 0; j < m.nJ; j++) {
+	int a0 = 0, a1 = 0, b0 = 0, b1 = 0;
+	float af = 0.f, bf = 0.f;
+	if (A && A->nFrames > 1) {
+		float f = ta * A->fps, span = (float)(A->nFrames - 1);
+		if (la) { f = fmodf(f, span); if (f < 0) f += span; }
+		else f = Clampf(f, 0, span);
+		a0 = (int)f; a1 = min(A->nFrames - 1, a0 + 1); af = f - a0;
+	}
+	if (B && blend < 1.f && B->nFrames > 1) {
+		float f = tb * B->fps, span = (float)(B->nFrames - 1);
+		if (lb) { f = fmodf(f, span); if (f < 0) f += span; }
+		else f = Clampf(f, 0, span);
+		b0 = (int)f; b1 = min(B->nFrames - 1, b0 + 1); bf = f - b0;
+	}
+	const int nJ = m.nJ;
+	for (int j = 0; j < nJ; j++) {
 		Q4 q = m.restR[j];
 		V3 t = m.restT[j];
-		if (A) q = SampleQ(*A, m.nJ, j, ta, la);
-		if (B && blend < 1.f) q = QNlerp(SampleQ(*B, m.nJ, j, tb, lb), q, blend);
+		if (A) q = (A->nFrames <= 1) ? A->q[j] : QNlerp(A->q[(size_t)a0 * nJ + j], A->q[(size_t)a1 * nJ + j], af);
+		if (B && blend < 1.f) {
+			Q4 qb = (B->nFrames <= 1) ? B->q[j] : QNlerp(B->q[(size_t)b0 * nJ + j], B->q[(size_t)b1 * nJ + j], bf);
+			q = QNlerp(qb, q, blend);
+		}
 		if (g && j == g->hips) {
 			if (A) t = SampleH(*A, ta, la);
 			if (B && blend < 1.f) t = Lerp(SampleH(*B, tb, lb), t, blend);
@@ -9173,7 +9267,7 @@ void Renderer::SetObj(const M4& world, const DrawParams& dp, float outlineW)
 {
 	TacObjCB o;
 	TacFillObj(o, world, dp, outlineW);
-	TacUploadObj(m_ctx, m_cbObj, o);
+	TacUploadObj(m_ctx, m_cbObj, o, m_tessOn);
 }
 
 void Renderer::ClearTess()
@@ -9356,7 +9450,7 @@ void Renderer::FlushQueuedDraws()
 			ib = c.ib;
 			ibFmt = c.ibFmt;
 		}
-		TacUploadObj(m_ctx, m_cbObj, c.obj);
+		TacUploadObj(m_ctx, m_cbObj, c.obj, m_tessOn);
 		m_ctx->DrawIndexed(c.nIdx, 0, 0);
 	}
 	g_drawN = 0;
@@ -9441,13 +9535,13 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 	BOOL alpha = ((dp.tint >> 24) & 255) < 255;
 	m_ctx->OMSetBlendState(alpha ? m_bsAlpha : m_bsOpaque, NULL, 0xFFFFFFFF);
 	if (dp.outline > 0 && !alpha) {
-		SetObj(world, dp, dp.outline);
 		BindForPass(FALSE, TRUE);
+		SetObj(world, dp, dp.outline);
 		m_ctx->DrawIndexed(m.nIdx, 0, 0);
 		m_bindKey = -1;
 	}
-	SetObj(world, dp, 0);
 	BindForPass(FALSE, FALSE);
+	SetObj(world, dp, 0);
 	if (m_psOverride) m_ctx->PSSetShader(m_psOverride, NULL, 0);
 	if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
 	m_ctx->DrawIndexed(m.nIdx, 0, 0);
@@ -11269,23 +11363,27 @@ BOOL Renderer::ApplyPost()
 	else
 		m_ctx->CopyResource(m_sceneTex, m_bb);
 
+	m_ctx->VSSetShader(m_vsQ, NULL, 0);
+	m_ctx->IASetInputLayout(NULL);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_ctx->RSSetState(m_rsNone);
+	m_ctx->OMSetDepthStencilState(m_dsOff, 0);
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+	m_ctx->PSSetSamplers(0, 1, &m_sClamp);
+	int curW = -1, curH = -1;
+	ID3D11PixelShader* curPs = NULL;
 	auto fs = [&](ID3D11PixelShader* ps, ID3D11ShaderResourceView* t0, ID3D11ShaderResourceView* t1, ID3D11RenderTargetView* dst, int w, int h, const DrawParams& dp, float p0) {
-		m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
 		m_ctx->PSSetShaderResources(0, 2, unb);
 		m_ctx->OMSetRenderTargets(1, &dst, NULL);
-		D3D11_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
-		m_ctx->RSSetViewports(1, &vp);
+		if (w != curW || h != curH) {
+			D3D11_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
+			m_ctx->RSSetViewports(1, &vp);
+			curW = w; curH = h;
+		}
 		SetObj(MIdent(), dp, p0);
 		ID3D11ShaderResourceView* srv[2] = { t0, t1 };
 		m_ctx->PSSetShaderResources(0, 2, srv);
-		m_ctx->VSSetShader(m_vsQ, NULL, 0);
-		m_ctx->PSSetShader(ps, NULL, 0);
-		m_ctx->IASetInputLayout(NULL);
-		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_ctx->RSSetState(m_rsNone);
-		m_ctx->OMSetDepthStencilState(m_dsOff, 0);
-		m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
-		m_ctx->PSSetSamplers(0, 1, &m_sClamp);
+		if (ps != curPs) { m_ctx->PSSetShader(ps, NULL, 0); curPs = ps; }
 		m_ctx->Draw(3, 0);
 	};
 	ID3D11ShaderResourceView* src = m_sceneSrv;
@@ -11363,19 +11461,23 @@ void Renderer::BeginHud()
 void Renderer::FlushHud()
 {
 	if (m_hud.empty()) return;
-	if (m_hudPipe != 1) {
-		ClearTess();
-		m_ctx->IASetInputLayout(m_ilH);
-		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_ctx->VSSetShader(m_vsH, NULL, 0);
-		m_ctx->PSSetShader(m_psH, NULL, 0);
-		m_ctx->RSSetState(m_rsHud);
-		m_ctx->OMSetDepthStencilState(m_dsOff, 0);
-		m_ctx->OMSetBlendState(m_bsPremul, NULL, 0xFFFFFFFF);
-		m_ctx->PSSetSamplers(0, 1, &m_sClamp);
-		m_hudPipe = 1;
+	const BOOL glass = (m_hudSrv == (ID3D11ShaderResourceView*)1);
+	const int wantPipe = glass ? 2 : 1;
+	if (m_hudPipe != wantPipe) {
+		if (m_hudPipe == 0) {
+			ClearTess();
+			m_ctx->IASetInputLayout(m_ilH);
+			m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			m_ctx->VSSetShader(m_vsH, NULL, 0);
+			m_ctx->RSSetState(m_rsHud);
+			m_ctx->OMSetDepthStencilState(m_dsOff, 0);
+			m_ctx->OMSetBlendState(m_bsPremul, NULL, 0xFFFFFFFF);
+			m_ctx->PSSetSamplers(0, 1, &m_sClamp);
+		}
+		m_ctx->PSSetShader(glass ? m_psUi : m_psH, NULL, 0);
+		m_hudPipe = wantPipe;
 	}
-	m_ctx->PSSetShaderResources(0, 1, &m_hudSrv);
+	if (!glass) m_ctx->PSSetShaderResources(0, 1, &m_hudSrv);
 	const size_t maxV = 6 * 4096;
 	size_t off = 0;
 	while (off < (size_t)m_hud.size()) {
@@ -11407,7 +11509,10 @@ void Renderer::HudPush(float x, float y, float w, float h, float u0, float v0, f
 	if (!srv) srv = m_srv[TEX_WHITE];
 	if (srv != m_hudSrv) { FlushHud(); m_hudSrv = srv; }
 	if (m_hud.size() + 6 > 24576) FlushHud();
-	VtxH a = { x, y, u0, v0, c0 }, b = { x + w, y, u1, v0, c0 }, c = { x + w, y + h, u1, v1, c1 }, d = { x, y + h, u0, v1, c1 };
+	VtxH a = { x, y, u0, v0, c0, { 0, 0, 0, 0 }, 0 };
+	VtxH b = { x + w, y, u1, v0, c0, { 0, 0, 0, 0 }, 0 };
+	VtxH c = { x + w, y + h, u1, v1, c1, { 0, 0, 0, 0 }, 0 };
+	VtxH d = { x, y + h, u0, v1, c1, { 0, 0, 0, 0 }, 0 };
 	m_hud.push_back(a); m_hud.push_back(b); m_hud.push_back(c);
 	m_hud.push_back(a); m_hud.push_back(c); m_hud.push_back(d);
 }
@@ -11444,40 +11549,20 @@ void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD bo
 		HudRect(x + 4, y + 4, w - 8, 1, MulA(RGBA8(255, 255, 255, 60), alpha));
 		return;
 	}
-	FlushHud();
-	if (m_hudPipe != 2) {
-		ClearTess();
-		m_ctx->IASetInputLayout(m_ilH);
-		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_ctx->VSSetShader(m_vsH, NULL, 0);
-		m_ctx->PSSetShader(m_psUi, NULL, 0);
-		m_ctx->RSSetState(m_rsHud);
-		m_ctx->OMSetDepthStencilState(m_dsOff, 0);
-		m_ctx->OMSetBlendState(m_bsPremul, NULL, 0xFFFFFFFF);
-		m_hudPipe = 2;
-	}
 	float rad = (w < h ? w : h) * 0.16f;
 	if (rad > 14.f) rad = 14.f;
 	if (rad < 5.f) rad = 5.f;
 	float a = alpha * ((fill >> 24) & 255) / 255.f;
-	DrawParams dp;
-	dp.tint = border;
-	dp.mode = h;
-	dp.emissive = rad;
-	dp.hue = a;
-	SetObj(MIdent(), dp, w);
 	DWORD fc = (fill & 0x00FFFFFF) | 0xFF000000;
-	VtxH v[6] = {
-		{ x, y, 0, 0, fc }, { x + w, y, 1, 0, fc }, { x + w, y + h, 1, 1, fc },
-		{ x, y, 0, 0, fc }, { x + w, y + h, 1, 1, fc }, { x, y + h, 0, 1, fc },
-	};
-	UINT st = sizeof(VtxH), o = 0;
-	void* dst = TacRingMap(m_ctx, m_vbHud, (UINT)(sizeof(VtxH) * 6 * 4096 * 4), m_hudPos, (UINT)sizeof(v), o);
-	if (!dst) return;
-	memcpy(dst, v, sizeof(v));
-	m_ctx->Unmap(m_vbHud, 0);
-	m_ctx->IASetVertexBuffers(0, 1, &m_vbHud, &st, &o);
-	m_ctx->Draw(6, 0);
+	ID3D11ShaderResourceView* gsrv = (ID3D11ShaderResourceView*)1;
+	if (m_hudSrv != gsrv) { FlushHud(); m_hudSrv = gsrv; }
+	if (m_hud.size() + 6 > 24576) FlushHud();
+	VtxH v0 = { x, y, 0, 0, fc, { w, h, rad, a }, border };
+	VtxH v1 = { x + w, y, 1, 0, fc, { w, h, rad, a }, border };
+	VtxH v2 = { x + w, y + h, 1, 1, fc, { w, h, rad, a }, border };
+	VtxH v3 = { x, y + h, 0, 1, fc, { w, h, rad, a }, border };
+	m_hud.push_back(v0); m_hud.push_back(v1); m_hud.push_back(v2);
+	m_hud.push_back(v0); m_hud.push_back(v2); m_hud.push_back(v3);
 }
 
 void Renderer::HudImage(ID3D11ShaderResourceView* srv, float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c)
@@ -11491,7 +11576,7 @@ void Renderer::HudQuad(ID3D11ShaderResourceView* srv, const float* xy, const flo
 	if (!srv) srv = m_srv[TEX_WHITE];
 	if (srv != m_hudSrv) { FlushHud(); m_hudSrv = srv; }
 	if (m_hud.size() + 6 > 24576) FlushHud();
-	VtxH p[4];
+	VtxH p[4] = {};
 	for (int i = 0; i < 4; i++) {
 		p[i].x = xy[i * 2]; p[i].y = xy[i * 2 + 1];
 		p[i].u = uv[i * 2]; p[i].v = uv[i * 2 + 1];

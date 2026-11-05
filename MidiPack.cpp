@@ -1,17 +1,18 @@
 ﻿#include "stdafx.h"
 #include "MidiPack.h"
 #include "ComposerConvert.h"
+#include "SevenZipDec.h"
 #include "CEmu/cemu_mgr.h"
 #include <vector>
-#include <wininet.h>
+#include <setupapi.h>
 #include <shlobj.h>
+
+#pragma comment(lib, "setupapi.lib")
 
 #define NOUNCRYPT
 #define USEWIN32IOAPI
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
-
-#pragma comment(lib, "wininet.lib")
 
 namespace {
 
@@ -790,213 +791,135 @@ static int LzhExtractOne(const wchar_t* path, const wchar_t* inner, const wchar_
 	return 0;
 }
 
-/* ---- 7za ---- */
+/* ---- 7z（内蔵デコーダ）と cab（Windows の cabinet） ---- */
 
 static int FileExistsW(const wchar_t* p)
 {
 	return p && p[0] && GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES;
 }
 
-static int ToolsDir(wchar_t* out, int outChars)
+static int NameEqInner(const wchar_t* a, const wchar_t* b)
 {
-	wchar_t base[MAX_PATH] = {};
-	DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
-	if (n == 0 || n >= MAX_PATH) return 0;
-	_snwprintf_s(out, outChars, _TRUNCATE, L"%s\\oggYSED\\tools", base);
-	SHCreateDirectoryExW(NULL, out, NULL);
-	return 1;
+	if (!a || !b) return 0;
+	while (*a && *b) {
+		if (!CiEq(*a++, *b++)) return 0;
+	}
+	return *a == 0 && *b == 0;
 }
 
-static int Find7za(wchar_t* out, int outChars)
+struct CabWalk {
+	std::vector<PackName>* names;
+	const wchar_t* want;
+	const wchar_t* dest;
+	int wrote;
+};
+
+static UINT CALLBACK CabFileCb(PVOID context, UINT note, UINT_PTR param1, UINT_PTR)
 {
-	if (!out || outChars < 8) return 0;
-	out[0] = 0;
-	wchar_t tryPath[MAX_PATH];
-	if (ToolsDir(tryPath, MAX_PATH)) {
-		wchar_t a[MAX_PATH];
-		_snwprintf_s(a, _TRUNCATE, L"%s\\7za.exe", tryPath);
-		if (FileExistsW(a)) { wcsncpy_s(out, outChars, a, _TRUNCATE); return 1; }
-		_snwprintf_s(a, _TRUNCATE, L"%s\\7z.exe", tryPath);
-		if (FileExistsW(a)) { wcsncpy_s(out, outChars, a, _TRUNCATE); return 1; }
+	CabWalk* w = (CabWalk*)context;
+	if (!w || note != SPFILENOTIFY_FILEINCABINET)
+		return NO_ERROR;
+	FILE_IN_CABINET_INFO_W* info = (FILE_IN_CABINET_INFO_W*)param1;
+	wchar_t inner[MIDIPACK_INNER];
+	wcsncpy_s(inner, info && info->NameInCabinet ? info->NameInCabinet : L"", _TRUNCATE);
+	SlashNorm(inner);
+	if (!inner[0] || IsJunkName(inner) || inner[wcslen(inner) - 1] == L'\\')
+		return FILEOP_SKIP;
+	if (w->names) {
+		if (w->names->size() < (size_t)kMaxMembers) {
+			PackName pn = {};
+			wcsncpy_s(pn.inner, inner, _TRUNCATE);
+			w->names->push_back(pn);
+		}
+		return FILEOP_SKIP;
 	}
-	const wchar_t* pf = _wgetenv(L"ProgramFiles");
-	if (pf) {
-		_snwprintf_s(tryPath, _TRUNCATE, L"%s\\7-Zip\\7z.exe", pf);
-		if (FileExistsW(tryPath)) { wcsncpy_s(out, outChars, tryPath, _TRUNCATE); return 1; }
-		_snwprintf_s(tryPath, _TRUNCATE, L"%s\\7-Zip\\7za.exe", pf);
-		if (FileExistsW(tryPath)) { wcsncpy_s(out, outChars, tryPath, _TRUNCATE); return 1; }
-	}
-	const wchar_t* pf86 = _wgetenv(L"ProgramFiles(x86)");
-	if (pf86) {
-		_snwprintf_s(tryPath, _TRUNCATE, L"%s\\7-Zip\\7z.exe", pf86);
-		if (FileExistsW(tryPath)) { wcsncpy_s(out, outChars, tryPath, _TRUNCATE); return 1; }
-	}
-	wchar_t exe[MAX_PATH] = {};
-	GetModuleFileNameW(NULL, exe, MAX_PATH);
-	wchar_t* sl = wcsrchr(exe, L'\\');
-	if (sl) sl[1] = 0;
-	_snwprintf_s(tryPath, _TRUNCATE, L"%stools\\7za.exe", exe);
-	if (FileExistsW(tryPath)) { wcsncpy_s(out, outChars, tryPath, _TRUNCATE); return 1; }
-	return 0;
+	if (!w->want || !w->dest || w->wrote)
+		return FILEOP_SKIP;
+	if (!NameEqInner(inner, w->want) && !NameEqInner(BaseNameW(inner), BaseNameW(w->want)))
+		return FILEOP_SKIP;
+	if (wcslen(w->dest) >= MAX_PATH)
+		return FILEOP_SKIP;
+	wcsncpy_s(info->FullTargetName, w->dest, _TRUNCATE);
+	w->wrote = 1;
+	return FILEOP_DOIT;
 }
 
-static int RunHidden(const wchar_t* cmd)
+static int CabList(const wchar_t* arc, std::vector<PackName>& names)
 {
-	STARTUPINFOW si = {};
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESHOWWINDOW;
-	si.wShowWindow = SW_HIDE;
-	PROCESS_INFORMATION pi = {};
-	wchar_t buf[2048];
-	wcsncpy_s(buf, cmd, _TRUNCATE);
-	if (!CreateProcessW(NULL, buf, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
+	names.clear();
+	CabWalk w = {};
+	w.names = &names;
+	if (!SetupIterateCabinetW(arc, 0, CabFileCb, &w))
 		return 0;
-	WaitForSingleObject(pi.hProcess, 120000);
-	DWORD code = 1;
-	GetExitCodeProcess(pi.hProcess, &code);
-	CloseHandle(pi.hThread);
-	CloseHandle(pi.hProcess);
-	return code == 0 ? 1 : 0;
+	return names.empty() ? 0 : 1;
 }
 
-static int DownloadUrl(const wchar_t* url, const wchar_t* dest)
+static int CabExtractOne(const wchar_t* arc, const wchar_t* inner, const wchar_t* destFile)
 {
-	HINTERNET hInet = InternetOpenW(L"oggMidiPack/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-	if (!hInet) return 0;
-	DWORD timeout = 120000;
-	InternetSetOption(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
-	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
-	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI
-		| INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
-	HINTERNET hUrl = InternetOpenUrlW(hInet, url, NULL, 0, flags, 0);
-	if (!hUrl) {
-		InternetCloseHandle(hInet);
+	wchar_t destDir[MIDIPACK_PATH];
+	wcsncpy_s(destDir, destFile, _TRUNCATE);
+	wchar_t* sl = wcsrchr(destDir, L'\\');
+	if (sl) *sl = 0;
+	if (destDir[0])
+		SHCreateDirectoryExW(NULL, destDir, NULL);
+	DeleteFileW(destFile);
+	CabWalk w = {};
+	w.want = inner;
+	w.dest = destFile;
+	if (!SetupIterateCabinetW(arc, 0, CabFileCb, &w) || !w.wrote)
 		return 0;
-	}
-	DWORD status = 0, slen = sizeof(status);
-	if (!HttpQueryInfoW(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
-		|| status < 200 || status >= 300) {
-		InternetCloseHandle(hUrl);
-		InternetCloseHandle(hInet);
-		return 0;
-	}
-	HANDLE hf = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hf == INVALID_HANDLE_VALUE) {
-		InternetCloseHandle(hUrl);
-		InternetCloseHandle(hInet);
-		return 0;
-	}
-	char tmp[8192];
-	DWORD rd = 0, wr = 0;
-	int ok = 1;
-	while (InternetReadFile(hUrl, tmp, sizeof(tmp), &rd) && rd) {
-		if (!WriteFile(hf, tmp, rd, &wr, NULL) || wr != rd) { ok = 0; break; }
-	}
-	CloseHandle(hf);
-	InternetCloseHandle(hUrl);
-	InternetCloseHandle(hInet);
-	return ok;
-}
-
-static int Ensure7za(wchar_t* out, int outChars)
-{
-	if (Find7za(out, outChars)) return 1;
-	wchar_t dir[MAX_PATH];
-	if (!ToolsDir(dir, MAX_PATH)) return 0;
-	wchar_t zip[MAX_PATH];
-	_snwprintf_s(zip, _TRUNCATE, L"%s\\7za920.zip", dir);
-	if (!FileExistsW(zip)) {
-		if (!DownloadUrl(L"https://www.7-zip.org/a/7za920.zip", zip))
-			return 0;
-	}
-	wchar_t exe[MAX_PATH];
-	_snwprintf_s(exe, _TRUNCATE, L"%s\\7za.exe", dir);
-	if (ZipExtractOne(zip, L"7za.exe", exe) && FileExistsW(exe)) {
-		wcsncpy_s(out, outChars, exe, _TRUNCATE);
-		return 1;
-	}
-	return 0;
+	return FileExistsW(destFile) ? 1 : 0;
 }
 
 static int SevenList(const wchar_t* arc, std::vector<PackName>& names)
 {
 	names.clear();
-	wchar_t za[MAX_PATH];
-	if (!Ensure7za(za, MAX_PATH)) return 0;
-	wchar_t tmpDir[MAX_PATH];
-	GetTempPathW(MAX_PATH, tmpDir);
-	wchar_t listf[MAX_PATH];
-	_snwprintf_s(listf, _TRUNCATE, L"%sogg_midpack_l.txt", tmpDir);
-	DeleteFileW(listf);
-	wchar_t cmd[2048];
-	_snwprintf_s(cmd, _TRUNCATE, L"cmd /c \"\"%s\" l -slt -- \"%s\" > \"%s\"\"", za, arc, listf);
-	if (!RunHidden(cmd) && !FileExistsW(listf))
+	if (EqExtW(arc, L".cab"))
+		return CabList(arc, names);
+	SevenZipArc a;
+	if (!SevenZipOpenW(&a, arc))
 		return 0;
-	HANDLE h = CreateFileW(listf, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	if (h == INVALID_HANDLE_VALUE) return 0;
-	DWORD sz = GetFileSize(h, NULL);
-	if (sz == INVALID_FILE_SIZE || sz > 8 * 1024 * 1024) { CloseHandle(h); return 0; }
-	std::vector<char> t(sz + 1);
-	DWORD rd = 0;
-	ReadFile(h, t.data(), sz, &rd, NULL);
-	CloseHandle(h);
-	DeleteFileW(listf);
-	t[rd] = 0;
-	const char* p = t.data();
-	while (p && *p) {
-		const char* nl = strchr(p, '\n');
-		size_t ln = nl ? (size_t)(nl - p) : strlen(p);
-		if (ln >= 7 && _strnicmp(p, "Path = ", 7) == 0) {
-			char raw[1024];
-			size_t cl = ln - 7;
-			if (cl >= sizeof(raw)) cl = sizeof(raw) - 1;
-			memcpy(raw, p + 7, cl);
-			raw[cl] = 0;
-			while (cl && (raw[cl - 1] == '\r' || raw[cl - 1] == ' ')) raw[--cl] = 0;
-			if (_stricmp(raw, "Path") != 0) {
-				PackName pn = {};
-				MbToW(raw, -1, CP_ACP, pn.inner, MIDIPACK_INNER);
-				SlashNorm(pn.inner);
-				if (pn.inner[0] && wcschr(pn.inner, L'\\') == NULL && wcschr(pn.inner, L'.') == NULL
-					&& wcsstr(pn.inner, L":\\")) {
-					/* archive path line — skip if it equals the archive itself */
-				} else if (pn.inner[0] && !IsJunkName(pn.inner)
-					&& pn.inner[wcsnlen(pn.inner, MIDIPACK_INNER) - 1] != L'\\')
-					names.push_back(pn);
-			}
-		}
-		p = nl ? nl + 1 : NULL;
+	for (UInt32 i = 0; i < a.db.NumFiles && names.size() < (size_t)kMaxMembers; i++) {
+		if (SzArEx_IsDir(&a.db, i))
+			continue;
+		PackName pn = {};
+		if (!SevenZipFileNameW(&a, i, pn.inner, MIDIPACK_INNER))
+			continue;
+		SlashNorm(pn.inner);
+		if (!pn.inner[0] || IsJunkName(pn.inner) || pn.inner[wcslen(pn.inner) - 1] == L'\\')
+			continue;
+		names.push_back(pn);
 	}
+	SevenZipClose(&a);
 	return names.empty() ? 0 : 1;
 }
 
 static int SevenExtractOne(const wchar_t* arc, const wchar_t* inner, const wchar_t* destFile)
 {
-	wchar_t za[MAX_PATH];
-	if (!Ensure7za(za, MAX_PATH)) return 0;
-	wchar_t destDir[MIDIPACK_PATH];
-	wcsncpy_s(destDir, destFile, _TRUNCATE);
-	wchar_t* sl = wcsrchr(destDir, L'\\');
-	if (sl) *sl = 0;
-	SHCreateDirectoryExW(NULL, destDir, NULL);
-	wchar_t innerN[MIDIPACK_INNER];
-	wcsncpy_s(innerN, inner, _TRUNCATE);
-	for (wchar_t* p = innerN; *p; ++p)
-		if (*p == L'\\') *p = L'/';
-	wchar_t cmd[2048];
-	_snwprintf_s(cmd, _TRUNCATE, L"\"%s\" e -y -o\"%s\" -- \"%s\" \"%s\"", za, destDir, arc, innerN);
-	if (!RunHidden(cmd)) {
-		_snwprintf_s(cmd, _TRUNCATE, L"\"%s\" e -y -o\"%s\" -- \"%s\" \"%s\"", za, destDir, arc, inner);
-		if (!RunHidden(cmd))
-			return 0;
+	if (EqExtW(arc, L".cab"))
+		return CabExtractOne(arc, inner, destFile);
+	SevenZipArc a;
+	if (!SevenZipOpenW(&a, arc))
+		return 0;
+	int ok = 0;
+	for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+		if (SzArEx_IsDir(&a.db, i))
+			continue;
+		wchar_t name[MIDIPACK_INNER];
+		if (!SevenZipFileNameW(&a, i, name, MIDIPACK_INNER))
+			continue;
+		SlashNorm(name);
+		if (!NameEqInner(name, inner) && !NameEqInner(BaseNameW(name), BaseNameW(inner)))
+			continue;
+		const Byte* data = NULL;
+		size_t sz = 0;
+		if (!SevenZipExtractIndex(&a, i, &data, &sz) || sz > 0xFFFFFFFFu)
+			break;
+		ok = WriteAllFile(destFile, data, (unsigned)sz);
+		break;
 	}
-	wchar_t produced[MIDIPACK_PATH];
-	_snwprintf_s(produced, _TRUNCATE, L"%s\\%s", destDir, BaseNameW(inner));
-	if (_wcsicmp(produced, destFile) != 0 && FileExistsW(produced)) {
-		DeleteFileW(destFile);
-		MoveFileW(produced, destFile);
-	}
-	return FileExistsW(destFile) ? 1 : 0;
+	SevenZipClose(&a);
+	return ok && FileExistsW(destFile) ? 1 : 0;
 }
 
 static int ListArchive(const wchar_t* arc, std::vector<PackName>& names)
@@ -1070,7 +993,7 @@ static int MaterializeArc(const wchar_t* arc, const wchar_t* inner, wchar_t* out
 	_snwprintf_s(out, outChars, _TRUNCATE, L"%s\\%s", dir, inner);
 	SlashNorm(out);
 	if (FileExistsW(out)) return 1;
-	/* basename fallback (7za e) */
+	/* パスが合わないときはファイル名だけでも当たる */
 	_snwprintf_s(out, outChars, _TRUNCATE, L"%s\\%s", dir, BaseNameW(inner));
 	return FileExistsW(out) ? 1 : (any ? 0 : 0);
 }

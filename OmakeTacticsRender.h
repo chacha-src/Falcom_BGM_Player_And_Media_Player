@@ -10,7 +10,7 @@ namespace otac {
 
 struct VtxS { float p[3], n[3], uv[2]; DWORD c; };
 struct VtxK { float p[3], n[3], uv[2]; BYTE j[4]; BYTE w[4]; };
-struct VtxH { float x, y, u, v; DWORD c; };
+struct VtxH { float x, y, u, v; DWORD c; float p0[4]; DWORD b; };
 struct VtxP { float p[3]; float u, v, shape; float c[4]; };
 
 inline DWORD RGBA8(int r, int g, int b, int a = 255)
@@ -206,6 +206,9 @@ public:
 	void NoteAvaPhase(int phase, int phases, int i, int n);
 	void FlashAvaLocal(int local);
 	void BeginAvaBatch(int n);
+	void SetAvaBuildOnly(BOOL on) { m_avaBuildOnly = on ? 1 : 0; }
+	void SetAvaLoadFull(BOOL on) { m_avaLoadFull = on ? 1 : 0; }
+	void GrabAvaPlate();
 	int CountPendingAvatars(int n, const int* model, const int* avatar, const int* cup) const;
 	BOOL ConsumeAvaFlash() { BOOL f = m_avaFlashed; m_avaFlashed = FALSE; return f; }
 	void LoadCreaturePack();
@@ -352,6 +355,8 @@ public:
 	int m_avaSegN;
 	int m_avaHide;
 	int m_avaLoading;
+	int m_avaBuildOnly;
+	int m_avaLoadFull;
 	int m_avaPct;
 	int m_avaShown;
 	int m_avaBatchN;
@@ -600,6 +605,9 @@ private:
 	IDXGISwapChain1* m_swap;
 	ID3D11RenderTargetView* m_bbRtv;
 	ID3D11Texture2D* m_bb;
+	ID3D11Texture2D* m_avaPlate;
+	int m_avaPlateW, m_avaPlateH;
+	void RestoreAvaPlate();
 	ID3D11Texture2D* m_msTex;
 	ID3D11RenderTargetView* m_msRtv;
 	ID3D11Texture2D* m_dsTex;

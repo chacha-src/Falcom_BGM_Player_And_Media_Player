@@ -34,7 +34,7 @@ enum {
 	ID_BASE_SET = 945, ID_BASE_THREAT = 949, ID_PT_EVO = 363,
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
-	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR, ID_CR_AVACOL, ID_CR_MODEL,
+	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR, ID_CR_AVACOL, ID_CR_MODEL, ID_CR_WING, ID_CR_GROUND,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
 	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1, ID_PT_PAS0 = 370, ID_PT_PAS1,
@@ -102,7 +102,7 @@ Game::Game()
 	m_loadPaint = 0;
 	m_loadA = m_loadB = 0;
 	m_loadLive = FALSE;
-	m_loadUnits = m_loadHave = m_sliceBase = m_sliceUnits = 0;
+	m_loadUnits = m_avaLoadUnits = m_loadHave = m_sliceBase = m_sliceUnits = 0;
 	m_renderDt = 1.f / 60.f;
 	m_lastRenderTime = 0;
 	m_qApply = -1;
@@ -279,6 +279,8 @@ Game::Game()
 	m_previewDrag = FALSE;
 	m_previewPanDrag = FALSE;
 	m_previewMot = 0;
+	m_previewWing = TRUE;
+	m_previewGround = FALSE;
 	m_partySel = -1;
 	m_eqPick = 0;
 	m_eqPage = 0;
@@ -322,6 +324,14 @@ Game::Game()
 	m_resultN = 0;
 	m_menuConfirm = 0;
 	m_enemyWait = 0;
+	m_demo = 0;
+	m_demoT = 0;
+	m_idleT = 0;
+	m_demoAct = 0;
+	m_demoTick = 0;
+	m_demoStep = 0;
+	m_demoStage = 1;
+	m_demoPh = -1;
 	m_flashWhite = 0;
 	m_strkN = 0;
 	m_turnOpen = FALSE;
@@ -382,9 +392,9 @@ void Game::BeginLoadSpan(int a, int b)
 	NoteLoad(a);
 }
 
-void Game::DrawLoadHud()
+void Game::DrawLoadHud(int permille)
 {
-	int pct = m_loadPm / 10;
+	int pct = (permille >= 0 ? permille : m_loadPm) / 10;
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
 	m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, U(40), RGBA8(255, 230, 160), 1, 1);
@@ -445,7 +455,25 @@ int Game::MeasureLoadUnits(int& showUnits)
 		if (!have && nBody < MAX_PARTY) { sprintf_s(seen[nBody], "%s", nm); nBody++; }
 	}
 	showUnits = 16 + nShow * 4;
-	int n = m_r.CountAssetPulses() + 12 + nBody * 48 + m_r.CountGearMeshes() + 8 + 24 + 4 + showUnits;
+	int avatarUnits = 0;
+	{
+		int keyM[MAX_ROSTER], keyA[MAX_ROSTER], keyC[MAX_ROSTER], nk = 0;
+		for (int ri = 0; ri < MAX_ROSTER; ri++) {
+			if (!m_save.roster[ri].used) continue;
+			const CharData& c = m_save.roster[ri];
+			int av = CharAvatar(c);
+			if (av <= 0) continue;
+			int md = (c.gender == 1 ? 100 : 0) + CharModel(c);
+			int cup = CharBust(c);
+			int seen = 0;
+			for (int k = 0; k < nk; k++) if (keyM[k] == md && keyA[k] == av && keyC[k] == cup) seen = 1;
+			if (seen) continue;
+			if (nk < MAX_ROSTER) { keyM[nk] = md; keyA[nk] = av; keyC[nk] = cup; nk++; }
+			avatarUnits += 64;
+		}
+	}
+	m_avaLoadUnits = avatarUnits;
+	int n = m_r.CountAssetPulses() + 12 + nBody * 48 + m_r.CountGearMeshes() + 8 + 24 + 4 + showUnits + avatarUnits;
 	return n > 0 ? n : 1;
 }
 
@@ -486,7 +514,7 @@ BOOL Game::LoadEverything()
 	m_loadUnits = MeasureLoadUnits(showUnits);
 	int assetN = m_r.CountAssetPulses();
 	int gearN = m_r.CountGearMeshes();
-	int bodyUnits = m_loadUnits - (assetN + 12 + gearN + 8 + 24 + 4 + showUnits);
+	int bodyUnits = m_loadUnits - (assetN + 12 + gearN + 8 + 24 + 4 + showUnits + m_avaLoadUnits);
 	if (bodyUnits < 0) bodyUnits = 0;
 	OpenLoadSlice(assetN);
 	if (!m_r.LoadAssets()) { m_r.SetLoadPulse(NULL, NULL); m_loadLive = FALSE; return FALSE; }
@@ -582,6 +610,8 @@ void Game::RefreshSurface()
 
 void Game::Persist()
 {
+	// デモ中のゴールドやドロップはセーブへ残さない。幕が開いて拠点に戻ったあとだけ書く。
+	if (m_demo == 1 || m_demo == 2 || (m_demo == 3 && m_screen == SC_BATTLE)) return;
 	SaveWrite(m_save);
 }
 
@@ -666,8 +696,22 @@ const wchar_t* Game::ClassName(int cls) const
 float Game::FitTextPx(const wchar_t* s, float maxW, float px, int bold)
 {
 	if (!s || !s[0] || px <= 0.f || maxW <= 1.f) return px;
+	enum { FIT_N = 512 };
+	struct FitSlot { UINT h; int mw, pxq, b; float res; };
+	static FitSlot s_fit[FIT_N];
+	const int mwI = (int)(maxW * 4.f + 0.5f);
+	const int pxI = (int)(px * 4.f + 0.5f);
+	const int bI = bold ? 1 : 0;
+	UINT hv = 2166136261u ^ (UINT)mwI ^ ((UINT)pxI << 12) ^ ((UINT)bI << 24);
+	for (const wchar_t* p = s; *p; p++) { hv ^= (UINT)*p; hv *= 16777619u; }
+	if (!hv) hv = 1;
+	FitSlot& sl = s_fit[hv & (FIT_N - 1)];
+	if (sl.h == hv && sl.mw == mwI && sl.pxq == pxI && sl.b == bI) return sl.res;
 	float w = m_r.TextWidth(s, px, bold);
-	if (w <= maxW) return px;
+	if (w <= maxW) {
+		sl.h = hv; sl.mw = mwI; sl.pxq = pxI; sl.b = bI; sl.res = px;
+		return px;
+	}
 	float n = px * maxW / w;
 	if (n > px) n = px;
 	float floorPx = min(px, U(6.f));
@@ -678,6 +722,7 @@ float Game::FitTextPx(const wchar_t* s, float maxW, float px, int bold)
 		if (n2 < floorPx) n2 = floorPx;
 		if (n2 < n) n = n2;
 	}
+	sl.h = hv; sl.mw = mwI; sl.pxq = pxI; sl.b = bI; sl.res = n;
 	return n;
 }
 
@@ -836,6 +881,17 @@ void Game::Tick(float dt)
 	}
 	dt = Clampf(dt, 0, .1f);
 	m_time += dt;
+	if (!m_demo) {
+		// 拠点でカーソルもボタンも止まっていれば、10秒でデモへ。戦闘の途中からは始めない。
+		BOOL idleHome = m_screen == SC_BASE && !m_shop && !m_codex && !m_slotUi && !m_showHelp
+			&& !m_mapLook && !m_sortieAsk && !m_sellAsk && !m_textFocus && !m_baseOpt && !m_confirmDelete
+			&& m_jobRedo != 1 && m_jobRedo != 3;
+		if (idleHome) {
+			m_idleT += dt;
+			if (m_idleT >= 10.f) DemoBegin();
+		} else m_idleT = 0;
+	}
+	if (m_demo) TickDemo(dt);
 	if (m_qCoolT > 0) m_qCoolT -= dt;
 	if (m_syncLock > 0) m_syncLock -= dt;
 	BOOL holdGame = FALSE;
@@ -844,12 +900,17 @@ void Game::Tick(float dt)
 			if (!LoadEverything()) { m_screen = SC_FAIL; m_loadLive = FALSE; }
 			else {
 				m_loadLive = TRUE;
-				int left = m_loadUnits - m_loadHave;
+				int ava = m_avaLoadUnits;
+				if (ava < 0) ava = 0;
+				int left = m_loadUnits - m_loadHave - ava;
 				if (left < 1) left = 1;
 				OpenLoadSlice(left);
 				EnterBase();
 				CloseLoadSlice();
+				m_screen = SC_LOADING;
+				WarmHomeAvatars();
 				NoteLoad(1000);
+				m_screen = SC_BASE;
 				m_r.SetLoadPulse(NULL, NULL);
 				m_loadLive = FALSE;
 				holdGame = TRUE;
@@ -859,7 +920,7 @@ void Game::Tick(float dt)
 	if (m_r.Ready() && m_r.DeviceLost()) {
 		if (!Recover()) { m_screen = SC_FAIL; return; }
 	}
-	float gdt = dt * (m_fastFwd ? 3.f : 1.f);
+	float gdt = dt * ((m_fastFwd && !m_demo) ? 3.f : 1.f);
 	switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_CREATE: UpdateBase(dt); break;
 	case SC_BATTLE: UpdateBattle(m_showHelp ? 0 : gdt); break;
@@ -883,7 +944,8 @@ void Game::Tick(float dt)
 	if (!m_r.ConsumeAvaFlash()) m_r.Present();
 	if (m_goHome) {
 		m_goHome = FALSE;
-		GoHomeFromBattle();
+		if (m_demo) DemoLeave();
+		else GoHomeFromBattle();
 	}
 	QueryPerformanceCounter(&t1);
 	QueryPerformanceFrequency(&freq);
@@ -1022,6 +1084,7 @@ void Game::RenderFrame()
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
 	m_r.SetSky(m_screen == SC_BATTLE ? TacWx(m_b.weather) : WX_CLEAR, m_screen == SC_BATTLE ? TacHour(m_b.weather) : HR_NOON);
+	m_r.SetAvaLoadFull(m_screen != SC_CREATE && m_screen != SC_BATTLE);
 	m_r.BeginFrame();
 	if (m_screen == SC_BATTLE) {
 		AssignBattlePortraits();
@@ -1045,7 +1108,15 @@ void Game::RenderFrame()
 	} break;
 	}
 	if (m_loaded) RenderPortraits();
+	const BOOL avaWait = m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL;
+	const BOOL avaFull = avaWait && m_screen != SC_CREATE;
+	if (avaFull) {
+		SetupCamera(v3(0, 0, 0), 0, .3f, 10, .8f);
+		m_r.BeginMainPass();
+		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
+	}
 	m_r.BeginHud();
+	if (m_screen == SC_CREATE) m_r.GrabAvaPlate();
 	m_btns.clear();
 	if (m_uiHoverScreen != m_screen || m_uiHoverShop != (m_shop != 0)) {
 		m_uiHover = -1;
@@ -1055,7 +1126,9 @@ void Game::RenderFrame()
 	m_uiHoverHit = 0;
 	m_statTip = -1;
 	m_skillTip = -1;
-	switch (m_screen) {
+	if (avaFull) {
+		DrawLoadHud(m_r.AvatarLoadPct() * 10);
+	} else switch (m_screen) {
 	case SC_LOADING:
 		DrawLoadHud();
 		break;
@@ -1075,27 +1148,34 @@ void Game::RenderFrame()
 	case SC_BATTLE: DrawBattleUi(); break;
 	case SC_RESULT: DrawResultUi(); break;
 	}
-	if (m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL) {
-		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(8, 10, 18, 150));
-		wchar_t wait[96];
-		swprintf_s(wait, L"%s  %d%%/100%%", TT(TX_AVA_WAIT), m_r.AvatarLoadPct());
-		m_r.HudText(wait, m_w * .5f, m_h * .5f, U(28), RGBA8(255, 236, 210), 1, 1);
+	if (avaWait && !avaFull) {
+		int pct = m_r.AvatarLoadPct();
+		if (pct < 0) pct = 0;
+		if (pct > 100) pct = 100;
+		wchar_t wait[80];
+		swprintf_s(wait, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
+		m_r.HudText(wait, m_w * .5f, m_h * .50f, U(20), RGBA8(255, 255, 255), 1, 1);
+		float bw = min(U(520.f), (float)m_w * .62f);
+		float bx = ((float)m_w - bw) * .5f;
+		Bar(bx, m_h * .56f, bw, U(22), pct / 100.f, RGBA8(255, 214, 120), RGBA8(40, 28, 18));
 	}
-	BOOL homeBare = m_screen == SC_BASE && !m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi
+	BOOL homeBare = !avaWait && m_screen == SC_BASE && !m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi
 		&& m_jobRedo != 1 && m_jobRedo != 3 && !m_showHelp;
-	if (!homeBare) {
+	if (!avaWait && !homeBare) {
 		DrawPopups(0);
 		DrawBanners(0);
 	}
-	if (m_showHelp) DrawHelpOverlay();
-	else if (m_statTip >= 0) DrawStatTip();
-	else if (m_skillTip >= 0) DrawSkillTip();
-	DrawPerfHud();
-	if (m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
-	if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
+	if (!avaWait && m_showHelp) DrawHelpOverlay();
+	else if (!avaWait && m_statTip >= 0) DrawStatTip();
+	else if (!avaWait && m_skillTip >= 0) DrawSkillTip();
+	if (!avaWait) DrawPerfHud();
+	if (!avaWait && m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
+	if (m_demo) m_click = FALSE;
+	else if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
 		m_click = FALSE;
 		BattleClick(m_clickX, m_clickY);
 	}
+	if (m_demo) DrawDemoCurtain();
 	m_r.EndHud();
 	m_btnsPrev = m_btns;
 	if (m_uiHoverHit) {
@@ -1136,6 +1216,9 @@ static void ClampPreviewPan(V3& pan, float h)
 // ============================================================ 入力
 void Game::OnMouseMove(int x, int y)
 {
+	// デモは盤の枠だけ動かす。OS のカーソルも、ここでの視点ドラッグも動かさない。
+	if (m_demo) { m_mx = x; m_my = y; return; }
+	if (x != m_mx || y != m_my) m_idleT = 0;
 	if (m_lDown && m_screen == SC_CREATE && m_previewDrag) {
 		m_previewYaw += (x - m_mx) * .012f;
 		m_previewPitch = Clampf(m_previewPitch + (y - m_my) * .005f, -1.05f, 1.15f);
@@ -1189,6 +1272,8 @@ static void CreateInfoRect(float ui, int sw, float& x, float& y, float& w, float
 
 void Game::OnMouseDown(int btn, int x, int y)
 {
+	if (m_demo) { m_mx = x; m_my = y; DemoLeave(); return; }
+	m_idleT = 0;
 	m_mx = x; m_my = y; m_mouseSeen = TRUE; m_navMode = FALSE;
 	if (btn == 0) {
 		m_lDown = TRUE; m_downX = x; m_downY = y;
@@ -1213,6 +1298,12 @@ void Game::OnMouseDown(int btn, int x, int y)
 
 void Game::OnMouseUp(int btn, int x, int y)
 {
+	if (m_demo) {
+		m_lDown = m_rDown = m_mDown = FALSE;
+		m_click = FALSE;
+		m_mx = x; m_my = y;
+		return;
+	}
 	m_mx = x; m_my = y;
 	if (btn == 0 && m_lDown) {
 		m_lDown = FALSE;
@@ -1276,6 +1367,8 @@ void Game::ResetCamDist()
 
 void Game::OnWheel(int delta)
 {
+	if (m_demo) { DemoLeave(); return; }
+	m_idleT = 0;
 	if (m_screen == SC_CREATE) {
 		if (delta == 0 || m_mx < m_w * .40f) return;
 		int sign = delta > 0 ? 1 : -1;
@@ -1521,6 +1614,11 @@ void Game::ReleaseInput()
 
 void Game::OnKey(int vk, BOOL down)
 {
+	if (m_demo) {
+		if (down && vk != VK_PROCESSKEY) DemoLeave();
+		return;
+	}
+	m_idleT = 0;
 	if (vk == VK_SHIFT) { m_keyShift = down; m_fastFwd = down; }
 	if (!down) return;
 	if (vk == VK_PROCESSKEY) return;
@@ -1604,10 +1702,23 @@ void Game::OnPad(const PadState& p, float dt)
 {
 	if (!p.connected) { memset(&m_padPrev, 0, sizeof(m_padPrev)); return; }
 	auto pressed = [&](int bit) { return (p.buttons & (1 << bit)) && !(m_padPrev.buttons & (1 << bit)); };
+	if (m_demo) {
+		BOOL any = FALSE;
+		for (int b = 0; b < 8; b++) if (pressed(b)) any = TRUE;
+		m_padPrev = p;
+		if (any) DemoLeave();
+		return;
+	}
+	{
+		BOOL any = FALSE;
+		for (int b = 0; b < 8; b++) if (pressed(b)) any = TRUE;
+		if (any) m_idleT = 0;
+	}
 	int dir = -1;
 	float ax = p.lx, ay = p.ly;
 	if (p.hat >= 0) { static const int hx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, hy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 }; ax = (float)hx[p.hat]; ay = (float)hy[p.hat]; }
 	if (fabsf(ax) > .55f || fabsf(ay) > .55f) dir = fabsf(ax) > fabsf(ay) ? (ax > 0 ? 1 : 3) : (ay > 0 ? 2 : 0);
+	if (dir >= 0) m_idleT = 0;
 	BOOL battleMap = m_slotUi == 0 && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE) && !m_showHelp;
 	if (dir >= 0) {
 		BOOL fire = FALSE;
@@ -2208,10 +2319,31 @@ float Game::DrawStatLines(const CharData& c, float x, float y, float w, const in
 {
 	int cols = w >= U(340) ? 4 : 2;
 	float lh = U(cols == 4 ? 20.f : 18.f);
-	float cw = w / (float)cols;
+	float maxNeed = 0.f;
+	for (int s = 0; s < S_COUNT; s++) {
+		int bonus = gains ? gains[s] : 0;
+		int total = c.stat[s] + bonus;
+		wchar_t lab[32], v[48], gbuf[24];
+		wcscpy_s(lab, TT(StatNameTx(s)));
+		if (s == S_HP && hpCur >= 0) swprintf_s(v, L"%s/%s", TacNum(hpCur), TacNum(total));
+		else if (s == S_MP && mpCur >= 0) swprintf_s(v, L"%s/%s", TacNum(mpCur), TacNum(total));
+		else swprintf_s(v, L"%s", TacNum(c.stat[s]));
+		gbuf[0] = 0;
+		if (bonus > 0) swprintf_s(gbuf, L"+%s", TacNum(bonus));
+		else if (bonus < 0) swprintf_s(gbuf, L"%s", TacNum(bonus));
+		float need = m_r.TextWidth(lab, U(13), 0) + U(3) + m_r.TextWidth(v, U(14), 1);
+		if (gbuf[0]) need += U(3) + m_r.TextWidth(gbuf, U(12), 1);
+		if (need > maxNeed) maxNeed = need;
+	}
+	float cwCap = w / (float)cols;
+	float cw = maxNeed + U(8);
+	if (cw > cwCap) cw = cwCap;
+	if (cw < U(64) && cwCap > cw) cw = min(cwCap, U(88));
+	float block = cw * (float)cols;
+	float x0 = x + max(0.f, (w - block) * .5f);
 	for (int s = 0; s < S_COUNT; s++) {
 		float col = (float)(s % cols), row = (float)(s / cols);
-		float sx = x + col * cw, sy = y + row * lh;
+		float sx = x0 + col * cw, sy = y + row * lh;
 		float cell = cw - U(3);
 		BOOL hov = m_mouseSeen && Hit(sx, sy, cell, lh);
 		if (hov) {
@@ -3511,6 +3643,126 @@ void Game::BuildShowcase()
 	if (slicing) { m_loadA = spanA; m_loadB = spanB; }
 }
 
+void Game::DemoBegin()
+{
+	int n = 0;
+	int cap = PartyCap();
+	for (int i = 0; i < cap; i++) {
+		int r = m_save.party[i];
+		if (r >= 0 && r < MAX_ROSTER && m_save.roster[r].used) n++;
+	}
+	if (!n) { m_idleT = 0; return; }
+	m_demoSave = m_save;
+	int hi = m_save.stageCleared + 1;
+	if (hi < 1) hi = 1;
+	if (hi > TAC_STAGE_MAX) hi = TAC_STAGE_MAX;
+	m_demoStage = m_rng.Range(1, hi);
+	m_demo = 1;
+	m_demoT = 0;
+	m_demoAct = 0;
+	m_demoTick = 0;
+	m_demoStep = 0;
+	m_demoPh = -1;
+	m_click = FALSE;
+}
+
+void Game::DemoLeave()
+{
+	if (m_demo == 0 || m_demo == 3) return;
+	m_demo = 3;
+	m_demoT = 0;
+}
+
+void Game::TickDemo(float dt)
+{
+	if (m_demo == 1) {
+		m_demoT += dt;
+		// 幕が閉じ切ってから戦闘を出す。BGM は画面が戦闘になった時点で地形曲へ替わる。
+		if (m_screen != SC_BATTLE && m_demoT >= 0.62f) {
+			StartBattle(m_demoStage);
+			if (m_screen != SC_BATTLE) {
+				m_save = m_demoSave;
+				m_demo = 0;
+				m_idleT = 0;
+				return;
+			}
+			m_navMode = TRUE;
+		}
+		if (m_screen == SC_BATTLE && m_demoT >= 1.25f) {
+			m_demo = 2;
+			m_demoT = 0;
+			m_demoAct = 0;
+			m_demoPh = -1;
+			m_navMode = TRUE;
+		}
+	} else if (m_demo == 3) {
+		m_demoT += dt;
+		if (m_screen == SC_BATTLE && m_demoT >= 0.55f) {
+			m_save = m_demoSave;
+			m_click = FALSE;
+			m_lDown = m_rDown = m_mDown = FALSE;
+			EnterBase();
+			m_idleT = 0;
+		}
+		if (m_demoT >= 1.20f) {
+			m_demo = 0;
+			m_idleT = 0;
+		}
+	}
+}
+
+void Game::DrawDemoCurtain()
+{
+	if (m_demo != 1 && m_demo != 3) return;
+	float cover;
+	BOOL out = m_demo == 3;
+	if (!out) {
+		float t = m_demoT;
+		cover = t < 0.62f ? Smooth01(t / 0.62f) : Smooth01((1.25f - t) / 0.63f);
+	} else {
+		float t = m_demoT;
+		cover = t < 0.55f ? Smooth01(t / 0.55f) : Smooth01((1.20f - t) / 0.65f);
+	}
+	if (cover <= 0.001f) return;
+	float W = (float)m_w, H = (float)m_h;
+	if (cover > 0.985f) {
+		m_r.HudRect(0, 0, W, H, out ? RGBA8(28, 10, 8) : RGBA8(8, 12, 28));
+		return;
+	}
+	// 入りは縦の刃が中央から閉じる。出は横の板が中央から閉じる。同じフェードにはしない。
+	if (!out) {
+		const int n = 18;
+		float cw = W / (float)n;
+		for (int i = 0; i < n; i++) {
+			float u = (i + 0.5f) / (float)n;
+			float lag = fabsf(u - 0.5f) * 0.55f;
+			float k = Smooth01((cover - lag) / (1.f - lag));
+			if (k <= 0.f) continue;
+			float bh = H * 0.5f * k;
+			float x = i * cw;
+			m_r.HudRectGrad(x, 0, cw + 1.f, bh, RGBA8(6, 10, 24), RGBA8(36, 44, 82));
+			m_r.HudRectGrad(x, H - bh, cw + 1.f, bh + 1.f, RGBA8(36, 44, 82), RGBA8(6, 10, 24));
+			m_r.HudRect(x, bh - 2.f, cw + 1.f, 3.f, RGBA8(232, 196, 110));
+			m_r.HudRect(x, H - bh - 1.f, cw + 1.f, 3.f, RGBA8(232, 196, 110));
+		}
+	} else {
+		const int n = 12;
+		float rh = H / (float)n;
+		for (int i = 0; i < n; i++) {
+			float u = (i + 0.5f) / (float)n;
+			float lag = fabsf(u - 0.5f) * 0.45f;
+			float k = Smooth01((cover - lag) / (1.f - lag));
+			if (k <= 0.f) continue;
+			float bw = W * 0.5f * k;
+			float y = i * rh;
+			m_r.HudRectGrad(0, y, bw, rh + 1.f, RGBA8(72, 28, 14), RGBA8(18, 8, 8));
+			m_r.HudRectGrad(W - bw, y, bw + 1.f, rh + 1.f, RGBA8(18, 8, 8), RGBA8(72, 28, 14));
+			m_r.HudRect(bw - 2.f, y, 3.f, rh + 1.f, RGBA8(220, 140, 70));
+			m_r.HudRect(W - bw - 1.f, y, 3.f, rh + 1.f, RGBA8(220, 140, 70));
+		}
+	}
+}
+
 void Game::GoHomeFromBattle()
 {
 	if (m_screen != SC_BATTLE) return;
@@ -3554,6 +3806,51 @@ void Game::EnterBase()
 	if (ydirty) Persist();
 	if (NextJobPending(0) < 0) m_jobRedo = 0;
 	else if (m_jobRedo != 1) m_jobRedo = 1;
+}
+
+void Game::WarmHomeAvatars()
+{
+	if (m_avaLoadUnits < 1) return;
+	int who[64];
+	int model[64], ava[64], cup[64];
+	int n = 0;
+	for (int ri = 0; ri < MAX_ROSTER && n < 64; ri++) {
+		if (!m_save.roster[ri].used) continue;
+		Actor tmp;
+		ActorFromChar(tmp, m_lib, m_r, m_save.roster[ri]);
+		if (tmp.avatar <= 0 || tmp.model < 0) continue;
+		int seen = 0;
+		for (int k = 0; k < n; k++) if (model[k] == tmp.model && ava[k] == tmp.avatar && cup[k] == tmp.bust) seen = 1;
+		if (seen) continue;
+		who[n] = ri;
+		model[n] = tmp.model;
+		ava[n] = tmp.avatar;
+		cup[n] = tmp.bust;
+		n++;
+	}
+	int pend = n > 0 ? m_r.CountPendingAvatars(n, model, ava, cup) : 0;
+	OpenLoadSlice(m_avaLoadUnits);
+	if (pend > 0) {
+		DrawParams dp = {};
+		M4 ident = MIdent();
+		auto drawOne = [&](int i) {
+			Actor tmp;
+			ActorFromChar(tmp, m_lib, m_r, m_save.roster[who[i]]);
+			if (tmp.avatar <= 0 || tmp.model < 0) return;
+			if (!tmp.poseValid || tmp.poseFrame != m_r.m_frame)
+				ActorPose(tmp, m_lib, m_r);
+			m_r.DrawAvatar(tmp.model, tmp.avatar, tmp.bust, tmp.pose, ident, dp, NULL);
+		};
+		// 1回目は予約だけ。生成はフレームが進んでから。ここで済ませないと、ホームのあと別画面になる。
+		for (int i = 0; i < n; i++) drawOne(i);
+		m_r.m_frame++;
+		m_r.BeginAvaBatch(pend);
+		m_r.SetAvaBuildOnly(TRUE);
+		for (int i = 0; i < n; i++) drawOne(i);
+		m_r.SetAvaBuildOnly(FALSE);
+		m_r.m_avaLoading = 0;
+	}
+	CloseLoadSlice();
 }
 
 void Game::UpdateBase(float dt)
@@ -6571,6 +6868,8 @@ void Game::EnterCreate(int editIdx)
 	m_previewPan = v3(0, 0, 0);
 	m_previewPanDrag = FALSE;
 	m_previewMot = 0;
+	m_previewWing = TRUE;
+	m_previewGround = FALSE;
 	m_focusId = ID_CR_NAME;
 	RefreshPreview();
 }
@@ -6578,6 +6877,26 @@ void Game::EnterCreate(int editIdx)
 static BOOL PreviewAlt(int style)
 {
 	return AttackClipFor(style, 0) != AttackClipFor(style, 1);
+}
+
+static BOOL PreviewHasWings(const CharData& c)
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	return cd.moveType == MV_FLY || CharHasPas(c, PAS_FLY) || c.cls == C_SKYKNIGHT || c.cls == C_DRAGONLORD;
+}
+
+// 翼オフは羽根だけ消す。地面は翼も浮きも羽ばたきもやめ、足の着いた動きに戻す。
+static void ApplyCreatePreview(Actor& a, BOOL showWing, BOOL ground)
+{
+	if (ground) {
+		a.wings = 0;
+		a.flap = 0;
+		a.hover = 0;
+		a.flyLean = 0;
+		a.legOk = 0;
+		return;
+	}
+	if (!showWing) a.wings = 0;
 }
 
 static void CharPreviewIn(const CharData& c, const Actor& a, int& style, int& idle, BOOL& fly)
@@ -6634,7 +6953,9 @@ void Game::RefreshPreview()
 	int style = 0, idle = CL_IDLE;
 	BOOL fly = FALSE;
 	CharPreviewIn(c, m_preview, style, idle, fly);
+	if (m_previewGround) fly = FALSE;
 	PlayShown(m_preview, m_previewMot, style, idle, fly, TRUE, FALSE);
+	ApplyCreatePreview(m_preview, m_previewWing, m_previewGround);
 }
 
 void Game::DrawCreate3D()
@@ -6944,9 +7265,33 @@ void Game::DrawCreateUi()
 		float paneW = (float)m_w - paneL;
 		float cx = paneL + paneW * .5f;
 		int hit = DrawMotRow(ID_CR_MOT0, cx, m_h - U(68), paneW - U(24), m_previewMot, PreviewAlt(style));
+		if (m_previewGround) fly = FALSE;
 		if (hit >= 0) {
 			m_previewMot = hit;
 			PlayShown(m_preview, m_previewMot, style, idle, fly, TRUE, TRUE);
+			ApplyCreatePreview(m_preview, m_previewWing, m_previewGround);
+		}
+		if (PreviewHasWings(m_edit)) {
+			const BOOL wingOn = m_previewWing && !m_previewGround;
+			wchar_t lab[48];
+			swprintf_s(lab, L"%s %s", TT(TX_CR_WING), TT(wingOn ? TX_CR_ON : TX_CR_OFF));
+			float ww = U(132), wh = U(32), gapb = U(8);
+			float span = ww * 2.f + gapb;
+			float wx = cx - span * .5f, wy = m_h - U(108);
+			if (Btn(ID_CR_WING, wx, wy, ww, wh, lab, TRUE, wingOn, U(15))) {
+				if (m_previewGround) { m_previewGround = FALSE; m_previewWing = TRUE; }
+				else m_previewWing = !m_previewWing;
+				RefreshPreview();
+			}
+			BOOL onWing = (m_mouseSeen && !m_navMode && Hit(wx, wy, ww, wh)) || (m_navMode && m_focusId == ID_CR_WING);
+			if (onWing) { tipTx = TX_CRH_WING; tipAx = wx; tipAy = wy; tipAw = ww; tipAh = wh; }
+			float gx = wx + ww + gapb;
+			if (Btn(ID_CR_GROUND, gx, wy, ww, wh, TT(TX_CR_GROUND), TRUE, m_previewGround != 0, U(15))) {
+				m_previewGround = !m_previewGround;
+				RefreshPreview();
+			}
+			BOOL onGround = (m_mouseSeen && !m_navMode && Hit(gx, wy, ww, wh)) || (m_navMode && m_focusId == ID_CR_GROUND);
+			if (onGround) { tipTx = TX_CRH_GROUND; tipAx = gx; tipAy = wy; tipAw = ww; tipAh = wh; }
 		}
 		m_r.HudText(TT(TX_CR_PREVIEW_HINT), cx, m_h - U(28), U(13), RGBA8(220, 220, 230), 1, 0);
 	}

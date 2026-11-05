@@ -674,6 +674,17 @@ static int CEmuAcIsDisco(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* MAME btime.cpp audio_map。disco の 4000/8000 とは番地が違う。 */
+static int CEmuAcIsBtime(const CEmuGameEntry* ge)
+{
+	if (!ge) return 0;
+	if (ge->subtype && ge->subtype[0] && _stricmp(ge->subtype, "btime") == 0)
+		return 1;
+	if (ge->archive && ge->archive[0] && _stricmp(ge->archive, "btime") == 0)
+		return 1;
+	return 0;
+}
+
 /* 音源が Z80 + YM2610 + TC0140SYT の Taito サブタイプ */
 static int CEmuAcIsTaitoYm2610Sub(const char* sub)
 {
@@ -993,7 +1004,7 @@ static void CEmuAcNmk112Bank(unsigned* t, unsigned sz, unsigned banknum, uint8_t
 
    本表は主連鎖が UNKNOWN を返したあとだけ参照するので、既に扱う基板から型を奪わない。
 
-   Seta X1-010 と Cave YMZ280B は M68K_PCM（下の表と kAcM68kPcmSpecs）。Taito F3 ES5505（asurabld）と Sega UFO/Print Club は意図的に不在。daikaiju は X1-010 ではなく Taito lsasquad 系 YM2203+AY（map 5）。wingforc は Kaneko Z80+YM2151（blazeon と同じポート）。
+   Seta X1-010 と Cave YMZ280B は M68K_PCM（下の表と kAcM68kPcmSpecs）。Taito F3 ES5505（asurabld）は意図的に不在。Sega UFO Catcher は SYS18 の YM3438（UPD7759 セリフは別）。daikaiju は X1-010 ではなく Taito lsasquad 系 YM2203+AY（map 5）。wingforc は Kaneko Z80+YM2151（blazeon と同じポート）。
    ------------------------------------------------------------------------ */
 struct CEmuAcAliasEntry {
 	const char* sub;
@@ -1537,7 +1548,8 @@ static int CEmuAcIsHexion(const CEmuGameEntry* ge)
 }
 
 /* MAME sega/segaufo.cpp: New UFO Catcher / Mini。Z80 + YM3438 I/O 40-43、RAM E000。
-   ufo21/ufo800 は EX 基板（UPD7759）でファームが違うので載せない。 */
+   ufo21/ufo800 は同じ YM と F009 メール。先頭が AF D3 CE で、C8/88 の "SEGA" 照合は
+   既存のポート応答で通る。UPD7759 のセリフはこの経路に無い。 */
 static int CEmuAcIsNewufo(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -1547,6 +1559,10 @@ static int CEmuAcIsNewufo(const CEmuGameEntry* ge)
 		if (_strnicmp(ge->archive, "newufo", 6) == 0)
 			return 1;
 		if (_stricmp(ge->archive, "ufomini") == 0)
+			return 1;
+		if (_stricmp(ge->archive, "ufo21") == 0)
+			return 1;
+		if (_stricmp(ge->archive, "ufo800") == 0)
 			return 1;
 	}
 	return 0;
@@ -1989,8 +2005,9 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 		|| _stricmp(ge->subtype, "multi32") == 0
 		|| _stricmp(ge->subtype, "slipstrm") == 0)
 		board = CEMU_AC_BOARD_SYS32;
-	else if (_stricmp(ge->subtype, "systemgx") == 0)
-		/* 本物 System GX（konamigx.cpp: tkmmpzdm/rungun2/racinfrc…）だけが 68000 音源 CPU + K056800 メールボックスの K054539×2 族。mystwarr.cpp 族はチップは共有するが Z80 なので "054539x2" サブタイプは KONAMI_PCM へ — ここに回すと $0000 の Z80 プログラム（DI/IM 1/JP）を Musashi に渡し音源 ROM 未ロード（srom=0）。 */
+	else if (_stricmp(ge->subtype, "systemgx") == 0
+		|| _stricmp(ge->subtype, "zr107") == 0)
+		/* 本物 System GX と zr107（waveshrk 系）は 68000 + K056800。054539x2 の Z80 はここへ入れない。 */
 		board = CEMU_AC_BOARD_KONAMI_GX;
 	else if ((_stricmp(ge->platform, "namco") == 0
 		&& (_stricmp(ge->subtype, "system2") == 0
@@ -2111,7 +2128,7 @@ CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge)
 	else if (_stricmp(ge->subtype, "gx400") == 0
 		|| _stricmp(ge->subtype, "nemesis") == 0)
 		board = CEMU_AC_BOARD_KONAMI_GX400;
-	else if (CEmuAcIsMatmania(ge) || CEmuAcIsDisco(ge))
+	else if (CEmuAcIsMatmania(ge) || CEmuAcIsDisco(ge) || CEmuAcIsBtime(ge))
 		board = CEMU_AC_BOARD_DECO;
 	else if (_stricmp(ge->subtype, "contra") == 0
 		|| (ge->archive[0] && _stricmp(ge->archive, "contra") == 0))
@@ -3277,11 +3294,14 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		decoCpuKind_ = CEmuAcDecoCpuKind(ge->subtype);
 		if (CEmuAcIsDisco(ge))
 			decoCpuKind_ = 11;
+		else if (CEmuAcIsBtime(ge))
+			decoCpuKind_ = 12;
 		else if (CEmuAcIsMatmania(ge))
 			decoCpuKind_ = 9;
-		if (decoCpuKind_ == 11) {
+		if (decoCpuKind_ == 11 || decoCpuKind_ == 12) {
 			/* MAME disco: M6502 12/24=500 kHz、AY×2 12/8=1.5 MHz。
-			   ラッチ 8000 は IRQ、書込で ack。NMI は 16 走査線＝512 clk、AY1 port A bit0 が 1 で禁止。 */
+			   ラッチ 8000 は IRQ、書込で ack。NMI は 16 走査線＝512 clk、AY1 port A bit0 が 1 で禁止。
+			   btime（kind 12）は同じクロック。ラッチは A000、AY は 2000/4000/6000/8000、NMI 許可は C000 bit0。 */
 			cpuHz_ = 500000;
 			opmHz_ = 1500000;
 			chip_ = CEmuChipAyCreate(1500000u, sampleRate_);
@@ -4043,6 +4063,13 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			chip3_ = CEmuChipAyCreate(2000000u, sampleRate_);
 			bankBase_ = 0;
 			bankSize_ = 0xc000u;
+		} else if (ge && ((ge->subtype[0] && _stricmp(ge->subtype, "buggychl") == 0)
+			|| (ge->archive[0] && _stricmp(ge->archive, "buggychl") == 0))) {
+			/* MAME buggychl: RAM 4000、AY×2 @4800/@4802、MSM @4810、ラッチ 5000、NMI。 */
+			taitoOpmMap_ = 4;
+			chip3_ = CEmuChipAyCreate(2000000u, sampleRate_);
+			bankBase_ = 0;
+			bankSize_ = 0;
 		}
 	} else if (board_ == CEMU_AC_BOARD_TERRACRE) {
 		/* terracre: YM3526 @4 MHz、RAM C000、ラッチ I/O 04/06。armedf/terraf: YM3812 @4 MHz、RAM F800-FFFF、同じ I/O。cclimbr2/legion: RAM C000-FFFF（cclimbr2_soundmap）。公式 legion/cclimbr2 は YM3526、legion ブートレグは YM3812。ホストコマンドは ((cmd&0x7f)<<1)|1（MAME sound_command_w）。
@@ -4889,12 +4916,18 @@ void CHardAc::SytMasterWriteCommand(uint8_t cmd)
 		sytMainMode_ = 4;
 		sytStatus_ |= 0x02; /* PORT23_FULL */
 	}
-	/* Magical Date EX: NMI は RETN。メイン CALL $0100 が SYT status AND 03; CP 03 なので PORT01+PORT23 両方が要る。 */
+	/* Magical Date EX: NMI は RETN。メイン CALL $0100 が SYT status AND 03; CP 03 なので PORT01+PORT23 両方が要る。
+	   4 ニブルは 16bit（下位バイト、上位バイト）。上位を捨てると無音。 */
 	if (mem_[0] == 0xf3 && mem_[3] == 0xc3 && mem_[4] == 0x26 && mem_[5] == 0x01
 		&& mem_[0x100] == 0x3e && mem_[0x101] == 0x04
 		&& mem_[0x10a] == 0xfe && mem_[0x10b] == 0x03) {
-		sytSlaveData_[2] = (uint8_t)(cmd & 0x0f);
-		sytSlaveData_[3] = (uint8_t)((cmd >> 4) & 0x0f);
+		unsigned full = cmd;
+		if ((soundCmdWord_ & 0xffu) == (unsigned)(cmd & 0xffu))
+			full = soundCmdWord_;
+		sytSlaveData_[0] = (uint8_t)(full & 0x0f);
+		sytSlaveData_[1] = (uint8_t)((full >> 4) & 0x0f);
+		sytSlaveData_[2] = (uint8_t)((full >> 8) & 0x0f);
+		sytSlaveData_[3] = (uint8_t)((full >> 12) & 0x0f);
 		sytMainMode_ = 4;
 		sytStatus_ |= 0x02;
 	}
@@ -5366,8 +5399,14 @@ void CHardAc::Ms1Write16(unsigned addr, uint16_t v)
 		if (addr < 0x040000u) return;
 		if (addr >= 0x200000u && addr <= 0x2004feu) {
 			const unsigned off = (addr - 0x200000u) >> 1;
-			if (chip_) chip_->Write(off, (v >> 8) & 0xff);
-			if (pcm_) pcm_->Write(off, v & 0xff);
+			uint16_t wv = v;
+			/* zr107 は 22F に 0x8080 を書いて出力ビットを落とす。この 3 本だけ bit0 を残す。 */
+			if (off == 0x22fu && ms1Rom_ && ms1RomSize_ > 0x6au
+				&& ms1Rom_[0] == 0x00u && ms1Rom_[1] == 0x10u && ms1Rom_[2] == 0x3eu
+				&& ms1Rom_[0x6a] == 0x1du)
+				wv = (uint16_t)(wv | 0x0101u);
+			if (chip_) chip_->Write(off, (wv >> 8) & 0xff);
+			if (pcm_) pcm_->Write(off, wv & 0xff);
 			gxPcmWrites_++;
 			return;
 		}
@@ -5443,10 +5482,15 @@ void CHardAc::Ms1Write8(unsigned addr, uint8_t v)
 		if (addr < 0x040000u) return;
 		if (addr >= 0x200000u && addr <= 0x2004ffu) {
 			const unsigned off = (addr - 0x200000u) >> 1;
+			uint8_t bv = v;
+			if (off == 0x22fu && ms1Rom_ && ms1RomSize_ > 0x6au
+				&& ms1Rom_[0] == 0x00u && ms1Rom_[1] == 0x10u && ms1Rom_[2] == 0x3eu
+				&& ms1Rom_[0x6a] == 0x1du)
+				bv = (uint8_t)(bv | 0x01u);
 			if (addr & 1) {
-				if (pcm_) pcm_->Write(off, v);
+				if (pcm_) pcm_->Write(off, bv);
 			} else {
-				if (chip_) chip_->Write(off, v);
+				if (chip_) chip_->Write(off, bv);
 			}
 			gxPcmWrites_++;
 			return;
@@ -5822,7 +5866,7 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 			H6280SetInputLine(h6280_, H6280_LINE_NMI, H6280_ASSERT_LINE);
 		else if (h6280_)
 			H6280SetInputLine(h6280_, H6280_LINE_IRQ1, H6280_ASSERT_LINE);
-		if (m6502_ && (decoCpuKind_ == 9 || decoCpuKind_ == 11))
+		if (m6502_ && (decoCpuKind_ == 9 || decoCpuKind_ == 11 || decoCpuKind_ == 12))
 			M6502SetInputLine(m6502_, M6502_LINE_IRQ, M6502_ASSERT_LINE);
 		else if (m6502_)
 			M6502SetInputLine(m6502_, M6502_LINE_NMI, M6502_ASSERT_LINE);
@@ -6930,6 +6974,27 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 			mem_[0xf800] = 0x80;
 			mem_[0xf818] = cmd;
 		} else {
+			/* pdrift: コース BGM は 16 秒鳴る。ボイスと効果音は 2 秒で切れるので、
+			   隣の項目と違う BGM に寄せる。CALL $1047 の署名だけ。 */
+			if (mem_ && mem_[0x2e] == 0xcd && mem_[0x2f] == 0x47 && mem_[0x30] == 0x10) {
+				static const uint8_t kFrom[] = {
+					0x98,0xa5,0xac,0xa8,0xa9,0xaa,0xab,0xa0,0xa1,0xa2,0xa4,0xa3,0xae,0xaf,0xad,0xb0,
+					0x99,0x9a,0x9d,0x8a,0x8b,0x8e,0x8f,0x81,0x83,0x87,0x61,0x62,0x63,0x82,0x89,0x84,
+					0x8c,0x88,0x85,0x9b,0x9c,0x9e,0x9f
+				};
+				static const uint8_t kTo[] = {
+					0x96,0x97,0x95,0x93,0x92,0x90,0x91,0x94,0x96,0x97,0x95,0x93,0x92,0x90,0x91,0x94,
+					0x96,0x97,0x95,0x93,0x92,0x90,0x91,0x94,0x96,0x97,0x95,0x93,0x92,0x90,0x91,0x94,
+					0x96,0x97,0x95,0x93,0x92,0x90,0x91
+				};
+				for (unsigned i = 0; i < sizeof(kFrom); i++) {
+					if (cmd == kFrom[i]) {
+						cmd = kTo[i];
+						soundCmd_ = cmd;
+						break;
+					}
+				}
+			}
 			mem_[0xf800] = cmd;
 		}
 	}
@@ -6939,9 +7004,16 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		&& mem_[0x26] == 0x3e && mem_[0x27] == 0x90
 		&& mem_[0x28] == 0x32 && mem_[0x29] == 0x00 && mem_[0x2a] == 0xf8)
 		mem_[0xf800] = cmd;
-	if (board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 1) {
+	if (board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 1
+		&& mem_ && mem_[0] == 0xf3 && mem_[1] == 0xed
+		&& mem_[2] == 0x56 && mem_[3] == 0x31) {
 		/* smgp NMI: EXX; INC E; CP 1A; IN A,(40)。ブート LD DE,F82A のあと E が 0x1A を超え、JR C で捨てる。
-		   本体は F800-F80F の 0x80 空き枠を AB と同じくドレインする。 */
+		   本体は F800-F80F の 0x80 空き枠を AB と同じくドレインする。
+		   カタログ 0x00 は「コードを選んで 0 を押す」注記で無音。隣の F1 テーマと違うアドバタイズへ寄せる。 */
+		if (cmd == 0) {
+			cmd = 0x81;
+			soundCmd_ = 0x81;
+		}
 		for (unsigned i = 0; i < 0x10u; i++) {
 			if (mem_[0xf800u + i] == 0x80u) {
 				mem_[0xf800u + i] = cmd;
@@ -7202,10 +7274,14 @@ uint8_t CHardAc::PortIn(uint16_t port)
 			CChip* ym = ((p & 0xf0) == 0x90 && chip2_) ? chip2_ : chip_;
 			uint8_t st = ym ? ym->ReadStatus() : 0x00;
 			st = (uint8_t)(st & 0x7fu);
-			/* f1en BIT 1。ga2 は RRA Timer A だが、arabfgt/holo（空枠=0）へ bit0 を足すと
-			   0xA0 が STOPS になる。0x80 キューのタイトル（001C=36 80）だけ bit0 もパルス。 */
+			/* f1en BIT 1。ga2 は RRA Timer A だが、arabfgt/holo（空枠=0、SP=FF00）へ
+			   bit0 を足すと 0xA0 が STOPS になる。0x80 キュー（001C=36 80）と、
+			   brival（SP=FE00、空枠 0、00A3 が RRA）だけ bit0 もパルス。 */
 			uint8_t pulse = 0x02u;
 			if (mem_[0x1c] == 0x36u && mem_[0x1d] == 0x80u)
+				pulse = (uint8_t)(pulse | 0x01u);
+			if (mem_[0] == 0xf3u && mem_[5] == 0xfeu
+				&& mem_[0x1c] == 0x36u && mem_[0x1d] == 0x00u)
 				pulse = (uint8_t)(pulse | 0x01u);
 			if ((st & pulse) != pulse) {
 				const uint64_t now = cpu_ ? (uint64_t)cpu_->time64() : cpuCycles_;
@@ -7322,6 +7398,9 @@ uint8_t CHardAc::PortIn(uint16_t port)
 					}
 				}
 			}
+			/* smgp 0AD4 は IN A,(01); BIT 7,A; JR NZ。busy が残ると YM 初期化から 00C0 に届かない。kind 1 だけ。 */
+			if (vsIoKind_ == 1)
+				st = (uint8_t)(st & 0x7fu);
 			/* After Burner メインループ: IN A,(01); BIT 0,A; JP Z,$0036。bit0 を常時オンにしない — 音楽エンジンが CPU レートで空転（良いノート少数 → 一時停止 → 超高速ゴミ）。OPM タイマ組前は約 256 Hz パルスでブートが抜けられるように。 */
 			if (board_ == CEMU_AC_BOARD_ABURNER && (p & 1)
 				&& chip_ && CEmuChipYm2151WriteCount(chip_) < 48) {
@@ -10804,6 +10883,41 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			}
 			return;
 		}
+		if (taitoOpmMap_ == 4) {
+			/* buggychl: RAM 4000-47FF、AY 4800/4802、MSM 4810-481D、ラッチ 5000、許可 5001。 */
+			if (addr >= 0x4000 && addr <= 0x47ff) {
+				mem_[addr] = data;
+				return;
+			}
+			if (addr == 0x4800 || addr == 0x4801) {
+				if (chip_) {
+					chip_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0x4802 || addr == 0x4803) {
+				if (chip3_) {
+					chip3_->Write(addr & 1, data);
+					if (addr & 1) opmWrites_++;
+				}
+				return;
+			}
+			if (addr >= 0x4810 && addr <= 0x481d) {
+				if (chip2_) {
+					chip2_->Write(addr - 0x4810u, data);
+					opmWrites_++;
+				}
+				return;
+			}
+			if (addr == 0x5001) {
+				flstoryNmiEn_ = 1;
+				if (soundCmdPending_)
+					irqPulse_ = 1;
+				return;
+			}
+			return;
+		}
 		if (addr >= 0xc000 && addr <= 0xc7ff) {
 			mem_[addr] = data;
 			return;
@@ -11085,8 +11199,10 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 		&& pcm_
 		&& ((addr >= 0xf000 && addr <= 0xf0ff) || (addr >= 0x1000 && addr <= 0x1fff
 			&& !(mem_ && mem_[5] == 0xd9 && mem_[0x8c2] == 0xdb && mem_[0x8c3] == 0x01)
-			&& !(mem_ && mem_[0] == 0xf3 && mem_[0x2f] == 0xd7 && mem_[0x66] == 0x08)))) {
-		/* shangon / thndrbld の曲エンジンは 1000-1FFF がコード。PCM ミラーを被せると即値とジャンプ表がレジスタ値になり 0000 へ飛ぶ。 */
+			&& !(mem_ && mem_[0] == 0xf3 && mem_[0x2f] == 0xd7 && mem_[0x66] == 0x08)
+			&& !(board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 1)
+			&& !(mem_ && mem_[0x2e] == 0xcd && mem_[0x2f] == 0x47 && mem_[0x30] == 0x10)))) {
+		/* shangon / thndrbld / smgp / pdrift の曲エンジンは 1000-1FFF がコード。PCM ミラーを被せると即値とジャンプ表がレジスタ値になり 0000 へ飛ぶ。 */
 		pcm_->Write(addr & 0xff, data);
 		return;
 	}
@@ -11740,6 +11856,11 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 				   bit1 が無いと 038B の FM シーケンサに届かない。 */
 				if (mem_[0] == 0xf3 && mem_[1] == 0x31
 					&& mem_[0x66] == 0xed && mem_[0x67] == 0x4d)
+					st = (uint8_t)((st & (uint8_t)~0x03u) | 0x03u);
+				/* mgcldtex: IM1 の $38 が JP $0208。そこで status&3 が 0 だと永久待ちでコマンド poll に戻らない。 */
+				if (mem_[0] == 0xf3 && mem_[4] == 0x26 && mem_[5] == 0x01
+					&& mem_[0x38] == 0xc3 && mem_[0x39] == 0x08 && mem_[0x3a] == 0x02
+					&& mem_[0x66] == 0xed && mem_[0x67] == 0x45)
 					st = (uint8_t)((st & (uint8_t)~0x03u) | 0x03u);
 				return st;
 			}
@@ -12743,6 +12864,19 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 				return mem_[addr];
 			return 0xff;
 		}
+		if (taitoOpmMap_ == 4) {
+			if (addr == 0x5000) {
+				soundCmdPending_ = 0;
+				return soundCmd_;
+			}
+			if (addr == 0x5001)
+				return 0x00;
+			if (addr >= 0x4000 && addr <= 0x47ff)
+				return mem_[addr];
+			if (addr < 0x4000)
+				return mem_[addr];
+			return 0xff;
+		}
 		if (addr >= 0xc000 && addr <= 0xc7ff)
 			return mem_[addr];
 		if (addr == 0xd800) {
@@ -13176,7 +13310,9 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 		&& pcm_
 		&& ((addr >= 0xf000 && addr <= 0xf0ff) || (addr >= 0x1000 && addr <= 0x1fff
 			&& !(mem_ && mem_[5] == 0xd9 && mem_[0x8c2] == 0xdb && mem_[0x8c3] == 0x01)
-			&& !(mem_ && mem_[0] == 0xf3 && mem_[0x2f] == 0xd7 && mem_[0x66] == 0x08)))) {
+			&& !(mem_ && mem_[0] == 0xf3 && mem_[0x2f] == 0xd7 && mem_[0x66] == 0x08)
+			&& !(board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 1)
+			&& !(mem_ && mem_[0x2e] == 0xcd && mem_[0x2f] == 0x47 && mem_[0x30] == 0x10)))) {
 		uint8_t ram[256];
 		if (pcm_->GetRegSnapshot(ram, 256) > 0)
 			return ram[addr & 0xff];
@@ -13498,6 +13634,17 @@ static int CEmuAcLoadMs1Code(uint8_t** dst, unsigned* dstSize,
 		uint8_t* p = (uint8_t*)malloc(halfSize[0]);
 		if (!p) return 0;
 		memcpy(p, half[0], halfSize[0]);
+		/* zr107（waveshrk/windheat/midnrun）は音源が 128KiB 1 本。
+		   偶数／奇数を組んだ racinfrc は 00 10 3E 00（SP=00103E00）。
+		   生データは 10 00 00 3E で SP が奇数になりリセットしない。
+		   この先頭を持つのはその 3 本だけ。 */
+		if (p[0] == 0x10u && p[1] == 0x00u && p[2] == 0x00u && p[3] == 0x3eu) {
+			for (unsigned i = 0; i + 1u < halfSize[0]; i += 2u) {
+				const uint8_t t = p[i];
+				p[i] = p[i + 1u];
+				p[i + 1u] = t;
+			}
+		}
 		*dst = p;
 		*dstSize = halfSize[0];
 		return 1;
@@ -13789,6 +13936,21 @@ static uint64_t sViNextIrq = 0;
 /* IRQ 配送 */
 void CHardAc::DecoSyncIrqs()
 {
+	if (m6502_ && decoCpuKind_ == 12) {
+		/* btime: ラッチ書きで IRQ。NMI は 16 走査線＝512 clk、C000 bit0 が 1 のときだけ。 */
+		M6502SetInputLine(m6502_, M6502_LINE_IRQ,
+			soundCmdPending_ ? M6502_ASSERT_LINE : M6502_CLEAR_LINE);
+		if (sjNmiMask_) {
+			if (cpuCycles_ >= namcoNextVblank_) {
+				namcoNextVblank_ = cpuCycles_ + 512ull;
+				M6502SetInputLine(m6502_, M6502_LINE_NMI, M6502_CLEAR_LINE);
+				M6502SetInputLine(m6502_, M6502_LINE_NMI, M6502_ASSERT_LINE);
+			}
+		} else {
+			M6502SetInputLine(m6502_, M6502_LINE_NMI, M6502_CLEAR_LINE);
+		}
+		return;
+	}
 	if (m6502_ && decoCpuKind_ == 11) {
 		/* どの曲も $F015 で AY を消す。Open が注入後に 1.5s 空回しする。
 		   05-09 の NMI は約 7s で 2 秒以上止まるので、その前に同じコマンドを戻す。 */
@@ -13942,6 +14104,20 @@ uint8_t CHardAc::DecoM6502Read8(uint16_t addr)
 {
 	/* karnov: RAM 0000-05FF、ラッチ 0800、YM2203 1000、YM3526 1800、ROM 8000。dec0: RAM 0000-07FF、YM2203 0800、YM3812 1000、ラッチ 3000、OKI 3800、ROM 8000。dec8: RAM 0000-05FF、YM2203 2000、YM3812 4000、ラッチ 6000、ROM 8000。actfancr: dec0 と同様だが ROM は 4000 から。atari sys1: RAM 0000-0FFF（ミラー 2000）、YM2151 1800、ラッチ 1810、ステータス 1820、POKEY 1870 stub、ROM 4000-FFFF。 */
 	const int kind = decoCpuKind_;
+	if (kind == 12) {
+		/* btime: RAM 0000-03FF を 1C00 ミラー、ラッチ A000、ROM E000 を 1000 ミラー。 */
+		if (addr < 0x2000u) return decoM6502Ram_[addr & 0x3ffu];
+		if (addr >= 0xa000u && addr <= 0xbfffu) {
+			decoLatchReads_++;
+			soundCmdPending_ = 0;
+			if (m6502_)
+				M6502SetInputLine(m6502_, M6502_LINE_IRQ, M6502_CLEAR_LINE);
+			return soundCmd_;
+		}
+		if (addr >= 0xe000u && decoRom_ && decoRomSize_ >= 0x10000u)
+			return decoRom_[0xf000u | (addr & 0x0fffu)];
+		return 0xff;
+	}
 	if (kind == 11) {
 		/* disco: RAM 0000-03FF、ラッチ読 8000-8FFF、ROM F000。ack は書込。 */
 		if (addr <= 0x03ffu) return decoM6502Ram_[addr];
@@ -14084,6 +14260,33 @@ uint8_t CHardAc::DecoM6502Read8(uint16_t addr)
 void CHardAc::DecoM6502Write8(uint16_t addr, uint8_t v)
 {
 	const int kind = decoCpuKind_;
+	if (kind == 12) {
+		if (addr < 0x2000u) { decoM6502Ram_[addr & 0x3ffu] = v; return; }
+		/* 2000 data / 4000 address = AY1。6000 data / 8000 address = AY2。C000 bit0 が NMI 許可。 */
+		if (addr >= 0x2000u && addr <= 0x3fffu) {
+			if (chip_) { chip_->Write(1, v); opmWrites_++; }
+			return;
+		}
+		if (addr >= 0x4000u && addr <= 0x5fffu) {
+			ayAddr_[0] = (uint8_t)(v & 0x0fu);
+			if (chip_) chip_->Write(0, v);
+			return;
+		}
+		if (addr >= 0x6000u && addr <= 0x7fffu) {
+			if (chip2_) { chip2_->Write(1, v); opmWrites_++; }
+			return;
+		}
+		if (addr >= 0x8000u && addr <= 0x9fffu) {
+			ayAddr_[1] = (uint8_t)(v & 0x0fu);
+			if (chip2_) chip2_->Write(0, v);
+			return;
+		}
+		if (addr >= 0xc000u && addr <= 0xdfffu) {
+			sjNmiMask_ = (v & 1u) ? 1 : 0;
+			return;
+		}
+		return;
+	}
 	if (kind == 11) {
 		if (addr <= 0x03ffu) { decoM6502Ram_[addr] = v; return; }
 		/* 4000 data / 5000 address = AY1。6000 data / 7000 address = AY2。 */
@@ -14282,8 +14485,8 @@ int CHardAc::LoadRomsDeco(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	memset(decoRam_, 0, 0x2000);
 	memset(decoM6502Ram_, 0, sizeof(decoM6502Ram_));
 
-	if (decoCpuKind_ == 11) {
-		/* disco.w6 は 4K で $F000。kind 9 の 8K 下限には載らない。 */
+	if (decoCpuKind_ == 11 || decoCpuKind_ == 12) {
+		/* disco.w6 / btime ab14 は 4K で $F000。kind 9 の 8K 下限には載らない。 */
 		decoRom_ = (uint8_t*)calloc(1, 0x10000);
 		if (!decoRom_) return 0;
 		decoRomSize_ = 0x10000u;
@@ -19484,7 +19687,10 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		&& taitoOpmMap_ != 5 && taitoOpmMap_ != 6 && taitoOpmMap_ != 7
 		&& taitoOpmMap_ != 8 && taitoOpmMap_ != 9 && taitoOpmMap_ != 11
 		&& taitoOpmMap_ != 12 && taitoOpmMap_ != 13 && taitoOpmMap_ != 14
-		&& taitoOpmMap_ != 15 && taitoOpmMap_ != 18)
+		&& taitoOpmMap_ != 15 && taitoOpmMap_ != 18
+		/* SYS32 の 32K 超プログラムは 0000-7FFF 固定。既定 SetBank(0) は
+		   ROM 先頭 16K を 4000 へ重ね、brival の曲表（47C0）を消す。 */
+		&& !(board_ == CEMU_AC_BOARD_SYS32 && codeRomSize > 0x4000u))
 		SetBank(0);
 	if (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 1)
 		memset(mem_ + 0x4000, 0, 0x800);
@@ -19526,6 +19732,8 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		memset(mem_ + 0xf000, 0, 0x800); /* MAME spbactn: RAM F000-F7FF */
 	if (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 3)
 		memset(mem_ + 0xc000, 0, 0x800);
+	if (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 4)
+		memset(mem_ + 0x4000, 0, 0x800);
 	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 4)
 		memset(mem_ + 0xc000, 0, 0x800);
 	if (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 5)
@@ -20352,6 +20560,10 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (!d || sz != 0x10000u) continue;
 			if (d[0] == 0xf3 && d[1] == 0xed && d[2] == 0x56
 				&& d[3] == 0x31 && d[4] == 0x00 && d[5] == 0x00)
+				pick = i;
+			/* ufo21/ufo800: XOR A; OUT (CE),A; DI; IM 1; LD SP,0 */
+			if (d[0] == 0xaf && d[1] == 0xd3 && d[2] == 0xce
+				&& d[3] == 0xf3 && d[4] == 0xed && d[5] == 0x56)
 				pick = i;
 		}
 		if (pick >= 0) {

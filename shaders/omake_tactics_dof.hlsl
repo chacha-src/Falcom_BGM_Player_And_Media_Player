@@ -89,12 +89,14 @@ float4 PSDofH(QOut i) : SV_Target
 	float2 rad = Screen.zw * Params.z * coc;
 	float3 acc = scene;
 	float wsum = 1;
-	[unroll] for (int k = 0; k < 8; k++) {
-		float2 u = i.uv + k8[k] * rad;
-		float zs = Depth.SampleLevel(SL, u, 0).r;
-		float w = 0.55 + 0.45 * saturate(1. - abs(zs - z) * 8.);
-		acc += Tex.SampleLevel(SL, u, 0).rgb * w;
-		wsum += w;
+	if (coc > 0.002) {
+		[unroll] for (int k = 0; k < 8; k++) {
+			float2 u = i.uv + k8[k] * rad;
+			float zs = Depth.SampleLevel(SL, u, 0).r;
+			float w = 0.55 + 0.45 * saturate(1. - abs(zs - z) * 8.);
+			acc += Tex.SampleLevel(SL, u, 0).rgb * w;
+			wsum += w;
+		}
 	}
 	return float4(lerp(scene, acc / wsum, saturate(coc * 1.35)), 1);
 }
@@ -118,21 +120,23 @@ float4 PSDofU(QOut i) : SV_Target
 	float2 rad = Screen.zw * Params.z * coc;
 	float3 acc = scene;
 	float wsum = 1;
-	[unroll] for (int k = 0; k < 16; k++) {
-		float2 u = i.uv + k16[k] * rad;
-		float zs = Depth.SampleLevel(SL, u, 0).r;
-		float w = 0.55 + 0.45 * saturate(1. - abs(zs - z) * 8.);
-		acc += Tex.SampleLevel(SL, u, 0).rgb * w;
-		wsum += w;
-	}
-	if (Q.x > 4.5) {
-		int extra = (Q.x > 5.5) ? 16 : 8;
-		[loop] for (int e = 0; e < extra; e++) {
-			float2 u2 = i.uv + k16[e] * rad * 1.85;
-			float zs = Depth.SampleLevel(SL, u2, 0).r;
-			float w = 0.4 + 0.35 * saturate(1. - abs(zs - z) * 8.);
-			acc += Tex.SampleLevel(SL, u2, 0).rgb * w;
+	if (coc > 0.002) {
+		[unroll] for (int k = 0; k < 16; k++) {
+			float2 u = i.uv + k16[k] * rad;
+			float zs = Depth.SampleLevel(SL, u, 0).r;
+			float w = 0.55 + 0.45 * saturate(1. - abs(zs - z) * 8.);
+			acc += Tex.SampleLevel(SL, u, 0).rgb * w;
 			wsum += w;
+		}
+		if (Q.x > 4.5) {
+			int extra = (Q.x > 5.5) ? 16 : 8;
+			[loop] for (int e = 0; e < extra; e++) {
+				float2 u2 = i.uv + k16[e] * rad * 1.85;
+				float zs = Depth.SampleLevel(SL, u2, 0).r;
+				float w = 0.4 + 0.35 * saturate(1. - abs(zs - z) * 8.);
+				acc += Tex.SampleLevel(SL, u2, 0).rgb * w;
+				wsum += w;
+			}
 		}
 	}
 	return float4(lerp(scene, acc / wsum, saturate(coc * 1.35)), 1);
