@@ -3933,12 +3933,16 @@ void Game::WarmHomeAvatars()
 		};
 		// 1回目は予約だけ。生成はフレームが進んでから。ここで済ませないと、ホームのあと別画面になる。
 		for (int i = 0; i < n; i++) drawOne(i);
-		m_r.m_frame++;
-		m_r.BeginAvaBatch(pend);
-		m_r.SetAvaBuildOnly(TRUE);
-		for (int i = 0; i < n; i++) drawOne(i);
-		m_r.SetAvaBuildOnly(FALSE);
-		m_r.m_avaLoading = 0;
+		for (int pass = 0; pass < 4; pass++) {
+			pend = m_r.CountPendingAvatars(n, model, ava, cup);
+			if (pend <= 0) break;
+			m_r.m_frame++;
+			m_r.BeginAvaBatch(pend);
+			m_r.SetAvaBuildOnly(TRUE);
+			for (int i = 0; i < n; i++) drawOne(i);
+			m_r.SetAvaBuildOnly(FALSE);
+		}
+		m_r.m_avaLoading = m_r.CountPendingAvatars(n, model, ava, cup) > 0 ? 1 : 0;
 	}
 	CloseLoadSlice();
 }

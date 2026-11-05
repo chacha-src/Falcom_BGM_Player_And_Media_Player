@@ -282,7 +282,7 @@ struct TacSnap6 {
 static TacSnap6 g_snapOld;
 static_assert(sizeof(Cell) == 15, "cell is 15 bytes");
 static_assert(sizeof(Map6) % 4 == 0, "old map stays aligned");
-static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 9 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int), "snap grew by cells and layers");
+static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 9 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int) + sizeof(int), "snap grew by cells, layers, lastActTeam");
 static int g_snapUse[SNAP_N];
 static TacSnap* g_qMid = NULL;
 static TacSnap* g_qAuto = NULL;
@@ -466,6 +466,7 @@ static void SnapLift(TacSnap& d, const TacSnap6& s)
 	d.b.stampedeShow = s.b.stampedeShow;
 	d.b.bgmWin = s.b.bgmWin;
 	d.b.sweep = s.b.sweep;
+	d.b.lastActTeam = -1;
 	d.b.RebuildOcc();
 }
 
@@ -2347,7 +2348,7 @@ BOOL Game::CanTarget(int ui, int t, int skill) const
 		if (dist + add < rmin || dist + add > rmax) return FALSE;
 	} else if (!InRangeOfUnit(m_b, u, u.x, u.z, rmin, rmax, d, true)) return FALSE;
 	if (IsFormSkill(skill) && !FormFits(m_b, ui, skill, d.x, d.z)) return FALSE;
-	return TRUE;
+	return SkillTargetHelps(m_b, ui, skill, t) ? TRUE : FALSE;
 }
 
 void Game::OpenCommand()
@@ -2459,8 +2460,7 @@ void Game::BattleConfirmCursor()
 	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
 		if (sd.rMax == 0) {
-			int tg[MAX_UNITS];
-			if (SkillTargets(m_b, m_cur, m_cmdSkill, u.x, u.z, tg, MAX_UNITS) == 0) {
+			if (!SkillAimHelps(m_b, m_cur, m_cmdSkill, u.x, u.z)) {
 				int c = sd.effect == EF_RAISE ? CorpseAt(m_b, u.x, u.z) : -1;
 				if (c >= 0 && !RaisePlaceable(m_b, m_b.u[c])) AddBanner(RaiseNoRoomWord(), NULL, RGBA8(255, 180, 160), 2, 1.8f, MSG_DROP);
 				else AddBanner(TT(TX_BT_NOTARGET), NULL, RGBA8(255, 180, 160), 2, 1.4f, MSG_DROP);
@@ -2471,8 +2471,7 @@ void Game::BattleConfirmCursor()
 			return;
 		}
 		if (sd.area > 0 && m_cursorValid && m_ovAtk[m_cz][m_cx]) {
-			int tg[MAX_UNITS];
-			if (SkillTargets(m_b, m_cur, m_cmdSkill, m_cx, m_cz, tg, MAX_UNITS) == 0) {
+			if (!SkillAimHelps(m_b, m_cur, m_cmdSkill, m_cx, m_cz)) {
 				BOOL blocked = FALSE;
 				if (sd.effect == EF_RAISE) {
 					for (int i = 0; i < m_b.nUnits && !blocked; i++) {
@@ -6654,9 +6653,9 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	BOOL noPoi = UnitHasPas(t, PAS_NOPOISON);
 	if (g->item == IT_MIGHT) return t.mulTurns < 3;
 	if (g->item == IT_DELAY) return !noSlow && t.ct > 0;
-	if (g->extra == IX_ATK) return t.buffAtk < 3;
-	if (g->extra == IX_DEF) return t.buffDef < 3;
-	if (g->extra == IX_AGI) return t.buffAgi < 3;
+	if (g->extra == IX_ATK) return t.buffAtk < 6;
+	if (g->extra == IX_DEF) return t.buffDef < 6;
+	if (g->extra == IX_AGI) return t.buffAgi < 6;
 	if (g->extra == IX_SLOW) return !noSlow && (t.ct > 0 || t.slow < 3);
 	if (g->extra == IX_VENOM || g->extra == 107) return !noPoi && t.poison <= 0;
 	if (g->extra == 108) return !noSlow && (t.ct > 0 || t.slow < 4);
@@ -6720,9 +6719,9 @@ void Game::UseConsumable(int good, int target)
 		}
 	} else if (g->extra == IX_FULL) {
 		dst->hp = dst->ch.stat[S_HP];
-	} else if (g->extra == IX_ATK) dst->buffAtk = max(dst->buffAtk, 3);
-	else if (g->extra == IX_DEF) dst->buffDef = max(dst->buffDef, 3);
-	else if (g->extra == IX_AGI) dst->buffAgi = max(dst->buffAgi, 3);
+	} else if (g->extra == IX_ATK) { dst->buffAtk += 3; if (dst->buffAtk > 6) dst->buffAtk = 6; }
+	else if (g->extra == IX_DEF) { dst->buffDef += 3; if (dst->buffDef > 6) dst->buffDef = 6; }
+	else if (g->extra == IX_AGI) { dst->buffAgi += 3; if (dst->buffAgi > 6) dst->buffAgi = 6; }
 	else if (g->extra == IX_SLOW) {
 		if (!UnitHasPas(*dst, PAS_NOSLOW) && !UnitAilmentHeld(*dst)) {
 			dst->ct = max(0, dst->ct - 500);
@@ -7587,7 +7586,11 @@ void Game::DrawCommandMenu()
 		Panel(x - U(8), y - U(8), cw + U(16), bh * n + gapc * max(0, n - 1) + extra, .55f);
 		BOOL hasSkill = FALSE, skillLive = FALSE;
 		for (int s = 0; s < SKL_COUNT; s++) {
-			if (IsFormSkill(s)) { if (SkillWorth(m_b, m_cur, s)) { hasSkill = TRUE; skillLive = TRUE; } continue; }
+			if (IsFormSkill(s)) {
+				if (UnitHasSkill(u, s)) hasSkill = TRUE;
+				if (SkillWorth(m_b, m_cur, s)) skillLive = TRUE;
+				continue;
+			}
 			if (!UnitHasSkill(u, s) || SkillInfo(s).kind == SK_PASSIVE) continue;
 			hasSkill = TRUE;
 			if (SkillWorth(m_b, m_cur, s)) skillLive = TRUE;
@@ -7802,7 +7805,7 @@ void Game::DrawCommandMenu()
 			int shapeHave[6] = {};
 			int elHave[9] = {};
 			for (int s = 0; s < SKL_COUNT; s++) {
-				if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
+				if (IsFormSkill(s) || !UnitHasSkill(u, s) || SkillInfo(s).kind == SK_PASSIVE) continue;
 				const SkillDef& sd = SkillInfo(s);
 				if (!tabKind(sd)) continue;
 				int sh = atkShape(sd);
@@ -7823,7 +7826,7 @@ void Game::DrawCommandMenu()
 			if (m_skillShape && m_skillEl) {
 				int both = 0;
 				for (int s = 0; s < SKL_COUNT; s++) {
-					if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
+					if (IsFormSkill(s) || !UnitHasSkill(u, s) || SkillInfo(s).kind == SK_PASSIVE) continue;
 					const SkillDef& sd = SkillInfo(s);
 					if (!tabKind(sd)) continue;
 					if (atkShape(sd) == m_skillShape && sd.element == m_skillEl) both++;
@@ -7831,7 +7834,7 @@ void Game::DrawCommandMenu()
 				if (!both) { m_skillEl = 0; m_skillPage = 0; }
 			}
 			for (int s = 0; s < SKL_COUNT; s++) {
-				if (IsFormSkill(s) || !UnitHasSkill(u, s) || !SkillWorth(m_b, m_cur, s)) continue;
+				if (IsFormSkill(s) || !UnitHasSkill(u, s) || SkillInfo(s).kind == SK_PASSIVE) continue;
 				const SkillDef& sd = SkillInfo(s);
 				if (!tabKind(sd)) continue;
 				int sh = atkShape(sd);
@@ -8775,13 +8778,49 @@ void Game::DrawBattleUi()
 		float sx, sy;
 		if (!m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + .12f, u.pz), sx, sy)) continue;
 		float bw = U(36);
+		int cells = 0;
+		if (u.team == TEAM_ENEMY) {
+			cells = 9999;
+			if (m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].alive)
+				cells = Dist(m_b.u[m_cur].x, m_b.u[m_cur].z, u.x, u.z);
+			else {
+				for (int p = 0; p < m_b.nUnits; p++) {
+					if (!m_b.u[p].alive || m_b.u[p].team != TEAM_PLAYER) continue;
+					int d = Dist(m_b.u[p].x, m_b.u[p].z, u.x, u.z);
+					if (d < cells) cells = d;
+				}
+			}
+			if (cells > 9000) cells = 0;
+		}
+		float fade = 1.f;
+		if (u.team == TEAM_ENEMY) {
+			if (cells <= 4) fade = 1.f;
+			else if (cells >= 28) fade = 0.22f;
+			else fade = 1.f - (cells - 4) * (0.78f / 24.f);
+			if (fade < 0.22f) fade = 0.22f;
+		}
+		auto fadeA = [&](DWORD c) -> DWORD {
+			int a = (int)(((c >> 24) & 255) * fade + 0.5f);
+			if (a < 1) a = 1;
+			if (a > 255) a = 255;
+			return (c & 0x00ffffff) | ((DWORD)a << 24);
+		};
+		BOOL off = (sx < 0.f || sy < 0.f || sx > (float)m_w || sy > (float)m_h);
+		float xMin = bw * .5f + U(4);
+		float xMax = m_hud.orderX - U(8) - bw * .5f;
+		if (xMax < xMin) xMax = xMin;
+		float yMin = U(10);
+		float yMax = (float)m_h - U(18);
 		if (sx + bw * .5f > m_hud.orderX - U(4))
-			sx = m_hud.orderX - U(8) - bw * .5f;
+			sx = xMax;
 		for (int uix = 0; uix < usedN; uix++) {
 			if (fabsf(sy - usedSy[uix]) < U(16) && fabsf(sx - usedSx[uix]) < bw + U(8))
 				sx += (uix & 1) ? U(22) : -U(22);
 		}
-		if (sx < bw * .5f + U(4)) sx = bw * .5f + U(4);
+		if (sx < xMin) sx = xMin;
+		if (sx > xMax) sx = xMax;
+		if (sy < yMin) sy = yMin;
+		if (sy > yMax) sy = yMax;
 		if (usedN < MAX_UNITS) { usedSx[usedN] = sx; usedSy[usedN] = sy; usedN++; }
 		if (barBn < 48) {
 			barBx[barBn] = sx - bw * .5f - U(20);
@@ -8792,28 +8831,33 @@ void Game::DrawBattleUi()
 		}
 		float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
 		DWORD col = !u.alive ? RGBA8(150, 150, 160) : (u.team == TEAM_PLAYER ? RGBA8(80, 220, 120) : (u.boss ? RGBA8(255, 200, 70) : RGBA8(240, 70, 60)));
-		m_r.HudRect(sx - bw * .5f - 1, sy - 1, bw + 2, U(6), RGBA8(8, 8, 12, 200));
-		m_r.HudRect(sx - bw * .5f, sy, bw * Clampf(frac, 0, 1), U(4), col);
+		m_r.HudRect(sx - bw * .5f - 1, sy - 1, bw + 2, U(6), fadeA(RGBA8(8, 8, 12, 200)));
+		m_r.HudRect(sx - bw * .5f, sy, bw * Clampf(frac, 0, 1), U(4), fadeA(col));
+		if (u.team == TEAM_ENEMY && (off || cells >= 4)) {
+			wchar_t dlab[24];
+			swprintf_s(dlab, L"%d%s", cells, LangPick14(L"マス", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
+			m_r.HudText(dlab, sx, sy - U(8), U(9), RGBA8(255, 236, 200), 1, 0, 1, fade);
+		}
 		if (i >= 0 && i < MAX_UNITS && aimMark[i] && aimTotal > 0) {
 			wchar_t nb[8];
 			swprintf_s(nb, L"%d", aimTotal);
 			float bs = U(16);
 			float bx = sx + bw * .5f + U(3);
 			if (bx + bs > m_hud.orderX - U(2)) bx = sx - bw * .5f - bs - U(3);
-			m_r.HudRect(bx, sy - U(2), bs, bs, RGBA8(28, 16, 6, 235));
-			m_r.HudFrame(bx, sy - U(2), bs, bs, 1.f, RGBA8(255, 214, 90));
-			m_r.HudText(nb, bx + bs * .5f, sy - U(2) + bs * .5f, U(11), RGBA8(255, 236, 160), 1, 1);
+			m_r.HudRect(bx, sy - U(2), bs, bs, fadeA(RGBA8(28, 16, 6, 235)));
+			m_r.HudFrame(bx, sy - U(2), bs, bs, 1.f, fadeA(RGBA8(255, 214, 90)));
+			m_r.HudText(nb, bx + bs * .5f, sy - U(2) + bs * .5f, U(11), fadeA(RGBA8(255, 236, 160)), 1, 1, 1, fade);
 		}
 		if (u.ch.stat[S_MP] > 0) {
 			float mf = (float)u.mp / max(1, u.ch.stat[S_MP]);
-			m_r.HudRect(sx - bw * .5f - 1, sy + U(5), bw + 2, U(4), RGBA8(8, 8, 12, 200));
-			m_r.HudRect(sx - bw * .5f, sy + U(6), bw * Clampf(mf, 0, 1), U(3), u.alive ? RGBA8(80, 150, 255) : RGBA8(90, 100, 120));
+			m_r.HudRect(sx - bw * .5f - 1, sy + U(5), bw + 2, U(4), fadeA(RGBA8(8, 8, 12, 200)));
+			m_r.HudRect(sx - bw * .5f, sy + U(6), bw * Clampf(mf, 0, 1), U(3), fadeA(u.alive ? RGBA8(80, 150, 255) : RGBA8(90, 100, 120)));
 		}
 		{
 			float cf = (float)u.cp / (float)CP_MAX;
 			float cy = sy + (u.ch.stat[S_MP] > 0 ? U(10) : U(5));
-			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), RGBA8(8, 8, 12, 200));
-			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50));
+			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), fadeA(RGBA8(8, 8, 12, 200)));
+			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), fadeA(u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50)));
 		}
 		if (!(m_seqCut && m_cutStage == 0) && u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0 || u.freeze > 0 || u.burn > 0 || u.bleed > 0 || u.blind > 0 || u.silence > 0)) {
 			int kinds[12], efs[12], nk = 0;

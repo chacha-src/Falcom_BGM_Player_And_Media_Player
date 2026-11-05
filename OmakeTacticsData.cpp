@@ -4603,12 +4603,12 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		int g = md.grow[s];
 		int v = md.base[s];
 		if (s == S_AGI) {
-			// 味方の期待成長は成長率の2倍で、およそ 0.8 / Lv。敵はその6割前後。
-			// 据え置きだと手番が来ず、兵士並みだと群れが手番を埋める。
-			int gAgi = g * 6 / 5;
-			if (gAgi < 44) gAgi = 44;
-			if (gAgi > 64) gAgi = 64;
+			// 味方は成長率×2。同じ倍率だと群れが手番を埋め、低すぎると先手が来ない。
+			int gAgi = g * 18 / 10;
+			if (gAgi < 70) gAgi = 70;
+			if (gAgi > 100) gAgi = 100;
 			v += gAgi * (u.ch.lv - 1) / 100;
+			v += 2;
 		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
 		// 味方のこれから先の成長が倍になった。敵はHPだけ同じ倍率にする。攻撃力は上げない。
@@ -4640,7 +4640,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	}
 	if (boss) {
 		u.ch.stat[S_HP] = u.ch.stat[S_HP] * 3 / 2;
-		u.ch.stat[S_STR] += 2; u.ch.stat[S_MAG] += 2; u.ch.stat[S_DEF] += 2; u.ch.stat[S_RES] += 2;
+		u.ch.stat[S_STR] += 2; u.ch.stat[S_MAG] += 2; u.ch.stat[S_DEF] += 2; u.ch.stat[S_RES] += 2; u.ch.stat[S_AGI] += 2;
 		u.ch.stat[S_MOV] = min(MoveCap(md.moveType), u.ch.stat[S_MOV] + 1);
 		u.ch.stat[S_GRD] += 2;
 		u.ch.stat[S_PEN] += 2;
@@ -4996,25 +4996,49 @@ int ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int ma
 	return out;
 }
 
+static bool SightTerrain(int t)
+{
+	return t == T_MOUNTAIN || t == T_ROCK || t == T_DOOR || t == T_VOID;
+}
+
+static bool SightCellBlocks(const Map& m, int x, int z, float y)
+{
+	if (!Map::In(x, z)) return true;
+	const Cell& c = m.At(x, z);
+	if (SightTerrain(c.t)) return true;
+	if (m.TopY(x, z) > y + .35f) return true;
+	int nL = CellLayN(c);
+	for (int L = 1; L < nL; L++) {
+		float slab = LayerHt(c, L) * kHStep;
+		if (y > slab - 0.2f && y < slab + 0.05f) return true;
+	}
+	return false;
+}
+
 static bool LineOfSightY(const Map& m, int ax, int az, float ya, int bx, int bz, float yb)
 {
-	int steps = max(abs(bx - ax), abs(bz - az)) * 2;
-	if (steps <= 2 && fabsf(ya - yb) < 1.2f) return true;
-	for (int i = 1; i < steps; i++) {
-		float t = (float)i / steps;
-		int x = (int)floorf(ax + (bx - ax) * t + .5f), z = (int)floorf(az + (bz - az) * t + .5f);
-		if ((x == ax && z == az) || (x == bx && z == bz)) continue;
-		const Cell& c = m.At(x, z);
-		if (c.t == T_MOUNTAIN || c.t == T_ROCK) return false;
-		float y = Lerpf(ya, yb, t);
-		if (m.TopY(x, z) > y + .35f) return false;
-		int nL = CellLayN(c);
-		for (int L = 1; L < nL; L++) {
-			float slab = LayerHt(c, L) * kHStep;
-			if (y > slab - 0.2f && y < slab + 0.05f) return false;
+	int dx = bx - ax, dz = bz - az;
+	if (dx == 0 && dz == 0) return true;
+	int adx = abs(dx), adz = abs(dz);
+	int sx = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
+	int sz = dz > 0 ? 1 : (dz < 0 ? -1 : 0);
+	int n = adx + adz;
+	if (n < 1) n = 1;
+	int x = ax, z = az, err = adx - adz;
+	int guard = n + 2;
+	while (guard-- > 0) {
+		int e2 = err * 2;
+		int px = x, pz = z;
+		if (e2 > -adz) { err -= adz; x += sx; }
+		if (e2 < adx) { err += adx; z += sz; }
+		if (x == bx && z == bz) return true;
+		float y = Lerpf(ya, yb, (float)(abs(x - ax) + abs(z - az)) / (float)n);
+		if (x != px && z != pz) {
+			if (SightCellBlocks(m, px, z, y) && SightCellBlocks(m, x, pz, y)) return false;
 		}
+		if (SightCellBlocks(m, x, z, y)) return false;
 	}
-	return true;
+	return false;
 }
 
 bool LineOfSight(const Map& m, int ax, int az, int bx, int bz)
@@ -5041,6 +5065,7 @@ bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, 
 	if (toLayer < 0 || toLayer >= LAY_N) return false;
 	const Cell& tc = b.map.At(tx, tz);
 	if (!LayerOn(tc, toLayer)) return false;
+	if (SightTerrain(LayerTr(tc, toLayer))) return false;
 	if (fromLayer < 0 || fromLayer >= LAY_N || !LayerOn(b.map.At(ax, az), fromLayer)) fromLayer = 0;
 	int add = LayerRangeCost(fromLayer, toLayer);
 	if (add < 0) return false;
@@ -5864,37 +5889,121 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 	return UnitHasSkill(u, skill) && u.mp >= s.mp;
 }
 
+bool SkillTargetHelps(const Battle& b, int ui, int skill, int ti)
+{
+	if (ti < 0 || ti >= b.nUnits) return false;
+	const Unit& t = b.u[ti];
+	const SkillDef& s = SkillInfo(skill);
+	if (s.effect == EF_RAISE)
+		return !t.alive && t.killed && t.team == b.u[ui].team && RaisePlaceable(b, t);
+	if (s.kind == SK_HEAL) {
+		if (!t.alive || t.team != b.u[ui].team) return false;
+		BOOL hurt = t.hp < t.ch.stat[S_HP];
+		BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
+			|| t.freeze > 0 || t.burn > 0 || t.bleed > 0 || t.blind > 0 || t.silence > 0;
+		if (s.effect == EF_CLEANSE) return hurt || ail;
+		return hurt;
+	}
+	if (s.kind == SK_BUFF) {
+		if (!t.alive || t.team != b.u[ui].team) return false;
+		if (s.effect == EF_REACT) return ti != ui && t.ct < 1000;
+		return true;
+	}
+	return t.alive && t.team != b.u[ui].team;
+}
+
+bool SkillAimHelps(const Battle& b, int ui, int skill, int cx, int cz)
+{
+	int tg[64];
+	int n = SkillTargets(b, ui, skill, cx, cz, tg, 64);
+	for (int i = 0; i < n; i++) if (SkillTargetHelps(b, ui, skill, tg[i])) return true;
+	return false;
+}
+
+static bool SkillReachUnit(const Battle& b, int ui, int skill, int ti)
+{
+	if (ui < 0 || ui >= b.nUnits || ti < 0 || ti >= b.nUnits) return false;
+	const Unit& u = b.u[ui];
+	const Unit& t = b.u[ti];
+	const SkillDef& s = SkillInfo(skill);
+	int rmin = SkillCastRangeMin(u, skill);
+	int rmax = SkillCastRangeMax(u, skill);
+	int dist = FootDist(u.x, u.z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+	if (s.effect == EF_RAISE) {
+		if (dist <= 0) return true;
+		int add = LayerRangeCost(u.deck, t.deck);
+		if (add < 0) return false;
+		return dist + add >= rmin && dist + add <= rmax;
+	}
+	BOOL friendly = s.kind == SK_HEAL || s.kind == SK_BUFF;
+	if (friendly) {
+		int add = LayerRangeCost(u.deck, t.deck);
+		if (add < 0) return false;
+		return dist + add >= rmin && dist + add <= rmax;
+	}
+	return InRangeOfUnit(b, u, u.x, u.z, rmin, rmax, t, true);
+}
+
+static bool UnitSeenFrom(const Battle& b, int ax, int az, int fromLayer, const Unit& t)
+{
+	if (!Map::In(ax, az)) return false;
+	int tL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
+	float yb = LayerHt(b.map.At(t.x, t.z), tL) * kHStep + .6f;
+	float ya = LayerHt(b.map.At(ax, az), fromLayer) * kHStep + .6f;
+	int st = UnitSpan(t);
+	if (st < 1) st = 1;
+	for (int tz = 0; tz < st; tz++) for (int tx = 0; tx < st; tx++) {
+		int cx = t.x + tx, cz = t.z + tz;
+		if (!Map::In(cx, cz)) continue;
+		if (LineOfSightY(b.map, ax, az, ya, cx, cz, yb)) return true;
+	}
+	return false;
+}
+
+static bool TileSeesUnit(const Battle& b, int ax, int az, const Unit& t)
+{
+	if (!Map::In(ax, az)) return false;
+	const Cell& ac = b.map.At(ax, az);
+	int nL = CellLayN(ac);
+	for (int L = 0; L < nL; L++) {
+		if (!LayerOn(ac, L) || SightTerrain(LayerTr(ac, L))) continue;
+		if (UnitSeenFrom(b, ax, az, L, t)) return true;
+	}
+	return false;
+}
+
 bool SkillWorth(const Battle& b, int ui, int skill)
 {
 	if (ui < 0 || ui >= b.nUnits || !SkillUsable(b, ui, skill)) return false;
 	const Unit& u = b.u[ui];
 	const SkillDef& s = SkillInfo(skill);
+	if (s.rMax == 0) return SkillAimHelps(b, ui, skill, u.x, u.z);
 	int rmin = SkillCastRangeMin(u, skill);
 	int rmax = SkillCastRangeMax(u, skill);
-	auto cell = [&](int cx, int cz) -> bool {
-		if (!Map::In(cx, cz)) return false;
-		int tg[64];
-		int n = SkillTargets(b, ui, skill, cx, cz, tg, 64);
-		if (n < 1) return false;
-		if (s.kind != SK_HEAL) return true;
-		for (int i = 0; i < n; i++) {
-			const Unit& t = b.u[tg[i]];
-			if (s.effect == EF_RAISE) return true;
-			BOOL hurt = t.hp < t.ch.stat[S_HP];
-			BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
-				|| t.freeze > 0 || t.burn > 0 || t.bleed > 0 || t.blind > 0 || t.silence > 0;
-			if (s.effect == EF_CLEANSE) { if (hurt || ail) return true; }
-			else if (hurt) return true;
+	int aL = LayerOn(b.map.At(u.x, u.z), u.deck) ? u.deck : 0;
+	BOOL friendly = s.kind == SK_HEAL || s.kind == SK_BUFF;
+	if (s.area > 0) {
+		for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
+			int d = abs(dx) + abs(dz);
+			if (d < rmin || d > rmax) continue;
+			int cx = u.x + dx, cz = u.z + dz;
+			if (!Map::In(cx, cz)) continue;
+			if (IsFormSkill(skill) && !FormFits(b, ui, skill, cx, cz)) continue;
+			BOOL reach = FALSE;
+			for (int L = 0; L < LAY_N && !reach; L++)
+				if (AttackReachLayer(b, u.x, u.z, aL, rmin, rmax, cx, cz, L, !friendly)) reach = TRUE;
+			if (!reach) continue;
+			if (SkillAimHelps(b, ui, skill, cx, cz)) return true;
 		}
+		if (s.effect == EF_RAISE && SkillAimHelps(b, ui, skill, u.x, u.z)) return true;
 		return false;
-	};
-	if (s.rMax == 0) return cell(u.x, u.z);
-	for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
-		int d = abs(dx) + abs(dz);
-		if (d < rmin || d > rmax) continue;
-		if (cell(u.x + dx, u.z + dz)) return true;
 	}
-	if (s.effect == EF_RAISE && cell(u.x, u.z)) return true;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!SkillTargetHelps(b, ui, skill, i)) continue;
+		if (!SkillReachUnit(b, ui, skill, i)) continue;
+		if (IsFormSkill(skill) && !FormFits(b, ui, skill, b.u[i].x, b.u[i].z)) continue;
+		return true;
+	}
 	return false;
 }
 
@@ -5963,6 +6072,14 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		}
 		if (!UnitOnShape(s, c, cx, cz, t)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
+		if (!friendly) {
+			if (s.area > 0) {
+				if (!TileSeesUnit(b, cx, cz, t)) continue;
+			} else {
+				int aL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
+				if (!UnitSeenFrom(b, c.x, c.z, aL, t)) continue;
+			}
+		}
 		out[n++] = i;
 	}
 	return n;
@@ -6079,9 +6196,9 @@ static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
 		ClearAilments(d);
 		return had;
 	}
-	case EF_BUFF_DEF: d.buffDef = 3; return true;
-	case EF_BUFF_AGI: d.buffAgi = 3; return true;
-	case EF_BUFF_ATK: d.buffAtk = 3; return true;
+	case EF_BUFF_DEF: d.buffDef += 3; if (d.buffDef > 6) d.buffDef = 6; return true;
+	case EF_BUFF_AGI: d.buffAgi += 3; if (d.buffAgi > 6) d.buffAgi = 6; return true;
+	case EF_BUFF_ATK: d.buffAtk += 3; if (d.buffAtk > 6) d.buffAtk = 6; return true;
 	case EF_REACT:
 		if (d.alive && d.team == a.team && d.ct < 1000) { d.ct = 1300; return true; }
 		return false;
@@ -6235,7 +6352,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 						else if (GutsHold(d, a, r)) s.guts = 1;
 						else { d.hp = 0; ClearAilments(d); s.kill = 1; }
 					}
-					if (a.team != d.team && !held && !UnitHasPas(d, PAS_NOSLOW)) d.ct = max(0, d.ct - 500);
+					if (a.team != d.team && !held && !UnitHasPas(d, PAS_NOSLOW)) d.ct = max(0, d.ct - 160);
 				}
 				}
 			}
@@ -6294,7 +6411,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				else if (GutsHold(y, x, r)) s.guts = 1;
 				else { y.hp = 0; ClearAilments(y); s.kill = 1; }
 			}
-			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
+			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (160 + (s.crit ? 80 : 0)));
 		}
 		}
 		out[n++] = s;
@@ -6368,7 +6485,7 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 				if (GutsHold(y, m, r)) s.guts = 1;
 				else { y.hp = 0; s.kill = 1; }
 			}
-			if (!UnitAilmentHeld(y) && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
+			if (!UnitAilmentHeld(y) && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (160 + (s.crit ? 80 : 0)));
 		}
 		out[n++] = s;
 	}
@@ -6400,23 +6517,61 @@ int Battle::AliveCount(int team) const
 	return n;
 }
 
-static int Speed(const Unit& u)
+static int Speed(const Battle& b, const Unit& u)
 {
 	int s = 10 + UnitStat(u, S_AGI);
 	if (UnitHasSkill(u, SKL_P_SWIFT)) s = s * 12 / 10;
+	if (u.team == TEAM_ENEMY) {
+		int np = 0, ne = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (!b.u[i].alive || b.u[i].alert != 1) continue;
+			if (b.u[i].team == TEAM_PLAYER) np++;
+			else ne++;
+		}
+		if (np > ne && ne > 0) {
+			int t = 100 + (np - ne) * 3;
+			if (t > 128) t = 128;
+			s = s * t / 100;
+		}
+	}
 	return s;
+}
+
+static int ReadyCt(const Unit* u, const int* ct, int i)
+{
+	return ct ? ct[i] : u[i].ct;
+}
+
+static int PickReady(const Unit* u, int n, int lastTeam, const int* ct)
+{
+	int bestP = -1, bestE = -1;
+	for (int i = 0; i < n; i++) {
+		if (!u[i].alive || u[i].alert != 1) continue;
+		int c = ReadyCt(u, ct, i);
+		if (c < 1000) continue;
+		int& best = (u[i].team == TEAM_PLAYER) ? bestP : bestE;
+		if (best < 0) { best = i; continue; }
+		int bc = ReadyCt(u, ct, best);
+		if (c > bc || (c == bc && i < best)) best = i;
+	}
+	if (bestP >= 0 && bestE >= 0) {
+		if (lastTeam == TEAM_PLAYER) return bestE;
+		if (lastTeam == TEAM_ENEMY) return bestP;
+		int pc = ReadyCt(u, ct, bestP), ec = ReadyCt(u, ct, bestE);
+		return (ec >= pc) ? bestE : bestP;
+	}
+	return bestP >= 0 ? bestP : bestE;
 }
 
 int Battle::NextActor()
 {
 	for (int guard = 0; guard < 100000; guard++) {
-		int best = -1;
-		for (int i = 0; i < nUnits; i++) {
-			if (!u[i].alive || u[i].alert != 1 || u[i].ct < 1000) continue;
-			if (best < 0 || u[i].ct > u[best].ct || (u[i].ct == u[best].ct && u[i].team < u[best].team)) best = i;
+		int best = PickReady(u, nUnits, lastActTeam, NULL);
+		if (best >= 0) {
+			lastActTeam = u[best].team;
+			return best;
 		}
-		if (best >= 0) return best;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) u[i].ct += Speed(u[i]);
+		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) u[i].ct += Speed(*this, u[i]);
 	}
 	return -1;
 }
@@ -6425,23 +6580,24 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 {
 	int ct[MAX_UNITS];
 	for (int i = 0; i < nUnits; i++) ct[i] = u[i].ct;
-	if (acting >= 0 && acting < nUnits) ct[acting] = max(0, ct[acting] - cost);
+	int last = lastActTeam;
+	if (acting >= 0 && acting < nUnits) {
+		ct[acting] = max(0, ct[acting] - cost);
+		last = u[acting].team;
+	}
 	if (insertAt) *insertAt = -1;
 	int got = 0;
 	for (int guard = 0; guard < 100000 && got < n; guard++) {
-		int best = -1;
-		for (int i = 0; i < nUnits; i++) {
-			if (!u[i].alive || u[i].alert != 1 || ct[i] < 1000) continue;
-			if (best < 0 || ct[i] > ct[best] || (ct[i] == ct[best] && u[i].team < u[best].team)) best = i;
-		}
+		int best = PickReady(u, nUnits, last, ct);
 		if (best >= 0) {
 			if (insertAt && *insertAt < 0 && best == acting) *insertAt = got;
 			out[got++] = best;
 			ct[best] -= 1000;
+			last = u[best].team;
 			continue;
 		}
 		bool any = false;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) { ct[i] += Speed(u[i]); any = true; }
+		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) { ct[i] += Speed(*this, u[i]); any = true; }
 		if (!any) break;
 	}
 	return got;
@@ -6517,6 +6673,28 @@ static int BossMonster(int stage, Rng& r)
 	return PickClassic(stage, r);
 }
 
+static int OpenWidth(const Map& m, int x, int z)
+{
+	if (!Map::In(x, z) || !FootPassable(m.At(x, z).t)) return 0;
+	int wx = 1, wz = 1;
+	for (int i = 1; Map::In(x - i, z) && FootPassable(m.At(x - i, z).t); i++) wx++;
+	for (int i = 1; Map::In(x + i, z) && FootPassable(m.At(x + i, z).t); i++) wx++;
+	for (int i = 1; Map::In(x, z - i) && FootPassable(m.At(x, z - i).t); i++) wz++;
+	for (int i = 1; Map::In(x, z + i) && FootPassable(m.At(x, z + i).t); i++) wz++;
+	return wx < wz ? wx : wz;
+}
+
+static int FootRoom(const Map& m, int ax, int az, int s)
+{
+	if (s < 1) s = 1;
+	int room = 99;
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int w = OpenWidth(m, ax + dx, az + dz);
+		if (w < room) room = w;
+	}
+	return room;
+}
+
 static bool FootFits(const Battle& b, int ui, int ax, int az)
 {
 	const Unit& u = b.u[ui];
@@ -6540,6 +6718,7 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 		}
 	}
 	if (mt != MV_FLY && hmax - hmin > jp) return false;
+	if (s > 1 && mt != MV_FLY && FootRoom(b.map, ax, az, s) < s) return false;
 	return true;
 }
 
@@ -6555,7 +6734,7 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 {
 	Unit& u = b.u[ui];
 	int s = UnitSpan(u);
-	int rad = s <= 1 ? 8 : 16;
+	int rad = s <= 1 ? 8 : 20;
 	int bestLeave = 99999, lx = -1, lz = -1;
 	int bestAny = 99999, ax = -1, az = -1;
 	BOOL needStep = UnitMove(u) >= 1 && UnitMoveType(u) != MV_FLY;
@@ -6564,6 +6743,7 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 		if (!FootFits(b, ui, x, z)) continue;
 		int contains = (gx >= x && gx < x + s && gz >= z && gz < z + s) ? 0 : 1000;
 		int rank = contains + abs(dx) + abs(dz);
+		if (s > 1) rank += (FootRoom(b.map, x, z, s) < s + 1) ? 4 : 0;
 		if (rank < bestAny) { bestAny = rank; ax = x; az = z; }
 		if (!needStep || FootCanLeave(b, ui, x, z)) {
 			if (rank < bestLeave) { bestLeave = rank; lx = x; lz = z; }
@@ -6585,6 +6765,37 @@ static void StampWalk(Cell& c, int h)
 		c.t = T_PLAIN;
 	c.h = (BYTE)Clampi(h, 1, MAXH);
 	c.prop = PK_NONE;
+}
+
+static bool RelocateWide(Battle& b, int ui)
+{
+	Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	if (s <= 1) return FootCanLeave(b, ui, u.x, u.z);
+	int ox = u.x, oz = u.z;
+	int px = b.map.nP > 0 ? b.map.pStartX[0] : ox;
+	int pz = b.map.nP > 0 ? b.map.pStartZ[0] : oz;
+	u.x = -1; u.z = -1;
+	b.RebuildOcc();
+	int best = 99999, bx = -1, bz = -1;
+	int rad = 22;
+	for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
+		int x = ox + dx, z = oz + dz;
+		if (!FootFits(b, ui, x, z)) continue;
+		if (FootRoom(b.map, x, z, s) < s) continue;
+		if (!FootCanLeave(b, ui, x, z)) continue;
+		int rank = abs(dx) + abs(dz) * 2 + Dist(x, z, px, pz);
+		if (rank < best) { best = rank; bx = x; bz = z; }
+	}
+	if (bx < 0) {
+		u.x = ox; u.z = oz;
+		b.RebuildOcc();
+		return false;
+	}
+	u.x = bx;
+	u.z = bz;
+	b.RebuildOcc();
+	return true;
 }
 
 // 岩と段差に挟まれて一歩も出られない大型を、味方の方向へ足跡幅の坂で出す。
@@ -6635,13 +6846,24 @@ static void RescueStuckFeet(Battle& b)
 		Unit& u = b.u[i];
 		if (!u.alive || u.team != TEAM_ENEMY) continue;
 		if (UnitMove(u) < 1 || UnitMoveType(u) == MV_FLY) continue;
-		if (FootCanLeave(b, i, u.x, u.z)) continue;
+		int s = UnitSpan(u);
+		BOOL cork = s > 1 && FootRoom(b.map, u.x, u.z, s) < s;
+		if (!cork && FootCanLeave(b, i, u.x, u.z)) continue;
+		if (s > 1 && RelocateWide(b, i)) continue;
 		int gx = u.x, gz = u.z;
 		u.x = -1; u.z = -1;
 		b.RebuildOcc();
 		if (!PlaceFoot(b, i, gx, gz) || !FootCanLeave(b, i, u.x, u.z)) {
 			if (u.x < 0) { u.x = gx; u.z = gz; }
 			b.RebuildOcc();
+			if (s > 1 && RelocateWide(b, i)) continue;
+			if (s > 1) {
+				u.span = 1;
+				b.RebuildOcc();
+				if (PlaceFoot(b, i, gx, gz) && FootCanLeave(b, i, u.x, u.z)) continue;
+				u.span = s;
+				b.RebuildOcc();
+			}
 			CarveFootExit(b, i);
 		}
 		b.RebuildOcc();
@@ -6653,6 +6875,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	memset(&b, 0, sizeof(b));
 	stage = Clampi(stage, 1, TAC_STAGE_MAX);
 	b.stage = stage;
+	b.lastActTeam = -1;
 	GenerateMap(b.map, stage, seed, theme);
 	int wx = WX_CLEAR;
 	int hour = HR_NOON;
@@ -6710,7 +6933,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.span = 1;
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
-		u.ct = r.Range(0, 300) + UnitStat(u, S_AGI) * 8;
+		u.ct = r.Range(0, 420) + UnitStat(u, S_AGI) * 6;
 		if (UnitHasPas(u, PAS_OPEN2)) u.ct += 400;
 		else if (UnitHasPas(u, PAS_OPEN)) u.ct += 250;
 		u.hpShow = (float)u.hp;
@@ -6807,9 +7030,20 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			int lv = baseLv + r.Range(-1, 1) + (boss ? 3 : 0) + (grp.boss ? 1 : 0);
 			if (stage <= 2) lv = max(1, lv - 1);
 			int use = k == 0 ? mon : PickMonster(stage, r);
+			int room = OpenWidth(b.map, grp.x[k], grp.z[k]);
+			if (room < 2) {
+				int slim = -1;
+				for (int t = 0; t < 10; t++) {
+					int id = PickMonster(stage, r);
+					if (MonsterSpan(MonsterInfo(id), 0) <= 1) { slim = id; break; }
+				}
+				if (slim < 0) slim = PickClassic(stage, r);
+				if (!boss) use = slim;
+			}
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
+			if (UnitSpan(u) > 1 && room < 2 && !boss) u.span = 1;
 			u.face = faceToE + 3.14159f;
-			u.ct = r.Range(0, 240) + UnitStat(u, S_AGI) * 6;
+			u.ct = r.Range(80, 480) + UnitStat(u, S_AGI) * 6;
 			u.hpShow = (float)u.hp;
 			u.grp = g;
 			u.alert = 0;
@@ -6818,12 +7052,17 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 				int s = max(1, UnitSpan(u));
 				int gx = Clampi((int)grp.x[k], 1, MAPN - s - 1);
 				int gz = Clampi((int)grp.z[k], 1, MAPN - s - 1);
-				int h = 2;
-				if (Map::In(gx, gz) && b.map.c[gz][gx].h > 0) h = (int)b.map.c[gz][gx].h;
-				for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
-					if (Map::In(gx + dx, gz + dz)) StampWalk(b.map.c[gz + dz][gx + dx], h);
 				u.x = gx;
 				u.z = gz;
+				n++;
+				b.nUnits = n;
+				b.RebuildOcc();
+				if (!RelocateWide(b, n - 1)) {
+					u.span = 1;
+					if (!PlaceFoot(b, n - 1, gx, gz)) { u.x = gx; u.z = gz; }
+				}
+				b.RebuildOcc();
+				continue;
 			}
 			if (!boss) {
 				const Cell& cell = b.map.At(u.x, u.z);
@@ -7096,10 +7335,16 @@ void JoinTurnClock(Battle& b, int ui)
 		n++;
 	}
 	if (n <= 0) return;
-	int spd = 10 + UnitStat(u, S_AGI);
-	int goal = top - spd * 8;
-	if (goal < 0) goal = 0;
-	if (goal > 640) goal = 640;
+	int spd = Speed(b, u);
+	int goal;
+	if (top >= 1000) {
+		goal = 1000 + (spd % 37);
+		if (goal > top - 1) goal = top > 1000 ? top - 1 : 1000;
+	} else {
+		goal = top - spd;
+		if (goal < 0) goal = 0;
+		if (goal < top * 3 / 4) goal = top * 3 / 4;
+	}
 	if (u.ct < goal) u.ct = goal;
 }
 
@@ -7703,7 +7948,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 					if (h <= 0) continue;
 					sc += h * 1.2f;
 				} else if (sd.kind == SK_BUFF) {
-					if (!cornered || sd.effect != EF_BUFF_DEF || u.buffDef > 0) continue;
+					if (!cornered || sd.effect != EF_BUFF_DEF || u.buffDef > 1) continue;
 					int targets[MAX_UNITS];
 					int nt = SkillTargets(b, ui, s, tx, tz, targets, MAX_UNITS);
 					int self = 0;
@@ -7745,7 +7990,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			if (cs < CRAFT_BASE) continue;
 			BOOL ougi = IsCraftSuper(cs);
 			const SkillDef& csd = SkillInfo(cs);
-			int defBuff = cornered && csd.effect == EF_BUFF_DEF && u.buffDef <= 0;
+			int defBuff = cornered && csd.effect == EF_BUFF_DEF && u.buffDef <= 1;
 			if ((ougi ? !tryOugi : !tryArt) && !defBuff) continue;
 			if (!SkillUsable(b, ui, cs)) continue;
 			int rmin = SkillCastRangeMin(u, cs), rmax = SkillCastRangeMax(u, cs);

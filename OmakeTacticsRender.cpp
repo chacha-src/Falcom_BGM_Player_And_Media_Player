@@ -2094,8 +2094,13 @@ void Renderer::FlashAvaPct(int pct)
 	if (pct > 100) pct = 100;
 	m_avaPct = pct;
 	if (m_loadFn) {
+		if (pct < m_avaShown && pct < 100) return;
 		m_avaShown = pct;
 		m_loadFn(pct, 100, m_loadUser);
+		return;
+	}
+	if (m_avaBuildOnly) {
+		if (pct > m_avaShown || pct >= 100) m_avaShown = pct;
 		return;
 	}
 	if (m_inPortrait || !m_ctx || !m_bbRtv || !m_swap || m_w < 8 || m_h < 8) return;
@@ -6889,7 +6894,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		}
 		const BOOL armed = slot >= 0 && m_avaWait[slot].frame != m_frame;
 		if (!armed) {
-			m_avaPct = 0;
+			if (m_avaPct < 1) m_avaPct = 1;
 			if (slot < 0) slot = freeSlot >= 0 ? freeSlot : 0;
 			m_avaWait[slot].model = model;
 			m_avaWait[slot].cos = ci;

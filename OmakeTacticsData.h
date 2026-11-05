@@ -773,6 +773,8 @@ bool RaisePlaceable(const Battle& b, const Unit& corpse);
 bool SettleRaised(Battle& b, Unit& corpse);
 bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int tz);
 bool SkillUsable(const Battle& b, int ui, int skill);
+bool SkillTargetHelps(const Battle& b, int ui, int skill, int ti);
+bool SkillAimHelps(const Battle& b, int ui, int skill, int cx, int cz);
 bool SkillWorth(const Battle& b, int ui, int skill);
 bool IsFormSkill(int skill);
 int  FormOf(int skill);
@@ -815,6 +817,7 @@ struct Battle {
 	int stampedeShow;         // 1=湧きを見せているあいだ、次の手番を少し待つ
 	int bgmWin;               // 1=今フレームは勝利目前。索敵が増えると戻す
 	int sweep;                // TAC_VAR_*。0通常 1掃討 2残党 3ボスのみ 4傷追い
+	int lastActTeam;          // 直前の手番の軍。-1=まだ誰も動いていない
 	int NextActor();          // CT を進めて次の行動者を返す
 	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
