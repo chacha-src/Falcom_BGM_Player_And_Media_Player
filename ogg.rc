@@ -2077,7 +2077,7 @@ END
 
 IDD_OMAKE_TACTICS DIALOGEX 0, 0, 640, 420
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "おまけタクティクスゲーム"
+CAPTION "タクティクス""らいらX"""
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
 END
@@ -3115,7 +3115,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1636
+ FILEVERSION 0,9,1,1640
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3133,10 +3133,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.05 v1636 s6.0.30"
-            VALUE "FileVersion", "0.9.1.1636"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.06 v1640 s6.0.100"
+            VALUE "FileVersion", "0.9.1.1640"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.05"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.06"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

@@ -279,6 +279,7 @@ void Renderer::Release()
 	ClearMonPack();
 	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
 	m_terrain.Release();
+	for (int i = 0; i < 16; i++) m_terrainChunk[i].Release();
 	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); m_cover3[i].Release(); m_cover4[i].Release(); }
 	m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
@@ -2136,7 +2137,13 @@ void Renderer::FlashAvaPct(int pct)
 	if (uiH < ui) ui = uiH;
 	if (ui < 0.62f) ui = 0.62f;
 	if (ui > 2.2f) ui = 2.2f;
-	if (full) HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, 40.f * ui, RGBA8(255, 230, 160), 1, 1);
+	if (full) {
+		const wchar_t* title = TT(TX_TITLE);
+		float th = 40.f * ui;
+		float maxW = (float)m_w * .86f;
+		while (th > 12.f && TextWidth(title, th, 1) > maxW) th *= 0.92f;
+		HudText(title, m_w * .5f, m_h * .38f, th, RGBA8(255, 230, 160), 1, 1);
+	}
 	wchar_t line[80];
 	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
 	HudText(line, m_w * .5f, m_h * .50f, 20.f * ui, RGBA8(255, 255, 255), 1, 1, 1);
@@ -9929,7 +9936,16 @@ void Renderer::DrawTerrain()
 	DrawParams dp;
 	dp.rim = 0;
 	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : m_psTheme;
-	if (m_terrain.vb) DrawStatic(m_terrain, m_sceneShift, dp);
+	for (int ch = 0; ch < 16; ch++) {
+		GpuMesh& chunk = m_terrainChunk[ch];
+		if (!chunk.vb) continue;
+		int cx = ch & 3, cz = ch >> 2;
+		V3 mid = MXformPt(m_sceneShift, v3(cx * 16.f + 8.f, 6.f, cz * 16.f + 8.f));
+		// 影はライトの範囲、本描画と反射はカメラ。外の区画は画素に出ない。
+		if (m_pass == PASS_SHADOW) { if (!InLight(mid, 16.f)) continue; }
+		else if (!InView(mid, 16.f)) continue;
+		DrawStatic(chunk, m_sceneShift, dp);
+	}
 	int gx = -99, gz = -99;
 	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
 	BOOL hasCover = FALSE;
@@ -9993,6 +10009,17 @@ void Renderer::DrawTerrain()
 		DrawStatic(m_lava, m_sceneShift, lp);
 	}
 	m_psOverride = NULL;
+}
+
+BOOL Renderer::GroundChunkVisible() const
+{
+	for (int ch = 0; ch < 16; ch++) {
+		if (!m_terrainChunk[ch].vb) continue;
+		int cx = ch & 3, cz = ch >> 2;
+		V3 mid = MXformPt(m_sceneShift, v3(cx * 16.f + 8.f, 6.f, cz * 16.f + 8.f));
+		if (InView(mid, 16.f)) return TRUE;
+	}
+	return FALSE;
 }
 
 void Renderer::SetStageId(int stage)
@@ -10911,12 +10938,14 @@ BOOL Renderer::BuildTerrain(Map& m)
 {
 	m_theme = Clampi(m.theme, 0, TH_COUNT - 1);
 	m_terrain.Release();
+	for (int i = 0; i < 16; i++) m_terrainChunk[i].Release();
 	for (int i = 0; i < 16; i++) { m_cover1[i].Release(); m_cover2[i].Release(); m_cover3[i].Release(); m_cover4[i].Release(); }
 	m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
 	m_props.clear();
-	static MeshBuild tb, wb, lb, wood, sceneMb, cov1[16], cov2[16], cov3[16], cov4[16];
-	tb.v.clear(); tb.i.clear(); wb.v.clear(); wb.i.clear(); lb.v.clear(); lb.i.clear(); wood.v.clear(); wood.i.clear();
+	static MeshBuild wb, lb, wood, sceneMb, tch[16], cov1[16], cov2[16], cov3[16], cov4[16];
+	wb.v.clear(); wb.i.clear(); lb.v.clear(); lb.i.clear(); wood.v.clear(); wood.i.clear();
+	for (int i = 0; i < 16; i++) { tch[i].v.clear(); tch[i].i.clear(); }
 	for (int i = 0; i < 16; i++) {
 		cov1[i].v.clear(); cov1[i].i.clear(); cov2[i].v.clear(); cov2[i].i.clear();
 		cov3[i].v.clear(); cov3[i].i.clear(); cov4[i].v.clear(); cov4[i].i.clear();
@@ -10985,12 +11014,14 @@ BOOL Renderer::BuildTerrain(Map& m)
 			c.t = T_HILL;
 		}
 	}
-	tb.v.reserve(160000); tb.i.reserve(240000);
 	const float bottom = -3.2f;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		const Cell& c = m.At(x, z);
 		if (c.t == T_VOID) continue;
-		MeshBuild& geo = tb;
+		int tchI = ((z >> 4) << 2) + (x >> 4);
+		if (tchI < 0) tchI = 0;
+		if (tchI > 15) tchI = 15;
+		MeshBuild& geo = tch[tchI];
 		DWORD col = (c.t == T_CHASM) ? RGBAf(.35f, .32f, .33f) : 0xFFFFFFFF;
 		if (c.t == T_WATER) col = 0xFEFFFFFF;
 		if (c.t != T_BRIDGE) {
@@ -11105,8 +11136,11 @@ BOOL Renderer::BuildTerrain(Map& m)
 		}
 	}
 	ScatterTheme(m, sceneMb, lb, m_puff, m_puffN);
-	if (!MakeMesh32(m_terrain, tb.v.data(), sizeof(VtxS), (UINT)tb.v.size(), tb.i.data(), (UINT)tb.i.size())) return FALSE;
-	m_terrain.tex = TEX_ATLAS;
+	for (int i = 0; i < 16; i++) {
+		if (tch[i].v.empty()) continue;
+		if (!MakeMesh32(m_terrainChunk[i], tch[i].v.data(), sizeof(VtxS), (UINT)tch[i].v.size(), tch[i].i.data(), (UINT)tch[i].i.size())) return FALSE;
+		m_terrainChunk[i].tex = TEX_ATLAS;
+	}
 	for (int i = 0; i < 16; i++) {
 		if (!cov1[i].v.empty()) { MakeMesh32(m_cover1[i], cov1[i].v.data(), sizeof(VtxS), (UINT)cov1[i].v.size(), cov1[i].i.data(), (UINT)cov1[i].i.size()); m_cover1[i].tex = TEX_ATLAS; }
 		if (!cov2[i].v.empty()) { MakeMesh32(m_cover2[i], cov2[i].v.data(), sizeof(VtxS), (UINT)cov2[i].v.size(), cov2[i].i.data(), (UINT)cov2[i].i.size()); m_cover2[i].tex = TEX_ATLAS; }
@@ -11830,10 +11864,9 @@ BOOL Renderer::ProjectToScreen(V3 p, float& sx, float& sy) const
 	return TRUE;
 }
 
-BOOL Renderer::InView(V3 p, float r) const
+static BOOL TacInClip(const float* m, V3 p, float r)
 {
 	if (r < .6f) r = .6f;
-	const float* m = m_vp.m;
 	float x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
 	float y = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
 	float z = p.x * m[2] + p.y * m[6] + p.z * m[10] + m[14];
@@ -11847,6 +11880,16 @@ BOOL Renderer::InView(V3 p, float r) const
 	if (y < -ww || y > ww) return FALSE;
 	if (z < -pad || z > ww) return FALSE;
 	return TRUE;
+}
+
+BOOL Renderer::InView(V3 p, float r) const
+{
+	return TacInClip(m_vp.m, p, r);
+}
+
+BOOL Renderer::InLight(V3 p, float r) const
+{
+	return TacInClip(m_lightVP.m, p, r);
 }
 
 void Renderer::ScreenRay(float sx, float sy, V3& org, V3& dir) const

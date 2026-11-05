@@ -329,7 +329,8 @@ if errorlevel 1 exit /b 1</Command>
     </Midl>
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
-      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <!-- /O2 相当は /Ob2。OnlyExplicitInline(/Ob1) だと inline 指定のない関数が展開されない -->
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -357,7 +358,7 @@ if errorlevel 1 exit /b 1</Command>
       <IntelJCCErratum>false</IntelJCCErratum>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Gw /fp:contract %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>

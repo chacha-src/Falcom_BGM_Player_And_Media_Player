@@ -543,7 +543,6 @@ void CraftBindUnit(Unit& u)
 	u.pasEq[0] = u.pasEq[1] = 0;
 	const CraftRec* r = FindRec(u.ch.uid, false);
 	if (!r) return;
-	u.cp = Clampi(r->cp, 0, CP_MAX);
 	for (int k = 0; k < CRAFT_SLOT_N; k++) {
 		int b = r->bead[k];
 		if (b >= 1 && b <= CRAFT_N) u.craftEq[k] = CRAFT_BASE + b - 1;

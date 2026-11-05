@@ -1028,7 +1028,7 @@ R(TX_MO_WYVERN, L"ワイバーン", L"Wyvern", L"Vouivre", L"Viverna", L"Guivern
 R(TX_MO_DARK_KNIGHT, L"暗黒騎士", L"Dark Knight", L"Chevalier noir", L"Cavaliere oscuro", L"Caballero oscuro", L"암흑기사", L"暗黑骑士", L"الفارس المظلم", L"Тёмный рыцарь", L"Dunkler Ritter", L"Cavaleiro sombrio", L"Duistere ridder", L"Mroczny rycerz", L"Kara şövalye")
 R(TX_MO_DRAGON, L"ドラゴン", L"Dragon", L"Dragon", L"Drago", L"Dragón", L"드래곤", L"巨龙", L"تنين", L"Дракон", L"Drache", L"Dragão", L"Draak", L"Smok", L"Ejderha")
 // ---------------------------------------------------------------- 拠点
-R(TX_TITLE, L"おまけタクティクス", L"Bonus Tactics", L"Tactique bonus", L"Tattica bonus", L"Tácticas extra", L"보너스 택틱스", L"附赠战棋", L"التكتيكات الإضافية", L"Бонусная тактика", L"Bonus-Taktik", L"Táticas bônus", L"Bonustactiek", L"Dodatkowa taktyka", L"Bonus taktik")
+R(TX_TITLE, L"タクティクス\"らいらX\"", L"Tactics \"Raira X\"", L"Tactique \"Raira X\"", L"Tattica \"Raira X\"", L"Tácticas \"Raira X\"", L"택틱스 \"라이라 X\"", L"战棋\"莱拉X\"", L"تكتيك \"رايرا X\"", L"Тактика \"Райра X\"", L"Taktik \"Raira X\"", L"Táticas \"Raira X\"", L"Tactiek \"Raira X\"", L"Taktyka \"Raira X\"", L"Taktik \"Raira X\"")
 R(TX_BASE_SORTIE, L"出撃", L"Sortie", L"Sortie", L"Sortita", L"Salir al combate", L"출격", L"出击", L"انطلاق", L"В бой", L"Ausrücken", L"Partir", L"Uitrukken", L"Do boju", L"Sefere çık")
 R(TX_BASE_CREATE, L"キャラクタ作成", L"Create Character", L"Créer un personnage", L"Crea personaggio", L"Crear personaje", L"캐릭터 생성", L"创建角色", L"إنشاء شخصية", L"Создать персонажа", L"Charakter erstellen", L"Criar personagem", L"Personage maken", L"Utwórz postać", L"Karakter oluştur")
 R(TX_BASE_PARTY, L"編成", L"Party", L"Équipe", L"Squadra", L"Grupo", L"편성", L"编队", L"الفريق", L"Отряд", L"Trupp", L"Grupo", L"Groep", L"Drużyna", L"Takım")
@@ -1239,7 +1239,7 @@ R(TX_HELP_TEXT,
 	L"【育成】\n"
 	L"・攻撃・回復・補助で経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
 	L"・Lv15・35・55・78・105・140・180・230・290で転職できます。素材は不要です。戦闘でレベルアップした直後にも選べ、後回しにもできます。\n"
-	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。\n"
+	L"・ステージは最初999まで。進むと上限が3000・6000・9999と広がり、その先は1つずつ。10000を超えるとステージEX。進むほど敵は強く、経験値も増えます。\n"
 	L"・出てくる敵は、ファンタジーとSFと夢の世界のモンスターです。生き物のほか、風呂桶のような物も混ざります。",
 	L"[Basics]\n"
 	L"- Turn order depends on agility and is shown in \"Turn Order\" at the top right. Fast units can cut in and act more often.\n"
@@ -1253,7 +1253,7 @@ R(TX_HELP_TEXT,
 	L"[Growth]\n"
 	L"- Attacks, healing and buffs grant EXP and levels. Skills are learned at certain levels.\n"
 	L"- Change class at Lv15, 35, 55, 78, 105, 140, 180, 230 and 290. No partner is needed. You can also choose right after a battle level-up, or later.\n"
-	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.\n"
+	L"- Stages start up to 999. The cap grows to 3000, 6000, then 9999, then one at a time. Past 10000 they become Stage EX. Enemies grow stronger and give more EXP as you advance.\n"
 	L"- The enemies are monsters from fantasy, science fiction and dream worlds. Living creatures appear alongside things such as bathtubs.",
 	L"[Bases]\n"
 	L"- L'ordre des tours dépend de l'agilité et s'affiche dans « Ordre des tours » en haut à droite. Les unités rapides s'intercalent et agissent plus souvent.\n"
@@ -1267,7 +1267,7 @@ R(TX_HELP_TEXT,
 	L"[Progression]\n"
 	L"- Attaques, soins et soutiens donnent de l'EXP et des niveaux. Des compétences s'apprennent à certains niveaux.\n"
 	L"- Changement de classe aux niv. 15, 35, 55, 78, 105, 140, 180, 230 et 290. Aucun partenaire. Aussi juste après un niveau, ou plus tard.\n"
-	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.\n"
+	L"- Les niveaux vont d'abord jusqu'à 999. Le plafond passe à 3000, 6000, puis 9999, ensuite un par un. Au-delà de 10000, ce sont des niveaux EX. Les ennemis deviennent plus forts et donnent plus d'EXP.\n"
 	L"- Les ennemis sont des monstres de fantasy, de science-fiction et de monde onirique. Des êtres vivants côtoient des objets, comme une baignoire.",
 	L"[Basi]\n"
 	L"- L'ordine dei turni dipende dall'agilità ed è mostrato in \"Ordine dei turni\" in alto a destra. Le unità veloci si inseriscono e agiscono più spesso.\n"
@@ -1281,7 +1281,7 @@ R(TX_HELP_TEXT,
 	L"[Crescita]\n"
 	L"- Attacchi, cure e supporti danno ESP e livelli. Le abilità si imparano a certi livelli.\n"
 	L"- Cambio classe a Lv15, 35, 55, 78, 105, 140, 180, 230 e 290. Nessun partner. Si può scegliere anche subito dopo un livello in battaglia, o più tardi.\n"
-	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.\n"
+	L"- I livelli arrivano prima a 999. Il tetto sale a 3000, 6000, poi 9999, poi uno alla volta. Oltre 10000 sono livelli EX. Avanzando i nemici diventano più forti e danno più ESP.\n"
 	L"- I nemici sono mostri di fantasy, fantascienza e mondo onirico. Accanto alle creature compaiono anche oggetti, come una vasca da bagno.",
 	L"[Básico]\n"
 	L"- El orden de turnos depende de la agilidad y se muestra en «Orden de turnos» arriba a la derecha. Las unidades rápidas se adelantan y actúan más a menudo.\n"
@@ -1295,7 +1295,7 @@ R(TX_HELP_TEXT,
 	L"[Progreso]\n"
 	L"- Ataques, curaciones y mejoras dan EXP y niveles. Las habilidades se aprenden en ciertos niveles.\n"
 	L"- Cambio de clase en Nv15, 35, 55, 78, 105, 140, 180, 230 y 290. Sin compañero. También justo después de subir de nivel, o más tarde.\n"
-	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.\n"
+	L"- Las fases llegan primero a 999. El tope sube a 3000, 6000 y 9999, luego de una en una. Pasado 10000 son fases EX. Al avanzar, los enemigos son más fuertes y dan más EXP.\n"
 	L"- Los enemigos son monstruos de fantasía, ciencia ficción y mundo onírico. Junto a los seres vivos aparecen objetos, como una bañera.",
 	L"[기본]\n"
 	L"- 행동 순서는 민첩으로 정해지며 오른쪽 위의 '행동 순서'에 표시됩니다. 빠른 캐릭터는 끼어들어 더 자주 행동합니다.\n"
@@ -1309,7 +1309,7 @@ R(TX_HELP_TEXT,
 	L"[육성]\n"
 	L"- 공격·회복·보조로 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
 	L"- Lv15·35·55·78·105·140·180·230·290에 전직합니다. 재료는 필요 없습니다. 전투 레벨업 직후에도 고르거나, 나중에 할 수 있습니다.\n"
-	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.\n"
+	L"- 스테이지는 처음 999까지. 나아가면 한도가 3000·6000·9999로 넓어지고, 그 다음은 하나씩. 10000을 넘으면 스테이지 EX. 앞으로 갈수록 적이 강해지고 경험치도 늘어납니다.\n"
 	L"- 나오는 적은 판타지와 SF와 꿈세계의 몬스터입니다. 생물 외에 욕조 같은 물건도 섞입니다.",
 	L"【基本】\n"
 	L"・行动顺序由敏捷决定，显示在右上角的“行动顺序”中。敏捷高的角色会插队，更频繁地行动。\n"
@@ -1323,7 +1323,7 @@ R(TX_HELP_TEXT,
 	L"【培养】\n"
 	L"・攻击、治疗和辅助都会获得经验值并升级。达到一定等级会习得技能。\n"
 	L"・Lv15、35、55、78、105、140、180、230、290可转职。不需要素材。战斗升级后立刻可选，也可以以后再选。\n"
-	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。\n"
+	L"・关卡起初到999。上限会扩到3000、6000、9999，再往后一次一关。超过10000就是关卡EX。越往后敌人越强，经验也越多。\n"
 	L"・出现的敌人是奇幻、科幻和梦境世界的怪物。除了生物，也会混入浴缸之类的东西。",
 	L"[الأساسيات]\n"
 	L"- يتحدد ترتيب الأدوار بالرشاقة ويظهر في «ترتيب الأدوار» أعلى اليمين. الوحدات السريعة تتقدم وتتحرك أكثر.\n"
@@ -1337,7 +1337,7 @@ R(TX_HELP_TEXT,
 	L"[التطوير]\n"
 	L"- الهجوم والعلاج والدعم تمنح الخبرة والمستويات. تُتعلم المهارات عند مستويات معينة.\n"
 	L"- تغيير الفئة عند 15 و35 و55 و78 و105 و140 و180 و230 و290. بلا شريك. يمكن الاختيار بعد رفع المستوى في المعركة أو لاحقًا.\n"
-	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.\n"
+	L"- المراحل تبدأ حتى 999. يرتفع الحد إلى 3000 ثم 6000 ثم 9999 ثم واحدة فواحدة. بعد 10000 تصبح مراحل EX. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.\n"
 	L"- الأعداء وحوش من عوالم الخيال والخيال العلمي والحلم. تظهر الكائنات إلى جانب أشياء مثل حوض الاستحمام.",
 	L"[Основы]\n"
 	L"- Порядок ходов зависит от ловкости и показан в «Порядке ходов» справа вверху. Быстрые бойцы вклиниваются и ходят чаще.\n"
@@ -1351,7 +1351,7 @@ R(TX_HELP_TEXT,
 	L"[Развитие]\n"
 	L"- Атаки, лечение и поддержка дают опыт и уровни. Навыки изучаются на определённых уровнях.\n"
 	L"- Смена класса на ур. 15, 35, 55, 78, 105, 140, 180, 230 и 290. Материал не нужен. Можно выбрать сразу после уровня в бою или позже.\n"
-	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.\n"
+	L"- Этапы сначала до 999. Потолок растёт до 3000, 6000 и 9999, затем по одному. После 10000 это этапы EX. Чем дальше, тем сильнее враги и больше опыта.\n"
 	L"- Враги — монстры фэнтези, научной фантастики и мира снов. Среди существ встречаются и вещи, например ванна.",
 	L"[Grundlagen]\n"
 	L"- Die Zugreihenfolge hängt von der Gewandtheit ab und wird oben rechts unter „Zugreihenfolge“ angezeigt. Schnelle Einheiten schieben sich dazwischen und handeln öfter.\n"
@@ -1365,7 +1365,7 @@ R(TX_HELP_TEXT,
 	L"[Entwicklung]\n"
 	L"- Angriffe, Heilung und Unterstützung geben EP und Stufen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
 	L"- Klassenwechsel bei Lv15, 35, 55, 78, 105, 140, 180, 230 und 290. Kein Partner. Auch direkt nach einem Levelaufstieg, oder später.\n"
-	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.\n"
+	L"- Stufen gehen zuerst bis 999. Die Obergrenze wächst auf 3000, 6000, dann 9999, danach einzeln. Über 10000 sind es Stufen EX. Je weiter du kommst, desto stärker die Feinde und desto mehr EP.\n"
 	L"- Die Feinde sind Monster aus Fantasy, Science-Fiction und Traumwelt. Neben Lebewesen erscheinen auch Dinge wie eine Badewanne.",
 	L"[Básico]\n"
 	L"- A ordem dos turnos depende da agilidade e aparece em \"Ordem dos turnos\" no canto superior direito. Unidades rápidas passam à frente e agem mais vezes.\n"
@@ -1379,7 +1379,7 @@ R(TX_HELP_TEXT,
 	L"[Evolução]\n"
 	L"- Ataques, curas e apoio dão EXP e níveis. Habilidades são aprendidas em certos níveis.\n"
 	L"- Mudança de classe nos Nv15, 35, 55, 78, 105, 140, 180, 230 e 290. Sem parceiro. Também logo após subir de nível, ou mais tarde.\n"
-	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.\n"
+	L"- As fases vão primeiro até 999. O teto sobe a 3000, 6000 e 9999, depois uma a uma. Depois de 10000 são fases EX. Quanto mais avança, mais fortes os inimigos e mais EXP.\n"
 	L"- Os inimigos são monstros de fantasia, ficção científica e mundo dos sonhos. Além dos seres, aparecem objetos como uma banheira.",
 	L"[Basis]\n"
 	L"- De beurtvolgorde hangt af van behendigheid en staat rechtsboven bij 'Beurtvolgorde'. Snelle eenheden dringen voor en handelen vaker.\n"
@@ -1393,7 +1393,7 @@ R(TX_HELP_TEXT,
 	L"[Groei]\n"
 	L"- Aanvallen, genezen en steun geven EP en levels. Vaardigheden leer je op bepaalde levels.\n"
 	L"- Klassewissel op Lv15, 35, 55, 78, 105, 140, 180, 230 en 290. Geen partner. Ook direct na een level, of later.\n"
-	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.\n"
+	L"- Levels gaan eerst tot 999. Het plafond groeit naar 3000, 6000 en 9999, daarna één voor één. Voorbij 10000 zijn het EX-levels. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.\n"
 	L"- De vijanden zijn monsters uit fantasy, sciencefiction en droomwereld. Naast wezens verschijnen ook dingen zoals een badkuip.",
 	L"[Podstawy]\n"
 	L"- Kolejność tur zależy od zwinności i widać ją w „Kolejności tur” w prawym górnym rogu. Szybkie jednostki wskakują przed innych i działają częściej.\n"
@@ -1407,7 +1407,7 @@ R(TX_HELP_TEXT,
 	L"[Rozwój]\n"
 	L"- Ataki, leczenie i wsparcie dają PD i poziomy. Umiejętności poznaje się na określonych poziomach.\n"
 	L"- Zmiana klasy na poz. 15, 35, 55, 78, 105, 140, 180, 230 i 290. Bez partnera. Także tuż po poziomie w walce albo później.\n"
-	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.\n"
+	L"- Etapy najpierw do 999. Limit rośnie do 3000, 6000 i 9999, potem po jednym. Powyżej 10000 to etapy EX. Im dalej, tym silniejsi wrogowie i więcej PD.\n"
 	L"- Wrogowie to potwory z fantasy, science fiction i świata snów. Oprócz istot pojawiają się też przedmioty, na przykład wanna.",
 	L"[Temel]\n"
 	L"- Sıra düzeni çevikliğe bağlıdır ve sağ üstteki \"Sıra düzeni\"nde gösterilir. Hızlı birimler araya girip daha sık hareket eder.\n"
@@ -1421,7 +1421,7 @@ R(TX_HELP_TEXT,
 	L"[Gelişim]\n"
 	L"- Saldırı, iyileştirme ve destek TP ve seviye kazandırır. Yetenekler belirli seviyelerde öğrenilir.\n"
 	L"- Sv15, 35, 55, 78, 105, 140, 180, 230 ve 290'da sınıf değişir. Ortak gerekmez. Savaşta seviye sonrası da seçilir, sonra da bırakılabilir.\n"
-	L"- Bölümler 1'den 9999'a kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.\n"
+	L"- Bölümler önce 999'a kadar. Tavan 3000, 6000, sonra 9999 olur, ardından tek tek. 10000'i aşınca EX bölüm olur. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.\n"
 	L"- Düşmanlar fantezi, bilimkurgu ve düş dünyasının canavarlarıdır. Canlıların yanında küvet gibi nesneler de çıkar.")
 // ---------------------------------------------------------------- その他
 R(TX_MISC_LV, L"Lv", L"Lv", L"Niv.", L"Lv", L"Nv", L"Lv", L"Lv", L"مستوى", L"Ур.", L"Lv", L"Nv", L"Lv", L"Poz.", L"Sv")
@@ -2679,7 +2679,7 @@ R(TX_CRH_GROUND, L"翼を付けない地上の動きで見る。浮きも羽ば�
 R(TX_CRH_BUST, L"胸の大きさが変わる。能力は変わらない。", L"Bust size changes. Stats do not.", L"La taille de la poitrine change. Les stats non.", L"Cambia la misura del petto. Le statistiche no.", L"Cambia el tamaño del busto. Los atributos no.", L"가슴 크기가 바뀐다. 능력은 그대로.", L"胸的大小会变。能力不变。", L"يتغير حجم الصدر. القدرات لا تتغير.", L"Меняется размер груди. Параметры нет.", L"Die Brustgröße ändert sich. Werte nicht.", L"O tamanho do busto muda. Os atributos não.", L"De borstomvang verandert. Waarden niet.", L"Zmienia się rozmiar biustu. Statystyki nie.", L"Göğüs boyutu değişir. Değerler değişmez.")
 R(TX_CRH_HAT, L"頭に帽子か兜が付く。衣装に兜があるときはそちらが優先される。", L"Adds a hat or helmet. If the costume already has a helmet, that one is used.", L"Ajoute un chapeau ou un casque. Si le costume a déjà un casque, c'est lui qui prime.", L"Aggiunge cappello o elmo. Se il costume ha già un elmo, vale quello.", L"Añade sombrero o yelmo. Si el traje ya tiene yelmo, se usa ese.", L"머리에 모자나 투구가 붙는다. 옷에 투구가 있으면 그쪽이 우선이다.", L"头上会加上帽子或头盔。衣服自带头盔时以那顶为准。", L"تُضاف قبعة أو خوذة. إذا كان للزي خوذة فهي التي تُستخدم.", L"Добавляет шляпу или шлем. Если у костюма уже есть шлем, берётся он.", L"Setzt Hut oder Helm auf. Hat das Kostüm schon einen Helm, gilt der.", L"Acrescenta chapéu ou elmo. Se o traje já tem elmo, esse prevalece.", L"Zet een hoed of helm op. Heeft het kostuum al een helm, dan geldt die.", L"Dodaje kapelusz albo hełm. Jeśli strój ma już hełm, używany jest tamten.", L"Başa şapka ya da miğfer ekler. Kıyafette miğfer varsa o kullanılır.")
 R(TX_CRH_CAPE, L"背中にマントが付く。アバター着用中は付かない。", L"Adds a cape on the back. It does not appear while an avatar is worn.", L"Ajoute une cape dans le dos. Elle n'apparaît pas avec un avatar.", L"Aggiunge un mantello sulla schiena. Non appare con un avatar.", L"Añade una capa a la espalda. No aparece con un avatar.", L"등에 망토가 붙는다. 아바타 착용 중에는 붙지 않는다.", L"背上会加上披风。穿着换装时不会出现。", L"تُضاف عباءة على الظهر. لا تظهر مع الأفاتار.", L"Добавляет плащ на спину. В аватаре он не появляется.", L"Legt einen Umhang auf den Rücken. Mit Avatar erscheint er nicht.", L"Acrescenta uma capa nas costas. Não aparece com avatar.", L"Zet een cape op de rug. Met avatar verschijnt die niet.", L"Dodaje pelerynę na plecach. W awatarze jej nie ma.", L"Sırta pelerin ekler. Avatar giyiliyorken görünmez.")
-R(TX_BSH_STAGE, L"出撃するステージ。◀▶で1つずつ。Ctrlで10、Shiftで100。クリアした次まで進める。", L"The stage you sortie to. ◀▶ moves by 1, Ctrl by 10, Shift by 100. You can go up to one past the last clear.", L"Étape de sortie. ◀▶ avance de 1, Ctrl de 10, Maj de 100. Jusqu'à une après le dernier succès.", L"Fase di sortita. ◀▶ sposta di 1, Ctrl di 10, Maiusc di 100. Fino a una dopo l'ultima completata.", L"Fase de salida. ◀▶ mueve 1, Ctrl 10, Mayús 100. Hasta una después de la última superada.", L"출격할 스테이지. ◀▶는 1, Ctrl은 10, Shift는 100. 클리어한 다음까지.", L"出击的关卡。◀▶每次1，Ctrl为10，Shift为100。最多到已通过的下一关。", L"مرحلة الانطلاق. ◀▶ بواحد، Ctrl بعشرة، Shift بمئة. حتى المرحلة التالية لآخر مرحلة مُنجزة.", L"Этап вылазки. ◀▶ на 1, Ctrl на 10, Shift на 100. Можно до следующего после последнего пройденного.", L"Stufe zum Ausrücken. ◀▶ um 1, Strg um 10, Umschalt um 100. Bis eine nach dem letzten Abschluss.", L"Fase da partida. ◀▶ anda 1, Ctrl 10, Shift 100. Até uma depois da última concluída.", L"Level om uit te rukken. ◀▶ met 1, Ctrl met 10, Shift met 100. Tot één voorbij de laatste gehaalde.", L"Etap wyprawy. ◀▶ o 1, Ctrl o 10, Shift o 100. Do jednego po ostatnim ukończonym.", L"Sefer bölümü. ◀▶ 1, Ctrl 10, Shift 100. Geçilenin bir sonrasına kadar.")
+R(TX_BSH_STAGE, L"出撃するステージ。◀▶で1つずつ。Ctrlで10、Shiftで100。クリアした次まで。上限は最初999、1000で3000、3000クリアで6000、6000クリアで9999、その先は1つずつ。10000を超えるとEX。", L"The stage you sortie to. ◀▶ by 1, Ctrl by 10, Shift by 100. Up to one past the last clear. Cap starts at 999, then 3000, 6000, 9999, then one at a time. Past 10000 they are EX.", L"Étape de sortie. ◀▶ de 1, Ctrl de 10, Maj de 100. Jusqu'à une après le dernier succès. Plafond 999, puis 3000, 6000, 9999, ensuite un par un. Au-delà de 10000 : EX.", L"Fase di sortita. ◀▶ di 1, Ctrl di 10, Maiusc di 100. Fino a una dopo l'ultima. Tetto 999, poi 3000, 6000, 9999, poi uno alla volta. Oltre 10000: EX.", L"Fase de salida. ◀▶ de 1, Ctrl 10, Mayús 100. Hasta una después de la última. Tope 999, luego 3000, 6000, 9999, luego de una en una. Pasado 10000: EX.", L"출격할 스테이지. ◀▶는 1, Ctrl은 10, Shift는 100. 클리어한 다음까지. 한도는 처음 999, 1000에서 3000, 3000 클리어에 6000, 6000 클리어에 9999, 그다음은 하나씩. 10000을 넘으면 EX.", L"出击的关卡。◀▶每次1，Ctrl为10，Shift为100。最多到已通过的下一关。上限起初999，到1000变为3000，清3000变6000，清6000变9999，再往后一次一关。超过10000为EX。", L"مرحلة الانطلاق. ◀▶ بواحد، Ctrl بعشرة، Shift بمئة. حتى التالية لآخر مُنجزة. الحد 999 ثم 3000 ثم 6000 ثم 9999 ثم واحدة فواحدة. بعد 10000 تصبح EX.", L"Этап вылазки. ◀▶ на 1, Ctrl на 10, Shift на 100. До следующего после последнего. Потолок 999, затем 3000, 6000, 9999, потом по одному. После 10000 — EX.", L"Stufe zum Ausrücken. ◀▶ um 1, Strg um 10, Umschalt um 100. Bis eine nach dem letzten Abschluss. Grenze 999, dann 3000, 6000, 9999, danach einzeln. Über 10000: EX.", L"Fase da partida. ◀▶ anda 1, Ctrl 10, Shift 100. Até uma depois da última. Teto 999, depois 3000, 6000, 9999, depois uma a uma. Depois de 10000: EX.", L"Level om uit te rukken. ◀▶ met 1, Ctrl 10, Shift 100. Tot één voorbij de laatste. Plafond 999, dan 3000, 6000, 9999, daarna één voor één. Voorbij 10000: EX.", L"Etap wyprawy. ◀▶ o 1, Ctrl o 10, Shift o 100. Do jednego po ostatnim. Limit 999, potem 3000, 6000, 9999, potem po jednym. Powyżej 10000: EX.", L"Sefer bölümü. ◀▶ 1, Ctrl 10, Shift 100. Geçilenin bir sonrasına kadar. Tavan önce 999, 1000'de 3000, 3000 bitince 6000, 6000 bitince 9999, sonra tek tek. 10000'i aşınca EX.")
 R(TX_BSH_CLEAR, L"いちばん遠くまでクリアしたステージ。", L"The furthest stage you have cleared.", L"L'étape la plus lointaine terminée.", L"La fase più lontana completata.", L"La fase más lejana superada.", L"가장 멀리 클리어한 스테이지.", L"已通过的最远关卡。", L"أبعد مرحلة أُنجزت.", L"Самый дальний пройденный этап.", L"Die weiteste abgeschlossene Stufe.", L"A fase mais distante concluída.", L"Het verste gehaalde level.", L"Najdalszy ukończony etap.", L"Geçilen en uzak bölüm.")
 R(TX_BSH_GOLD, L"所持金。商店で武器や道具を買う。", L"Gold. Spent in the shop on weapons and goods.", L"Or. Sert à la boutique pour armes et objets.", L"Oro. Si spende in bottega per armi e oggetti.", L"Oro. Se gasta en la tienda en armas y objetos.", L"소지금. 상점에서 무기와 도구를 산다.", L"所持金。在商店购买武器和道具。", L"الذهب. يُصرف في المتجر على الأسلحة والأغراض.", L"Золото. Тратится в лавке на оружие и предметы.", L"Gold. Im Laden für Waffen und Waren.", L"Ouro. Gasta-se na loja em armas e itens.", L"Goud. In de winkel voor wapens en spullen.", L"Złoto. W sklepie na broń i przedmioty.", L"Altın. Dükkanda silah ve eşya alır.")
 R(TX_BSH_SUM, L"いま出撃に入っている仲間の、HPとMPの合計。", L"Total HP and MP of the members currently set to sortie.", L"Total des PV et PM des membres prêts à partir.", L"Somma di PS e PM dei membri in sortita.", L"Suma de PV y PM de quienes van a salir.", L"지금 출격에 들어간 동료의 HP와 MP 합계.", L"当前出击同伴的HP与MP合计。", L"مجموع الصحة والمانا لمن هم في الانطلاق.", L"Сумма ОЗ и ОМ бойцов, назначенных в вылазку.", L"Summe der LP und MP der Mitglieder, die ausrücken.", L"Soma de PV e PM de quem vai partir.", L"Totaal LP en MP van wie nu uitrukt.", L"Suma PŻ i PM członków wyznaczonych do wyprawy.", L"Şu an sefere çıkanların CP ve MP toplamı.")
@@ -2737,10 +2737,24 @@ R(TX_SET_WIN, L"画面", L"Screen", L"Écran", L"Schermo", L"Pantalla", L"화면
 R(TX_WIN_BOX, L"ウィンドウ", L"Window", L"Fenêtre", L"Finestra", L"Ventana", L"창", L"窗口", L"نافذة", L"Окно", L"Fenster", L"Janela", L"Venster", L"Okno", L"Pencere")
 R(TX_WIN_FULL, L"仮想フルスクリーン", L"Borderless", L"Plein écran fenêtré", L"Schermo intero finestra", L"Pantalla completa ventana", L"가상 전체화면", L"虚拟全屏", L"ملء إطار", L"Окно на весь экран", L"Rahmenlos", L"Ecrã inteiro em janela", L"Randloos", L"Okno na pełny ekran", L"Çerçevesiz tam ekran")
 R(TX_BSH_AI, L"敵の動きの上手さ。体力は変わりません。最弱はほとんど通常攻撃ででたらめに動きます。MAXは仲間と狙う相手を合わせます。", L"How well enemies move and pick actions. Hit points stay the same. Lowest mostly swings and wanders. MAX focuses the same target together.", L"L'adresse des ennemis. Les PV ne changent pas. Très faible frappe surtout au hasard. MAX vise ensemble.", L"Quanto sono bravi i nemici. I PS non cambiano. Minima attacca a caso. MAX punta insieme lo stesso bersaglio.", L"Lo bien que se mueven los enemigos. Los PV no cambian. Mínima ataca casi al azar. MAX apunta juntos.", L"적의 움직임. 체력은 그대로. 최약은 거의 보통 공격으로 헤맵니다. MAX는 같은 대상을 함께 노립니다.", L"敌人行动的聪明程度。体力不变。最弱几乎只普通攻击并乱走。MAX会一起盯同一个目标。", L"مهارة حركة الأعداء. الصحة لا تتغير. الأضعف يضرب عشوائيًا. MAX يركزون معًا.", L"Насколько умно ходят враги. ОЗ те же. Слабейший бьёт как попало. MAX бьют одну цель вместе.", L"Wie klug Feinde handeln. LP bleiben. Schwächste schlagen meist planlos. MAX zielen gemeinsam.", L"O quão bem os inimigos agem. Os PV ficam. Mínima ataca quase ao acaso. MAX focam juntos.", L"Hoe slim vijanden spelen. LP blijven gelijk. Zwakste slaat meestal lukraak. MAX richten samen.", L"Jak mądrze grają wrogowie. PŻ bez zmian. Najsłabsza bije prawie na oślep. MAX celują razem.", L"Düşmanların ne kadar iyi oynadığı. Can aynı kalır. En zayıf rastgele vurur. MAX aynı hedefe birlikte gider.")
-R(TX_BSH_SYNC, L"描画の間隔。1/30 から 1/240。", L"How often the picture updates, from 1/30 to 1/240.", L"Rythme d'image, de 1/30 à 1/240.", L"Ritmo del disegno, da 1/30 a 1/240.", L"Ritmo de imagen, de 1/30 a 1/240.", L"그림 간격. 1/30에서 1/240.", L"画面更新间隔，从1/30到1/240。", L"فاصل الرسم من 1/30 إلى 1/240.", L"Интервал кадра от 1/30 до 1/240.", L"Bildtakt von 1/30 bis 1/240.", L"Ritmo da imagem, de 1/30 a 1/240.", L"Beeldtempo van 1/30 tot 1/240.", L"Tempo obrazu od 1/30 do 1/240.", L"Görüntü aralığı, 1/30 ile 1/240.")
+R(TX_BSH_SYNC, L"画質が自動のときは実測で間隔を選びます。自動以外では、ここで選んだ間隔が上限です。1/30 から 1/540。", L"When quality is Auto, the interval is chosen from measured fps. Otherwise the value you pick is the cap. From 1/30 to 1/540.", L"Si la qualité est Auto, l'intervalle vient du fps mesuré. Sinon, la valeur choisie est le plafond. De 1/30 à 1/540.", L"Se la qualità è Auto, l'intervallo viene dagli fps misurati. Altrimenti il valore scelto è il tetto. Da 1/30 a 1/540.", L"Si la calidad es Auto, el intervalo sale del fps medido. Si no, el valor elegido es el tope. De 1/30 a 1/540.", L"화질이 자동이면 실측 fps로 간격을 고릅니다. 자동이 아니면 고른 값이 상한입니다. 1/30에서 1/540.", L"画质为自动时按实测帧率选间隔。否则这里选的间隔就是上限。从1/30到1/540。", L"عندما تكون الجودة تلقائيًا يُختار الفاصل من الإطارات المقاسة. وإلا فالقيمة المختارة هي الحد. من 1/30 إلى 1/540.", L"Если качество «Авто», интервал берётся из измеренного fps. Иначе выбранное значение — потолок. От 1/30 до 1/540.", L"Bei Qualität Auto kommt der Takt aus gemessenen fps. Sonst ist der gewählte Wert die Obergrenze. Von 1/30 bis 1/540.", L"Se a qualidade é Auto, o intervalo vem dos fps medidos. Senão, o valor escolhido é o tecto. De 1/30 a 1/540.", L"Bij kwaliteit Auto komt het interval uit gemeten fps. Anders is de gekozen waarde het maximum. Van 1/30 tot 1/540.", L"Gdy jakość to Auto, interwał bierze się z mierzonego fps. W przeciwnym razie wybrana wartość to pułap. Od 1/30 do 1/540.", L"Kalite Otomatikken aralık ölçülen fps'ten seçilir. Değilse seçtiğiniz değer tavandır. 1/30 ile 1/540.")
 R(TX_BSH_WIN, L"ウィンドウのままにするか、画面いっぱいの仮想フルスクリーンにするか。", L"Keep a window, or fill the monitor without exclusive fullscreen.", L"Garder une fenêtre, ou remplir l'écran sans mode exclusif.", L"Tenere la finestra, o riempire lo schermo senza modalità esclusiva.", L"Dejar la ventana, o llenar la pantalla sin modo exclusivo.", L"창으로 둘지, 화면을 채우는 가상 전체화면으로 할지.", L"保持窗口，或铺满显示器的虚拟全屏。", L"إبقاء نافذة، أو ملء الشاشة دون وضع حصري.", L"Оставить окно или занять монитор без исключительного режима.", L"Fenster lassen oder den Monitor ohne Exklusivmodus füllen.", L"Manter a janela ou encher o ecrã sem modo exclusivo.", L"Venster houden of de monitor vullen zonder exclusieve modus.", L"Zostawić okno albo wypełnić monitor bez trybu wyłącznego.", L"Pencere kalsın ya da özel kip olmadan ekranı doldursun.")
 R(TX_SET_FPS, L"フレームレート", L"Frame rate", L"Images/s", L"Fotogrammi", L"Fotogramas", L"프레임", L"帧率", L"الإطار", L"Кадры", L"Bildrate", L"Quadros", L"Beeld", L"Klatki", L"Kare")
 R(TX_BSH_FPS, L"今のフレームレートと画質を出します。手番や地形の文字、ホームの題とは別の空きに置きます。普段はオフです。", L"Shows the current frame rate and picture quality in a gap away from other text. Off by default.", L"Affiche le rythme d'image et la qualité, à l'écart des autres textes. Désactivé par défaut.", L"Mostra i fotogrammi e la qualità, lontano dagli altri testi. Spento di base.", L"Muestra los fotogramas y la calidad, aparte de otros textos. Apagado por defecto.", L"현재 프레임과 화질을 다른 글자와 겹치지 않게 표시합니다. 기본은 꺼짐.", L"显示当前帧率和画质，并避开其他文字。默认关闭。", L"يعرض معدل الإطارات وجودة الصورة بعيدًا عن النصوص الأخرى. مغلق افتراضيًا.", L"Показывает частоту кадров и качество в стороне от другого текста. По умолчанию выключено.", L"Zeigt Bildrate und Qualität abseits anderer Texte. Standard aus.", L"Mostra os quadros e a qualidade longe de outros textos. Desligado por padrão.", L"Toont beeldsnelheid en kwaliteit vrij van andere tekst. Standaard uit.", L"Pokazuje klatki i jakość z dala od innego tekstu. Domyślnie wyłączone.", L"Kare hızını ve görüntü kalitesini diğer yazılardan uzağa koyar. Varsayılan kapalı.")
+R(TX_SET_PACE, L"進行速度", L"Pace", L"Allure", L"Ritmo", L"Ritmo", L"진행 속도", L"进行速度", L"سرعة التقدم", L"Темп", L"Tempo", L"Ritmo", L"Tempo", L"Tempo", L"Hız")
+R(TX_SET_CUTSPD, L"カット速度", L"Cutscene", L"Cinématique", L"Filmato", L"Cinemática", L"컷 속도", L"过场速度", L"سرعة المشهد", L"Ролик", L"Zwischensequenz", L"Cena", L"Filmpje", L"Przerywnik", L"Ara sahne")
+R(TX_PACE0, L"瞬時", L"Instant", L"Instantané", L"Istantaneo", L"Instantáneo", L"즉시", L"瞬间", L"فوري", L"Мгновенно", L"Sofort", L"Instantâneo", L"Meteen", L"Natychmiast", L"Anında")
+R(TX_PACE1, L"速い", L"Fast", L"Rapide", L"Veloce", L"Rápido", L"빠름", L"快", L"سريع", L"Быстро", L"Schnell", L"Rápido", L"Snel", L"Szybko", L"Hızlı")
+R(TX_PACE2, L"やや速い", L"Brisk", L"Assez rapide", L"Abbastanza veloce", L"Algo rápido", L"다소 빠름", L"稍快", L"أسرع قليلاً", L"Побыстрее", L"Eher schnell", L"Um pouco rápido", L"Vrij snel", L"Dość szybko", L"Biraz hızlı")
+R(TX_PACE3, L"普通", L"Normal", L"Normal", L"Normale", L"Normal", L"보통", L"普通", L"عادي", L"Обычный", L"Normal", L"Normal", L"Normaal", L"Zwykłe", L"Normal")
+R(TX_PACE4, L"やや遅い", L"Unhurried", L"Assez lent", L"Abbastanza lento", L"Algo lento", L"다소 느림", L"稍慢", L"أبطأ قليلاً", L"Помедленнее", L"Eher langsam", L"Um pouco lento", L"Vrij langzaam", L"Dość wolno", L"Biraz yavaş")
+R(TX_PACE5, L"遅い", L"Slow", L"Lent", L"Lento", L"Lento", L"느림", L"慢", L"بطيء", L"Медленно", L"Langsam", L"Lento", L"Traag", L"Wolno", L"Yavaş")
+R(TX_BSH_PACE, L"移動と、敵の狙い・レベルアップ・勝敗が出るまでの待ち。普通はフル演出のときの速さです。速いが、これまで短縮で動いていた速さです。演出の有無とは別にかかります。", L"Move speed, and the wait before an enemy's aim, a level-up, or the result. Normal is the Full-scene pace. Fast is the old Short move speed. Separate from whether scenes play.", L"Vitesse et attente avant la visée, le niveau ou le résultat. Normal est le rythme des scènes complètes. Rapide est l'ancienne marche courte. Indépendant des scènes.", L"Velocità e attesa prima di mira, livello o risultato. Normale è il ritmo delle scene complete. Veloce è il vecchio passo breve. A parte dalle scene.", L"Velocidad y espera antes de la mira, el nivel o el resultado. Normal es el ritmo de las escenas completas. Rápido es el paso corto de antes. Aparte de las escenas.", L"이동과, 적의 조준·레벨업·승패까지의 대기. 보통은 전체 연출의 속도. 빠름은 지금까지의 단축 이동. 연출과는 별개.", L"移动，以及瞄准、升级、胜负前的等待。普通是完整演出的速度。快是以往简短时的移动。与演出开关分开。", L"سرعة الحركة وانتظار التصويب والمستوى والنتيجة. العادي هو إيقاع المشاهد الكاملة. السريع هو حركة المختصر السابقة. منفصل عن المشاهد.", L"Скорость хода и пауза до прицела, уровня и итога. Обычный — темп полных сцен. Быстро — прежний короткий шаг. Отдельно от сцен.", L"Bewegung und Wartezeit vor Ziel, Stufe und Ergebnis. Normal ist das Tempo voller Szenen. Schnell ist der alte kurze Schritt. Getrennt von den Szenen.", L"Velocidade e espera antes da mira, do nível ou do resultado. Normal é o ritmo das cenas completas. Rápido é o passo curto de antes. À parte das cenas.", L"Beweging en wachttijd vóór richting, niveau of uitslag. Normaal is het tempo van volledige scènes. Snel is de oude korte pas. Los van de scènes.", L"Ruch i czekanie przed celem, poziomem i wynikiem. Zwykłe to tempo pełnych scen. Szybko to dawny krótki krok. Osobno od scen.", L"Hareket ve nişan, seviye veya sonuç öncesi bekleme. Normal, tam sahne hızıdır. Hızlı, eski kısa adımdır. Sahne anahtarından ayrıdır.")
+R(TX_BSH_CUTSPD, L"技のカットシーンの長さ。戦闘演出がフルのときだけ効きます。短縮では使いません。", L"Length of skill cutscenes. Used only while battle scenes are Full. Short ignores it.", L"Durée des cinématiques. Seulement si les scènes sont complètes. Court l'ignore.", L"Durata dei filmati. Solo se le scene sono complete. Breve la ignora.", L"Duración de las cinemáticas. Solo si las escenas están completas. Corta la ignora.", L"기술 컷신의 길이. 전투 연출이 전체일 때만. 단축에서는 쓰지 않습니다.", L"技能过场的长度。只在战斗演出为完整时生效。简短时不用。", L"طول مشاهد المهارة. يعمل فقط والمشاهد كاملة. المختصرة تتجاهله.", L"Длина роликов умений. Только когда сцены полные. Краткие её не используют.", L"Länge der Fähigkeits-Zwischensequenzen. Nur bei vollen Kampfszenen. Kurz ignoriert sie.", L"Duração das cenas de habilidade. Só com cenas completas. Curta ignora.", L"Lengte van vaardigheidsfilmpjes. Alleen bij volledige gevechtsscènes. Kort negeert het.", L"Długość przerywników umiejętności. Tylko przy pełnych scenach. Skrócone pomija.", L"Yetenek ara sahnesinin uzunluğu. Yalnızca savaş sahneleri tamken. Kısada kullanılmaz.")
+R(TX_CDX_FIND, L"名前で絞る", L"Filter by name", L"Filtrer par nom", L"Filtra per nome", L"Filtrar por nombre", L"이름으로 찾기", L"按名字筛选", L"تصفية بالاسم", L"Фильтр по имени", L"Nach Name filtern", L"Filtrar por nome", L"Filter op naam", L"Filtruj po nazwie", L"Ada göre süz")
+R(TX_BT_LOOP, L"同じステージ", L"Repeat Stage", L"Même niveau", L"Stesso livello", L"Misma fase", L"같은 스테이지", L"同一关卡", L"نفس المرحلة", L"Тот же этап", L"Dieselbe Stufe", L"Mesma fase", L"Zelfde level", L"Ten sam etap", L"Aynı bölüm")
+R(TX_BT_LUCKY, L"ラッキーモンスター", L"Lucky Monster", L"Monstre chanceux", L"Mostro fortunato", L"Monstruo de la suerte", L"럭키 몬스터", L"幸运怪物", L"وحش محظوظ", L"Счастливый монстр", L"Glücksmonster", L"Monstro da sorte", L"Geluksmonster", L"Szczęśliwy potwór", L"Şanslı canavar")
+R(TX_BT_LUCKY_HELP, L"ラッキーモンスター。経験値3倍。雑魚と同じ強さです。", L"Lucky monster. Grants 3× EXP. Same strength as a normal foe.", L"Monstre chanceux. EXP ×3. Même force qu'un ennemi normal.", L"Mostro fortunato. ESP ×3. Stessa forza di un nemico normale.", L"Monstruo de la suerte. EXP ×3. Misma fuerza que un enemigo normal.", L"럭키 몬스터. 경험치 3배. 잡몹과 같은 강도입니다.", L"幸运怪物。经验值3倍。强度与杂鱼相同。", L"وحش محظوظ. نقاط الخبرة ×3. بنفس قوة العدو العادي.", L"Счастливый монстр. Опыт ×3. Сила как у обычного врага.", L"Glücksmonster. EP ×3. Gleiche Stärke wie ein normaler Gegner.", L"Monstro da sorte. EXP ×3. Mesma força de um inimigo comum.", L"Geluksmonster. EXP ×3. Even sterk als een gewone vijand.", L"Szczęśliwy potwór. EXP ×3. Siła jak zwykły wróg.", L"Şanslı canavar. Deneyim ×3. Sıradan düşmanla aynı güç.")
 #include "tactics_src/skill_more_text.inc"
 
 };
@@ -2766,6 +2780,15 @@ const wchar_t* TT(int id)
 	if (id < 0 || id >= TX_COUNT || !g_table[id]) return L"?";
 	const wchar_t* const* s = g_table[id];
 	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+}
+
+const wchar_t* TTAt(int id, int lang)
+{
+	if (!g_built) BuildTable();
+	if (id < 0 || id >= TX_COUNT || !g_table[id]) return L"?";
+	if (lang < 0 || lang > 13) lang = 1;
+	const wchar_t* s = g_table[id][lang];
+	return (s && s[0]) ? s : g_table[id][1];
 }
 
 } // namespace otac

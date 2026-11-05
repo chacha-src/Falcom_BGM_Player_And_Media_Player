@@ -916,125 +916,272 @@ namespace PianoRoll108
                     p.outF0Hz[i] = PianoKey::KeyHz(i);
             }
         }
-        // ここまでのピーク採用は捨てる。ノートは倍音列の基音。
-        // 基音の山がこのフレームに無い系列は、上の部分音から基音振幅を逆算しない。
-        // 逆算すると予測が「その部分音そのもの」になり、歌の山が消える。
-        float workAmp[PickScratch::PMAX];
-        float totalE = 0.0f;
+        // ここまでの系列スコアは捨てる。大きい山を「弱い低音の倍音」とみなして
+        // 2 分の 1・3 分の 1 へ落とすと、実音が消えて低音が雲になり、残った高音は
+        // 全体エネルギー比で切られて出ない。
+        // ノートは目立つピークそのもの。より大きい低い音の減衰倍音だけを落とす。
         float seriesMax = 0.0f;
-        for (int i = 0; i < np; ++i) {
-            workAmp[i] = pa0[i];
-            totalE += pa0[i];
+        for (int i = 0; i < np; ++i)
             if (pa0[i] > seriesMax) seriesMax = pa0[i];
-        }
-        if (totalE < 1.0e-8f) totalE = 1.0e-8f;
-        auto measureSeries = [&](float f0, float& energy, int& hits, float& aFund) {
-            energy = 0.0f;
-            hits = 0;
-            aFund = 0.0f;
-            for (int n = 1; n <= 8; ++n) {
-                const int j = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f0 * (float)n, (n == 1) ? 30.0f : 42.0f);
-                if (j < 0) continue;
-                energy += workAmp[j];
-                ++hits;
-                if (n == 1) aFund = workAmp[j];
-            }
-        };
-        auto consumeSeries = [&](float f0) {
-            const int j1 = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f0, 35.0f);
-            if (j1 < 0 || workAmp[j1] <= 0.0f) return;
-            const float a1 = workAmp[j1];
-            workAmp[j1] = 0.0f;
-            for (int n = 2; n <= 8; ++n) {
-                const int j = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f0 * (float)n, 42.0f);
-                if (j < 0) continue;
-                const float pred = a1 * powf((float)n, -0.65f);
-                // 基音と同じくらい大きい山は、減衰した倍音ではない。
-                // ここを消すと、ベースの3倍に乗った歌声がノートになる前に消える。
-                if (workAmp[j] >= a1 * 0.70f) {
-                    if (workAmp[j] > pred) workAmp[j] -= pred;
-                    continue;
-                }
-                if (workAmp[j] <= pred * 2.5f) workAmp[j] = 0.0f;
-                else workAmp[j] -= pred;
-            }
-        };
         bool seriesOn[COUNT];
         float seriesHz[COUNT];
+        float seriesA[COUNT];
         memset(seriesOn, 0, sizeof(seriesOn));
         memset(seriesHz, 0, sizeof(seriesHz));
-        auto addF0 = [&](float f0, bool eat) {
-            const int k = KeyFromHzTune(f0, p.tuneSemis);
-            if (k < MUSIC_LOW_FLOOR || k >= COUNT || seriesOn[k]) return;
-            seriesOn[k] = true;
-            seriesHz[k] = f0;
-            // 基音が測れているときだけ部分音を消す。無い基音の逆算で歌を消さない。
-            if (eat) consumeSeries(f0);
-        };
-        // C6(key 84) 以上は倍音がナイキストに届かない。3本必須のままだと高音は基音になれず、
-        // 2 分の 1・3 分の 1 の高さへ落ちるか消える。
-        auto hitsNeeded = [](int key) -> int {
-            if (key >= O5_HI) return 1;
-            if (key >= MID_END) return 2;
-            return 3;
-        };
-        if (prevActive && p.prevF0Hz) {
-            for (int key = MUSIC_LOW_FLOOR; key < COUNT; ++key) {
-                if (!prevActive[key] || p.prevF0Hz[key] <= 1.0f) continue;
-                float e = 0.0f, a1 = 0.0f;
-                int h = 0;
-                measureSeries(p.prevF0Hz[key], e, h, a1);
-                if (key >= O5_HI) {
-                    if (a1 <= 0.0f) continue;
+        memset(seriesA, 0, sizeof(seriesA));
+        nPicked = 0;
+        if (seriesMax > 1.0e-8f && np > 0) {
+            int ordA[PickScratch::PMAX];
+            const int nSort = (np < PickScratch::PMAX) ? np : PickScratch::PMAX;
+            for (int i = 0; i < nSort; ++i) ordA[i] = i;
+            for (int i = 1; i < nSort; ++i) {
+                const int v = ordA[i];
+                int j = i;
+                while (j > 0 && pa0[ordA[j - 1]] < pa0[v]) {
+                    ordA[j] = ordA[j - 1];
+                    --j;
                 }
-                else if (h < hitsNeeded(key) || e < totalE * 0.08f) continue;
-                if (a1 <= 0.0f && key >= BASS_END) continue;
-                addF0(p.prevF0Hz[key], a1 > 0.0f);
+                ordA[j] = v;
             }
-        }
-        for (int iter = 0; iter < 8; ++iter) {
-            float bestF = 0.0f, bestE = 0.0f, bestA1 = 0.0f;
-            int bestH = 0;
-            bool bestEat = false;
-            for (int i = 0; i < np; ++i) {
-                if (workAmp[i] <= 0.0f) continue;
-                for (int div = 1; div <= 3; ++div) {
-                    const float f = phz[i] / (float)div;
-                    const int k = KeyFromHzTune(f, p.tuneSemis);
-                    if (k < MUSIC_LOW_FLOOR || k >= COUNT || seriesOn[k]) continue;
-                    float e = 0.0f, a1 = 0.0f;
-                    int h = 0;
-                    measureSeries(f, e, h, a1);
-                    if (h < hitsNeeded(k)) continue;
-                    if (a1 <= 0.0f) {
-                        if (k >= BASS_END) continue;
-                        const int j2 = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f * 2.0f, 42.0f);
-                        const int j3 = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f * 3.0f, 42.0f);
-                        if (j2 < 0 || j3 < 0) continue;
+            // pa0 は取り込み時に sqrt 済みの振幅。帯域ごとの床はフレーム最大との比。
+            // 大きい山から採る。低音は 2 音まで。上のコードトーンを「下の倍音」の根拠にすると
+            // オクターブ下の誤ったベースが残るので、自分より小さい部分音だけを見る。
+            // 基音が無い音を下に作り足すことはしない。
+            const float floorR[4] = { 0.14f, 0.11f, 0.07f, 0.22f };
+            const int cap[4] = { 2, 10, 3, 1 };
+            int used[4] = {};
+            auto centsTo = [](float hz, float target) -> float {
+                if (hz <= 1.0f || target <= 1.0f) return 9999.0f;
+                return 1731.234049066756f * fabsf(logf(hz / target));
+            };
+            auto quietHits = [&](float hz, float amp) -> int {
+                int hit = 0;
+                const float mul[3] = { 2.0f, 3.0f, 4.0f };
+                const float tol[3] = { 32.0f, 36.0f, 40.0f };
+                for (int n = 0; n < 3; ++n) {
+                    float best = 0.0f;
+                    const float target = hz * mul[n];
+                    for (int j = 0; j < nSort; ++j) {
+                        if (centsTo(phz[j], target) < tol[n] && pa0[j] > best)
+                            best = pa0[j];
                     }
-                    if (e > bestE) { bestE = e; bestF = f; bestH = h; bestA1 = a1; bestEat = a1 > 0.0f; }
+                    if (best >= amp * 0.40f && best <= amp * 1.05f && best >= seriesMax * 0.08f)
+                        ++hit;
+                }
+                return hit;
+            };
+            int hits[PickScratch::PMAX];
+            float bandLin[4] = {};
+            for (int i = 0; i < nSort; ++i) {
+                hits[i] = quietHits(phz[i], pa0[i]);
+                const int k = KeyFromHzTune(phz[i], p.tuneSemis);
+                if (k < MUSIC_LOW_FLOOR || k > 100) continue;
+                const int b = (k < BASS_END) ? 0 : (k < MID_END) ? 1 : (k < EDGE_HI) ? 2 : 3;
+                if (pa0[i] > bandLin[b]) bandLin[b] = pa0[i];
+            }
+            for (int oi = 0; oi < nSort; ++oi) {
+                const int i = ordA[oi];
+                float hz = phz[i];
+                int k = KeyFromHzTune(hz, p.tuneSemis);
+                if (k < MUSIC_LOW_FLOOR || k > 100) continue;
+                int b = (k < BASS_END) ? 0 : (k < MID_END) ? 1 : (k < EDGE_HI) ? 2 : 3;
+                if (pa0[i] < seriesMax * floorR[b]) continue;
+                if (k >= 88 && pa0[i] < seriesMax * 0.18f) continue;
+                // 部分音の無い弱い低音は、上の和音のオクターブ下にできた影。
+                if (b == 0 && hits[i] < 1 && pa0[i] < seriesMax * 0.24f) continue;
+                if (used[b] >= cap[b]) continue;
+                if (prevActive && p.prevF0Hz) {
+                    for (int d = -1; d <= 1; ++d) {
+                        const int q = k + d;
+                        if (q < MUSIC_LOW_FLOOR || q >= COUNT || !prevActive[q]) continue;
+                        if (p.prevF0Hz[q] <= 1.0f) continue;
+                        if (centsTo(hz, p.prevF0Hz[q]) <= 55.0f) {
+                            k = q;
+                            hz = p.prevF0Hz[q];
+                            break;
+                        }
+                    }
+                }
+                if (seriesOn[k]) continue;
+                if (k > 100) continue;
+                b = (k < BASS_END) ? 0 : (k < MID_END) ? 1 : (k < EDGE_HI) ? 2 : 3;
+                if (used[b] >= cap[b]) continue;
+                // 1.7 半音以内に 1.35 倍より大きい山があるときは、割れた裾。
+                // 全音（2 半音）の和音は残す。
+                bool shoulder = false;
+                for (int j = 0; j < nSort && !shoulder; ++j) {
+                    if (!(pa0[j] > pa0[i] * 1.35f)) continue;
+                    if (centsTo(phz[j], phz[i]) <= 170.0f) shoulder = true;
+                }
+                if (shoulder) continue;
+                // 2.4〜3.5 半音隣に部分音のある山があるときは、根拠のない側を捨てる。
+                if (hits[i] < 1) {
+                    bool backed = false;
+                    for (int j = 0; j < nSort && !backed; ++j) {
+                        if (hits[j] < 1 || !(pa0[j] > pa0[i])) continue;
+                        const float gap = centsTo(phz[j], phz[i]);
+                        // 300 cent 付近は短 3 度の和音。そこから外れた中途半端な割れだけ捨てる。
+                        if (gap >= 240.0f && gap <= 350.0f && fabsf(gap - 300.0f) > 40.0f)
+                            backed = true;
+                    }
+                    if (backed) continue;
+                }
+                const int hit = hits[i];
+                bool clash = false;
+                for (int q = k - 3; q <= k + 3 && !clash; ++q) {
+                    if (q < 0 || q >= COUNT || !seriesOn[q]) continue;
+                    const int dk = (q > k) ? (q - k) : (k - q);
+                    if (dk <= 1) clash = true;
+                    else if (dk == 2 && hit < 1 && pa0[i] < seriesA[q] * 0.48f) clash = true;
+                    else if (dk == 3 && hit < 1 && pa0[i] < seriesA[q] * 0.45f) clash = true;
+                }
+                if (clash) continue;
+                bool ghost = false;
+                const bool bandChamp = bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.85f;
+                for (int lo = MUSIC_LOW_FLOOR; lo < k && !ghost; ++lo) {
+                    if (!seriesOn[lo]) continue;
+                    const float f0 = seriesHz[lo];
+                    const float aLo = seriesA[lo];
+                    if (f0 <= 1.0f || aLo < pa0[i]) continue;
+                    const float ratio = phz[i] / f0;
+                    const int n = (int)floorf(ratio + 0.5f);
+                    if (n < 2 || n > 5) continue;
+                    if (centsTo(phz[i], f0 * (float)n) > 40.0f) continue;
+                    if (n == 2 && centsTo(phz[i], f0 * 2.0f) < 22.0f && aLo > pa0[i] * 1.6f
+                        && pa0[i] < seriesMax * 0.18f) {
+                        ghost = true;
+                        break;
+                    }
+                    if (bandChamp) continue;
+                    float lim = 0.20f;
+                    if (n == 2) lim = 0.50f;
+                    else if (n == 3) lim = 0.36f;
+                    else if (n == 4) lim = 0.26f;
+                    if (hit >= 2 && n >= 3) continue;
+                    // 3 倍以上、または自分の部分音を持つオクターブで、フレームの 2 割を超える山は和音。
+                    if (n >= 3 && pa0[i] >= seriesMax * 0.15f) continue;
+                    if (n == 2 && hit >= 1 && pa0[i] >= seriesMax * 0.22f) continue;
+                    if (pa0[i] < aLo * lim && pa0[i] < seriesMax * 0.55f)
+                        ghost = true;
+                }
+                if (ghost) continue;
+                seriesOn[k] = true;
+                seriesHz[k] = hz;
+                seriesA[k] = pa0[i];
+                ++used[b];
+                ++nPicked;
+            }
+            // 出した低音が、一番大きい中音の 1 オクターブ下から外れていて、
+            // その位置に十分な山があるときだけ替える。山が無い音は作らない。
+            int loudMid = -1;
+            float loudA = 0.0f;
+            for (int key = BASS_END; key < MID_END; ++key) {
+                if (seriesOn[key] && seriesA[key] > loudA) {
+                    loudA = seriesA[key];
+                    loudMid = key;
                 }
             }
-            if (bestH < 1 || bestF <= 0.0f) break;
-            const int bestKey = KeyFromHzTune(bestF, p.tuneSemis);
-            // 系列の合計が全体の一部でも、基音自体がフレームの大きい山ならノート。
-            // 合計との比だけで切ると、一番大きい歌の山がベースの裾に負ける。
-            // 高音は部分音が少ないので、山そのものが残っていればノートにする。
-            if (bestKey >= O5_HI) {
-                if (bestA1 < seriesMax * 0.12f) break;
+            if (loudMid >= 0) {
+                const int target = loudMid - 12;
+                int best = -1;
+                float bestA = 0.0f, bestHz = 0.0f;
+                if (target >= MUSIC_LOW_FLOOR && target < BASS_END) {
+                    for (int i = 0; i < nSort; ++i) {
+                        const int key = KeyFromHzTune(phz[i], p.tuneSemis);
+                        if (abs(key - target) > 1) continue;
+                        if (centsTo(phz[i], PianoKey::KeyHz(target)) > 70.0f) continue;
+                        if (pa0[i] < seriesMax * 0.40f) continue;
+                        if (pa0[i] > bestA) {
+                            bestA = pa0[i];
+                            best = key;
+                            bestHz = phz[i];
+                        }
+                    }
+                }
+                int cur = -1;
+                for (int key = MUSIC_LOW_FLOOR; key < BASS_END; ++key) {
+                    if (seriesOn[key]) { cur = key; break; }
+                }
+                if (best >= 0 && (cur < 0 || abs(cur - target) > 2)) {
+                    if (cur >= 0) seriesOn[cur] = false;
+                    seriesOn[best] = true;
+                    seriesHz[best] = bestHz;
+                    seriesA[best] = bestA;
+                }
             }
-            else if (bestE < totalE * 0.12f && bestA1 < seriesMax * 0.35f) break;
-            addF0(bestF, bestEat);
-        }
-        for (int i = 0; i + 1 < COUNT; ++i) {
-            if (!seriesOn[i] || !seriesOn[i + 1]) continue;
-            const int ji = FindPeakInHzWindow(phz, pa0, np, hzOrd, seriesHz[i], 40.0f);
-            const int jj = FindPeakInHzWindow(phz, pa0, np, hzOrd, seriesHz[i + 1], 40.0f);
-            const float ai = (ji >= 0) ? pa0[ji] : 0.0f;
-            const float aj = (jj >= 0) ? pa0[jj] : 0.0f;
-            const int drop = (ai >= aj) ? (i + 1) : i;
-            seriesOn[drop] = false;
-            seriesHz[drop] = 0.0f;
+            // 低音は 1 音のまま。ただし選んだ低音の 1 オクターブ上にも
+            // 同じ帯域の山があるときは、そのオクターブも残す。
+            // 全音違いの 2 音目は足さない。
+            {
+                int bassNow = -1;
+                float bassA = 0.0f, bassHz = 0.0f;
+                for (int key = MUSIC_LOW_FLOOR; key < BASS_END; ++key) {
+                    if (seriesOn[key] && seriesA[key] > bassA) {
+                        bassA = seriesA[key];
+                        bassNow = key;
+                        bassHz = seriesHz[key];
+                    }
+                }
+                if (bassNow >= 0 && bassHz > 1.0f) {
+                    const int up = bassNow + 12;
+                    if (up < BASS_END) {
+                        int bestUp = -1;
+                        float bestUpA = 0.0f, bestUpHz = 0.0f;
+                        for (int i = 0; i < nSort; ++i) {
+                            const int key = KeyFromHzTune(phz[i], p.tuneSemis);
+                            if (abs(key - up) > 1) continue;
+                            if (centsTo(phz[i], bassHz * 2.0f) > 40.0f) continue;
+                            if (pa0[i] < seriesMax * 0.40f) continue;
+                            if (pa0[i] > bestUpA) {
+                                bestUpA = pa0[i];
+                                bestUp = key;
+                                bestUpHz = phz[i];
+                            }
+                        }
+                        if (bestUp >= 0 && !seriesOn[bestUp]) {
+                            seriesOn[bestUp] = true;
+                            seriesHz[bestUp] = bestUpHz;
+                            seriesA[bestUp] = bestUpA;
+                        }
+                    }
+                }
+            }
+            // ちょうど 1 オクターブ上で、下も同じ程度に残っている山は倍音。
+            // フレーム最大の半分を超える上の音は和音の構成音として残す。
+            for (int hi = 60; hi <= 100; ++hi) {
+                if (!seriesOn[hi]) continue;
+                const int lo = hi - 12;
+                if (lo < MUSIC_LOW_FLOOR || !seriesOn[lo]) continue;
+                if (centsTo(seriesHz[hi], seriesHz[lo] * 2.0f) > 18.0f) continue;
+                if (seriesA[hi] >= seriesMax * 0.22f) continue;
+                if (seriesA[lo] > seriesA[hi] * 0.45f) seriesOn[hi] = false;
+            }
+            // 全音（2 半音）は和音の構成音。隣だからという理由では消さない。
+            // 半音隣は受け付け側で既に 1 音に畳んである。
+            // 長 3 度は和音の下の音。弱いという理由では消さない。
+            // ベースの 4 倍で、かつ 5 半音下にも音がある弱い山。
+            for (int key = 60; key < MID_END; ++key) {
+                if (!seriesOn[key] || seriesA[key] >= seriesMax * 0.40f) continue;
+                const int q = key - 5;
+                if (q < 0 || !seriesOn[q] || !(seriesA[key] < seriesA[q] * 0.72f)) continue;
+                for (int lo = MUSIC_LOW_FLOOR; lo < BASS_END && seriesOn[key]; ++lo) {
+                    if (!seriesOn[lo] || seriesHz[lo] <= 1.0f) continue;
+                    if (seriesA[lo] < seriesA[key] * 2.0f) continue;
+                    if (centsTo(seriesHz[key], seriesHz[lo] * 4.0f) < 80.0f)
+                        seriesOn[key] = false;
+                }
+            }
+            for (int key = 96; key <= 100; ++key) {
+                if (seriesOn[key] && seriesA[key] < seriesMax * 0.50f)
+                    seriesOn[key] = false;
+            }
+            for (int key = 72; key <= 100; ++key) {
+                if (!seriesOn[key]) continue;
+                const int b = (key < EDGE_HI) ? 2 : 3;
+                if (seriesA[key] < seriesMax * 0.12f && bandLin[b] > 0.0f
+                    && seriesA[key] < bandLin[b] * 0.40f)
+                    seriesOn[key] = false;
+            }
         }
         nPicked = 0;
         for (int i = 0; i < COUNT; ++i) {
@@ -1045,7 +1192,7 @@ namespace PianoRoll108
                 continue;
             }
             outPicked[i] = true;
-            outOwnPow[i] = blend[i];
+            outOwnPow[i] = blend[i] > seriesA[i] ? blend[i] : seriesA[i];
             if (p.outF0Hz) p.outF0Hz[i] = seriesHz[i];
             ++nPicked;
         }

@@ -339,7 +339,38 @@ enum ClassId {
 	C_ALCHEMIST, C_ARCHALCHEMIST,
 	C_PLAYER_COUNT
 };
-enum { TAC_LV_MAX = 9999, TAC_ENEMY_LV_MAX = 99999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
+enum { TAC_LV_MAX = 9999, TAC_ENEMY_LV_MAX = 99999, TAC_STAGE_MAX = 9999, TAC_STAGE_EX = 10000, TAC_STAGE_ABS = 999999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
+// 表示上限。最初999、1000マス目で3000、3000/6000クリアで6000/9999、9999の先は1ずつ。10000超は EX。
+inline int StageShownMax(int cleared)
+{
+	if (cleared < 0) cleared = 0;
+	if (cleared < 999) return 999;
+	if (cleared < 3000) return 3000;
+	if (cleared < 6000) return 6000;
+	if (cleared < 9999) return 9999;
+	int n = cleared + 1;
+	if (n > TAC_STAGE_ABS) n = TAC_STAGE_ABS;
+	return n;
+}
+inline int StagePlayMax(int cleared)
+{
+	int shown = StageShownMax(cleared);
+	int next = cleared + 1;
+	if (next < 1) next = 1;
+	if (next > shown) next = shown;
+	return next;
+}
+// 敵一覧の出現表示の先。最初は999、広がったあとはクリアに合わせて伸びる。
+inline int StageFoeViewHi(int cleared)
+{
+	int shown = StageShownMax(cleared);
+	if (cleared < 999) return 999;
+	int hi = StagePlayMax(cleared);
+	if (hi > shown) hi = shown;
+	return hi;
+}
+void StageText(int stage, wchar_t* out, int cap);
+void StageCaption(int stage, wchar_t* out, int cap);
 // ファイター・シーフの3次職。既存の順位 ID を動かさないため、ランク枠の後ろに置く。
 enum { C_GLADIATOR = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N, C_SHADOW = C_GLADIATOR + 1 };
 // 公開一覧の固有職。X of Y は使わない。ID は既存ランクの後ろ。
@@ -577,6 +608,7 @@ struct MonsterDef {
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
+const wchar_t* MonsterLabelAt(int m, int lang);
 int MonsterGait(int monster);
 int MonsterCatalog(int* out, int cap);
 bool MonsterKnown(int id, int stageCleared);
@@ -597,6 +629,7 @@ struct Unit {
 	int rosterIdx;       // 味方: ロースター番号
 	int monster;         // 敵: MonsterId
 	int boss;
+	int lucky;           // 1=ラッキー。ボスではない雑魚。経験値3倍
 	CharData ch;         // 戦闘中の能力（敵も同形式）
 	int hp, mp;
 	int x, z;
@@ -635,6 +668,10 @@ inline int UnitSpan(const Unit& u)
 	if (s < 1) s = 1;
 	if (s > 3) s = 3;
 	return s;
+}
+inline int UnitIsLucky(const Unit& u)
+{
+	return u.lucky && !u.boss && u.team == TEAM_ENEMY;
 }
 int UnitStat(const Unit& u, int s);     // バフ込み
 float AilmentBreak(const Unit& d, int el); // 状態と属性の相性。弱点なら 2
@@ -928,7 +965,7 @@ struct SaveData {
 	int reserved[4];
 	int partyCap;              // 5..15。店の編成拡張券。11体目以降はステージ制限
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
-	int spare[32];             // version 7。[0]=1自動 0固定 [1]=GPU名ハッシュ [2]=自動の現在段 [3]=自動の上限
+	int spare[32];             // version 7。[0]=1自動 0固定 [1]=GPU名ハッシュ [2]=自動の現在段 [3]=自動の上限 [4]=進行速度+1 [5]=カットシーン速度+1
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
 // version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。
@@ -937,11 +974,60 @@ struct SaveData {
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
-// showGrid の空き。bit9 が立つまで敵の頭は普通、同期は 1/60、画面はウィンドウ。
+enum { TAC_HZ_N = 22, TAC_HZ_MAX = 540 };
+inline const int* TacHzList()
+{
+	static const int hz[TAC_HZ_N] = {
+		30, 50, 60, 72, 75, 85, 90, 100, 120, 144,
+		160, 165, 170, 175, 180, 200, 240, 280, 300, 360, 480, 540
+	};
+	return hz;
+}
+inline int TacHzAt(int i)
+{
+	if (i < 0) i = 0;
+	if (i >= TAC_HZ_N) i = TAC_HZ_N - 1;
+	return TacHzList()[i];
+}
+inline int TacHzIndexOf(int hz)
+{
+	const int* h = TacHzList();
+	int best = 0;
+	for (int i = 0; i < TAC_HZ_N; i++) {
+		if (h[i] == hz) return i;
+		if (h[i] < hz) best = i;
+	}
+	return best;
+}
+inline int TacHzDefaultI() { return TacHzIndexOf(240); }
+inline void TacPackHz(SaveData& s, int idx)
+{
+	if (idx < 0) idx = 0;
+	if (idx >= TAC_HZ_N) idx = TAC_HZ_N - 1;
+	s.showGrid = (s.showGrid & ~(31 << 12)) | (idx << 12) | (1 << 11);
+}
+inline int TacHzFromOldBits(const SaveData& s)
+{
+	int v = (s.showGrid >> 5) & 7;
+	if (v > 4) v = 1;
+	static const int oldHz[5] = { 30, 60, 120, 144, 240 };
+	return TacHzIndexOf(oldHz[v]);
+}
+inline void TacMigrateHz(SaveData& s)
+{
+	if (s.showGrid & (1 << 11)) return;
+	TacPackHz(s, (s.showGrid & (1 << 9)) ? TacHzFromOldBits(s) : TacHzDefaultI());
+}
+// showGrid の空き。bit9 が立つまで敵の頭は普通、同期は 1/240、画面はウィンドウ。
+// bit11 以降が新しい間隔表。旧 bit5-7 の 5 段は読込時に移す。
 inline void TacEnsureOpt(SaveData& s)
 {
-	if (s.showGrid & (1 << 9)) return;
-	s.showGrid = (s.showGrid & 3) | (2 << 2) | (1 << 5) | (1 << 9);
+	if ((s.showGrid & (1 << 9)) == 0) {
+		s.showGrid = (s.showGrid & 3) | (2 << 2) | (1 << 9);
+		TacPackHz(s, TacHzDefaultI());
+		return;
+	}
+	TacMigrateHz(s);
 }
 inline int TacAi(const SaveData& s)
 {
@@ -958,21 +1044,24 @@ inline void TacSetAi(SaveData& s, int a)
 }
 inline int TacVsync(const SaveData& s)
 {
-	if ((s.showGrid & (1 << 9)) == 0) return 1;
-	int v = (s.showGrid >> 5) & 7;
-	return (v > 4) ? 1 : v;
+	if (s.showGrid & (1 << 11)) {
+		int v = (s.showGrid >> 12) & 31;
+		if (v >= TAC_HZ_N) return TacHzDefaultI();
+		return v;
+	}
+	if ((s.showGrid & (1 << 9)) == 0) return TacHzDefaultI();
+	return TacHzFromOldBits(s);
 }
 inline void TacSetVsync(SaveData& s, int v)
 {
 	TacEnsureOpt(s);
-	v %= 5;
-	if (v < 0) v += 5;
-	s.showGrid = (s.showGrid & ~(7 << 5)) | (v << 5);
+	v %= TAC_HZ_N;
+	if (v < 0) v += TAC_HZ_N;
+	TacPackHz(s, v);
 }
 inline int TacVsyncHz(const SaveData& s)
 {
-	static const int hz[5] = { 30, 60, 120, 144, 240 };
-	return hz[TacVsync(s)];
+	return TacHzAt(TacVsync(s));
 }
 inline int TacWinMode(const SaveData& s) { return ((s.showGrid & (1 << 9)) != 0 && (s.showGrid & (1 << 8)) != 0) ? 1 : 0; }
 inline void TacSetWinMode(SaveData& s, int m)
@@ -1012,6 +1101,43 @@ bool SaveWrite(const SaveData& s);
 int  TacQualitySuggestFromGpu();
 void TacQualityEnsureAutoDefault(SaveData& s);
 inline void TacQualityUserLock(SaveData& s) { s.spare[0] = 0; }
+// 進行速度。0瞬時 1速い 2やや速い 3普通 4やや遅い 5遅い。未設定は普通。戻りは待ち時間の倍率（普通が 1）。
+inline int TacPace(const SaveData& s)
+{
+	int v = s.spare[4];
+	if (v < 1 || v > 6) return 3;
+	return v - 1;
+}
+inline void TacSetPace(SaveData& s, int v)
+{
+	v %= 6;
+	if (v < 0) v += 6;
+	s.spare[4] = v + 1;
+}
+inline float TacPaceTime(const SaveData& s)
+{
+	static const float k[6] = { 0.08f, 0.50f, 0.72f, 1.f, 1.45f, 2.05f };
+	return k[TacPace(s)];
+}
+// カットシーン速度。戦闘演出が短縮のときは掛けない（1 のまま）。
+inline int TacCutPace(const SaveData& s)
+{
+	int v = s.spare[5];
+	if (v < 1 || v > 6) return 3;
+	return v - 1;
+}
+inline void TacSetCutPace(SaveData& s, int v)
+{
+	v %= 6;
+	if (v < 0) v += 6;
+	s.spare[5] = v + 1;
+}
+inline float TacCutTime(const SaveData& s)
+{
+	if (s.battleAnim) return 1.f;
+	static const float k[6] = { 0.08f, 0.50f, 0.72f, 1.f, 1.45f, 2.05f };
+	return k[TacCutPace(s)];
+}
 
 enum { GEAR_STASH = 12 };
 struct GearDef {

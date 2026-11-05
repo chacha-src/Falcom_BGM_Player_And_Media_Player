@@ -4,6 +4,7 @@
 #include "DatArchive.h"
 #include <math.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <immintrin.h>
 
 namespace otac {
@@ -33,6 +34,7 @@ enum {
 	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1, ID_BT_CRAFT2, ID_BT_CRAFT3,
 	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT, ID_BT_M_ZOOM, ID_BT_M_SLOT = 910, ID_BT_M_GAME = 911,
 	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID, ID_BT_OPT_THREAT, ID_BT_OPT_AI, ID_BT_OPT_SYNC, ID_BT_OPT_WIN, ID_BT_OPT_FPS,
+	ID_BT_OPT_PACE = 928, ID_BT_OPT_CUT,
 	ID_BT_IT0 = 960, ID_BT_ITT0 = 980,
 	ID_BT_PROMO0 = 740, ID_BT_PROMO_LATER = 748,
 	ID_BT_EQ0 = 750, ID_BT_EQNONE = 754, ID_BT_EQROW = 755, ID_BT_PAS0 = 762, ID_BT_PAS1, ID_BT_EQPREV = 764, ID_BT_EQNEXT = 765, ID_BT_BEAD2 = 766, ID_BT_BEAD3,
@@ -233,7 +235,48 @@ enum { SNAP_N = 4 };
 static TacSnap g_snapPool[SNAP_N];
 static TacSnap g_snapLoad;
 
-// 層を足す前の中断。マスは6バイト、占有は1層。ヘッダとユニットは今と同じ。
+// ラッキーフラグを足す前のユニット。途中セーブ／オートセーブの持ち上げ用。
+struct UnitPreLucky {
+	int alive;
+	int team;
+	int rosterIdx;
+	int monster;
+	int boss;
+	CharData ch;
+	int hp, mp;
+	int x, z;
+	int span;
+	int ct;
+	float face;
+	int buffDef, buffAgi, buffAtk, poison, slow, defDown;
+	int sleep, confuse, stun;
+	int freeze, burn, bleed, blind, silence;
+	int mulTurns;
+	int alert;
+	int rush;
+	int deck;
+	int grp;
+	int expGained;
+	int levelsGained;
+	int skillLearned[4];
+	int nLearned;
+	int killed;
+	int cp;
+	int craftEq[4];
+	int accEq[2];
+	int pasEq[2];
+	int pasUsed;
+	float px, py, pz;
+	float hpShow;
+	float dissolve;
+	float flash;
+	float hover;
+};
+static_assert(sizeof(Unit) == sizeof(UnitPreLucky) + sizeof(int), "lucky added after boss");
+static_assert(offsetof(Unit, boss) == offsetof(UnitPreLucky, boss), "unit prefix matches");
+static_assert(offsetof(Unit, ch) == offsetof(UnitPreLucky, ch) + sizeof(int), "lucky sits before ch");
+
+// 層を足す前の中断。マスは6バイト、占有は1層。ユニットはラッキー追加前。
 struct Cell6 {
 	BYTE t, h, prop, var, gimm, gparam;
 };
@@ -250,7 +293,7 @@ struct Map6 {
 };
 struct Battle6 {
 	Map6 map;
-	Unit u[MAX_UNITS];
+	UnitPreLucky u[MAX_UNITS];
 	int nUnits;
 	int stage;
 	int turnCount;
@@ -279,10 +322,48 @@ struct TacSnap6 {
 	AiPlan ai;
 	Battle6 b;
 };
+// 今の地図・層のまま、ユニットだけラッキー追加前。直近の途中セーブ／オートセーブ。
+struct BattlePreLucky {
+	Map map;
+	UnitPreLucky u[MAX_UNITS];
+	int nUnits;
+	int stage;
+	int turnCount;
+	int occ[LAY_N][MAPN][MAPN];
+	int weather;
+	int stampede;
+	int stampedeLeft;
+	int stampedeLine;
+	int stampedeShow;
+	int bgmWin;
+	int sweep;
+	int lastActTeam;
+};
+struct TacSnapPreLucky {
+	DWORD magic;
+	int version;
+	int kind;
+	int stage;
+	DWORD rng;
+	int cur, turnOpen, phase, moved, x0, z0, deck0, cx, cz;
+	float face0;
+	float camYaw, camPitch, camDist, camX, camY, camZ;
+	int itemN[8];
+	int resultN, resultLv0[MAX_PARTY], resultExp[MAX_PARTY], resultRoster[MAX_PARTY];
+	int expGain[MAX_UNITS];
+	int bossDown;
+	AiPlan ai;
+	BattlePreLucky b;
+};
 static TacSnap6 g_snapOld;
+static TacSnapPreLucky g_snapMid;
 static_assert(sizeof(Cell) == 15, "cell is 15 bytes");
 static_assert(sizeof(Map6) % 4 == 0, "old map stays aligned");
-static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 9 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int) + sizeof(int), "snap grew by cells, layers, lastActTeam");
+static_assert(sizeof(Battle) == sizeof(BattlePreLucky) + MAX_UNITS * sizeof(int), "battle grew by lucky");
+static_assert(sizeof(TacSnap) == sizeof(TacSnapPreLucky) + MAX_UNITS * sizeof(int), "snap grew by lucky");
+static_assert(sizeof(TacSnap) == sizeof(TacSnap6) + 9 * MAPN * MAPN + (LAY_N - 1) * MAPN * MAPN * sizeof(int) + sizeof(int) + MAX_UNITS * sizeof(int), "snap grew by cells, layers, lastActTeam, lucky");
+static_assert(offsetof(TacSnap, b) == offsetof(TacSnapPreLucky, b), "snap header matches");
+static_assert(offsetof(TacSnap, b) == offsetof(TacSnap6, b), "old snap header matches");
 static int g_snapUse[SNAP_N];
 static TacSnap* g_qMid = NULL;
 static TacSnap* g_qAuto = NULL;
@@ -408,8 +489,16 @@ static int ProbeLeaf(const TCHAR* leaf)
 	n += fread(&stage, 1, sizeof(stage), fp);
 	fclose(fp);
 	if (n < sizeof(magic) + sizeof(ver) * 3 || magic != kSnapMagic || ver != 1) return 0;
-	if (sz != (long)sizeof(TacSnap) && sz != (long)sizeof(TacSnap6)) return 0;
+	if (sz != (long)sizeof(TacSnap) && sz != (long)sizeof(TacSnapPreLucky) && sz != (long)sizeof(TacSnap6)) return 0;
 	return stage > 0 ? stage : 0;
+}
+
+static void LiftUnit(Unit& d, const UnitPreLucky& s)
+{
+	memset(&d, 0, sizeof(d));
+	memcpy(&d, &s, offsetof(Unit, lucky));
+	d.lucky = 0;
+	memcpy(&d.ch, &s.ch, sizeof(UnitPreLucky) - offsetof(UnitPreLucky, ch));
 }
 
 static void SnapLift(TacSnap& d, const TacSnap6& s)
@@ -455,7 +544,7 @@ static void SnapLift(TacSnap& d, const TacSnap6& s)
 	d.b.map.nE = s.b.map.nE;
 	memcpy(d.b.map.grp, s.b.map.grp, sizeof(d.b.map.grp));
 	d.b.map.nGrp = s.b.map.nGrp;
-	memcpy(d.b.u, s.b.u, sizeof(d.b.u));
+	for (int i = 0; i < MAX_UNITS; i++) LiftUnit(d.b.u[i], s.b.u[i]);
 	d.b.nUnits = s.b.nUnits;
 	d.b.stage = s.b.stage;
 	d.b.turnCount = s.b.turnCount;
@@ -467,6 +556,26 @@ static void SnapLift(TacSnap& d, const TacSnap6& s)
 	d.b.bgmWin = s.b.bgmWin;
 	d.b.sweep = s.b.sweep;
 	d.b.lastActTeam = -1;
+	d.b.RebuildOcc();
+}
+
+static void SnapLiftPreLucky(TacSnap& d, const TacSnapPreLucky& s)
+{
+	memset(&d, 0, sizeof(d));
+	memcpy(&d, &s, offsetof(TacSnap, b));
+	d.b.map = s.b.map;
+	for (int i = 0; i < MAX_UNITS; i++) LiftUnit(d.b.u[i], s.b.u[i]);
+	d.b.nUnits = s.b.nUnits;
+	d.b.stage = s.b.stage;
+	d.b.turnCount = s.b.turnCount;
+	d.b.weather = s.b.weather;
+	d.b.stampede = s.b.stampede;
+	d.b.stampedeLeft = s.b.stampedeLeft;
+	d.b.stampedeLine = s.b.stampedeLine;
+	d.b.stampedeShow = s.b.stampedeShow;
+	d.b.bgmWin = s.b.bgmWin;
+	d.b.sweep = s.b.sweep;
+	d.b.lastActTeam = s.b.lastActTeam;
 	d.b.RebuildOcc();
 }
 
@@ -552,6 +661,10 @@ void Game::ResumeBattle(int kind)
 		fseek(fp, 0, SEEK_SET);
 		if (sz == (long)sizeof(TacSnap))
 			ok = fread(s, 1, sizeof(*s), fp) == sizeof(*s);
+		else if (sz == (long)sizeof(TacSnapPreLucky)) {
+			ok = fread(&g_snapMid, 1, sizeof(g_snapMid), fp) == sizeof(g_snapMid);
+			if (ok) SnapLiftPreLucky(*s, g_snapMid);
+		}
 		else if (sz == (long)sizeof(TacSnap6)) {
 			ok = fread(&g_snapOld, 1, sizeof(g_snapOld), fp) == sizeof(g_snapOld);
 			if (ok) SnapLift(*s, g_snapOld);
@@ -634,7 +747,7 @@ void Game::ResumeBattle(int kind)
 	int loadedKind = kind;
 	DropSuspend(loadedKind);
 	wchar_t t[64];
-	swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), m_battleStage);
+	StageCaption(m_battleStage, t, 64);
 	AddBanner(t, TT(loadedKind == 1 ? TX_SV_FROMMID : TX_SV_FROMAUTO), RGBA8(255, 226, 150), 0, 2.f, MSG_FACE);
 }
 
@@ -719,7 +832,7 @@ void Game::StartBattle(int stage)
 		n++;
 	}
 	if (!n) return;
-	stage = Clampi(stage, 1, TAC_STAGE_MAX);
+	stage = Clampi(stage, 1, TAC_STAGE_ABS);
 	RollMapSeed(stage, FALSE);
 	DWORD seed = m_mapSeed;
 	SetupBattle(m_b, stage, seed, chars, idx, n, m_themeSel);
@@ -836,12 +949,14 @@ void Game::StartBattle(int stage)
 	else if (m_b.stampede) { title = TX_BT_STAMPEDE; titleCol = RGBA8(255, 150, 70); }
 	if (title) {
 		swprintf_s(t, L"%s", TT(title));
+		wchar_t sn[48];
+		StageCaption(stage, sn, 48);
 		if (m_b.stampede && title != TX_BT_STAMPEDE)
-			swprintf_s(sub, L"%s %d  —  %s  —  %s", TT(TX_BT_STAGE), stage, TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_STAMPEDE));
+			swprintf_s(sub, L"%s  —  %s  —  %s", sn, TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_STAMPEDE));
 		else
-			swprintf_s(sub, L"%s %d  —  %s", TT(TX_BT_STAGE), stage, TT(ThemeNameTx(m_b.map.theme)));
+			swprintf_s(sub, L"%s  —  %s", sn, TT(ThemeNameTx(m_b.map.theme)));
 	} else {
-		swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), stage);
+		StageCaption(stage, t, 64);
 		swprintf_s(sub, L"%s  —  %s", TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_GOAL));
 	}
 	AddBanner(t, sub, titleCol, 0, title ? 6.2f : 2.4f, MSG_DEPTH);
@@ -922,7 +1037,7 @@ void Game::EndBattle(int victory)
 	}
 	if (victory) {
 		m_save.stageCleared = max(m_save.stageCleared, m_battleStage);
-		m_save.stageSel = Clampi(m_battleStage + 1, 1, min(TAC_STAGE_MAX, m_save.stageCleared + 1));
+		m_save.stageSel = Clampi(m_battleStage + 1, 1, StagePlayMax(m_save.stageCleared));
 		DropSuspend(0);
 	}
 	Persist();
@@ -2533,7 +2648,7 @@ void Game::BattleClick(int x, int y)
 		return;
 	}
 	if (m_statOpen) return;
-	if (m_phase == PH_INTRO) { m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f); return; }
+	if (m_phase == PH_INTRO) { m_phaseT = max(m_phaseT, (m_surveyN >= 2 ? kIntroSweep : 0.35f) * TacPaceTime(m_save)); return; }
 	if (m_phase != PH_P_MOVE && m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET && m_phase != PH_P_SHOVE) return;
 	// ログも手番欄も、その下の移動先をクリックできるようにする。ボタンは先にクリックを消費する。
 	int cx, cz;
@@ -2618,7 +2733,7 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_LEVELUP:
-		if (!m_promoAsk && m_lvqCur == 0 && m_lvT < 2.6f) break;
+		if (!m_promoAsk && m_lvqCur == 0 && m_lvT < 2.6f * TacPaceTime(m_save)) break;
 		AdvanceLevelUp();
 		sounded = 1;
 		break;
@@ -2662,7 +2777,9 @@ void Game::UpdateMove(float dt)
 	int ui = m_moveUnit;
 	Unit& u = m_b.u[ui];
 	BOOL fly = UnitMoveType(u) == MV_FLY;
-	float speed = (m_save.battleAnim ? 5.2f : 2.6f) * 1.5f;
+	float pace = TacPaceTime(m_save);
+	if (pace < 0.05f) pace = 0.05f;
+	float speed = 2.6f * 1.5f / pace;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	{
@@ -3368,6 +3485,11 @@ static int CutClipFor(const Unit& u, int skill, int variant)
 
 void Game::UpdateSeq(float dt)
 {
+	{
+		float mul = m_seqCut ? TacCutTime(m_save) : TacPaceTime(m_save);
+		if (mul < 0.05f) mul = 0.05f;
+		dt /= mul;
+	}
 	if (m_seqCut) {
 		m_cutStageT += dt;
 		if (m_cutStage == 0) {
@@ -4085,7 +4207,7 @@ void Game::UpdateCamera(float dt)
 		}
 	}
 	if (m_phase == PH_INTRO && m_surveyN >= 2) {
-		float f = Smooth01(Clampf(m_phaseT / kIntroSweep, 0, 1));
+		float f = Smooth01(Clampf(m_phaseT / (kIntroSweep * TacPaceTime(m_save)), 0, 1));
 		focus = Lerp(m_surveyPt[0], m_surveyPt[1], f);
 		m_camDistGoal = Lerpf(42.f, 18.f, f);
 	}
@@ -4095,11 +4217,15 @@ void Game::UpdateCamera(float dt)
 	focus.x = Clampf(focus.x, 0, (float)MAPN);
 	focus.z = Clampf(focus.z, 0, (float)MAPN);
 	float sp = m_save.camSpeed <= 0 ? .55f : (m_save.camSpeed >= 2 ? 1.75f : 1.f);
-	float k = (m_phase == PH_INTRO) ? 1.f : Clampf(dt * 4.5f * sp, 0, 1);
+	float camPace = 1.f;
+	if (m_phase == PH_MOVING || m_phase == PH_E_MOVE || m_phase == PH_E_SHOW) camPace = TacPaceTime(m_save);
+	else if (m_phase == PH_ACTION) camPace = m_seqCut ? TacCutTime(m_save) : TacPaceTime(m_save);
+	if (camPace < 0.05f) camPace = 0.05f;
+	float k = (m_phase == PH_INTRO) ? 1.f : Clampf(dt * 4.5f * sp / camPace, 0, 1);
 	m_camTarget = Lerp(m_camTarget, focus, k);
-	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f * sp, 0, 1));
+	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f * sp / camPace, 0, 1));
 	if (m_zoomHold) ApplyZoomHold(dt);
-	else m_camDist = Lerpf(m_camDist, m_camDistGoal, Clampf(dt * (m_phase == PH_INTRO ? 6.f : 5.f), 0, 1));
+	else m_camDist = Lerpf(m_camDist, m_camDistGoal, Clampf(dt * (m_phase == PH_INTRO ? 6.f : 5.f) / camPace, 0, 1));
 }
 
 void Game::UpdateBattle(float dt)
@@ -4109,16 +4235,25 @@ void Game::UpdateBattle(float dt)
 	if (m_demo && (m_stashFull || m_shopFit)) { m_stashFull = 0; m_shopFit = 0; }
 	if (m_stashFull) { UpdateUnitsVisual(dt); return; }
 	m_phaseT += dt;
-	UpdateUnitsVisual(dt);
+	{
+		float vis = dt;
+		float mul = 1.f;
+		if (m_phase == PH_ACTION) mul = m_seqCut ? TacCutTime(m_save) : TacPaceTime(m_save);
+		else if (m_phase == PH_MOVING || m_phase == PH_E_MOVE) mul = TacPaceTime(m_save);
+		if (mul < 0.05f) mul = 0.05f;
+		if (mul != 1.f) vis = dt / mul;
+		UpdateUnitsVisual(vis);
+	}
 	switch (m_phase) {
 	case PH_INTRO:
-		if (m_phaseT > (m_surveyN >= 2 ? kIntroSweep + 0.7f : 0.35f)) { m_phase = PH_NEXT; m_phaseT = 0; }
+		if (m_phaseT > (m_surveyN >= 2 ? kIntroSweep + 0.7f : 0.35f) * TacPaceTime(m_save)) { m_phase = PH_NEXT; m_phaseT = 0; }
 		break;
 	case PH_NEXT: BeginTurn(); break;
 	case PH_MOVING: case PH_E_MOVE: UpdateMove(dt); break;
 	case PH_ACTION: UpdateSeq(dt); break;
 	case PH_E_SHOW: {
-		float wait = m_save.battleAnim ? .45f : .85f;
+		float wait = 0.85f * TacPaceTime(m_save);
+		if (wait < 0.04f) wait = 0.04f;
 		if (m_cur >= 0 && m_cur < m_b.nUnits) {
 			const Unit& u = m_b.u[m_cur];
 			float f = Clampf(m_phaseT / max(0.05f, wait), 0.f, 1.f);
@@ -4153,7 +4288,7 @@ void Game::UpdateBattle(float dt)
 		}
 	} break;
 	case PH_END:
-		if (m_phaseT > (m_b.stampedeShow ? 1.25f : .22f)) {
+		if (m_phaseT > (m_b.stampedeShow ? 1.25f : .22f) * TacPaceTime(m_save)) {
 			m_b.stampedeShow = 0;
 			m_phase = PH_NEXT;
 			m_phaseT = 0;
@@ -4161,14 +4296,14 @@ void Game::UpdateBattle(float dt)
 		break;
 	case PH_LEVELUP:
 		m_lvT += dt;
-		if (!m_promoAsk && m_lvqCur == 0 && m_lvqN > 0 && m_lvT - dt < 2.6f && m_lvT >= 2.6f) {
+		if (!m_promoAsk && m_lvqCur == 0 && m_lvqN > 0 && m_lvT - dt < 2.6f * TacPaceTime(m_save) && m_lvT >= 2.6f * TacPaceTime(m_save)) {
 			TacSfx(TS_LEVEL);
 			if (m_lvq[0].nLearned > 0) TacSfx(TS_LEARN);
 		}
 		break;
 	case PH_OVER:
 		m_overT += dt;
-		if (m_overT > 3.f) EndBattle(m_victory);
+		if (m_overT > 3.f * TacPaceTime(m_save)) EndBattle(m_victory);
 		break;
 	default: break;
 	}
@@ -4182,6 +4317,7 @@ void Game::UpdateBattle(float dt)
 // 画面に床・水面・壁のどれかがある。奈落だけのときは反射を描かない。
 BOOL Game::ViewShowsGround() const
 {
+	if (m_r.GroundChunkVisible()) return TRUE;
 	const Map& map = m_b.map;
 	for (int z = 0; z < MAPN; z++) {
 		for (int x = 0; x < MAPN; x++) {
@@ -4450,6 +4586,7 @@ void Game::DrawBattle3D()
 		float pulse = active ? .8f + .2f * sinf(m_time * 5.f) : .5f;
 		DWORD tc = u.team == TEAM_PLAYER ? RGBA8(90, 170, 255, (int)(255 * pulse * (active ? 1.f : .55f))) : RGBA8(255, 80, 70, (int)(255 * pulse * (active ? 1.f : .55f)));
 		if (u.boss) tc = RGBA8(255, 200, 60, (int)(255 * pulse * (active ? 1.f : .7f)));
+		else if (UnitIsLucky(u)) tc = RGBA8(70, 220, 255, (int)(255 * pulse * (active ? 1.f : .7f)));
 		if (!u.alive) tc = RGBA8(170, 176, 190, 120);
 		BOOL ghost = offLayer(i);
 		if (ghost) {
@@ -4543,6 +4680,14 @@ void Game::DrawBattle3D()
 				if (ghost) cp.tint = 0xA0FFFFFF;
 				V3 hp = drawPos + v3(0, m_act[i].height + .22f + sinf(m_time * 2.f) * .04f, 0);
 				m_r.DrawStatic(m_lib.crown, MMul(MMul(MScale(.9f, .9f, .9f), MRotY(m_time)), MTrans(hp.x, hp.y, hp.z)), cp);
+			} else if (UnitIsLucky(u) && u.alive) {
+				DrawParams lp;
+				lp.noTess = 1;
+				lp.emissive = 1.15f;
+				lp.outline = .006f;
+				lp.tint = ghost ? RGBA8(80, 230, 255, 160) : RGBA8(80, 230, 255);
+				V3 hp = drawPos + v3(0, m_act[i].height + .18f + sinf(m_time * 3.f) * .04f, 0);
+				m_r.DrawStatic(m_lib.orb, MMul(MMul(MScale(.2f, .2f, .2f), MRotY(m_time * 2.4f)), MTrans(hp.x, hp.y, hp.z)), lp);
 			}
 			if (ghost) m_r.SetDepthTest(TRUE);
 		}
@@ -5602,6 +5747,34 @@ static int WrapSpaceLines(Renderer& r, const wchar_t* src, float maxW, float px,
 	return nLine;
 }
 
+static DWORD FoeInk(const Unit& u)
+{
+	if (UnitIsLucky(u)) return RGBA8(70, 220, 255);
+	if (u.boss) return RGBA8(255, 200, 60);
+	return RGBA8(255, 100, 90);
+}
+static DWORD FoeBarCol(const Unit& u)
+{
+	if (UnitIsLucky(u)) return RGBA8(50, 220, 255);
+	if (u.boss) return RGBA8(255, 200, 70);
+	return RGBA8(240, 70, 60);
+}
+static DWORD HpFillCol(const Unit& u, float frac)
+{
+	if (UnitIsLucky(u)) {
+		if (frac > .5f) return RGBA8(80, 235, 255);
+		if (frac > .25f) return RGBA8(70, 170, 230);
+		return RGBA8(40, 90, 190);
+	}
+	if (frac > .5f) return RGBA8(120, 240, 120);
+	if (frac > .25f) return RGBA8(240, 210, 80);
+	return RGBA8(255, 90, 70);
+}
+static DWORD HpBackCol(const Unit& u)
+{
+	return UnitIsLucky(u) ? RGBA8(16, 48, 72) : RGBA8(40, 120, 50);
+}
+
 // ============================================================ HUD（戦闘）
 void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, float* rx, float* ry, float* rw, float* rh)
 {
@@ -5651,12 +5824,13 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		}
 		float gapN = U(big ? 20.f : 18.f);
 		float gapRow = U(16);
+		float gapLucky = UnitIsLucky(u) ? gapRow : 0;
 		float gapHp = U(big ? 20.f : 22.f);
 		float gapMp = (!big && u.ch.stat[S_MP] > 0) ? U(20) : 0;
 		float gapStat = big ? U(18) : 0;
 		float gapSt = (big && st[0]) ? U(16) : 0;
 		float gapSk = nSk > 0 ? (U(6) + nSk * U(15)) : 0;
-		float span = U(12) + gapN + gapRow + gapRow + gapHp + gapMp + gapStat + gapSt + gapSk + U(12);
+		float span = U(12) + gapN + gapRow + gapRow + gapLucky + gapHp + gapMp + gapStat + gapSt + gapSk + U(12);
 		float h = max(ps + U(16), span);
 		if (big) {
 			float limitBot = (float)m_h - m_hud.margin;
@@ -5675,11 +5849,11 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		if (tw < U(72)) tw = U(72);
 		note(x, y, w, h);
 		Panel(x, y, w, h);
-		DWORD fc = u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90);
+		DWORD fc = FoeInk(u);
 		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
 		float cy = y + U(12);
 		float textLim = y + h - U(6);
-		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? RGBA8(255, 255, 255) : RGBA8(255, 176, 168), 0, 1);
+		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? (UnitIsLucky(u) ? RGBA8(180, 240, 255) : RGBA8(255, 255, 255)) : RGBA8(255, 176, 168), 0, 1);
 		cy += gapN;
 		m_r.HudText(lv, tx, cy, FitTextPx(lv, tw, U(13), 0), RGBA8(255, 226, 150), 0, 0);
 		cy += gapRow;
@@ -5687,6 +5861,11 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		if (m_r.TextWidth(wk, wfs, 0) > tw) wfs = U(10);
 		m_r.HudText(wk, tx, cy, wfs, RGBA8(255, 186, 120), 0, 0);
 		cy += gapRow;
+		if (UnitIsLucky(u)) {
+			const wchar_t* luck = TT(TX_BT_LUCKY_HELP);
+			m_r.HudText(luck, tx, cy, FitTextPx(luck, tw, U(12), 0), RGBA8(140, 230, 255), 0, 0);
+			cy += gapLucky;
+		}
 		if (big) {
 			wchar_t hp[48], mp[48], cp[32];
 			swprintf_s(hp, L"%s %s/%s", TT(TX_ST_HP), TacNum((int)(u.hpShow + .5f)), TacNum(u.ch.stat[S_HP]));
@@ -5730,7 +5909,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			swprintf_s(cp, L"%s %s", TT(TX_CP), TacNum(u.cp));
 			m_r.HudText(cp, tx + tw - bw - U(8), cy, U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
 			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-			Bar(tx + tw - bw, cy + U(2), bw, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+			Bar(tx + tw - bw, cy + U(2), bw, U(8), frac, HpFillCol(u, frac), HpBackCol(u));
 			cy += gapHp;
 			if (u.ch.stat[S_MP] > 0) {
 			swprintf_s(hp, L"%s %s/%s", TT(TX_ST_MP), TacNum(u.mp), TacNum(u.ch.stat[S_MP]));
@@ -5765,7 +5944,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 	if (ps > h - U(16)) ps = max(U(40), h - U(16));
 	note(x, y, w, h);
 	Panel(x, y, w, h);
-	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
+	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
 		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(10), ps, fc);
 	float tx = x + ps + U(20), tw = w - ps - U(30);
 	if (tw < U(48)) tw = U(48);
@@ -5841,7 +6020,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			m_r.HudText(cp, tx + tw - bw - U(8), by + U(2), U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
 		}
 		float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-		Bar(tx + tw - bw, by + U(4), bw, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+		Bar(tx + tw - bw, by + U(4), bw, U(8), frac, HpFillCol(u, frac), HpBackCol(u));
 		by += U(20);
 		if (u.ch.stat[S_MP] > 0) {
 			swprintf_s(l, L"%s %s/%s", TT(TX_ST_MP), TacNum(u.mp), TacNum(u.ch.stat[S_MP]));
@@ -5962,7 +6141,7 @@ void Game::DrawTurnOrder()
 	float ry = y + head;
 	auto row = [&](int ui, float y0, float xoff, BOOL now, BOOL ghost, const wchar_t* arrow) {
 		const Unit& u = m_b.u[ui];
-		DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
+		DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
 		if (ghost) fc = RGBA8(255, 210, 90);
 		if (now) m_r.HudRect(x + U(4), y0, w - U(8), rh - U(4), RGBA8(255, 220, 120, 60));
 		if (ghost) m_r.HudRect(x + U(4), y0, w - U(8), rh - U(4), RGBA8(255, 190, 60, 50));
@@ -6251,7 +6430,7 @@ void Game::DrawMinimap(float x, float y, float s, int layer)
 		int deck = u.deck;
 		if (deck < 0 || deck >= LAY_N || !LayerOn(m_b.map.At(u.x, u.z), deck)) deck = 0;
 		if (deck != layer) continue;
-		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert == 2 ? RGBA8(255, 170, 60) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50))));
+		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (UnitIsLucky(u) ? RGBA8(70, 220, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert == 2 ? RGBA8(255, 170, 60) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50)))));
 		float d = max(cs * .72f, i == m_cur ? cs * .95f : cs * .78f);
 		float sx, sy;
 		toScreen(u.px, u.pz, sx, sy);
@@ -8144,8 +8323,8 @@ void Game::DrawLevelUp()
 	if (m_lvqCur >= m_lvqN) return;
 	float shown = m_lvT;
 	if (m_lvqCur == 0) {
-		if (m_lvT < 2.6f) return;
-		shown = m_lvT - 2.6f;
+		if (m_lvT < 2.6f * TacPaceTime(m_save)) return;
+		shown = m_lvT - 2.6f * TacPaceTime(m_save);
 	}
 	const LevelUpInfo& L = m_lvq[m_lvqCur];
 	const Unit& u = m_b.u[L.unit];
@@ -8253,12 +8432,12 @@ void Game::DrawCutInUi()
 			float bx = align ? x - w : x;
 			wchar_t nm[64];
 			UnitTitle(u, nm, 64);
-			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : RGBA8(255, 110, 100);
+			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
 			float fs = row >= U(20) ? U(14) : max(U(9.f), row * .42f);
 			float bh = max(U(3.f), min(U(8.f), row - fs - U(2)));
 			m_r.HudText(nm, align ? bx + w : bx, y, fs, fc, align ? 2 : 0, 1);
 			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-			Bar(bx, y + fs, w, bh, frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+			Bar(bx, y + fs, w, bh, frac, HpFillCol(u, frac), HpBackCol(u));
 		};
 		auto col = [&](const int* id, int n, int align) {
 			if (n < 1) return;
@@ -8526,7 +8705,7 @@ void Game::DrawBattleUi()
 	// 左上: ステージ情報。スタンピードはその段のあいだ出し続ける。
 	{
 		wchar_t l[96], th[128], info[220];
-		swprintf_s(l, L"%s %s", TT(TX_BT_STAGE), TacNum(m_battleStage));
+		StageCaption(m_battleStage, l, 96);
 		int wx = WeatherTx(TacWx(m_b.weather));
 		int hx = HourTx(TacHour(m_b.weather));
 		if (wx && hx) swprintf_s(th, L"%s  %s  %s", TT(ThemeNameTx(m_b.map.theme)), TT(wx), TT(hx));
@@ -8830,9 +9009,11 @@ void Game::DrawBattleUi()
 			barBn++;
 		}
 		float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-		DWORD col = !u.alive ? RGBA8(150, 150, 160) : (u.team == TEAM_PLAYER ? RGBA8(80, 220, 120) : (u.boss ? RGBA8(255, 200, 70) : RGBA8(240, 70, 60)));
+		DWORD col = !u.alive ? RGBA8(150, 150, 160) : (u.team == TEAM_PLAYER ? RGBA8(80, 220, 120) : FoeBarCol(u));
 		m_r.HudRect(sx - bw * .5f - 1, sy - 1, bw + 2, U(6), fadeA(RGBA8(8, 8, 12, 200)));
 		m_r.HudRect(sx - bw * .5f, sy, bw * Clampf(frac, 0, 1), U(4), fadeA(col));
+		if (UnitIsLucky(u) && u.alive)
+			m_r.HudText(L"☆", sx - bw * .5f - U(2), sy - U(1), U(11), fadeA(RGBA8(80, 235, 255)), 2, 0, 1, fade);
 		if (u.team == TEAM_ENEMY && (off || cells >= 4)) {
 			wchar_t dlab[24];
 			swprintf_s(dlab, L"%d%s", cells, LangPick14(L"マス", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
@@ -9259,19 +9440,19 @@ void Game::DrawBattleUi()
 			ly += lineG;
 		}
 	}
-	if (m_phase == PH_INTRO && m_surveyN >= 2 && m_phaseT < kIntroSweep) {
+	if (m_phase == PH_INTRO && m_surveyN >= 2 && m_phaseT < kIntroSweep * TacPaceTime(m_save)) {
 		wchar_t hs[160];
 		swprintf_s(hs, TT(TX_BT_SURVEY), m_b.AliveCount(TEAM_ENEMY));
 		float tw = m_r.TextWidth(hs, U(16), 1) + U(48);
 		float tx0 = ((float)m_w - tw) * .5f, top = (float)m_h - U(96);
 		m_r.HudPanel(tx0, top, tw, U(50), RGBA8(16, 20, 36, 150), RGBA8(150, 128, 86));
 		m_r.HudText(hs, tx0 + tw * .5f, top + U(17), U(16), RGBA8(255, 255, 255), 1, 1);
-		Bar(tx0 + U(16), top + U(34), tw - U(32), U(6), m_phaseT / kIntroSweep, RGBA8(255, 200, 110), RGBA8(255, 236, 170));
+		Bar(tx0 + U(16), top + U(34), tw - U(32), U(6), m_phaseT / (kIntroSweep * TacPaceTime(m_save)), RGBA8(255, 200, 110), RGBA8(255, 236, 170));
 	}
 	if (m_phase == PH_MENU) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
 		float w = m_menuConfirm == 2 ? U(420) : (m_menuConfirm == 3 ? U(480) : U(320));
-		float h = (m_menuConfirm == 1 || m_menuConfirm == 3) ? U(220) : (m_menuConfirm == 2 ? U(648) : U(460));
+		float h = (m_menuConfirm == 1 || m_menuConfirm == 3) ? U(220) : (m_menuConfirm == 2 ? U(600) : U(460));
 		float x = (m_w - w) * .5f, y = (m_h - h) * .5f;
 		Panel(x, y, w, h);
 		m_r.HudText(TT(TX_BT_MENU), x + w * .5f, y + U(26), U(20), RGBA8(255, 226, 150), 1, 1);
@@ -9304,6 +9485,16 @@ void Game::DrawBattleUi()
 			oy += U(34);
 			if (Sel(ID_BT_OPT_ANIM, bx, oy, bw, U(32), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
 			oy += U(34);
+			{
+				static const int paceTx[6] = { TX_PACE0, TX_PACE1, TX_PACE2, TX_PACE3, TX_PACE4, TX_PACE5 };
+				if (int d = Sel(ID_BT_OPT_PACE, bx, oy, bw, U(32), TT(TX_SET_PACE), TT(paceTx[TacPace(m_save)]))) TacSetPace(m_save, TacPace(m_save) + d);
+			}
+			oy += U(34);
+			{
+				static const int paceTx[6] = { TX_PACE0, TX_PACE1, TX_PACE2, TX_PACE3, TX_PACE4, TX_PACE5 };
+				if (int d = Sel(ID_BT_OPT_CUT, bx, oy, bw, U(32), TT(TX_SET_CUTSPD), TT(paceTx[TacCutPace(m_save)]), m_save.battleAnim ? 0 : 1)) TacSetCutPace(m_save, TacCutPace(m_save) + d);
+			}
+			oy += U(34);
 			if (Sel(ID_BT_OPT_GRID, bx, oy, bw, U(32), TT(TX_SET_GRID), TT(TacGridOn(m_save) ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid ^= 1;
 			oy += U(34);
 			if (Sel(ID_BT_OPT_THREAT, bx, oy, bw, U(32), TT(TX_SET_THREAT), TT(TacThreatOn(m_save) ? TX_CR_ON : TX_CR_OFF))) {
@@ -9314,13 +9505,14 @@ void Game::DrawBattleUi()
 			if (int d = Sel(ID_BT_OPT_AI, bx, oy, bw, U(32), TT(TX_SET_AI), TT(TacAiTx(TacAi(m_save))))) TacSetAi(m_save, TacAi(m_save) + d);
 			oy += U(34);
 			{
-				wchar_t vs[16];
-				swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
-				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs)) {
+				BOOL autoQ = m_save.quality == TAC_Q_AUTO;
+				wchar_t vs[32];
+				if (autoQ) swprintf_s(vs, L"%s  1/%d", TT(TX_SET_Q_AUTO), PaceHz());
+				else swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
+				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs, autoQ ? 0 : 1)) {
 					TacSetVsync(m_save, TacVsync(m_save) + d);
 					m_syncRun = -1;
 					m_syncArmN = 0;
-					if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; ApplyQualityNow(6); }
 				}
 			}
 			oy += U(34);

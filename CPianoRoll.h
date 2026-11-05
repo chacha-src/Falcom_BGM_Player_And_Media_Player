@@ -310,6 +310,11 @@ private:
     float m_detPeakHz[DET_PEAK_MAX];
     float m_detPeakAmp[DET_PEAK_MAX];
     int   m_detPeakN = 0;
+    // 直近 2048 サンプル（約 46ms）の山。短いアルペジオを長い窓の平均から拾う。
+    static constexpr int BURST_MAX = 16;
+    float m_burstHz[BURST_MAX] = {};
+    float m_burstAmp[BURST_MAX] = {};
+    int   m_burstN = 0;
     // 直前フレームの PickNotes 出力（VisGap 点灯は含めない）。系列を Hz で追う。
     bool  m_prevPicked[KEY_COUNT] = {};
     bool  m_ownVoice[KEY_COUNT] = {};

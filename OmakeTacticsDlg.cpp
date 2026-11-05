@@ -26,6 +26,31 @@ static COmakeTacticsDlg* g_tac = nullptr;
 #endif
 enum { IDC_TAC_IME = 0x7A10 };
 
+static void TacBindHIMC(HWND h, void*& ctx)
+{
+	if (!h) return;
+	if (!ctx) {
+		HIMC hc = ::ImmCreateContext();
+		if (hc) ctx = hc;
+	}
+	if (ctx) ::ImmAssociateContext(h, (HIMC)ctx);
+}
+
+static void TacFocusIme(CEdit& ed, void*& ctx)
+{
+	HWND h = ed.GetSafeHwnd();
+	if (!h) return;
+	if (!::IsWindowEnabled(h)) ::EnableWindow(h, TRUE);
+	TacBindHIMC(h, ctx);
+	HIMC himc = ::ImmGetContext(h);
+	if (himc) {
+		::ImmSetOpenStatus(himc, TRUE);
+		::ImmReleaseContext(h, himc);
+	}
+	if (::GetFocus() != h)
+		ed.SetFocus();
+}
+
 // ---------------------------------------------------------------------------
 // パッド（DirectInput / UI スレッドのみ）
 // ---------------------------------------------------------------------------
@@ -217,6 +242,8 @@ void CTacView::Up(int btn, CPoint pt)
 	m_btnMask &= ~(1 << btn);
 	if (!m_btnMask && GetCapture() == this) ReleaseCapture();
 	if (had && m_owner && m_owner->GameReady()) m_owner->GameRef().OnMouseUp(btn, pt.x, pt.y);
+	if (had && m_owner && m_owner->GameReady() && m_owner->GameRef().WantsTextInput())
+		m_owner->EnsureImeFocus();
 }
 void CTacView::ReleaseButtons()
 {
@@ -289,6 +316,9 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_WM_ACTIVATEAPP()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_GETDLGCODE()
+	ON_WM_CTLCOLOR()
+	ON_EN_CHANGE(IDC_TAC_IME, OnImeChange)
+	ON_EN_SETFOCUS(IDC_TAC_IME, OnImeSetFocus)
 END_MESSAGE_MAP()
 
 COmakeTacticsDlg::COmakeTacticsDlg(CWnd* pParent)
@@ -304,10 +334,7 @@ COmakeTacticsDlg::~COmakeTacticsDlg()
 
 static const wchar_t* TacCaption()
 {
-	return LL14(L"おまけタクティクスゲーム", L"Bonus Tactics Game", L"Jeu de tactique bonus",
-		L"Gioco tattico bonus", L"Juego de tácticas extra", L"보너스 택틱스 게임", L"附赠战棋游戏",
-		L"لعبة التكتيكات الإضافية", L"Бонусная тактическая игра", L"Bonus-Taktikspiel",
-		L"Jogo de táticas bônus", L"Bonus-tactiekspel", L"Dodatkowa gra taktyczna", L"Bonus taktik oyunu");
+	return TT(TX_TITLE);
 }
 
 BOOL COmakeTacticsDlg::OnInitDialog()
@@ -350,15 +377,23 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 	m_view.CreateView(this, rc);
 	m_viewW = rc.Width();
 	m_viewH = rc.Height();
-	m_ime.Create(WS_CHILD | ES_AUTOHSCROLL | ES_WANTRETURN, CRect(0, 0, 8, 8), this, IDC_TAC_IME);
+	m_ime.Create(WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | ES_WANTRETURN, CRect(0, 0, 8, 8), this, IDC_TAC_IME);
 	if (m_ime.GetSafeHwnd()) {
+		HWND ih = m_ime.GetSafeHwnd();
+		m_ime.ModifyStyle(WS_BORDER, 0);
+		m_ime.ModifyStyleEx(WS_EX_CLIENTEDGE | WS_EX_STATICEDGE, 0);
+		LONG ex = ::GetWindowLongW(ih, GWL_EXSTYLE);
+		::SetWindowLongW(ih, GWL_EXSTYLE, (ex | WS_EX_NOINHERITLAYOUT) & ~(WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_LAYERED | WS_EX_TRANSPARENT));
+		m_imeBrush.CreateSolidBrush(RGB(40, 46, 80));
+		m_imeFontPx = 16;
 		m_imeFont.CreateFont(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
 			OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Yu Gothic UI");
 		if (m_imeFont.GetSafeHandle()) m_ime.SetFont(&m_imeFont);
+		m_ime.SendMessage(EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(4, 4));
+		m_ime.EnableWindow(TRUE);
 		m_ime.ShowWindow(SW_HIDE);
 	}
-	if (m_hWnd) ::ImmAssociateContext(m_hWnd, NULL);
-	if (m_view.GetSafeHwnd()) ::ImmAssociateContext(m_view.GetSafeHwnd(), NULL);
+	if (m_ime.GetSafeHwnd()) TacBindHIMC(m_ime.GetSafeHwnd(), m_imeCtx);
 	m_gameOk = m_game.Init(m_view.GetSafeHwnd(), m_viewW, m_viewH);
 	TacAudioStart(m_hWnd);
 
@@ -468,7 +503,7 @@ DWORD WINAPI COmakeTacticsDlg::PaceThread(LPVOID param)
 		if (!stop || WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) break;
 		int hz = (int)d->m_paceHz;
 		if (hz < 30) hz = 30;
-		if (hz > 240) hz = 240;
+		if (hz > TAC_HZ_MAX) hz = TAC_HZ_MAX;
 		const LONGLONG period = freq.QuadPart / hz;
 		QueryPerformanceCounter(&now);
 		next.QuadPart += period;
@@ -500,7 +535,7 @@ void COmakeTacticsDlg::StartPace()
 	if (m_paceThread) return;
 	if (!m_paceStop) m_paceStop = CreateEventW(NULL, TRUE, FALSE, NULL);
 	if (m_paceStop) ResetEvent(m_paceStop);
-	m_paceHz = 60;
+	m_paceHz = TAC_HZ_MAX;
 	m_paceThread = CreateThread(NULL, 256u * 1024u, PaceThread, this, 0, NULL);
 }
 
@@ -527,16 +562,32 @@ void COmakeTacticsDlg::ReleaseUiInput()
 void COmakeTacticsDlg::DrainInput()
 {
 	if (m_destroying) return;
-	HWND hw[2] = { m_hWnd, m_view.GetSafeHwnd() };
+	HWND root = GetSafeHwnd();
+	if (!root) return;
+	HWND hw[3] = { root, m_view.GetSafeHwnd(), m_ime.GetSafeHwnd() };
+	const UINT range[3][2] = {
+		{ WM_MOUSEFIRST, WM_MOUSELAST },
+		{ WM_KEYFIRST, WM_IME_COMPOSITION },
+		{ WM_IME_SETCONTEXT, WM_IME_KEYUP },
+	};
 	MSG msg;
-	for (int i = 0; i < 2; i++) {
-		if (!hw[i]) continue;
-		while (::PeekMessage(&msg, hw[i], WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE)) {
-			if (m_destroying || !GetSafeHwnd()) return;
-			if (PreTranslateMessage(&msg)) continue;
-			::TranslateMessage(&msg);
-			::DispatchMessage(&msg);
-			if (m_destroying || !GetSafeHwnd()) return;
+	int n = 0;
+	for (int pass = 0; pass < 3 && n < 48; pass++) {
+		for (int i = 0; i < 3 && n < 48; i++) {
+			if (!hw[i]) continue;
+			while (n < 48 && ::PeekMessage(&msg, hw[i], range[pass][0], range[pass][1], PM_REMOVE)) {
+				if (m_destroying || !GetSafeHwnd()) return;
+				if (msg.message == WM_QUIT) {
+					::PostQuitMessage((int)msg.wParam);
+					return;
+				}
+				if (!PreTranslateMessage(&msg)) {
+					::TranslateMessage(&msg);
+					::DispatchMessage(&msg);
+				}
+				if (m_destroying || !GetSafeHwnd()) return;
+				n++;
+			}
 		}
 	}
 }
@@ -578,6 +629,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 		QueryPerformanceFrequency(&af);
 		if (m_gameOk) m_game.SetAudioMs(af.QuadPart ? (float)((double)(a1.QuadPart - a0.QuadPart) * 1000.0 / (double)af.QuadPart) : 0.f);
 		PollPad(dt);
+		PullImeToGame();
 		m_game.Tick(dt);
 		SyncImeEdit();
 		ApplyWinMode();
@@ -634,8 +686,8 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 			m_swapShown = TRUE;
 			LayoutView();
 		}
-		if (m_gameOk && m_game.WantsTextInput() && m_ime.GetSafeHwnd())
-			m_ime.SetFocus();
+		if (m_gameOk && m_game.WantsTextInput())
+			TacFocusIme(m_ime, m_imeCtx);
 		else if (GetSafeHwnd())
 			SetFocus();
 		if (m_gameOk) {
@@ -681,9 +733,27 @@ static UINT TacRealVk(MSG* pMsg)
 	return vk;
 }
 
+static void TacReadComp(HWND h, wchar_t* comp, int compN)
+{
+	if (!comp || compN < 2) return;
+	comp[0] = 0;
+	if (!h) return;
+	HIMC himc = ::ImmGetContext(h);
+	if (!himc) return;
+	LONG n = ::ImmGetCompositionStringW(himc, GCS_COMPSTR, comp, (DWORD)((compN - 1) * sizeof(wchar_t)));
+	if (n < 0) n = 0;
+	int c = (int)(n / sizeof(wchar_t));
+	if (c < 0) c = 0;
+	if (c > compN - 1) c = compN - 1;
+	comp[c] = 0;
+	::ImmReleaseContext(h, himc);
+}
+
 void COmakeTacticsDlg::HideImeEdit()
 {
 	m_imeKind = 0;
+	m_imePush = TRUE;
+	if (m_ime.GetSafeHwnd()) m_ime.SetWindowText(L"");
 	m_imePush = FALSE;
 	if (m_ime.GetSafeHwnd() && ::GetFocus() == m_ime.GetSafeHwnd() && GetSafeHwnd())
 		SetFocus();
@@ -701,14 +771,7 @@ void COmakeTacticsDlg::PullImeToGame()
 	caret = sel;
 	HWND ih = m_ime.GetSafeHwnd();
 	wchar_t comp[48];
-	comp[0] = 0;
-	HIMC himc = ::ImmGetContext(ih);
-	if (himc) {
-		LONG n = ::ImmGetCompositionStringW(himc, GCS_COMPSTR, comp, sizeof(comp) - sizeof(wchar_t));
-		if (n < 0) n = 0;
-		comp[n / sizeof(wchar_t)] = 0;
-		::ImmReleaseContext(ih, himc);
-	}
+	TacReadComp(ih, comp, 48);
 	m_game.SetImeComp(comp);
 	if (m_game.TextFocus() == 3) {
 		m_game.SetSellFromText(t);
@@ -717,11 +780,12 @@ void COmakeTacticsDlg::PullImeToGame()
 	wchar_t* buf = NULL;
 	int maxLen = 0;
 	if (!m_game.TextLive(buf, maxLen) || !buf || maxLen < 2) return;
-	wchar_t prev[64];
+	wchar_t prev[32];
 	wcsncpy_s(prev, buf, _TRUNCATE);
 	wcsncpy_s(buf, maxLen, t, _TRUNCATE);
 	m_game.SetTextCaret(caret);
-	if (m_game.TextFocus() == 4 && wcscmp(prev, buf) != 0) m_game.NotifyFindChanged();
+	if (m_game.TextFocus() == 4 && wcscmp(prev, buf) != 0)
+		m_game.NotifyFindChanged();
 }
 
 void COmakeTacticsDlg::PlaceImeWindow()
@@ -731,27 +795,65 @@ void COmakeTacticsDlg::PlaceImeWindow()
 	if (InterlockedCompareExchange(&s_imePosBusy, 1, 0) != 0) return;
 	RECT box = {};
 	m_game.TextBoxRect(box);
-	POINT caret = { box.left + (LONG)m_game.TextCaretPx(), box.top };
-	::ClientToScreen(m_view.GetSafeHwnd(), &caret);
-	CPoint dlgPt = caret;
-	ScreenToClient(&dlgPt);
-	int h = box.bottom - box.top;
+	POINT tl = { box.left, box.top };
+	POINT br = { box.right, box.bottom };
+	HWND view = m_view.GetSafeHwnd();
+	::ClientToScreen(view, &tl);
+	::ClientToScreen(view, &br);
+	CPoint dlgTl = tl, dlgBr = br;
+	ScreenToClient(&dlgTl);
+	ScreenToClient(&dlgBr);
+	int caretPx = (int)(m_game.TextCaretPx() + .5f);
+	if (caretPx < 0) caretPx = 0;
+	// キャラ名と同じ 1px。表示は HUD が描く。広い編集欄はスワップチェインに隠れて文字が見えなくなる。
+	int left = dlgTl.x + caretPx;
+	int w = 1;
+	int h = dlgBr.y - dlgTl.y;
 	if (h < 8) h = 8;
-	m_ime.SetWindowPos(&wndTop, dlgPt.x, dlgPt.y, 1, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-	HIMC himc = ::ImmGetContext(m_ime.GetSafeHwnd());
-	if (himc) {
+	int fontPx = (int)(m_game.TextFontPx() + .5f);
+	if (fontPx < 10) fontPx = 10;
+	if (fontPx > 48) fontPx = 48;
+	if (fontPx != m_imeFontPx) {
+		CFont neu;
+		if (neu.CreateFont(-fontPx, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+			OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Yu Gothic UI")) {
+			m_ime.SetFont(&neu);
+			m_imeFont.DeleteObject();
+			m_imeFont.Attach(neu.Detach());
+			m_imeFontPx = fontPx;
+		}
+	}
+	HWND ih = m_ime.GetSafeHwnd();
+	if (!::IsWindowEnabled(ih)) ::EnableWindow(ih, TRUE);
+	const BOOL busy = TacImeBusy(ih);
+	static int sx = -99999, sy = 0, sw = 0, sh = 0;
+	if (!m_ime.IsWindowVisible()) sx = -99999;
+	const BOOL same = (left == sx && dlgTl.y == sy && w == sw && h == sh);
+	if (!same && !busy) {
+		m_ime.SetWindowPos(&wndTop, left, dlgTl.y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		sx = left; sy = dlgTl.y; sw = w; sh = h;
+	} else if (!m_ime.IsWindowVisible()) {
+		m_ime.ShowWindow(SW_SHOWNA);
+	}
+	HIMC himc = ::ImmGetContext(ih);
+	if (himc && !busy) {
 		COMPOSITIONFORM cf = {};
 		cf.dwStyle = CFS_POINT;
 		cf.ptCurrentPos.x = 0;
 		cf.ptCurrentPos.y = 0;
 		::ImmSetCompositionWindow(himc, &cf);
+		LOGFONTW lf = {};
+		if (m_imeFont.GetSafeHandle()) m_imeFont.GetLogFont(&lf);
+		if (lf.lfFaceName[0]) ::ImmSetCompositionFontW(himc, &lf);
 		CANDIDATEFORM cand = {};
 		cand.dwIndex = 0;
 		cand.dwStyle = CFS_CANDIDATEPOS;
 		cand.ptCurrentPos.x = 0;
 		cand.ptCurrentPos.y = h;
 		::ImmSetCandidateWindow(himc, &cand);
-		::ImmReleaseContext(m_ime.GetSafeHwnd(), himc);
+		::ImmReleaseContext(ih, himc);
+	} else if (himc) {
+		::ImmReleaseContext(ih, himc);
 	}
 	InterlockedExchange(&s_imePosBusy, 0);
 }
@@ -760,37 +862,68 @@ void COmakeTacticsDlg::SyncImeEdit()
 {
 	if (!m_gameOk || m_destroying || !m_ime.GetSafeHwnd()) return;
 	const int focus = m_game.TextFocus();
+	const BOOL reload = m_game.TakeImeReload();
 	if (!focus) {
 		if (m_imeKind) HideImeEdit();
 		return;
 	}
-	if (focus != m_imeKind) {
-		m_imePush = TRUE;
-		wchar_t tmp[64];
-		tmp[0] = 0;
-		int limit = 15;
-		if (focus == 3) {
-			m_game.SellToText(tmp, 64);
-			limit = 8;
-		} else {
-			wchar_t* buf = NULL;
-			int maxLen = 0;
-			if (m_game.TextLive(buf, maxLen) && buf) {
-				wcsncpy_s(tmp, buf, _TRUNCATE);
-				limit = maxLen > 1 ? maxLen - 1 : 1;
-			}
+	if (!m_ime.IsWindowEnabled()) m_ime.EnableWindow(TRUE);
+	wchar_t want[64];
+	want[0] = 0;
+	int limit = 15;
+	if (focus == 3) {
+		m_game.SellToText(want, 64);
+		limit = 8;
+	} else {
+		wchar_t* buf = NULL;
+		int maxLen = 0;
+		if (m_game.TextLive(buf, maxLen) && buf) {
+			wcsncpy_s(want, buf, _TRUNCATE);
+			limit = maxLen > 1 ? maxLen - 1 : 1;
 		}
+	}
+	if (focus != m_imeKind || reload) {
+		m_imePush = TRUE;
 		m_ime.SetLimitText(limit);
-		m_ime.SetWindowText(tmp);
-		int n = (int)wcslen(tmp);
+		m_ime.SetWindowText(want);
+		int n = (int)wcslen(want);
 		if (focus == 3) m_ime.SetSel(0, -1);
 		else m_ime.SetSel(n, n);
-		m_game.SetTextCaret(focus == 3 ? n : n);
+		m_game.SetTextCaret(n);
 		m_imeKind = focus;
 		m_imePush = FALSE;
 	}
 	PlaceImeWindow();
-	if (::GetFocus() != m_ime.GetSafeHwnd()) m_ime.SetFocus();
+	TacFocusIme(m_ime, m_imeCtx);
+	if (!m_imePush) PullImeToGame();
+}
+
+void COmakeTacticsDlg::OnImeChange()
+{
+	if (!m_imePush) PullImeToGame();
+}
+
+void COmakeTacticsDlg::OnImeSetFocus()
+{
+}
+
+void COmakeTacticsDlg::EnsureImeFocus()
+{
+	if (m_destroying || !m_gameOk) return;
+	if (!m_ime.GetSafeHwnd() || !m_game.WantsTextInput()) return;
+	if (::GetForegroundWindow() != m_hWnd) SetForegroundWindow();
+	SyncImeEdit();
+}
+
+HBRUSH COmakeTacticsDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (pWnd == &m_ime) {
+		pDC->SetBkMode(OPAQUE);
+		pDC->SetBkColor(RGB(40, 46, 80));
+		pDC->SetTextColor(RGB(255, 255, 255));
+		return (HBRUSH)m_imeBrush.GetSafeHandle();
+	}
+	return CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
 UINT COmakeTacticsDlg::OnGetDlgCode()
@@ -822,31 +955,49 @@ BOOL COmakeTacticsDlg::HandleKeyMessage(MSG* pMsg)
 	const BOOL typing = m_gameOk && (m_game.WantsTextInput() || (imeHw && ::GetFocus() == imeHw));
 	if (typing) {
 		const UINT vk = TacRealVk(pMsg);
+		if (msg == WM_KEYDOWN && (vk == VK_BACK || vk == VK_DELETE)) m_imeAllowClear = TRUE;
+		if ((msg == WM_CHAR || msg == WM_IME_CHAR) && (pMsg->wParam == 8 || pMsg->wParam == 0x7F))
+			m_imeAllowClear = TRUE;
 		const BOOL composing = TacImeBusy(imeHw);
 		if (msg == WM_KEYDOWN && (vk == VK_RETURN || vk == VK_ESCAPE || vk == VK_TAB) && !composing) {
 			PullImeToGame();
 			if (m_gameOk) m_game.OnKey((int)vk, TRUE);
-			HideImeEdit();
+			if (!m_gameOk || !m_game.WantsTextInput()) HideImeEdit();
+			else TacFocusIme(m_ime, m_imeCtx);
+			m_imeAllowClear = FALSE;
 			return TRUE;
 		}
-		if (imeHw && ::GetFocus() != imeHw) m_ime.SetFocus();
-		if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) ::TranslateMessage(pMsg);
-		HWND dest = imeHw ? imeHw : pMsg->hwnd;
-		if (dest && pMsg->hwnd != dest) {
-			MSG m2 = *pMsg;
-			m2.hwnd = dest;
-			::DispatchMessage(&m2);
+		TacFocusIme(m_ime, m_imeCtx);
+		CString before;
+		if (imeHw) m_ime.GetWindowText(before);
+		MSG m2 = *pMsg;
+		if (imeHw) m2.hwnd = imeHw;
+		if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) ::TranslateMessage(&m2);
+		::DispatchMessage(&m2);
+		CString after;
+		if (imeHw) m_ime.GetWindowText(after);
+		if (m_gameOk && after == before && !composing && (msg == WM_CHAR || msg == WM_IME_CHAR)) {
+			wchar_t ch = (wchar_t)pMsg->wParam;
+			if (ch == 8 || ch >= 32) m_game.OnChar(ch);
+			wchar_t* buf = NULL;
+			int maxLen = 0;
+			if (m_game.TextLive(buf, maxLen) && buf && imeHw) {
+				m_imePush = TRUE;
+				m_ime.SetWindowText(buf);
+				int caret = m_game.TextCaret();
+				m_ime.SetSel(caret, caret);
+				m_imePush = FALSE;
+			}
 		} else {
-			::DispatchMessage(pMsg);
+			PullImeToGame();
 		}
-		PullImeToGame();
-		PlaceImeWindow();
+		m_imeAllowClear = FALSE;
 		return TRUE;
 	}
 
-	if (msg == WM_CHAR || msg == WM_IME_CHAR || msg == WM_UNICHAR || msg == WM_DEADCHAR)
-		return TRUE;
 	if (imeMsg)
+		return FALSE;
+	if (msg == WM_CHAR || msg == WM_IME_CHAR || msg == WM_UNICHAR || msg == WM_DEADCHAR)
 		return TRUE;
 	if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) {
 		if (m_gameOk) {
@@ -903,6 +1054,11 @@ void COmakeTacticsDlg::OnDestroy()
 {
 	m_destroying = TRUE;
 	HideImeEdit();
+	if (m_imeCtx) {
+		if (m_ime.GetSafeHwnd()) ::ImmAssociateContext(m_ime.GetSafeHwnd(), NULL);
+		::ImmDestroyContext((HIMC)m_imeCtx);
+		m_imeCtx = nullptr;
+	}
 	ReleaseUiInput();
 	StopPace();
 	TacAudioStop();

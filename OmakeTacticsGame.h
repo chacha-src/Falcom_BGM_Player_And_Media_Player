@@ -108,6 +108,7 @@ public:
 	BOOL WantsTextInput() const { return m_textFocus != 0; }
 	int TextFocus() const { return m_textFocus; }
 	void ClearTextFocus();
+	void SanitizeTextFocus();
 	BOOL TextLive(wchar_t*& buf, int& maxLen);
 	void SetTextCaret(int caret);
 	int TextCaret() const { return m_textCaret; }
@@ -116,8 +117,15 @@ public:
 	void SetSellFromText(const wchar_t* s);
 	void SellToText(wchar_t* s, int n) const;
 	void NotifyFindChanged();
+	BOOL FoeFindLive() const { return m_screen == SC_BASE && m_codex == 4; }
+	const wchar_t* MonFindText() const { return m_monFind; }
+	void ArmFoeFind();
+	void CommitMonFind(const wchar_t* s);
+	void RequestImeReload() { m_textReload = 1; }
+	BOOL TakeImeReload() { BOOL r = m_textReload; m_textReload = 0; return r; }
 	float TextCaretPx();
 	float TextFontPx() const { return m_textPx > 1.f ? m_textPx : 16.f; }
+	float TextPad() const { return m_textPad; }
 
 private:
 	// 基盤
@@ -135,7 +143,7 @@ private:
 	void ApplyQualityNow(int q);
 	void PickQuality(int delta);
 	int QualityNow() const;
-	// 保存の拍は利用者の選択のまま。自動の保険（標準未満で 1/30 など）は実行時だけ上書きする。
+	// 保存の拍は利用者の選択のまま。自動の保険（一段ずつ下げ、余力で一段上げ）は実行時だけ上書きする。
 	int SyncNow() const;
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
@@ -408,9 +416,11 @@ private:
 	int m_selDelta;     // フォーカス中セレクタの左右入力
 	int m_textFocus;
 	int m_textCaret;
+	BOOL m_textReload;
 	wchar_t m_imeComp[48];
 	float m_textBox[4];
 	float m_textPx;
+	float m_textPad;
 	BOOL m_keyShift;
 	PadState m_padPrev;
 	float m_padRepeat;

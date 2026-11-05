@@ -459,6 +459,7 @@ public:
 	void SetCamNear(float hide, float solid) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; }
 	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; m_fcb.camFwd[3] = 1.f; }
 	void DrawTerrain();
+	BOOL GroundChunkVisible() const;
 	void SetFadeAbove(int layer, int x = -1, int z = -1) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; }
 	void SetCutDeck(int deck) { m_cutDeck = deck; }
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
@@ -521,6 +522,7 @@ public:
 
 	BOOL ProjectToScreen(V3 p, float& sx, float& sy) const;
 	BOOL InView(V3 p, float radius) const;
+	BOOL InLight(V3 p, float radius) const;
 	void ScreenRay(float sx, float sy, V3& org, V3& dir) const;
 
 	HRESULT LastError() const { return m_lastHr; }
@@ -814,6 +816,7 @@ private:
 
 	// 地形
 	GpuMesh m_terrain;
+	GpuMesh m_terrainChunk[16];
 	GpuMesh m_cover1[16];
 	GpuMesh m_cover2[16];
 	GpuMesh m_cover3[16];

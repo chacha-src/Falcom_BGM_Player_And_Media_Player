@@ -1533,6 +1533,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_fftSalSmoothed[i] *= 0.5f;
         }
         m_detPeakN = 0;
+        m_burstN = 0;
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         m_percLevel = 0.0f;
         m_detectSilent = true;
@@ -1556,6 +1557,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     float floorMag[KEY_COUNT];
     PianoRollPeakSpectrum::TuneAcc tune;
     m_detPeakN = 0;
+    m_burstN = 0;
     auto takePeaks = [&](int keyLo, int keyHi, int winSamples, int refWin) {
         const int n = m_peakSpec.PeakCount();
         for (int i = 0; i < n; ++i) {
@@ -1663,6 +1665,32 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             const double resultant = sqrt(m_tuneC * m_tuneC + m_tuneS * m_tuneS) / m_tuneW;
             if (resultant > 0.5)
                 m_tuneSemis = (float)(atan2(m_tuneS, m_tuneC) / 6.283185307179586);
+        }
+    }
+
+    // 直近 46ms。45〜100ms のアルペジオは 8192 窓では前後の音に埋もれる。
+    if (m_winLow >= 2048) {
+        double burstWin[2048];
+        const double* src = m_analysisBuf + (m_winLow - 2048);
+        for (int i = 0; i < 2048; ++i) {
+            const double p = 6.283185307179586 * i / 2047.0;
+            burstWin[i] = src[i] * (0.42 - 0.5 * cos(p) + 0.08 * cos(2.0 * p));
+        }
+        float burstMag[KEY_COUNT];
+        float burstFloor[KEY_COUNT];
+        float burstSal[KEY_COUNT];
+        PianoRollPeakSpectrum::TuneAcc burstTune;
+        m_peakSpec.Analyze(burstWin, 2048, m_inputSampleRate,
+            PianoRollPeakSpectrum::SIDELOBE_BLACKMAN_DB, 36, 100,
+            0.0f, 12.0f, burstMag, burstFloor, burstSal, &burstTune);
+        m_burstN = 0;
+        for (int i = 0; i < m_peakSpec.PeakCount() && m_burstN < BURST_MAX; ++i) {
+            const float hz = m_peakSpec.PeakHzAt(i);
+            const float amp = ScaleGoertzelAmpFlat(m_peakSpec.PeakAmpAt(i));
+            if (hz <= 1.0f || amp <= 0.0f) continue;
+            m_burstHz[m_burstN] = hz;
+            m_burstAmp[m_burstN] = amp;
+            ++m_burstN;
         }
     }
 
@@ -1811,6 +1839,83 @@ void CPianoRoll::UpdateNoteStates()
     pp.melodyHz = &m_melodyHz;
     pp.melodyMiss = &m_melodyMiss;
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
+
+    // 短い窓の先頭だけを足す。長い音は上のピックのまま。
+    // 今も鳴っている低い音の整数倍はアルペジオではなく倍音なので足さない。
+    // C6 より上で、短い窓に出ていない整数倍はノイズとして落とす。
+    if (m_burstN > 0) {
+        float bMax = 0.0f;
+        for (int i = 0; i < m_burstN; ++i)
+            if (m_burstAmp[i] > bMax) bMax = m_burstAmp[i];
+        auto centsBetween = [](float a, float b) -> float {
+            if (a <= 1.0f || b <= 1.0f) return 9999.0f;
+            return 1731.234049066756f * fabsf(logf(a / b));
+        };
+        auto relShort = [&](int key) -> float {
+            if (bMax <= 0.0f) return 0.0f;
+            const float target = PianoKey::KeyHz(key);
+            float best = 0.0f;
+            for (int i = 0; i < m_burstN; ++i) {
+                if (centsBetween(m_burstHz[i], target) < 60.0f) {
+                    const float r = m_burstAmp[i] / bMax;
+                    if (r > best) best = r;
+                }
+            }
+            return best;
+        };
+        for (int hi = 84; hi <= 100; ++hi) {
+            if (!picked[hi] || relShort(hi) >= 0.25f) continue;
+            for (int lo = 28; lo < hi && picked[hi]; ++lo) {
+                if (!picked[lo] || ownPow[lo] < ownPow[hi] * 1.05f) continue;
+                const float ratio = PianoKey::KeyHz(hi) / PianoKey::KeyHz(lo);
+                const int hn = (int)floorf(ratio + 0.5f);
+                if (hn < 2 || hn > 6) continue;
+                if (centsBetween(PianoKey::KeyHz(hi), PianoKey::KeyHz(lo) * (float)hn) < 40.0f
+                    && ownPow[hi] < ownPow[lo] * 0.92f) {
+                    picked[hi] = false;
+                    ownPow[hi] = 0.0f;
+                }
+            }
+        }
+        int ord[BURST_MAX];
+        for (int i = 0; i < m_burstN; ++i) ord[i] = i;
+        for (int i = 1; i < m_burstN; ++i) {
+            const int v = ord[i];
+            int j = i;
+            while (j > 0 && m_burstAmp[ord[j - 1]] < m_burstAmp[v]) {
+                ord[j] = ord[j - 1];
+                --j;
+            }
+            ord[j] = v;
+        }
+        int added = 0;
+        for (int oi = 0; oi < m_burstN && added < 2; ++oi) {
+            const int i = ord[oi];
+            const float rel = bMax > 0.0f ? m_burstAmp[i] / bMax : 0.0f;
+            if (rel < 0.60f) continue;
+            const int key = PianoRoll108::KeyFromHzTune(m_burstHz[i], 0.0f);
+            if (key < 36 || key > 96) continue;
+            bool nearPicked = false;
+            for (int d = -1; d <= 1; ++d) {
+                const int q = key + d;
+                if (q >= 0 && q < KEY_COUNT && picked[q]) nearPicked = true;
+            }
+            if (nearPicked) continue;
+            bool partial = false;
+            for (int lo = 28; lo < key && !partial; ++lo) {
+                if (!picked[lo] || relShort(lo) < 0.45f) continue;
+                const float ratio = m_burstHz[i] / PianoKey::KeyHz(lo);
+                const int hn = (int)floorf(ratio + 0.5f);
+                if (hn < 2 || hn > 4) continue;
+                if (centsBetween(m_burstHz[i], PianoKey::KeyHz(lo) * (float)hn) < 40.0f)
+                    partial = true;
+            }
+            if (partial) continue;
+            picked[key] = true;
+            if (ownPow[key] < m_burstAmp[i]) ownPow[key] = m_burstAmp[i];
+            ++added;
+        }
+    }
 
 #ifdef _DEBUG
     // [診断用] ピック直後、絶対床の半分にも満たない鍵が選ばれていないかを確認する。

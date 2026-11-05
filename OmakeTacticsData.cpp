@@ -2985,6 +2985,21 @@ int ExpToNext(int lv)
 	if (lv >= TAC_LV_MAX) return 999999;
 	return 70 + lv * 10 + lv * lv / 10;
 }
+void StageText(int stage, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	if (stage > TAC_STAGE_EX)
+		swprintf_s(out, (size_t)cap, L"EX%s", TacNum(stage - TAC_STAGE_EX));
+	else
+		wcsncpy_s(out, (size_t)cap, TacNum(stage < 0 ? 0 : stage), _TRUNCATE);
+}
+void StageCaption(int stage, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	wchar_t n[40];
+	StageText(stage, n, 40);
+	swprintf_s(out, (size_t)cap, L"%s %s", TT(TX_BT_STAGE), n);
+}
 const wchar_t* TacNum(int v)
 {
 	static wchar_t buf[8][32];
@@ -3080,10 +3095,10 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_P_CRIT, TX_SKD_P_CRIT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_E_VENOM, TX_SKD_E_VENOM, SK_PHYS, 4, 120, 1, 1, 0, EL_POISON, 1, 0, EF_POISON, 1 },
 	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_BURN, 1 },
-	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 0, 160, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 1 },
+	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 0, 125, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_E_DRAIN, TX_SKD_E_DRAIN, SK_PHYS, 5, 100, 1, 1, 0, EL_DARK, 1, 0, EF_DRAIN, 1 },
 	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 0, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLEEP, 1 },
-	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 0, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_STUN, 1 },
+	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 0, 110, 0, 0, 1, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_REFRESH, TX_SKD_REFRESH, SK_BUFF, 8, 0, 1, 1, 0, EL_HOLY, 1, 0, EF_REACT, 0 },
 	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 115, 0, 0, 1, EL_NONE, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 180, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
@@ -3349,11 +3364,18 @@ static MonsterDef kMon[M_COUNT] = {
 #include "tactics_src/mon_species.inc"
 #include "tactics_src/mon_names.inc"
 #include "tactics_src/summon.inc"
-static const wchar_t* ImportLocName(int model)
+static const wchar_t* ImportLocAt(int model, int lang)
 {
 	if (model < 0 || model >= kImportN) return L"?";
-	const wchar_t* const* s = kImportLoc[model];
-	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (lang < 0 || lang > 13) lang = 1;
+	const wchar_t* s = kImportLoc[model][lang];
+	return (s && s[0]) ? s : kImportLoc[model][1];
+}
+static const wchar_t* ImportLocName(int model)
+{
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	return ImportLocAt(model, lang);
 }
 
 enum { IMP_CAP = 2048, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
@@ -3609,6 +3631,13 @@ const wchar_t* MonsterLabel(int m)
 	return TT(d.nameTx);
 }
 
+const wchar_t* MonsterLabelAt(int m, int lang)
+{
+	const MonsterDef& d = MonsterInfo(m);
+	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return ImportLocAt(d.model, lang);
+	return TTAt(d.nameTx, lang);
+}
+
 static int NameGait(const wchar_t* n)
 {
 	if (!n) return GAIT_BIPED;
@@ -3670,8 +3699,12 @@ bool MonsterKnown(int id, int cleared)
 	} else if (id >= M_COUNT) return false;
 	const MonsterDef& d = MonsterInfo(id);
 	int lo = MonsterFirstStage(id);
+	int view = StageFoeViewHi(cleared);
+	if (lo > view) return false;
+	if (lo >= view) return false;
 	int hi = d.maxStage > 0 ? d.maxStage : TAC_STAGE_MAX;
 	int top = cleared < hi ? cleared : hi;
+	if (top > view) top = view;
 	return lo <= top;
 }
 
@@ -4515,6 +4548,8 @@ void UnitHeldText(const Unit& u, wchar_t* out, int cap)
 {
 	if (!out || cap < 2) return;
 	out[0] = 0;
+	wchar_t luck[160] = L"";
+	if (UnitIsLucky(u)) wcsncpy_s(luck, TT(TX_BT_LUCKY), _TRUNCATE);
 	wchar_t act[160] = L"", pas[80] = L"", cr[160] = L"";
 	for (int s = 0; s < SKL_COUNT; s++) {
 		if (!UnitHasSkill(u, s)) continue;
@@ -4544,10 +4579,14 @@ void UnitHeldText(const Unit& u, wchar_t* out, int cap)
 		wcscat_s(cf, L" ");
 		wcscat_s(cf, cr);
 	}
-	if (sk[0] && cf[0] && (int)(wcslen(sk) + wcslen(cf) + 5) < cap)
-		swprintf_s(out, (size_t)cap, L"%s    %s", sk, cf);
-	else if (sk[0]) wcscpy_s(out, (size_t)cap, sk);
-	else if (cf[0]) wcscpy_s(out, (size_t)cap, cf);
+	wchar_t rest[400] = L"";
+	if (sk[0] && cf[0] && (int)(wcslen(sk) + wcslen(cf) + 5) < 400)
+		swprintf_s(rest, L"%s    %s", sk, cf);
+	else if (sk[0]) wcscpy_s(rest, sk);
+	else if (cf[0]) wcscpy_s(rest, cf);
+	if (luck[0] && rest[0]) swprintf_s(out, (size_t)cap, L"%s    %s", luck, rest);
+	else if (luck[0]) wcsncpy_s(out, (size_t)cap, luck, _TRUNCATE);
+	else if (rest[0]) wcsncpy_s(out, (size_t)cap, rest, _TRUNCATE);
 }
 
 // 足の半幅。タイル中心から 0.5 が端。
@@ -4596,6 +4635,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	u.rosterIdx = -1;
 	u.monster = monster;
 	u.boss = boss;
+	u.lucky = 0;
 	u.ch.used = 1;
 	u.ch.cls = -1;
 	u.ch.lv = Clampi(lv, 1, TAC_ENEMY_LV_MAX);
@@ -4611,7 +4651,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 			v += 2;
 		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
-		// 味方のこれから先の成長が倍になった。敵はHPだけ同じ倍率にする。攻撃力は上げない。
+		// 味方は成長率×2で体力が伸びる。敵の体力だけ同じ方向に合わせ、攻撃は別の曲線で足す。
 		if (s == S_HP) {
 			v *= 2;
 			int bulk = 0;
@@ -4645,6 +4685,42 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		u.ch.stat[S_GRD] += 2;
 		u.ch.stat[S_PEN] += 2;
 	}
+	// 序盤は今の攻撃のまま。中盤から線形で足し、体力の 1/4〜2/5 が目安（回復は要るが即死しない）。
+	{
+		int lv = u.ch.lv;
+		int pct = 0;
+		int flat = 0;
+		if (lv > 16) {
+			int t = lv - 16;
+			if (t > 100) t = 100;
+			pct = t * 6 / 5;
+			if (pct > 140) pct = 140;
+		}
+		if (lv > 28) {
+			int t = lv - 28;
+			if (t > 80) t = 80;
+			flat = t / 2;
+			if (flat > 40) flat = 40;
+		}
+		if (lv > 140) {
+			int extra = (lv - 140) / 8;
+			if (extra > 60) extra = 60;
+			pct += extra;
+		}
+		if (pct > 180) pct = 180;
+		if (pct > 0) {
+			u.ch.stat[S_STR] = u.ch.stat[S_STR] * (100 + pct) / 100;
+			u.ch.stat[S_MAG] = u.ch.stat[S_MAG] * (100 + pct) / 100;
+		}
+		if (flat > 0) {
+			if (u.ch.stat[S_STR] >= u.ch.stat[S_MAG]) u.ch.stat[S_STR] += flat;
+			else u.ch.stat[S_MAG] += flat;
+		}
+		if (boss && lv > 16) {
+			u.ch.stat[S_STR] = u.ch.stat[S_STR] * 108 / 100;
+			u.ch.stat[S_MAG] = u.ch.stat[S_MAG] * 108 / 100;
+		}
+	}
 	for (int i = 0; i < 3; i++) {
 		int sk = md.skills[i];
 		if (sk < 0) continue;
@@ -4657,7 +4733,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	if (u.ch.lv >= 45) CharGiveSkill(u.ch, SKL_P_CRIT);
 	u.hp = u.ch.stat[S_HP];
 	u.mp = u.ch.stat[S_MP];
-	u.cp = boss ? 30 : 0;
+	u.cp = 0;
 	u.span = MonsterSpan(md, boss);
 	{
 		int line = monster % 6;
@@ -6101,6 +6177,7 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
 	double e = (8.0 + (double)stage * 0.48) * (0.38 + 0.32 * frac) * lvK;
 	if (d.boss) e *= 1.25;
+	if (UnitIsLucky(d)) e *= 3.0;
 	if (e < 1.0) return 1;
 	if (e > 2000000000.0) return 2000000000;
 	return (int)(e + 0.5);
@@ -6116,11 +6193,14 @@ long long ExpShareAoe(long long e, int nHit)
 	return o;
 }
 
-/* ステージ1で Lv1、19で 30、以後同じ傾き。9999で約1.6万。 */
+/* ステージ1で Lv1、19で 30、以後同じ傾き。9999で約1.6万。EX も同じ傾きのまま。 */
 static int StageEnemyLevel(int stage)
 {
-	stage = Clampi(stage, 1, TAC_STAGE_MAX);
-	return 1 + (stage - 1) * 29 / 18;
+	if (stage < 1) stage = 1;
+	long long lv = 1 + ((long long)stage - 1) * 29 / 18;
+	if (lv > TAC_ENEMY_LV_MAX) lv = TAC_ENEMY_LV_MAX;
+	if (lv < 1) lv = 1;
+	return (int)lv;
 }
 
 static bool TurnFx(int effect)
@@ -6213,7 +6293,7 @@ static void AddCp(Unit& u, int n)
 	if (n < 1) return;
 	if (UnitHasPas(u, PAS_CP2)) n *= 2;
 	else if (UnitHasPas(u, PAS_CP)) n = n * 3 / 2;
-	n += max(0, UnitStat(u, S_CPL) / 4);
+	n += max(0, UnitStat(u, S_CPL) / 8);
 	if (u.cp < 0) u.cp = 0;
 	int c = u.cp + n;
 	if (c > CP_MAX) c = CP_MAX;
@@ -6321,7 +6401,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.dmg = -(d.hp - before);
 					s.hit = 1;
 					if (sd->effect == EF_CLEANSE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
-					AddCp(a, 4);
+					AddCp(a, 2);
 				}
 			} else if (sd->kind == SK_BUFF) {
 				s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
@@ -6334,7 +6414,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.overkill = 1;
 					s.crit = (int)(r.Next() % 100) < crit;
 					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
-					AddCp(a, 5 + s.dmg / 12);
+					AddCp(a, 2 + s.dmg / 20);
 				} else {
 				s.hit = (int)(r.Next() % 100) < hit;
 				if (s.hit) {
@@ -6342,8 +6422,8 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
 					if ((long long)s.dmg >= (long long)d.hp * 2) s.overkill = 1;
 					d.hp -= s.dmg;
-					AddCp(a, 5 + s.dmg / 12);
-					AddCp(d, 7 + s.dmg / 8);
+					AddCp(a, 2 + s.dmg / 20);
+					AddCp(d, 3 + s.dmg / 20);
 					bool held = UnitAilmentHeld(d);
 					if (s.dmg > 0 && !(held && TurnFx(sd->effect))) d.sleep = 0;
 					if (sd->effect != EF_NONE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
@@ -6386,7 +6466,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			s.overkill = 1;
 			s.crit = (int)(r.Next() % 100) < crit;
 			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
-			AddCp(x, 5 + s.dmg / 12);
+			AddCp(x, 2 + s.dmg / 20);
 		} else {
 		s.hit = (int)(r.Next() % 100) < hit;
 		if (s.hit) {
@@ -6394,8 +6474,8 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
 			if ((long long)s.dmg >= (long long)y.hp * 2) s.overkill = 1;
 			y.hp -= s.dmg;
-			AddCp(x, 5 + s.dmg / 12);
-			AddCp(y, 7 + s.dmg / 8);
+			AddCp(x, 2 + s.dmg / 20);
+			AddCp(y, 3 + s.dmg / 20);
 			if (sk >= 0 && SkillInfo(sk).effect == EF_DRAIN) {
 				int h = s.dmg / 2;
 				x.hp = min(x.ch.stat[S_HP], x.hp + h);
@@ -6640,9 +6720,8 @@ static int PickClassic(int stage, Rng& r)
 	return ids[0];
 }
 
-static int PickMonster(int stage, Rng& r)
+static int PickMonsterAt(int stage, Rng& r)
 {
-	EnsureMonsters();
 	int roll = r.Range(0, 99);
 	int pool = POOL_FAN;
 	if (stage < 25) {
@@ -6661,9 +6740,55 @@ static int PickMonster(int stage, Rng& r)
 	return id;
 }
 
+static int StageMod(int stage, int mod)
+{
+	if (mod < 1) mod = 1;
+	int k = stage % mod;
+	if (k < 1) k = mod;
+	if (k > TAC_STAGE_MAX) k = TAC_STAGE_MAX;
+	return k;
+}
+
+static int PickAnyFoe(Rng& r)
+{
+	EnsureMonsters();
+	int ids[IMP_CAP + M_COUNT];
+	int n = 0;
+	int cap = IMP_CAP + M_COUNT;
+	for (int i = 0; i < M_COUNT && n < cap; i++)
+		if (kMon[i].weight > 0) ids[n++] = i;
+	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	for (int i = 0; i < nImp && n < cap; i++) {
+		if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
+		if (s_monImp[i].weight <= 0) continue;
+		ids[n++] = M_COUNT + i;
+	}
+	if (n <= 0) return M_SLIME;
+	return ids[r.Range(0, n - 1)];
+}
+
+static int PickMonster(int stage, Rng& r)
+{
+	EnsureMonsters();
+	if (stage >= TAC_STAGE_EX) {
+		int mode = r.Range(0, 99);
+		if (mode < 40) return PickMonsterAt(StageMod(stage, 10000), r);
+		if (mode < 70) return PickMonsterAt(StageMod(stage, 100), r);
+		return PickAnyFoe(r);
+	}
+	return PickMonsterAt(stage, r);
+}
+
 static int BossMonster(int stage, Rng& r)
 {
 	EnsureMonsters();
+	if (stage >= TAC_STAGE_EX) {
+		int mode = r.Range(0, 99);
+		if (mode < 20) return M_DRAGON;
+		if (mode < 50) return PickMonsterAt(StageMod(stage, 10000), r);
+		if (mode < 75) return PickMonsterAt(StageMod(stage, 100), r);
+		return PickAnyFoe(r);
+	}
 	if (stage >= 80 && (stage % 20) == 0) return M_DRAGON;
 	if (stage >= 24 && r.Range(0, 3) == 0) return M_WYVERN;
 	if (stage >= 16 && r.Range(0, 3) == 0) return M_GOLEM;
@@ -6873,7 +6998,7 @@ static void RescueStuckFeet(Battle& b)
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
-	stage = Clampi(stage, 1, TAC_STAGE_MAX);
+	stage = Clampi(stage, 1, TAC_STAGE_ABS);
 	b.stage = stage;
 	b.lastActTeam = -1;
 	GenerateMap(b.map, stage, seed, theme);
@@ -6930,6 +7055,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.hp = u.ch.stat[S_HP];
 		u.mp = u.ch.stat[S_MP];
 		CraftBindUnit(u);
+		u.cp = 0;
 		u.span = 1;
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
@@ -7140,6 +7266,12 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		}
 	}
 	WakeNearPlayers(b, 16, 1);
+	// どの特殊戦でも、ボス以外の雑魚を独立抽選。1体とは限らない。
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY || u.boss) continue;
+		if (r.Chance(6)) u.lucky = 1;
+	}
 	b.stampede = 0;
 	b.stampedeLeft = 0;
 	b.stampedeLine = 0;
@@ -7218,6 +7350,7 @@ int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap)
 		int lv = baseLv + r.Range(-1, 1);
 		if (b.stage <= 2) lv = max(1, lv - 1);
 		MakeEnemy(u, mon, lv, 0, r);
+		if (r.Chance(6)) u.lucky = 1;
 		u.span = 1;
 		u.x = -8;
 		u.z = -8;
@@ -9203,6 +9336,7 @@ void SaveDefaults(SaveData& s)
 	s.quality = TAC_Q_AUTO;
 	s.spare[0] = 1;
 	s.showGrid = 1;
+	TacEnsureOpt(s);
 	s.uidNext = 1;
 	s.bgmVol = 6;
 	s.seVol = 8;
@@ -9808,8 +9942,8 @@ bool SaveLoad(SaveData& s)
 	}
 	for (int i = 0; i < MAX_PARTY; i++)
 		if (s.party[i] < -1 || s.party[i] >= MAX_ROSTER || (s.party[i] >= 0 && !s.roster[s.party[i]].used)) s.party[i] = -1;
-	s.stageCleared = Clampi(s.stageCleared, 0, TAC_STAGE_MAX);
-	s.stageSel = Clampi(s.stageSel, 1, min(TAC_STAGE_MAX, s.stageCleared + 1));
+	s.stageCleared = Clampi(s.stageCleared, 0, TAC_STAGE_ABS);
+	s.stageSel = Clampi(s.stageSel, 1, StagePlayMax(s.stageCleared));
 	if (s.uidNext == 0) s.uidNext = 1;
 	s.camSpeed = Clampi(s.camSpeed, 0, 2);
 	TacQualityEnsureAutoDefault(s);

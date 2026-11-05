@@ -345,7 +345,7 @@ float ShadowAt(float3 w, float3 n)
 	float2 uv = sp.xy / sp.w * float2(.5, -.5) + .5;
 	float z = sp.z / sp.w - 0.0015;
 	if (any(uv < 0) || any(uv > 1) || z >= 1) return 1;
-	// 12 タップの円盤。影の縁を 3x3 よりなだらかにする。
+	// 単位円盤。地面の位置で回して、模様がカメラに追従して流れないようにする。
 	const float2 k[16] = {
 		float2(-0.326212, -0.405810), float2(-0.840144, -0.073580), float2(-0.695914, 0.457137),
 		float2(-0.203345, 0.620716), float2(0.962340, -0.194983), float2(0.473434, -0.480026),
@@ -354,49 +354,49 @@ float ShadowAt(float3 w, float3 n)
 		float2(0.089842, 0.323164), float2(-0.461230, 0.218612), float2(0.248110, 0.553812),
 		float2(-0.118392, -0.210418)
 	};
-	// 標準から円盤。高い段ほど接触は鋭く、離れた遮蔽だけ広げる。超軽量は1。
-	int taps = 12;
-	float rad = 1.45;
-	if (Q.x > 3.5 && Q.x < 4.5) { taps = 1; rad = 0; }
-	else if (Q.x > 5.5) { taps = 16; rad = 0.42; }
-	else if (Q.x > 4.5) { taps = 16; rad = 0.58; }
-	else if (Q.x > 2.5) { taps = 16; rad = 0.78; }
-	else if (Q.x > 1.5) { taps = 12; rad = 1.05; }
-	float t = Fog.w * rad;
-	if (taps > 1 && Q.x > 1.5) {
-		int nb = (Q.x > 5.5) ? 16 : ((Q.x > 2.5) ? 8 : 4);
-		float search = Fog.w * ((Q.x > 5.5) ? 14.0 : ((Q.x > 2.5) ? 8.0 : 5.0));
-		float avg = 0;
-		float cnt = 0;
-		[loop] for (int b = 0; b < nb; b++) {
-			float d = ShadowMap.SampleLevel(SL, uv + k[b] * search, 0).r;
-			if (d > 0.001 && d < z) { avg += d; cnt += 1; }
+	float ang = frac(dot(w.xz, float2(0.1031, 0.11369))) * 6.2831853;
+	float cs = cos(ang), sn = sin(ang);
+	// 超軽量は1点。軽量と標準は円盤の大きさだけ広げ、枚数は変えない。
+	if (Q.x < 1.5 || (Q.x > 3.5 && Q.x < 4.5)) {
+		if (Q.x > 3.5 && Q.x < 4.5) return ShadowMap.SampleCmpLevelZero(SC, uv, z);
+		float t0 = Fog.w * (Q.x > 0.5 ? 5.2 : 3.4);
+		float s0 = 0;
+		[loop] for (int i = 0; i < 12; i++) {
+			float2 o = k[i];
+			float2 r = float2(o.x * cs - o.y * sn, o.x * sn + o.y * cs);
+			s0 += ShadowMap.SampleCmpLevelZero(SC, uv + r * t0, z);
 		}
-		if (cnt > 0.5) {
-			if (cnt >= nb - 0.5) {
-				float pen0 = saturate((z - avg / cnt) * ((Q.x > 5.5) ? 36.0 : 22.0));
-				float wide0 = (Q.x > 5.5) ? 3.2 : ((Q.x > 2.5) ? 2.2 : 1.6);
-				float maxOff = t * lerp(0.42, wide0, pen0) * (Q.x > 5.5 ? 2.35 : (Q.x > 4.5 ? 1.75 : 1.0));
-				if (maxOff <= search) return 0;
-			}
-			float pen = saturate((z - avg / cnt) * ((Q.x > 5.5) ? 36.0 : 22.0));
-			float wide = (Q.x > 5.5) ? 3.2 : ((Q.x > 2.5) ? 2.2 : 1.6);
-			t *= lerp(0.42, wide, pen);
-		} else return 1;
+		return s0 * (1.0 / 12.0);
 	}
+	// 自然光。足元は細く、遮蔽が遠いほど太陽の視半径ぶん縁が広がる。
+	// 広がりは探索円の内側まで。影の中は探索だけで打ち切るので、外側の追加サンプルは足さない。
+	int nb = (Q.x > 5.5) ? 16 : ((Q.x > 2.5) ? 8 : 4);
+	float searchTex = (Q.x > 5.5) ? 14.0 : ((Q.x > 2.5) ? 8.0 : 5.0);
+	float search = Fog.w * searchTex;
+	float avg = 0;
+	float cnt = 0;
+	[loop] for (int b = 0; b < nb; b++) {
+		float d = ShadowMap.SampleLevel(SL, uv + k[b] * search, 0).r;
+		if (d > 0.001 && d < z) { avg += d; cnt += 1; }
+	}
+	if (cnt < 0.5) return 1;
+	float pen = saturate((z - avg / cnt) * ((Q.x > 5.5) ? 22.0 : 16.0));
+	float contact = (Q.x > 5.5) ? 2.2 : ((Q.x > 2.5) ? 1.8 : 1.45);
+	float sun = (Q.x > 5.5) ? 12.0 : ((Q.x > 2.5) ? 7.0 : 4.4);
+	float radTex = lerp(contact, sun, pen);
+	float capTex = searchTex * 0.92;
+	if (radTex > capTex) radTex = capTex;
+	if (cnt >= (float)nb - 0.5) return 0;
+	float t = Fog.w * radTex;
+	float zb = z - t * 0.55;
+	int taps = (Q.x > 2.5) ? 16 : 12;
 	float s = 0;
-	int ntap = taps;
-	[loop] for (int i = 0; i < taps; i++)
-		s += ShadowMap.SampleCmpLevelZero(SC, uv + k[i] * t, z);
-	if (Q.x > 4.5) {
-		float t2 = t * (Q.x > 5.5 ? 2.35 : 1.75);
-		int extra = (Q.x > 5.5) ? 16 : 8;
-		[loop] for (int j = 0; j < extra; j++)
-			s += ShadowMap.SampleCmpLevelZero(SC, uv + k[j] * t2, z);
-		ntap += extra;
+	[loop] for (int i = 0; i < taps; i++) {
+		float2 o = k[i];
+		float2 r = float2(o.x * cs - o.y * sn, o.x * sn + o.y * cs);
+		s += ShadowMap.SampleCmpLevelZero(SC, uv + r * t, zb);
 	}
-	s /= ntap;
-	return saturate(s);
+	return saturate(s / taps);
 }
 
 float3 HueRotate(float3 c, float a)

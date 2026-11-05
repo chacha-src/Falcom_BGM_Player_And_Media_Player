@@ -43,6 +43,7 @@ public:
 
 	void RequestDestroyWindow();
 	BOOL HandleKeyMessage(MSG* pMsg);
+	void EnsureImeFocus();
 	BOOL Destroying() const { return m_destroying; }
 	otac::Game& GameRef() { return m_game; }
 	BOOL GameReady() const { return m_gameOk; }
@@ -67,6 +68,9 @@ protected:
 	afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg UINT OnGetDlgCode();
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnImeChange();
+	afx_msg void OnImeSetFocus();
 	DECLARE_MESSAGE_MAP()
 
 	void LayoutView();
@@ -95,11 +99,15 @@ protected:
 	HANDLE m_paceThread = NULL;
 	BOOL m_inPace = FALSE;
 	volatile LONG m_pacePosted = 0;
-	volatile LONG m_paceHz = 60;
+	volatile LONG m_paceHz = 240;
 	int m_winApplied = -1;
 	int m_viewW = 0, m_viewH = 0;
 	CEdit m_ime;
 	CFont m_imeFont;
+	CBrush m_imeBrush;
 	int m_imeKind = 0;
 	BOOL m_imePush = FALSE;
+	BOOL m_imeAllowClear = FALSE;
+	void* m_imeCtx = nullptr;
+	int m_imeFontPx = 16;
 };

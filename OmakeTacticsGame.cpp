@@ -43,7 +43,7 @@ enum {
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_EV_PART_PREV = 1510, ID_EV_PART_NEXT, ID_EV_MAIN_PREV, ID_EV_MAIN_NEXT,
 	ID_CR_MOT0 = 1550, ID_MON_MOT0 = 1560,
-	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE,
+	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE, ID_RS_LOOP,
 	ID_HELP_CLOSE = 900,
 	ID_BASE_REROLL = 940, ID_BASE_THEME, ID_BASE_LOOK = 942, ID_BASE_LOOK_BACK,
 	ID_BASE_SAVESLOT = 947,
@@ -51,7 +51,8 @@ enum {
 	ID_SLOT_OUT = 998, ID_SLOT_IN,
 	ID_JOB_GO = 2200, ID_JOB_SKIP, ID_JOB_YES, ID_JOB_NO, ID_JOB_BACK, ID_JOB_NEXT, ID_JOB_OPT0 = 2210,
 	ID_GROW_ROOT0 = 2300, ID_GROW_NODE0 = 2320, ID_GROW_BACK = 2390,
-	ID_CDX_BRANCH = 2400
+	ID_CDX_BRANCH = 2400,
+	ID_BASE_PACE = 3100, ID_BASE_CUT
 };
 
 void ThemeEnv(int th, Env& e)
@@ -141,9 +142,11 @@ Game::Game()
 	m_selDelta = 0;
 	m_textFocus = 0;
 	m_textCaret = 0;
+	m_textReload = 0;
 	m_imeComp[0] = 0;
 	m_textBox[0] = m_textBox[1] = m_textBox[2] = m_textBox[3] = 0;
 	m_textPx = 16.f;
+	m_textPad = 0;
 	m_keyShift = FALSE;
 	memset(&m_padPrev, 0, sizeof(m_padPrev));
 	m_padRepeat = 0; m_padDirPrev = -1; m_padTrig = 0;
@@ -368,7 +371,7 @@ BOOL Game::Init(HWND view, int w, int h)
 	m_loadFrames = 0;
 	m_ui = Clampf(min(m_w / 1280.f, m_h / 720.f), .62f, 2.2f);
 	m_qApply = TacQualityWanted(m_save);
-	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; }
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzDefaultI(); }
 	m_qCoolT = 0.8f;
 	if (!m_r.Init(view, m_qApply)) { m_screen = SC_FAIL; return FALSE; }
 	return TRUE;
@@ -401,7 +404,8 @@ void Game::DrawLoadHud(int permille)
 	int pct = (permille >= 0 ? permille : m_loadPm) / 10;
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
-	m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, U(40), RGBA8(255, 230, 160), 1, 1);
+	float titlePx = FitTextPx(TT(TX_TITLE), (float)m_w * .86f, U(40), 1);
+	m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, titlePx, RGBA8(255, 230, 160), 1, 1);
 	wchar_t line[80];
 	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
 	m_r.HudText(line, m_w * .5f, m_h * .50f, U(20), RGBA8(230, 230, 240), 1, 0);
@@ -581,8 +585,8 @@ BOOL Game::Recover()
 	m_r.Release();
 	m_loaded = FALSE;
 	m_qApply = TacQualityWanted(m_save);
-	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; }
-	m_syncRun = -1;
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzDefaultI(); }
+	else m_syncRun = -1;
 	m_syncArmN = 0;
 	if (!m_r.Init(m_hwnd, m_qApply)) return FALSE;
 	if (!LoadEverything()) return FALSE;
@@ -738,9 +742,10 @@ void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 	if (u.team == TEAM_PLAYER) swprintf_s(out, n, L"%s", u.ch.name);
 	else {
 		const MonsterDef& md = MonsterInfo(u.monster);
-		if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", u.boss ? L"★" : L"", MonsterLabel(u.monster));
-		else if (md.nameB >= 0) swprintf_s(out, n, L"%s%s %s", u.boss ? L"★" : L"", TT(md.nameTx), TT(md.nameB));
-		else swprintf_s(out, n, L"%s%s", u.boss ? L"★" : L"", TT(md.nameTx));
+		const wchar_t* mark = u.boss ? L"★" : (UnitIsLucky(u) ? L"☆" : L"");
+		if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", mark, MonsterLabel(u.monster));
+		else if (md.nameB >= 0) swprintf_s(out, n, L"%s%s %s", mark, TT(md.nameTx), TT(md.nameB));
+		else swprintf_s(out, n, L"%s%s", mark, TT(md.nameTx));
 	}
 }
 
@@ -753,14 +758,16 @@ int Game::QualityNow() const
 
 int Game::SyncNow() const
 {
-	int v = (m_syncRun >= 0) ? m_syncRun : TacVsync(m_save);
-	return Clampi(v, 0, 4);
+	if (m_save.quality == TAC_Q_AUTO) {
+		int v = (m_syncRun >= 0) ? m_syncRun : TacHzDefaultI();
+		return Clampi(v, 0, TAC_HZ_N - 1);
+	}
+	return Clampi(TacVsync(m_save), 0, TAC_HZ_N - 1);
 }
 
 int Game::PaceHz() const
 {
-	static const int hz[5] = { 30, 60, 120, 144, 240 };
-	return hz[SyncNow()];
+	return TacHzAt(SyncNow());
 }
 
 void Game::ApplyQualityNow(int q)
@@ -790,11 +797,12 @@ void Game::PickQuality(int delta)
 		m_save.spare[2] = 6;
 		TacQualityEnsureAutoDefault(m_save);
 		m_save.spare[2] = 6;
-		m_syncRun = -1;
+		m_syncRun = TacHzDefaultI();
 		ApplyQualityNow(6);
 	} else {
 		m_save.quality = q;
 		TacQualityUserLock(m_save);
+		m_syncRun = -1;
 		ApplyQualityNow(q);
 	}
 	InvalidatePortraits();
@@ -804,10 +812,8 @@ void Game::PulseQuality(float work, float span)
 {
 	(void)work;
 	if (m_screen == SC_LOADING || !m_loaded || !m_r.Ready()) return;
-	static const int kHz[5] = { 30, 60, 120, 144, 240 };
-	int user = Clampi(TacVsync(m_save), 0, 4);
-	int userHz = kHz[user];
-	int hz = PaceHz();
+	int runI = SyncNow();
+	int hz = TacHzAt(runI);
 	if (hz < 30) hz = 30;
 	if (m_qHz != hz) {
 		m_qHz = hz;
@@ -822,22 +828,19 @@ void Game::PulseQuality(float work, float span)
 	const int stdSlot = TacQualityFixedSlot(1);
 	const int capSlot = 6;
 	if (autoOn) {
-		// 保存している拍は触らない。設定Hzの限界突破から下げ、標準でも足りなければ
-		// 1/60限界突破、軽量以下なら 1/30限界突破。実働で上の拍に戻れるか裏判定する。
+		int capI = TAC_HZ_N - 1;
 		int now = QualityNow();
 		int slot = TacQualityFixedSlot(now);
 		int next = now;
-		auto goTier = [&](int sync, int q) {
-			m_syncRun = sync;
-			m_save.spare[2] = q;
-			ApplyQualityNow(q);
+		auto goHz = [&](int sync) {
+			m_syncRun = Clampi(sync, 0, capI);
 			m_qMissN = 0;
 			m_qOkN = 0;
 			m_syncArmN = 0;
 			m_syncLock = 0.45f;
 			m_fpsN = 0;
 			m_fpsI = 0;
-			m_qHz = (sync < 0) ? userHz : kHz[Clampi(sync, 0, 4)];
+			m_qHz = TacHzAt(m_syncRun);
 		};
 		float holdHz = (hz >= 120) ? (float)hz * 0.88f : (float)hz * 0.95f;
 		float dropHz = (hz >= 120) ? (float)hz * 0.72f : (float)hz * 0.80f;
@@ -845,37 +848,27 @@ void Game::PulseQuality(float work, float span)
 		else if (m_fps < dropHz) { m_qMissN++; m_qOkN = 0; }
 		else { m_qMissN = 0; m_qOkN = 0; }
 		int floorSlot = (hz <= 30) ? 0 : stdSlot;
-		if (hz <= 30 && userHz >= 60) {
-			float b60 = 1.f / 60.f;
-			BOOL can60 = slot >= stdSlot && m_fps >= 30.f * 0.95f
-				&& m_workAvg > 0.f && m_workAvg <= b60 * 0.98f;
-			if (can60) m_syncArmN++;
-			else m_syncArmN = 0;
-			if (m_syncArmN >= 20) {
-				goTier((userHz >= 120) ? 1 : -1, 6);
-				return;
-			}
-		} else if (hz >= 60 && hz < userHz && userHz >= 120) {
-			float bU = 1.f / (float)userHz;
-			BOOL canU = slot >= stdSlot && m_fps >= 60.f * 0.95f
+		BOOL peakQ = (now == 5 || now == 6);
+		if (peakQ && runI < capI) {
+			int upI = runI + 1;
+			float bU = 1.f / (float)TacHzAt(upI);
+			BOOL canU = m_fps >= (float)hz * 0.95f
 				&& m_workAvg > 0.f && m_workAvg <= bU * 0.98f;
 			if (canU) m_syncArmN++;
 			else m_syncArmN = 0;
 			if (m_syncArmN >= 20) {
-				goTier(-1, 6);
+				goHz(upI);
 				return;
 			}
 		} else m_syncArmN = 0;
 		if (m_qMissN >= 20) {
+			if (now == 3 && runI > 0) {
+				goHz(runI - 1);
+				return;
+			}
 			if (slot > floorSlot) {
 				next = TacQualityFixedAt(slot - 1);
 				m_qMissN = 0;
-			} else if (hz >= 120) {
-				goTier(1, 6);
-				return;
-			} else if (hz >= 60) {
-				goTier(0, 6);
-				return;
 			} else m_qMissN = 0;
 		} else if (m_syncArmN == 0 && m_qOkN >= 40 && slot < capSlot) {
 			next = TacQualityFixedAt(slot + 1);
@@ -886,26 +879,7 @@ void Game::PulseQuality(float work, float span)
 		if (next != now) ApplyQualityNow(next);
 		return;
 	}
-	if (userHz >= 120) return;
-	// 1/60 以下の固定画質。表示間隔だけを見る。標準以上で 1/30 には落とさない。
-	int v = SyncNow();
-	int qSlot = TacQualityFixedSlot(QualityNow());
-	int desired = user;
-	if (qSlot < stdSlot) desired = 0;
-	else if (user == 0) desired = 1;
-	if (desired != v) {
-		m_qMissN = 0;
-		if (m_syncArm != desired) { m_syncArm = desired; m_syncArmN = 0; }
-		m_syncArmN++;
-		if (m_syncLock <= 0.f && m_syncArmN >= 10) {
-			m_syncRun = (desired == user) ? -1 : desired;
-			m_syncArmN = 0;
-			m_syncLock = 1.5f;
-			m_qOkN = 0;
-			m_qHz = PaceHz();
-		}
-		if (desired < v) return;
-	} else m_syncArmN = 0;
+	m_syncRun = -1;
 	float period = 1.f / (float)hz;
 	BOOL shownOk = (m_fps >= (float)hz * 0.98f) || (span <= period * 1.08f);
 	if (shownOk) { m_qOkN++; m_qMissN = 0; }
@@ -932,6 +906,8 @@ void Game::PulseQuality(float work, float span)
 
 void Game::Tick(float dt)
 {
+	m_textPad = 0;
+	SanitizeTextFocus();
 	if (m_slotBusy) return;
 	if (m_slotJob) {
 		int job = m_slotJob;
@@ -1217,7 +1193,7 @@ void Game::RenderFrame()
 		break;
 	case SC_FAIL: {
 		const wchar_t* msg = m_r.Ready() ? TT(TX_MISC_ASSETFAIL) : TT(TX_MISC_DXFAIL);
-		m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .4f, U(34), RGBA8(255, 230, 160), 1, 1);
+		m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .4f, FitTextPx(TT(TX_TITLE), (float)m_w * .86f, U(34), 1), RGBA8(255, 230, 160), 1, 1);
 		m_r.HudText(msg, m_w * .5f, m_h * .52f, U(18), RGBA8(255, 160, 150), 1, 0);
 		wchar_t hr[64];
 		swprintf_s(hr, L"0x%08X / %d", (unsigned)m_r.LastError(), m_r.FailStage());
@@ -1396,7 +1372,16 @@ void Game::OnMouseUp(int btn, int x, int y)
 		m_monDrag = FALSE;
 		if (abs(x - m_downX) < 12 && abs(y - m_downY) < 12) {
 			m_click = TRUE; m_clickX = x; m_clickY = y;
-			if (m_textFocus && m_screen == SC_CREATE) m_textFocus = 0;
+			if (m_textFocus == 1
+				&& m_textBox[2] > 1.f && m_textBox[3] > 1.f
+				&& !Hit(m_textBox[0], m_textBox[1], m_textBox[2], m_textBox[3])) {
+				const BOOL began = m_downX >= m_textBox[0] && m_downY >= m_textBox[1]
+					&& m_downX < m_textBox[0] + m_textBox[2] && m_downY < m_textBox[1] + m_textBox[3];
+				if (!began) {
+					m_textFocus = 0;
+					m_imeComp[0] = 0;
+				}
+			}
 		}
 	}
 	if (btn == 1 && m_rDown) {
@@ -1555,13 +1540,26 @@ void Game::ClearTextFocus()
 	m_imeComp[0] = 0;
 }
 
+void Game::SanitizeTextFocus()
+{
+	int f = m_textFocus;
+	if (f == 1 && m_screen != SC_CREATE) f = 0;
+	else if (f == 2 && !m_slotUi) f = 0;
+	else if (f == 3 && !m_sellAsk) f = 0;
+	else if (f == 4 && (m_screen != SC_BASE || m_codex != 4)) f = 0;
+	if (f != m_textFocus) {
+		m_textFocus = 0;
+		m_imeComp[0] = 0;
+	}
+}
+
 BOOL Game::TextLive(wchar_t*& buf, int& maxLen)
 {
 	buf = NULL;
 	maxLen = 0;
-	if (m_textFocus == 1) { buf = m_edit.name; maxLen = NAME_LEN; return TRUE; }
-	if (m_textFocus == 2) { buf = m_slotEdit; maxLen = TAC_SLOT_NAME; return TRUE; }
-	if (m_textFocus == 4) { buf = m_monFind; maxLen = 24; return TRUE; }
+	if (m_textFocus == 1 && m_screen == SC_CREATE) { buf = m_edit.name; maxLen = NAME_LEN; return TRUE; }
+	if (m_textFocus == 2 && m_slotUi) { buf = m_slotEdit; maxLen = TAC_SLOT_NAME; return TRUE; }
+	if (m_textFocus == 4 && m_screen == SC_BASE && m_codex == 4) { buf = m_monFind; maxLen = 24; return TRUE; }
 	return FALSE;
 }
 
@@ -1618,6 +1616,26 @@ void Game::NotifyFindChanged()
 	m_codexPage = 0;
 }
 
+void Game::ArmFoeFind()
+{
+	if (m_screen != SC_BASE || m_codex != 4) return;
+	if (m_textFocus == 4) return;
+	m_textFocus = 4;
+	m_textCaret = TacWLen(m_monFind);
+	m_imeComp[0] = 0;
+	m_textReload = 1;
+}
+
+void Game::CommitMonFind(const wchar_t* s)
+{
+	if (m_screen != SC_BASE || m_codex != 4) return;
+	if (!s) s = L"";
+	wchar_t prev[24];
+	wcsncpy_s(prev, m_monFind, _TRUNCATE);
+	wcsncpy_s(m_monFind, s, _TRUNCATE);
+	if (wcscmp(prev, m_monFind) != 0) m_codexPage = 0;
+}
+
 float Game::TextCaretPx()
 {
 	const wchar_t* s = L"";
@@ -1633,7 +1651,7 @@ float Game::TextCaretPx()
 	for (int i = 0; m_imeComp[i] && o + 1 < 96; i++) pre[o++] = m_imeComp[i];
 	pre[o] = 0;
 	float px = m_textPx > 1.f ? m_textPx : 16.f;
-	return m_r.TextWidth(pre, px, 1);
+	return m_r.TextWidth(pre, px, 1) + m_textPad;
 }
 
 void Game::OnChar(wchar_t ch)
@@ -1653,8 +1671,10 @@ void Game::OnChar(wchar_t ch)
 	}
 	if (ch == 13 || ch == 27 || ch == 9) {
 		if (m_textFocus == 2 && ch == 13) CommitSlotName();
-		else m_textFocus = 0;
-		m_imeComp[0] = 0;
+		else if (!(m_textFocus == 4 && ch == 13)) {
+			m_textFocus = 0;
+			m_imeComp[0] = 0;
+		}
 		return;
 	}
 	wchar_t* buf = NULL;
@@ -1721,7 +1741,7 @@ void Game::OnKey(int vk, BOOL down)
 		if (m_textCaret < 0 || m_textCaret > n) m_textCaret = n;
 		if (vk == VK_RETURN) {
 			if (m_textFocus == 2) CommitSlotName();
-			else { m_textFocus = 0; m_imeComp[0] = 0; }
+			else if (m_textFocus != 4) { m_textFocus = 0; m_imeComp[0] = 0; }
 			return;
 		}
 		if (vk == VK_ESCAPE || vk == VK_TAB) { m_textFocus = 0; m_imeComp[0] = 0; if (vk == VK_ESCAPE) TacSfx(TS_CANCEL); return; }
@@ -1752,7 +1772,7 @@ void Game::OnKey(int vk, BOOL down)
 		return;
 	}
 	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && (vk == VK_RETURN || vk == VK_SPACE || vk == 'Z' || vk == VK_ESCAPE || vk == VK_BACK || vk == 'X')) {
-		m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f);
+		m_phaseT = max(m_phaseT, (m_surveyN >= 2 ? kIntroSweep : 0.35f) * TacPaceTime(m_save));
 		return;
 	}
 	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
@@ -1786,6 +1806,7 @@ void Game::OnKey(int vk, BOOL down)
 void Game::OnPad(const PadState& p, float dt)
 {
 	if (!p.connected) { memset(&m_padPrev, 0, sizeof(m_padPrev)); return; }
+	if (m_textFocus) { m_padPrev = p; return; }
 	auto pressed = [&](int bit) { return (p.buttons & (1 << bit)) && !(m_padPrev.buttons & (1 << bit)); };
 	if (m_demo) {
 		BOOL any = FALSE;
@@ -1816,7 +1837,7 @@ void Game::OnPad(const PadState& p, float dt)
 		}
 	}
 	m_padDirPrev = dir;
-	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && !m_showHelp && (pressed(0) || pressed(1))) m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f);
+	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && !m_showHelp && (pressed(0) || pressed(1))) m_phaseT = max(m_phaseT, (m_surveyN >= 2 ? kIntroSweep : 0.35f) * TacPaceTime(m_save));
 	else {
 		if (pressed(0)) {
 			if (m_showHelp) { m_showHelp = FALSE; TacSfx(TS_CANCEL); }
@@ -2613,8 +2634,8 @@ void Game::RenderPortraits()
 			int ui = want - 100;
 			const Unit& u = m_b.u[ui];
 			if (ui >= 0 && ui < MAX_UNITS && m_act[ui].model >= 0) {
-				DWORD bg0 = u.team == TEAM_PLAYER ? RGBA8(70, 110, 190) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60));
-				DWORD bg1 = u.team == TEAM_PLAYER ? RGBA8(20, 30, 70) : RGBA8(50, 14, 20);
+				DWORD bg0 = u.team == TEAM_PLAYER ? RGBA8(70, 110, 190) : (UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60)));
+				DWORD bg1 = u.team == TEAM_PLAYER ? RGBA8(20, 30, 70) : (UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20));
 				return RenderActorPortrait(s, m_act[ui], bg0, bg1, u.team != TEAM_PLAYER, TRUE);
 			}
 			if (u.team == TEAM_PLAYER) {
@@ -2628,7 +2649,7 @@ void Game::RenderPortraits()
 				m_ptCacheLook[s] = u.monster;
 			}
 			if (md.look == LK_MESH && m_ptCache[s].proc != 3) return FALSE;
-			return RenderActorPortrait(s, m_ptCache[s], u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60), RGBA8(50, 14, 20), 1, FALSE);
+			return RenderActorPortrait(s, m_ptCache[s], UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60)), UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20), 1, FALSE);
 		}
 		if (want >= 1 && want <= MAX_ROSTER) {
 			const CharData& c = m_save.roster[want - 1];
@@ -3682,7 +3703,7 @@ void Game::StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, B
 // ============================================================ 拠点
 void Game::RollMapSeed(int stage, BOOL force)
 {
-	stage = Clampi(stage, 1, TAC_STAGE_MAX);
+	stage = Clampi(stage, 1, TAC_STAGE_ABS);
 	if (!force && m_mapSeed != 0 && m_mapSeedStage == stage) return;
 	DWORD s = m_rng.Next() ^ GetTickCount() ^ (DWORD)(stage * 2654435761u) ^ (DWORD)(m_time * 1000.f);
 	if (s == 0 || s == m_mapSeed) s ^= 0x9E3779B9u;
@@ -3695,7 +3716,7 @@ void Game::RollMapSeed(int stage, BOOL force)
 void Game::BuildShowcase()
 {
 	if (!m_loaded) return;
-	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
+	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_ABS);
 	RollMapSeed(st, FALSE);
 	if (!m_showBuilt || m_showStage != st || m_showTheme != m_themeSel) {
 		GenerateMap(m_showMap, st, m_mapSeed, m_themeSel);
@@ -3743,9 +3764,7 @@ void Game::DemoBegin()
 	}
 	if (!n) { m_idleT = 0; return; }
 	m_demoSave = m_save;
-	int hi = m_save.stageCleared + 1;
-	if (hi < 1) hi = 1;
-	if (hi > TAC_STAGE_MAX) hi = TAC_STAGE_MAX;
+	int hi = StagePlayMax(m_save.stageCleared);
 	m_demoStage = m_rng.Range(1, hi);
 	m_demo = 1;
 	m_demoT = 0;
@@ -3866,6 +3885,8 @@ void Game::EnterBase()
 {
 	m_r.LoadBattleCreatures(NULL, 0);
 	m_importBind = 0;
+	m_textFocus = 0;
+	m_imeComp[0] = 0;
 	m_screen = SC_BASE;
 	m_mapLook = 0;
 	m_homeUi = 1;
@@ -3980,7 +4001,7 @@ void Game::DrawShowcase3D()
 	m_r.SetTheme(m_showMap.theme);
 	m_r.SetStageId(m_showStage);
 	if (m_screen != SC_BATTLE && m_screen != SC_RESULT) {
-		int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
+		int st = Clampi(m_save.stageSel, 1, TAC_STAGE_ABS);
 		if (!m_showBuilt || m_showStage != st) BuildShowcase();
 	}
 	Env e;
@@ -4328,17 +4349,55 @@ static BOOL TextHas(const wchar_t* hay, const wchar_t* needle)
 static int DebutLv(int stage)
 {
 	if (stage < 1) stage = 1;
-	if (stage > TAC_STAGE_MAX) stage = TAC_STAGE_MAX;
-	return 1 + (stage - 1) * 29 / 18;
+	long long lv = 1 + ((long long)stage - 1) * 29 / 18;
+	if (lv > TAC_ENEMY_LV_MAX) lv = TAC_ENEMY_LV_MAX;
+	if (lv < 1) lv = 1;
+	return (int)lv;
 }
 
-static void MonLvSpan(int id, int& lo, int& hi)
+static void MonLvSpan(int id, int viewHi, int& lo, int& hi)
 {
 	const MonsterDef& md = MonsterInfo(id);
-	lo = DebutLv(MonsterDebut(id));
+	int start = MonsterDebut(id);
 	int end = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
+	if (viewHi < 1) viewHi = 1;
+	if (end > viewHi) end = viewHi;
+	if (end > TAC_STAGE_MAX) end = TAC_STAGE_MAX;
+	if (start > end) start = end;
+	lo = DebutLv(start);
 	hi = DebutLv(end);
 	if (hi < lo) hi = lo;
+}
+
+static void FmtMonLv(int id, int viewHi, wchar_t* out, int n)
+{
+	int lo = 1, hi = 1;
+	MonLvSpan(id, viewHi, lo, hi);
+	if (hi > lo && MonsterInfo(id).maxStage <= 0 && viewHi >= TAC_STAGE_MAX) swprintf_s(out, n, L"%d+", lo);
+	else if (hi > lo) swprintf_s(out, n, L"%d–%d", lo, hi);
+	else swprintf_s(out, n, L"%d", lo);
+}
+
+static void FmtAppearRange(int id, int cleared, wchar_t* out, int n)
+{
+	const MonsterDef& md = MonsterInfo(id);
+	int lo = MonsterDebut(id);
+	int view = StageFoeViewHi(cleared);
+	int hi = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
+	if (hi > view) hi = view;
+	if (hi > TAC_STAGE_MAX) hi = TAC_STAGE_MAX;
+	if (hi < lo) hi = lo;
+	wchar_t a[40], b[40];
+	StageText(lo, a, 40);
+	StageText(hi, b, 40);
+	if (cleared >= TAC_STAGE_EX)
+		swprintf_s(out, n, L"%s-%s / EX", a, b);
+	else if (md.maxStage <= 0 && view >= TAC_STAGE_MAX && hi >= TAC_STAGE_MAX)
+		swprintf_s(out, n, L"%s+", a);
+	else if (hi <= lo)
+		swprintf_s(out, n, L"%s", a);
+	else
+		swprintf_s(out, n, L"%s-%s", a, b);
 }
 
 static BOOL BandHasDebut(int band, int lo)
@@ -4356,15 +4415,22 @@ int Game::FoeList(int* out, int cap) const
 	int n = MonsterCatalog(ids, FOE_LIST_MAX);
 	int w = 0;
 	if (!out || cap <= 0) return 0;
+	int view = StageFoeViewHi(m_save.stageCleared);
 	for (int i = 0; i < n && w < cap; i++) {
 		int id = ids[i];
+		if (MonsterDebut(id) > view) continue;
 		BOOL known = MonsterKnown(id, m_save.stageCleared);
 		if (m_monSeenOnly && !known) continue;
 		if (m_monFind[0]) {
-			if (!known || !TextHas(MonsterLabel(id), m_monFind)) continue;
+			if (!known) continue;
+			BOOL hit = FALSE;
+			for (int lang = 0; lang < 14; lang++) {
+				if (TextHas(MonsterLabelAt(id, lang), m_monFind)) { hit = TRUE; break; }
+			}
+			if (!hit) continue;
 		}
 		int lo = 1, hi = 1;
-		MonLvSpan(id, lo, hi);
+		MonLvSpan(id, view, lo, hi);
 		(void)hi;
 		if (!BandHasDebut(m_monBand, lo)) continue;
 		out[w++] = id;
@@ -4410,7 +4476,7 @@ void Game::EnsureMonPreview()
 
 void Game::DrawMonStage()
 {
-	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
+	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_ABS);
 	if (!m_showBuilt || m_showStage != st) BuildShowcase();
 	m_r.SetTheme(m_showMap.theme);
 	m_r.SetStageId(m_showStage);
@@ -4456,7 +4522,10 @@ void Game::DrawMonStage()
 void Game::DrawMonCodex()
 {
 	static int ids[FOE_LIST_MAX];
-	int nAll = MonsterCatalog(ids, FOE_LIST_MAX);
+	int nCat = MonsterCatalog(ids, FOE_LIST_MAX);
+	int view = StageFoeViewHi(m_save.stageCleared);
+	int nAll = 0;
+	for (int i = 0; i < nCat; i++) if (MonsterDebut(ids[i]) <= view) nAll++;
 	float x = U(24), y = U(24), w = min(U(520.f), (float)m_w * .46f), h = (float)m_h - U(108);
 	Panel(x, y, w, h);
 	const wchar_t* title = LangPick14(L"敵一覧", L"Foes", L"Ennemis", L"Nemici", L"Enemigos", L"적 목록", L"敌人一览", L"الأعداء", L"Враги", L"Gegner", L"Inimigos", L"Vijanden", L"Wrogowie", L"Düşmanlar");
@@ -4466,24 +4535,38 @@ void Game::DrawMonCodex()
 	float gap = U(6);
 	float clearW = U(36);
 	float findW = w - U(32) - clearW - gap;
-	wchar_t box[48];
-	BOOL finding = m_textFocus == 4;
-	TacMarkBox(m_textBox, x + U(16), fy, findW, bh);
-	m_textPx = U(13);
-	if (finding) TacCaretStr(box, 48, m_monFind, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
-	else if (m_monFind[0]) wcsncpy_s(box, m_monFind, _TRUNCATE);
-	else wcscpy_s(box, LangPick14(L"名前で絞る", L"Filter by name", L"Filtrer par nom", L"Filtra per nome", L"Filtrar por nombre", L"이름으로 찾기", L"按名字筛选", L"تصفية بالاسم", L"Фильтр по имени", L"Nach Name filtern", L"Filtrar por nome", L"Filter op naam", L"Filtruj po nazwie", L"Ada göre süz"));
-	if (Btn(ID_MON_FIND, x + U(16), fy, findW, bh, box, TRUE, finding, U(13))) {
-		m_textFocus = 4;
-		m_textCaret = TacWLen(m_monFind);
-		m_imeComp[0] = 0;
+	float fx = x + U(16);
+	BOOL foc = m_textFocus == 4;
+	UiBtn findBtn = { ID_MON_FIND, fx, fy, findW, bh, 1, 0 };
+	m_btns.push_back(findBtn);
+	if (ClickIn(fx, fy, findW, bh) || m_activateId == ID_MON_FIND) {
+		if (m_textFocus != 4) {
+			m_textFocus = 4;
+			m_textCaret = TacWLen(m_monFind);
+			m_imeComp[0] = 0;
+			m_textReload = 1;
+		}
+		m_activateId = -1;
 	}
+	BOOL nf = m_navMode && m_focusId == ID_MON_FIND;
+	TacMarkBox(m_textBox, fx, fy, findW, bh);
+	m_textPx = U(13);
+	m_textPad = U(10);
+	m_r.HudRect(fx, fy, findW, bh, foc ? RGBA8(40, 46, 80, 240) : RGBA8(20, 24, 44, 230));
+	m_r.HudFrame(fx, fy, findW, bh, U(1.5f), foc || nf ? RGBA8(255, 230, 150) : RGBA8(120, 104, 74));
+	wchar_t box[48];
+	if (foc) TacCaretStr(box, 48, m_monFind, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
+	else if (m_monFind[0]) wcsncpy_s(box, m_monFind, _TRUNCATE);
+	else wcscpy_s(box, TT(TX_CDX_FIND));
+	BOOL emptyHint = !foc && !m_monFind[0];
+	m_r.HudText(box, fx + U(10), fy + bh * .5f, U(13), emptyHint ? RGBA8(140, 140, 150) : RGBA8(255, 255, 255), 0, 1);
 	if (Btn(ID_MON_CLEAR, x + U(16) + findW + gap, fy, clearW, bh, L"×", m_monFind[0] != 0, FALSE, U(16))) {
 		m_monFind[0] = 0;
 		m_codexPage = 0;
 		m_textFocus = 4;
 		m_textCaret = 0;
 		m_imeComp[0] = 0;
+		m_textReload = 1;
 	}
 	fy += bh + gap;
 	static const wchar_t* bandL[8] = { L"", L"Lv 1–10", L"Lv 11–20", L"Lv 21–40", L"Lv 41–60", L"Lv 61–100", L"Lv 101–200", L"Lv 201+" };
@@ -4529,22 +4612,17 @@ void Game::DrawMonCodex()
 		if (on) m_r.HudRect(x + U(12), yy - U(4), w - U(24), U(26), RGBA8(70, 78, 120, 180));
 		const wchar_t* nm = seen ? MonsterLabel(id) : L"？？？";
 		m_r.HudText(nm, x + U(24), yy + U(8), FitTextPx(nm, w - U(150), U(15), 1), on ? RGBA8(255, 226, 150) : (seen ? RGBA8(236, 236, 244) : RGBA8(140, 146, 164)), 0, 1);
+		wchar_t lv[24];
+		FmtMonLv(id, view, lv, 24);
+		m_r.HudText(lv, x + w - U(52), yy + U(8), U(12), seen ? RGBA8(180, 196, 220) : RGBA8(150, 166, 186), 2, 0);
 		if (seen) {
-			int lo = 1, hi = 1;
-			MonLvSpan(id, lo, hi);
-			wchar_t lv[24];
-			if (hi > lo && MonsterInfo(id).maxStage <= 0) swprintf_s(lv, L"%d+", lo);
-			else if (hi > lo) swprintf_s(lv, L"%d–%d", lo, hi);
-			else swprintf_s(lv, L"%d", lo);
-			m_r.HudText(lv, x + w - U(52), yy + U(8), U(12), RGBA8(180, 196, 220), 2, 0);
 			int kn = FoeKills(id);
 			wchar_t ks[16];
 			swprintf_s(ks, L"%d", kn);
 			m_r.HudText(ks, x + w - U(16), yy + U(8), U(13), kn > 0 ? RGBA8(255, 214, 120) : RGBA8(140, 146, 164), 2, 0);
 		}
-		if (m_click && m_clickX >= x + U(12) && m_clickX < x + w - U(12) && m_clickY >= yy - U(4) && m_clickY < yy + U(22)) {
+		if (m_click && m_clickY >= listTop - U(2) && m_clickX >= x + U(12) && m_clickX < x + w - U(12) && m_clickY >= yy - U(4) && m_clickY < yy + U(22)) {
 			m_monSel = id;
-			m_textFocus = 0;
 			m_click = FALSE;
 		}
 		yy += U(28);
@@ -4568,8 +4646,9 @@ void Game::DrawMonCodex()
 		int lo = MonsterDebut(id);
 		wchar_t line[320];
 		const wchar_t* stageW = LangPick14(L"出現", L"Appears", L"Apparition", L"Compare", L"Aparece", L"출현", L"出现", L"الظهور", L"Появление", L"Erscheint", L"Aparece", L"Verschijnt", L"Pojawia się", L"Çıkış");
-		if (md.maxStage > 0) swprintf_s(line, L"%s %d-%d  Lv%d", stageW, lo, md.maxStage, lv);
-		else swprintf_s(line, L"%s %d+  Lv%d", stageW, lo, lv);
+		wchar_t span[80];
+		FmtAppearRange(id, m_save.stageCleared, span, 80);
+		swprintf_s(line, L"%s %s  Lv%d", stageW, span, lv);
 		m_r.HudText(line, x + U(16), sy, U(13), RGBA8(255, 226, 150), 0, 1);
 		sy += U(18);
 		static const int showS[] = { S_HP, S_MP, S_STR, S_DEF, S_MAG, S_RES, S_AGI, S_DEX, S_MOV, S_JMP };
@@ -4593,6 +4672,13 @@ void Game::DrawMonCodex()
 		if (held[0]) m_r.HudTextBox(held, x + U(16), sy, w - U(32), U(36), U(12), RGBA8(186, 214, 255));
 	} else {
 		m_r.HudText(L"？？？", x + U(16), sy, U(15), RGBA8(150, 156, 172), 0, 1);
+		if (n > 0) {
+			wchar_t lv[24];
+			FmtMonLv(m_monSel, view, lv, 24);
+			wchar_t line[48];
+			swprintf_s(line, L"%s %s", TT(TX_MISC_LV), lv);
+			m_r.HudText(line, x + U(16), sy + U(22), U(13), RGBA8(180, 196, 220), 0, 1);
+		}
 	}
 	const wchar_t* hint = LangPick14(
 		L"ドラッグで回転　右ドラッグ・Q/Eで見回す",
@@ -4623,7 +4709,6 @@ void Game::DrawMonCodex()
 			PlayShown(m_monAct, m_monMot, style, CL_IDLE, fly, FALSE, TRUE);
 		}
 	}
-	DrawCodexTabs();
 }
 
 void Game::DrawCodexTabs()
@@ -4650,7 +4735,14 @@ void Game::DrawCodexTabs()
 			else if (i == 1) m_codex = 3;
 			else if (i == 2) { m_codex = 1; m_codexPage = 0; }
 			else if (i == 3) m_codex = 5;
-			else if (i == 4) { if (m_codex != 4) m_codexPage = 0; m_codex = 4; }
+			else if (i == 4) {
+				if (m_codex != 4) m_codexPage = 0;
+				m_codex = 4;
+				m_textFocus = 4;
+				m_textCaret = TacWLen(m_monFind);
+				m_imeComp[0] = 0;
+				m_textReload = 1;
+			}
 			else m_codex = 0;
 		}
 		x += bw + gap;
@@ -4662,6 +4754,7 @@ static int PartySlotStage(int cap);
 
 void Game::DrawCodex()
 {
+	DrawCodexTabs();
 	if (m_codex == 4) { DrawMonCodex(); return; }
 	float tabTop = (float)m_h - U(34) - U(10);
 	float x = U(30), y = U(16), w = (float)m_w - U(60);
@@ -5061,7 +5154,6 @@ void Game::DrawCodex()
 			yy += U(42);
 		}
 	}
-	DrawCodexTabs();
 }
 
 void Game::DrawShopArm()
@@ -6054,6 +6146,8 @@ static void KeepAppSettings(SaveData& dst, const SaveData& src)
 	dst.spare[1] = src.spare[1];
 	dst.spare[2] = src.spare[2];
 	dst.spare[3] = src.spare[3];
+	dst.spare[4] = src.spare[4];
+	dst.spare[5] = src.spare[5];
 	dst.showGrid = src.showGrid;
 	dst.battleAnim = src.battleAnim;
 	dst.bgmVol = src.bgmVol;
@@ -6287,7 +6381,7 @@ void Game::DrawSlotUi()
 			BOOL editing = m_textFocus == 2 && i == m_slotPick && mode == 1;
 			wchar_t info[48];
 			if (m_slotClear[i] < 0) wcsncpy_s(info, TT(TX_SLOT_EMPTY), _TRUNCATE);
-			else swprintf_s(info, L"%s %d", TT(TX_BASE_STAGE), m_slotClear[i]);
+			else StageCaption(m_slotClear[i], info, 48);
 			wchar_t shown[64];
 			if (editing) {
 				TacMarkBox(m_textBox, x + pad, top + rowH * i, w - pad * 2.f, rowH - U(3));
@@ -6495,8 +6589,9 @@ void Game::DrawPerfHud()
 		float pw = min(U(330), (float)m_w - margin * 2.f);
 		float ph = min((float)m_h - margin * 2.f, (float)m_h - 8.f);
 		float titleH = min(U(24), ph * .045f);
+		float titlePx = FitTextPx(TT(TX_TITLE), pw - U(20), titleH, 1);
 		float titleCy = margin + titleH + 8.f;
-		float titleW = m_r.TextWidth(TT(TX_TITLE), titleH, 1);
+		float titleW = m_r.TextWidth(TT(TX_TITLE), titlePx, 1);
 		float titleR = margin + pw * .5f + titleW * .5f + U(8);
 		float right = margin + pw - U(8);
 		float free = right - titleR;
@@ -6560,7 +6655,8 @@ void Game::DrawBaseUi()
 	if (y + ph > m_h) ph = (float)m_h - y - 4.f;
 	Panel(x, y, pw, ph);
 	float titleH = min(U(24), ph * .045f);
-	m_r.HudText(TT(TX_TITLE), x + pw * .5f, y + titleH + 8.f, titleH, RGBA8(255, 226, 150), 1, 1);
+	float titlePx = FitTextPx(TT(TX_TITLE), pw - U(20), titleH, 1);
+	m_r.HudText(TT(TX_TITLE), x + pw * .5f, y + titleH + 8.f, titlePx, RGBA8(255, 226, 150), 1, 1);
 	float helpH = min(U(40), max(24.f, ph * .07f));
 	float helpY = y + ph - helpH - max(6.f, ph * .015f);
 	float top = y + titleH * 2.f + 14.f;
@@ -6579,14 +6675,19 @@ void Game::DrawBaseUi()
 	};
 	wchar_t st[64];
 	int shownTh = m_themeSel >= 0 ? m_themeSel : m_showMap.theme;
-	swprintf_s(st, L"%d / %d   %s", m_save.stageSel, TAC_STAGE_MAX, TT(ThemeNameTx(shownTh)));
+	{
+		wchar_t cur[40], cap[40];
+		StageText(m_save.stageSel, cur, 40);
+		StageText(StageShownMax(m_save.stageCleared), cap, 40);
+		swprintf_s(st, L"%s / %s   %s", cur, cap, TT(ThemeNameTx(shownTh)));
+	}
 	mark(ID_BASE_STAGE, TX_BSH_STAGE, bx, by, bw, Ku(40));
 	int d = Sel(ID_BASE_STAGE, bx, by, bw, Ku(40), TT(TX_BASE_STAGE), st);
 	if (d) {
 		int step = m_keyShift ? 100 : 10;
 		if ((GetKeyState(VK_CONTROL) & 0x8000) == 0 && !m_keyShift) step = 1;
 		int prev = m_save.stageSel;
-		int mx = min(TAC_STAGE_MAX, m_save.stageCleared + 1);
+		int mx = StagePlayMax(m_save.stageCleared);
 		m_save.stageSel = Clampi(m_save.stageSel + d * step, 1, mx);
 		if (m_save.stageSel != prev) {
 			m_mapSeed = 0;
@@ -6615,7 +6716,11 @@ void Game::DrawBaseUi()
 		m_r.HudText(s, bx + U(4), by + px * 0.15f, px, RGBA8(200, 200, 210), 0, 0);
 		by += Ku(18);
 	};
-	swprintf_s(cl, L"%s: %s", TT(TX_BASE_CLEARED), TacNum(m_save.stageCleared));
+	{
+		wchar_t sn[40];
+		StageText(m_save.stageCleared, sn, 40);
+		swprintf_s(cl, L"%s: %s", TT(TX_BASE_CLEARED), sn);
+	}
 	statLine(cl, TX_BSH_CLEAR);
 	swprintf_s(cl, L"%s  %s", TT(TX_GOLD), TacNum(m_save.gold));
 	statLine(cl, TX_BSH_GOLD);
@@ -6670,7 +6775,7 @@ void Game::DrawBaseUi()
 	}
 	by += bh + Ku(12);
 	if (m_baseOpt) {
-		const int nOpt = 11;
+		const int nOpt = 13;
 		float room = helpY - 8.f - by;
 		if (room < 8.f) room = 8.f;
 		float rowH = room / (float)nOpt;
@@ -6691,6 +6796,18 @@ void Game::DrawBaseUi()
 		mark(ID_BASE_ANIM, TX_BSH_ANIM, bx, oy, bw, bhOpt);
 		if (Sel(ID_BASE_ANIM, bx, oy, bw, bhOpt, TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
 		oy = take();
+		{
+			static const int paceTx[6] = { TX_PACE0, TX_PACE1, TX_PACE2, TX_PACE3, TX_PACE4, TX_PACE5 };
+			mark(ID_BASE_PACE, TX_BSH_PACE, bx, oy, bw, bhOpt);
+			if (int d = Sel(ID_BASE_PACE, bx, oy, bw, bhOpt, TT(TX_SET_PACE), TT(paceTx[TacPace(m_save)]))) TacSetPace(m_save, TacPace(m_save) + d);
+		}
+		oy = take();
+		{
+			static const int paceTx[6] = { TX_PACE0, TX_PACE1, TX_PACE2, TX_PACE3, TX_PACE4, TX_PACE5 };
+			mark(ID_BASE_CUT, TX_BSH_CUTSPD, bx, oy, bw, bhOpt);
+			if (int d = Sel(ID_BASE_CUT, bx, oy, bw, bhOpt, TT(TX_SET_CUTSPD), TT(paceTx[TacCutPace(m_save)]), m_save.battleAnim ? 0 : 1)) TacSetCutPace(m_save, TacCutPace(m_save) + d);
+		}
+		oy = take();
 		mark(ID_BASE_GRID, TX_BSH_GRID, bx, oy, bw, bhOpt);
 		if (Sel(ID_BASE_GRID, bx, oy, bw, bhOpt, TT(TX_SET_GRID), TT(TacGridOn(m_save) ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid ^= 1;
 		oy = take();
@@ -6701,14 +6818,15 @@ void Game::DrawBaseUi()
 		if (int d = Sel(ID_BASE_AI, bx, oy, bw, bhOpt, TT(TX_SET_AI), TT(TacAiTx(TacAi(m_save))))) TacSetAi(m_save, TacAi(m_save) + d);
 		oy = take();
 		{
-			wchar_t vs[16];
-			swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
+			BOOL autoQ = m_save.quality == TAC_Q_AUTO;
+			wchar_t vs[32];
+			if (autoQ) swprintf_s(vs, L"%s  1/%d", TT(TX_SET_Q_AUTO), PaceHz());
+			else swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
 			mark(ID_BASE_SYNC, TX_BSH_SYNC, bx, oy, bw, bhOpt);
-			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs)) {
+			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs, autoQ ? 0 : 1)) {
 				TacSetVsync(m_save, TacVsync(m_save) + d);
 				m_syncRun = -1;
 				m_syncArmN = 0;
-				if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; ApplyQualityNow(6); }
 			}
 		}
 		oy = take();
@@ -7118,13 +7236,15 @@ void Game::DrawCreateUi()
 	// 名前
 	{
 		float nw = bw - U(110);
-		BOOL foc = m_textFocus != 0;
+		BOOL foc = m_textFocus == 1;
 		UiBtn b = { ID_CR_NAME, bx, yy, nw, rh, 1, 0 };
 		m_btns.push_back(b);
 		if (ClickIn(bx, yy, nw, rh) || m_activateId == ID_CR_NAME) {
-			m_textFocus = 1;
-			m_textCaret = TacWLen(m_edit.name);
-			m_imeComp[0] = 0;
+			if (m_textFocus != 1) {
+				m_textFocus = 1;
+				m_textCaret = TacWLen(m_edit.name);
+				m_imeComp[0] = 0;
+			}
 			m_activateId = -1;
 		}
 		BOOL nf = m_navMode && m_focusId == ID_CR_NAME;
@@ -8789,7 +8909,7 @@ void Game::DrawResultUi()
 	Panel(x, y, w, h);
 	m_r.HudText(TT(m_victory ? TX_RS_STAGECLEAR : TX_BT_DEFEAT), x + w * .5f, y + U(34), U(30), m_victory ? RGBA8(255, 226, 120) : RGBA8(200, 160, 200), 1, 1);
 	wchar_t st[64];
-	swprintf_s(st, L"%s %d", TT(TX_BT_STAGE), m_battleStage);
+	StageCaption(m_battleStage, st, 64);
 	m_r.HudText(st, x + w * .5f, y + U(66), U(15), RGBA8(220, 220, 230), 1, 0);
 	float rowH = min(U(76), (h - U(170)) / max(1, m_resultN));
 	float ry = y + U(90);
@@ -8814,20 +8934,37 @@ void Game::DrawResultUi()
 		ry += rowH;
 	}
 	float by = y + h - U(60);
-	float bw = U(200);
-	if (m_victory && m_battleStage < TAC_STAGE_MAX) {
-		if (Btn(ID_RS_NEXT, x + w * .5f - bw * 1.5f - U(12), by, bw, U(42), TT(TX_BT_NEXT), PartyCount() > 0, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
-			m_save.stageSel = Clampi(m_battleStage + 1, 1, min(TAC_STAGE_MAX, m_save.stageCleared + 1));
-			StartBattle(m_save.stageSel);
-			return;
+	float gap = U(12);
+	BOOL canFight = PartyCount() > 0;
+	int play = StagePlayMax(m_save.stageCleared);
+	int nBtn = 2;
+	if (m_victory && m_battleStage < play) nBtn = 3;
+	float bw = min(U(200), (w - gap * (float)(nBtn - 1) - U(24)) / (float)nBtn);
+	if (bw < U(120)) bw = U(120);
+	float bx = x + (w - ((float)nBtn * bw + (float)(nBtn - 1) * gap)) * .5f;
+	if (m_victory) {
+		if (m_battleStage < play) {
+			if (Btn(ID_RS_NEXT, bx, by, bw, U(42), TT(TX_BT_NEXT), canFight, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
+				m_save.stageSel = Clampi(m_battleStage + 1, 1, play);
+				StartBattle(m_save.stageSel);
+				return;
+			}
+			bx += bw + gap;
 		}
-	} else if (!m_victory) {
-		if (Btn(ID_RS_RETRY, x + w * .5f - bw * 1.5f - U(12), by, bw, U(42), TT(TX_BT_RETRY), PartyCount() > 0, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
+		if (Btn(ID_RS_LOOP, bx, by, bw, U(42), TT(TX_BT_LOOP), canFight, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
+			m_save.stageSel = m_battleStage;
 			StartBattle(m_battleStage);
 			return;
 		}
+		bx += bw + gap;
+	} else {
+		if (Btn(ID_RS_RETRY, bx, by, bw, U(42), TT(TX_BT_RETRY), canFight, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
+			StartBattle(m_battleStage);
+			return;
+		}
+		bx += bw + gap;
 	}
-	if (Btn(ID_RS_BASE, x + w * .5f - bw * .5f, by, bw, U(42), TT(TX_BT_TOBASE), TRUE, FALSE, U(17))) {
+	if (Btn(ID_RS_BASE, bx, by, bw, U(42), TT(TX_BT_TOBASE), TRUE, FALSE, U(17))) {
 		m_showBuilt = FALSE;
 		EnterBase();
 		return;
