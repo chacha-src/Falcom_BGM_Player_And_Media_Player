@@ -571,7 +571,12 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 		}
 	}
 	if (!IsIconic() && IsWindowVisible()) {
+		LARGE_INTEGER a0, a1, af;
+		QueryPerformanceCounter(&a0);
 		if (!TacAudioOnThread()) TacAudioPump();
+		QueryPerformanceCounter(&a1);
+		QueryPerformanceFrequency(&af);
+		if (m_gameOk) m_game.SetAudioMs(af.QuadPart ? (float)((double)(a1.QuadPart - a0.QuadPart) * 1000.0 / (double)af.QuadPart) : 0.f);
 		PollPad(dt);
 		m_game.Tick(dt);
 		SyncImeEdit();

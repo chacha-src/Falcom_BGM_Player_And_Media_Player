@@ -57,6 +57,41 @@ enum { TAC_CB_POOL = 4096 };
 static ID3D11Buffer* g_cbPool[TAC_CB_POOL];
 static int g_cbPoolN = 0;
 static int g_cbPoolI = 0;
+// 同じ動的定数を描画の途中で DISCARD すると、GPU が読み終わるまで CPU が止まり、その間 GPU も空く。
+// 枠を回して、飛行中のバッファは触らない。
+enum { TAC_CB_RING = 256 };
+struct TacCbRing { ID3D11Buffer* b[TAC_CB_RING]; int n, i; ID3D11Buffer* cur; };
+static TacCbRing g_frameR, g_boneR, g_skinBoneR, g_skinParmR, g_clothR, g_softR, g_hairSimR, g_hairClothR;
+static void TacCbRingFree(TacCbRing& r)
+{
+	for (int i = 0; i < r.n; i++) TAC_REL(r.b[i]);
+	r.n = 0; r.i = 0; r.cur = NULL;
+}
+static void TacCbRingMake(ID3D11Device* dev, TacCbRing& r, UINT bytes)
+{
+	TacCbRingFree(r);
+	if (!dev || !bytes) return;
+	D3D11_BUFFER_DESC bd = {};
+	bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	bd.ByteWidth = (bytes + 15u) & ~15u;
+	for (int i = 0; i < TAC_CB_RING; i++) {
+		if (FAILED(dev->CreateBuffer(&bd, NULL, &r.b[i]))) break;
+		r.n++;
+	}
+}
+static ID3D11Buffer* TacCbAcquire(TacCbRing& r, ID3D11DeviceContext* ctx, ID3D11Buffer* fallback, D3D11_MAPPED_SUBRESOURCE& ms)
+{
+	ID3D11Buffer* b = (r.n > 0) ? r.b[r.i] : fallback;
+	if (!ctx || !b) return NULL;
+	if (FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
+	if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
+	r.cur = b;
+	return b;
+}
+static ID3D11Buffer* TacCbCur(const TacCbRing& r, ID3D11Buffer* fallback)
+{
+	return r.cur ? r.cur : fallback;
+}
 static ID3D11Buffer* g_cbBound = NULL;
 
 static BOOL TacQueueUses(ID3D11Buffer* vb)
@@ -132,6 +167,7 @@ Renderer::Renderer()
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
+	m_qDisjoint = m_qTs0 = m_qTs1 = NULL; m_gpuMs = 0; m_gpuArmed = FALSE;
 	m_fadeAbove = -1;
 	m_cutDeck = -1;
 	m_cutActors = FALSE;
@@ -153,6 +189,7 @@ Renderer::Renderer()
 	m_gsP = NULL;
 	m_instOn = FALSE;
 	m_psM = m_psO = m_psOV = m_psH = m_psP = m_psSky = NULL;
+	for (int si = 0; si < 10; si++) m_psSkyT[si] = NULL;
 	m_psBloom = m_psBlur = m_psGrade = m_psGradeTiny = m_psDofH = m_psDofU = m_psUi = NULL;
 	m_vsT = NULL; m_hsT = NULL; m_dsT = NULL;
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
@@ -202,6 +239,7 @@ Renderer::Renderer()
 	m_lightVP = MIdent();
 	m_hudSrv = NULL;
 	m_inPortrait = FALSE; m_portraitSlot = 0;
+	m_ptClear[0] = m_ptClear[1] = m_ptClear[2] = 0.f; m_ptClear[3] = 1.f;
 	m_avaSegN = 0;
 	m_avaHide = m_avaLoading = m_avaBuildOnly = m_avaLoadFull = m_avaPct = 0;
 	m_avaShown = -1;
@@ -269,6 +307,7 @@ void Renderer::Release()
 	TAC_REL(m_vsS); TAC_REL(m_vsSh); TAC_REL(m_vsB); TAC_REL(m_vsBSh); TAC_REL(m_vsK); TAC_REL(m_vsKSh); TAC_REL(m_vsH); TAC_REL(m_vsP); TAC_REL(m_vsPT); TAC_REL(m_vsQ);
 	TAC_REL(m_gsP);
 	TAC_REL(m_psM); TAC_REL(m_psO); TAC_REL(m_psOV); TAC_REL(m_psH); TAC_REL(m_psP); TAC_REL(m_psSky);
+	for (int si = 0; si < 10; si++) TAC_REL(m_psSkyT[si]);
 	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psGradeTiny);
 	TAC_REL(m_psDofH); TAC_REL(m_psDofU); TAC_REL(m_vsT); TAC_REL(m_hsT); TAC_REL(m_dsT); TAC_REL(m_psUi);
 	TAC_REL(m_psProp); TAC_REL(m_psWater); TAC_REL(m_psLava);
@@ -278,13 +317,14 @@ void Renderer::Release()
 	TAC_REL(m_groundSrv); TAC_REL(m_groundTex); TAC_REL(m_matSrv); TAC_REL(m_matTex);
 	DropLooks();
 	TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TAC_REL(m_cbHairCloth); TAC_REL(m_faceDummySRV); TAC_REL(m_faceDummy);
+	TacCbRingFree(g_skinBoneR); TacCbRingFree(g_skinParmR); TacCbRingFree(g_hairClothR);
 	for (int ci = 0; ci < 3; ci++) TAC_REL(m_csCloth[ci]);
-	TAC_REL(m_cbCloth);
-	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft);
-	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim);
+	TAC_REL(m_cbCloth); TacCbRingFree(g_clothR);
+	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft); TacCbRingFree(g_softR);
+	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim); TacCbRingFree(g_hairSimR);
 	ReleaseHair();
 	TAC_REL(m_ilS); TAC_REL(m_ilB); TAC_REL(m_ilK); TAC_REL(m_ilH); TAC_REL(m_ilP); TAC_REL(m_ilPT);
-	TAC_REL(m_cbFrame); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
+	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
 	for (int i = 0; i < g_cbPoolN; i++) TAC_REL(g_cbPool[i]);
 	g_cbPoolN = 0;
 	g_cbPoolI = 0;
@@ -297,6 +337,7 @@ void Renderer::Release()
 	for (int i = 0; i < TEX_MAX; i++) { TAC_REL(m_srv[i]); TAC_REL(m_tex[i]); }
 	for (int i = 0; i < LAY_N; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
 	if (m_wait) { CloseHandle(m_wait); m_wait = NULL; }
+	TAC_REL(m_qDisjoint); TAC_REL(m_qTs0); TAC_REL(m_qTs1); m_gpuArmed = FALSE;
 	TAC_REL(m_swap);
 	if (m_ctx) { m_ctx->ClearState(); m_ctx->Flush(); }
 	TAC_REL(m_ctx1);
@@ -372,22 +413,9 @@ static BOOL TacQUltra(int q) { return q == 3 || q == 5 || q == 6; }
 
 static int TacQFootprint(int q)
 {
-	q = Clampi(q, 0, 6);
-	// 軽量・標準・高は同じターゲット。影やMSAAの作り直しが切替のカクつきになる。
-	if (q == 0 || q == 2) q = 1;
-	int sh = 1024;
-	if (q == 4) sh = 512;
-	else if (q <= 0) sh = 1024;
-	else if (q == 1) sh = 4096;
-	else if (q == 6) sh = 16384;
-	else sh = 8192;
-	int msaa = (q == 1 || TacQRich(q)) ? 8 : 1;
-	int blur = (q <= 0 || q == 4) ? 4 : ((q == 1) ? 2 : 1);
-	int ref = 0;
-	if (q == 1) ref = 2;
-	else if (q == 2 || q == 3 || q == 5) ref = 1;
-	else if (q == 6) ref = 3;
-	int fx = TacQFx(q) ? 1 : 0;
+	(void)q;
+	// 画質はシェーダとパス回数だけ変える。RTの形を揃えて切替の作り直しを止める。
+	const int sh = 4096, msaa = 2, blur = 2, ref = 2, fx = 1;
 	return sh | (msaa << 16) | (blur << 20) | (ref << 24) | (fx << 28);
 }
 
@@ -582,14 +610,14 @@ static BOOL MakeColorRt(ID3D11Device* dev, int w, int h, ID3D11Texture2D** tex, 
 BOOL Renderer::CreateTargets()
 {
 	if (!m_dev || !m_swap) return FALSE;
-	const int rq = (m_quality == 0 || m_quality == 2) ? 1 : m_quality;
+	const int rq = m_quality;
 	HRESULT hr = S_OK;
 	if (!m_bb) {
 		hr = m_swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&m_bb);
 		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 		if (FAILED(hr = m_dev->CreateRenderTargetView(m_bb, NULL, &m_bbRtv))) { m_lastHr = hr; return FALSE; }
 	}
-	int want = (rq == 1 || TacQRich(rq)) ? 8 : 1;
+	int want = 2;
 	m_msaa = 1;
 	for (int s = want; s >= 2; s /= 2) {
 		UINT ql = 0;
@@ -608,13 +636,7 @@ BOOL Renderer::CreateTargets()
 	td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 	if (FAILED(hr = m_dev->CreateTexture2D(&td, NULL, &m_dsTex)) || FAILED(hr = m_dev->CreateDepthStencilView(m_dsTex, NULL, &m_dsv))) { m_lastHr = hr; return FALSE; }
 	if (!m_shTex) {
-		int ss = 1024;
-		if (rq == 4) ss = 512;
-		else if (rq <= 0) ss = 1024;
-		else if (rq == 1) ss = 4096;
-		else if (rq == 6) ss = 16384;
-		else if (rq == 2) ss = 8192;
-		else if (TacQUltra(rq)) ss = 8192;
+		int ss = 4096;
 		for (; ss >= 512; ss /= 2) {
 			D3D11_TEXTURE2D_DESC st = {};
 			st.Width = st.Height = ss; st.MipLevels = 1; st.ArraySize = 1; st.SampleDesc.Count = 1;
@@ -638,7 +660,7 @@ BOOL Renderer::CreateTargets()
 		pt.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; pt.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 		if (SUCCEEDED(m_dev->CreateTexture2D(&pt, NULL, &m_ptDs))) m_dev->CreateDepthStencilView(m_ptDs, NULL, &m_ptDsv);
 	}
-	int div = (rq <= 0 || rq == 4) ? 4 : ((rq == 1) ? 2 : 1);
+	int div = 2;
 	m_blW = max(8, m_w / div); m_blH = max(8, m_h / div);
 	if (!MakeColorRt(m_dev, m_w, m_h, &m_sceneTex, &m_sceneRtv, &m_sceneSrv)
 		|| !MakeColorRt(m_dev, m_blW, m_blH, &m_blA, &m_blARtv, &m_blASrv)
@@ -648,10 +670,7 @@ BOOL Renderer::CreateTargets()
 		TAC_REL(m_blBSrv); TAC_REL(m_blBRtv); TAC_REL(m_blB);
 	}
 	{
-		int rmul = 1, rdiv = 0;
-		if (rq == 1) rdiv = 2;
-		else if (rq == 2 || rq == 3 || rq == 5) rdiv = 1;
-		else if (rq == 6) { rdiv = 1; rmul = 2; }
+		int rmul = 1, rdiv = 2;
 		if (rdiv > 0) {
 			m_refW = max(8, m_w * rmul / rdiv);
 			m_refH = max(8, m_h * rmul / rdiv);
@@ -674,7 +693,7 @@ BOOL Renderer::CreateTargets()
 			}
 		}
 	}
-	if (TacQFx(rq)) {
+	{
 		D3D11_TEXTURE2D_DESC zt = {};
 		zt.Width = m_w; zt.Height = m_h; zt.MipLevels = 1; zt.ArraySize = 1;
 		zt.Format = DXGI_FORMAT_R16_FLOAT; zt.SampleDesc.Count = m_msaa;
@@ -887,6 +906,20 @@ BOOL Renderer::CreateShaders()
 		hr = m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psDofU); TAC_REL(b);
 		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 	}
+	{
+		static const int skyRid[10] = {
+			IDR_CSO_TAC_PSSKY0, IDR_CSO_TAC_PSSKY1, IDR_CSO_TAC_PSSKY2, IDR_CSO_TAC_PSSKY3, IDR_CSO_TAC_PSSKY4,
+			IDR_CSO_TAC_PSSKY5, IDR_CSO_TAC_PSSKY6, IDR_CSO_TAC_PSSKY7, IDR_CSO_TAC_PSSKY8, IDR_CSO_TAC_PSSKY9
+		};
+		static const char* skyEnt[10] = { "PSSKY0", "PSSKY1", "PSSKY2", "PSSKY3", "PSSKY4", "PSSKY5", "PSSKY6", "PSSKY7", "PSSKY8", "PSSKY9" };
+		for (int t = 0; t < 10; t++) {
+			ID3DBlob* b = NULL;
+			if (SUCCEEDED(LoadBlob(skyEnt[t], "ps_5_0", skyRid[t], &b)) && b) {
+				if (FAILED(m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psSkyT[t]))) m_psSkyT[t] = NULL;
+				TAC_REL(b);
+			}
+		}
+	}
 	(void)sizeof(VSDef);
 	ID3DBlob* bC = NULL;
 	if (SUCCEEDED(LoadBlob("CSSkin", "cs_5_0", IDR_CSO_TAC_CSSKIN, &bC)) && bC) {
@@ -898,10 +931,13 @@ BOOL Renderer::CreateShaders()
 		bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 		bd.ByteWidth = 64 * MAXJ;
 		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSkinBone))) { TAC_REL(m_csSkin); }
+		else TacCbRingMake(m_dev, g_skinBoneR, bd.ByteWidth);
 		bd.ByteWidth = 96;
-		if (m_csSkin && FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSkinParm))) { TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); }
+		if (m_csSkin && FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSkinParm))) { TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TacCbRingFree(g_skinBoneR); }
+		else if (m_csSkin) TacCbRingMake(m_dev, g_skinParmR, bd.ByteWidth);
 		bd.ByteWidth = (9 + 1 + SKULL_NA * SKULL_NE / 4) * 16;
-		if (m_csSkin && FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbHairCloth))) { TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); }
+		if (m_csSkin && FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbHairCloth))) { TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TacCbRingFree(g_skinBoneR); TacCbRingFree(g_skinParmR); }
+		else if (m_csSkin) TacCbRingMake(m_dev, g_hairClothR, bd.ByteWidth);
 		struct { float d[4], n[4]; } z = {};
 		bd.Usage = D3D11_USAGE_IMMUTABLE; bd.BindFlags = D3D11_BIND_SHADER_RESOURCE; bd.CPUAccessFlags = 0;
 		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED; bd.StructureByteStride = 32; bd.ByteWidth = 32;
@@ -932,7 +968,7 @@ BOOL Renderer::CreateShaders()
 		if (!all || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbCloth))) {
 			for (int i = 0; i < 3; i++) TAC_REL(m_csCloth[i]);
 			m_cbCloth = NULL;
-		}
+		} else TacCbRingMake(m_dev, g_clothR, bd.ByteWidth);
 		static const struct { const char* e; int rid; } sf[2] = {
 			{ "CSSoft", IDR_CSO_TAC_CSSOFT }, { "CSSoftWrite", IDR_CSO_TAC_CSSOFTW } };
 		for (int i = 0; i < 2; i++) {
@@ -945,7 +981,7 @@ BOOL Renderer::CreateShaders()
 		bd.ByteWidth = 720;
 		if (!m_csSoft[0] || !m_csSoft[1] || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSoft))) {
 			TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft);
-		}
+		} else TacCbRingMake(m_dev, g_softR, bd.ByteWidth);
 		static const struct { const char* e; int rid; } hr[2] = {
 			{ "CSHair", IDR_CSO_TAC_CSHAIR }, { "CSHairWrite", IDR_CSO_TAC_CSHAIRW } };
 		for (int i = 0; i < 2; i++) {
@@ -958,7 +994,7 @@ BOOL Renderer::CreateShaders()
 		bd.ByteWidth = 592;
 		if (!m_csHair[0] || !m_csHair[1] || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbHairSim))) {
 			TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim);
-		}
+		} else TacCbRingMake(m_dev, g_hairSimR, bd.ByteWidth);
 	}
 	return TRUE;
 }
@@ -969,6 +1005,7 @@ BOOL Renderer::CreateStates()
 	bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	bd.ByteWidth = (sizeof(FrameCB) + 15) & ~15;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbFrame))) return FALSE;
+	TacCbRingMake(m_dev, g_frameR, bd.ByteWidth);
 	bd.ByteWidth = 48 * 16;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbRipple))) return FALSE;
 	bd.ByteWidth = 64 + 16 * 4;
@@ -986,6 +1023,7 @@ BOOL Renderer::CreateStates()
 	if (g_cbPool[0]) g_cbPoolN = TAC_CB_POOL;
 	bd.ByteWidth = 64 * MAXJ;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbBones))) return FALSE;
+	TacCbRingMake(m_dev, g_boneR, bd.ByteWidth);
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	bd.ByteWidth = sizeof(VtxH) * 6 * 4096 * 4;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbHud))) return FALSE;
@@ -1063,6 +1101,14 @@ BOOL Renderer::CreateStates()
 	m_dev->CreateBlendState(&bl, &m_bsPremul);
 	t.SrcBlend = D3D11_BLEND_ONE; t.DestBlend = D3D11_BLEND_ONE; t.SrcBlendAlpha = D3D11_BLEND_ZERO; t.DestBlendAlpha = D3D11_BLEND_ONE;
 	m_dev->CreateBlendState(&bl, &m_bsAdd);
+	{
+		D3D11_QUERY_DESC qd = {};
+		qd.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+		m_dev->CreateQuery(&qd, &m_qDisjoint);
+		qd.Query = D3D11_QUERY_TIMESTAMP;
+		m_dev->CreateQuery(&qd, &m_qTs0);
+		m_dev->CreateQuery(&qd, &m_qTs1);
+	}
 	return m_sLin && m_sCmp && m_rsBack && m_dsWrite && m_bsAlpha && m_bsAdd;
 }
 
@@ -3913,13 +3959,14 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	const BOOL faceOn = src.faceN > 0 && src.faceSet >= 0 && src.faceSet <= 1 && (src.faceSynth ? dp.face >= 0 : facePack);
 	if (faceOn) UpdateFaceGpu(src, dp.face);
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
+	ID3D11Buffer* skinBone = TacCbAcquire(g_skinBoneR, m_ctx, m_cbSkinBone, ms);
+	if (!skinBone) return FALSE;
 	int nj = pose.nJ;
 	if (nj < 0) nj = 0;
 	if (nj > MAXJ) nj = MAXJ;
 	if (nj) memcpy(ms.pData, pose.palette, sizeof(M4) * (size_t)nj);
 	if (nj < MAXJ) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(MAXJ - nj));
-	m_ctx->Unmap(m_cbSkinBone, 0);
+	m_ctx->Unmap(skinBone, 0);
 	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; };
 	static_assert(sizeof(Parm) == 96, "SkinParm");
 	Parm prm;
@@ -3993,13 +4040,14 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	prm.extra[2] = dp.clothTint & 0x00FFFFFFu;
 	prm.extra[3] = dp.clothTint ? 1u : 0u;
 	prm.info[3] = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
-	if (FAILED(m_ctx->Map(m_cbSkinParm, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
+	ID3D11Buffer* skinParm = TacCbAcquire(g_skinParmR, m_ctx, m_cbSkinParm, ms);
+	if (!skinParm) return FALSE;
 	memcpy(ms.pData, &prm, sizeof(prm));
-	m_ctx->Unmap(m_cbSkinParm, 0);
+	m_ctx->Unmap(skinParm, 0);
 	ID3D11Buffer* noneVB = NULL;
 	UINT zero = 0;
 	m_ctx->IASetVertexBuffers(0, 1, &noneVB, &zero, &zero);
-	ID3D11Buffer* cbs[3] = { m_cbSkinBone, m_cbSkinParm, m_cbHairCloth };
+	ID3D11Buffer* cbs[3] = { skinBone, skinParm, TacCbCur(g_hairClothR, m_cbHairCloth) };
 	m_ctx->CSSetConstantBuffers(0, 3, cbs);
 	ID3D11ShaderResourceView* srvs[2] = { src.bindSRV, (faceOn && src.faceSRV) ? src.faceSRV : m_faceDummySRV };
 	m_ctx->CSSetShaderResources(0, 2, srvs);
@@ -4008,7 +4056,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	m_ctx->CSSetUnorderedAccessViews(0, 1, &outUAV, &cnt);
 	m_ctx->CSSetShader(m_csSkin, NULL, 0);
 	m_ctx->Dispatch(((UINT)src.gpuNv + 63u) / 64u, 1, 1);
-	if (cloth && owner) {
+	if (cloth && owner && !m_inPortrait) {
 		ID3D11Buffer* keepVB = src.outVB;
 		ID3D11UnorderedAccessView* keepUAV = src.outUAV;
 		if (so) { src.outVB = so->vb; src.outUAV = so->uav; }
@@ -7653,6 +7701,7 @@ static void TacGrav(const M4& world, float g, float out[3])
 
 void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp)
 {
+	if (m_inPortrait) return;
 	const BOOL canSkirt = owner && src.outUAV && ac.clothN > 0 && ac.clothN <= CLOTH_NODES && ac.clothVN > 0
 		&& ac.clothSRV[0] && ac.clothSRV[1] && ac.clothSRV[2] && m_cbCloth && m_cbSkinBone && m_csCloth[0] && m_csCloth[1] && m_csCloth[2]
 		&& ac.clothHip >= 0 && ac.clothHip < pose.nJ;
@@ -7780,11 +7829,12 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		ci->limbOk = 1;
 	}
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (SUCCEEDED(m_ctx->Map(m_cbCloth, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+	ID3D11Buffer* clothB = TacCbAcquire(g_clothR, m_ctx, m_cbCloth, ms);
+	if (clothB) {
 	memcpy(ms.pData, &cb, sizeof(cb));
-	m_ctx->Unmap(m_cbCloth, 0);
+	m_ctx->Unmap(clothB, 0);
 	// b1 は直前の CSSkin で書いた骨の行列（座ったときに脚へ沿わせる分）。
-	ID3D11Buffer* cbs[2] = { m_cbCloth, m_cbSkinBone };
+	ID3D11Buffer* cbs[2] = { clothB, TacCbCur(g_skinBoneR, m_cbSkinBone) };
 	m_ctx->CSSetConstantBuffers(0, 2, cbs);
 	m_ctx->CSSetShaderResources(0, 3, ac.clothSRV);
 	ID3D11UnorderedAccessView* uavs[2] = { src.outUAV, ci->uav };
@@ -7875,10 +7925,11 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 			scb.cnt[0] = (unsigned)ac.softN;
 			scb.cnt[1] = (unsigned)ac.softVN;
 			D3D11_MAPPED_SUBRESOURCE ms;
-			if (SUCCEEDED(m_ctx->Map(m_cbSoft, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+			ID3D11Buffer* softB = TacCbAcquire(g_softR, m_ctx, m_cbSoft, ms);
+			if (softB) {
 				memcpy(ms.pData, &scb, sizeof(scb));
-				m_ctx->Unmap(m_cbSoft, 0);
-				ID3D11Buffer* cb1 = m_cbSoft;
+				m_ctx->Unmap(softB, 0);
+				ID3D11Buffer* cb1 = softB;
 				m_ctx->CSSetConstantBuffers(0, 1, &cb1);
 				ID3D11ShaderResourceView* sv[2] = { ac.softSRV[0], ac.softSRV[1] };
 				m_ctx->CSSetShaderResources(0, 2, sv);
@@ -7936,6 +7987,7 @@ void Renderer::ReleaseHair()
 
 void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth)
 {
+	if (m_inPortrait) return;
 	ID3D11UnorderedAccessView* dst = vertUAV ? vertUAV : m_hairUAV;
 	if (style < 1 || style > 15 || m_hairVN[style] <= 0 || !m_csHair[0] || !m_csHair[1] || !m_cbHairSim || !m_hairGuide || !m_hairVert || !dst) return;
 	if (headJ < 0 || headJ >= pose.nJ) return;
@@ -8079,10 +8131,11 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	cb.cnt[2] = (unsigned)nc;
 	cb.cnt[3] = (unsigned)m_hairVN[style];
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_cbHairSim, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	ID3D11Buffer* hairSim = TacCbAcquire(g_hairSimR, m_ctx, m_cbHairSim, ms);
+	if (!hairSim) return;
 	memcpy(ms.pData, &cb, sizeof(cb));
-	m_ctx->Unmap(m_cbHairSim, 0);
-	ID3D11Buffer* cbs[2] = { m_cbHairSim, m_cbHairCloth };
+	m_ctx->Unmap(hairSim, 0);
+	ID3D11Buffer* cbs[2] = { hairSim, TacCbCur(g_hairClothR, m_cbHairCloth) };
 	m_ctx->CSSetConstantBuffers(0, 2, cbs);
 	ID3D11ShaderResourceView* sv[2] = { m_hairGuide, m_hairVert };
 	m_ctx->CSSetShaderResources(0, 2, sv);
@@ -8561,7 +8614,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	for (int s = 0; s < m_avaSegN; s++) if (!strcmp(m_avaSeg[s], "Head")) { headSeg = s; break; }
 	if (!am || headSeg < 0 || am->M.size() < (size_t)(headSeg + 1) * 12) return FALSE;
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
+	ID3D11Buffer* skinBone = TacCbAcquire(g_skinBoneR, m_ctx, m_cbSkinBone, ms);
+	if (!skinBone) return FALSE;
 	if (nj) memcpy(ms.pData, pose.palette, sizeof(M4) * (size_t)nj);
 	if (nj < 63) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(63 - nj));
 	float* slot = ((float*)ms.pData) + 63 * 16;
@@ -8600,7 +8654,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	M4 hairSeg;
 	memcpy(hairSeg.m, slot, sizeof(hairSeg.m));
 	const M4 hairPlace = MMul(hairSeg, pose.palette[headJ]);
-	m_ctx->Unmap(m_cbSkinBone, 0);
+	m_ctx->Unmap(skinBone, 0);
 	float cloth[36 + 4 + SKULL_NA * SKULL_NE];
 	memset(cloth, 0, sizeof(cloth));
 	if (hs && hs->skullC[1] > 0.4f) {
@@ -8620,9 +8674,10 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			break;
 		}
 	}
-	if (FAILED(m_ctx->Map(m_cbHairCloth, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
+	ID3D11Buffer* hairCloth = TacCbAcquire(g_hairClothR, m_ctx, m_cbHairCloth, ms);
+	if (!hairCloth) return FALSE;
 	memcpy(ms.pData, cloth, sizeof(cloth));
-	m_ctx->Unmap(m_cbHairCloth, 0);
+	m_ctx->Unmap(hairCloth, 0);
 	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; };
 	Parm prm;
 	memset(&prm, 0, sizeof(prm));
@@ -8632,13 +8687,14 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	prm.bust[0] = -1.f;
 	prm.info[1] = (float)nj;
 	prm.extra[1] = m_hairNv;
-	if (FAILED(m_ctx->Map(m_cbSkinParm, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
+	ID3D11Buffer* skinParm = TacCbAcquire(g_skinParmR, m_ctx, m_cbSkinParm, ms);
+	if (!skinParm) return FALSE;
 	memcpy(ms.pData, &prm, sizeof(prm));
-	m_ctx->Unmap(m_cbSkinParm, 0);
+	m_ctx->Unmap(skinParm, 0);
 	ID3D11Buffer* noneVB = NULL;
 	UINT zero = 0;
 	m_ctx->IASetVertexBuffers(0, 1, &noneVB, &zero, &zero);
-	ID3D11Buffer* cbs[3] = { m_cbSkinBone, m_cbSkinParm, m_cbHairCloth };
+	ID3D11Buffer* cbs[3] = { skinBone, skinParm, hairCloth };
 	m_ctx->CSSetConstantBuffers(0, 3, cbs);
 	ID3D11ShaderResourceView* srvs[2] = { m_hairBind, m_faceDummySRV };
 	m_ctx->CSSetShaderResources(0, 2, srvs);
@@ -8989,14 +9045,19 @@ void Renderer::UpdateFrameCB()
 {
 	FlushQueuedDraws();
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (SUCCEEDED(m_ctx->Map(m_cbFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-		memcpy(ms.pData, &m_fcb, sizeof(m_fcb));
-		m_ctx->Unmap(m_cbFrame, 0);
-	}
+	ID3D11Buffer* b = TacCbAcquire(g_frameR, m_ctx, m_cbFrame, ms);
+	if (!b) return;
+	memcpy(ms.pData, &m_fcb, sizeof(m_fcb));
+	m_ctx->Unmap(b, 0);
+	m_ctx->VSSetConstantBuffers(0, 1, &b);
+	m_ctx->PSSetConstantBuffers(0, 1, &b);
+	m_ctx->HSSetConstantBuffers(0, 1, &b);
+	m_ctx->DSSetConstantBuffers(0, 1, &b);
 }
 
 void Renderer::BeginFrame()
 {
+	MarkGpuBegin();
 	FlushQueuedDraws();
 	m_avaLoading = 0;
 	m_avaFlashed = FALSE;
@@ -9025,15 +9086,16 @@ void Renderer::BeginFrame()
 	m_fcb.wxPack[2] = m_fcb.wxPack[3] = 0;
 	m_fcb.reflectInfo[0] = m_fcb.reflectInfo[1] = m_fcb.reflectInfo[2] = m_fcb.reflectInfo[3] = 0;
 	m_cutDeck = -1;
-	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
-	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
+	ID3D11Buffer* frame = TacCbCur(g_frameR, m_cbFrame);
+	m_ctx->VSSetConstantBuffers(0, 1, &frame);
+	m_ctx->PSSetConstantBuffers(0, 1, &frame);
 	if (m_cbRipple) {
 		m_ctx->VSSetConstantBuffers(3, 1, &m_cbRipple);
 		m_ctx->PSSetConstantBuffers(3, 1, &m_cbRipple);
 	}
-	m_ctx->HSSetConstantBuffers(0, 1, &m_cbFrame);
-	m_ctx->DSSetConstantBuffers(0, 1, &m_cbFrame);
-	ID3D11Buffer* cb[2] = { m_cbObj, m_cbBones };
+	m_ctx->HSSetConstantBuffers(0, 1, &frame);
+	m_ctx->DSSetConstantBuffers(0, 1, &frame);
+	ID3D11Buffer* cb[2] = { m_cbObj, TacCbCur(g_boneR, m_cbBones) };
 	m_ctx->VSSetConstantBuffers(1, 2, cb);
 	m_ctx->PSSetConstantBuffers(1, 1, &m_cbObj);
 	m_ctx->HSSetConstantBuffers(1, 1, &m_cbObj);
@@ -9219,10 +9281,13 @@ void Renderer::BeginMainPass()
 		m_ctx->RSSetViewports(1, &vp);
 		// 枠の色は消さないと、選択順で枠が入れ替わったとき前の髪が残る。
 		if (m_ctx1) {
-			float zc[4] = { 0, 0, 0, 0 };
 			D3D11_RECT rc;
 			rc.left = sx; rc.top = sy; rc.right = sx + PORTRAIT_PX; rc.bottom = sy + PORTRAIT_PX;
-			m_ctx1->ClearView(m_ptRtv, zc, &rc, 1);
+			m_ctx1->ClearView(m_ptRtv, m_ptClear, &rc, 1);
+			if (m_ptDsv) {
+				float zd[4] = { 1, 1, 1, 1 };
+				m_ctx1->ClearView(m_ptDsv, zd, &rc, 1);
+			}
 		} else m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 	} else {
 		BOOL mrt = TacQFx(m_quality) && m_zRtv && m_zSrv;
@@ -9241,7 +9306,10 @@ void Renderer::BeginMainPass()
 	m_ctx->RSSetState(m_inPortrait ? m_rsNone : (m_reflecting ? m_rsFront : m_rsBack));
 	m_fcb.screen[0] = m_inPortrait ? (float)PORTRAIT_PX : (float)m_w;
 	m_fcb.screen[1] = m_inPortrait ? (float)PORTRAIT_PX : (float)m_h;
+	float themeKeep = m_fcb.fogColor[3];
+	if (m_inPortrait) m_fcb.fogColor[3] = -1.f;
 	UpdateFrameCB();
+	if (m_inPortrait) m_fcb.fogColor[3] = themeKeep;
 	if (!m_inPortrait || m_portraitSlot < 0) {
 		ID3D11ShaderResourceView* sh = (m_shSrv && m_fcb.light[3] > .5f) ? m_shSrv : NULL;
 		m_ctx->PSSetShaderResources(1, 1, &sh);
@@ -9355,9 +9423,13 @@ void Renderer::DrawSky(DWORD top, DWORD bottom, int lines, DWORD lineColor)
 	m_ctx->IASetInputLayout(NULL);
 	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_ctx->VSSetShader(m_vsQ, NULL, 0);
-	m_ctx->PSSetShader(m_psSky, NULL, 0);
+	{
+		ID3D11PixelShader* sky = m_psSky;
+		if (m_theme >= 0 && m_theme < 10 && m_psSkyT[m_theme]) sky = m_psSkyT[m_theme];
+		m_ctx->PSSetShader(sky, NULL, 0);
+	}
 	m_ctx->RSSetState(m_rsNone);
-	m_ctx->OMSetDepthStencilState(m_dsOff, 0);
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 	m_ctx->Draw(3, 0);
 	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
@@ -9797,9 +9869,15 @@ void Renderer::DrawSkinned(const Model& m, const Pose& p, const M4& world, const
 	FlushQueuedDraws();
 	if (m_dsWant) m_ctx->OMSetDepthStencilState(m_dsWant, 0);
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (SUCCEEDED(m_ctx->Map(m_cbBones, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-		memcpy(ms.pData, p.palette, sizeof(M4) * min(p.nJ, (int)MAXJ));
-		m_ctx->Unmap(m_cbBones, 0);
+	ID3D11Buffer* bone = TacCbAcquire(g_boneR, m_ctx, m_cbBones, ms);
+	if (bone) {
+		int nj = p.nJ;
+		if (nj < 0) nj = 0;
+		if (nj > MAXJ) nj = MAXJ;
+		if (nj) memcpy(ms.pData, p.palette, sizeof(M4) * (size_t)nj);
+		if (nj < MAXJ) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(MAXJ - nj));
+		m_ctx->Unmap(bone, 0);
+		m_ctx->VSSetConstantBuffers(2, 1, &bone);
 	}
 	BOOL alpha = ((dp.tint >> 24) & 255) < 255;
 	for (int pass = 0; pass < 2; pass++) {
@@ -10106,7 +10184,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->VSSetShader(m_vsPT, NULL, 0);
 		m_ctx->GSSetShader(m_gsP, NULL, 0);
 		ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
-		ID3D11Buffer* gcb[2] = { m_cbFrame, objb };
+		ID3D11Buffer* gcb[2] = { TacCbCur(g_frameR, m_cbFrame), objb };
 		m_ctx->GSSetConstantBuffers(0, 2, gcb);
 		m_ctx->PSSetShader(m_psP, NULL, 0);
 		m_ctx->RSSetState(m_rsNone);
@@ -11671,6 +11749,33 @@ void Renderer::HudTextBox(const wchar_t* s, float x, float y, float w, float h, 
 }
 
 
+void Renderer::MarkGpuBegin()
+{
+	if (!m_ctx || !m_qDisjoint || !m_qTs0 || !m_qTs1) return;
+	if (m_gpuArmed == 2) {
+		D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj = {};
+		UINT64 a = 0, b = 0;
+		if (m_ctx->GetData(m_qDisjoint, &dj, sizeof(dj), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return;
+		if (!dj.Disjoint && dj.Frequency
+			&& m_ctx->GetData(m_qTs0, &a, sizeof(a), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK
+			&& m_ctx->GetData(m_qTs1, &b, sizeof(b), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK && b >= a)
+			m_gpuMs = (float)((double)(b - a) * 1000.0 / (double)dj.Frequency);
+		m_gpuArmed = 0;
+	}
+	if (m_gpuArmed != 0) return;
+	m_ctx->Begin(m_qDisjoint);
+	m_ctx->End(m_qTs0);
+	m_gpuArmed = 1;
+}
+
+void Renderer::MarkGpuEnd()
+{
+	if (!m_ctx || m_gpuArmed != 1 || !m_qDisjoint || !m_qTs1) return;
+	m_ctx->End(m_qTs1);
+	m_ctx->End(m_qDisjoint);
+	m_gpuArmed = 2;
+}
+
 void Renderer::Present()
 {
 	Present(1, 0);
@@ -11678,6 +11783,7 @@ void Renderer::Present()
 
 void Renderer::Present(int, int)
 {
+	MarkGpuEnd();
 	FlushQueuedDraws();
 	if (!m_swap) return;
 	m_presentBusy = FALSE;

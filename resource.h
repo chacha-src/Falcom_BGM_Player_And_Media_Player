@@ -2396,6 +2396,16 @@
 #define IDR_TAC_PH17                    4987
 #define IDR_TAC_PH18                    4988
 #define IDR_TAC_PH19                    4989
+#define IDR_CSO_TAC_PSSKY0              4990
+#define IDR_CSO_TAC_PSSKY1              4991
+#define IDR_CSO_TAC_PSSKY2              4992
+#define IDR_CSO_TAC_PSSKY3              4993
+#define IDR_CSO_TAC_PSSKY4              4994
+#define IDR_CSO_TAC_PSSKY5              4995
+#define IDR_CSO_TAC_PSSKY6              4996
+#define IDR_CSO_TAC_PSSKY7              4997
+#define IDR_CSO_TAC_PSSKY8              4998
+#define IDR_CSO_TAC_PSSKY9              4999
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED

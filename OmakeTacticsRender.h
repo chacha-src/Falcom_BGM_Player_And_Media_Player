@@ -432,6 +432,13 @@ public:
 	void EndReflectPass();
 	void ReuseReflect(float planeY);
 	void DrawSky(DWORD top, DWORD bottom, int speedLines, DWORD lineColor);
+	void SetPortraitBg(DWORD c)
+	{
+		m_ptClear[0] = (c & 255) / 255.f;
+		m_ptClear[1] = ((c >> 8) & 255) / 255.f;
+		m_ptClear[2] = ((c >> 16) & 255) / 255.f;
+		m_ptClear[3] = 1.f;
+	}
 	void ClearDepth();
 	void CommitFrame() { UpdateFrameCB(); }
 	void SetShadowEnabled(BOOL on) { m_fcb.light[3] = (on && m_shSrv) ? 1.f : 0.f; }
@@ -503,6 +510,9 @@ public:
 	void EndHud();
 	void Present();
 	void Present(int slots, int wantHz);
+	void MarkGpuBegin();
+	void MarkGpuEnd();
+	float GpuMs() const { return m_gpuMs; }
 	void EndFrameTextGc();
 	BOOL FrameReady();             // 待機オブジェクト（ブロックしない）
 	BOOL PresentBusy() const { return m_presentBusy; }
@@ -576,6 +586,11 @@ private:
 
 	HWND m_hwnd;
 	HANDLE m_wait;
+	ID3D11Query* m_qDisjoint;
+	ID3D11Query* m_qTs0;
+	ID3D11Query* m_qTs1;
+	float m_gpuMs;
+	BOOL m_gpuArmed;
 	BOOL m_lost;
 	BOOL m_presented;
 	BOOL m_presentBusy;
@@ -669,6 +684,7 @@ private:
 	ID3D11PixelShader* m_psP;
 	ID3D11VertexShader* m_vsQ;
 	ID3D11PixelShader* m_psSky;
+	ID3D11PixelShader* m_psSkyT[10];
 	ID3D11PixelShader* m_psBloom;
 	ID3D11PixelShader* m_psBlur;
 	ID3D11PixelShader* m_psGrade;
@@ -844,6 +860,7 @@ private:
 	BOOL m_inPortrait;
 	BOOL m_instOn;
 	int m_portraitSlot;
+	float m_ptClear[4];
 	BOOL PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void FlushInst();
 };

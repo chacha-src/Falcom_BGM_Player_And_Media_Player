@@ -74,6 +74,16 @@ call :job gs_5_0 GSP shaders\omake_tactics.hlsl tac_GSP tac_gsp
 call :job ps_5_0 PSP shaders\omake_tactics.hlsl tac_PSP tac_psp
 call :job vs_5_0 VSQ shaders\omake_tactics.hlsl tac_VSQ tac_vsq
 call :job ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky
+call :job ps_5_0 PSSKY0 shaders\omake_tactics.hlsl tac_PSSKY0 tac_pssky0
+call :job ps_5_0 PSSKY1 shaders\omake_tactics.hlsl tac_PSSKY1 tac_pssky1
+call :job ps_5_0 PSSKY2 shaders\omake_tactics.hlsl tac_PSSKY2 tac_pssky2
+call :job ps_5_0 PSSKY3 shaders\omake_tactics.hlsl tac_PSSKY3 tac_pssky3
+call :job ps_5_0 PSSKY4 shaders\omake_tactics.hlsl tac_PSSKY4 tac_pssky4
+call :job ps_5_0 PSSKY5 shaders\omake_tactics.hlsl tac_PSSKY5 tac_pssky5
+call :job ps_5_0 PSSKY6 shaders\omake_tactics.hlsl tac_PSSKY6 tac_pssky6
+call :job ps_5_0 PSSKY7 shaders\omake_tactics.hlsl tac_PSSKY7 tac_pssky7
+call :job ps_5_0 PSSKY8 shaders\omake_tactics.hlsl tac_PSSKY8 tac_pssky8
+call :job ps_5_0 PSSKY9 shaders\omake_tactics.hlsl tac_PSSKY9 tac_pssky9
 call :job cs_5_0 CSSkin shaders\omake_tactics_skin.hlsl tac_CSSkin tac_csskin
 call :job cs_5_0 CSClothStep shaders\omake_tactics_cloth.hlsl tac_CSClothStep tac_csclths
 call :job cs_5_0 CSClothRelax shaders\omake_tactics_cloth.hlsl tac_CSClothRelax tac_csclthr

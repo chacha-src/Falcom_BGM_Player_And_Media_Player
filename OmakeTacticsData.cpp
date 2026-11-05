@@ -8941,7 +8941,7 @@ void TacQualityEnsureAutoDefault(SaveData& s)
 		s.spare[1] = tag;
 		s.spare[3] = gpu;
 		if (newGpu || s.spare[2] < 0 || s.spare[2] > 6)
-			s.spare[2] = gpu;
+			s.spare[2] = 6;
 		return;
 	}
 	if (s.quality < 0 || s.quality > 6) s.quality = 1;

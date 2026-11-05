@@ -120,6 +120,22 @@ float vnoise(float2 p)
 	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
 float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 6; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
+// 空と奈落用。大きな形は残し、細かい段は捨てる。重みを戻して濃さは揃える。
+float fbmSky(float2 p)
+{
+	// 6段のうち、形を決める低い2段だけ。濃さは3段のときと同じに戻す。
+	float s = 0, a = .5;
+	[unroll] for (int i = 0; i < 2; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; }
+	return s * (0.875 / 0.75);
+}
+float2 CurlSky(float2 p)
+{
+	float e = 0.11;
+	float n0 = fbmSky(p);
+	float nx = fbmSky(p + float2(e, 0));
+	float ny = fbmSky(p + float2(0, e));
+	return float2(n0 - ny, nx - n0);
+}
 
 float2 Curl2(float2 p)
 {
@@ -1079,7 +1095,7 @@ void GroundSurfaceLayer(float theme, float3 w, float3 n, float cliff, float t, f
 	float up = saturate((n.y - 0.55) * 3.0) * (1.0 - cliff);
 	if (up < 0.02) return;
 	float2 xz = w.xz;
-	if (theme < 0.5) {
+	[branch] if (theme < 0.5) {
 		float2 windP = xz * float2(0.55, 0.22) - float2(t * (1.6 + gust * 1.4), t * 0.35);
 		float wave = fbm2(windP) * fbm2(windP * 2.1 + 3.7);
 		float2 bladeG = xz * 18.0 + Curl2(xz * 0.9 - t * 0.4) * 1.6;
@@ -1822,7 +1838,7 @@ QOut VSQ(uint id : SV_VertexID)
 {
 	QOut o;
 	float2 p = float2((id << 1) & 2, id & 2);
-	o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
+	o.pos = float4(p * float2(2, -2) + float2(-1, 1), 1, 1);
 	o.uv = p;
 	return o;
 }
@@ -1837,13 +1853,13 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 	float2 pit1 = PlaneXZ(rd, -8.0, 0.09) * 0.14;
 	float2 pit2 = PlaneXZ(rd, -22.0, 0.09) * 0.07;
 	float2 pit3 = PlaneXZ(rd, -44.0, 0.09) * 0.035;
-	if (ths < 0.5) {
-		float c1 = fbm2(skyXZ * 0.22 + float2(-t * (0.18 + gust * 0.22), t * 0.04));
-		float c2 = fbm2(skyXZ * 0.52 + float2(-t * 0.32, -t * 0.08) + 3.1);
+	[branch] if (ths < 0.5) {
+		float c1 = fbmSky(skyXZ * 0.22 + float2(-t * (0.18 + gust * 0.22), t * 0.04));
+		float c2 = vnoise(skyXZ * 0.52 + float2(-t * 0.32, -t * 0.08) + 3.1);
 		float cloud = smoothstep(0.36, 0.76, c1 * 0.6 + c2 * 0.5);
 		c = lerp(c, float3(0.98, 0.99, 1.0), cloud * up * 0.55);
-		float sea1 = fbm2(pit1 + float2(-t * 0.25, t * 0.08));
-		float sea2 = fbm2(pit2 * 1.8 + float2(-t * 0.14, -t * 0.05));
+		float sea1 = fbmSky(pit1 + float2(-t * 0.25, t * 0.08));
+		float sea2 = vnoise(pit2 * 1.8 + float2(-t * 0.14, -t * 0.05));
 		float billow = smoothstep(0.3, 0.74, sea1 * 0.6 + sea2 * 0.5);
 		float3 abyss = lerp(float3(0.32, 0.52, 0.74), float3(0.88, 0.95, 1.0), billow);
 		float shaft = pow(0.5 + 0.5 * sin(yaw * 9.0 - t * 0.35 + sea1 * 3.0), 8.0);
@@ -1851,24 +1867,24 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		c = lerp(c, abyss, down * 0.88);
 		c += float3(0.85, 0.94, 1.0) * rim * 0.22;
 	} else if (ths < 1.5) {
-		float mesa = fbm2(float2(yaw * 3.5, 1.2)) * 0.18;
+		float mesa = fbmSky(float2(yaw * 3.5, 1.2)) * 0.18;
 		float ridge = smoothstep(mesa + 0.06, mesa - 0.02, abs(rd.y + 0.04));
 		c = lerp(c, float3(0.36, 0.16, 0.08), ridge * rim * 0.65);
-		float d1 = fbm2(pit1 * 1.4 - float2(t * 0.38, t * 0.12));
-		float d2 = fbm2(pit2 * 2.6 + float2(t * 0.22, -t * 0.18));
+		float d1 = fbmSky(pit1 * 1.4 - float2(t * 0.38, t * 0.12));
+		float d2 = fbmSky(pit2 * 2.6 + float2(t * 0.22, -t * 0.18));
 		float strata = 0.5 + 0.5 * sin(rd.y * 48.0 + d1 * 5.0);
 		float3 gorge = lerp(float3(0.18, 0.07, 0.03), float3(0.78, 0.38, 0.16), saturate(d1 * 0.7 + strata * 0.35));
 		gorge += float3(1.0, 0.58, 0.22) * pow(saturate(d2), 2.4) * 0.42;
 		c = lerp(c, gorge, down * 0.9);
 		c += float3(1.0, 0.56, 0.24) * rim * 0.28;
 	} else if (ths < 2.5) {
-		float can = fbm2(skyXZ * 0.38 + float2(t * 0.04, 0));
+		float can = fbmSky(skyXZ * 0.38 + float2(t * 0.04, 0));
 		float ray = pow(0.5 + 0.5 * sin(yaw * 14.0 + can * 2.5 - t * 0.18), 10.0);
 		c += float3(0.72, 1.0, 0.45) * ray * (up + rim * 0.6) * 0.32;
 		float2 rv1 = VoronoiGap(pit1 * 2.2);
 		float2 rv2 = VoronoiGap(pit2 * 3.4 + 1.7);
 		float roots = (1.0 - smoothstep(0.02, 0.09, rv1.y)) + (1.0 - smoothstep(0.025, 0.1, rv2.y)) * 0.6;
-		float mist = fbm2(pit1 * 1.2 + float2(t * 0.12, -t * 0.09));
+		float mist = fbmSky(pit1 * 1.2 + float2(t * 0.12, -t * 0.09));
 		float2 sp = floor(pit1 * 9.0 + float2(0, t * 0.8));
 		float fly = step(0.95, hash21(sp)) * (0.5 + 0.5 * sin(t * 4.0 + hash21(sp) * 20.0));
 		float3 deep = lerp(float3(0.03, 0.1, 0.05), float3(0.16, 0.42, 0.22), mist);
@@ -1877,27 +1893,27 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		c = lerp(c, deep, down * 0.92);
 	} else if (ths < 3.5) {
 		float2 ap = float2(yaw * 2.2 + t * 0.06, rd.y * 3.4);
-		float a1 = fbm2(ap + float2(0, fbm2(ap * 1.8) * 0.8));
-		float a2 = fbm2(ap * 2.1 - float2(t * 0.04, 1.7));
+		float a1 = fbmSky(ap + float2(0, fbmSky(ap * 1.8) * 0.8));
+		float a2 = fbmSky(ap * 2.1 - float2(t * 0.04, 1.7));
 		float aur = pow(saturate(a1 * 0.62 + a2 * 0.52), 1.4) * up;
 		c += lerp(float3(0.12, 0.92, 0.58), float3(0.38, 0.45, 1.0), a2) * aur * 0.55;
 		float2 cv1 = VoronoiGap(pit1 * 2.6);
 		float2 cv2 = VoronoiGap(pit2 * 4.0);
 		float rift = (1.0 - smoothstep(0.015, 0.07, cv1.y)) + (1.0 - smoothstep(0.02, 0.08, cv2.y)) * 0.65;
-		float3 crev = lerp(float3(0.03, 0.09, 0.18), float3(0.22, 0.58, 0.86), fbm2(pit1 * 1.6));
+		float3 crev = lerp(float3(0.03, 0.09, 0.18), float3(0.22, 0.58, 0.86), fbmSky(pit1 * 1.6));
 		crev += float3(0.55, 0.88, 1.0) * saturate(rift) * 0.62;
 		c = lerp(c, crev, down * 0.92);
 	} else if (ths < 4.5) {
-		float mir = fbm2(float2(yaw * 4.0 - t * 0.22, rd.y * 12.0));
+		float mir = fbmSky(float2(yaw * 4.0 - t * 0.22, rd.y * 12.0));
 		c += float3(1.0, 0.78, 0.38) * (rim * 0.32 + mir * up * 0.16);
-		float w1 = fbm2(pit1 * 1.8 - float2(t * 0.55, t * 0.18));
-		float w2 = fbm2(pit2 * 3.2 - float2(t * 0.85, -t * 0.24));
+		float w1 = fbmSky(pit1 * 1.8 - float2(t * 0.55, t * 0.18));
+		float w2 = fbmSky(pit2 * 3.2 - float2(t * 0.85, -t * 0.24));
 		float swirl = sin(atan2(pit1.y, pit1.x) * 3.0 + length(pit1) * 1.4 - t * 1.6) * 0.5 + 0.5;
 		float3 sea = lerp(float3(0.26, 0.16, 0.06), float3(0.88, 0.66, 0.32), saturate(w1 * 0.65 + w2 * 0.45));
 		sea += float3(1.0, 0.82, 0.42) * pow(swirl * w1, 2.0) * 0.38;
 		c = lerp(c, sea, down * 0.9);
 	} else if (ths < 5.5) {
-		float ash = fbm2(skyXZ * 0.35 - float2(t * 0.12, t * 0.28));
+		float ash = fbmSky(skyXZ * 0.35 - float2(t * 0.12, t * 0.28));
 		c = lerp(c, float3(0.14, 0.05, 0.03), ash * up * 0.55);
 		c += float3(1.0, 0.3, 0.04) * pow(ash, 2.4) * (up * 0.35 + rim * 0.45);
 		float2 mv1 = VoronoiGap(pit1 * 1.9 + float2(t * 0.05, -t * 0.03));
@@ -1907,13 +1923,13 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float3 cald = float3(0.07, 0.02, 0.01);
 		cald += float3(1.0, 0.28, 0.02) * vein1 * 1.15;
 		cald += float3(1.0, 0.65, 0.12) * vein2 * 0.65;
-		cald += float3(1.0, 0.22, 0.02) * pow(fbm2(pit3 * 2.0 - t * 0.2), 2.2) * 0.55;
+		cald += float3(1.0, 0.22, 0.02) * pow(fbmSky(pit3 * 2.0 - t * 0.2), 2.2) * 0.55;
 		c = lerp(c, cald, down * 0.95);
 	} else if (ths < 6.5) {
-		float gas = fbm2(skyXZ * 0.32 + Curl2(skyXZ * 0.18 + t * 0.05) * 0.6);
+		float gas = fbmSky(skyXZ * 0.32 + CurlSky(skyXZ * 0.18 + t * 0.05) * 0.6);
 		c += float3(0.38, 0.88, 0.28) * pow(gas, 2.0) * (up * 0.28 + rim * 0.35);
-		float m1 = fbm2(pit1 * 1.5 + Curl2(pit1 * 0.8 + t * 0.1));
-		float m2 = fbm2(pit2 * 2.8 - float2(t * 0.16, t * 0.12));
+		float m1 = fbmSky(pit1 * 1.5 + CurlSky(pit1 * 0.8 + t * 0.1));
+		float m2 = fbmSky(pit2 * 2.8 - float2(t * 0.16, t * 0.12));
 		float2 wc = floor(pit1 * 4.5);
 		float2 wf = frac(pit1 * 4.5) - 0.5 - (hash22(wc) - 0.5) * 0.4;
 		float orb = exp(-dot(wf, wf) * 18.0) * step(0.72, hash21(wc)) * (0.5 + 0.5 * sin(t * 2.4 + hash21(wc) * 16.0));
@@ -1926,7 +1942,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float ring1 = exp(-abs(frac(r * 0.35 - t * 0.05) - 0.5) * 22.0);
 		float ring2 = exp(-abs(frac(r * 0.7 + t * 0.04) - 0.5) * 26.0);
 		float glyph = step(0.65, sin(a * 12.0 + floor(r * 0.7) * 2.3 + t * 0.4));
-		float3 sanc = lerp(float3(0.04, 0.05, 0.12), float3(0.14, 0.22, 0.44), fbm2(pit2 * 1.6));
+		float3 sanc = lerp(float3(0.04, 0.05, 0.12), float3(0.14, 0.22, 0.44), fbmSky(pit2 * 1.6));
 		sanc += float3(0.45, 0.78, 1.0) * (ring1 * 0.55 + ring2 * glyph * 0.75);
 		c = lerp(c, sanc, down * 0.92);
 		float skyR = exp(-abs(rd.y - 0.32) * 18.0) * (0.5 + 0.5 * sin(yaw * 8.0 - t * 0.3));
@@ -1934,20 +1950,20 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 	} else if (ths < 8.5) {
 		float2 cp = skyXZ * 0.42 + float2(t * 0.14, -t * 0.09);
 		float ca = CausAt(cp * 0.6, t * 0.8);
-		float shaft = pow(0.5 + 0.5 * sin(yaw * 10.0 + fbm2(cp) * 3.0 - t * 0.25), 8.0);
+		float shaft = pow(0.5 + 0.5 * sin(yaw * 10.0 + fbmSky(cp) * 3.0 - t * 0.25), 8.0);
 		c += float3(0.2, 0.75, 1.0) * (ca * 0.38 + shaft * 0.32) * (up + rim * 0.5);
 		float2 bc1 = floor(pit1 * 6.0);
 		float2 bc2 = floor(pit2 * 11.0);
 		float b1 = exp(-length(frac(pit1 * 6.0) - 0.5) * 9.0) * step(0.74, hash21(bc1));
 		float b2 = exp(-length(frac(pit2 * 11.0) - 0.5) * 10.0) * step(0.78, hash21(bc2));
-		float3 trench = lerp(float3(0.01, 0.05, 0.12), float3(0.04, 0.24, 0.42), fbm2(pit1 * 1.2 + t * 0.08));
+		float3 trench = lerp(float3(0.01, 0.05, 0.12), float3(0.04, 0.24, 0.42), fbmSky(pit1 * 1.2 + t * 0.08));
 		trench += float3(0.15, 0.95, 0.82) * (b1 * 0.75 + b2 * 0.55);
 		trench += float3(0.22, 0.68, 1.0) * CausAt(pit1 * 0.8, t) * 0.28;
 		c = lerp(c, trench, down * 0.94);
 	} else if (ths < 9.5) {
-		float fall = fbm2(float2(yaw * 18.0, rd.y * 6.0 - t * 1.8));
+		float fall = fbmSky(float2(yaw * 18.0, rd.y * 6.0 - t * 1.8));
 		float sheet = pow(0.5 + 0.5 * sin(yaw * 22.0 + fall * 2.0), 4.0);
-		float mist = fbm2(pit1 * 1.4 - float2(0, t * 0.65));
+		float mist = fbmSky(pit1 * 1.4 - float2(0, t * 0.65));
 		float bowA = exp(-pow((rd.y + 0.18) * 5.5, 2.0));
 		float3 bow = lerp(float3(1, 0.38, 0.38), lerp(float3(0.38, 1, 0.52), float3(0.38, 0.58, 1), saturate(rd.y * 3.0 + 0.8)), saturate(rd.y * 2.0 + 0.5));
 		float3 plunge = lerp(float3(0.14, 0.32, 0.48), float3(0.82, 0.94, 1.0), saturate(mist * 0.65 + sheet * 0.45));
@@ -1957,8 +1973,8 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 	} else if (ths < 10.5) {
 		float3 sd = normalize(rd);
 		float2 u1 = float2(atan2(sd.x, sd.z) * 1.8, sd.y * 2.4);
-		float n1 = fbm2(u1 + t * 0.02);
-		float n2 = fbm2(u1 * 2.3 - t * 0.015 + 3.4);
+		float n1 = fbmSky(u1 + t * 0.02);
+		float n2 = fbmSky(u1 * 2.3 - t * 0.015 + 3.4);
 		float neb = smoothstep(0.28, 0.78, n1 * 0.58 + n2 * 0.52);
 		float3 cosmos = float3(0.02, 0.02, 0.06);
 		cosmos += lerp(float3(0.55, 0.12, 0.88), float3(0.12, 0.58, 1.0), n2) * neb * 0.72;
@@ -1967,7 +1983,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float s1 = step(0.988, hash21(floor(sg1))) * saturate(1.0 - length(frac(sg1) - 0.5) * 5.2);
 		float s2 = step(0.992, hash21(floor(sg2))) * saturate(1.0 - length(frac(sg2) - 0.5) * 6.0);
 		cosmos += float3(0.92, 0.96, 1.0) * (s1 + s2 * 0.8);
-		float vortex = exp(-abs(length(pit1) * 0.18 - 1.2) * 2.5) * fbm2(pit1 * 0.8 - t * 0.2);
+		float vortex = exp(-abs(length(pit1) * 0.18 - 1.2) * 2.5) * fbmSky(pit1 * 0.8 - t * 0.2);
 		cosmos += float3(0.42, 0.78, 1.0) * vortex * down * 0.55;
 		c = lerp(c, cosmos, saturate(up * 0.75 + down * 0.96));
 	} else if (ths < 11.5) {
@@ -1988,7 +2004,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float arch = smoothstep(0.42, 0.49, max(a1.x, a1.y));
 		float rose = exp(-abs(length(frac(pit1 * 0.5) - 0.5) - 0.32) * 28.0);
 		float candle = step(0.84, hash21(floor(pit1 * 3.0))) * exp(-length(frac(pit1 * 3.0) - 0.5) * 9.0);
-		float3 nave = lerp(float3(0.06, 0.03, 0.11), float3(0.24, 0.12, 0.38), fbm2(pit2 * 1.4));
+		float3 nave = lerp(float3(0.06, 0.03, 0.11), float3(0.24, 0.12, 0.38), fbmSky(pit2 * 1.4));
 		nave += float3(0.78, 0.52, 1.0) * (arch * 0.48 + rose * 0.65);
 		nave += float3(1.0, 0.76, 0.34) * candle * 0.9;
 		c = lerp(c, nave, down * 0.94);
@@ -2000,7 +2016,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float2 f2 = frac(l2) - 0.5 - (hash22(c2) - 0.5) * 0.4;
 		float o1 = exp(-dot(f1, f1) * 16.0) * step(0.55, hash21(c1));
 		float o2 = exp(-dot(f2, f2) * 18.0) * step(0.58, hash21(c2));
-		float3 sea = lerp(float3(0.06, 0.05, 0.14), float3(0.22, 0.18, 0.38), fbm2(pit1 * 0.9 + t * 0.05));
+		float3 sea = lerp(float3(0.06, 0.05, 0.14), float3(0.22, 0.18, 0.38), fbmSky(pit1 * 0.9 + t * 0.05));
 		sea += float3(1.0, 0.74, 0.32) * (o1 * 1.05 + o2 * 0.75);
 		c = lerp(c, sea, down * 0.94);
 		float2 sL = skyXZ * 0.45 + float2(t * 0.06, -t * 0.03);
@@ -2011,7 +2027,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 	}
 }
 
-GOut PSSKY(QOut i)
+GOut SkyPS(QOut i, float ths)
 {
 	float3 top = Tint.rgb, bot = Extra.rgb;
 	float y = i.uv.y;
@@ -2024,7 +2040,7 @@ GOut PSSKY(QOut i)
 		float r = length(q);
 		float ln = step(0.86, frac(sin(floor(ang * 40.) * 91.7) * 437.5 + t * 3.)) * smoothstep(0.15, 0.6, r);
 		c = lerp(c, OutlineColor.rgb, ln * 0.55);
-	} else {
+	} else if (ths >= 0) {
 		float2 suv = float2(Params.z, Params.w);
 		float2 q = i.uv - suv;
 		q.x *= Screen.x * Screen.w;
@@ -2034,8 +2050,7 @@ GOut PSSKY(QOut i)
 		c += sunCol * exp(-sd * 7.5) * 0.62 * vis;
 		c += sunCol * smoothstep(0.05, 0.0, sd) * 1.35 * vis;
 		c += sunCol * exp(-abs(y - 0.62) * 9.0) * 0.16 * vis;
-		float ths = FogColor.a;
-		float cl = fbm2(float2(i.uv.x * 2.1, y * 1.5 + t * 0.03));
+		float cl = fbmSky(float2(i.uv.x * 2.1, y * 1.5 + t * 0.03));
 		cl *= smoothstep(0.95, 0.28, y) * smoothstep(0.05, 0.22, y);
 		float clAmt = 0.22;
 		if (ths > 2.5 && ths < 3.5) clAmt = 0.06;
@@ -2052,7 +2067,7 @@ GOut PSSKY(QOut i)
 		float horz = smoothstep(0.18, 0.52, y) * smoothstep(0.92, 0.58, y);
 		float skyA = smoothstep(0.88, 0.05, y);
 		float gustS = GustAmt();
-		if (ths < 0.5) {
+		[branch] if (ths < 0.5) {
 			float streak = pow(0.5 + 0.5 * sin(i.uv.x * 4.2 - t * (0.18 + gustS * 0.25) + y * 1.4), 4);
 			c += float3(1.0, 0.96, 0.78) * streak * skyA * 0.11;
 			c = lerp(c, float3(0.8, 0.9, 1.0), horz * 0.06);
@@ -2066,8 +2081,8 @@ GOut PSSKY(QOut i)
 		} else if (ths < 3.5) {
 			c = lerp(c, float3(0.78, 0.88, 1.0), horz * 0.14);
 			float2 ap = float2(i.uv.x * 2.6 + t * 0.035, y * 1.7);
-			float a1 = fbm2(ap);
-			float a2 = fbm2(ap * 1.65 + float2(3.1, t * 0.025));
+			float a1 = fbmSky(ap);
+			float a2 = fbmSky(ap * 1.65 + float2(3.1, t * 0.025));
 			float curtain = saturate(a1 * 0.55 + a2 * 0.45);
 			curtain *= saturate(1.0 - abs(y - 0.22) * 2.6) * skyA;
 			c += lerp(float3(0.14, 0.72, 0.52), float3(0.32, 0.4, 1.0), a2) * pow(curtain, 1.55) * 0.22;
@@ -2077,7 +2092,7 @@ GOut PSSKY(QOut i)
 			c += float3(1, 0.7, 0.3) * exp(-abs(y - 0.6) * 8.0) * 0.1;
 		} else if (ths < 5.5) {
 			c = lerp(c, float3(0.4, 0.1, 0.04), horz * 0.3);
-			float heat = fbm2(float2(i.uv.x * 1.5, y * 3.2 - t * 0.07));
+			float heat = fbmSky(float2(i.uv.x * 1.5, y * 3.2 - t * 0.07));
 			c += float3(1.0, 0.26, 0.04) * heat * heat * skyA * 0.14;
 			c += float3(1, 0.42, 0.08) * exp(-abs(y - 0.54) * 6.5) * 0.1;
 		} else if (ths < 6.5) {
@@ -2090,9 +2105,9 @@ GOut PSSKY(QOut i)
 		} else if (ths < 8.5) {
 			c = lerp(c, float3(0.02, 0.16, 0.3), 0.38);
 			float2 cp = float2(i.uv.x * 3.4 + t * 0.06, y * 4.0 - t * 0.04);
-			float ca = saturate(fbm2(cp) * fbm2(cp.yx * 1.25 + 2.0));
+			float ca = saturate(fbmSky(cp) * fbmSky(cp.yx * 1.25 + 2.0));
 			c += float3(0.12, 0.5, 0.82) * ca * skyA * 0.16;
-			float colx = i.uv.x * 5.5 + fbm2(float2(i.uv.x * 2.0, t * 0.04)) * 0.7;
+			float colx = i.uv.x * 5.5 + fbmSky(float2(i.uv.x * 2.0, t * 0.04)) * 0.7;
 			float ray = pow(saturate(sin(colx * 6.28318) * 0.5 + 0.32), 14.0);
 			c += float3(0.18, 0.62, 1.0) * ray * (0.12 + y * 0.32) * 0.09;
 		} else if (ths < 9.5) {
@@ -2101,8 +2116,8 @@ GOut PSSKY(QOut i)
 		} else if (ths < 10.5) {
 			c = lerp(c, float3(0.05, 0.06, 0.14), 0.32);
 			float2 np = float2(i.uv.x * 1.7 + t * 0.018, y * 1.35);
-			float n1 = fbm2(np);
-			float n2 = fbm2(np * 2.05 + float2(4.0, -t * 0.012));
+			float n1 = fbmSky(np);
+			float n2 = fbmSky(np * 2.05 + float2(4.0, -t * 0.012));
 			float neb = saturate(n1 * 0.58 + n2 * 0.48);
 			c += lerp(float3(0.36, 0.1, 0.68), float3(0.08, 0.36, 0.88), n2) * neb * neb * skyA * 0.4;
 			float2 sg = i.uv * float2(380, 220);
@@ -2139,11 +2154,21 @@ GOut PSSKY(QOut i)
 			float orb = exp(-dot(lf, lf) * 10.0) * step(0.62, lh);
 			c += float3(1.0, 0.72, 0.38) * orb * skyA * 0.45;
 		}
-		if (ths > -0.5)
-			AbyssAndSky(c, WorldRay(i.uv), ths, t, gustS);
+		AbyssAndSky(c, WorldRay(i.uv), ths, t, gustS);
 	}
 	return EmitZ(float4(c, 1), 1);
 }
+GOut PSSKY(QOut i) { return SkyPS(i, FogColor.a); }
+GOut PSSKY0(QOut i) { return SkyPS(i, 0); }
+GOut PSSKY1(QOut i) { return SkyPS(i, 1); }
+GOut PSSKY2(QOut i) { return SkyPS(i, 2); }
+GOut PSSKY3(QOut i) { return SkyPS(i, 3); }
+GOut PSSKY4(QOut i) { return SkyPS(i, 4); }
+GOut PSSKY5(QOut i) { return SkyPS(i, 5); }
+GOut PSSKY6(QOut i) { return SkyPS(i, 6); }
+GOut PSSKY7(QOut i) { return SkyPS(i, 7); }
+GOut PSSKY8(QOut i) { return SkyPS(i, 8); }
+GOut PSSKY9(QOut i) { return SkyPS(i, 9); }
 
 float3 WeatherSample(float2 uv, float2 ofs, float3 col)
 {
@@ -2244,28 +2269,28 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 	float yaw = atan2(rd.x, rd.z);
 	float3 wpos = Eye.xyz + rd * (max(z, 0.45) * max(Fog.y, 60.0));
 	float2 wxz = wpos.xz;
-	if (th < 0.5) {
+	[branch] if (th < 0.5) {
 		float2 p = wxz * float2(0.18, 0.07) - float2(t * (0.9 + gust * 0.8), t * 0.2);
-		float rib = smoothstep(0.42, 0.78, fbm2(p) * 0.65 + fbm2(p * 2.3 + 1.9) * 0.5);
+		float rib = smoothstep(0.42, 0.78, fbmSky(p) * 0.65 + vnoise(p * 2.3 + 1.9) * 0.5);
 		float2 sg = wxz * 0.85 - float2(t * 1.4, t * 0.35);
 		float2 sc = floor(sg);
 		float seed = smoothstep(0.12, 0.02, length(frac(sg) - 0.5 - (hash22(sc) - 0.5) * 0.4)) * step(0.78, hash21(sc));
 		col += float3(0.95, 0.98, 0.72) * (rib * 0.38 + seed * 0.55) * veil;
 	} else if (th < 1.5) {
 		float2 dp = wxz * float2(0.14, 0.28) - float2(t * 0.75, t * 0.18);
-		float colm = smoothstep(0.4, 0.78, fbm2(dp) * 0.65 + fbm2(dp * 2.4) * 0.5);
+		float colm = smoothstep(0.4, 0.78, fbmSky(dp) * 0.65 + fbmSky(dp * 2.4) * 0.5);
 		col = FarBend(col, uv, t * 0.7, veil * 0.85, 0.006);
 		col += float3(1.0, 0.48, 0.16) * colm * veil * 0.44;
 	} else if (th < 2.5) {
-		float ray = pow(0.5 + 0.5 * sin(yaw * 16.0 + fbm2(wxz * 0.08 + t * 0.05) * 2.5 - t * 0.2), 8.0);
+		float ray = pow(0.5 + 0.5 * sin(yaw * 16.0 + fbmSky(wxz * 0.08 + t * 0.05) * 2.5 - t * 0.2), 8.0);
 		float2 fg = wxz * 0.65 + float2(sin(t * 0.5), cos(t * 0.4)) * 0.5;
 		float2 fc = floor(fg);
 		float spore = smoothstep(0.14, 0.02, length(frac(fg) - 0.5 - (hash22(fc) - 0.5) * 0.4)) * step(0.75, hash21(fc));
 		col += float3(0.72, 1.0, 0.48) * (ray * 0.42 + spore * 0.55) * veil;
 	} else if (th < 3.5) {
 		float2 ap = float2(yaw * 2.6 + t * 0.05, rd.y * 3.2);
-		float a = fbm2(ap);
-		float b = fbm2(ap * 1.9 + 4.0);
+		float a = fbmSky(ap);
+		float b = fbmSky(ap * 1.9 + 4.0);
 		float curtain = pow(saturate(a * 0.6 + b * 0.5), 1.5);
 		float2 dg = wxz * 1.1 - float2(t * 1.6, t * 0.4);
 		float diamond = step(0.94, hash21(floor(dg))) * (0.5 + 0.5 * sin(t * 6.0 + hash21(floor(dg)) * 30.0));
@@ -2274,18 +2299,18 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 	} else if (th < 4.5) {
 		col = FarBend(col, uv, t * 1.15, veil, 0.012);
 		float2 sp = wxz * float2(0.16, 0.45) - float2(t * 1.3, t * 0.25);
-		float veilS = smoothstep(0.38, 0.76, fbm2(sp) * 0.65 + fbm2(sp * 2.3) * 0.5);
+		float veilS = smoothstep(0.38, 0.76, fbmSky(sp) * 0.65 + fbmSky(sp * 2.3) * 0.5);
 		col += float3(1.0, 0.78, 0.35) * veilS * veil * 0.42;
 	} else if (th < 5.5) {
 		float2 eg = float2(yaw * 18.0 + sin(t * 0.6 + wpos.y * 0.2), wpos.y * 0.45 - t * 1.1);
 		float2 ec = floor(eg);
 		float2 ef = frac(eg) - 0.5 - (hash22(ec) - 0.5) * 0.4;
 		float ember = smoothstep(0.14, 0.02, length(ef)) * step(0.7, hash21(ec));
-		float plume = smoothstep(0.4, 0.78, fbm2(wxz * 0.12 - float2(t * 0.2, t * 0.35)));
+		float plume = smoothstep(0.4, 0.78, fbmSky(wxz * 0.12 - float2(t * 0.2, t * 0.35)));
 		col += float3(1.0, 0.32, 0.04) * (ember * 0.85 + plume * 0.32) * veil;
 	} else if (th < 6.5) {
-		float2 mp = wxz * 0.14 + Curl2(wxz * 0.08 + t * 0.06) * 0.8;
-		float sheet = smoothstep(0.34, 0.74, fbm2(mp + float2(t * 0.14, -t * 0.09)));
+		float2 mp = wxz * 0.14 + CurlSky(wxz * 0.08 + t * 0.06) * 0.8;
+		float sheet = smoothstep(0.34, 0.74, fbmSky(mp + float2(t * 0.14, -t * 0.09)));
 		float2 wg = wxz * 0.45;
 		float2 wc = floor(wg);
 		float wisp = exp(-length(frac(wg) - 0.5 - (hash22(wc) - 0.5) * 0.35) * 10.0) * step(0.74, hash21(wc));
@@ -2306,11 +2331,11 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		float rad = length(float2(sin(yaw - 0.6), rd.y + 0.08));
 		float arc = exp(-pow((rad - 0.42) * 9.0, 2.0));
 		float3 bow = lerp(float3(1, 0.35, 0.35), lerp(float3(0.4, 1, 0.45), float3(0.35, 0.55, 1), saturate(ang)), saturate(ang));
-		float spray = smoothstep(0.38, 0.76, fbm2(wxz * 0.18 - float2(0, t * 0.8)));
+		float spray = smoothstep(0.38, 0.76, fbmSky(wxz * 0.18 - float2(0, t * 0.8)));
 		col += (bow * arc * 0.55 + float3(0.82, 0.94, 1.0) * spray * 0.32) * veil;
 	} else if (th < 10.5) {
 		float2 u = float2(yaw * 2.0, rd.y * 2.6);
-		float n = fbm2(u + t * 0.02) * 0.6 + fbm2(u * 2.2 - t * 0.015) * 0.5;
+		float n = fbmSky(u + t * 0.02) * 0.6 + fbmSky(u * 2.2 - t * 0.015) * 0.5;
 		float2 sg = float2(yaw * 120.0, rd.y * 180.0);
 		float star = step(0.99, hash21(floor(sg))) * saturate(1.0 - length(frac(sg) - 0.5) * 5.5);
 		col += lerp(float3(0.48, 0.12, 0.82), float3(0.1, 0.45, 1.0), saturate(n)) * n * veil * 0.58;
@@ -2410,7 +2435,7 @@ float4 PSGrade(QOut i) : SV_Target
 	float sky = saturate((0.46 - i.uv.y) * 2.6);
 	float sunUp = saturate((0.4 - suv.y) * 3.2);
 	float shaftMask = Extra.w * saturate(0.7 - dist) * sky * sunUp;
-	if (shaftMask > 1e-4) {
+	[branch] if (shaftMask > 1e-4) {
 		[loop] for (int k = 1; k <= shaftN; k++) {
 			float t = k / (float)shaftN;
 			float w = 1. - t;

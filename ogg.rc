@@ -357,6 +357,26 @@ IDR_CSO_TAC_VSQ         RCDATA                  "res\\cso\\tac_vsq.cso"
 
 IDR_CSO_TAC_PSSKY       RCDATA                  "res\\cso\\tac_pssky.cso"
 
+IDR_CSO_TAC_PSSKY0      RCDATA                  "res\\cso\\tac_pssky0.cso"
+
+IDR_CSO_TAC_PSSKY1      RCDATA                  "res\\cso\\tac_pssky1.cso"
+
+IDR_CSO_TAC_PSSKY2      RCDATA                  "res\\cso\\tac_pssky2.cso"
+
+IDR_CSO_TAC_PSSKY3      RCDATA                  "res\\cso\\tac_pssky3.cso"
+
+IDR_CSO_TAC_PSSKY4      RCDATA                  "res\\cso\\tac_pssky4.cso"
+
+IDR_CSO_TAC_PSSKY5      RCDATA                  "res\\cso\\tac_pssky5.cso"
+
+IDR_CSO_TAC_PSSKY6      RCDATA                  "res\\cso\\tac_pssky6.cso"
+
+IDR_CSO_TAC_PSSKY7      RCDATA                  "res\\cso\\tac_pssky7.cso"
+
+IDR_CSO_TAC_PSSKY8      RCDATA                  "res\\cso\\tac_pssky8.cso"
+
+IDR_CSO_TAC_PSSKY9      RCDATA                  "res\\cso\\tac_pssky9.cso"
+
 IDR_CSO_TAC_CSSKIN      RCDATA                  "res\\cso\\tac_csskin.cso"
 
 IDR_CSO_TAC_CSCLTHS     RCDATA                  "res\\cso\\tac_csclths.cso"

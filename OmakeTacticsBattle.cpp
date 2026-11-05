@@ -4180,6 +4180,20 @@ void Game::UpdateBattle(float dt)
 	if (m_flashWhite > 0) m_flashWhite = max(0.f, m_flashWhite - dt * 3.f);
 }
 
+// 画面に床・水面・壁のどれかがある。奈落だけのときは反射を描かない。
+BOOL Game::ViewShowsGround() const
+{
+	const Map& map = m_b.map;
+	for (int z = 0; z < MAPN; z++) {
+		for (int x = 0; x < MAPN; x++) {
+			if (map.At(x, z).t == T_VOID) continue;
+			float y = map.StandY(x, z);
+			if (m_r.InView(v3((float)x + 0.5f, y + 0.4f, (float)z + 0.5f), 2.4f)) return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 // ============================================================ 描画（マップ）
 void Game::ClearRipples()
 {
@@ -4193,6 +4207,15 @@ void Game::ClearRipples()
 
 void Game::DrawBattle3D()
 {
+	LARGE_INTEGER pq, pt;
+	QueryPerformanceFrequency(&pq);
+	QueryPerformanceCounter(&pt);
+	m_msSh = m_msRef = 0;
+	auto take = [&](float& dst) {
+		LARGE_INTEGER n; QueryPerformanceCounter(&n);
+		dst = pq.QuadPart ? (float)((double)(n.QuadPart - pt.QuadPart) * 1000.0 / (double)pq.QuadPart) : 0.f;
+		pt = n;
+	};
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	m_r.SetSceneShift(MIdent());
@@ -4267,6 +4290,8 @@ void Game::DrawBattle3D()
 		float lim = shR + (float)sp + 3.f;
 		return dx * dx + dz * dz <= lim * lim;
 	};
+	BOOL seeGround = ViewShowsGround();
+	if (seeGround) {
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	{
@@ -4289,6 +4314,8 @@ void Game::DrawBattle3D()
 		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], AilmentPos(m_act[i], ActorPos(i)), ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
 	}
 	m_r.EndInstBatch();
+	}
+	take(m_msSh);
 	{
 		V3 look = m_camTarget + v3(0, .4f, 0);
 		BOOL reflectBusy = m_phase == PH_MOVING || m_phase == PH_E_MOVE || m_phase == PH_ACTION || m_phase == PH_INTRO || m_shake > 0.02f;
@@ -4297,11 +4324,12 @@ void Game::DrawBattle3D()
 		BOOL camMove = fabsf(m_camYaw - s_yaw) > 0.004f || fabsf(m_camPitch - s_pitch) > 0.004f
 			|| fabsf(m_camDist - s_dist) > 0.08f
 			|| fabsf(m_camTarget.x - s_tx) > 0.08f || fabsf(m_camTarget.z - s_tz) > 0.08f;
-		BOOL drawRef = reflectBusy || camMove || s_refFrame < 0 || (m_r.m_frame - s_refFrame) >= 2;
-		if (!drawRef) m_r.ReuseReflect(m_camTarget.y);
-		else if (m_r.BeginReflectPass(m_camTarget.y, look)) {
-			m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
+		// 奈落だけを見ているときは、床も水面も反射をサンプルしない。シーンの描き直しは待ちになるだけ。
+		BOOL drawRef = seeGround && (reflectBusy || camMove || s_refFrame < 0 || (m_r.m_frame - s_refFrame) >= 2);
+		if (seeGround && !drawRef) m_r.ReuseReflect(m_camTarget.y);
+		else if (seeGround && m_r.BeginReflectPass(m_camTarget.y, look)) {
 			m_r.DrawTerrain();
+			m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 			m_r.DrawWater();
 			m_r.BeginInstBatch();
 			for (int i = 0; i < m_b.nUnits; i++) {
@@ -4323,6 +4351,7 @@ void Game::DrawBattle3D()
 			s_tz = m_camTarget.z;
 		}
 	}
+	take(m_msRef);
 	m_r.BeginMainPass();
 	{
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -4351,9 +4380,9 @@ void Game::DrawBattle3D()
 		}
 		m_r.SetLiquidRipples(&m_rip[0][0], TAC_RIPN);
 	}
+	if (seeGround) m_r.DrawTerrain();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
-	m_r.DrawTerrain();
-	m_r.DrawWater();
+	if (seeGround) m_r.DrawWater();
 	BuildOverlayQuads();
 	m_r.DrawOverlayQuads(m_ovQuads.data(), m_ovQuads.size(), 0);
 	// カーソル
@@ -5334,8 +5363,8 @@ void Game::DrawCutIn3D()
 	}
 	m_r.EndInstBatch();
 	if (m_r.BeginReflectPass(0.f, look)) {
-		m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 		m_r.DrawTerrain();
+		m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 		m_r.DrawWater();
 		m_r.ResetActorPipe();
 		m_r.BeginInstBatch();
@@ -5356,7 +5385,6 @@ void Game::DrawCutIn3D()
 		m_r.EndReflectPass();
 	}
 	m_r.BeginMainPass();
-	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	{
 		float rip[TAC_RIPN * 4];
 		float c = scene.m[0], s = scene.m[8];
@@ -5370,6 +5398,7 @@ void Game::DrawCutIn3D()
 		m_r.SetLiquidRipples(rip, TAC_RIPN);
 	}
 	m_r.DrawTerrain();
+	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
 	m_r.ResetActorPipe();
 	m_r.BeginInstBatch();
@@ -9243,7 +9272,12 @@ void Game::DrawBattleUi()
 			{
 				wchar_t vs[16];
 				swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
-				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs)) { TacSetVsync(m_save, TacVsync(m_save) + d); m_syncRun = -1; m_syncArmN = 0; }
+				if (int d = Sel(ID_BT_OPT_SYNC, bx, oy, bw, U(32), TT(TX_SET_SYNC), vs)) {
+					TacSetVsync(m_save, TacVsync(m_save) + d);
+					m_syncRun = -1;
+					m_syncArmN = 0;
+					if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; ApplyQualityNow(6); }
+				}
 			}
 			oy += U(34);
 			if (Sel(ID_BT_OPT_WIN, bx, oy, bw, U(32), TT(TX_SET_WIN), TT(TacWinTx(TacWinMode(m_save))))) TacSetWinMode(m_save, TacWinMode(m_save) ^ 1);

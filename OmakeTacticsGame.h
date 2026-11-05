@@ -249,6 +249,7 @@ private:
 	void EndBattle(int victory);
 	void UpdateBattle(float dt);
 	void DrawBattle3D();
+	BOOL ViewShowsGround() const;
 	void DrawBattleUi();
 	void PlaceBattleHud();
 	void BattleClick(int x, int y);
@@ -290,6 +291,7 @@ private:
 	void ComputeOverlays();
 	void BuildOverlayQuads();
 public:
+	void SetAudioMs(float ms) { m_msAud = ms; }
 	int AppendOverlayQuad(VtxS* dst, int n, int cap, int x, int z, DWORD c, float lift, float yAbs, int layer, int segs) const;
 	int BuildRangeBand(int z0, int z1, const BYTE* block, VtxS* dst, int cap) const;
 private:
@@ -361,7 +363,10 @@ private:
 	BOOL m_qDrew;
 	float m_qCoolT, m_syncLock;
 	float m_fps;
-	float m_fpsSpan[5];
+	float m_fpsSpan[20];
+	float m_workSpan[20];
+	float m_workAvg;
+	float m_msUpd, m_msSh, m_msRef, m_msMain, m_msPort, m_msHud, m_msPr, m_msAud;
 	int m_fpsN, m_fpsI;
 	LARGE_INTEGER m_fpsAt;
 	HWND m_hwnd;

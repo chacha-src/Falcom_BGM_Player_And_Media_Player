@@ -118,7 +118,10 @@ Game::Game()
 	m_qDrew = FALSE;
 	m_syncLock = 0;
 	m_fps = 0;
+	m_workAvg = 0;
+	m_msUpd = m_msSh = m_msRef = m_msMain = m_msPort = m_msHud = m_msPr = m_msAud = 0;
 	ZeroMemory(m_fpsSpan, sizeof(m_fpsSpan));
+	ZeroMemory(m_workSpan, sizeof(m_workSpan));
 	m_fpsN = 0;
 	m_fpsI = 0;
 	m_fpsAt.QuadPart = 0;
@@ -365,6 +368,7 @@ BOOL Game::Init(HWND view, int w, int h)
 	m_loadFrames = 0;
 	m_ui = Clampf(min(m_w / 1280.f, m_h / 720.f), .62f, 2.2f);
 	m_qApply = TacQualityWanted(m_save);
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; }
 	m_qCoolT = 0.8f;
 	if (!m_r.Init(view, m_qApply)) { m_screen = SC_FAIL; return FALSE; }
 	return TRUE;
@@ -577,6 +581,9 @@ BOOL Game::Recover()
 	m_r.Release();
 	m_loaded = FALSE;
 	m_qApply = TacQualityWanted(m_save);
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; }
+	m_syncRun = -1;
+	m_syncArmN = 0;
 	if (!m_r.Init(m_hwnd, m_qApply)) return FALSE;
 	if (!LoadEverything()) return FALSE;
 	InvalidatePortraits();
@@ -756,21 +763,16 @@ int Game::PaceHz() const
 	return hz[SyncNow()];
 }
 
-static BOOL TacMidBand(int q) { return q == 0 || q == 1 || q == 2; }
-
 void Game::ApplyQualityNow(int q)
 {
 	q = Clampi(q, 0, 6);
-	int prev = m_qApply;
 	if (q == m_qApply) {
 		m_r.SetQuality(q);
 		return;
 	}
 	m_qApply = q;
 	BOOL rebuilt = m_r.SetQuality(q);
-	float cool = rebuilt ? 1.0f : 0.28f;
-	if (prev >= 0 && TacMidBand(prev) && TacMidBand(q)) cool = 2.0f;
-	m_qCoolT = cool;
+	m_qCoolT = rebuilt ? 0.45f : 0.20f;
 	m_qMissN = 0;
 	m_qOkN = 0;
 }
@@ -785,9 +787,11 @@ void Game::PickQuality(int delta)
 		m_save.quality = TAC_Q_AUTO;
 		m_save.spare[0] = 1;
 		m_save.spare[1] = 0;
-		m_save.spare[2] = -1;
+		m_save.spare[2] = 6;
 		TacQualityEnsureAutoDefault(m_save);
-		ApplyQualityNow(TacQualityWanted(m_save));
+		m_save.spare[2] = 6;
+		m_syncRun = -1;
+		ApplyQualityNow(6);
 	} else {
 		m_save.quality = q;
 		TacQualityUserLock(m_save);
@@ -800,25 +804,92 @@ void Game::PulseQuality(float work, float span)
 {
 	(void)work;
 	if (m_screen == SC_LOADING || !m_loaded || !m_r.Ready()) return;
+	static const int kHz[5] = { 30, 60, 120, 144, 240 };
+	int user = Clampi(TacVsync(m_save), 0, 4);
+	int userHz = kHz[user];
 	int hz = PaceHz();
 	if (hz < 30) hz = 30;
 	if (m_qHz != hz) {
 		m_qHz = hz;
 		m_qMissN = 0;
 		m_qOkN = 0;
+		m_syncArmN = 0;
 	}
-	// 表示間隔だけを見る。1/60 が底。標準以上で 1/30 には落とさない。
-	// Present は待たない。1/120 に届かないからと拍を 1/60 にすると、描画が早く終わっても次まで待ち、CPU も GPU も余ったまま 60 で止まる。
-	// 標準を下回ったら保険として 1/30 にする。
-	if (m_qCoolT > 0) {
-		if (m_fps >= (float)hz * 0.98f) { m_qOkN++; m_qMissN = 0; }
+	if (m_qCoolT > 0) return;
+	if (m_fpsN < 20 || span < 0.003f || span >= 0.25f) return;
+	if (m_syncLock > 0) return;
+	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
+	const int stdSlot = TacQualityFixedSlot(1);
+	const int capSlot = 6;
+	if (autoOn) {
+		// 保存している拍は触らない。設定Hzの限界突破から下げ、標準でも足りなければ
+		// 1/60限界突破、軽量以下なら 1/30限界突破。実働で上の拍に戻れるか裏判定する。
+		int now = QualityNow();
+		int slot = TacQualityFixedSlot(now);
+		int next = now;
+		auto goTier = [&](int sync, int q) {
+			m_syncRun = sync;
+			m_save.spare[2] = q;
+			ApplyQualityNow(q);
+			m_qMissN = 0;
+			m_qOkN = 0;
+			m_syncArmN = 0;
+			m_syncLock = 0.45f;
+			m_fpsN = 0;
+			m_fpsI = 0;
+			m_qHz = (sync < 0) ? userHz : kHz[Clampi(sync, 0, 4)];
+		};
+		float holdHz = (hz >= 120) ? (float)hz * 0.88f : (float)hz * 0.95f;
+		float dropHz = (hz >= 120) ? (float)hz * 0.72f : (float)hz * 0.80f;
+		if (m_fps >= holdHz) { m_qOkN++; m_qMissN = 0; }
+		else if (m_fps < dropHz) { m_qMissN++; m_qOkN = 0; }
+		else { m_qMissN = 0; m_qOkN = 0; }
+		int floorSlot = (hz <= 30) ? 0 : stdSlot;
+		if (hz <= 30 && userHz >= 60) {
+			float b60 = 1.f / 60.f;
+			BOOL can60 = slot >= stdSlot && m_fps >= 30.f * 0.95f
+				&& m_workAvg > 0.f && m_workAvg <= b60 * 0.98f;
+			if (can60) m_syncArmN++;
+			else m_syncArmN = 0;
+			if (m_syncArmN >= 20) {
+				goTier((userHz >= 120) ? 1 : -1, 6);
+				return;
+			}
+		} else if (hz >= 60 && hz < userHz && userHz >= 120) {
+			float bU = 1.f / (float)userHz;
+			BOOL canU = slot >= stdSlot && m_fps >= 60.f * 0.95f
+				&& m_workAvg > 0.f && m_workAvg <= bU * 0.98f;
+			if (canU) m_syncArmN++;
+			else m_syncArmN = 0;
+			if (m_syncArmN >= 20) {
+				goTier(-1, 6);
+				return;
+			}
+		} else m_syncArmN = 0;
+		if (m_qMissN >= 20) {
+			if (slot > floorSlot) {
+				next = TacQualityFixedAt(slot - 1);
+				m_qMissN = 0;
+			} else if (hz >= 120) {
+				goTier(1, 6);
+				return;
+			} else if (hz >= 60) {
+				goTier(0, 6);
+				return;
+			} else m_qMissN = 0;
+		} else if (m_syncArmN == 0 && m_qOkN >= 40 && slot < capSlot) {
+			next = TacQualityFixedAt(slot + 1);
+			m_qOkN = 0;
+		}
+		if (next != TacQualityWanted(m_save))
+			m_save.spare[2] = next;
+		if (next != now) ApplyQualityNow(next);
 		return;
 	}
-	if (span < 0.003f || span >= 0.25f) return;
-	int user = Clampi(TacVsync(m_save), 0, 4);
+	if (userHz >= 120) return;
+	// 1/60 以下の固定画質。表示間隔だけを見る。標準以上で 1/30 には落とさない。
 	int v = SyncNow();
 	int qSlot = TacQualityFixedSlot(QualityNow());
-	int stdSlot = TacQualityFixedSlot(1);
 	int desired = user;
 	if (qSlot < stdSlot) desired = 0;
 	else if (user == 0) desired = 1;
@@ -837,35 +908,25 @@ void Game::PulseQuality(float work, float span)
 	} else m_syncArmN = 0;
 	float period = 1.f / (float)hz;
 	BOOL shownOk = (m_fps >= (float)hz * 0.98f) || (span <= period * 1.08f);
-	BOOL holdQ = (!shownOk && qSlot >= stdSlot && hz > 60 && m_fps >= 54.f);
 	if (shownOk) { m_qOkN++; m_qMissN = 0; }
-	else if (holdQ) { m_qMissN = 0; }
 	else { m_qMissN++; m_qOkN = 0; }
-
-	const int needMiss = 10;
-	const int needOk = (m_fps >= (float)hz) ? 8 : 20;
-
-	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
 	int now = QualityNow();
 	int slot = TacQualityFixedSlot(now);
-	int cap = autoOn ? 6 : ((m_qHold >= 0) ? m_qHold : TacQualityWanted(m_save));
+	int cap = (m_qHold >= 0) ? m_qHold : TacQualityWanted(m_save);
 	if (cap < 0 || cap > 6) cap = now;
-	int capSlot = TacQualityFixedSlot(cap);
-	int floorSlot = autoOn ? 0 : (capSlot - 2);
-	if (floorSlot < 0) floorSlot = 0;
-
+	int qCapSlot = TacQualityFixedSlot(cap);
+	int qFloor = qCapSlot - 2;
+	if (qFloor < 0) qFloor = 0;
 	int next = now;
-	if (m_qMissN >= needMiss) {
-		if (slot > floorSlot) next = TacQualityFixedAt(slot - 1);
+	if (m_qMissN >= 20) {
+		if (slot > qFloor) next = TacQualityFixedAt(slot - 1);
 		m_qMissN = 0;
-		if (!autoOn && m_qHold < 0) m_qHold = TacQualityWanted(m_save);
-	} else if (m_qOkN >= needOk) {
-		if (slot < capSlot) next = TacQualityFixedAt(slot + 1);
+		if (m_qHold < 0) m_qHold = TacQualityWanted(m_save);
+	} else if (m_qOkN >= 20) {
+		if (slot < qCapSlot) next = TacQualityFixedAt(slot + 1);
 		m_qOkN = 0;
-		if (!autoOn && m_qHold >= 0 && next == m_qHold) m_qHold = -1;
+		if (m_qHold >= 0 && next == m_qHold) m_qHold = -1;
 	}
-	if (autoOn && next != TacQualityWanted(m_save))
-		m_save.spare[2] = next;
 	if (next != now) ApplyQualityNow(next);
 }
 
@@ -880,6 +941,8 @@ void Game::Tick(float dt)
 		m_slotBusy = 0;
 	}
 	dt = Clampf(dt, 0, .1f);
+	LARGE_INTEGER busy0;
+	QueryPerformanceCounter(&busy0);
 	m_time += dt;
 	if (!m_demo) {
 		// 拠点でカーソルもボタンも止まっていれば、10秒でデモへ。戦闘の途中からは始めない。
@@ -940,7 +1003,11 @@ void Game::Tick(float dt)
 	if (holdGame) return;
 	LARGE_INTEGER t0, t1, freq;
 	QueryPerformanceCounter(&t0);
+	QueryPerformanceFrequency(&freq);
+	m_msUpd = freq.QuadPart ? (float)((double)(t0.QuadPart - busy0.QuadPart) * 1000.0 / (double)freq.QuadPart) : 0.f;
 	RenderFrame();
+	LARGE_INTEGER tPr;
+	QueryPerformanceCounter(&tPr);
 	if (!m_r.ConsumeAvaFlash()) m_r.Present();
 	if (m_goHome) {
 		m_goHome = FALSE;
@@ -949,6 +1016,7 @@ void Game::Tick(float dt)
 	}
 	QueryPerformanceCounter(&t1);
 	QueryPerformanceFrequency(&freq);
+	m_msPr = freq.QuadPart ? (float)((double)(t1.QuadPart - tPr.QuadPart) * 1000.0 / (double)freq.QuadPart) : 0.f;
 	m_r.EndFrameTextGc();
 	float work = 0.f;
 	float span = 0.f;
@@ -956,13 +1024,16 @@ void Game::Tick(float dt)
 		work = (float)((double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
 	if (m_fpsAt.QuadPart && freq.QuadPart) {
 		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
-		if (span >= 0.003f && span < 0.25f) {
+		float busy = (float)((double)(t1.QuadPart - busy0.QuadPart) / (double)freq.QuadPart);
+		if (span >= 0.003f && span < 0.25f && busy >= 0.f && busy < 0.25f) {
 			m_fpsSpan[m_fpsI] = span;
-			m_fpsI = (m_fpsI + 1) % 5;
-			if (m_fpsN < 5) m_fpsN++;
-			float sum = 0.f;
-			for (int i = 0; i < m_fpsN; i++) sum += m_fpsSpan[i];
+			m_workSpan[m_fpsI] = busy;
+			m_fpsI = (m_fpsI + 1) % 20;
+			if (m_fpsN < 20) m_fpsN++;
+			float sum = 0.f, wsum = 0.f;
+			for (int i = 0; i < m_fpsN; i++) { sum += m_fpsSpan[i]; wsum += m_workSpan[i]; }
 			span = sum / (float)m_fpsN;
+			m_workAvg = wsum / (float)m_fpsN;
 			m_fps = 1.f / span;
 		}
 	}
@@ -1085,6 +1156,10 @@ void Game::RenderFrame()
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
 	m_r.SetSky(m_screen == SC_BATTLE ? TacWx(m_b.weather) : WX_CLEAR, m_screen == SC_BATTLE ? TacHour(m_b.weather) : HR_NOON);
 	m_r.SetAvaLoadFull(m_screen != SC_CREATE && m_screen != SC_BATTLE);
+	LARGE_INTEGER rf0, rf1, rfq;
+	m_msSh = m_msRef = 0;
+	QueryPerformanceCounter(&rf0);
+	QueryPerformanceFrequency(&rfq);
 	m_r.BeginFrame();
 	if (m_screen == SC_BATTLE) {
 		AssignBattlePortraits();
@@ -1107,7 +1182,15 @@ void Game::RenderFrame()
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	} break;
 	}
+	QueryPerformanceCounter(&rf1);
+	m_msMain = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
+	m_msMain -= m_msSh + m_msRef;
+	if (m_msMain < 0.f) m_msMain = 0.f;
+	QueryPerformanceCounter(&rf0);
 	if (m_loaded) RenderPortraits();
+	QueryPerformanceCounter(&rf1);
+	m_msPort = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
+	QueryPerformanceCounter(&rf0);
 	const BOOL avaWait = m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL;
 	const BOOL avaFull = avaWait && m_screen != SC_CREATE;
 	if (avaFull) {
@@ -1177,6 +1260,8 @@ void Game::RenderFrame()
 	}
 	if (m_demo) DrawDemoCurtain();
 	m_r.EndHud();
+	QueryPerformanceCounter(&rf1);
+	m_msHud = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
 	m_btnsPrev = m_btns;
 	if (m_uiHoverHit) {
 		if (m_uiHoverCand != m_uiHover && !m_click && m_activateId < 0)
@@ -2469,8 +2554,13 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	DrawParams dp;
 	dp.outline = 0;
 	dp.rim = .22f;
+	{
+		int r = ((bg0 & 255) + (bg1 & 255)) / 2;
+		int g = (((bg0 >> 8) & 255) + ((bg1 >> 8) & 255)) / 2;
+		int b = (((bg0 >> 16) & 255) + ((bg1 >> 16) & 255)) / 2;
+		m_r.SetPortraitBg(RGBA8(r, g, b));
+	}
 	m_r.BeginMainPass();
-	m_r.DrawSky(bg0, bg1, 0, 0);
 	BOOL drew = ActorDraw(m_r, m_lib, a, world, dp, m_time);
 	m_r.EndPortrait();
 	return drew;
@@ -3944,8 +4034,8 @@ void Game::DrawShowcase3D()
 	}
 	m_r.EndInstBatch();
 	m_r.BeginMainPass();
-	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawTerrain();
+	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
 	m_r.BeginInstBatch();
 	for (int i = 0; i < showN; i++) {
@@ -4347,8 +4437,8 @@ void Game::DrawMonStage()
 	}
 	m_r.EndInstBatch();
 	m_r.BeginMainPass();
-	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawTerrain();
+	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
 	m_r.BeginInstBatch();
 	if (m_monShown >= 0) {
@@ -6332,15 +6422,21 @@ void Game::DrawPerfHud()
 	if (!TacFpsOn(m_save)) return;
 	if (m_screen == SC_LOADING || m_screen == SC_FAIL) return;
 	if (m_fps < 1.f) return;
-	int fps = (int)(m_fps + 0.5f);
-	if (fps < 15) fps = 15;
-	if (fps > 240) fps = 240;
+	float fps = m_fps;
+	if (fps > 999.f) fps = 999.f;
+	float ms = 1000.f / fps;
+	if (ms > 999.f) ms = 999.f;
+	int fps10 = (int)(fps * 10.f + 0.5f);
+	int ms10 = (int)(ms * 10.f + 0.5f);
+	if (fps10 > 9999) fps10 = 9999;
+	if (ms10 > 9999) ms10 = 9999;
 	int q = QualityNow();
-	wchar_t line[96];
+	const wchar_t* mode = LangPick14(L"モード", L"mode", L"mode", L"modo", L"modo", L"모드", L"模式", L"وضع", L"режим", L"Modus", L"modo", L"modus", L"tryb", L"mod");
+	wchar_t line[220];
 	if (m_save.quality == TAC_Q_AUTO)
-		swprintf_s(line, L"%dfps  %s %s", fps, TT(TX_SET_Q_AUTO), TT(TacQualityTx(q)));
+		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, PaceHz(), mode, TT(TX_SET_Q_AUTO), TT(TacQualityTx(q)));
 	else
-		swprintf_s(line, L"%dfps  %s", fps, TT(TacQualityTx(q)));
+		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, PaceHz(), mode, TT(TacQualityTx(q)));
 	float px = U(13);
 	if (px < 11.f) px = 11.f;
 	float pad = U(8);
@@ -6604,7 +6700,12 @@ void Game::DrawBaseUi()
 			wchar_t vs[16];
 			swprintf_s(vs, L"1/%d", TacVsyncHz(m_save));
 			mark(ID_BASE_SYNC, TX_BSH_SYNC, bx, oy, bw, bhOpt);
-			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs)) { TacSetVsync(m_save, TacVsync(m_save) + d); m_syncRun = -1; m_syncArmN = 0; }
+			if (int d = Sel(ID_BASE_SYNC, bx, oy, bw, bhOpt, TT(TX_SET_SYNC), vs)) {
+				TacSetVsync(m_save, TacVsync(m_save) + d);
+				m_syncRun = -1;
+				m_syncArmN = 0;
+				if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; ApplyQualityNow(6); }
+			}
 		}
 		oy = take();
 		mark(ID_BASE_WIN, TX_BSH_WIN, bx, oy, bw, bhOpt);
