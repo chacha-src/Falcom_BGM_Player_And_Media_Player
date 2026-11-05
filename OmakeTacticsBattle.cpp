@@ -5575,8 +5575,14 @@ static int WrapSpaceLines(Renderer& r, const wchar_t* src, float maxW, float px,
 }
 
 // ============================================================ HUD（戦闘）
-void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
+void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, float* rx, float* ry, float* rw, float* rh)
 {
+	auto note = [&](float px, float py, float pw, float ph) {
+		if (rx) *rx = px;
+		if (ry) *ry = py;
+		if (rw) *rw = pw;
+		if (rh) *rh = ph;
+	};
 	int ui = (int)(&u - m_b.u);
 	if (u.team == TEAM_ENEMY) {
 		wchar_t held[480];
@@ -5639,6 +5645,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		tx = x + ps + pad + U(8);
 		tw = w - (tx - x) - pad;
 		if (tw < U(72)) tw = U(72);
+		note(x, y, w, h);
 		Panel(x, y, w, h);
 		DWORD fc = u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90);
 		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
@@ -5728,6 +5735,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 	float h = FitCardH(m_r, &u, w, big, ps, U(30), baseH, linePx, room, &pathLines);
 	if (y + h > limitBot) h = max(U(72), limitBot - y);
 	if (ps > h - U(16)) ps = max(U(40), h - U(16));
+	note(x, y, w, h);
 	Panel(x, y, w, h);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
 		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(10), ps, fc);
@@ -8918,7 +8926,9 @@ void Game::DrawBattleUi()
 	}
 	float logTop = m_hud.logTop;
 	float logH = m_hud.logH;
-	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO && (m_b.u[m_cur].alive || m_b.u[m_cur].team == TEAM_PLAYER)) DrawUnitPanel(m_b.u[m_cur], panelX, panelTop, panelW, TRUE);
+	float cardX = 0, cardY = 0, cardW = 0, cardH = 0;
+	float hovX = 0, hovY = 0, hovW = 0, hovH = 0;
+	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO && (m_b.u[m_cur].alive || m_b.u[m_cur].team == TEAM_PLAYER)) DrawUnitPanel(m_b.u[m_cur], panelX, panelTop, panelW, TRUE, &cardX, &cardY, &cardW, &cardH);
 	float hoverTop = -1.f;
 	if (m_hoverUnit >= 0 && m_hoverUnit != m_cur && m_phase != PH_ACTION && (m_b.u[m_hoverUnit].alive || m_b.u[m_hoverUnit].team == TEAM_PLAYER)) {
 		float hw = min(U(360.f), max(U(220.f), logW));
@@ -8941,7 +8951,7 @@ void Game::DrawBattleUi()
 		if (hy + U(80) > logTop - gap) hy = logTop - gap - U(80);
 		if (hy < 4.f) hy = 4.f;
 		hoverTop = hy;
-		DrawUnitPanel(m_b.u[m_hoverUnit], hx, hy, hw, FALSE);
+		DrawUnitPanel(m_b.u[m_hoverUnit], hx, hy, hw, FALSE, &hovX, &hovY, &hovW, &hovH);
 	}
 	DrawBattleLog(logX, logTop, logW, logH);
 	if (m_seqCut && m_cutStage == 4) DrawCutInUi();
@@ -9106,6 +9116,9 @@ void Game::DrawBattleUi()
 		addB(0, 0, m_hud.stageR, m_hud.stageB);
 		addB(m_hud.margin, m_hud.partyT, max(0.f, m_hud.partyR - m_hud.margin), max(0.f, m_hud.partyB - m_hud.partyT));
 		addB(panelX, panelTop, panelW, max(0.f, (float)m_h - panelTop));
+		addB(cardX - U(6), cardY - U(6), cardW + U(12), cardH + U(12));
+		addB(hovX - U(6), hovY - U(6), hovW + U(12), hovH + U(12));
+		addB(logX, logTop, logW, logH);
 		addB(fx, fy, fw, fh);
 		addB(hintX, hintY, hintW, hintH);
 		addB(miniLeft, miniTop, ms, (float)nMap * miniStep);
@@ -9127,29 +9140,37 @@ void Game::DrawBattleUi()
 			return a;
 		};
 		float gap = U(14);
-		float candsX[10], candsY[10];
-		int nc = 0;
-		auto put = [&](float x, float y) { if (nc < 10) { candsX[nc] = x; candsY[nc] = y; nc++; } };
-		put(aimSx - chipW * .5f, aimSy + gap + U(10));
-		put(aimSx - chipW * .5f, aimSy - chipH - gap - U(10));
-		put(aimSx + gap + U(20), aimSy - chipH * .5f);
-		put(aimSx - chipW - gap - U(20), aimSy - chipH * .5f);
-		put(aimSx + gap, aimSy + gap);
-		put(aimSx - chipW - gap, aimSy + gap);
-		put(aimSx + gap, aimSy - chipH - gap);
-		put(aimSx - chipW - gap, aimSy - chipH - gap);
-		put(aimSx - chipW * .5f, aimSy + gap + U(52));
-		put(aimSx - chipW * .5f, aimSy - chipH - gap - U(52));
-		float px = candsX[0], py = candsY[0];
-		float best = hitArea(px, py, chipW, chipH);
-		for (int i = 1; i < nc && best > 0.5f; i++) {
-			float a = hitArea(candsX[i], candsY[i], chipW, chipH);
-			if (a < best) { best = a; px = candsX[i]; py = candsY[i]; }
+		auto fits = [&](float x, float y) -> BOOL {
+			if (x < 2.f || y < 2.f || x + chipW > (float)m_w - 2.f || y + chipH > (float)m_h - 2.f) return FALSE;
+			return hitArea(x, y, chipW, chipH) <= 0.5f;
+		};
+		BOOL found = FALSE;
+		float px = 2.f, py = 2.f;
+		float bestD = 1e12f;
+		auto consider = [&](float x, float y) {
+			if (!fits(x, y)) return;
+			float dx = (x + chipW * .5f) - aimSx;
+			float dy = (y + chipH * .5f) - aimSy;
+			float d = dx * dx + dy * dy;
+			if (d < bestD) { bestD = d; px = x; py = y; found = TRUE; }
+		};
+		for (int ring = 1; ring <= 18; ring++) {
+			float dist = gap + U(18.f) * (float)ring;
+			for (int k = 0; k < 8; k++) {
+				float ang = (float)k * 0.78539816f;
+				float cx = aimSx + cosf(ang) * dist - chipW * .5f;
+				float cy = aimSy + sinf(ang) * dist - chipH * .5f;
+				consider(cx, cy);
+			}
+			if (found) break;
 		}
-		if (px < 2.f) px = 2.f;
-		if (py < 2.f) py = 2.f;
-		if (px + chipW > (float)m_w - 2.f) px = (float)m_w - 2.f - chipW;
-		if (py + chipH > (float)m_h - 2.f) py = (float)m_h - 2.f - chipH;
+		if (!found) {
+			float step = max(10.f, U(14));
+			for (float y = 2.f; y + chipH < (float)m_h - 2.f; y += step)
+				for (float x = 2.f; x + chipW < (float)m_w - 2.f; x += step)
+					consider(x, y);
+		}
+		if (!found) { px = 2.f; py = 2.f; }
 		m_r.HudPanel(px, py, chipW, chipH, RGBA8(16, 18, 28, 220), RGBA8(255, 200, 90));
 		float ly = py + U(3);
 		if (aimCount[0]) {

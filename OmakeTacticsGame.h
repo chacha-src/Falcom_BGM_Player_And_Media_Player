@@ -300,7 +300,7 @@ private:
 	void AimFormFace();
 	void PickSkillCursor(int skill);
 	void DrawTurnOrder();
-	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big);
+	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, float* rx = 0, float* ry = 0, float* rw = 0, float* rh = 0);
 	void DrawForecast(float* ox = 0, float* oy = 0, float* ow = 0, float* oh = 0);
 	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
 	void DrawMinimap(float x, float y, float s, int layer = 0);
