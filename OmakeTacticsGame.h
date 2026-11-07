@@ -324,6 +324,7 @@ private:
 	void DrawShopFit();
 	void DrawShopAsk();
 	void DrawShopArm();
+	void DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear, int accId, float ax, float ay, float aw, float ah);
 	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();

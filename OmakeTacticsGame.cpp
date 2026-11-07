@@ -5811,6 +5811,183 @@ static int CommitSell(SaveData& s, int kind, int id, int n)
 	return sold;
 }
 
+static void ShopFightStats(const CharData& c, int gearId, int accSlot, int accId, int out[S_COUNT])
+{
+	CharData t = c;
+	if (gearId > 0) {
+		const GearDef* g = GearOf(gearId);
+		if (g) t.reserved[g->kind ? 7 : 6] = gearId;
+	}
+	Unit u{};
+	u.monster = -1;
+	u.alive = 1;
+	u.ch = t;
+	CraftBindUnit(u);
+	if (accId > 0 && accSlot >= 0 && accSlot < 2) u.accEq[accSlot] = accId;
+	for (int s = 0; s < S_COUNT; s++) out[s] = UnitStat(u, s);
+}
+
+void Game::DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear, int accId, float ax, float ay, float aw, float ah)
+{
+	struct Row { int who, can; int cur[S_COUNT]; int nxt[S_COUNT]; };
+	Row row[MAX_ROSTER];
+	int n = 0;
+	for (int i = 0; i < MAX_ROSTER; i++) {
+		const CharData& c = m_save.roster[i];
+		if (!c.used) continue;
+		int ln = ClassLine(c.cls);
+		int can = 0;
+		if (mode == 1) can = ln == line;
+		else if (mode == 2) can = ln == line && ClassTier(c.cls) >= tier;
+		else if (mode == 3) can = gear && GearCanWear(c.cls, gear);
+		else can = 1;
+		if ((mode == 1 || mode == 2) && ln != line) continue;
+		if (n >= MAX_ROSTER) break;
+		row[n].who = i;
+		row[n].can = can;
+		ShopFightStats(c, 0, -1, 0, row[n].cur);
+		if ((mode == 3 && can && gear) || (mode == 4 && accId > 0)) {
+			int slot = -1;
+			int gid = 0;
+			int aid = 0;
+			if (mode == 3) gid = 0;
+			if (mode == 3) {
+				for (int id = 1; id <= GearCount(); id++) if (GearOf(id) == gear) { gid = id; break; }
+			} else {
+				slot = (EquippedAccId(c, 0) > 0 && EquippedAccId(c, 1) <= 0) ? 1 : 0;
+				aid = accId;
+			}
+			ShopFightStats(c, gid, slot, aid, row[n].nxt);
+		} else {
+			for (int s = 0; s < S_COUNT; s++) row[n].nxt[s] = row[n].cur[s];
+		}
+		n++;
+	}
+	for (int a = 1; a < n; a++) {
+		Row v = row[a];
+		int b = a;
+		int lv = m_save.roster[v.who].lv;
+		while (b > 0 && (row[b - 1].can < v.can || (row[b - 1].can == v.can && m_save.roster[row[b - 1].who].lv < lv))) {
+			row[b] = row[b - 1];
+			b--;
+		}
+		row[b] = v;
+	}
+	const wchar_t* head = L"";
+	if (mode == 1) head = ClassName(line == 0 ? C_SOLDIER : line == 1 ? C_FIGHTER : line == 2 ? C_ARCHER : line == 3 ? C_THIEF : line == 4 ? C_MAGE : C_CLERIC);
+	else if (mode == 2) {
+		static const int tierCls[6][3] = {
+			{ C_SOLDIER, C_PALADIN, C_HERO },
+			{ C_FIGHTER, C_BERSERKER, C_GLADIATOR },
+			{ C_ARCHER, C_SNIPER, C_PHANTOM },
+			{ C_THIEF, C_ASSASSIN, C_SHADOW },
+			{ C_MAGE, C_WIZARD, C_ARCHMAGE },
+			{ C_CLERIC, C_BISHOP, C_SAINT }
+		};
+		static const int rankLine[6] = { 0, 6, 3, 7, 1, 2 };
+		int cls = tier <= 3 ? tierCls[line][tier - 1] : C_PLAYER_COUNT + rankLine[line] * TAC_RANK_N + (tier - 4);
+		head = ClassName(cls);
+	} else if (mode == 3 && gear) head = GearName(0);
+	else if (mode == 4) head = AccName(accId);
+	wchar_t title[160];
+	if (mode == 3 && gear) {
+		int gid = 0;
+		for (int id = 1; id <= GearCount(); id++) if (GearOf(id) == gear) { gid = id; break; }
+		swprintf_s(title, L"%s", gid ? GearName(gid) : L"");
+	} else swprintf_s(title, L"%s", head ? head : L"");
+	const float px = U(12);
+	const float rowH = U(22);
+	int capN = (int)((m_h * 0.58f) / rowH);
+	if (capN < 4) capN = 4;
+	if (capN > 18) capN = 18;
+	int shown = n < capN ? n : capN;
+	int extra = n - shown;
+	float pw = min(U(820.f), (float)m_w - U(16));
+	float ph = U(34) + (shown < 1 ? 1 : shown) * rowH + (extra > 0 ? rowH : 0) + U(14);
+	float lx = ax + aw + U(10);
+	float ly = ay;
+	if (lx + pw > (float)m_w - U(8)) lx = ax - pw - U(10);
+	if (lx < U(8)) lx = U(8);
+	if (ly + ph > (float)m_h - U(8)) ly = (float)m_h - ph - U(8);
+	if (ly < U(8)) ly = U(8);
+	m_r.HudPanel(lx, ly, pw, ph, RGBA8(14, 16, 28, 236), RGBA8(212, 176, 96));
+	m_r.HudText(title, lx + U(12), ly + U(16), U(15), RGBA8(255, 226, 150), 0, 1);
+	if (mode == 3 || mode == 4) {
+		const wchar_t* leg = LangPick14(
+			L"⬆上昇  ⬇低下  ➔同じ",
+			L"⬆ up   ⬇ down   ➔ same",
+			L"⬆ hausse  ⬇ baisse  ➔ égal",
+			L"⬆ sale  ⬇ scende  ➔ uguale",
+			L"⬆ sube  ⬇ baja  ➔ igual",
+			L"⬆ 상승  ⬇ 하락  ➔ 같음",
+			L"⬆上升  ⬇下降  ➔不变",
+			L"⬆ أعلى  ⬇ أدنى  ➔ نفسه",
+			L"⬆ выше  ⬇ ниже  ➔ то же",
+			L"⬆ rauf  ⬇ runter  ➔ gleich",
+			L"⬆ sobe  ⬇ desce  ➔ igual",
+			L"⬆ omhoog  ⬇ omlaag  ➔ gelijk",
+			L"⬆ w górę  ⬇ w dół  ➔ bez zmian",
+			L"⬆ artar  ⬇ azalır  ➔ aynı");
+		m_r.HudText(leg, lx + pw - U(12), ly + U(16), U(12), RGBA8(210, 214, 224), 2, 0);
+	}
+	if (shown < 1) {
+		m_r.HudText(TT(TX_SHOP_NOWEAR), lx + U(12), ly + U(42), U(13), RGBA8(255, 180, 160), 0, 0);
+		return;
+	}
+	static const int kSt[] = { S_HP, S_MP, S_STR, S_MAG, S_DEF, S_RES };
+	float yy = ly + U(32);
+	for (int i = 0; i < shown; i++) {
+		const Row& r = row[i];
+		const CharData& c = m_save.roster[r.who];
+		DWORD nameC = r.can ? RGBA8(214, 244, 220) : RGBA8(150, 146, 154);
+		DWORD dim = r.can ? RGBA8(186, 198, 214) : RGBA8(120, 118, 126);
+		float x = lx + U(10);
+		m_r.HudRect(x, yy - U(8), U(4), U(16), r.can ? RGBA8(96, 214, 128) : RGBA8(150, 84, 84));
+		x += U(10);
+		wchar_t mark[8];
+		swprintf_s(mark, L"%s ", r.can ? L"○" : L"×");
+		m_r.HudText(mark, x, yy, px, r.can ? RGBA8(120, 220, 140) : RGBA8(220, 110, 110), 0, 1);
+		x += m_r.TextWidth(mark, px, 1);
+		float namePx = FitTextPx(c.name, U(108), px, 1);
+		m_r.HudText(c.name, x, yy, namePx, nameC, 0, 1);
+		x += U(112);
+		const wchar_t* cn = ClassName(c.cls);
+		float cpx = FitTextPx(cn, U(108), px, 0);
+		m_r.HudText(cn, x, yy, cpx, dim, 0, 0);
+		x += U(114);
+		for (int k = 0; k < 6; k++) {
+			int s = kSt[k];
+			if (x > lx + pw - U(70)) break;
+			int cur = r.cur[s];
+			int nxt = r.nxt[s];
+			int bonus = cur - c.stat[s];
+			wchar_t cell[48];
+			DWORD col = dim;
+			if (mode == 3 || mode == 4) {
+				const wchar_t* ar = L"➔";
+				col = RGBA8(176, 182, 194);
+				if (r.can && nxt > cur) { ar = L"⬆"; col = RGBA8(96, 220, 130); }
+				else if (r.can && nxt < cur) { ar = L"⬇"; col = RGBA8(240, 96, 96); }
+				swprintf_s(cell, L"%s%d%s ", TT(StatNameTx(s)), r.can ? nxt : cur, ar);
+			} else if (bonus > 0) {
+				swprintf_s(cell, L"%s%d(+%d) ", TT(StatNameTx(s)), cur, bonus);
+				col = RGBA8(255, 214, 120);
+			} else if (bonus < 0) {
+				swprintf_s(cell, L"%s%d(%d) ", TT(StatNameTx(s)), cur, bonus);
+				col = RGBA8(240, 130, 120);
+			} else swprintf_s(cell, L"%s%d ", TT(StatNameTx(s)), cur);
+			m_r.HudText(cell, x, yy, px, col, 0, 0);
+			x += m_r.TextWidth(cell, px, 0) + U(2);
+		}
+		yy += rowH;
+	}
+	if (extra > 0) {
+		wchar_t more[64];
+		swprintf_s(more, LangPick14(L"ほか %d", L"+%d more", L"+%d", L"+%d", L"+%d", L"외 %d", L"另有 %d", L"+%d", L"ещё %d", L"+%d", L"+%d", L"+%d", L"+%d", L"+%d"), extra);
+		m_r.HudText(more, lx + U(12), yy, U(12), RGBA8(180, 186, 200), 0, 0);
+	}
+}
+
 void Game::DrawShop()
 {
 	if (!m_sellAsk && m_textFocus == 3) m_textFocus = 0;
@@ -5835,6 +6012,9 @@ void Game::DrawShop()
 	swprintf_s(title, L"%s    %s %s", TT(TX_SHOP), TT(TX_GOLD), TacNum(m_save.gold));
 	m_r.HudText(title, x + w * .5f, y + U(22), FitTextPx(title, w - U(24), U(20), 1), RGBA8(255, 226, 150), 1, 1);
 	static const int lineCls[6] = { C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC };
+	int whoMode = 0, whoLine = 0, whoTier = 0, whoAcc = 0;
+	const GearDef* whoGear = NULL;
+	float whoAx = 0, whoAy = 0, whoAw = 0, whoAh = 0;
 	float tx = x + U(12);
 	float step = min(U(108.f), (w - U(24)) / 7.f);
 	for (int i = 0; i < 7; i++) {
@@ -5844,6 +6024,9 @@ void Game::DrawShop()
 			m_shopLine = i; m_shopTier = 0; m_shopPage = 0; m_shopSellPage = 0;
 			if (i == 6) { if (m_shopKind != 4 && m_shopKind != 6 && m_shopKind != 7) m_shopKind = 5; }
 			else if (m_shopKind == 2) m_shopKind = 0;
+		}
+		if (i < 6 && (Hit(tx, y + U(40), step - U(4), U(28)) || (m_navMode && m_focusId == id))) {
+			whoMode = 1; whoLine = i; whoAx = tx; whoAy = y + U(40); whoAw = step - U(4); whoAh = U(28);
 		}
 		tx += step;
 	}
@@ -5891,9 +6074,13 @@ void Game::DrawShop()
 		for (int t = 0; t < 10; t++) {
 			int cls = t < 3 ? tierCls[m_shopLine][t] : C_PLAYER_COUNT + rankLine[m_shopLine] * TAC_RANK_N + (t - 3);
 			int on = m_shopTier == t + 1;
-			if (Btn(ID_SHOP_TIER0 + t, x + U(16) + (twb + gap) * t, listTop, twb, U(24), ClassName(cls), TRUE, on, tfs)) {
+			float tbx = x + U(16) + (twb + gap) * t;
+			if (Btn(ID_SHOP_TIER0 + t, tbx, listTop, twb, U(24), ClassName(cls), TRUE, on, tfs)) {
 				m_shopTier = on ? 0 : t + 1;
 				m_shopPage = 0;
+			}
+			if (Hit(tbx, listTop, twb, U(24)) || (m_navMode && m_focusId == ID_SHOP_TIER0 + t)) {
+				whoMode = 2; whoLine = m_shopLine; whoTier = t + 1; whoAx = tbx; whoAy = listTop; whoAw = twb; whoAh = U(24);
 			}
 		}
 		listTop += U(28);
@@ -6030,6 +6217,9 @@ void Game::DrawShop()
 			{
 				AccTipText(ids[ix] + 1, hovBuf, 520);
 				takeHover(ID_SHOP_BUY0 + s, yy, hovBuf);
+				if (Hit(rowX, yy, rowW, rowH) || (m_navMode && m_focusId == ID_SHOP_BUY0 + s)) {
+					whoMode = 4; whoAcc = ids[ix] + 1; whoAx = rowX; whoAy = yy; whoAw = rowW; whoAh = rowH;
+				}
 			}
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
 				m_shopHold = 1; m_shopFit = 3; m_shopFitId = ids[ix] + 1; m_shopFitPage = 0;
@@ -6087,6 +6277,9 @@ void Game::DrawShop()
 				GearTipText(g, tip, 400);
 				swprintf_s(hovBuf, L"%s%s%s", GearName(ids[ix] + 1), tip[0] ? L"\n" : L"", tip);
 				takeHover(ID_SHOP_BUY0 + s, yy, hovBuf);
+				if (Hit(rowX, yy, rowW, rowH) || (m_navMode && m_focusId == ID_SHOP_BUY0 + s)) {
+					whoMode = 3; whoGear = g; whoAx = rowX; whoAy = yy; whoAw = rowW; whoAh = rowH;
+				}
 			}
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, L"", ok, FALSE, U(13))) {
 				m_shopHold = 1; m_shopFit = g->kind ? 2 : 1; m_shopFitId = ids[ix]; m_shopFitPage = 0;
@@ -6326,6 +6519,8 @@ void Game::DrawShop()
 		m_shopWho = -1;
 		if (m_shopBack) { m_shopBack = 0; EnterParty(); }
 	}
+	if (whoMode && !fit && !ask)
+		DrawShopRosterLayer(whoMode, whoLine, whoTier, whoGear, whoAcc, whoAx, whoAy, whoAw, whoAh);
 	if (fit) {
 		m_click = savedClick;
 		m_activateId = savedAct;

@@ -1843,9 +1843,7 @@ void CPianoRoll::UpdateNoteStates()
     pp.melodyMiss = &m_melodyMiss;
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
-    // 短い窓の先頭だけを足す。長い音は上のピックのまま。
-    // 今も鳴っている低い音の整数倍はアルペジオではなく倍音なので足さない。
-    // C6 より上で、短い窓に出ていない整数倍はノイズとして落とす。
+    // C6 より上で、短い窓に出ていない整数倍は倍音なので落とす。足し込みはしない。
     if (m_burstN > 0) {
         float bMax = 0.0f;
         for (int i = 0; i < m_burstN; ++i)
@@ -1879,76 +1877,6 @@ void CPianoRoll::UpdateNoteStates()
                     picked[hi] = false;
                     ownPow[hi] = 0.0f;
                 }
-            }
-        }
-        int ord[BURST_MAX];
-        for (int i = 0; i < m_burstN; ++i) ord[i] = i;
-        for (int i = 1; i < m_burstN; ++i) {
-            const int v = ord[i];
-            int j = i;
-            while (j > 0 && m_burstAmp[ord[j - 1]] < m_burstAmp[v]) {
-                ord[j] = ord[j - 1];
-                --j;
-            }
-            ord[j] = v;
-        }
-        int added = 0;
-        for (int oi = 0; oi < m_burstN && added < 2; ++oi) {
-            const int i = ord[oi];
-            const float rel = bMax > 0.0f ? m_burstAmp[i] / bMax : 0.0f;
-            if (rel < 0.60f) continue;
-            const int key = PianoRoll108::KeyFromHzTune(m_burstHz[i], 0.0f);
-            if (key < 36 || key > 96) continue;
-            bool nearPicked = false;
-            for (int d = -1; d <= 1; ++d) {
-                const int q = key + d;
-                if (q >= 0 && q < KEY_COUNT && picked[q]) nearPicked = true;
-            }
-            if (nearPicked) continue;
-            bool partial = false;
-            for (int lo = 28; lo < key && !partial; ++lo) {
-                if (!picked[lo] || relShort(lo) < 0.45f) continue;
-                const float ratio = m_burstHz[i] / PianoKey::KeyHz(lo);
-                const int hn = (int)floorf(ratio + 0.5f);
-                if (hn < 2 || hn > 4) continue;
-                if (centsBetween(m_burstHz[i], PianoKey::KeyHz(lo) * (float)hn) < 40.0f)
-                    partial = true;
-            }
-            if (partial) continue;
-            picked[key] = true;
-            if (ownPow[key] < m_burstAmp[i]) ownPow[key] = m_burstAmp[i];
-            ++added;
-        }
-        float detMax = 0.0f;
-        for (int i = 0; i < m_detPeakN; ++i) {
-            if (m_detPeakAmp[i] > 0.0f) {
-                const float l = sqrtf(m_detPeakAmp[i]);
-                if (l > detMax) detMax = l;
-            }
-        }
-        if (detMax > 1.0e-8f) {
-            for (int i = 0; i < m_detPeakN; ++i) {
-                if (m_detPeakHz[i] <= 1.0f || m_detPeakAmp[i] <= 0.0f) continue;
-                const int k = PianoRoll108::KeyFromHzTune(m_detPeakHz[i], m_tuneSemis);
-                if (k < 36 || k > 96 || picked[k]) continue;
-                const float pa = sqrtf(m_detPeakAmp[i]);
-                if (pa < detMax * 0.12f) continue;
-                if (relShort(k) < 0.25f) continue;
-                const bool nearPicked = (k > 0 && picked[k - 1]) || (k + 1 < KEY_COUNT && picked[k + 1]);
-                if (nearPicked) continue;
-                bool partial = false;
-                for (int lo = 28; lo < k && !partial; ++lo) {
-                    if (!picked[lo]) continue;
-                    const float ratio = m_detPeakHz[i] / PianoKey::KeyHz(lo);
-                    const int hn = (int)floorf(ratio + 0.5f);
-                    if (hn < 2 || hn > 6) continue;
-                    if (centsBetween(m_detPeakHz[i], PianoKey::KeyHz(lo) * (float)hn) < 40.0f
-                        && pa < ownPow[lo] * 0.65f)
-                        partial = true;
-                }
-                if (partial) continue;
-                picked[k] = true;
-                if (ownPow[k] < pa) ownPow[k] = pa;
             }
         }
     }
