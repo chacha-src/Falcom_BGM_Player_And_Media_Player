@@ -43,6 +43,7 @@ void* TacArenaAlloc(size_t bytes, size_t align)
 	LeaveCriticalSection(&g_arenaCs[0]);
 	return r;
 }
+void TacArenaReset() { LockArena(0); g_tacUsed = 0; g_tacBad = 0; LeaveCriticalSection(&g_arenaCs[0]); }
 int TacArenaBad() { return g_tacBad; }
 
 static unsigned char g_avaArena[TAC_AVA_ARENA];
@@ -60,6 +61,8 @@ void* TacAvaAlloc(size_t bytes, size_t align)
 	LeaveCriticalSection(&g_arenaCs[1]);
 	return r;
 }
+size_t TacAvaMark() { LockArena(1); size_t m = g_avaUsed; LeaveCriticalSection(&g_arenaCs[1]); return m; }
+void TacAvaRewind(size_t mark) { LockArena(1); if (mark <= g_avaUsed) g_avaUsed = mark; LeaveCriticalSection(&g_arenaCs[1]); }
 void TacAvaReset() { LockArena(1); g_avaUsed = 0; g_avaBad = 0; LeaveCriticalSection(&g_arenaCs[1]); }
 int TacAvaBad() { return g_avaBad; }
 
@@ -3348,7 +3351,7 @@ static MonsterDef kMon[M_COUNT] = {
 	{ TX_MO_BAT, LK_BAT, -1, 0, MV_FLY, 9, 1, 1, 0, 4, AS_BITE,
 	{ 15, 6, 6, 2, 0, 3, 11, 7, 6, 7 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070, 32, -1 },
 	{ TX_MO_LICH, LK_KAYKIT, 8, 4, MV_FOOT, 2, 1, 3, 1, 4, AS_CAST,
-	{ 20, 20, 1, 3, 8, 8, 5, 6, 4, 3 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
+	{ 20, 20, 1, 3, 8, 8, 5, 6, 4, 3 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_BLIZZARD, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
 	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 2, 2, 0, 5, AS_SHOOT1,
 	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0, 36, -1 },
 	{ TX_MO_GOLEM, LK_GOLEM, -1, 0, MV_FOOT, 1, 1, 1, 0, 8, AS_PUNCH,
@@ -3472,6 +3475,19 @@ static int NameHas(const wchar_t* n, const wchar_t* k)
 {
 	return n && k && wcsstr(n, k) != NULL;
 }
+static int IceCaster(const wchar_t* n)
+{
+	if (!n) return 0;
+	if (NameHas(n, L"Tree") || NameHas(n, L"Bush") || NameHas(n, L"Rock")) return 0;
+	return NameHas(n, L"Frost") || NameHas(n, L"Yeti") || NameHas(n, L"Penguin") || NameHas(n, L"Polar")
+		|| NameHas(n, L"Ice") || NameHas(n, L"Snow");
+}
+static int FireBreather(const wchar_t* n)
+{
+	if (!n) return 0;
+	return NameHas(n, L"Dragon") || NameHas(n, L"Wyvern") || NameHas(n, L"Drake")
+		|| NameHas(n, L"Flame") || NameHas(n, L"Phoenix") || NameHas(n, L"Salamand");
+}
 // 取り込み種は 1 種 1 行。個体では引かない。並びは kImportName と同じ。
 static const int kImportWeak[kImportN][6] = {
 #include "tactics_src/mon_weak.inc"
@@ -3581,6 +3597,24 @@ static void EnsureMonsters()
 		{
 			int ail = AilmentFor(nm, i);
 			if (ail >= 0 && ail != d.skills[0] && ail != d.skills[1]) d.skills[2] = ail;
+		}
+		// 炎上は魔法職の火炎と、竜・ワイバーンのブレス。凍結は氷・雪・ペンギン・イエティ。召喚はそのまま。
+		if (nm && wcsncmp(nm, L"Sum", 3) != 0 && IceCaster(nm)) {
+			d.magAttack = 1;
+			d.attackStyle = AS_CAST;
+			d.rMin = 1; d.rMax = 3;
+			if (d.base[S_MP] < 16) d.base[S_MP] = 16;
+			if (d.base[S_MAG] < 8) d.base[S_MAG] = 8;
+			if (d.grow[S_MP] < 40) d.grow[S_MP] = 40;
+			if (d.grow[S_MAG] < 50) d.grow[S_MAG] = 50;
+			d.skills[0] = SKL_BLIZZARD;
+		} else if (nm && wcsncmp(nm, L"Sum", 3) != 0 && FireBreather(nm)) {
+			int burn = 0;
+			for (int s = 0; s < 3; s++) if (d.skills[s] == SKL_FIRE || d.skills[s] == SKL_E_BREATH) burn = 1;
+			if (!burn) {
+				if (d.base[S_MP] < 12) d.base[S_MP] = 12;
+				d.skills[0] = d.magAttack ? SKL_FIRE : SKL_E_BREATH;
+			}
 		}
 		for (int k = 0; k < 4; k++) d.weak[k] = kImportWeak[i][k];
 		d.ailWeak[0] = kImportWeak[i][4];
@@ -7427,24 +7461,18 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	if (UnitHasPas(u, PAS_NOSLEEP)) { u.sleep = 0; u.freeze = 0; }
 	if (UnitHasPas(u, PAS_NOCONFUSE)) u.confuse = 0;
 	if (UnitHasPas(u, PAS_NOSTUN)) u.stun = 0;
-	if (u.poison > 0) {
-		int d = max(1, u.ch.stat[S_HP] * 5 / 100);
-		u.hp = max(1, u.hp - d);
-		*poisonOut = d;
-		u.poison--;
-	}
-	if (u.burn > 0) {
-		int d = max(1, u.ch.stat[S_HP] * 6 / 100);
-		u.hp = max(1, u.hp - d);
-		if (burnOut) *burnOut = d;
-		u.burn--;
-	}
-	if (u.bleed > 0) {
-		int d = max(1, u.ch.stat[S_HP] * 4 / 100);
-		u.hp = max(1, u.hp - d);
-		if (bleedOut) *bleedOut = d;
-		u.bleed--;
-	}
+	// 毒・炎上・裂傷は 0 まで落とす。倒したあとの残りはここでは進めない。
+	auto dot = [&](int& turns, int pct, int* out) {
+		if (turns <= 0 || u.hp <= 0) return;
+		int d = max(1, u.ch.stat[S_HP] * pct / 100);
+		if (d > u.hp) d = u.hp;
+		u.hp -= d;
+		if (out) *out = d;
+		turns--;
+	};
+	dot(u.poison, 5, poisonOut);
+	dot(u.burn, 6, burnOut);
+	dot(u.bleed, 4, bleedOut);
 	if (u.blind > 0) u.blind--;
 	if (u.silence > 0) u.silence--;
 	if (u.slow > 0) u.slow--;
@@ -7952,6 +7980,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 	BOOL tryArt = level >= 4 || (r.Next() % 100) < (level <= 1 ? 12 : (level == 3 ? 68 : 36));
 	BOOL tryOugi = level >= 4 || (r.Next() % 100) < (level <= 1 ? 4 : (level == 3 ? 34 : 14));
 	BOOL allowSkill = level >= 2 || (r.Next() % 100) < 18;
+	// 攻撃スキルと奥義は約半分の手番だけ。残りは通常攻撃。回復と、追い詰められた防御は残す。
+	BOOL halfOff = level < 2 || (r.Next() % 100) < 50;
 	float noise = level <= 1 ? 2.8f : (level == 2 ? 1.f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
@@ -8054,6 +8084,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			if (!allowSkill) break;
 			if (!SkillUsable(b, ui, s)) continue;
 			const SkillDef& sd = SkillInfo(s);
+			if (!halfOff && sd.kind != SK_HEAL && sd.kind != SK_BUFF) continue;
 			int rmin = SkillCastRangeMin(u, s), rmax = SkillCastRangeMax(u, s);
 			for (int i = 0; i < b.nUnits; i++) {
 				const Unit& t = b.u[i];
@@ -8125,6 +8156,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			const SkillDef& csd = SkillInfo(cs);
 			int defBuff = cornered && csd.effect == EF_BUFF_DEF && u.buffDef <= 1;
 			if ((ougi ? !tryOugi : !tryArt) && !defBuff) continue;
+			if (!halfOff && !defBuff && csd.kind != SK_HEAL) continue;
 			if (!SkillUsable(b, ui, cs)) continue;
 			int rmin = SkillCastRangeMin(u, cs), rmax = SkillCastRangeMax(u, cs);
 			for (int i = 0; i < b.nUnits; i++) {
@@ -8254,6 +8286,8 @@ const wchar_t* GoodDesc(int i)
 	case 109: return LangPick14(L"3マス以内の味方の毒を消し、HPを最大の35%回復する。", L"Cures an ally's poison within 3 tiles and restores 35% max HP.", L"Soigne le poison d'un allié dans 3 cases et rend 35 % des PV max.", L"Cura il veleno di un alleato entro 3 caselle e restituisce il 35% dei PS max.", L"Cura el veneno de un aliado a 3 casillas y recupera el 35% de PV máx.", L"3칸 이내의 아군 독을 풀고 HP를 최대의 35% 회복한다.", L"解除3格以内同伴的中毒，并恢复最大HP的35%。", L"يزيل سم حليف ضمن 3 مربعات ويعيد 35٪ من الصحة.", L"Снимает яд с союзника в 3 клетках и восстанавливает 35% макс. ОЗ.", L"Hebt das Gift eines Verbündeten in 3 Feldern auf und stellt 35 % der max. LP her.", L"Cura o veneno de um aliado em até 3 casas e recupera 35% dos PV máx.", L"Heft het gif van een bondgenoot binnen 3 vakken op en herstelt 35% van de max. LP.", L"Zdejmuje truciznę sojusznika w zasięgu 3 pól i przywraca 35% maks. PŻ.", L"3 kare içindeki yoldaşın zehrini siler ve azami CP'nin %35'ini iyileştirir.");
 	case 110: return LangPick14(L"3マス以内の味方を5ターン、守備を30%上げる。", L"Raises an ally's defense by 30% for 5 turns. Within 3 tiles.", L"Défense d'un allié +30 % pendant 5 tours. Portée 3.", L"Difesa di un alleato +30% per 5 turni. Entro 3 caselle.", L"Defensa de un aliado +30% durante 5 turnos. Alcance 3.", L"3칸 이내의 아군을 5턴 동안 수비 30% 올린다.", L"使3格以内的同伴在5回合内防御提高30%。", L"يرفع دفاع حليف 30٪ لخمسة أدوار. ضمن 3 مربعات.", L"Защита союзника +30% на 5 ходов. В пределах 3 клеток.", L"Abwehr eines Verbündeten +30 % für 5 Züge. Reichweite 3.", L"Defesa de um aliado +30% por 5 turnos. Até 3 casas.", L"Verdediging van een bondgenoot +30% gedurende 5 beurten. Binnen 3 vakken.", L"Obrona sojusznika +30% przez 5 tur. Zasięg 3 pól.", L"3 kare içindeki yoldaşın savunmasını 5 tur %30 artırır.");
 	case 111: return LangPick14(L"3マス以内の味方を5ターン素早さ30%上げ、行動順を少し早める。", L"Raises an ally's agility by 30% for 5 turns and hurries their next action. Within 3 tiles.", L"Agilité d'un allié +30 % pendant 5 tours, et son prochain tour avance. Portée 3.", L"Agilità di un alleato +30% per 5 turni, e il prossimo turno arriva prima. Entro 3 caselle.", L"Agilidad de un aliado +30% durante 5 turnos, y su siguiente turno llega antes. Alcance 3.", L"3칸 이내의 아군을 5턴 민첩 30% 올리고 행동 순서를 조금 당긴다.", L"使3格以内的同伴敏捷提高30%共5回合，并略微提前行动。", L"يرفع رشاقة حليف 30٪ لخمسة أدوار ويقرّب دوره. ضمن 3 مربعات.", L"Ловкость союзника +30% на 5 ходов, и следующий ход ближе. В пределах 3 клеток.", L"Beweglichkeit eines Verbündeten +30 % für 5 Züge, und der nächste Zug kommt früher. Reichweite 3.", L"Agilidade de um aliado +30% por 5 turnos e o próximo turno chega antes. Até 3 casas.", L"Behendigheid van een bondgenoot +30% gedurende 5 beurten, en de volgende beurt komt eerder. Binnen 3 vakken.", L"Zwinność sojusznika +30% przez 5 tur i następna tura przychodzi wcześniej. Zasięg 3 pól.", L"3 kare içindeki yoldaşın çevikliğini 5 tur %30 artırır ve sırasını biraz öne alır.");
+	case 112: return LangPick14(L"3マス以内の味方の炎上を消し、HPを最大の15%回復する。", L"Clears an ally's burn within 3 tiles and restores 15% max HP.", L"Éteint les flammes d'un allié dans 3 cases et rend 15 % des PV max.", L"Spegne le fiamme di un alleato entro 3 caselle e restituisce il 15% dei PS max.", L"Apaga la quemadura de un aliado a 3 casillas y recupera el 15% de PV máx.", L"3칸 이내의 아군 염상을 끄고 HP를 최대의 15% 회복한다.", L"解除3格以内同伴的炎上，并恢复最大HP的15%。", L"يطفئ احتراق حليف ضمن 3 مربعات ويعيد 15٪ من الصحة.", L"Снимает горение с союзника в 3 клетках и восстанавливает 15% макс. ОЗ.", L"Löscht das Brennen eines Verbündeten in 3 Feldern und stellt 15 % der max. LP her.", L"Apaga a queimadura de um aliado em até 3 casas e recupera 15% dos PV máx.", L"Dooft de brand van een bondgenoot binnen 3 vakken en herstelt 15% van de max. LP.", L"Gasi podpalenie sojusznika w zasięgu 3 pól i przywraca 15% maks. PŻ.", L"3 kare içindeki yoldaşın yanmasını söndürür ve azami CP'nin %15'ini iyileştirir.");
+	case 113: return LangPick14(L"3マス以内の味方の凍結を解く。", L"Thaws an ally's freeze within 3 tiles.", L"Dégèle un allié dans 3 cases.", L"Scongela un alleato entro 3 caselle.", L"Descongela a un aliado a 3 casillas.", L"3칸 이내의 아군 동결을 푼다.", L"解除3格以内同伴的冻结。", L"يذيب تجمد حليف ضمن 3 مربعات.", L"Снимает заморозку с союзника в пределах 3 клеток.", L"Taut das Einfrieren eines Verbündeten in 3 Feldern auf.", L"Descongela um aliado em até 3 casas.", L"Ontdooit een bondgenoot binnen 3 vakken.", L"Odmraża sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın donmasını çözer.");
 	default: break;
 	}
 	return L"";
@@ -8572,6 +8606,8 @@ static const GoodDef kGood[] = {
 	{ 80, -1, 109, TX_GD_BLESS, 0 },
 	{ 85, -1, 110, TX_GD_IRON, 0 },
 	{ 85, -1, 111, TX_GD_STEP, 0 },
+	{ 55, -1, 112, TX_GD_SOOTHE, 0 },
+	{ 50, -1, 113, TX_GD_THAW, 0 },
 };
 int GoodCount() { return (int)(sizeof(kGood) / sizeof(kGood[0])); }
 const GoodDef* GoodAt(int i) { return (i >= 0 && i < GoodCount()) ? &kGood[i] : NULL; }
@@ -9288,15 +9324,20 @@ void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price)
 
 int TacQualitySuggestFromGpu()
 {
+	static int s_cached = -1;
+	if (s_cached >= 0) return s_cached;
 	static const int kMap[10] = { 4, 4, 0, 1, 1, 2, 3, 5, 5, 6 };
 	int s3 = S3GfxQualitySuggestFromGpu();
 	if (s3 < 0) s3 = 0;
 	if (s3 > 9) s3 = 9;
-	return kMap[s3];
+	s_cached = kMap[s3];
+	return s_cached;
 }
 
 static int TacGpuNameHash()
 {
+	static int s_cached = 0;
+	if (s_cached != 0) return s_cached;
 	S3GpuProbe p = {};
 	S3GpuProbePrimary(&p);
 	unsigned h = 2166136261u;
@@ -9305,7 +9346,8 @@ static int TacGpuNameHash()
 		h *= 16777619u;
 	}
 	if (h == 0) h = 1;
-	return (int)h;
+	s_cached = (int)h;
+	return s_cached;
 }
 
 void TacQualityEnsureAutoDefault(SaveData& s)

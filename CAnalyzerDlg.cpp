@@ -2235,7 +2235,7 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 				LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
 					L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
 					L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"),
-				LL14(L"簡易ピアノロールウィンドウを開きます。", L"Open the simple piano roll window.", L"Ouvrir la fenetre du piano roll simple.", L"Apri la finestra del piano roll semplice.", L"Abrir la ventana del piano roll simple.", L"간이 피아노 롤 창을 엽니다.", L"打开简易钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو البسيطة.", L"Открыть окно простого пианоролла.", L"Einfaches Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll simples.", L"Open het eenvoudige piano-roll-venster.", L"Otworz okno prostego piano roll.", L"Basit piyano roll penceresini ac."));
+				LL14(L"ピアノロールウィンドウを開きます。", L"Open the piano roll window.", L"Ouvrir la fenetre du piano roll.", L"Apri la finestra del piano roll.", L"Abrir la ventana del piano roll.", L"피아노 롤 창을 엽니다.", L"打开钢琴卷帘窗口。", L"فتح نافذة لفافة البيانو.", L"Открыть окно пианоролла.", L"Piano-Roll-Fenster offnen.", L"Abrir a janela do piano roll.", L"Open het piano-roll-venster.", L"Otworz okno piano roll.", L"Piyano roll penceresini ac."));
 			openSub->AddCommand(ID_MP_OPEN_MIDIMON,
 				LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI", L"Abrir monitor MIDI",
 					L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI", L"Открыть MIDI-монитор", L"MIDI-Monitor öffnen",

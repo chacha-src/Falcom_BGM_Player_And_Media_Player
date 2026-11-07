@@ -731,6 +731,11 @@ void Game::ResumeBattle(int kind)
 	ClearRipples();
 	memset(m_cover, 0, sizeof(m_cover));
 	m_wxMesh = 0;
+	m_wxEventT = m_rng.F(4.f, 9.f);
+	m_boltT = 0; m_boltMag = 0;
+	m_quakeT = 0; m_quakeMag = 0; m_quakeAcc = 0;
+	m_hailBurstT = 0; m_hailAcc = 0;
+	m_wxFlash = 0;
 	m_seqCut = FALSE; m_cutStage = 0; m_victory = 0; m_hoverUnit = -1;
 	m_lvqN = m_lvqCur = 0; m_promoAsk = 0; m_menuConfirm = 0; m_proj.active = 0;
 	m_screen = SC_BATTLE;
@@ -913,6 +918,11 @@ void Game::StartBattle(int stage)
 	ClearRipples();
 	memset(m_cover, 0, sizeof(m_cover));
 	m_wxMesh = 0;
+	m_wxEventT = m_rng.F(4.f, 9.f);
+	m_boltT = 0; m_boltMag = 0;
+	m_quakeT = 0; m_quakeMag = 0; m_quakeAcc = 0;
+	m_hailBurstT = 0; m_hailAcc = 0;
+	m_wxFlash = 0;
 	m_seqCut = FALSE;
 	m_cutStage = 0;
 	m_bossDown = 0;
@@ -1094,8 +1104,24 @@ void Game::BeginTurn()
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
 		u.hp = 0; u.alive = 0; u.killed = 1;
+		u.poison = u.burn = u.bleed = u.freeze = u.sleep = u.stun = u.confuse = u.slow = u.defDown = u.blind = u.silence = 0;
 		if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
 		if (m_dieT[ui] < 0) m_dieT[ui] = 0;
+		if (u.team == TEAM_ENEMY && u.boss) {
+			int otherBoss = 0;
+			for (int j = 0; j < m_b.nUnits; j++) {
+				if (j == ui) continue;
+				const Unit& o = m_b.u[j];
+				if (o.alive && o.hp > 0 && o.team == TEAM_ENEMY && o.boss) otherBoss = 1;
+			}
+			if (!otherBoss) m_bossDown = 1;
+		}
+		// 状態異常での敵の死は撃破報酬は出す。経験値は攻撃側の行動にしか乗らない。
+		if (u.team == TEAM_ENEMY) { GrantFoeLoot(ui, 0); TacSfx(TS_GET); }
+		wchar_t nm[64], dead[96];
+		UnitTitle(u, nm, 64);
+		swprintf_s(dead, L"%s  %s", nm, TT(u.team == TEAM_PLAYER ? TX_RS_KO : TX_BT_DEFEATED));
+		AddBanner(dead, NULL, u.team == TEAM_PLAYER ? RGBA8(255, 150, 140) : RGBA8(255, 226, 150), 2, 1.6f, u.team == TEAM_PLAYER ? MSG_DROP : MSG_BLUR);
 		if (CheckBattleOver()) return;
 		FinishUnitTurn(1);
 		return;
@@ -2763,7 +2789,7 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 			if (m_act[ui].hover < .2f) m_act[ui].hover = .35f;
 			m_act[ui].flap = 1.f;
 			ActorPlay(m_act[ui], CL_IDLE, 1, .12f);
-			m_act[ui].animSpeed = 1.f;
+			m_act[ui].animSpeed = 1.2f;
 		} else {
 			int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
 			ActorPlay(m_act[ui], clip, 1, .1f);
@@ -2780,6 +2806,8 @@ void Game::UpdateMove(float dt)
 	float pace = TacPaceTime(m_save);
 	if (pace < 0.05f) pace = 0.05f;
 	float speed = 2.6f * 1.5f / pace;
+	// 徒歩はそのまま。翼の飛行は一マスを速くするが、時間は半分まで縮めない。
+	if (fly) speed *= 1.35f;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	{
@@ -3826,6 +3854,75 @@ static int PlayerCoop(const Battle& b, const Strike* s, int n, int defender)
 	return nw;
 }
 
+void Game::GrantFoeLoot(int ui, int coop)
+{
+	if (ui < 0 || ui >= m_b.nUnits) return;
+	Unit& u = m_b.u[ui];
+	if (u.team != TEAM_ENEMY) return;
+	FoeNoteKill(u.monster);
+	int pay = 5 + u.ch.lv / 2 + (u.boss ? 28 : 0);
+	m_save.gold += pay;
+	wchar_t coin[32];
+	swprintf_s(coin, L"+%s G", TacNum(pay));
+	AddPopup(v3(u.px, u.py + .8f, u.pz), coin, RGBA8(255, 220, 90), 0, MSG_RISE, 0, 3.6f);
+	AddLog(coin, RGBA8(255, 220, 90));
+	int rolls = m_rng.Chance(coop >= 2 ? 80 : 40) ? 2 : 1;
+	int chance = u.boss ? 70 : 28;
+	if (coop >= 2) chance += 34;
+	if (chance > 92) chance = 92;
+	for (int r = 0; r < rolls; r++) {
+		if (!m_rng.Chance(chance)) continue;
+		int beforeN = m_save.gearN;
+		int gid = GearTryDrop(m_save, u.ch.lv, u.monster, m_rng);
+		if (!m_demo && m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
+		if (gid > 0) {
+			AddPopup(v3(u.px, u.py + 1.3f + r * .35f, u.pz), GearName(gid), RGBA8(180, 255, 190), 1, MSG_RISE, .12f * r, 3.6f);
+			AddLog(GearName(gid), RGBA8(180, 255, 190));
+		}
+	}
+	int goods = (m_rng.Chance(u.boss ? 78 : (coop >= 2 ? 62 : 40)) ? 1 : 0) + ((coop >= 2 && m_rng.Chance(50)) ? 1 : 0);
+	for (int g = 0; g < goods; g++) {
+		wchar_t cn[96];
+		if (!DropConsumable(m_save, u.monster, m_rng, cn, 96)) continue;
+		AddPopup(v3(u.px, u.py + 1.55f + g * .32f, u.pz), cn, RGBA8(255, 210, 140), 1, MSG_RISE, .15f, 3.6f);
+		AddLog(cn, RGBA8(255, 210, 140));
+	}
+	if (m_rng.Chance(coop >= 2 ? 45 : 22)) {
+		int it = m_rng.Chance(50) ? IT_ORE : IT_HERB;
+		int cashed = GainItemN(m_save, it, 1);
+		wchar_t shown[64];
+		if (cashed > 0) swprintf_s(shown, L"+%dG", cashed);
+		else wcsncpy_s(shown, TT(it == IT_ORE ? TX_IT_ORE : TX_IT_HERB), _TRUNCATE);
+		AddPopup(v3(u.px, u.py + 1.9f, u.pz), shown, RGBA8(180, 220, 160), 1, MSG_RISE, .2f, 3.6f);
+		AddLog(shown, RGBA8(180, 220, 160));
+	}
+	int trophyN = (u.boss || coop >= 2 || m_rng.Chance(45)) ? 2 : 1;
+	for (int di = 0; di < trophyN; di++) {
+		wchar_t part[80];
+		int sold = 0;
+		if (!DropTrophy(u.monster, u.boss, m_rng, part, 80, &sold)) continue;
+		wchar_t line[96];
+		if (sold > 0) swprintf_s(line, L"%s +%sG", part, TacNum(sold));
+		else swprintf_s(line, L"%s", part);
+		AddPopup(v3(u.px, u.py + 2.2f + di * .35f, u.pz), line, RGBA8(255, 186, 96), 1, MSG_RISE, .1f * di, 3.6f);
+		AddLog(line, RGBA8(255, 186, 96));
+	}
+	wchar_t loot[80];
+	if (DropCraftLoot(m_save, u.monster, u.boss, m_battleStage, m_rng, loot, 80)) {
+		AddPopup(v3(u.px, u.py + 2.9f, u.pz), loot, RGBA8(190, 170, 255), 1, MSG_RISE, .2f, 3.6f);
+		AddLog(loot, RGBA8(190, 170, 255));
+	}
+	int extraRolls = u.boss ? 2 : 1;
+	for (int ex = 0; ex < extraRolls; ex++) {
+		int chance = u.boss ? (ex == 0 ? 80 : 45) : 28;
+		if (!m_rng.Chance(chance)) continue;
+		wchar_t extra[96];
+		if (!DropExtraLoot(m_save, m_battleStage, u.boss, m_rng, extra, 96)) continue;
+		AddPopup(v3(u.px, u.py + 3.25f + ex * .32f, u.pz), extra, RGBA8(255, 196, 140), 1, MSG_RISE, .18f + ex * .08f, 3.6f);
+		AddLog(extra, RGBA8(255, 196, 140));
+	}
+}
+
 void Game::FinishSeq()
 {
 	m_sumOn = 0;
@@ -3851,70 +3948,8 @@ void Game::FinishSeq()
 				if (!otherBoss) m_bossDown = 1;
 			}
 			if (u.team == TEAM_ENEMY) {
-				FoeNoteKill(u.monster);
 				lootSfx = 1;
-				int coop = PlayerCoop(m_b, m_strk, m_strkN, i);
-				int pay = 5 + u.ch.lv / 2 + (u.boss ? 28 : 0);
-				m_save.gold += pay;
-				wchar_t coin[32];
-				swprintf_s(coin, L"+%s G", TacNum(pay));
-				AddPopup(v3(u.px, u.py + .8f, u.pz), coin, RGBA8(255, 220, 90), 0, MSG_RISE, 0, 3.6f);
-				AddLog(coin, RGBA8(255, 220, 90));
-				int rolls = m_rng.Chance(coop >= 2 ? 80 : 40) ? 2 : 1;
-				int chance = u.boss ? 70 : 28;
-				if (coop >= 2) chance += 34;
-				if (chance > 92) chance = 92;
-				for (int r = 0; r < rolls; r++) {
-					if (!m_rng.Chance(chance)) continue;
-					int beforeN = m_save.gearN;
-					int gid = GearTryDrop(m_save, u.ch.lv, u.monster, m_rng);
-					if (!m_demo && m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
-					if (gid > 0) {
-						AddPopup(v3(u.px, u.py + 1.3f + r * .35f, u.pz), GearName(gid), RGBA8(180, 255, 190), 1, MSG_RISE, .12f * r, 3.6f);
-						AddLog(GearName(gid), RGBA8(180, 255, 190));
-					}
-				}
-				int goods = (m_rng.Chance(u.boss ? 78 : (coop >= 2 ? 62 : 40)) ? 1 : 0) + ((coop >= 2 && m_rng.Chance(50)) ? 1 : 0);
-				for (int g = 0; g < goods; g++) {
-					wchar_t cn[96];
-					if (!DropConsumable(m_save, u.monster, m_rng, cn, 96)) continue;
-					AddPopup(v3(u.px, u.py + 1.55f + g * .32f, u.pz), cn, RGBA8(255, 210, 140), 1, MSG_RISE, .15f, 3.6f);
-					AddLog(cn, RGBA8(255, 210, 140));
-				}
-				if (m_rng.Chance(coop >= 2 ? 45 : 22)) {
-					int it = m_rng.Chance(50) ? IT_ORE : IT_HERB;
-					int cashed = GainItemN(m_save, it, 1);
-					wchar_t shown[64];
-					if (cashed > 0) swprintf_s(shown, L"+%dG", cashed);
-					else wcsncpy_s(shown, TT(it == IT_ORE ? TX_IT_ORE : TX_IT_HERB), _TRUNCATE);
-					AddPopup(v3(u.px, u.py + 1.9f, u.pz), shown, RGBA8(180, 220, 160), 1, MSG_RISE, .2f, 3.6f);
-					AddLog(shown, RGBA8(180, 220, 160));
-				}
-				int trophyN = (u.boss || coop >= 2 || m_rng.Chance(45)) ? 2 : 1;
-				for (int di = 0; di < trophyN; di++) {
-					wchar_t part[80];
-					int sold = 0;
-					if (!DropTrophy(u.monster, u.boss, m_rng, part, 80, &sold)) continue;
-					wchar_t line[96];
-					if (sold > 0) swprintf_s(line, L"%s +%sG", part, TacNum(sold));
-					else swprintf_s(line, L"%s", part);
-					AddPopup(v3(u.px, u.py + 2.2f + di * .35f, u.pz), line, RGBA8(255, 186, 96), 1, MSG_RISE, .1f * di, 3.6f);
-					AddLog(line, RGBA8(255, 186, 96));
-				}
-				wchar_t loot[80];
-				if (DropCraftLoot(m_save, u.monster, u.boss, m_battleStage, m_rng, loot, 80)) {
-					AddPopup(v3(u.px, u.py + 2.9f, u.pz), loot, RGBA8(190, 170, 255), 1, MSG_RISE, .2f, 3.6f);
-					AddLog(loot, RGBA8(190, 170, 255));
-				}
-				int extraRolls = u.boss ? 2 : 1;
-				for (int ex = 0; ex < extraRolls; ex++) {
-					int chance = u.boss ? (ex == 0 ? 80 : 45) : 28;
-					if (!m_rng.Chance(chance)) continue;
-					wchar_t extra[96];
-					if (!DropExtraLoot(m_save, m_battleStage, u.boss, m_rng, extra, 96)) continue;
-					AddPopup(v3(u.px, u.py + 3.25f + ex * .32f, u.pz), extra, RGBA8(255, 196, 140), 1, MSG_RISE, .18f + ex * .08f, 3.6f);
-					AddLog(extra, RGBA8(255, 196, 140));
-				}
+				GrantFoeLoot(i, PlayerCoop(m_b, m_strk, m_strkN, i));
 			}
 			for (int k = 0; k < m_strkN; k++) {
 				if (m_strk[k].defender == i && m_strk[k].kill) {
@@ -6818,7 +6853,8 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	if (g->item == IT_RAISE || g->extra == 106) return TRUE;
 	BOOL hurt = t.alive && t.hp < t.ch.stat[S_HP];
 	BOOL mana = t.alive && t.mp < t.ch.stat[S_MP];
-	BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0;
+	BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
+		|| t.freeze > 0 || t.burn > 0 || t.bleed > 0 || t.blind > 0 || t.silence > 0;
 	if (g->item == IT_ELIXIR) return hurt;
 	if (g->extra == IX_FULL) return hurt;
 	if (g->extra == IX_CURE || g->extra == 109) return hurt || t.poison > 0;
@@ -6840,6 +6876,8 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	if (g->extra == 108) return !noSlow && (t.ct > 0 || t.slow < 4);
 	if (g->extra == 110) return t.buffDef < 5;
 	if (g->extra == 111) return t.buffAgi < 5 || t.ct < 980;
+	if (g->extra == 112) return t.burn > 0;
+	if (g->extra == 113) return t.freeze > 0;
 	return FALSE;
 }
 
@@ -6928,6 +6966,11 @@ void Game::UseConsumable(int good, int target)
 		dst->stun = 0;
 		dst->confuse = 0;
 		dst->defDown = 0;
+		dst->freeze = 0;
+		dst->burn = 0;
+		dst->bleed = 0;
+		dst->blind = 0;
+		dst->silence = 0;
 		dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] / 5));
 	} else if (g->extra == 104) {
 		dst->mp = dst->ch.stat[S_MP];
@@ -6949,6 +6992,11 @@ void Game::UseConsumable(int good, int target)
 	} else if (g->extra == 111) {
 		dst->buffAgi = max(dst->buffAgi, 5);
 		dst->ct += 200;
+	} else if (g->extra == 112) {
+		dst->burn = 0;
+		dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] * 15 / 100));
+	} else if (g->extra == 113) {
+		dst->freeze = 0;
 	}
 	dst->flash = 1.f;
 	AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), TT(g->nameTx), RGBA8(140, 230, 170), 1, MSG_FACE);
@@ -6958,7 +7006,7 @@ void Game::UseConsumable(int good, int target)
 	else if (g->item == IT_MIGHT) TacSfx(TS_BUFF);
 	else if (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == 108) TacSfx(TS_SLOW);
 	else if (g->extra == IX_VENOM || g->extra == 107) TacSfx(TS_POISON);
-	else if (g->extra == IX_CURE || (g->extra >= 100 && g->extra <= 103) || g->extra == 109) TacSfx(TS_CLEANSE);
+	else if (g->extra == IX_CURE || (g->extra >= 100 && g->extra <= 103) || g->extra == 109 || g->extra == 112 || g->extra == 113) TacSfx(TS_CLEANSE);
 	else if (g->extra == IX_FULL || g->extra == IX_ETHER || g->extra == 104 || g->extra == 105) TacSfx(TS_HEAL);
 	else TacSfx(TS_BUFF);
 	m_b.RebuildOcc();
@@ -8510,6 +8558,12 @@ void Game::DrawCutInUi()
 		}
 	}
 	if (m_flashWhite > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_flashWhite * 180)));
+	// 稲妻の閃光。寒色で、見づらくならないよう強さは控えめに。
+	if (m_wxFlash > 0) {
+		int fa = (int)(min(1.f, m_wxFlash) * 118.f);
+		m_r.HudRect(0, 0, (float)m_w, (float)m_h,
+			RGBA8((int)(m_wxFlashCol[0] * 255), (int)(m_wxFlashCol[1] * 255), (int)(m_wxFlashCol[2] * 255), fa));
+	}
 }
 
 void Game::PlaceBattleHud()

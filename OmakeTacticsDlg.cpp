@@ -342,7 +342,7 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(TacCaption());
 
-	SaveData sv;
+	SaveData& sv = m_game.Save();
 	SaveDefaults(sv);
 	SaveLoad(sv);
 	if (sv.winSizeVer >= 3 && sv.winW >= 640 && sv.winH >= 420) {

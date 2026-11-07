@@ -2991,8 +2991,13 @@ bool EnsureBonusImages(int kind)
 			L"택틱스 이미지", L"战术图片", L"صور التكتيك", L"Картинки тактики", L"Taktik-Bilder",
 			L"Imagens de tática", L"Tactiek-afbeeldingen", L"Obrazy taktyki", L"Taktik görselleri");
 	const bool have = GetFileAttributes(key) != INVALID_FILE_ATTRIBUTES;
-	const __int64 remote = (__int64)HttpGetLastModified(url);
 	const __int64 saved = BonusReadUtc(utcPath);
+	static bool s_bonusChecked[3] = { false, false, false };
+	if (have && saved > 0 && s_bonusChecked[kind]) {
+		if (kind == 2) EnsureTacticsOggAvailable(false);
+		return true;
+	}
+	const __int64 remote = (__int64)HttpGetLastModified(url);
 	if (remote <= 0) {
 		UpdateBusyClose();
 		CString msg;
@@ -3015,6 +3020,7 @@ bool EnsureBonusImages(int kind)
 		return false;
 	}
 	if (have && saved > 0 && remote <= saved) {
+		s_bonusChecked[kind] = true;
 		if (kind == 2) EnsureTacticsOggAvailable(false);
 		return true;
 	}
@@ -3061,6 +3067,7 @@ bool EnsureBonusImages(int kind)
 		return false;
 	}
 	BonusWriteUtc(utcPath, remote);
+	s_bonusChecked[kind] = true;
 	if (kind == 2) EnsureTacticsOggAvailable(true);
 	return true;
 }

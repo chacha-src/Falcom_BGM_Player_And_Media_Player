@@ -1794,7 +1794,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_xfadeL.SetWindowText(LL14(L"秒", L"sec", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn"));
 	SyncPlayXfadeUi(TRUE);
 	m_eq.SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
-	m_piano.SetWindowText(LL14(L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Piano roll semplice", L"Rollo piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة", L"Простой пианоролл", L"Einfache Klavierrolle", L"Piano roll simples", L"Eenvoudige pianorol", L"Prosta rolka pianina", L"Basit piyano rulosu"));
+	m_piano.SetWindowText(LL14(L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Piano roll", L"Rollo piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Pianorol", L"Rolka pianina", L"Piyano rulosu"));
 	if (m_analyzer.GetSafeHwnd())
 		m_analyzer.SetWindowText(LL14(L"アナライザー", L"Analyzer", L"Analyseur", L"Analizzatore", L"Analizador", L"분석기", L"分析器", L"المحلل", L"Анализатор", L"Analysator", L"Analisador", L"Analyser", L"Analizator", L"Analizor"));
 	if (m_pro.GetSafeHwnd())
@@ -2254,7 +2254,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_abClr, LL14(L"A-Bリピートを解除します。[ または ] でも解除。", L"Clear A-B repeat. Also [ or ] while looping.", L"Effacer A-B. Aussi [ ou ] en boucle.", L"Cancella A-B. Anche [ o ] in loop.", L"Borrar A-B. Tambien [ o ] en bucle.", L"A-B 반복 해제. 루프 중 [ 또는 ] 로도 해제.", L"清除A-B重复。循环中也可用 [ 或 ]。", L"مسح تكرار A-B. أيضاً [ أو ] أثناء الحلقة.", L"Сбросить A-B. Также [ или ] во время цикла.", L"A-B aufheben. Auch [ oder ] wahrend Loop.", L"Limpar A-B. Tambem [ ou ] em loop.", L"A-B wissen. Ook [ of ] tijdens lus.", L"Wyczysc A-B. Takze [ lub ] w petli.", L"A-B temizle. Dongude [ veya ] de olur."));
 	addTip(m_vol, LL14(L"音量を調整します。", L"Adjust volume.", L"Regler le volume.", L"Regola il volume.", L"Ajustar el volumen.", L"음량을 조절합니다.", L"调整音量。", L"ضبط مستوى الصوت.", L"Регулировка громкости.", L"Lautstarke einstellen.", L"Ajustar o volume.", L"Volume aanpassen.", L"Reguluj głośność.", L"Sesi ayarla."));
 	addTip(m_eq, LL14(L"イコライザーを開きます。右クリックでプリセット等。", L"Open the equalizer. Right-click for presets.", L"Ouvrir l'egaliseur. Clic droit: presets.", L"Apri l'equalizzatore. Tasto destro: preset.", L"Abrir el ecualizador. Clic derecho: presets.", L"이퀄라이저를 엽니다. 우클릭으로 프리셋.", L"打开均衡器。右键预设。", L"فتح المعادل. زر يمين: إعدادات.", L"Открыть эквалайзер. ПКМ — пресеты.", L"Equalizer offnen. RMB: Presets.", L"Abrir o equalizador. Clique direito: presets.", L"Equalizer openen. Rechtsklik: presets.", L"Otworz korektor. PPM: presety.", L"Ekolayzeri ac. Sag tik: onayarlar."));
-	addTip(m_piano, LL14(L"簡易ピアノロールを開きます。", L"Open the simple piano roll.", L"Ouvrir le rouleau piano simple.", L"Apri il piano roll semplice.", L"Abrir el rollo de piano simple.", L"간이 피아노 롤을 엽니다.", L"打开简易钢琴卷帘。", L"فتح لوحة البيانو البسيطة.", L"Открыть простой пианоролл.", L"Einfache Klavierrolle offnen.", L"Abrir o piano roll simples.", L"Eenvoudige pianorol openen.", L"Otworz prosta rolke pianina.", L"Basit piyano rulosunu ac."));
+	addTip(m_piano, LL14(L"ピアノロールを開きます。", L"Open the piano roll.", L"Ouvrir le rouleau piano.", L"Apri il piano roll.", L"Abrir el rollo de piano.", L"피아노 롤을 엽니다.", L"打开钢琴卷帘。", L"فتح لوحة البيانو.", L"Открыть пианоролл.", L"Klavierrolle offnen.", L"Abrir o piano roll.", L"Pianorol openen.", L"Otworz rolke pianina.", L"Piyano rulosunu ac."));
 	if (m_analyzer.GetSafeHwnd())
 		addTip(m_analyzer, LL14(L"アナライザーを開きます。", L"Open the analyzer.", L"Ouvrir l'analyseur.", L"Apri l'analizzatore.", L"Abrir el analizador.", L"분석기를 엽니다.", L"打开分析器。", L"فتح المحلل.", L"Открыть анализатор.", L"Analysator offnen.", L"Abrir o analisador.", L"Analyser openen.", L"Otworz analizator.", L"Analizoru ac."));
 	if (m_pro.GetSafeHwnd())
@@ -3244,7 +3244,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_eq.GetSafeHwnd())
 				m_eq.SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
 			if (m_piano.GetSafeHwnd())
-				m_piano.SetWindowText(LL14(L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Piano roll semplice", L"Rollo piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة", L"Простой пианоролл", L"Einfache Klavierrolle", L"Piano roll simples", L"Eenvoudige pianorol", L"Prosta rolka pianina", L"Basit piyano rulosu"));
+				m_piano.SetWindowText(LL14(L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Piano roll", L"Rollo piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Pianorol", L"Rolka pianina", L"Piyano rulosu"));
 			if (m_analyzer.GetSafeHwnd())
 				m_analyzer.SetWindowText(LL14(L"アナライザー", L"Analyzer", L"Analyseur", L"Analizzatore", L"Analizador", L"분석기", L"分析器", L"المحلل", L"Анализатор", L"Analysator", L"Analisador", L"Analyser", L"Analizator", L"Analizor"));
 			if (m_pro.GetSafeHwnd())

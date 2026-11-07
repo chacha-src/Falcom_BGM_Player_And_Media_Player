@@ -125,6 +125,7 @@ Game::Game()
 	ZeroMemory(m_workSpan, sizeof(m_workSpan));
 	m_fpsN = 0;
 	m_fpsI = 0;
+	m_fpsWin = 0;
 	m_fpsAt.QuadPart = 0;
 	m_recoverTries = 0;
 	m_mx = m_my = 0;
@@ -256,6 +257,12 @@ Game::Game()
 	m_wxAcc = 0;
 	m_wxMeshWait = 0;
 	m_wxMesh = 0;
+	m_wxEventT = 6.f;
+	m_boltT = 0; m_boltMag = 0;
+	m_quakeT = 0; m_quakeMag = 0; m_quakeAcc = 0;
+	m_hailBurstT = 0; m_hailAcc = 0;
+	m_wxFlash = 0;
+	m_wxFlashCol[0] = 0.82f; m_wxFlashCol[1] = 0.88f; m_wxFlashCol[2] = 1.f;
 	memset(m_cover, 0, sizeof(m_cover));
 	m_eye = v3(0, 10, 0);
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) {
@@ -364,7 +371,7 @@ BOOL Game::Init(HWND view, int w, int h)
 {
 	m_hwnd = view;
 	m_w = max(8, w); m_h = max(8, h);
-	SaveLoad(m_save);
+	if (m_save.magic != 0x54414331u) SaveLoad(m_save);
 	ApplyAudio();
 	m_rng = Rng(GetTickCount() ^ 0x5EED1234u);
 	m_screen = SC_LOADING;
@@ -465,9 +472,10 @@ int Game::MeasureLoadUnits(int& showUnits)
 	showUnits = 16 + nShow * 4;
 	int avatarUnits = 0;
 	{
-		int keyM[MAX_ROSTER], keyA[MAX_ROSTER], keyC[MAX_ROSTER], nk = 0;
-		for (int ri = 0; ri < MAX_ROSTER; ri++) {
-			if (!m_save.roster[ri].used) continue;
+		int keyM[MAX_PARTY], keyA[MAX_PARTY], keyC[MAX_PARTY], nk = 0;
+		for (int i = 0; i < MAX_PARTY; i++) {
+			int ri = m_save.party[i];
+			if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
 			const CharData& c = m_save.roster[ri];
 			int av = CharAvatar(c);
 			if (av <= 0) continue;
@@ -476,7 +484,7 @@ int Game::MeasureLoadUnits(int& showUnits)
 			int seen = 0;
 			for (int k = 0; k < nk; k++) if (keyM[k] == md && keyA[k] == av && keyC[k] == cup) seen = 1;
 			if (seen) continue;
-			if (nk < MAX_ROSTER) { keyM[nk] = md; keyA[nk] = av; keyC[nk] = cup; nk++; }
+			if (nk < MAX_PARTY) { keyM[nk] = md; keyA[nk] = av; keyC[nk] = cup; nk++; }
 			avatarUnits += 64;
 		}
 	}
@@ -822,7 +830,7 @@ void Game::PulseQuality(float work, float span)
 		m_syncArmN = 0;
 	}
 	if (m_qCoolT > 0) return;
-	if (m_fpsN < 20 || span < 0.003f || span >= 0.25f) return;
+	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.25f) return;
 	if (m_syncLock > 0) return;
 	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
 	const int stdSlot = TacQualityFixedSlot(1);
@@ -840,15 +848,32 @@ void Game::PulseQuality(float work, float span)
 			m_syncLock = 0.45f;
 			m_fpsN = 0;
 			m_fpsI = 0;
+			m_fpsWin = 0;
+			m_syncArm = 0;
 			m_qHz = TacHzAt(m_syncRun);
 		};
-		float holdHz = (hz >= 120) ? (float)hz * 0.88f : (float)hz * 0.95f;
+		float holdHz = (float)hz * 0.90f;
 		float dropHz = (hz >= 120) ? (float)hz * 0.72f : (float)hz * 0.80f;
-		if (m_fps >= holdHz) { m_qOkN++; m_qMissN = 0; }
+		if (m_fps >= holdHz) { m_qOkN++; m_qMissN = 0; m_syncArm = 0; }
 		else if (m_fps < dropHz) { m_qMissN++; m_qOkN = 0; }
-		else { m_qMissN = 0; m_qOkN = 0; }
-		int floorSlot = (hz <= 30) ? 0 : stdSlot;
-		BOOL peakQ = (now == 5 || now == 6);
+		else m_qOkN = 0;
+		// 1/60 が底。標準以上では 1/30 に落とさない。間隔が実測より高いときは画質より先に間隔を合わせ、限界突破を取りにいく。
+		int i60 = TacHzIndexOf(60);
+		int hzFloorI = (slot < stdSlot) ? TacHzIndexOf(30) : i60;
+		if (m_fps < holdHz && runI > hzFloorI) {
+			int fit = hzFloorI;
+			for (int i = hzFloorI; i <= runI; ++i) {
+				if ((float)TacHzAt(i) * 0.90f <= m_fps) fit = i;
+			}
+			if (m_syncArm < 0) m_syncArm = 0;
+			m_syncArm++;
+			if (m_syncArm >= 8 && fit < runI) {
+				goHz(fit);
+				return;
+			}
+		}
+		int floorSlot = (runI <= i60) ? 0 : stdSlot;
+		BOOL peakQ = (now == 6);
 		if (peakQ && runI < capI) {
 			int upI = runI + 1;
 			float bU = 1.f / (float)TacHzAt(upI);
@@ -861,8 +886,10 @@ void Game::PulseQuality(float work, float span)
 				return;
 			}
 		} else m_syncArmN = 0;
-		if (m_qMissN >= 20) {
-			if (now == 3 && runI > 0) {
+		int needMiss = (slot >= 6) ? 48 : ((slot >= 5) ? 36 : 20);
+		int needOk = (slot >= 4) ? 18 : 36;
+		if (m_qMissN >= needMiss) {
+			if (runI > hzFloorI) {
 				goHz(runI - 1);
 				return;
 			}
@@ -870,7 +897,7 @@ void Game::PulseQuality(float work, float span)
 				next = TacQualityFixedAt(slot - 1);
 				m_qMissN = 0;
 			} else m_qMissN = 0;
-		} else if (m_syncArmN == 0 && m_qOkN >= 40 && slot < capSlot) {
+		} else if (m_syncArmN == 0 && m_qOkN >= needOk && slot < capSlot) {
 			next = TacQualityFixedAt(slot + 1);
 			m_qOkN = 0;
 		}
@@ -881,9 +908,9 @@ void Game::PulseQuality(float work, float span)
 	}
 	m_syncRun = -1;
 	float period = 1.f / (float)hz;
-	BOOL shownOk = (m_fps >= (float)hz * 0.98f) || (span <= period * 1.08f);
-	if (shownOk) { m_qOkN++; m_qMissN = 0; }
-	else { m_qMissN++; m_qOkN = 0; }
+	float okLine = (float)hz * 0.90f;
+	if (m_fps >= okLine || span <= period * 1.15f) { m_qOkN++; m_qMissN = 0; }
+	else if (m_fps < (float)hz * 0.78f && span > period * 1.28f) { m_qMissN++; m_qOkN = 0; }
 	int now = QualityNow();
 	int slot = TacQualityFixedSlot(now);
 	int cap = (m_qHold >= 0) ? m_qHold : TacQualityWanted(m_save);
@@ -891,12 +918,14 @@ void Game::PulseQuality(float work, float span)
 	int qCapSlot = TacQualityFixedSlot(cap);
 	int qFloor = qCapSlot - 2;
 	if (qFloor < 0) qFloor = 0;
+	int needMiss = (slot >= 6) ? 48 : ((slot >= 5) ? 36 : 20);
+	int needOk = (slot >= 4) ? 18 : 24;
 	int next = now;
-	if (m_qMissN >= 20) {
+	if (m_qMissN >= needMiss) {
 		if (slot > qFloor) next = TacQualityFixedAt(slot - 1);
 		m_qMissN = 0;
 		if (m_qHold < 0) m_qHold = TacQualityWanted(m_save);
-	} else if (m_qOkN >= 20) {
+	} else if (m_qOkN >= needOk) {
 		if (slot < qCapSlot) next = TacQualityFixedAt(slot + 1);
 		m_qOkN = 0;
 		if (m_qHold >= 0 && next == m_qHold) m_qHold = -1;
@@ -1002,15 +1031,32 @@ void Game::Tick(float dt)
 		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
 		float busy = (float)((double)(t1.QuadPart - busy0.QuadPart) / (double)freq.QuadPart);
 		if (span >= 0.003f && span < 0.25f && busy >= 0.f && busy < 0.25f) {
+			enum { FPS_CAP = 160 };
+			const float kWin = 0.50f;
+			const int kMin = 8;
 			m_fpsSpan[m_fpsI] = span;
 			m_workSpan[m_fpsI] = busy;
-			m_fpsI = (m_fpsI + 1) % 20;
-			if (m_fpsN < 20) m_fpsN++;
-			float sum = 0.f, wsum = 0.f;
-			for (int i = 0; i < m_fpsN; i++) { sum += m_fpsSpan[i]; wsum += m_workSpan[i]; }
-			span = sum / (float)m_fpsN;
-			m_workAvg = wsum / (float)m_fpsN;
+			int newest = m_fpsI;
+			m_fpsI = (m_fpsI + 1) % FPS_CAP;
+			if (m_fpsN < FPS_CAP) m_fpsN++;
+			float sum = 0.f, wsum = 0.f, acc = 0.f;
+			int n = 0;
+			int idx = newest;
+			for (int k = 0; k < m_fpsN; k++) {
+				float s = m_fpsSpan[idx];
+				if (n >= kMin && acc >= kWin) break;
+				sum += s;
+				wsum += m_workSpan[idx];
+				acc += s;
+				n++;
+				if (n >= kMin && acc >= kWin) break;
+				idx = (idx + FPS_CAP - 1) % FPS_CAP;
+			}
+			if (n < 1) n = 1;
+			span = sum / (float)n;
+			m_workAvg = wsum / (float)n;
 			m_fps = 1.f / span;
+			m_fpsWin = acc;
 		}
 	}
 	m_fpsAt = t1;
@@ -1694,6 +1740,7 @@ void Game::OnBecameActive()
 	m_fpsAt.QuadPart = 0;
 	m_fpsN = 0;
 	m_fpsI = 0;
+	m_fpsWin = 0;
 }
 
 void Game::ReleaseInput()
@@ -2805,27 +2852,26 @@ void Game::WeatherTread(const Unit& u, int x, int z)
 // 髪や服と同じ突風。地形に沿った渦を足して、粒がまっすぐ飛ばないようにする。
 static void WindField(float time, float x, float z, float& ox, float& oz, float& lift, int theme)
 {
-	float burst = TacBurst(time);
-	float ang = time * 0.23f;
-	float mag = 1.25f + burst * 6.2f;
-	if (theme == TH_DESERT || theme == TH_CANYON) mag *= 1.48f;
-	else if (theme == TH_PLAINS) mag *= 1.12f;
-	else if (theme == TH_SNOW) mag *= 0.68f;
-	else if (theme == TH_FOREST) mag *= 0.52f;
-	else if (theme == TH_SEABED) mag *= 0.32f;
-	else if (theme == TH_ORBIT) mag *= 0.18f;
-	else if (theme == TH_VOLCANO) mag *= 1.22f;
-	else if (theme == TH_FALLS) mag *= 0.82f;
-	else if (theme == TH_STATION) mag *= 0.4f;
-	else if (theme == TH_CITADEL) mag *= 0.7f;
-	else if (theme == TH_LANTERN) mag *= 0.55f;
-	ox = cosf(ang) * mag;
-	oz = sinf(ang) * mag;
+	TacAir air = TacAirHeld(time);
+	float mag = 1.f;
+	if (theme == TH_DESERT || theme == TH_CANYON) mag = 1.48f;
+	else if (theme == TH_PLAINS) mag = 1.12f;
+	else if (theme == TH_SNOW) mag = 0.68f;
+	else if (theme == TH_FOREST) mag = 0.52f;
+	else if (theme == TH_SEABED) mag = 0.32f;
+	else if (theme == TH_ORBIT) mag = 0.18f;
+	else if (theme == TH_VOLCANO) mag = 1.22f;
+	else if (theme == TH_FALLS) mag = 0.82f;
+	else if (theme == TH_STATION) mag = 0.4f;
+	else if (theme == TH_CITADEL) mag = 0.7f;
+	else if (theme == TH_LANTERN) mag = 0.55f;
+	ox = (air.bx + air.mx) * mag * 1.7f;
+	oz = (air.bz + air.mz) * mag * 1.7f;
 	float s = sinf(x * 0.41f + time * 0.55f) * cosf(z * 0.33f - time * 0.37f);
 	float c = cosf(x * 0.27f - time * 0.48f) * sinf(z * 0.36f + time * 0.29f);
-	ox += -c * (0.9f + burst * 2.2f);
-	oz += s * (0.9f + burst * 2.2f);
-	lift = burst * 2.4f + s * 0.45f;
+	ox += -c * (0.7f + mag * 0.35f);
+	oz += s * (0.7f + mag * 0.35f);
+	lift = air.y * mag * 1.5f + s * 0.35f;
 	if (theme == TH_VOLCANO) lift += 1.15f;
 	else if (theme == TH_SEABED) lift -= 0.35f;
 	else if (theme == TH_SWAMP) lift += 0.25f;
@@ -3087,6 +3133,8 @@ void Game::UpdateParticles(float dt)
 						if ((n & 1) == 0) {
 							if (!onLand(16.f, 0.08f, 0.28f, at)) continue;
 							born(7, at, v3(wx * 0.22f, 0.12f, wz * 0.22f), 2.6f, 0.11f, 0.9f, 0.96f, 1.f, 0, 0.04f, 0.7f);
+							if (n == 0 && onLand(14.f, 1.4f, 4.2f, at))
+								born(7, at, v3(wx * 0.06f, m_rng.F(0.04f, 0.18f), wz * 0.06f), 3.6f, 0.16f, 0.92f, 0.98f, 1.f, 0, -0.12f, 0.88f);
 						} else {
 							if (!onLand(16.f, 2.4f, 6.5f, at)) continue;
 							born(9, at, v3(wx * 0.18f, m_rng.F(-1.6f, -0.5f), wz * 0.18f), 2.1f, 0.055f, 0.92f, 0.97f, 1.f, 1, 4.6f, 0.32f);
@@ -3183,6 +3231,16 @@ void Game::UpdateParticles(float dt)
 		else if (wx == WX_HEAT) rate = 18.f;
 		if (QualityNow() <= 0) rate *= 0.45f;
 		else if (QualityNow() == 4) rate *= 0.3f;
+		// 雨は一定ではない。ゆっくりした強弱と突風で土砂降りと小降りを行き来させる。
+		float wetGust = 0.f;
+		if (wx == WX_RAIN || wx == WX_STORM) {
+			wetGust = TacBurst(m_time);
+			float swell = 0.78f + 0.42f * sinf(m_time * 0.11f) + 0.22f * sinf(m_time * 0.037f + 1.7f);
+			float f = swell + wetGust * 0.5f;
+			if (f < 0.45f) f = 0.45f;
+			else if (f > 1.75f) f = 1.75f;
+			rate *= f;
+		}
 		m_wxAcc += dt * rate;
 		V3 eye = m_eye;
 		V3 fwd = m_camTarget - eye;
@@ -3209,7 +3267,7 @@ void Game::UpdateParticles(float dt)
 			q.p = p; q.a = 1; q.add = 1; q.nHit = 0;
 			if (wx == WX_RAIN || wx == WX_STORM) {
 				float sp = (wx == WX_STORM) ? m_rng.F(14.f, 20.f) : m_rng.F(10.f, 15.f);
-				float w = (wx == WX_STORM) ? 5.2f : 1.6f;
+				float w = ((wx == WX_STORM) ? 5.2f : 1.6f) * (1.f + wetGust * 1.2f);
 				q.v = wind * w + v3(m_rng.F(-0.4f, 0.4f), -sp, m_rng.F(-0.4f, 0.4f));
 				q.life = q.max = 1.6f;
 				q.size = 0.055f; q.size1 = 0.04f;
@@ -3407,12 +3465,10 @@ void Game::UpdateParticles(float dt)
 				p.v.x += sinf(m_time * 0.55f + p.p.z * 0.28f) * dt * 0.16f;
 			}
 		} else {
-			float gust = TacBurst(m_time);
-			if (gust > 0.02f) {
-				float ang = m_time * 0.23f;
-				p.v.x += cosf(ang) * gust * 7.5f * dt;
-				p.v.z += sinf(ang) * gust * 6.2f * dt;
-			}
+			TacAir air = TacAirHeld(m_time);
+			p.v.x += (air.bx + air.mx) * 2.4f * dt;
+			p.v.z += (air.bz + air.mz) * 2.1f * dt;
+			p.v.y += air.y * 1.6f * dt;
 		}
 		V3 prev = p.p;
 		p.v.y -= p.grav * dt;
@@ -3517,7 +3573,196 @@ void Game::UpdateParticles(float dt)
 			m_r.BuildMinimap(m_b.map);
 		}
 	}
+	UpdateWeatherEvents(dt);
 	if (m_shake > 0) m_shake = max(0.f, m_shake - dt * 2.5f);
+}
+
+// 天候に合わせたまれな出来事。雷・にわか雹・地震。エフェクトと盤面を一体で動かす。
+void Game::LightningStrike(V3 to, float mag)
+{
+	// 空から着弾点まで、横に跳ねながら落ちるジグザグの筋。既存の雷（shape 6）と同じ描き方。
+	float h = m_rng.F(15.f, 20.f);
+	float topx = to.x + m_rng.F(-2.2f, 2.2f);
+	float topz = to.z + m_rng.F(-2.2f, 2.2f);
+	int segs = 18;
+	for (int s = 0; s < segs && (int)m_parts.size() < 3960; s++) {
+		float f = (float)s / segs;              // 0=空 1=地面
+		float jig = 1.5f * (1.f - f) + 0.12f;
+		float cx = to.x + (topx - to.x) * (1.f - f) + m_rng.F(-jig, jig);
+		float cz = to.z + (topz - to.z) * (1.f - f) + m_rng.F(-jig, jig);
+		float cy = to.y + h * (1.f - f);
+		Particle q = {};
+		q.p = v3(cx, cy, cz);
+		q.v = v3(m_rng.F(-0.5f, 0.5f), -6.5f, m_rng.F(-0.5f, 0.5f));
+		q.life = q.max = 0.14f + m_rng.F(0.f, 0.08f);
+		q.size = 0.26f * mag; q.size1 = 0.08f;
+		q.r = 0.9f; q.g = 0.95f; q.b = 1.f; q.a = 1;
+		q.shape = 6; q.add = 1; q.stretch = 0.06f; q.drag = 0.f; q.wxHit = 0;
+		m_parts.push_back(q);
+		// たまに枝分かれ
+		if (s > 5 && (s & 3) == 0 && (int)m_parts.size() < 3960) {
+			Particle b = q;
+			b.p.x += m_rng.F(-0.9f, 0.9f); b.p.z += m_rng.F(-0.9f, 0.9f);
+			b.size *= 0.55f; b.life = b.max = 0.1f;
+			m_parts.push_back(b);
+		}
+	}
+	// 着弾の閃光コアと火花
+	Burst(to, 2, 0.2f, 1.1f * mag, 0.2f, 0.9f, 0.96f, 1.f, 1, 1, 0, 0, 0, 2.2f * mag);
+	Burst(to, 16, 6.5f * mag, 0.07f, 0.4f, 0.95f, 0.98f, 1.f, 3, 1, 1.2f, 0.03f, 0.3f);
+	// 盤面への影響。水面なら波紋と飛沫、それ以外は雨なら湿りを一気に上げる。
+	int ix = (int)floorf(to.x), iz = (int)floorf(to.z);
+	if (Map::In(ix, iz)) {
+		const Cell& c = m_b.map.At(ix, iz);
+		if (c.t == T_WATER) {
+			int s = m_ripHead % TAC_RIPN;
+			m_ripHead++;
+			m_rip[s][0] = to.x; m_rip[s][1] = m_time; m_rip[s][2] = to.z; m_rip[s][3] = 1.6f * mag;
+			Burst(to, 10, 3.2f, 0.06f, 0.5f, 0.78f, 0.9f, 1.f, 1, 1, 10.f, 0.03f, 1.6f);
+		} else if (c.t != T_VOID && c.t != T_CHASM) {
+			int wx = TacWx(m_b.weather);
+			if (wx == WX_RAIN || wx == WX_STORM) {
+				int i = iz * MAPN + ix;
+				int d = m_cover[i] + 40; if (d > 255) d = 255;
+				m_cover[i] = (unsigned char)d;
+			}
+		}
+	}
+}
+
+void Game::UpdateWeatherEvents(float dt)
+{
+	if (m_screen != SC_BATTLE) return;
+	int wx = TacWx(m_b.weather);
+	int theme = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+	BOOL wet = (wx == WX_RAIN || wx == WX_STORM);
+	BOOL storm = (wx == WX_STORM);
+
+	// 稲妻フラッシュの減衰（速く、寒色で、見づらくならない強さに抑える）
+	if (m_wxFlash > 0.f) m_wxFlash = max(0.f, m_wxFlash - dt * 3.6f);
+
+	// 落雷から遅れて来る雷鳴（＝揺れ）。近いほど早く・強く。
+	if (m_boltT > 0.f) {
+		m_boltT -= dt;
+		if (m_boltT <= 0.f) {
+			m_shake = max(m_shake, m_boltMag);
+			m_boltMag = 0.f;
+		}
+	}
+
+	// 地震。揺れを持続させ、足元から砂塵を巻き上げる。
+	if (m_quakeT > 0.f) {
+		m_quakeT -= dt;
+		float env = m_quakeMag * (0.45f + 0.55f * fabsf(sinf(m_time * 21.f)));
+		m_shake = max(m_shake, env);
+		m_quakeAcc += dt * 46.f;
+		int guard = 0;
+		const Map& map = m_b.map;
+		while (m_quakeAcc >= 1.f && guard < 5 && (int)m_parts.size() < 3700) {
+			m_quakeAcc -= 1.f; guard++;
+			float ang = m_rng.F(0.f, 6.2831853f);
+			float rr = m_rng.F(2.f, 15.f);
+			float x = m_camTarget.x + cosf(ang) * rr;
+			float z = m_camTarget.z + sinf(ang) * rr;
+			int ix = (int)floorf(x), iz = (int)floorf(z);
+			if (!Map::In(ix, iz)) continue;
+			const Cell& c = map.At(ix, iz);
+			if (c.t == T_VOID || c.t == T_CHASM) continue;
+			float gy = map.TopY(ix, iz);
+			Particle q = {};
+			q.p = v3(x, gy + m_rng.F(0.02f, 0.12f), z);
+			q.v = v3(m_rng.F(-0.5f, 0.5f), m_rng.F(0.5f, 1.6f), m_rng.F(-0.5f, 0.5f));
+			q.life = q.max = m_rng.F(0.7f, 1.5f);
+			q.size = m_rng.F(0.05f, 0.1f); q.size1 = q.size * 2.2f;
+			if (theme == TH_VOLCANO) { q.r = 0.5f; q.g = 0.32f; q.b = 0.22f; }
+			else if (theme == TH_DESERT || theme == TH_CANYON) { q.r = 0.78f; q.g = 0.66f; q.b = 0.42f; }
+			else { q.r = 0.62f; q.g = 0.6f; q.b = 0.58f; }
+			q.a = 0.5f; q.shape = 0; q.add = 0; q.grav = -0.4f; q.drag = 0.9f; q.wxHit = 0;
+			m_parts.push_back(q);
+		}
+	}
+
+	// にわか雹。既存の雹の粒を降らせ、跳ねて積もる処理はそのまま使う。
+	if (m_hailBurstT > 0.f) {
+		m_hailBurstT -= dt;
+		float hrate = (QualityNow() == 4) ? 14.f : 34.f;
+		m_hailAcc += dt * hrate;
+		V3 eye = m_eye;
+		V3 fwd = m_camTarget - eye; float fl = Len(fwd);
+		fwd = fl > 0.2f ? fwd * (1.f / fl) : v3(0, 0, 1);
+		V3 side = Cross(v3(0, 1, 0), fwd);
+		side = (Len(side) < 0.2f) ? v3(1, 0, 0) : Norm(side);
+		int guard = 0;
+		while (m_hailAcc >= 1.f && guard < 6 && (int)m_parts.size() < 3400) {
+			m_hailAcc -= 1.f; guard++;
+			float along = m_rng.F(3.4f, 15.f), lat = m_rng.F(-9.f, 9.f), up = m_rng.F(1.f, 6.5f);
+			V3 p = eye + fwd * along + side * lat + v3(0, up, 0);
+			int ix = (int)floorf(p.x), iz = (int)floorf(p.z);
+			if (Map::In(ix, iz)) { float gy = m_b.map.StandY(ix, iz); if (p.y < gy + 1.4f) p.y = gy + m_rng.F(3.f, 8.5f); }
+			Particle q = {};
+			q.p = p; q.a = 1; q.add = 1; q.nHit = 0;
+			q.v = v3(m_rng.F(-0.2f, 0.2f), m_rng.F(-18.f, -13.f), m_rng.F(-0.2f, 0.2f));
+			q.life = q.max = 1.4f;
+			q.size = 0.06f; q.size1 = 0.05f;
+			q.r = 0.9f; q.g = 0.95f; q.b = 1.f;
+			q.shape = 7; q.grav = 22.f; q.drag = 0.05f; q.stretch = 0.02f; q.wxHit = 5;
+			m_parts.push_back(q);
+		}
+	}
+
+	// 次のイベント抽選
+	m_wxEventT -= dt;
+	if (m_wxEventT > 0.f) return;
+	float base = 22.f;
+	if (storm) base = 5.5f;
+	else if (wx == WX_RAIN) base = 15.f;
+	m_wxEventT = m_rng.F(base * 0.6f, base * 1.4f);
+
+	BOOL quakeTheme = (theme == TH_VOLCANO || theme == TH_CANYON || theme == TH_RUINS || theme == TH_CITADEL);
+	float r = m_rng.F(0.f, 1.f);
+
+	auto trigBolt = [&]() {
+		// 視界の前方・盤上の地点を選ぶ
+		V3 eye = m_eye, fwd = m_camTarget - eye; float fl = Len(fwd);
+		fwd = fl > 0.2f ? fwd * (1.f / fl) : v3(0, 0, 1);
+		V3 side = Cross(v3(0, 1, 0), fwd); side = (Len(side) < 0.2f) ? v3(1, 0, 0) : Norm(side);
+		V3 to = m_camTarget; BOOL found = FALSE;
+		for (int t = 0; t < 8 && !found; t++) {
+			float along = m_rng.F(4.f, 18.f), lat = m_rng.F(-12.f, 12.f);
+			V3 p = m_camTarget + fwd * (along - 10.f) + side * lat;
+			int ix = (int)floorf(p.x), iz = (int)floorf(p.z);
+			if (!Map::In(ix, iz)) continue;
+			const Cell& c = m_b.map.At(ix, iz);
+			if (c.t == T_VOID || c.t == T_CHASM) continue;
+			to = v3(ix + 0.5f, m_b.map.TopY(ix, iz), iz + 0.5f); found = TRUE;
+		}
+		float distToEye = Len(to - m_eye);
+		float near01 = 1.f - min(1.f, distToEye / 36.f);
+		float mag = 0.85f + near01 * 0.6f + (storm ? 0.25f : 0.f);
+		LightningStrike(to, mag);
+		m_wxFlash = max(m_wxFlash, 0.42f + near01 * 0.3f);
+		// 雷鳴は距離に応じて遅れて届く
+		m_boltT = 0.08f + distToEye * 0.045f;
+		m_boltMag = max(m_boltMag, (0.3f + near01 * 0.55f) * (storm ? 1.1f : 0.85f));
+	};
+	auto trigHail = [&]() { m_hailBurstT = m_rng.F(2.5f, 5.5f); m_hailAcc = 0.f; };
+	auto trigQuake = [&]() {
+		m_quakeT = m_rng.F(1.6f, 3.6f);
+		m_quakeMag = (theme == TH_VOLCANO) ? m_rng.F(0.5f, 0.75f) : m_rng.F(0.32f, 0.55f);
+		m_quakeAcc = 0.f;
+	};
+
+	if (storm) {
+		if (r < 0.66f) trigBolt();
+		else if (r < 0.86f) trigHail();
+		else trigQuake();
+	} else if (wx == WX_RAIN) {
+		if (r < 0.42f) trigBolt();
+		else if (r < 0.58f) trigHail();
+		else if (quakeTheme && r < 0.74f) trigQuake();
+	} else {
+		if (quakeTheme && r < 0.5f) trigQuake();
+	}
 }
 
 void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
@@ -3922,11 +4167,12 @@ void Game::EnterBase()
 void Game::WarmHomeAvatars()
 {
 	if (m_avaLoadUnits < 1) return;
-	int who[64];
-	int model[64], ava[64], cup[64];
+	int who[MAX_PARTY];
+	int model[MAX_PARTY], ava[MAX_PARTY], cup[MAX_PARTY];
 	int n = 0;
-	for (int ri = 0; ri < MAX_ROSTER && n < 64; ri++) {
-		if (!m_save.roster[ri].used) continue;
+	for (int i = 0; i < MAX_PARTY && n < MAX_PARTY; i++) {
+		int ri = m_save.party[i];
+		if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
 		Actor tmp;
 		ActorFromChar(tmp, m_lib, m_r, m_save.roster[ri]);
 		if (tmp.avatar <= 0 || tmp.model < 0) continue;
@@ -7205,7 +7451,7 @@ void Game::DrawCreate3D()
 	m_r.SetLight(Norm(v3(.42f, .86f, -.42f)), look, 4.5f);
 	m_r.SetShadowEnabled(TRUE);
 	ActorPose(a, m_lib, m_r);
-	M4 aw = ActorWorld(a, pos + v3(0, a.hover + sinf(m_time * 2.f) * .03f * (a.hover > 0), 0), PI + m_previewYaw);
+	M4 aw = ActorWorld(a, pos + v3(0, a.hover, 0), PI + m_previewYaw);
 	DrawParams dp;
 	dp.outline = .01f;
 	dp.rim = .55f;

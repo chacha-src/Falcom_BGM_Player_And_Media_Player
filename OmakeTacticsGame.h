@@ -285,6 +285,7 @@ private:
 	void UpdateSeq(float dt);
 	void SeqImpact(const SeqStep& st, int volley);
 	void FinishSeq();
+	void GrantFoeLoot(int ui, int coop);
 	void AwardExp();
 	void FinishUnitTurn(int acted);
 	void RaiseStampede();
@@ -357,6 +358,8 @@ private:
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void UpdateParticles(float dt);
+	void UpdateWeatherEvents(float dt);
+	void LightningStrike(V3 to, float mag);
 	void WeatherTread(const Unit& u, int x, int z);
 	void Shake(float s) { m_shake = max(m_shake, s); }
 
@@ -371,9 +374,10 @@ private:
 	BOOL m_qDrew;
 	float m_qCoolT, m_syncLock;
 	float m_fps;
-	float m_fpsSpan[20];
-	float m_workSpan[20];
+	float m_fpsSpan[160];
+	float m_workSpan[160];
 	float m_workAvg;
+	float m_fpsWin;
 	float m_msUpd, m_msSh, m_msRef, m_msMain, m_msPort, m_msHud, m_msPr, m_msAud;
 	int m_fpsN, m_fpsI;
 	LARGE_INTEGER m_fpsAt;
@@ -478,6 +482,17 @@ private:
 	float m_wxAcc;
 	float m_wxMeshWait;
 	int m_wxMesh;
+	// 天候イベント（雷・雹・地震）。固定配列のまま、戦闘中だけ動く。
+	float m_wxEventT;      // 次の天候イベントまでの残り
+	float m_boltT;         // 落雷から雷鳴（揺れ）までの遅延
+	float m_boltMag;       // 雷鳴の強さ
+	float m_quakeT;        // 地震の残り時間
+	float m_quakeMag;      // 地震の強さ
+	float m_quakeAcc;      // 地震の砂塵スポーン蓄積
+	float m_hailBurstT;    // にわか雹の残り時間
+	float m_hailAcc;       // にわか雹のスポーン蓄積
+	float m_wxFlash;       // 稲妻フラッシュの強さ 0..1
+	float m_wxFlashCol[3]; // フラッシュの色（寒色の白）
 	unsigned char m_cover[MAPN * MAPN];
 	V3 m_eye;
 

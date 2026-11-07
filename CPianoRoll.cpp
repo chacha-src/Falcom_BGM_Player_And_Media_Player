@@ -156,10 +156,10 @@ void CPrHelpDlg::OnPaint()
 
 	int y = 6;
 	const int L = 10;
-	title(L, y, LL14(L"簡易ピアノロール操作ガイド", L"Simple Piano Roll — Guide", L"Piano roll simple — Guide", L"Piano roll semplice — Guida",
-		L"Piano roll simple — Guía", L"간이 피아노롤 — 가이드", L"简易钢琴卷帘 — 指南", L"لفة بيانو بسيطة — دليل",
-		L"Простой piano roll — руководство", L"Einfache Klavierrolle — Guide", L"Piano roll simples — Guia", L"Eenvoudige pianorol — Gids",
-		L"Prosta rolka — przewodnik", L"Basit piyano rulosu — kılavuz"));
+	title(L, y, LL14(L"ピアノロール操作ガイド", L"Piano Roll — Guide", L"Piano roll — Guide", L"Piano roll — Guida",
+		L"Piano roll — Guía", L"피아노롤 — 가이드", L"钢琴卷帘 — 指南", L"لفة البيانو — دليل",
+		L"Piano roll — руководство", L"Klavierrolle — Guide", L"Piano roll — Guia", L"Pianorol — Gids",
+		L"Rolka pianina — przewodnik", L"Piyano rulosu — kılavuz"));
 	y += titleLh;
 	muted(L, y, LL14(
 		L"再生音声からノートを推定し、鍵盤とロールで同期表示します（鍵盤MIDI入力ではありません。録りは右クリック）。",
@@ -1155,10 +1155,10 @@ BOOL CPianoRoll::OnInitDialog()
 {
     CCustomBlurDialogExBase::OnInitDialog();
     SetWindowText(LL14(
-        L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Rotolo pianoforte semplice",
-        L"Rollo de piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة",
-        L"Простой пианоролл", L"Einfache Klavierrolle", L"Rolo de piano simples", L"Eenvoudige pianorol",
-        L"Prosta rolka pianina", L"Basit piyano rulosu"));
+        L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Rotolo pianoforte",
+        L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو",
+        L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol",
+        L"Rolka pianina", L"Piyano rulosu"));
     // [ビルド確認用タグ] この文字列がタイトルバーに出ていれば、この CPianoRoll.cpp が
     // 実際にビルド・実行されている証拠になる。出ていなければ、差し替え忘れ/
     // 別コピーのビルド/キャッシュ等、ファイルが反映されていない問題を疑うこと。
@@ -1821,6 +1821,9 @@ void CPianoRoll::UpdateNoteStates()
     pp.peakHz = m_detPeakHz;
     pp.peakAmp = m_detPeakAmp;
     pp.nPeaks = m_detPeakN;
+    pp.burstHz = m_burstHz;
+    pp.burstAmp = m_burstAmp;
+    pp.nBurst = m_burstN;
     pp.tuneSemis = m_tuneSemis;
 
     bool prevActive[KEY_COUNT];
@@ -1864,7 +1867,8 @@ void CPianoRoll::UpdateNoteStates()
             return best;
         };
         for (int hi = 84; hi <= 100; ++hi) {
-            if (!picked[hi] || relShort(hi) >= 0.25f) continue;
+            // 短い窓にほとんど出ていない整数倍だけ落とす。鳴っている高音は残す。
+            if (!picked[hi] || relShort(hi) >= 0.01f) continue;
             for (int lo = 28; lo < hi && picked[hi]; ++lo) {
                 if (!picked[lo] || ownPow[lo] < ownPow[hi] * 1.05f) continue;
                 const float ratio = PianoKey::KeyHz(hi) / PianoKey::KeyHz(lo);
@@ -1914,6 +1918,38 @@ void CPianoRoll::UpdateNoteStates()
             picked[key] = true;
             if (ownPow[key] < m_burstAmp[i]) ownPow[key] = m_burstAmp[i];
             ++added;
+        }
+        float detMax = 0.0f;
+        for (int i = 0; i < m_detPeakN; ++i) {
+            if (m_detPeakAmp[i] > 0.0f) {
+                const float l = sqrtf(m_detPeakAmp[i]);
+                if (l > detMax) detMax = l;
+            }
+        }
+        if (detMax > 1.0e-8f) {
+            for (int i = 0; i < m_detPeakN; ++i) {
+                if (m_detPeakHz[i] <= 1.0f || m_detPeakAmp[i] <= 0.0f) continue;
+                const int k = PianoRoll108::KeyFromHzTune(m_detPeakHz[i], m_tuneSemis);
+                if (k < 36 || k > 96 || picked[k]) continue;
+                const float pa = sqrtf(m_detPeakAmp[i]);
+                if (pa < detMax * 0.12f) continue;
+                if (relShort(k) < 0.25f) continue;
+                const bool nearPicked = (k > 0 && picked[k - 1]) || (k + 1 < KEY_COUNT && picked[k + 1]);
+                if (nearPicked) continue;
+                bool partial = false;
+                for (int lo = 28; lo < k && !partial; ++lo) {
+                    if (!picked[lo]) continue;
+                    const float ratio = m_detPeakHz[i] / PianoKey::KeyHz(lo);
+                    const int hn = (int)floorf(ratio + 0.5f);
+                    if (hn < 2 || hn > 6) continue;
+                    if (centsBetween(m_detPeakHz[i], PianoKey::KeyHz(lo) * (float)hn) < 40.0f
+                        && pa < ownPow[lo] * 0.65f)
+                        partial = true;
+                }
+                if (partial) continue;
+                picked[k] = true;
+                if (ownPow[k] < pa) ownPow[k] = pa;
+            }
         }
     }
 
@@ -3590,7 +3626,7 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
                 L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
                 L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
                 L"Przewodnik", L"İşlem kılavuzu"),
-            LL14(L"簡易ピアノロールの操作ガイドを表示します。", L"Show the simple piano roll operation guide.", L"Afficher le guide d'utilisation du piano roll simple.", L"Mostra la guida operativa del piano roll semplice.", L"Mostrar la guia de operacion del piano roll simple.", L"간이 피아노 롤 조작 가이드를 표시합니다.", L"显示简易钢琴卷帘操作指南。", L"عرض دليل تشغيل لفافة البيانو البسيطة.", L"Показать руководство по простому пианороллу.", L"Bedienungsanleitung des einfachen Piano-Roll anzeigen.", L"Mostrar o guia de operacao do piano roll simples.", L"Toon de handleiding van de eenvoudige piano-roll.", L"Pokaz przewodnik po prostym piano roll.", L"Basit piyano roll islem kilavuzunu goster."));
+            LL14(L"ピアノロールの操作ガイドを表示します。", L"Show the piano roll operation guide.", L"Afficher le guide d'utilisation du piano roll.", L"Mostra la guida operativa del piano roll.", L"Mostrar la guia de operacion del piano roll.", L"피아노 롤 조작 가이드를 표시합니다.", L"显示钢琴卷帘操作指南。", L"عرض دليل تشغيل لفافة البيانو.", L"Показать руководство по пианороллу.", L"Bedienungsanleitung des Piano-Roll anzeigen.", L"Mostrar o guia de operacao do piano roll.", L"Toon de handleiding van de piano-roll.", L"Pokaz przewodnik po piano roll.", L"Piyano roll islem kilavuzunu goster."));
     }
 
     if (point.x == -1 && point.y == -1) {

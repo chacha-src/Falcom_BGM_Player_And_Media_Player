@@ -40,9 +40,12 @@ struct Fix {
 // 可変長の中身は、起動時に一度だけ確保したarenaから切り出す。pushのたびに new しない。
 enum { TAC_ARENA = 512 * 1024 * 1024, TAC_AVA_ARENA = 192 * 1024 * 1024 };
 void* TacArenaAlloc(size_t bytes, size_t align);
+void TacArenaReset();
 int TacArenaBad();
 // アバターの生成だけは捨てて作り直せる領域。本体の arena は戻せないので、衣装を切り替えると埋まって落ちていた。
 void* TacAvaAlloc(size_t bytes, size_t align);
+size_t TacAvaMark();
+void TacAvaRewind(size_t mark);
 void TacAvaReset();
 int TacAvaBad();
 // 敵一覧と戦闘で載せ替えるモンスター。切り替えるたびに本体 arena へ捨てると、一覧を見たあと戦闘開始で落ちる。
@@ -92,15 +95,27 @@ struct Buf {
 		for (int i = old; i < n; i++) p[i] = fillv;
 	}
 	void fill(int nn, const T& fillv) {
-		resize(nn);
-		for (int i = 0; i < n; i++) p[i] = fillv;
+		if (nn < 0) nn = 0;
+		if (nn > cap) grow(nn);
+		if (nn > cap) nn = cap;
+		n = nn;
+		if (!p || n <= 0) return;
+		unsigned char b0 = *(const unsigned char*)&fillv;
+		bool sameByte = true;
+		for (size_t k = 1; k < sizeof(T); k++) {
+			if (((const unsigned char*)&fillv)[k] != b0) { sameByte = false; break; }
+		}
+		if (sameByte) memset(p, b0, (size_t)n * sizeof(T));
+		else for (int i = 0; i < n; i++) p[i] = fillv;
 	}
 	template<class It>
 	void assign(It a, It b) {
 		int nn = (int)(b - a);
 		if (nn < 0) nn = 0;
-		resize(nn);
-		for (int i = 0; i < n; i++) p[i] = a[i];
+		if (nn > cap) grow(nn);
+		if (nn > cap) nn = cap;
+		n = nn;
+		if (p && n > 0) memcpy(p, &(*a), (size_t)n * sizeof(T));
 	}
 	void grow(int nn) {
 		if (nn <= cap) return;

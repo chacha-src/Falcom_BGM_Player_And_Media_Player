@@ -83,23 +83,31 @@ void CSSkin(uint id : SV_DispatchThreadID)
 			p = origin;
 			nrm = float3(0, 1, 0);
 		} else {
-			// 型の髪は頭の形と合わず、頭頂や分け目で頭蓋がカードの間から出る。
-			// 頭蓋の内側に入った髪だけ、中心から外へ 6mm 浮かせた面まで出す。
-			// 顔の下半分（前で中心より 3cm 下）は前髪が鼻の前へ出るので触らない。
+			// 頭蓋の内側に入った髪だけ、中心から外へ 8mm 浮かせた面まで出す。
+			// 前髪が目・鼻・頬・顎に刺さらないよう、顔の下側や側面も楕円体で下限を持たせて顔の前後左右へ逃がす。
 			if (SkullC.w > 0.5) {
 				float3 d = p - SkullC.xyz;
 				float r = length(d);
-				if (r > 1e-5 && !(d.z < -0.04 && d.y < -0.03)) {
+				if (r > 1e-5 && d.y > -0.15) {
 					float el = asin(clamp(d.y / r, -1, 1));
-					if (el > -0.6 && el < 1.35) {
+					float R = 0.0;
+					if (el > -0.58 && el < 1.35) {
 						float fa = (atan2(d.x, d.z) + 3.14159265) * (16.0 / 6.2831853) - 0.5;
 						float fe = (el + 0.6) * (8.0 / 2.1707963) - 0.5;
 						int a0 = (int)floor(fa), e0 = (int)floor(fe);
 						float ta = fa - a0, te = fe - e0;
-						float R = lerp(lerp(SkullAt(e0, a0), SkullAt(e0, a0 + 1), ta),
+						R = lerp(lerp(SkullAt(e0, a0), SkullAt(e0, a0 + 1), ta),
 							lerp(SkullAt(e0 + 1, a0), SkullAt(e0 + 1, a0 + 1), ta), te);
-						if (R > 0.03 && r < R + 0.008) p = SkullC.xyz + d * ((R + 0.008) / r);
 					}
+					float3 u = d / r;
+					float rz = u.z < 0.0 ? 0.100 : 0.094;
+					float ry = u.y < 0.0 ? 0.125 : 0.100;
+					float rx = 0.086;
+					float e2 = (u.x * u.x) / (rx * rx) + (u.y * u.y) / (ry * ry) + (u.z * u.z) / (rz * rz);
+					float faceR = rsqrt(max(e2, 1e-4)) * smoothstep(-0.15, -0.09, d.y);
+					R = max(R, faceR);
+					float pad = d.z < -0.02 ? 0.010 : 0.008;
+					if (R > 0.03 && r < R + pad) p = SkullC.xyz + u * (R + pad);
 				}
 			}
 			if (hj < 64u) {

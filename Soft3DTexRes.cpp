@@ -28,11 +28,10 @@ static void BonusExeDir(wchar_t* dir, int cch)
 	if (sl) *sl = 0;
 }
 
-BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
+static BOOL BonusImagePath(int id, wchar_t* path, int cch)
 {
-	if (data) *data = NULL;
-	if (len) *len = 0;
-	if (!data || !len || id <= 0) return FALSE;
+	if (!path || cch < 4 || id <= 0) return FALSE;
+	path[0] = 0;
 	wchar_t rel[96] = {};
 	if (id >= IDR_TAC_PH0 && id < IDR_TAC_PH0 + 28) {
 		int i = id - IDR_TAC_PH0;
@@ -84,9 +83,59 @@ BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
 	}
 	wchar_t exe[MAX_PATH];
 	BonusExeDir(exe, MAX_PATH);
+	swprintf_s(path, (size_t)cch, L"%s\\tacticsbgm\\resource\\%s", exe, rel);
+	return TRUE;
+}
+
+BOOL BonusImageMap(int id, const BYTE** data, DWORD* len)
+{
+	if (data) *data = NULL;
+	if (len) *len = 0;
+	if (!data || !len || id <= 0) return FALSE;
+	struct MapSlot { int id; const BYTE* p; DWORD n; HANDLE hMap; HANDLE hFile; };
+	static MapSlot s_slot[32];
+	static int s_nslot = 0;
+	for (int i = 0; i < s_nslot; i++) {
+		if (s_slot[i].id == id) {
+			*data = s_slot[i].p;
+			*len = s_slot[i].n;
+			return TRUE;
+		}
+	}
 	wchar_t path[MAX_PATH];
-	swprintf_s(path, L"%s\\tacticsbgm\\resource\\%s", exe, rel);
-	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (!BonusImagePath(id, path, MAX_PATH)) return FALSE;
+	HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return FALSE;
+	DWORD sz = GetFileSize(hFile, NULL);
+	if (sz < 24 || sz > 512u * 1024u * 1024u) { CloseHandle(hFile); return FALSE; }
+	HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!hMap) { CloseHandle(hFile); return FALSE; }
+	const BYTE* view = (const BYTE*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+	if (!view) { CloseHandle(hMap); CloseHandle(hFile); return FALSE; }
+	if (s_nslot < 32) {
+		s_slot[s_nslot].id = id;
+		s_slot[s_nslot].p = view;
+		s_slot[s_nslot].n = sz;
+		s_slot[s_nslot].hMap = hMap;
+		s_slot[s_nslot].hFile = hFile;
+		s_nslot++;
+	} else {
+		CloseHandle(hMap);
+		CloseHandle(hFile);
+	}
+	*data = view;
+	*len = sz;
+	return TRUE;
+}
+
+BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
+{
+	if (data) *data = NULL;
+	if (len) *len = 0;
+	if (!data || !len || id <= 0) return FALSE;
+	wchar_t path[MAX_PATH];
+	if (!BonusImagePath(id, path, MAX_PATH)) return FALSE;
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (h == INVALID_HANDLE_VALUE) return FALSE;
 	DWORD sz = GetFileSize(h, NULL);
 	if (sz < 24 || sz > 512u * 1024u * 1024u) { CloseHandle(h); return FALSE; }
@@ -105,7 +154,9 @@ BOOL Soft3DTexLoadPngRes(int id, DWORD* dst, int dstW, int dstH)
 	BYTE* owned = NULL;
 	DWORD n = 0;
 	const BYTE* mem = NULL;
-	if (BonusImageRead(id, &owned, &n)) mem = owned;
+	if (!BonusImageMap(id, &mem, &n)) {
+		if (BonusImageRead(id, &owned, &n)) mem = owned;
+	}
 	if (!mem) {
 		HINSTANCE hi = AfxGetResourceHandle();
 		HRSRC hrs = FindResource(hi, MAKEINTRESOURCE(id), RT_RCDATA);

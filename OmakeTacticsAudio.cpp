@@ -347,23 +347,51 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 		if (duty > 0.5f) duty = 0.5f;
 		float tau = v.dec >= 0.015f ? v.dec : dur * 0.38f;
 		if (tau < 0.010f) tau = 0.010f;
+		int nDur = ev.n > 0 ? ev.n : 1;
+		int nRel = (int)(rel * (float)TAC_RATE);
+		if (nRel < 1) nRel = 1;
+		int nAtk = (int)(0.002f * (float)TAC_RATE);
+		if (nAtk < 1) nAtk = 1;
+		const float tauK = expf(-1.f / (tau * (float)TAC_RATE));
+		const float relK = expf(-3.f / (float)nRel);
+		float tauEnv = 1.f;
+		float relEnv = 1.f;
+		float curHz = ev.hz;
+		float hzMul = 1.f, hzAcc = 1.f;
+		if (sweep != 0.f) {
+			const double c = (double)sweep / 12.0;
+			const double invN = 1.0 / (double)nDur;
+			if (sweep > 0.f) {
+				hzMul = (float)pow(2.0, c * invN);
+			} else {
+				const double invN2 = invN * invN;
+				hzMul = (float)pow(2.0, c * (2.0 * (double)nDur - 1.0) * invN2);
+				hzAcc = (float)pow(2.0, -2.0 * c * invN2);
+			}
+		}
 		for (int i = 0; i < n; i++) {
-			float t = (float)i / (float)TAC_RATE;
-			float u = t / dur;
-			if (u > 1.f) u = 1.f;
-			float hz = ev.hz;
-			if (sweep != 0.f) hz *= powf(2.f, (sweep * (sweep < 0.f ? u * (2.f - u) : u)) / 12.f);
+			float hz = curHz;
+			if (i < nDur && sweep != 0.f) {
+				curHz *= hzMul;
+				hzMul *= hzAcc;
+			}
 			float env;
 			if (v.sus < 0.f) {
-				env = t < dur ? sinf(3.1415927f * sqrtf(u)) : 0.f;
+				float u = (float)i / (float)nDur;
+				env = i < nDur ? FmSin(0.5f * sqrtf(u > 1.f ? 1.f : u)) : 0.f;
 			} else if (v.sus >= 0.45f) {
-				env = t < 0.002f ? t / 0.002f : 1.f;
-			} else if (t < 0.002f) env = t / 0.002f;
-			else env = expf(-((t < dur ? t : dur) - 0.002f) / tau);
-			if (t > dur + rel) env = 0.f;
-			else if (t > dur) {
-				float r = (t - dur) / rel;
-				env *= expf(-3.f * r) * (1.f - r);
+				env = i < nAtk ? (float)i / (float)nAtk : 1.f;
+			} else if (i < nAtk) {
+				env = (float)i / (float)nAtk;
+			} else {
+				env = tauEnv;
+				if (i < nDur) tauEnv *= tauK;
+			}
+			if (i >= nDur + nRel) env = 0.f;
+			else if (i >= nDur) {
+				float r = (float)(i - nDur) / (float)nRel;
+				env *= relEnv * (1.f - r);
+				relEnv *= relK;
 			}
 			if (env <= 0.001f) continue;
 			float s = 0.f;
@@ -400,6 +428,19 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 	float mk = v.mdec != 0.f ? expf(-1.f / (fabsf(v.mdec) * (float)TAC_RATE)) : 1.f;
 	float nk = expf(-1.f / ((0.012f + v.dec * 0.3f) * (float)TAC_RATE));
 	float dx = 1.f, rx = 1.f, mx = 1.f, nx = 1.f, last = 0.f;
+	float curHz = ev.hz;
+	float hzMul = 1.f, hzAcc = 1.f;
+	if (sweep != 0.f && nDur > 0) {
+		const double c = (double)sweep / 12.0;
+		const double invN = 1.0 / (double)nDur;
+		if (sweep > 0.f) {
+			hzMul = (float)pow(2.0, c * invN);
+		} else {
+			const double invN2 = invN * invN;
+			hzMul = (float)pow(2.0, c * (2.0 * (double)nDur - 1.0) * invN2);
+			hzAcc = (float)pow(2.0, -2.0 * c * invN2);
+		}
+	}
 	for (int i = 0; i < n; i++) {
 		float env;
 		if (i < nAt) { env = (float)i / (float)nAt; last = env; }
@@ -410,13 +451,12 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 		}
 		float m = v.mdec > 0.f ? v.mfl + (1.f - v.mfl) * mx : (v.mdec < 0.f ? v.mfl + (1.f - v.mfl) * (1.f - mx) : 1.f);
 		mx *= mk;
-		if (env <= 0.f) continue;
-		float hz = ev.hz;
-		if (sweep != 0.f) {
-			float u = (float)i / (float)nDur;
-			if (u > 1.f) u = 1.f;
-			hz *= powf(2.f, (sweep * (sweep < 0.f ? u * (2.f - u) : u)) / 12.f);
+		float hz = curHz;
+		if (i < nDur && sweep != 0.f) {
+			curHz *= hzMul;
+			hzMul *= hzAcc;
 		}
+		if (env <= 0.f) continue;
 		float o0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
 		float o1, o2, o3, a;
 		if (v.alg == 2) {
@@ -1317,17 +1357,27 @@ int TacAudioOnThread()
 	return s_th != NULL && s_run != 0;
 }
 
+static int s_sfxBuilt = 0;
+
 void TacAudioStart(void* hwnd)
 {
 	TacCsInit();
-	PcmRewind();
-	for (int i = 0; i < TS_N; i++) {
-		s_clip[i].pcm = NULL;
-		s_clip[i].play = NULL;
-		s_clip[i].n = s_clip[i].playN = 0;
+	if (!s_sfxBuilt) {
+		PcmRewind();
+		for (int i = 0; i < TS_N; i++) {
+			s_clip[i].pcm = NULL;
+			s_clip[i].play = NULL;
+			s_clip[i].n = s_clip[i].playN = 0;
+		}
+		TacSynthAll();
+		int miss = 0;
+		for (int i = 0; i < TS_N; i++) if (!s_clip[i].play) { miss = 1; break; }
+		if (miss) {
+			TacLoadPack();
+			TacSynthAll();
+		}
+		s_sfxBuilt = 1;
 	}
-	TacLoadPack();
-	TacSynthAll();
 	TacBgmScene(TAC_BGM_HUB);
 	int bgm = s_bgm;
 	if (!TacEnsureBuf((HWND)hwnd)) {
@@ -1367,12 +1417,6 @@ void TacAudioStop()
 	if (s_ds) { s_ds->Release(); s_ds = NULL; }
 	s_started = 0;
 	TacCloseBgm();
-	for (int i = 0; i < TS_N; i++) {
-		s_clip[i].pcm = NULL;
-		s_clip[i].play = NULL;
-		s_clip[i].n = s_clip[i].playN = 0;
-	}
-	PcmRewind();
 	memset(s_voice, 0, sizeof(s_voice));
 }
 

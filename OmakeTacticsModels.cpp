@@ -29,6 +29,10 @@ struct Geo {
 	int curPal;
 	DWORD curCol;
 	Geo() : curBone(0), curBone2(-1), curW2(0), curPal(Pal(0, 15)), curCol(0xFFFFFFFF) {}
+	void Clear() {
+		p.clear(); n.clear(); pal.clear(); b0.clear(); b1.clear(); w1.clear(); col.clear(); idx.clear();
+		curBone = 0; curBone2 = -1; curW2 = 0; curPal = Pal(0, 15); curCol = 0xFFFFFFFF;
+	}
 
 	int V(V3 pos, V3 nrm)
 	{
@@ -48,8 +52,10 @@ struct Geo {
 	template <class F>
 	void Ellipsoid(const M4& xf, V3 r, int seg, int rings, F keep)
 	{
+		if (seg > 62) seg = 62;
+		if (rings > 62) rings = 62;
 		int base = (int)p.size();
-		Buf<int> ok((seg + 1) * (rings + 1));
+		unsigned char ok[64 * 64];
 		for (int i = 0; i <= rings; i++) {
 			float th = PI * i / rings;
 			for (int j = 0; j <= seg; j++) {
@@ -213,12 +219,18 @@ struct Geo {
 	}
 };
 
+static Buf<VtxS> g_geoStaticV;
+static int g_fbHairModel = -2;
+static GpuMesh g_fbHairMesh[HAIR_STYLES];
+static Buf<VtxS> g_fbHairV[HAIR_STYLES];
+static V3 g_fbHairP[HAIR_STYLES];
+static Buf<VtxS> g_hairDrawBuf;
+
 static BOOL GeoToStatic(Renderer& r, const Geo& g, GpuMesh& out)
 {
 	if (g.p.empty() || g.idx.empty() || g.p.size() > 65535) return FALSE;
-	Buf<VtxS> v;
-	g.ToStatic(v);
-	if (!r.MakeMesh(out, v.data(), sizeof(VtxS), (UINT)v.size(), g.idx.data(), (UINT)g.idx.size())) return FALSE;
+	g.ToStatic(g_geoStaticV);
+	if (!r.MakeMesh(out, g_geoStaticV.data(), sizeof(VtxS), (UINT)g_geoStaticV.size(), g.idx.data(), (UINT)g.idx.size())) return FALSE;
 	out.tex = r.TexWhite();
 	return TRUE;
 }
@@ -277,12 +289,16 @@ static const ProcJoint kGolJ[GJ_N] = {
 	{ "legL", 1, .24f, .5f, 0 }, { "legR", 1, -.24f, .5f, 0 },
 };
 
+static Geo g_procGeo;
+static Buf<VtxK> g_procVtx;
+
 static int MakeSlime(Renderer& r)
 {
 	Model m;
 	BuildProcRig(m, "proc_slime", kSlimeJ, SJ_N);
 	m.headJ = SJ_TOP;
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curPal = Pal(13, 5);
 	// 体（下を潰した雫型）: body と top を高さで混合
 	int base = (int)g.p.size();
@@ -309,9 +325,8 @@ static int MakeSlime(Renderer& r)
 	g.Sphere(v3(.24f, .32f, -.08f), v3(.05f, .04f, .04f), 6, 4);
 	g.Sphere(v3(-.2f, .28f, .1f), v3(.045f, .035f, .04f), 6, 4);
 	g.Sphere(v3(.08f, .48f, .16f), v3(.04f, .03f, .035f), 6, 4);
-	Buf<VtxK> v;
-	g.ToSkinned(v);
-	return r.AddProcModel(m, v, g.idx);
+	g.ToSkinned(g_procVtx);
+	return r.AddProcModel(m, g_procVtx, g.idx);
 }
 
 static int MakeBat(Renderer& r)
@@ -319,7 +334,8 @@ static int MakeBat(Renderer& r)
 	Model m;
 	BuildProcRig(m, "proc_bat", kBatJ, BJ_N);
 	m.headJ = BJ_HEAD;
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curBone = BJ_BODY; g.curPal = Pal(0, 4);
 	g.Sphere(v3(0, .95f, 0), v3(.17f, .2f, .16f), 12, 8);
 	g.curBone = BJ_HEAD;
@@ -355,9 +371,8 @@ static int MakeBat(Renderer& r)
 	g.curBone = BJ_BODY; g.curPal = Pal(0, 3);
 	g.Cone(v3(.06f, .8f, 0), v3(.07f, .7f, -.02f), .03f, 5);
 	g.Cone(v3(-.06f, .8f, 0), v3(-.07f, .7f, -.02f), .03f, 5);
-	Buf<VtxK> v;
-	g.ToSkinned(v);
-	return r.AddProcModel(m, v, g.idx);
+	g.ToSkinned(g_procVtx);
+	return r.AddProcModel(m, g_procVtx, g.idx);
 }
 
 static int MakeWyvern(Renderer& r)
@@ -365,7 +380,8 @@ static int MakeWyvern(Renderer& r)
 	Model m;
 	BuildProcRig(m, "proc_wyvern", kWyvJ, WJ_N);
 	m.headJ = WJ_HEAD;
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	const int body = Pal(0, 12), belly = Pal(13, 2), horn = Pal(14, 2), memb = Pal(0, 8), eye = Pal(4, 3);
 	g.curBone = WJ_BODY; g.curPal = body;
 	g.Ellipsoid(MMul(MRotX(-.15f), MTrans(0, .95f, .08f)), v3(.3f, .28f, .5f), 14, 9);
@@ -433,9 +449,8 @@ static int MakeWyvern(Renderer& r)
 		g.Tri2(el, tip, f1);
 		g.Tri2(el, f1, f2);
 	}
-	Buf<VtxK> v;
-	g.ToSkinned(v);
-	return r.AddProcModel(m, v, g.idx);
+	g.ToSkinned(g_procVtx);
+	return r.AddProcModel(m, g_procVtx, g.idx);
 }
 
 static int MakeGolem(Renderer& r)
@@ -443,7 +458,8 @@ static int MakeGolem(Renderer& r)
 	Model m;
 	BuildProcRig(m, "proc_golem", kGolJ, GJ_N);
 	m.headJ = GJ_HEAD;
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	const int stone = Pal(0, 9), dark = Pal(0, 6), moss = Pal(6, 5), eye = Pal(4, 8), crack = Pal(1, 4);
 	g.curBone = GJ_HIPS; g.curPal = dark;
 	g.Sphere(v3(0, .40f, 0), v3(.32f, .16f, .26f), 12, 8);
@@ -485,9 +501,8 @@ static int MakeGolem(Renderer& r)
 		g.curPal = dark;
 		g.Sphere(v3(s * .22f, .05f, .04f), v3(.16f, .05f, .20f), 8, 5);
 	}
-	Buf<VtxK> v;
-	g.ToSkinned(v);
-	return r.AddProcModel(m, v, g.idx);
+	g.ToSkinned(g_procVtx);
+	return r.AddProcModel(m, g_procVtx, g.idx);
 }
 
 // 手続きアニメ（clip 種別ごと）
@@ -702,7 +717,8 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 		rr.z = min(rr.z, rr.x);
 		rr.y = min(rr.y, rr.x * 1.05f);
 	}
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curCol = 0xFFFFFFFF;
 	V3 capR = v3(rr.x * 1.08f, rr.y * 1.02f, rr.z * 1.15f);
 	V3 cc = c;
@@ -905,7 +921,8 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 // 背中に生やす翼。原点は肩、+X が翼端。羽軸・次列風切・初列風切・雨覆。
 static void BuildWing(Renderer& r, int dragon, int left, GpuMesh& out)
 {
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	if (!dragon) {
 		auto feather = [&](V3 st, float ang, float len, float wide, DWORD col) {
 			V3 d = v3(cosf(ang), sinf(ang), 0);
@@ -962,7 +979,8 @@ static void BuildWing(Renderer& r, int dragon, int left, GpuMesh& out)
 
 static void BuildCrown(Renderer& r, GpuMesh& out)
 {
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curCol = RGBA8(255, 205, 60);
 	const int N = 16;
 	for (int i = 0; i < N; i++) {
@@ -990,7 +1008,8 @@ static void BuildCrown(Renderer& r, GpuMesh& out)
 
 static void BuildRing(Renderer& r, GpuMesh& out)
 {
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curCol = 0xFFFFFFFF;
 	const int N = 40;
 	for (int i = 0; i < N; i++) {
@@ -1006,7 +1025,8 @@ static void BuildRing(Renderer& r, GpuMesh& out)
 
 static void BuildOrb(Renderer& r, GpuMesh& out)
 {
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curCol = 0xFFFFFFFF;
 	g.Sphere(v3(0, 0, 0), v3(1, 1, 1), 16, 10);
 	GeoToStatic(r, g, out);
@@ -1014,7 +1034,8 @@ static void BuildOrb(Renderer& r, GpuMesh& out)
 
 static void BuildIce(Renderer& r, GpuMesh& out)
 {
-	Geo g;
+	Geo& g = g_procGeo;
+	g.Clear();
 	g.curCol = RGBA8(255, 255, 255);
 	const float phi = 1.6180339887f;
 	V3 rv[12] = {
@@ -1091,6 +1112,12 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 
 void ReleaseLibrary(Library& lib)
 {
+	g_procGeo.Clear();
+	g_procVtx.clear();
+	g_geoStaticV.clear();
+	g_hairDrawBuf.clear();
+	g_fbHairModel = -2;
+	for (int s = 0; s < HAIR_STYLES; s++) { g_fbHairMesh[s].Release(); g_fbHairV[s].clear(); }
 	for (int b = 0; b < B_COUNT; b++) for (int s = 0; s < HAIR_STYLES; s++) lib.hair[b][s].Release();
 	for (int i = 0; i < HUM_HAIR_N; i++) for (int s = 0; s < HAIR_STYLES; s++) { lib.humHair[i][s].Release(); lib.humHairV[i][s].clear(); }
 	lib.humHairN = 0;
@@ -1214,8 +1241,11 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 			a.mods.Reset(r.models[hi].nJ);
 		}
 	}
-	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0)
-		EnsureHumHair(lib, r, a.model, Clampi(c.hair, 0, HAIR_STYLES - 1));
+	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0) {
+		const char* mn = r.models[a.model].name;
+		const BOOL digit = (!strncmp(mn, "HumF", 4) || !strncmp(mn, "HumM", 4)) && mn[4] >= '0' && mn[4] <= '9';
+		if (!digit) EnsureHumHair(lib, r, a.model, Clampi(c.hair, 0, HAIR_STYLES - 1));
+	}
 	{
 		int tier = ClassInfo(c.cls).tier;
 		if (tier > 1) a.scale *= 1.f + (tier - 1) * .02f;
@@ -1803,8 +1833,13 @@ static void ApplyFlyTrail(Actor& a, const Renderer& r)
 	}
 	r.FinishPose(m, a.pose, &a.mods);
 	int hips = HumanJoint(r, m, "Hips", "hips");
-	if (hips >= 0 && fabsf(a.legQ[6]) > 1e-4f) {
-		SpinJointBack(m, a.pose, hips, a.legQ[6]);
+	if (hips >= 0) {
+		const float bobW = a.legT * (a.flap > 0.5f ? 10.5f : 4.8f);
+		const float bobY = (a.flap > 0.5f ? 0.032f : 0.014f) * sinf(bobW);
+		const float bobZ = (a.flap > 0.5f ? 0.014f : 0.006f) * cosf(bobW * 0.5f);
+		a.pose.local[hips].m[13] += bobY;
+		a.pose.local[hips].m[14] += bobZ;
+		if (fabsf(a.legQ[6]) > 1e-4f) SpinJointBack(m, a.pose, hips, a.legQ[6]);
 		r.FinishPose(m, a.pose, &a.mods);
 	}
 	for (int k = 0; k < 3; k++) {
@@ -2378,6 +2413,11 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (!a.poseValid) ActorPose(a, lib, r);
 		if (!a.poseValid) return TRUE;
 		DrawParams d = dp;
+		// 見本は足が地面に付いたままなので、移動の速度は出ない。歩き・走り・飛行の羽根で向かい風を足す。
+		d.gait = 0.f;
+		if (a.clip == CL_RUN) d.gait = 0.72f;
+		else if (a.clip == CL_WALK) d.gait = 0.46f;
+		if (a.flap > 0.45f) d.gait = d.gait > 0.3f ? 1.05f : 0.95f;
 		BOOL hum = a.model >= 0 && a.model < (int)r.models.size() && strncmp(r.models[a.model].name, "Hum", 3) == 0;
 		if (hum) {
 			d.outline = 0;
@@ -2627,21 +2667,17 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			const Buf<VtxS>* hv = (slot >= 0) ? &lib.humHairV[slot][style] : NULL;
 			V3 piv = (slot >= 0) ? lib.humHairPivot[slot][style] : v3(0, 0, 0);
 			// 起動時の枠に入らなかった体でも、今のモデルで作り直して同じ経路で描く。
-			static int fbModel = -2;
-			static GpuMesh fbMesh[HAIR_STYLES];
-			static Buf<VtxS> fbV[HAIR_STYLES];
-			static V3 fbP[HAIR_STYLES];
 			if (!mesh || !mesh->vb || !hv || hv->empty()) {
-				if (fbModel != a.model) {
-					for (int s = 1; s < HAIR_STYLES; s++) { fbMesh[s].Release(); fbV[s].clear(); }
-					fbModel = a.model;
+				if (g_fbHairModel != a.model) {
+					for (int s = 1; s < HAIR_STYLES; s++) { g_fbHairMesh[s].Release(); g_fbHairV[s].clear(); }
+					g_fbHairModel = a.model;
 				}
-				if (!fbMesh[style].vb || fbV[style].empty())
-					BuildHair(r, *humM, style, fbMesh[style], 2.2f, &fbV[style], &fbP[style]);
-				if (fbMesh[style].vb && !fbV[style].empty()) {
-					mesh = &fbMesh[style];
-					hv = &fbV[style];
-					piv = fbP[style];
+				if (!g_fbHairMesh[style].vb || g_fbHairV[style].empty())
+					BuildHair(r, *humM, style, g_fbHairMesh[style], 2.2f, &g_fbHairV[style], &g_fbHairP[style]);
+				if (g_fbHairMesh[style].vb && !g_fbHairV[style].empty()) {
+					mesh = &g_fbHairMesh[style];
+					hv = &g_fbHairV[style];
+					piv = g_fbHairP[style];
 				}
 			}
 			if (mesh && mesh->vb && hv && !hv->empty()) {
@@ -2666,7 +2702,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				back = Norm(back - up * Dot(back, up));
 				V3 right = Norm(Cross(up, back));
 				V3 skull = MXformPt(H, piv);
-				static Buf<VtxS> buf;
+				Buf<VtxS>& buf = g_hairDrawBuf;
 				buf.resize(hv->size());
 				float y0 = 1e9f, y1 = -1e9f;
 				for (size_t k = 0; k < hv->size(); k++) {

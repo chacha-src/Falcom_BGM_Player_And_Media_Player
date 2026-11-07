@@ -10,7 +10,8 @@ cbuffer HairParm : register(b0)
 	row_major float4x4 Pal;    // 頭の骨（バインドから今の姿勢へ）。頭蓋の当たり用
 	row_major float4x4 PalInv;
 	float4 Sim;                // x=dt y=歩数 z=1 で置き直し w=時刻
-	float4 Wind;               // xyz=風 w=1 で背中にマントがある
+	float4 Wind;               // xyz=強風・暴風と移動 w=1 で背中にマントがある
+	float4 Air;                // xyz=そよ風 w=上下。上が正
 	float4 Body;               // xyz=胴の中心 w=身長
 	float4 CapA[8];            // カプセル始点 xyz、w=半径。w<0 で無効
 	float4 CapB[8];            // 終点 xyz、w=終点の半径
@@ -80,7 +81,7 @@ float3 Slide(float3 p, float3 a, float3 b, float r0, float r1)
 	if (R < 0.005) return p;
 	float3 d = p - c;
 	float dist = length(d);
-	if (dist >= R) return p;
+	if (dist >= R + 0.016) return p;
 	float3 n = dist > 1e-4 ? d / dist : float3(1, 0, 0);
 	return c + n * (R + 0.016);
 }
@@ -187,41 +188,102 @@ float3 Part(float3 p, float pick)
 	return p;
 }
 
-float3 SkullPush(float3 p)
+float SkullRad(float3 d)
+{
+	float r = length(d);
+	if (r < 1e-5 || d.y <= -0.15) return 0;
+	float el = asin(clamp(d.y / r, -1, 1));
+	float R = 0.0;
+	if (el > -0.58 && el < 1.35) {
+		float fa = (atan2(d.x, d.z) + 3.14159265) * (16.0 / 6.2831853) - 0.5;
+		float fe = (el + 0.6) * (8.0 / 2.1707963) - 0.5;
+		int a0 = (int)floor(fa), e0 = (int)floor(fe);
+		float ta = fa - a0, te = fe - e0;
+		R = lerp(lerp(SkullAt(e0, a0), SkullAt(e0, a0 + 1), ta),
+			lerp(SkullAt(e0 + 1, a0), SkullAt(e0 + 1, a0 + 1), ta), te);
+	}
+	float3 u = d / r;
+	float rz = u.z < 0.0 ? 0.100 : 0.094;
+	float ry = u.y < 0.0 ? 0.125 : 0.100;
+	float rx = 0.086;
+	float e2 = (u.x * u.x) / (rx * rx) + (u.y * u.y) / (ry * ry) + (u.z * u.z) / (rz * rz);
+	float faceR = rsqrt(max(e2, 1e-4)) * smoothstep(-0.15, -0.09, d.y);
+	R = max(R, faceR);
+	if (R < 0.03 && el > -0.55) R = 0.095;
+	return R;
+}
+
+// 頭蓋と顔（額・目・鼻・頬・顎）の外へ出し、顔の正面に入り込んだ束は顔の左右・前後へ滑らかに振り分ける。
+// 頭頂の毛が下へ沈んでハゲになるのも防ぐ。
+float3 SkullPush(float3 p, float3 keep)
 {
 	if (SkullC.w < 0.5) return p;
 	float3 b = mul(float4(p, 1), PalInv).xyz;
-	float3 d = b - SkullC.xyz;
-	float r = length(d);
-	if (r < 1e-5) return p;
-	// 顔の下半分（前髪）は鼻の前へ出るので、頭蓋では押さない。首はカプセルが受ける。
-	if (d.z < -0.04 && d.y < -0.03) return p;
-	float el = asin(clamp(d.y / r, -1, 1));
-	if (el <= -0.55) return p;
-	float fa = (atan2(d.x, d.z) + 3.14159265) * (16.0 / 6.2831853) - 0.5;
-	float fe = (el + 0.6) * (8.0 / 2.1707963) - 0.5;
-	int a0 = (int)floor(fa), e0 = (int)floor(fe);
-	float ta = fa - a0, te = fe - e0;
-	float R = lerp(lerp(SkullAt(e0, a0), SkullAt(e0, a0 + 1), ta),
-		lerp(SkullAt(e0 + 1, a0), SkullAt(e0 + 1, a0 + 1), ta), te);
-	// 8mm 足すと頭頂の輪が外へ割れ、渦の穴から地肌が出る。めり込んだ分だけ戻す。
-	if (R > 0.03 && r < R + 0.002) b = SkullC.xyz + d * ((R + 0.002) / r);
+	float3 k = mul(float4(keep, 1), PalInv).xyz;
+	float3 C = SkullC.xyz;
+	float3 dK = k - C;
+	float3 dP = b - C;
+	// 頭頂に近い毛が重力や風で頭蓋の下へ沈むとハゲるので、元の高さを下回らないように支える。
+	if (dK.y > 0.035 && dP.y < dK.y - 0.012) {
+		dP.y = lerp(dP.y, dK.y, 0.75);
+		b.y = C.y + dP.y;
+	}
+	float rK = length(dK), rP = length(dP);
+	if (rP < 1e-5) {
+		float3 side0 = rK > 1e-4 ? dK : float3(0, 1, 0);
+		float Rs0 = max(SkullRad(side0), 0.095);
+		b = C + side0 * ((Rs0 + 0.008) / max(length(side0), 1e-4));
+		return mul(float4(b, 1), Pal).xyz;
+	}
+	float3 dirK = rK > 1e-4 ? dK / rK : dP / rP;
+	float3 dirP = dP / rP;
+	// 反対側（後ろ髪が顔の前へ、前髪が後頭へ）へ頭蓋を貫通していたら、元の側の面へ戻す。
+	if (rK > 1e-4 && dot(dK.xz, dP.xz) < -0.0008 && dP.y > -0.14 && rP < 0.45) {
+		dP.xz = dK.xz;
+		rP = length(dP);
+		dirP = rP > 1e-4 ? dP / rP : dirK;
+	}
+	// 目の高さ〜顎（dP.y < 0.01, dP.z < -0.02）で顔の中央に入った毛は、顔の左右（こめかみ・頬の外）へ流す。
+	if (dP.z < -0.025 && dP.y < 0.015 && dP.y > -0.14) {
+		float faceBand = smoothstep(0.015, -0.035, dP.y) * smoothstep(-0.14, -0.09, dP.y);
+		float sgnX = abs(dK.x) > 0.005 ? (dK.x >= 0.0 ? 1.0 : -1.0) : (dP.x >= 0.0 ? 1.0 : -1.0);
+		float wantX = 0.068 * faceBand;
+		if (abs(dP.x) < wantX) {
+			dP.x = lerp(dP.x, sgnX * wantX, 0.65 * faceBand);
+			rP = length(dP);
+			dirP = rP > 1e-4 ? dP / rP : dirK;
+		}
+	}
+	float Rp = SkullRad(dP);
+	float Rk = SkullRad(dK);
+	float mk = (dP.z < -0.01 || dK.z < -0.01) ? 0.010 : 0.008;
+	if (Rp > 0.02 && rP < Rp + mk) {
+		float3 outDir = normalize(lerp(dirP, dirK, 0.35));
+		float Ro = max(SkullRad(outDir * Rp), Rp);
+		b = C + outDir * (Ro + mk);
+		return mul(float4(b, 1), Pal).xyz;
+	}
+	if (rK > 1e-4 && dot(dK, dP) < 0.0 && rP < 0.50) {
+		float Rs = max(Rk, 0.095);
+		b = C + dirK * (Rs + mk);
+		return mul(float4(b, 1), Pal).xyz;
+	}
 	return mul(float4(b, 1), Pal).xyz;
 }
 
-// 首から下だけ。頭蓋は触らない（根元は CSSkin が頭に付けたまま）。
+// 首・肩・胸・背中。頭蓋の下端より下を、顔の前後左右や肩の上へ滑らかに振り分ける。
 float3 BodyHit(float3 p, float pick)
 {
 	if (SkullC.w > 0.5) {
 		float3 b = mul(float4(p, 1), PalInv).xyz;
-		if (b.y > SkullC.y - 0.02) return p;
+		if (b.y > SkullC.y + 0.01) return p;
 	}
 	uint nc = min(Cnt.z, 8u);
 	[loop] for (uint s = 0; s < nc; s++) {
 		if (CapA[s].w < 0) continue;
 		p = Slide(p, CapA[s].xyz, CapB[s].xyz, CapA[s].w, CapB[s].w);
 	}
-	[loop] for (uint s2 = 0; s2 < min(nc, 2u); s2++) {
+	[loop] for (uint s2 = 0; s2 < min(nc, 4u); s2++) {
 		if (CapA[s2].w < 0) continue;
 		p = Slide(p, CapA[s2].xyz, CapB[s2].xyz, CapA[s2].w, CapB[s2].w);
 	}
@@ -237,16 +299,37 @@ void CSHair(uint id : SV_GroupIndex)
 	float flop = Flop(hang);
 	gR[id] = rest;
 	float pick = StrandFace(id);
-	float3 home = (id < HA || flop < 0.08) ? rest : BodyHit(rest, pick);
-	// 毛先を風下へ置く。根元から 4 割は頭に残し、突風でも分け目から地肌を出さない。
-	float amp = length(Wind.xyz);
+	float3 keep = SkullPush(rest, rest);
+	float3 home = (id < HA || flop < 0.08) ? keep : BodyHit(keep, pick);
+	// 強い風は毛先を揃え、そよ風は束ごとにずらす。根元は頭に残す。
 	float crown = smoothstep(0.16, 0.46, flop);
-	float3 lean = (amp > 0.02 && crown > 0.001) ? (Wind.xyz / amp) * min(amp, 1.5) * crown * 0.085 : 0;
-	home += lean;
+	float3 flow = Wind.xyz + Air.xyz;
+	float b = length(Air.xyz);
+	if (b > 0.02)
+		flow += Air.xyz * (0.15 * sin(Sim.w * 1.3 + (float)(id % HA) * 0.45));
+	flow.y += clamp(Air.w, -0.35, 0.35) * 0.35;
+	// TacWind 後の長さ。そよ風 0.15 で毛先 8cm、強風 0.65 で 20cm、暴風 1.3 で 30cm。顔の中には出さない。
+	float famp = length(flow);
+	float reach = min(famp, 0.15) * 0.40;
+	if (famp > 0.15) reach += min(famp - 0.15, 0.50) * 0.12;
+	if (famp > 0.65) reach += min(famp - 0.65, 0.70) * 0.05;
+	reach = min(reach, 0.10);
+	reach *= 0.94 + 0.06 * sin(Sim.w * 2.1);
+	float3 lean = (famp > 0.02 && crown > 0.001) ? (flow / famp) * reach * crown : 0;
+	if (id >= HA && flop >= 0.08) {
+		float3 n = rest - mul(float4(SkullC.xyz, 1), Pal).xyz;
+		float nl = length(n);
+		float3 around = lean;
+		if (nl > 1e-4) {
+			n /= nl;
+			around = lean - n * dot(lean, n);
+		}
+		home = BodyHit(SkullPush(keep + around, keep), pick);
+	}
 	gH[id] = home;
-	// 根元と短い殻は、頭に付けた位置のまま。押すと頭頂が割れる。
+	// 根元も短い殻も、静止位置が頭蓋の中なら表面へ出す。中に置くとカードが頭をくり抜く。
 	if (Sim.z > 0.5 || flop < 0.08 || id < HA) {
-		float3 held = rest + lean;
+		float3 held = (id < HA) ? SkullPush(rest, rest) : BodyHit(SkullPush(rest, rest), pick);
 		gP[id] = held;
 		St[id] = float4(held, 0);
 		St[HG + id] = float4(held, 0);
@@ -264,20 +347,24 @@ void CSHair(uint id : SV_GroupIndex)
 		if (sp > vl0 * 1.65) v *= (vl0 * 1.65) / sp;
 		v *= pow(lerp(0.80, 0.88, flop), Sim.y);
 		float vl = length(v);
-		float vm = lerp(0.010, 0.028, flop) * max(Body.w, 0.2);
+		float vm = 0.015 * max(Body.w, 0.2);
 		if (vl > vm) v *= vm / vl;
 		float dt = Sim.x;
 		float gust = 0.90 + 0.10 * sin(Sim.w * 0.37 + rest.x * 1.7 + rest.z * 0.8);
 		float3 p = pos + v;
 		p += Grav.xyz * (dt * dt) * flop;
 		// 加速度として足す。普段の風はそのまま、それを超えた突風は毛先だけ大きく流す。
-		float amp = length(Wind.xyz);
-		float gustK = 1.0 + saturate((amp - 0.55) / 0.70) * 1.5;
-		float crown = smoothstep(0.16, 0.46, flop);
-		p += Wind.xyz * (dt * dt) * crown * gust * 14.0 * gustK;
+		float ampW = length(flow);
+		float gustK = 1.0 + saturate((ampW - 0.55) / 0.70) * 1.5;
+		float crownW = smoothstep(0.16, 0.46, flop);
+		p += flow * (dt * dt) * crownW * gust * 14.0 * gustK;
 		float ks = lerp(0.22, 0.012, flop);
 		float k = 1 - pow(saturate(1 - ks), Sim.y);
-		p = lerp(p, home, k);
+		float3 delta = (home - p) * k;
+		float dlh = length(delta);
+		// 頭蓋の半径は約 9cm。2cm なら中心を越えない。越えると近い面が顔側になり、毛が前へ抜ける。
+		if (dlh > 0.020) delta *= 0.020 / dlh;
+		p += delta;
 		St[3 * HG + id] = float4(s1, 0);
 		St[2 * HG + id] = float4(s0, 0);
 		St[HG + id] = float4(p, 0);
@@ -285,7 +372,8 @@ void CSHair(uint id : SV_GroupIndex)
 	}
 	GroupMemoryBarrierWithGroupSync();
 	[loop] for (int it = 0; it < 6; it++) {
-		float3 p = gP[id];
+		float3 p0 = gP[id];
+		float3 p = p0;
 		uint ia = id % HA;
 		uint il = id / HA;
 		if (flop >= 0.08 && Sim.z < 0.5) {
@@ -315,14 +403,21 @@ void CSHair(uint id : SV_GroupIndex)
 				p = home + lerp(p - home, acc / cnt, 0.28);
 			}
 		}
-		if (flop >= 0.08 && il > 0) p = BodyHit(SkullPush(p), pick);
-		// 頭に近い束は静止位置へ戻す。突風でカードが開いても、笠の外に地肌が出ない。
-		if (flop < 0.42) p = lerp(rest, p, smoothstep(0.10, 0.42, flop));
+		// 頭に近い束は静止位置へ戻してから、顔と胴の外へ出す。戻したあとに押さないと、毛が顔へ戻る。
+		if (flop < 0.34) p = lerp(rest, p, smoothstep(0.10, 0.34, flop));
+		float3 dlt = p - p0;
+		float dl2 = length(dlt);
+		if (dl2 > 0.020) p = p0 + dlt * (0.020 / dl2);
+		// 1 フレーム前が顔側に抜けていても、静止位置（頭の付いていた側）へ戻す。p0 を残すと顔に固定される。
+		if (il > 0) p = BodyHit(SkullPush(p, keep), pick);
+		else p = SkullPush(p, keep);
 		GroupMemoryBarrierWithGroupSync();
 		gP[id] = p;
 		GroupMemoryBarrierWithGroupSync();
 	}
 	St[id] = float4(gP[id], 0);
+	// 今の拘束済み位置からの差分だけを描く。前フレームの平均を足すと、頭を抜けた位置が残る。
+	St[4 * HG + id] = float4(gP[id] - rest, 0);
 }
 
 [numthreads(64, 1, 1)]
@@ -336,12 +431,12 @@ void CSHairWrite(uint id : SV_DispatchThreadID)
 	float3 d = float3(0, 0, 0);
 	[unroll] for (int k = 0; k < 4; k++) {
 		uint gi = min(k4[k], (uint)(HG - 1));
-		float3 gr = RestOf(gi);
-		d += (St[gi].xyz - gr) * c.w[k];
+		d += St[4 * HG + gi].xyz * c.w[k];
 	}
 	float w = saturate((c.p.w - 0.05) / 0.22);
 	float3 p = rest + d * w;
-	// 根元寄りの頂点も、案内点と案内点の間の面も、首・肩・胴の外へ出す。頭蓋より上は BodyHit が触らない。
+	float3 keep = SkullPush(rest, rest);
+	p = SkullPush(p, keep);
 	p = BodyHit(p, StrandFace(k4[0]));
 	float3 nrm = asfloat(Vout.Load3(o + 12));
 	float nl = dot(nrm, nrm);

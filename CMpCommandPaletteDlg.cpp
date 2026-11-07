@@ -325,7 +325,7 @@ const wchar_t* PalCmdName(int id)
 			L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer",
 			L"Equalizador", L"Equalizer", L"Equalizer", L"Equalizer");
 	case PAL_WIN_PIANO:
-		return LL14(L"簡易ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
+		return LL14(L"ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
 			L"피아노 롤", L"钢琴卷帘", L"لفة البيانو", L"Пианоролл", L"Piano Roll",
 			L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll");
 	case PAL_WIN_MIDIMON:

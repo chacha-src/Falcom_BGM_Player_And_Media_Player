@@ -38,6 +38,8 @@ struct Soft3DFmtSlot {
 };
 static Soft3DFmtSlot s_fmtCache[S3T_FMT_CACHE];
 static int s_fmtN = 0;
+static ID2D1SolidColorBrush* s_brush = NULL;
+static ID2D1RenderTarget* s_brushRt = NULL;
 
 struct Soft3DTextD2DCanvas {
 	IWICBitmap* bitmap;
@@ -55,8 +57,27 @@ struct Soft3DTextD2DCanvas {
 static Soft3DTextD2DCanvas s_shared;
 static int s_sharedW = 0, s_sharedH = 0, s_sharedBusy = 0;
 
+static void Soft3DTextD2D_DropBrush()
+{
+	SAFE_RELEASE(s_brush);
+	s_brushRt = NULL;
+}
+
+static ID2D1SolidColorBrush* Soft3DTextD2D_Brush(Soft3DTextD2DCanvas* c, BYTE a, BYTE r, BYTE g, BYTE b)
+{
+	if (!c || !c->rt) return NULL;
+	if (s_brushRt != c->rt || !s_brush) {
+		Soft3DTextD2D_DropBrush();
+		if (FAILED(c->rt->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 1.f), &s_brush)) || !s_brush) return NULL;
+		s_brushRt = c->rt;
+	}
+	s_brush->SetColor(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f));
+	return s_brush;
+}
+
 static void Soft3DTextD2D_DropShared()
 {
+	Soft3DTextD2D_DropBrush();
 	SAFE_RELEASE(s_shared.lock);
 	SAFE_RELEASE(s_shared.rt);
 	SAFE_RELEASE(s_shared.bitmap);
@@ -204,7 +225,7 @@ Soft3DTextD2DCanvas* Soft3DTextD2D_Begin(int w, int h)
 			Soft3DTextD2D_DropShared();
 			IWICBitmap* bm = NULL;
 			ID2D1RenderTarget* rt = NULL;
-			if (SUCCEEDED(s_wic->CreateBitmap(nw, nh, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &bm)) && bm) {
+			if (SUCCEEDED(s_wic->CreateBitmap(nw, nh, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bm)) && bm) {
 				D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 					D2D1_RENDER_TARGET_TYPE_DEFAULT,
 					D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
@@ -236,7 +257,7 @@ Soft3DTextD2DCanvas* Soft3DTextD2D_Begin(int w, int h)
 	if (!c) return NULL;
 	c->bitmap = NULL; c->rt = NULL; c->w = w; c->h = h;
 	c->lock = NULL; c->bits = NULL; c->stride = 0; c->shared = 0;
-	HRESULT hr = s_wic->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &c->bitmap);
+	HRESULT hr = s_wic->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &c->bitmap);
 	if (FAILED(hr) || !c->bitmap) { delete c; return NULL; }
 	D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 		D2D1_RENDER_TARGET_TYPE_DEFAULT,
@@ -253,19 +274,17 @@ Soft3DTextD2DCanvas* Soft3DTextD2D_Begin(int w, int h)
 void Soft3DTextD2D_FillRect(Soft3DTextD2DCanvas* c, float x, float y, float w, float h, BYTE a, BYTE r, BYTE g, BYTE b)
 {
 	if (!c || !c->rt) return;
-	ID2D1SolidColorBrush* br = NULL;
-	if (FAILED(c->rt->CreateSolidColorBrush(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f), &br)) || !br) return;
+	ID2D1SolidColorBrush* br = Soft3DTextD2D_Brush(c, a, r, g, b);
+	if (!br) return;
 	c->rt->FillRectangle(D2D1::RectF(x, y, x + w, y + h), br);
-	br->Release();
 }
 
 void Soft3DTextD2D_FillEllipse(Soft3DTextD2DCanvas* c, float cx, float cy, float rw, float rh, BYTE a, BYTE r, BYTE g, BYTE b)
 {
 	if (!c || !c->rt) return;
-	ID2D1SolidColorBrush* br = NULL;
-	if (FAILED(c->rt->CreateSolidColorBrush(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f), &br)) || !br) return;
+	ID2D1SolidColorBrush* br = Soft3DTextD2D_Brush(c, a, r, g, b);
+	if (!br) return;
 	c->rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), rw, rh), br);
-	br->Release();
 }
 
 void Soft3DTextD2D_FillTriangle(Soft3DTextD2DCanvas* c, float x0, float y0, float x1, float y1, float x2, float y2, BYTE a, BYTE r, BYTE g, BYTE b)
@@ -282,11 +301,8 @@ void Soft3DTextD2D_FillTriangle(Soft3DTextD2DCanvas* c, float x0, float y0, floa
 		sink->Close();
 		sink->Release();
 	}
-	ID2D1SolidColorBrush* br = NULL;
-	if (SUCCEEDED(c->rt->CreateSolidColorBrush(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f), &br)) && br) {
-		c->rt->FillGeometry(geo, br);
-		br->Release();
-	}
+	ID2D1SolidColorBrush* br = Soft3DTextD2D_Brush(c, a, r, g, b);
+	if (br) c->rt->FillGeometry(geo, br);
 	geo->Release();
 }
 
@@ -298,11 +314,10 @@ void Soft3DTextD2D_DrawText(Soft3DTextD2DCanvas* c, const wchar_t* text, float x
 	if (!fmt) return;
 	// キャッシュ共有のため毎 Draw で設定（wrap=0 の呼び出しが前の wrap=1 を残さない）
 	fmt->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_EMERGENCY_BREAK : DWRITE_WORD_WRAPPING_NO_WRAP);
-	ID2D1SolidColorBrush* br = NULL;
-	if (SUCCEEDED(c->rt->CreateSolidColorBrush(D2D1::ColorF(r / 255.f, g / 255.f, b / 255.f, a / 255.f), &br)) && br) {
+	ID2D1SolidColorBrush* br = Soft3DTextD2D_Brush(c, a, r, g, b);
+	if (br) {
 		c->rt->DrawText(text, (UINT32)wcslen(text), fmt, D2D1::RectF(x, y, x + w, y + h), br,
 			D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
-		br->Release();
 	}
 	// fmt はキャッシュ所有 — Release しない
 }
@@ -362,6 +377,7 @@ void Soft3DTextD2D_Release(Soft3DTextD2DCanvas* c)
 		if (!c->rt) Soft3DTextD2D_DropShared();
 		return;
 	}
+	if (s_brushRt == c->rt) Soft3DTextD2D_DropBrush();
 	SAFE_RELEASE(c->rt);
 	SAFE_RELEASE(c->bitmap);
 	delete c;

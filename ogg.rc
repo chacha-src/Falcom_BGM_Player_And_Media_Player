@@ -1092,7 +1092,7 @@ BEGIN
     COMBOBOX        IDC_COMBO1,7,23,81,182,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "名前変更",IDC_BUTTON3,89,23,50,11
     PUSHBUTTON      "リスト削除",IDC_PLAYDELETE,140,23,50,11
-    PUSHBUTTON      "簡易ピアノロール",IDC_PIANOROLL,185,23,60,11
+    PUSHBUTTON      "ピアノロール",IDC_PIANOROLL,185,23,60,11
     COMBOBOX        IDC_PL_ENDMODE,247,23,120,80,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
 END
 
@@ -2762,7 +2762,7 @@ END
 IDD_PIANOROLL DIALOGEX 0, 0, 400, 200
 STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES
-CAPTION "簡易ピアノロール"
+CAPTION "ピアノロール"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     PUSHBUTTON      "?",IDC_PR_HELP,368,2,24,16
@@ -3115,7 +3115,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1640
+ FILEVERSION 0,9,1,1642
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3133,10 +3133,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.06 v1640 s6.0.100"
-            VALUE "FileVersion", "0.9.1.1640"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.07 v1642 s6.0.120"
+            VALUE "FileVersion", "0.9.1.1642"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.06"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.07"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

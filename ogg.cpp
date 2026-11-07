@@ -337,7 +337,7 @@ BOOL COggApp::InitInstance()
     if(Status == ERROR_ALREADY_EXISTS){ 
         ReleaseMutex(Mutex);
 		OggActivateOrForwardExisting();
-        exit(0); 
+        exit(0);
     } 
 //	_getcwd(karento2,255);
 	if (::GetModuleFileName(NULL, karento2, 1000)){    //実行ファイルのフルパスを取得

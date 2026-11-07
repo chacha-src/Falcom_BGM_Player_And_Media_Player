@@ -22,21 +22,74 @@ inline DWORD RGBAf(float r, float g, float b, float a = 1.f)
 	return RGBA8((int)(r * 255.f + .5f), (int)(g * 255.f + .5f), (int)(b * 255.f + .5f), (int)(a * 255.f + .5f));
 }
 
-// 数秒に一度、1秒あまり。髪・服・木・粒子が同じ突風を見る。
+// 数秒に一度の突風だけではなく、そよ風・強風・暴風・上風・下風。周期が違うので同時に当たる。
+// マップのシェーダ（GustAmt / AirMain / AirBreeze）と同じ定数。ずらすと木と服が別の風になる。
+inline float TacGate(float s, float th)
+{
+	if (s <= th) return 0.f;
+	float u = (s - th) / (1.f - th);
+	if (u > 1.f) u = 1.f;
+	return u * u * (3.f - 2.f * u);
+}
+
+struct TacAir {
+	float bx, bz; // そよ風（世界の xz）
+	float mx, mz; // 強風と暴風（世界の xz）
+	float y;      // 上が正、下が負
+	float sway;   // 木や草を曲げる量
+};
+
+inline TacAir TacAirAt(float time)
+{
+	const float breeze = 0.62f + 0.38f * sinf(time * 0.31f);
+	const float strong = TacGate(sinf(time * 0.17f + 0.6f), 0.55f);
+	const float gale = TacGate(sinf(time * 0.083f + 2.4f), 0.90f);
+	const float down = TacGate(sinf(time * 0.13f + 1.2f), 0.72f);
+	const float up = TacGate(sinf(time * 0.19f + 3.6f), 0.78f);
+	const float aB = time * 0.11f;
+	const float aS = time * 0.047f + 1.9f;
+	const float aG = time * 0.031f + 4.4f;
+	TacAir a;
+	a.bx = cosf(aB) * (0.40f * breeze);
+	a.bz = sinf(aB) * (0.40f * breeze);
+	a.mx = cosf(aS) * strong * 1.30f + cosf(aG) * gale * 2.70f;
+	a.mz = sinf(aS) * strong * 1.30f + sinf(aG) * gale * 2.70f;
+	a.y = up * 0.95f - down * 1.15f;
+	const float h = sqrtf(a.mx * a.mx + a.mz * a.mz);
+	const float hb = sqrtf(a.bx * a.bx + a.bz * a.bz);
+	a.sway = h * 0.22f + hb * 0.35f + fabsf(a.y) * 0.18f;
+	if (a.sway > 1.f) a.sway = 1.f;
+	return a;
+}
+
+// 直近 32 フレーム（約 0.5 秒）の平均。一瞬の突風で木も服も跳ねない。
+inline TacAir TacAirHeld(float time)
+{
+	TacAir a = {};
+	const int N = 32;
+	for (int i = 0; i < N; ++i) {
+		const TacAir s = TacAirAt(time - i * (1.f / 60.f));
+		a.bx += s.bx; a.bz += s.bz;
+		a.mx += s.mx; a.mz += s.mz;
+		a.y += s.y;
+	}
+	const float n = (float)N;
+	a.bx /= n; a.bz /= n; a.mx /= n; a.mz /= n; a.y /= n;
+	const float h = sqrtf(a.mx * a.mx + a.mz * a.mz);
+	const float hb = sqrtf(a.bx * a.bx + a.bz * a.bz);
+	a.sway = h * 0.22f + hb * 0.35f + fabsf(a.y) * 0.18f;
+	if (a.sway > 1.f) a.sway = 1.f;
+	return a;
+}
+
+// 古い呼び出し。強風と暴風の強さだけ返す。
 inline float TacBurst(float time)
 {
-	float burst = 0.f;
-	const float s = sinf(time * 0.85f);
-	if (s > 0.72f) {
-		const float u = (s - 0.72f) / 0.28f;
-		burst = u * u * (3.f - 2.f * u);
-	}
-	const float s2 = sinf(time * 0.37f + 2.1f);
-	if (s2 > 0.82f) {
-		const float u = (s2 - 0.82f) / 0.18f;
-		if (u > burst) burst = u;
-	}
-	return burst;
+	TacAir a = TacAirAt(time);
+	const float h = sqrtf(a.mx * a.mx + a.mz * a.mz);
+	float b = h / 2.70f;
+	if (b > 1.f) b = 1.f;
+	return b;
 }
 
 struct GpuMesh {
@@ -154,7 +207,8 @@ struct DrawParams {
 	float fly;           // 0〜1。宙に浮いている人間。スカートは脚から離れて世界の下へ垂れる
 	int cape;            // 1 なら背中にマントがある。髪はマントの厚みの外を流す
 	float girth;         // 体型の胴の太さ（標準 1）。髪は太った胴・首・腕の外を流す
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f) {}
+	float gait;          // 0=止まっている 歩き・走り・飛行移動。その場の見本でも向かい風を足す
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f), gait(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -327,6 +381,9 @@ public:
 		// 胸と袖。softN=0 はタイト（体に沿ったまま）。softBone は 0 胸、1 上腕左、2 前腕左、3 上腕右、4 前腕右。
 		ID3D11Buffer* softSB[2]; ID3D11ShaderResourceView* softSRV[2]; int softN, softVN;
 		int softBone[6];
+		// 腰から下腹の断面。角度 16。体の中へ布を入れない。0 は未計測。
+		float torsoR[16];
+		float torsoC[3];
 		int armJ[4][2];
 		float bustA[2][4];
 		float armA[4][4];
@@ -342,6 +399,8 @@ public:
 			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
 			softSB[0] = softSB[1] = NULL; softSRV[0] = softSRV[1] = NULL;
 			clothAxis[0] = clothAxis[1] = clothY0 = 0.f;
+			memset(torsoR, 0, sizeof(torsoR));
+			torsoC[0] = torsoC[1] = torsoC[2] = 0.f;
 			for (int i = 0; i < 6; i++) softBone[i] = -1;
 			for (int i = 0; i < 4; i++) armJ[i][0] = armJ[i][1] = -1;
 			memset(bustA, 0, sizeof(bustA));
@@ -523,6 +582,7 @@ public:
 	BOOL ProjectToScreen(V3 p, float& sx, float& sy) const;
 	BOOL InView(V3 p, float radius) const;
 	BOOL InLight(V3 p, float radius) const;
+	BOOL BoundVisible(float cx, float cy, float cz, float rad) const;
 	void ScreenRay(float sx, float sy, V3& org, V3& dir) const;
 
 	HRESULT LastError() const { return m_lastHr; }
@@ -574,11 +634,20 @@ private:
 		float vel[3];
 		int limbOk;
 		int slot;
-		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0), slot(-1) {
+		float prevFly, prevGait;
+		// そよ風・強風・暴風・上風・下風は足す前に別々に覚える。ゲートが落ちても数十フレーム残す。
+		struct Chan { float d[3]; float amp; float env; int hold; };
+		Chan breeze, strong, gale, up, down;
+		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0), slot(-1), prevFly(-1.f), prevGait(-1.f) {
 			world = MIdent();
 			memset(limbPrev, 0, sizeof(limbPrev));
 			memset(handPrev, 0, sizeof(handPrev));
 			vel[0] = vel[1] = vel[2] = 0.f;
+			memset(&breeze, 0, sizeof(breeze));
+			memset(&strong, 0, sizeof(strong));
+			memset(&gale, 0, sizeof(gale));
+			memset(&up, 0, sizeof(up));
+			memset(&down, 0, sizeof(down));
 		}
 	};
 	Fix<ClothInst, CLOTH_INST> m_clothInst;
@@ -748,7 +817,8 @@ private:
 		float vel[3];
 		int slot;
 		int capeBit;
-		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1), capeBit(-1) {
+		float prevFly, prevGait;
+		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1), capeBit(-1), prevFly(-1.f), prevGait(-1.f) {
 			world = MIdent();
 			vel[0] = vel[1] = vel[2] = 0.f;
 		}
@@ -757,7 +827,7 @@ private:
 	ID3D11Buffer* m_hairScratchSB;
 	ID3D11UnorderedAccessView* m_hairScratchUAV;
 	ID3D11ShaderResourceView* m_hairScratchSRV;
-	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth = 1.f);
+	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth = 1.f, float gait = 0.f, float fly = 0.f);
 	void ReleaseHairInst();
 	int m_scalpModel; // m_capDraw を作った体
 	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
@@ -824,11 +894,14 @@ private:
 	int m_fadeAbove, m_fadeX, m_fadeZ;
 	int m_cutDeck;
 	GpuMesh m_water;
+	struct BoundMesh { GpuMesh mesh; float cx, cy, cz, rad; };
+	BoundMesh m_waterChunk[16];
+	BoundMesh m_lavaChunk[16];
 	BOOL m_cutActors;
 	unsigned m_cutActorGen;
 	GpuMesh m_lava;
-	struct PropBatch { GpuMesh mesh; float hue; float mat; };
-	Fix<PropBatch, 16> m_props;
+	struct PropBatch { GpuMesh mesh; float hue; float mat; float cx, cy, cz, rad; };
+	Fix<PropBatch, 192> m_props;
 	DWORD m_waterColor;
 	int m_theme;
 	int m_stageId;
