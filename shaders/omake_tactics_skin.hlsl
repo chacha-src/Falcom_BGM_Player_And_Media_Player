@@ -69,20 +69,18 @@ float SkullAt(int e, int a)
 }
 
 [numthreads(64, 1, 1)]
-void CSSkin(uint id : SV_DispatchThreadID)
+void CSSkin(uint dtid : SV_DispatchThreadID)
 {
+	uint id = (Bust.x < 0) ? (Extra.x + dtid) : dtid;
 	if (id >= Extra.y) return;
 	SkinIn s = Vin[id];
 	// 髪型の付け替えと揺れ。Bust.x が負のときだけ。体の胸には入らない。
 	if (Bust.x < 0) {
+		if (abs(s.n.w - Nip0.x) > 0.5) return;
 		float3 p = mul(float4(s.p.xyz, 1), Bones[63]).xyz;
 		float3 nrm = mul(s.n.xyz, (float3x3)Bones[63]);
 		uint hj = (uint)Nip0.y;
-		float3 origin = (hj < 64u) ? mul(float4(0, 0, 0, 1), Bones[hj]).xyz : float3(0, 0, 0);
-		if (abs(s.n.w - Nip0.x) > 0.5) {
-			p = origin;
-			nrm = float3(0, 1, 0);
-		} else {
+		{
 			// 頭蓋の内側に入った髪だけ、中心から外へ 8mm 浮かせた面まで出す。
 			// 前髪が目・鼻・頬・顎に刺さらないよう、顔の下側や側面も楕円体で下限を持たせて顔の前後左右へ逃がす。
 			if (SkullC.w > 0.5) {
@@ -91,13 +89,18 @@ void CSSkin(uint id : SV_DispatchThreadID)
 				if (r > 1e-5 && d.y > -0.15) {
 					float el = asin(clamp(d.y / r, -1, 1));
 					float R = 0.0;
-					if (el > -0.58 && el < 1.35) {
+					if (el > -0.58) {
 						float fa = (atan2(d.x, d.z) + 3.14159265) * (16.0 / 6.2831853) - 0.5;
 						float fe = (el + 0.6) * (8.0 / 2.1707963) - 0.5;
 						int a0 = (int)floor(fa), e0 = (int)floor(fe);
 						float ta = fa - a0, te = fe - e0;
-						R = lerp(lerp(SkullAt(e0, a0), SkullAt(e0, a0 + 1), ta),
-							lerp(SkullAt(e0 + 1, a0), SkullAt(e0 + 1, a0 + 1), ta), te);
+						float r00 = min(SkullAt(e0, a0), 0.20);
+						float r10 = min(SkullAt(e0, a0 + 1), 0.20);
+						float r01 = min(SkullAt(e0 + 1, a0), 0.20);
+						float r11 = min(SkullAt(e0 + 1, a0 + 1), 0.20);
+						float Rlerp = lerp(lerp(r00, r10, ta), lerp(r01, r11, ta), te);
+						float Rmax = max(max(r00, r10), max(r01, r11));
+						R = min(max(Rlerp, Rmax - 0.020), 0.20);
 					}
 					float3 u = d / r;
 					float rz = u.z < 0.0 ? 0.100 : 0.094;

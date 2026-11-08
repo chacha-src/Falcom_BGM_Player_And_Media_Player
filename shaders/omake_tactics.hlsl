@@ -17,7 +17,7 @@ cbuffer Frame : register(b0)
 	float4 Ally[16]; // xy=味方のワールドxz z=有効
 	float4 CamNear;  // x=視線方向で消す深さ y=ここから残す。0 なら無効
 	float4 CamFwd;   // xyz=今のカメラ前方
-	float4 Wx;       // x=天候 y=時刻。地面の反射に使う
+	float4 Wx;       // x=天候 y=時刻。地面の反射に使う。z=画質の連続段(rank)
 	row_major float4x4 ReflectVP;
 	float4 ReflectInfo; // x=映す y=床の高さ z=反射パス(1=上面を捨てる 2=上面も残す) w=ぼかし幅
 	row_major float4x4 InvVP;
@@ -40,6 +40,21 @@ cbuffer Liquid : register(b3)
 	float4 Rip[48];
 };
 
+// 画質の連続段。Q.x は粗段(整数)だが、Wx.z は 0.25 刻みの連続段で、段差をまたいでも滑らかに動く。
+// 0超軽量 1軽量 2標準 3高 4超綺麗 5最高 6限界突破。限界突破は +10(=8.5)より上も伸びる。超軽量より下は負。
+float QRank() { return Wx.z; }
+float QLerp(float rank, float v0, float v1, float v2, float v3, float v4, float v5, float v6, float vHi)
+{
+	if (rank <= 0.0) return v0 * saturate(1.0 + rank * 0.5);
+	if (rank <= 1.0) return lerp(v0, v1, rank);
+	if (rank <= 2.0) return lerp(v1, v2, rank - 1.0);
+	if (rank <= 3.0) return lerp(v2, v3, rank - 2.0);
+	if (rank <= 4.0) return lerp(v3, v4, rank - 3.0);
+	if (rank <= 5.0) return lerp(v4, v5, rank - 4.0);
+	if (rank <= 6.0) return lerp(v5, v6, rank - 5.0);
+	return v6 + (vHi - v6) * ((rank - 6.0) / 2.5);
+}
+
 float TacGate(float s, float th)
 {
 	if (s <= th) return 0;
@@ -47,52 +62,17 @@ float TacGate(float s, float th)
 	return u * u * (3.0 - 2.0 * u);
 }
 
-// C++ の TacAirHeld と同じ。直近およそ 32 フレームを均す。
-float2 AirBreezeAt(float t)
+// そよ風・強風・暴風・上下。式は以前の 8 サンプル平均のまま。
+// 頂点と画素のたびに sin を回さず、フレーム定数を読む。ホーム・戦闘・デモで同じ。
+cbuffer AirNow : register(b4)
 {
-	float breeze = 0.62 + 0.38 * sin(t * 0.31);
-	float a = t * 0.11;
-	return float2(cos(a), sin(a)) * (0.40 * breeze);
-}
-float2 AirMainAt(float t)
-{
-	float strong = TacGate(sin(t * 0.17 + 0.6), 0.55);
-	float gale = TacGate(sin(t * 0.083 + 2.4), 0.90);
-	float aS = t * 0.047 + 1.9;
-	float aG = t * 0.031 + 4.4;
-	return float2(cos(aS), sin(aS)) * strong * 1.30 + float2(cos(aG), sin(aG)) * gale * 2.70;
-}
-float AirLiftAt(float t)
-{
-	float down = TacGate(sin(t * 0.13 + 1.2), 0.72);
-	float up = TacGate(sin(t * 0.19 + 3.6), 0.78);
-	return up * 0.95 - down * 1.15;
-}
-float2 AirBreeze()
-{
-	float2 s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirBreezeAt(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-float2 AirMain()
-{
-	float2 s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirMainAt(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-float AirLift()
-{
-	float s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirLiftAt(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-
-float GustAmt()
-{
-	float2 m = AirMain();
-	float h = length(m) / 2.70;
-	return saturate(h + length(AirBreeze()) * 0.45 + abs(AirLift()) * 0.28);
-}
+	float4 AirB; // xy=そよ風 zw=強風+暴風
+	float4 AirL; // x=上下 y=GustAmt
+};
+float2 AirBreeze() { return AirB.xy; }
+float2 AirMain() { return AirB.zw; }
+float AirLift() { return AirL.x; }
+float GustAmt() { return AirL.y; }
 
 float3 FallLean(float3 w, float3 n, float amount)
 {
@@ -102,9 +82,9 @@ float3 FallLean(float3 w, float3 n, float amount)
 	float g = saturate(length(AirMain()) / 2.70);
 	float br = saturate(length(AirBreeze()) / 0.40);
 	float hgt = saturate((w.y + 9.0) / 30.0);
-	w.x += dir.x * (g * 0.85 + br * 0.22) * hgt * amount;
-	w.z += dir.y * (g * 0.70 + br * 0.18) * hgt * amount;
-	w.y += AirLift() * hgt * amount * 0.16;
+	w.x += dir.x * (g * 1.25 + br * 0.35) * hgt * amount;
+	w.z += dir.y * (g * 1.05 + br * 0.28) * hgt * amount;
+	w.y += AirLift() * hgt * amount * 0.28;
 	float flutter = sin(w.y * 1.85 + Eye.w * 3.4 + w.x * 0.45);
 	w += n * flutter * (0.03 + g * 0.11) * saturate(amount * 1.4);
 	return w;
@@ -261,8 +241,8 @@ void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 	dh = amp * (d1 * k1 * cos(f1) + d2 * k2 * 0.55 * cos(f2) + d3 * k3 * 0.28 * cos(f3));
 	dh += float2(sin(t * 0.65 + xz.x * 0.85), cos(t * 0.5 + xz.y * 0.75)) * amp * 1.4;
 	float gust = GustAmt();
-	h *= 1.0 + gust * 0.35;
-	dh *= 1.0 + gust * 0.35;
+	h *= 1.0 + gust * 1.15;
+	dh *= 1.0 + gust * 1.15;
 	if (Q.x > 1.5 && !(Q.x > 3.5 && Q.x < 4.5)) {
 		float2 d4 = normalize(float2(0.72, 0.69));
 		float2 d5 = normalize(float2(-0.88, 0.42));
@@ -281,20 +261,55 @@ void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 	}
 }
 
-// amt: 頂点αに焼いた「根元からの高さ」重み（0=揺れない）
+// amt: 頂点αの根元からの重み + Extra.w。Extra.w は岩まで滑らせないよう除く。
+// そよ風は常時、強風と暴風と上下は C++ の TacAir と同じ位相。
 float3 Sway(float3 w, float amt)
 {
-	if (amt <= 0.001) return w;
+	float vert = amt - Extra.w;
+	if (vert < 0) vert = 0;
+	float bend = saturate(vert) + saturate(vert - 1.0) * 0.22;
+	if (bend <= 0.001) return w;
 	float2 m = AirMain();
 	float2 b = AirBreeze();
+	float lift = AirLift();
 	float g = saturate(length(m) / 2.70);
 	float t = Eye.w;
-	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.5 + sin(t * 2.9 + w.x * 1.7) * 0.25;
-	float k = amt * (0.55 + g * 2.2);
-	w.x += s * k * 0.05 + b.x * amt * 0.10 + m.x * amt * 0.07;
-	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * k * 0.04 + b.y * amt * 0.08 + m.y * amt * 0.055;
-	w.y += AirLift() * amt * 0.045;
+	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.55 + sin(t * 2.9 + w.x * 1.7) * 0.28;
+	float flick = bend * (0.06 + g * 0.18);
+	w.x += s * flick + b.x * bend * 0.38 + m.x * bend * 0.26;
+	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * flick * 0.85 + b.y * bend * 0.32 + m.y * bend * 0.22;
+	w.y += lift * bend * 0.16;
 	return w;
+}
+
+// 足は残し、頭の高さだけ同じ風で倒す。量は頭蓋も髪の頭もこの式だけ。
+float3 WindLean(float localY)
+{
+	float h = saturate(localY / 1.55);
+	h = h * h;
+	float3 o = 0;
+	if (h <= 0.001) return o;
+	// 視点が 4m を超えると倒れを 1.55 まで増していた。背中の頂点だけ動き、骨に付いた翼の根元が外れて羽が扇になる。
+	// 近いときに付いて見えていた倒れのまま、どの距離でも同じにする。
+	float reach = 0.42;
+	float2 m = AirMain();
+	float2 b = AirBreeze();
+	float lift = AirLift();
+	float k = h * reach;
+	float flutter = sin(Eye.w * 1.6 + localY * 2.2) * (0.02 + length(m) * 0.025);
+	o.x = (b.x * 0.22 + m.x * 0.11) * k + flutter * k;
+	o.z = (b.y * 0.18 + m.y * 0.10) * k;
+	o.y = lift * 0.08 * k;
+	return o;
+}
+
+// 舞台の人・敵・武具。sway=1 の描画だけ。mode 7 の髪はここを通らない。
+void BodyWind(inout float3 w, float localY)
+{
+	if (Extra.w < 0.75) return;
+	if (OutlineColor.a < 1.5) return;
+	if (Params.y > 0.5) return;
+	w += WindLean(localY);
 }
 
 PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
@@ -303,6 +318,11 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 	float3 w = mul(float4(v.p, 1), WM).xyz;
 	float3 n = normalize(mul(v.n, (float3x3)WM));
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
+	BodyWind(w, v.p.y);
+	// 髪は mode 7 なので上の BodyWind に入らない。頭蓋の頂点だけ倒れると、髪の頭が骨に残って禿げる。
+	// 体は頂点を縮尺済み、髪はワールド側で縮尺する。高さを揃えてから、同じ倒れを足す。
+	if (Params.y > 6.5 && Params.y < 7.5 && Extra.w >= 0.75)
+		w += WindLean(v.p.y * length(WM[1].xyz));
 	// 体は noTess で OutlineColor.a=2。滝の mode が定数に残っても、人や敵の頂点は流さない。
 	if (OutlineColor.a < 1.5 && Params.y > 0.5 && Params.y < 1.5) {
 		if (n.y > 0.45) {
@@ -348,29 +368,32 @@ PSIn VSSB(VSIn v, float4 r0 : TEXCOORD4, float4 r1 : TEXCOORD5, float4 r2 : TEXC
 	row_major float4x4 WM = float4x4(r0, r1, r2, r3);
 	return ShadeStatic(v, WM);
 }
-float4 ShadowPos(float3 p, float3 n, float a)
+float4 ShadowPos(float3 p, float3 n, float a, float localY)
 {
 	float3 w = p;
 	w = Sway(w, (1. - a) * 4. + Extra.w);
+	BodyWind(w, localY);
 	w += n * Params.x;
 	return mul(float4(w, 1), VP);
 }
 float4 VSSSh(VSIn v) : SV_Position
 {
 	float3 n = normalize(mul(v.n, (float3x3)World));
-	return ShadowPos(mul(float4(v.p, 1), World).xyz, n, v.c.a);
+	return ShadowPos(mul(float4(v.p, 1), World).xyz, n, v.c.a, v.p.y);
 }
 float4 VSSBSh(VSIn v, float4 r0 : TEXCOORD4, float4 r1 : TEXCOORD5, float4 r2 : TEXCOORD6, float4 r3 : TEXCOORD7) : SV_Position
 {
 	row_major float4x4 WM = float4x4(r0, r1, r2, r3);
 	float3 n = normalize(mul(v.n, (float3x3)WM));
-	return ShadowPos(mul(float4(v.p, 1), WM).xyz, n, v.c.a);
+	return ShadowPos(mul(float4(v.p, 1), WM).xyz, n, v.c.a, v.p.y);
 }
 float4 VSKSh(VKIn v) : SV_Position
 {
 	float4x4 m = Bones[v.bi.x] * v.bw.x + Bones[v.bi.y] * v.bw.y + Bones[v.bi.z] * v.bw.z + Bones[v.bi.w] * v.bw.w;
 	float3 lp = mul(float4(v.p, 1), m).xyz;
-	return mul(float4(mul(float4(lp, 1), World).xyz, 1), VP);
+	float3 w = mul(float4(lp, 1), World).xyz;
+	BodyWind(w, v.p.y);
+	return mul(float4(w, 1), VP);
 }
 
 PSIn VSK(VKIn v)
@@ -381,10 +404,17 @@ PSIn VSK(VKIn v)
 	PSIn o;
 	float3 w = mul(float4(lp, 1), World).xyz;
 	float3 n = normalize(mul(ln, (float3x3)World));
+	BodyWind(w, v.p.y);
 	w += n * Params.x;
 	o.w = w; o.n = n; o.uv = v.uv; o.c = float4(1, 1, 1, 1);
 	o.pos = mul(float4(w, 1), VP);
 	return o;
+}
+
+// 影の芯を 0 にすると全マップで床も体も黒く潰れる。日向よりはっきり暗く、模様は残す。
+float ShadowVis(float s)
+{
+	return lerp(0.46, 1.0, pow(saturate(s), 1.35));
 }
 
 float ShadowAt(float3 w, float3 n)
@@ -410,7 +440,7 @@ float ShadowAt(float3 w, float3 n)
 	float cs = cos(ang), sn = sin(ang);
 	// 超軽量は1点。軽量と標準は円盤の大きさだけ広げ、枚数は変えない。
 	if (Q.x < 1.5 || (Q.x > 3.5 && Q.x < 4.5)) {
-		if (Q.x > 3.5 && Q.x < 4.5) return ShadowMap.SampleCmpLevelZero(SC, uv, z);
+		if (Q.x > 3.5 && Q.x < 4.5) return ShadowVis(ShadowMap.SampleCmpLevelZero(SC, uv, z));
 		float t0 = Fog.w * (Q.x > 0.5 ? 7.6 : 5.0);
 		float s0 = 0;
 		[loop] for (int i = 0; i < 12; i++) {
@@ -418,7 +448,7 @@ float ShadowAt(float3 w, float3 n)
 			float2 r = float2(o.x * cs - o.y * sn, o.x * sn + o.y * cs);
 			s0 += ShadowMap.SampleCmpLevelZero(SC, uv + r * t0, z);
 		}
-		return pow(saturate(s0 * (1.0 / 12.0)), 1.7);
+		return ShadowVis(s0 * (1.0 / 12.0));
 	}
 	// 自然光。足元は細く、遮蔽が遠いほど太陽の視半径ぶん縁が広がる。
 	// 広がりは探索円の内側まで。影の中は探索だけで打ち切るので、外側の追加サンプルは足さない。
@@ -439,7 +469,7 @@ float ShadowAt(float3 w, float3 n)
 	float radTex = lerp(contact, sun, pen);
 	float capTex = searchTex * 0.92;
 	if (radTex > capTex) radTex = capTex;
-	if (cnt >= (float)nb - 0.5) return 0;
+	if (cnt >= (float)nb - 0.5) return ShadowVis(0);
 	float t = Fog.w * radTex;
 	float zb = z - t * 0.2;
 	int taps = (Q.x > 2.5) ? 16 : 12;
@@ -449,8 +479,8 @@ float ShadowAt(float3 w, float3 n)
 		float2 r = float2(o.x * cs - o.y * sn, o.x * sn + o.y * cs);
 		s += ShadowMap.SampleCmpLevelZero(SC, uv + r * t, zb);
 	}
-	// 中はほぼ黒のまま、混ざった縁だけを残す。
-	return pow(saturate(s / taps), 1.7);
+	// 芯は日向の半分弱。縁のぼかしだけ、サンプルの混ざりを残す。
+	return ShadowVis(s / taps);
 }
 
 float3 HueRotate(float3 c, float a)
@@ -471,13 +501,8 @@ float SkinMask(float3 c)
 // 標準で薄く、限界突破まで段々。超軽量と軽量は無し。テッセレーションは使わない。
 float DewAmt()
 {
-	if (Q.x > 3.5 && Q.x < 4.5) return 0;
-	if (Q.x < 0.5) return 0;
-	if (Q.x < 1.5) return 0.22;
-	if (Q.x < 2.5) return 0.42;
-	if (Q.x < 3.5) return 0.64;
-	if (Q.x < 5.5) return 0.84;
-	return 1;
+	// 無印の各段の量は従来どおり。間を連続段で滑らかに渡す。限界突破より上は少しだけ伸ばす。
+	return QLerp(QRank(), 0.0, 0.0, 0.22, 0.42, 0.64, 0.84, 1.0, 1.1);
 }
 
 float3 DewShade(float3 col, float3 albedo, float3 n, float3 v, float sh, float flesh, float hair)
@@ -572,7 +597,9 @@ float3 LitCore(float3 albedo, float3 n, float3 v, float rough, float3 f0, float 
 {
 	float3 l = normalize(LightDir.xyz);
 	float nd = dot(n, l);
-	float ndl = lerp(saturate(nd), saturate((nd + 0.4) / 1.4), skin);
+	// 背を向けた面も 0 にしない。向きは試合で変わるので、陰でも服と顔が読める明るさにする。
+	float soft = lerp(saturate(nd), saturate((nd + 0.4) / 1.4), skin);
+	float ndl = lerp(0.42, 1.0, soft);
 	float3 h = normalize(l + v);
 	float ndh = saturate(dot(n, h));
 	float ndv = saturate(dot(n, v));
@@ -593,7 +620,7 @@ float3 LitCore(float3 albedo, float3 n, float3 v, float rough, float3 f0, float 
 float3 LitTiny(float3 albedo, float3 n, float sh)
 {
 	float3 l = normalize(LightDir.xyz);
-	float ndl = saturate(dot(n, l));
+	float ndl = lerp(0.42, 1.0, saturate(dot(n, l) * 0.5 + 0.5));
 	float3 amb = lerp(GndAmb.rgb, SkyAmb.rgb, saturate(n.y * .5 + .5)) * SkyAmb.w * 0.85;
 	return albedo * (amb + ndl * sh);
 }
@@ -738,13 +765,8 @@ GOut PSM(PSIn i)
 	float3 f0 = lerp(float3(0.04, 0.04, 0.04), float3(0.03, 0.02, 0.015), skin);
 	float3 col = Lit(albedo, n, v, rough, f0, sh, skin * 0.85);
 	float rim = pow(1. - saturate(dot(n, v)), 3.) * Extra.z;
-	float rimK = 1;
-	if (Q.x > 3.5 && Q.x < 4.5) rimK = 0;
-	else if (Q.x < 0.5) rimK = 1;
-	else if (Q.x > 5.5) rimK = 1.7;
-	else if (Q.x > 4.5) rimK = 1.5;
-	else if (Q.x > 2.5) rimK = 1.35;
-	else if (Q.x > 1.5) rimK = 1.12;
+	// 段ごとの差を連続段で繋ぐ。無印の各段の値は従来どおり、間を滑らかに渡す。限界突破より上は少しだけ伸ばす。
+	float rimK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.12, 1.35, 1.5, 1.7, 1.9);
 	col += rim * rimK * float3(1, 0.95, 0.85) * (0.35 + 0.65 * sh);
 	{
 		float thc = FogColor.a;
@@ -760,13 +782,7 @@ GOut PSM(PSIn i)
 		else if (thc < 8.5) tr = float3(0.32, 0.78, 1);
 		else tr = float3(0.72, 0.92, 1);
 		float frC = pow(1.0 - saturate(dot(n, v)), 2.4);
-		float rimA = 0.1;
-		if (Q.x > 0.5 && Q.x < 1.5) rimA = 0.14;
-		else if (Q.x > 1.5 && Q.x < 2.5) rimA = 0.18;
-		else if (Q.x > 2.5 && Q.x < 3.5) rimA = 0.2;
-		else if (Q.x > 4.5 && Q.x < 5.5) rimA = 0.24;
-		else if (Q.x > 5.5) rimA = 0.28;
-		else if (Q.x > 3.5 && Q.x < 4.5) rimA = 0.08;
+		float rimA = QLerp(QRank(), 0.08, 0.1, 0.14, 0.18, 0.2, 0.24, 0.28, 0.32);
 		col += tr * frC * rimA * (0.5 + 0.5 * sh) * (1. - person * 0.8);
 	}
 	col += emis;
@@ -1005,12 +1021,7 @@ GOut PSWater(PSIn i)
 	float3 L = normalize(LightDir.xyz);
 	float3 H = normalize(L + v);
 	float sp = pow(saturate(dot(wn, H)), thw > 2.5 && thw < 3.5 ? 140. : 48.) * saturate(dot(wn, L) * 0.85 + 0.15);
-	float specK = 1;
-	if (Q.x > 3.5 && Q.x < 4.5) specK = 0;
-	else if (Q.x > 5.5) specK = 1.85;
-	else if (Q.x > 4.5) specK = 1.6;
-	else if (Q.x > 2.5) specK = 1.4;
-	else if (Q.x > 1.5) specK = 1.15;
+	float specK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.15, 1.4, 1.6, 1.85, 2.0);
 	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9) * specK;
 	ApplyReflect(col, wn, v, i.w, 0.05, 0.96);
 	col = lerp(col, float3(0.9, 0.95, 0.98), crest * (thw > 5.5 && thw < 6.5 ? 0.15 : 0.42));
@@ -2313,22 +2324,19 @@ float3 FarBend(float3 col, float2 uv, float t, float mask, float amp)
 }
 
 // マップごとに一つの空間技法。すべて世界座標の視線と平面に乗せる。近い画素（キャラ・移動マス）には掛けない。
-void StageSignature(inout float3 col, float2 uv, float th, float t, float z, float sky, float far, float presence)
+void StageSignature(inout float3 col, float2 uv, float th, float t, float z, float sky, float far, float presence, float zMax)
 {
 	if (th < 0) return;
+	float clear = smoothstep(0.16, 0.44, z);
+	float pres = saturate(presence);
+	if (max(sky * clear, far) * pres < 0.02) return;
 	float room = 0.62;
 	if (z > 0.02) {
-		float2 px = Screen.zw * 2.2;
-		float zr = DepthMap.SampleLevel(SL, uv + float2(px.x, 0), 0).r;
-		float zl = DepthMap.SampleLevel(SL, uv - float2(px.x, 0), 0).r;
-		float zu = DepthMap.SampleLevel(SL, uv + float2(0, px.y), 0).r;
-		float zd = DepthMap.SampleLevel(SL, uv - float2(0, px.y), 0).r;
-		float front = saturate((max(max(zr, zl), max(zu, zd)) - z) * 14.0);
+		float front = saturate((zMax - z) * 14.0);
 		float nearC = 1.0 - smoothstep(0.05, 0.22, z);
 		room = saturate(1.0 - max(front, nearC * 0.94));
 	}
-	float clear = smoothstep(0.16, 0.44, z);
-	float veil = max(sky * clear, far * room) * saturate(presence);
+	float veil = max(sky * clear, far * room) * pres;
 	if (veil < 0.02) return;
 	float gust = GustAmt();
 	float3 rd = WorldRay(uv);
@@ -2438,15 +2446,20 @@ void ThemeWorld(inout float3 col, float2 uv, float th, float t, float z)
 	float sky = saturate((0.4 - uv.y) * 2.5);
 	float hasZ = step(0.02, z);
 	float far = hasZ * smoothstep(0.5, 0.84, z);
-	StageSignature(col, uv, th, t, z, sky, far, max(presence, 0.72));
-	if (tier > 2.5 && hasZ > 0.5) {
-		float2 px = Screen.zw * (tier > 5.5 ? 2.4 : 1.8);
+	float zMax = z, zMin = z;
+	bool needEdge = (tier > 2.5 && hasZ > 0.5);
+	bool needRoom = (far * max(presence, 0.72) >= 0.02 && hasZ > 0.5);
+	if (needEdge || needRoom) {
+		float2 px = Screen.zw * (tier > 5.5 ? 2.4 : (needEdge ? 1.8 : 2.2));
 		float zr = DepthMap.SampleLevel(SL, uv + float2(px.x, 0), 0).r;
 		float zl = DepthMap.SampleLevel(SL, uv - float2(px.x, 0), 0).r;
 		float zu = DepthMap.SampleLevel(SL, uv + float2(0, px.y), 0).r;
 		float zd = DepthMap.SampleLevel(SL, uv - float2(0, px.y), 0).r;
-		float zMax = max(max(zr, zl), max(zu, zd));
-		float zMin = min(min(zr, zl), min(zu, zd));
+		zMax = max(max(zr, zl), max(zu, zd));
+		zMin = min(min(zr, zl), min(zu, zd));
+	}
+	StageSignature(col, uv, th, t, z, sky, far, max(presence, 0.72), zMax);
+	if (needEdge) {
 		float front = saturate((zMax - z) * (tier > 5.5 ? 12.0 : 9.0));
 		float back = saturate((z - zMin) * 6.0);
 		float3 edge = float3(1, 0.97, 0.92);

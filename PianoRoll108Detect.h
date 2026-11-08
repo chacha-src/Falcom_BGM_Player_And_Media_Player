@@ -998,15 +998,33 @@ namespace PianoRoll108
                 }
                 return hit;
             };
-            auto hasFullBassSeries = [&](float hz, float amp) -> bool {
-                float b2 = 0.0f, b3 = 0.0f;
+            auto partialAt = [&](float f0, int n) -> float {
+                if (f0 <= 1.0f || n < 1) return 0.0f;
+                const float target = f0 * (float)n;
+                float best = 0.0f;
                 for (int j = 0; j < nSort; ++j) {
-                    if (centsTo(phz[j], hz * 2.0f) < 65.0f && pa0[j] > b2) b2 = pa0[j];
-                    if (centsTo(phz[j], hz * 3.0f) < 65.0f && pa0[j] > b3) b3 = pa0[j];
+                    if (centsTo(phz[j], target) < 34.0f && pa0[j] > best)
+                        best = pa0[j];
                 }
-                return b2 >= amp * 0.25f && b2 <= amp * 4.5f
-                    && b3 >= amp * 0.20f && b3 <= amp * 4.5f
-                    && b2 >= seriesMax * 0.08f && b3 >= seriesMax * 0.08f;
+                return best;
+            };
+            // 基音より倍音が強い音（単音・長音・明るい音色）も系列として数える。
+            auto seriesAbove = [&](float hz, float amp) -> int {
+                int hit = 0;
+                const float mul[3] = { 2.0f, 3.0f, 4.0f };
+                for (int n = 0; n < 3; ++n) {
+                    const float best = partialAt(hz, n + 2);
+                    if (best >= amp * 0.20f && best <= amp * 6.0f && best >= seriesMax * 0.05f)
+                        ++hit;
+                }
+                return hit;
+            };
+            auto hasFullBassSeries = [&](float hz, float amp) -> bool {
+                const float b2 = partialAt(hz, 2);
+                const float b3 = partialAt(hz, 3);
+                return b2 >= amp * 0.25f && b2 <= amp * 6.0f
+                    && b3 >= amp * 0.20f && b3 <= amp * 6.0f
+                    && b2 >= seriesMax * 0.06f && b3 >= seriesMax * 0.05f;
             };
             int hits[PickScratch::PMAX];
             int hitsSoft[PickScratch::PMAX];
@@ -1040,19 +1058,29 @@ namespace PianoRoll108
                 if ((b == 2 || b == 3) && bandLin[b] > 0.0f
                     && pa0[i] >= bandLin[b] * 0.75f && relShortKey(k) >= 0.06f)
                     fl = 0.055f;
-                if (pa0[i] < seriesMax * fl) continue;
-                if (k >= 72 && pa0[i] < seriesMax * 0.12f && bandLin[b] > 0.0f
-                    && pa0[i] < bandLin[b] * 0.40f)
+                if (pa0[i] < seriesMax * fl) {
+                    // 高音は低音の最大値ではなく、その帯域と短い窓で見る。
+                    const float bandRatio = (b >= 3) ? 0.16f : 0.42f;
+                    const bool bandLead = (b >= 2 && bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * bandRatio);
+                    const bool shortOk = (k >= 72 && relShortKey(k) >= 0.10f && pa0[i] >= seriesMax * 0.025f);
+                    const bool weakFund = (seriesAbove(hz, pa0[i]) >= 2 && pa0[i] >= seriesMax * 0.04f);
+                    if (!bandLead && !shortOk && !weakFund) continue;
+                }
+                if (k >= 72 && pa0[i] < seriesMax * 0.03f && bandLin[b] > 0.0f
+                    && pa0[i] < bandLin[b] * 0.14f && relShortKey(k) < 0.06f)
                     continue;
                 if (b == 4) {
-                    const float needC7 = (k == 96) ? ((relShortKey(96) >= 0.05f) ? 0.24f : 0.40f) : 0.50f;
-                    if (pa0[i] < seriesMax * needC7) continue;
+                    const bool c7ok = (relShortKey(k) >= 0.08f)
+                        || (bandLin[4] > 0.0f && pa0[i] >= bandLin[4] * 0.45f && pa0[i] >= seriesMax * 0.03f);
+                    if (!c7ok && pa0[i] < seriesMax * 0.16f) continue;
                 }
-                if (k >= 88 && pa0[i] < seriesMax * 0.10f) {
-                    if (!(pa0[i] >= seriesMax * 0.06f && relShortKey(k) >= 0.10f)) continue;
-                }
+                if (k >= 88 && pa0[i] < seriesMax * 0.05f && relShortKey(k) < 0.08f
+                    && !(bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.40f))
+                    continue;
                 // 部分音の無い弱い低音は、上の和音のオクターブ下にできた影。
-                if (b == 0 && hitsSoft[i] < 1 && pa0[i] < seriesMax * 0.18f) continue;
+                // 基音より上の倍音が揃っていれば単音・長音の弱い基音なので残す。
+                if (b == 0 && hitsSoft[i] < 1 && seriesAbove(hz, pa0[i]) < 2
+                    && pa0[i] < seriesMax * 0.18f) continue;
                 if (used[b] >= cap[b]) continue;
                 if (prevActive && p.prevF0Hz) {
                     for (int d = -1; d <= 1; ++d) {
@@ -1190,61 +1218,138 @@ namespace PianoRoll108
                     seriesOn[quiet] = false;
                 }
             }
-            // 主音は倍音列の下側。ただし弱い低音が上の実音の 1/2 に乗っているだけなら、
-            // その低音は幻なので先に消す。残った根拠のある音だけが、上の整数倍を倍音として消す。
+            // 1 本の音の倍音はおよそ 1/n で減衰する。その包絡に収まる山は倍音。
+            // 包絡から突き出す山は、同じ整数倍に乗っていても別の実音（高音・和音）。
+            // 基音が弱くて倍音だけが見える単音・長音は、列が 1 本に揃うときだけ基音を足す。
             {
                 auto hzOf = [&](int k) -> float {
                     return (seriesHz[k] > 1.0f) ? seriesHz[k] : PianoKey::KeyHz(k);
                 };
-                auto isHarm = [&](int lo, int hi) -> bool {
-                    const float fr = hzOf(lo);
-                    const float fk = hzOf(hi);
-                    if (fr <= 1.0f || fk <= fr) return false;
-                    const float ratio = fk / fr;
+                auto harmN = [&](float loF, float hiF) -> int {
+                    if (loF <= 1.0f || hiF <= loF) return 0;
+                    const float ratio = hiF / loF;
                     const int n = (int)floorf(ratio + 0.5f);
-                    if (n < 2 || n > 8) return false;
-                    return centsTo(fk, fr * (float)n) <= 36.0f;
+                    if (n < 2 || n > 8) return 0;
+                    if (centsTo(hiF, loF * (float)n) > 36.0f) return 0;
+                    return n;
                 };
-                auto credible = [&](int k) -> bool {
-                    if (seriesA[k] >= seriesMax * 0.32f) return true;
-                    if (k < BASS_END) return hasFullBassSeries(hzOf(k), seriesA[k]);
-                    return keyHitsSoft[k] >= 1;
-                };
-                for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k) {
-                    if (!seriesOn[k] || credible(k)) continue;
-                    for (int h = k + 1; h < COUNT; ++h) {
-                        if (!seriesOn[h] || !isHarm(k, h)) continue;
-                        if (seriesA[h] > seriesA[k]) {
-                            seriesOn[k] = false;
-                            break;
+                int nStrong = 0;
+                int loudI = -1;
+                float loudP = 0.0f;
+                for (int i = 0; i < nSort; ++i) {
+                    if (pa0[i] < seriesMax * 0.12f) continue;
+                    ++nStrong;
+                    if (pa0[i] > loudP) { loudP = pa0[i]; loudI = i; }
+                }
+                if (loudI >= 0 && nStrong >= 3 && nStrong <= 5) {
+                    const float fPeak = phz[loudI];
+                    float bestF = 0.0f;
+                    int bestKey = -1, bestNh = 0, bestExpl = 0;
+                    for (int div = 2; div <= 4; ++div) {
+                        const float f0 = fPeak / (float)div;
+                        const int key = KeyFromHzTune(f0, p.tuneSemis);
+                        if (key < MUSIC_LOW_FLOOR || key >= 84 || seriesOn[key]) continue;
+                        int nh = 0;
+                        for (int n = 1; n <= 6; ++n)
+                            if (partialAt(f0, n) >= seriesMax * 0.08f) ++nh;
+                        if (nh < 3) continue;
+                        int expl = 0;
+                        for (int i = 0; i < nSort; ++i) {
+                            if (pa0[i] < seriesMax * 0.12f) continue;
+                            if (harmN(f0, phz[i]) > 0 || centsTo(phz[i], f0) < 36.0f)
+                                ++expl;
+                        }
+                        if (expl * 4 < nStrong * 3) continue;
+                        if (nh > bestNh || (nh == bestNh && expl > bestExpl)) {
+                            bestNh = nh;
+                            bestExpl = expl;
+                            bestF = f0;
+                            bestKey = key;
                         }
                     }
-                }
-                bool root[COUNT] = {};
-                for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k) {
-                    if (!seriesOn[k] || !credible(k)) continue;
-                    root[k] = true;
-                }
-                for (int h = MUSIC_LOW_FLOOR; h < COUNT; ++h) {
-                    if (!seriesOn[h]) continue;
-                    for (int k = MUSIC_LOW_FLOOR; k < h; ++k) {
-                        if (!root[k] || !isHarm(k, h)) continue;
-                        seriesOn[h] = false;
-                        break;
+                    if (bestKey >= 0) {
+                        seriesOn[bestKey] = true;
+                        seriesHz[bestKey] = bestF;
+                        float a0 = partialAt(bestF, 1);
+                        if (a0 < seriesMax * 0.06f) a0 = seriesMax * 0.06f;
+                        seriesA[bestKey] = a0;
                     }
                 }
-            }
-            for (int key = 96; key <= 100; ++key) {
-                if (!seriesOn[key]) continue;
-                const float needC7 = (key == 96) ? ((relShortKey(96) >= 0.05f) ? 0.15f : 0.24f) : 0.50f;
-                if (seriesA[key] < seriesMax * needC7)
-                    seriesOn[key] = false;
+                for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k) {
+                    if (!seriesOn[k]) continue;
+                    const float f0 = hzOf(k);
+                    float prod[6];
+                    int m = 0;
+                    for (int n = 1; n <= 6; ++n) {
+                        const float a = (n == 1) ? seriesA[k] : partialAt(f0, n);
+                        if (a >= seriesMax * 0.05f && m < 6)
+                            prod[m++] = a * (float)n;
+                    }
+                    float c = 0.0f;
+                    if (m >= 3) {
+                        for (int i = 1; i < m; ++i) {
+                            const float v = prod[i];
+                            int j = i;
+                            while (j > 0 && prod[j - 1] > v) { prod[j] = prod[j - 1]; --j; }
+                            prod[j] = v;
+                        }
+                        c = prod[m / 2];
+                    }
+                    if (seriesA[k] < seriesMax * 0.12f && c <= 0.0f) continue;
+                    for (int h = k + 1; h < COUNT; ++h) {
+                        if (!seriesOn[h]) continue;
+                        const int n = harmN(f0, hzOf(h));
+                        if (n < 2) continue;
+                        const float left = partialAt(f0, n - 1);
+                        const float right = (n < 8) ? partialAt(f0, n + 1) : 0.0f;
+                        const float neighbor = (left > right) ? left : right;
+                        // 両隣の倍音が無い高音は、低音の倍音列ではなく独立した音。
+                        if (h >= 72 && neighbor < seriesMax * 0.05f) continue;
+                        if (neighbor > 0.0f && seriesA[h] > neighbor * 2.0f) continue;
+                        float gate = seriesA[k] * 0.62f;
+                        if (c > 0.0f) {
+                            const float pred = c / (float)n * 1.20f;
+                            if (pred > gate) gate = pred;
+                        }
+                        if (seriesA[h] <= gate)
+                            seriesOn[h] = false;
+                    }
+                }
+                // 倍音を消したあとの空きに、帯域枠へ入れなかった高音を戻す。
+                // 大きい倍音が先に枠を埋めて、弱い実音が最初から捨てられていた。
+                int usedNow[5] = {};
+                for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k)
+                    if (seriesOn[k]) ++usedNow[bandOf(k)];
+                for (int oi = 0; oi < nSort; ++oi) {
+                    const int i = ordA[oi];
+                    const int k = KeyFromHzTune(phz[i], p.tuneSemis);
+                    if (k < 72 || k > 100 || seriesOn[k]) continue;
+                    const int b = bandOf(k);
+                    if (usedNow[b] >= cap[b]) continue;
+                    if (pa0[i] < seriesMax * 0.012f) continue;
+                    if (bandLin[b] > 0.0f && pa0[i] < bandLin[b] * 0.12f && relShortKey(k) < 0.05f)
+                        continue;
+                    bool stacked = false;
+                    for (int lo = MUSIC_LOW_FLOOR; lo < k && !stacked; ++lo) {
+                        if (!seriesOn[lo]) continue;
+                        if (harmN(hzOf(lo), phz[i]) >= 2) stacked = true;
+                    }
+                    if (stacked) continue;
+                    seriesOn[k] = true;
+                    seriesHz[k] = phz[i];
+                    seriesA[k] = pa0[i];
+                    ++usedNow[b];
+                }
             }
             for (int key = 72; key <= 100; ++key) {
                 if (!seriesOn[key]) continue;
                 const int b = bandOf(key);
-                if (seriesA[key] < seriesMax * 0.12f && bandLin[b] > 0.0f
-                    && seriesA[key] < bandLin[b] * 0.40f)
+                if (relShortKey(key) >= 0.06f && seriesA[key] >= seriesMax * 0.02f) continue;
+                const float keepRatio = (b >= 3) ? 0.16f : 0.35f;
+                if (bandLin[b] > 0.0f && seriesA[key] >= bandLin[b] * keepRatio
+                    && seriesA[key] >= seriesMax * 0.02f) continue;
+                if (seriesA[key] < seriesMax * 0.03f && bandLin[b] > 0.0f
+                    && seriesA[key] < bandLin[b] * 0.14f)
                     seriesOn[key] = false;
             }
         }

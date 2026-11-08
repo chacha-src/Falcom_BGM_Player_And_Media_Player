@@ -2336,6 +2336,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 			dw.twoSided = 1;
 			dw.noTess = 1;
 			dw.mode = 0.f;
+			dw.sway = 0.f;
 			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(hit->l[side], world), dw);
 		}
 		return;
@@ -2381,6 +2382,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		dw.twoSided = 1;
 		dw.noTess = 1;
 		dw.mode = 0.f;
+		dw.sway = 0.f;
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
 		r.DrawStatic(lib.wing[dr][1 - side], MMul(l, world), dw);
 		hit->l[side] = l;
@@ -2412,8 +2414,10 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 	if (a.proc == 3) {
 		if (!a.poseValid) ActorPose(a, lib, r);
 		if (!a.poseValid) return TRUE;
-		DrawParams d = dp;
-		// 見本は足が地面に付いたままなので、移動の速度は出ない。歩き・走り・飛行の羽根で向かい風を足す。
+	DrawParams d = dp;
+	// 戦闘・カット・拠点。作成プレビューと顔枠は、今の布の見え方のまま。
+	if (r.StageWind() && !r.InPortrait() && d.sway < 1.f) d.sway = 1.f;
+	// 見本は足が地面に付いたままなので、移動の速度は出ない。歩き・走り・飛行の羽根で向かい風を足す。
 		d.gait = 0.f;
 		if (a.clip == CL_RUN) d.gait = 0.72f;
 		else if (a.clip == CL_WALK) d.gait = 0.46f;
@@ -2477,6 +2481,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 		const int nAtt = (ava && !bareBase) ? a.wepAtt : a.nAtt, nGear = (ava && !bareBase) ? a.wepGear : a.nGear;
 		DrawParams da = dp;
+		if (r.StageWind() && !r.InPortrait()) da.sway = 1.f;
 		da.noTess = 1;
 		if (hum) da.rim = 0.06f;
 		auto bindOf = [&](int j) -> M4 {
@@ -2640,7 +2645,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			dh0.outline = 0;
 			dh0.twoSided = 1;
 			dh0.noTess = 1;
-			dh0.sway = 0.f;
+			dh0.sway = d.sway;
 			dh0.emissive = 0.f;
 			{
 				int al = (dp.tint >> 24) & 255;

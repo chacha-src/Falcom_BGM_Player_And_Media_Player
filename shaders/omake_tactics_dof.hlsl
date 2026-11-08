@@ -80,10 +80,12 @@ float3 ReflectTap(float2 uv, float z)
 
 float4 PSDofH(QOut i) : SV_Target
 {
+	float3 scene = Tex.SampleLevel(SL, i.uv, 0).rgb;
+	// 作成プレビューは Q.w を負にする。人物が画面の大半なので、空だけでなく全面で被写界と遮蔽を省く。
+	if (Q.w < 0) return float4(scene, 1);
 	float z = Depth.SampleLevel(SL, i.uv, 0).r;
 	float focus = Params.w;
 	float coc = saturate((z - focus) * 2.4) * saturate(Q.w);
-	float3 scene = Tex.SampleLevel(SL, i.uv, 0).rgb;
 	scene += ReflectTap(i.uv, z) * (Q.x > 1.5 ? 0.22 : 0.16);
 	scene *= 1. - min(Ao4(i.uv, z, Q.x > 1.5 ? 7.5 : 5.0), 0.5) * (Q.x > 1.5 ? 0.26 : 0.2);
 	float2 rad = Screen.zw * Params.z * coc;
@@ -103,12 +105,14 @@ float4 PSDofH(QOut i) : SV_Target
 
 float4 PSDofU(QOut i) : SV_Target
 {
+	float3 scene = Tex.SampleLevel(SL, i.uv, 0).rgb;
+	// 作成プレビューは Q.w を負にする。マップのポストはそのまま、この画面だけ色を返す。
+	if (Q.w < 0) return float4(scene, 1);
 	float z = Depth.SampleLevel(SL, i.uv, 0).r;
 	float focus = Params.w;
 	float farC = saturate((z - focus) * 1.7);
 	float nearC = saturate((focus * 0.42 - z) * 6.0);
 	float coc = max(farC, nearC) * saturate(Q.w);
-	float3 scene = Tex.SampleLevel(SL, i.uv, 0).rgb;
 	scene += ReflectTap(i.uv, z) * (Q.x > 5.5 ? 0.34 : 0.26);
 	{
 		float ao = Ao12(i.uv, z, 6.5);

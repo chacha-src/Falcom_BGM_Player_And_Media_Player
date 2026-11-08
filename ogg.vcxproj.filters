@@ -1392,6 +1392,21 @@
     <ClCompile Include="AnalyzerFftAvx512.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AnalyzerFftAvx10.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PianoRollGoertzelAvx10.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="simd_kernels.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="simd_kernels_avx512.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="simd_kernels_avx10.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ZmusicEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -2090,6 +2105,18 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PianoRollGoertzelAvx2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpu_isa.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="simd_kernels.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="simd_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="x64lib_isa.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="FileTagInfo.h">

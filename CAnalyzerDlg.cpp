@@ -12,9 +12,11 @@
 #include <cstring>
 #include <algorithm>
 #include "cpu_isa.h"
+#include "simd_kernels.h"
 
 #if defined(_M_X64)
 void AnalyzerFftRadix2_AVX512(float* re, float* im, int n);
+void AnalyzerFftRadix2_AVX10(float* re, float* im, int n);
 #endif
 
 extern COggDlg* og;
@@ -78,9 +80,11 @@ namespace
 	void FftRadix2(float* re, float* im, int n)
 	{
 #if defined(_M_X64)
-		if (n >= 64 && (n & (n - 1)) == 0
-			&& (CpuIsaHasAvx512() || CpuIsaHasAvx10_512())) {
-			AnalyzerFftRadix2_AVX512(re, im, n);
+		if (n >= 64 && (n & (n - 1)) == 0 && CpuIsaWide512()) {
+			if (CpuIsaHasAvx10_512())
+				AnalyzerFftRadix2_AVX10(re, im, n);
+			else
+				AnalyzerFftRadix2_AVX512(re, im, n);
 			return;
 		}
 #endif
@@ -2503,7 +2507,7 @@ bool CAnalyzerDlg::SnapshotRing(int& outWrite, int& outFilled, int& outChannels)
 		return false;
 	}
 	for (int c = 0; c < outChannels; ++c)
-		memcpy(m_ringSnap[c].data(), m_ring[c].data(), RING_SAMPLES * sizeof(float));
+		SimdKernels::Get().Copy(m_ringSnap[c].data(), m_ring[c].data(), RING_SAMPLES * sizeof(float));
 	LeaveCriticalSection(&m_cs);
 	return true;
 }

@@ -63,8 +63,12 @@ inline TacAir TacAirAt(float time)
 }
 
 // 直近 32 フレーム（約 0.5 秒）の平均。一瞬の突風で木も服も跳ねない。
+// 同じ時刻は粒の数だけ呼ばれても一度だけ計算する。値は変えない。
 inline TacAir TacAirHeld(float time)
 {
+	struct Cache { float time; int valid; TacAir a; };
+	static Cache c;
+	if (c.valid && c.time == time) return c.a;
 	TacAir a = {};
 	const int N = 32;
 	for (int i = 0; i < N; ++i) {
@@ -79,6 +83,7 @@ inline TacAir TacAirHeld(float time)
 	const float hb = sqrtf(a.bx * a.bx + a.bz * a.bz);
 	a.sway = h * 0.22f + hb * 0.35f + fabsf(a.y) * 0.18f;
 	if (a.sway > 1.f) a.sway = 1.f;
+	c.time = time; c.a = a; c.valid = 1;
 	return a;
 }
 
@@ -100,7 +105,8 @@ struct GpuMesh {
 	int tex;       // テクスチャ番号（-1=白）
 	int glow;
 	int i32;       // 32bit インデックス
-	GpuMesh() : vb(NULL), ib(NULL), nIdx(0), stride(0), tex(-1), glow(0), i32(0) {}
+	UINT iBase;   // DrawIndexed の開始インデックス。0 なら先頭から
+	GpuMesh() : vb(NULL), ib(NULL), nIdx(0), stride(0), tex(-1), glow(0), i32(0), iBase(0) {}
 	void Release();
 };
 
@@ -248,6 +254,8 @@ public:
 	int H() const { return m_h; }
 	ID3D11Device* Dev() { return m_dev; }
 	BOOL SetQuality(int q);
+	void SetQualityPlus(int plus);
+	int QualityPlus() const { return m_qPlus; }
 
 	// アセット
 	typedef void (*TacLoadPulseFn)(int cur, int total, void* user);
@@ -509,6 +517,10 @@ public:
 	// カットシーンのキャラ描画前。滝の定数と分割を捨て、布も置き直す。
 	void ResetActorPipe();
 	void SetCutActors(BOOL on) { m_cutActors = on; }
+	// 作成プレビューは布の見え方をそのままにする。戦闘・カット・拠点は 1。
+	void SetStageWind(BOOL on) { m_stageWind = on; }
+	BOOL StageWind() const { return m_stageWind; }
+	void SetPreviewPost(BOOL on) { m_previewPost = on; }
 	BOOL InPortrait() const { return m_inPortrait; }
 	// m の索引で、頂点だけ v に差し替えて描く（毎フレーム CPU で動かす髪など）。
 	void DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp);
@@ -556,6 +568,11 @@ public:
 
 	// HUD
 	void BeginHud();
+	// 読み込み中は時刻が止まっている。空と後処理を一度描いた絵を、進捗の塗り直しに使う。
+	BOOL LoadSkyReady() const;
+	void RememberLoadSky();
+	void ShowLoadSky();
+	void DropLoadSky();
 	void HudRect(float x, float y, float w, float h, DWORD c);
 	void HudRectGrad(float x, float y, float w, float h, DWORD top, DWORD bottom);
 	void HudFrame(float x, float y, float w, float h, float t, DWORD c);
@@ -652,6 +669,8 @@ private:
 	};
 	Fix<ClothInst, CLOTH_INST> m_clothInst;
 	void RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp);
+	void FlushClothPend();
+	void FlushHairPend();
 	void ReleaseClothInst();
 	void HudPush(float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c0, DWORD c1, ID3D11ShaderResourceView* srv);
 
@@ -670,6 +689,7 @@ private:
 	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
 	int m_w, m_h;
 	int m_quality;
+	int m_qPlus;
 	int m_gpu; // 0不明 1NVIDIA 2AMD 3Intel
 	BOOL m_allowTess;
 	BOOL m_tessOn;
@@ -691,6 +711,8 @@ private:
 	IDXGISwapChain1* m_swap;
 	ID3D11RenderTargetView* m_bbRtv;
 	ID3D11Texture2D* m_bb;
+	ID3D11Texture2D* m_loadSky;
+	int m_loadSkyW, m_loadSkyH;
 	ID3D11Texture2D* m_avaPlate;
 	int m_avaPlateW, m_avaPlateH;
 	void RestoreAvaPlate();
@@ -810,6 +832,8 @@ private:
 	ID3D11Buffer* m_hairVertSB;
 	ID3D11ShaderResourceView* m_hairVert;
 	int m_hairV0[16], m_hairVN[16];
+	int m_hairI0[16], m_hairIN[16];
+	int m_hairVMin[16], m_hairVMax[16];
 	struct HairInst {
 		const void* owner; int style;
 		ID3D11Buffer* sb; ID3D11UnorderedAccessView* uav; ID3D11ShaderResourceView* srv;
@@ -818,8 +842,10 @@ private:
 		int slot;
 		int capeBit;
 		float prevFly, prevGait;
-		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1), capeBit(-1), prevFly(-1.f), prevGait(-1.f) {
+		M4 place; int placeOk;
+		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0), slot(-1), capeBit(-1), prevFly(-1.f), prevGait(-1.f), placeOk(0) {
 			world = MIdent();
+			place = MIdent();
 			vel[0] = vel[1] = vel[2] = 0.f;
 		}
 	};
@@ -827,7 +853,7 @@ private:
 	ID3D11Buffer* m_hairScratchSB;
 	ID3D11UnorderedAccessView* m_hairScratchUAV;
 	ID3D11ShaderResourceView* m_hairScratchSRV;
-	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth = 1.f, float gait = 0.f, float fly = 0.f);
+	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth = 1.f, float gait = 0.f, float fly = 0.f, const void* clothMem = NULL);
 	void ReleaseHairInst();
 	int m_scalpModel; // m_capDraw を作った体
 	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
@@ -843,6 +869,7 @@ private:
 	ID3D11InputLayout* m_ilP;
 	ID3D11InputLayout* m_ilPT;
 	ID3D11Buffer* m_cbFrame;
+	ID3D11Buffer* m_cbAir;
 	ID3D11Buffer* m_cbRipple;
 	ID3D11Buffer* m_cbObj;
 	ID3D11Buffer* m_cbBones;
@@ -898,6 +925,8 @@ private:
 	BoundMesh m_waterChunk[16];
 	BoundMesh m_lavaChunk[16];
 	BOOL m_cutActors;
+	BOOL m_stageWind;
+	BOOL m_previewPost;
 	unsigned m_cutActorGen;
 	GpuMesh m_lava;
 	struct PropBatch { GpuMesh mesh; float hue; float mat; float cx, cy, cz, rad; };
@@ -929,10 +958,12 @@ private:
 	// HUD
 	Fix<VtxH, 24576> m_hud;
 	ID3D11ShaderResourceView* m_hudSrv;
-	enum { TAC_TEXTN = 512, TAC_TEXTK = 192 };
+	enum { TAC_TEXTN = 512, TAC_TEXTK = 192, TAC_TEXTH = 1024 };
 	struct TextSlot { wchar_t key[TAC_TEXTK]; TextSprite sp; int live; };
 	TextSlot m_text[TAC_TEXTN];
 	UINT m_textHash[TAC_TEXTN];
+	int m_textNext[TAC_TEXTN];
+	int m_textHead[TAC_TEXTH];
 	BOOL m_inPortrait;
 	BOOL m_instOn;
 	int m_portraitSlot;

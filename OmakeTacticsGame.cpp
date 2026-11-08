@@ -113,6 +113,7 @@ Game::Game()
 	m_qCoolT = 0;
 	m_qHz = 0;
 	m_qSlots = 1;
+	m_qFine = TacTierNotch(1);
 	m_syncArm = -1;
 	m_syncArmN = 0;
 	m_syncRun = -1;
@@ -136,6 +137,7 @@ Game::Game()
 	m_click = m_rclick = FALSE;
 	m_clickX = m_clickY = 0;
 	m_dragRot = m_dragPan = FALSE;
+	m_rOnUi = FALSE;
 	m_dragLastX = m_dragLastY = 0;
 	m_dragDist = 0;
 	m_focusId = -1; m_activateId = -1;
@@ -426,11 +428,13 @@ void Game::DrawLoadHud(int permille)
 BOOL Game::PaintLoadScreen()
 {
 	if (!m_r.Ready() || !m_r.FrameReady()) return FALSE;
-	SetupCamera(v3(0, 0, 0), 0, .3f, 10, .8f);
-	m_r.BeginFrame();
-	m_r.BeginMainPass();
-	m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
-	m_r.BeginHud();
+	if (!m_r.LoadSkyReady()) {
+		SetupCamera(v3(0, 0, 0), 0, .3f, 10, .8f);
+		m_r.BeginMainPass();
+		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
+		m_r.BeginHud();
+		m_r.RememberLoadSky();
+	} else m_r.ShowLoadSky();
 	DrawLoadHud();
 	m_r.EndHud();
 	m_r.Present();
@@ -798,6 +802,7 @@ void Game::PickQuality(int delta)
 	m_qHold = -1;
 	m_qMissN = 0;
 	m_qOkN = 0;
+	// 設定を変えたら細段は選んだ段の無印から始める。あとは性能に合わせて + / - へ滑らかに動く。
 	if (q == TAC_Q_AUTO) {
 		m_save.quality = TAC_Q_AUTO;
 		m_save.spare[0] = 1;
@@ -806,11 +811,17 @@ void Game::PickQuality(int delta)
 		TacQualityEnsureAutoDefault(m_save);
 		m_save.spare[2] = 6;
 		m_syncRun = TacHzDefaultI();
+		m_syncArm = 0;
+		m_syncArmN = 0;
+		m_qFine = TacTierNotch(6);
+		m_r.SetQualityPlus(0);
 		ApplyQualityNow(6);
 	} else {
 		m_save.quality = q;
 		TacQualityUserLock(m_save);
 		m_syncRun = -1;
+		m_qFine = TacTierNotch(q);
+		m_r.SetQualityPlus(0);
 		ApplyQualityNow(q);
 	}
 	InvalidatePortraits();
@@ -833,104 +844,178 @@ void Game::PulseQuality(float work, float span)
 	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.25f) return;
 	if (m_syncLock > 0) return;
 	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
-	const int stdSlot = TacQualityFixedSlot(1);
-	const int capSlot = 6;
 	if (autoOn) {
-		int capI = TAC_HZ_N - 1;
-		int now = QualityNow();
-		int slot = TacQualityFixedSlot(now);
-		int next = now;
-		auto goHz = [&](int sync) {
-			m_syncRun = Clampi(sync, 0, capI);
-			m_qMissN = 0;
-			m_qOkN = 0;
-			m_syncArmN = 0;
-			m_syncLock = 0.45f;
-			m_fpsN = 0;
-			m_fpsI = 0;
-			m_fpsWin = 0;
-			m_syncArm = 0;
-			m_qHz = TacHzAt(m_syncRun);
+		// 代表 Hz は残す（144/165 ディスプレイに合わせるため）。1 段ずつしか動かさない。
+		// フレームレート確認と描画段は交互。限界突破+++で一度、上の Hz を見る。
+		// 上げられるなら Hz を上げ、無理なら +4 へ。+5 以降は本当に余白があるときだけ。
+		static const int kCand[] = { 240, 165, 144, 120, 90, 72, 60 };
+		const int nCand = (int)(sizeof(kCand) / sizeof(kCand[0]));
+		auto nextUp = [&](int curHz) {
+			int best = 0;
+			for (int c = 0; c < nCand; ++c) {
+				int h = kCand[c];
+				if (h > curHz && (best == 0 || h < best)) best = h;
+			}
+			return best;
 		};
-		float holdHz = (float)hz * 0.90f;
-		float dropHz = (hz >= 120) ? (float)hz * 0.72f : (float)hz * 0.80f;
-		if (m_fps >= holdHz) { m_qOkN++; m_qMissN = 0; m_syncArm = 0; }
-		else if (m_fps < dropHz) { m_qMissN++; m_qOkN = 0; }
-		else m_qOkN = 0;
-		// 1/60 が底。標準以上では 1/30 に落とさない。間隔が実測より高いときは画質より先に間隔を合わせ、限界突破を取りにいく。
-		int i60 = TacHzIndexOf(60);
-		int hzFloorI = (slot < stdSlot) ? TacHzIndexOf(30) : i60;
-		if (m_fps < holdHz && runI > hzFloorI) {
-			int fit = hzFloorI;
-			for (int i = hzFloorI; i <= runI; ++i) {
-				if ((float)TacHzAt(i) * 0.90f <= m_fps) fit = i;
+		auto nextDn = [&](int curHz) {
+			int best = 0;
+			for (int c = 0; c < nCand; ++c) {
+				int h = kCand[c];
+				if (h < curHz && h > best) best = h;
 			}
-			if (m_syncArm < 0) m_syncArm = 0;
-			m_syncArm++;
-			if (m_syncArm >= 8 && fit < runI) {
-				goHz(fit);
-				return;
-			}
-		}
-		int floorSlot = (runI <= i60) ? 0 : stdSlot;
-		BOOL peakQ = (now == 6);
-		if (peakQ && runI < capI) {
-			int upI = runI + 1;
-			float bU = 1.f / (float)TacHzAt(upI);
-			BOOL canU = m_fps >= (float)hz * 0.95f
-				&& m_workAvg > 0.f && m_workAvg <= bU * 0.98f;
-			if (canU) m_syncArmN++;
-			else m_syncArmN = 0;
-			if (m_syncArmN >= 20) {
-				goHz(upI);
-				return;
-			}
-		} else m_syncArmN = 0;
-		int needMiss = (slot >= 6) ? 48 : ((slot >= 5) ? 36 : 20);
-		int needOk = (slot >= 4) ? 18 : 36;
-		if (m_qMissN >= needMiss) {
-			if (runI > hzFloorI) {
-				goHz(runI - 1);
-				return;
-			}
-			if (slot > floorSlot) {
-				next = TacQualityFixedAt(slot - 1);
+			return best;
+		};
+		auto applyHz = [&](int nhz) {
+			int idx = TacHzIndexOf(nhz);
+			if (idx < TacHzIndexOf(60)) idx = TacHzIndexOf(60);
+			m_syncRun = idx;
+			m_qHz = TacHzAt(idx);
+		};
+		auto applyNotch = [&](int next) {
+			if (next < TAC_NOTCH_FLOOR) next = TAC_NOTCH_FLOOR;
+			if (next > TAC_NOTCH_OPEN) next = TAC_NOTCH_OPEN;
+			if (next == m_qFine) return;
+			m_qFine = next;
+			int q, plus;
+			TacNotchSplit(next, q, plus);
+			m_r.SetQualityPlus(plus);
+			ApplyQualityNow(q);
+		};
+		if (m_syncArm < 0) m_syncArm = 0;
+		float g = m_r.GpuMs();
+		if (g <= 0.05f) return;
+		int cur = TacHzAt(m_syncRun);
+		if (cur < 60) cur = 60;
+		float period = 1000.f / (float)cur;
+		int up = nextUp(cur);
+		int dn = nextDn(cur);
+		const int gate = TAC_NOTCH_LIMIT + 3; // 限界突破+++
+		const int soft = TAC_NOTCH_LIMIT + 4; // +4
+		const bool canUp = up && g <= (1000.f / (float)up) * 0.82f;
+		const bool miss = g > period * 1.08f; // 今の拍に乗れていない。画質より先に拍を下げる
+		const bool over = g > period * 0.98f;
+		const bool tight = g > period * 0.90f;
+		const bool room = g <= period * 0.72f;
+		const bool spare = g <= period * 0.55f;
+		const bool crowded = g > period * 0.62f;
+		if (m_syncRun < TacHzIndexOf(60)) applyHz(60);
+		// 0 = フレームレート、1 = 描画。結論が出たら相手へ渡す。
+		if (m_syncArm == 0) {
+			if (canUp) {
+				m_qOkN++;
 				m_qMissN = 0;
-			} else m_qMissN = 0;
-		} else if (m_syncArmN == 0 && m_qOkN >= needOk && slot < capSlot) {
-			next = TacQualityFixedAt(slot + 1);
-			m_qOkN = 0;
+				if (m_qOkN >= 16) {
+					applyHz(up);
+					m_qHold = 0;
+					m_qOkN = 0;
+					m_syncArmN = 0;
+					m_syncArm = 1;
+				}
+			} else if (dn && (miss || (over && m_qFine <= TAC_NOTCH_LIMIT))) {
+				m_qMissN++;
+				m_qOkN = 0;
+				if (m_qMissN >= 6) {
+					applyHz(dn);
+					m_qHold = 0;
+					m_qMissN = 0;
+					m_syncArmN = 0;
+					m_syncArm = 1;
+				}
+			} else {
+				m_qOkN = 0;
+				m_qMissN = 0;
+				m_syncArmN++;
+				int waitNo = (m_qFine > soft) ? 6 : 12;
+				if (m_syncArmN >= waitNo) {
+					m_qHold = 1; // 上の Hz は今回は無理。描画側が + を判断してよい
+					m_syncArmN = 0;
+					m_syncArm = 1;
+				}
+			}
+		} else {
+			int notch = m_qFine;
+			if (notch < TAC_NOTCH_FLOOR) notch = TAC_NOTCH_FLOOR;
+			if (notch > TAC_NOTCH_OPEN) notch = TAC_NOTCH_OPEN;
+			int next = notch;
+			int floorN = (cur <= 60 && over) ? TAC_NOTCH_FLOOR : TAC_NOTCH_LIMIT;
+			const bool probed = (m_qHold == 1);
+			bool acted = false;
+			if ((over && notch > floorN) || (tight && notch > TAC_NOTCH_LIMIT)) {
+				m_qMissN++;
+				m_qOkN = 0;
+				if (m_qMissN >= 6) { next = notch - 1; acted = true; }
+			} else if (notch > soft && crowded) {
+				next = notch - 1; // +5 より上で余白が無いなら、Hz を見たあと 1 段戻す
+				acted = true;
+			} else if (notch < gate && room && probed) {
+				m_qOkN++;
+				m_qMissN = 0;
+				if (m_qOkN >= 14) { next = notch + 1; acted = true; }
+			} else if (notch == gate && probed && !tight) {
+				// +++ で上の Hz を見て無理だった。ここから +4。
+				m_qOkN++;
+				m_qMissN = 0;
+				if (m_qOkN >= 12) { next = notch + 1; acted = true; }
+			} else if (notch >= soft && notch < TAC_NOTCH_OPEN && spare && probed) {
+				m_qOkN++;
+				m_qMissN = 0;
+				if (m_qOkN >= 28) { next = notch + 1; acted = true; }
+			} else {
+				m_qOkN = 0;
+				m_qMissN = 0;
+				m_syncArm = 0;
+				m_syncArmN = 0;
+				return;
+			}
+			if (acted) {
+				if (next != notch) {
+					applyNotch(next);
+					m_qHold = 0; // 画質を動かしたので、次は必ずフレームレートを見る
+				}
+				m_qOkN = 0;
+				m_qMissN = 0;
+				m_syncArmN = 0;
+				m_syncArm = 0;
+			}
 		}
-		if (next != TacQualityWanted(m_save))
-			m_save.spare[2] = next;
-		if (next != now) ApplyQualityNow(next);
 		return;
 	}
 	m_syncRun = -1;
+
+	// 細段（notch, 0.25 刻み）を 1 段ずつ上下。設定段が天井、床は絶対最下段（古いノート向けに超軽量の下まで）。
+	// 設定の名前も保存値も変えず、内部の + / - 段だけを動かす。段差をまたいでも 0.25 ずつなので見た目は滑らか。
+	int ceilQ = autoOn ? 6 : TacQualityWanted(m_save);
+	int ceilNotch = TacTierCeilNotch(ceilQ);
+	// 自動時：まだ上位フレームレートへ上がれる余地がある間は、画質の開放段(限界突破+N)を無印で止めて
+	// GPUの余力を残し、1/120・1/144 などへの上りルートを確保する。Hz天井に達して初めて+Nを開放する。
+	bool hzCeil = !autoOn || (m_qHold >= 30);
+	if (!hzCeil && ceilNotch > TAC_NOTCH_LIMIT) ceilNotch = TAC_NOTCH_LIMIT;
+	int floorNotch = TAC_NOTCH_FLOOR;
+	int notch = m_qFine;
+	if (notch < floorNotch) notch = floorNotch;
+	if (notch > ceilNotch) notch = ceilNotch;
+
 	float period = 1.f / (float)hz;
 	float okLine = (float)hz * 0.90f;
 	if (m_fps >= okLine || span <= period * 1.15f) { m_qOkN++; m_qMissN = 0; }
 	else if (m_fps < (float)hz * 0.78f && span > period * 1.28f) { m_qMissN++; m_qOkN = 0; }
-	int now = QualityNow();
-	int slot = TacQualityFixedSlot(now);
-	int cap = (m_qHold >= 0) ? m_qHold : TacQualityWanted(m_save);
-	if (cap < 0 || cap > 6) cap = now;
-	int qCapSlot = TacQualityFixedSlot(cap);
-	int qFloor = qCapSlot - 2;
-	if (qFloor < 0) qFloor = 0;
-	int needMiss = (slot >= 6) ? 48 : ((slot >= 5) ? 36 : 20);
-	int needOk = (slot >= 4) ? 18 : 24;
-	int next = now;
-	if (m_qMissN >= needMiss) {
-		if (slot > qFloor) next = TacQualityFixedAt(slot - 1);
-		m_qMissN = 0;
-		if (m_qHold < 0) m_qHold = TacQualityWanted(m_save);
-	} else if (m_qOkN >= needOk) {
-		if (slot < qCapSlot) next = TacQualityFixedAt(slot + 1);
-		m_qOkN = 0;
-		if (m_qHold >= 0 && next == m_qHold) m_qHold = -1;
+
+	// 上げは慎重、下げは素早く。往復を避ける。上位段ほど上げに時間をかける（上位は重い）。
+	int needMiss = 12;
+	int needOk = (notch >= TAC_NOTCH_LIMIT) ? 40 : (notch >= 16 ? 30 : 22);
+	int next = notch;
+	if (m_qMissN >= needMiss) { if (notch > floorNotch) next = notch - 1; m_qMissN = 0; }
+	else if (m_qOkN >= needOk) { if (notch < ceilNotch) next = notch + 1; m_qOkN = 0; }
+	if (next < floorNotch) next = floorNotch;
+	if (next > ceilNotch) next = ceilNotch;
+	if (next != m_qFine) {
+		m_qFine = next;
+		int q, plus;
+		TacNotchSplit(next, q, plus);
+		m_r.SetQualityPlus(plus);
+		ApplyQualityNow(q);   // 粗段が変わるときだけ作り直すが、footprint は同形なので実際は軽い。
 	}
-	if (next != now) ApplyQualityNow(next);
 }
 
 void Game::Tick(float dt)
@@ -965,7 +1050,7 @@ void Game::Tick(float dt)
 	BOOL holdGame = FALSE;
 	if (m_screen == SC_LOADING) {
 		if (m_loadFrames++ >= 2) {
-			if (!LoadEverything()) { m_screen = SC_FAIL; m_loadLive = FALSE; }
+			if (!LoadEverything()) { m_r.DropLoadSky(); m_screen = SC_FAIL; m_loadLive = FALSE; }
 			else {
 				m_loadLive = TRUE;
 				int ava = m_avaLoadUnits;
@@ -978,6 +1063,7 @@ void Game::Tick(float dt)
 				m_screen = SC_LOADING;
 				WarmHomeAvatars();
 				NoteLoad(1000);
+				m_r.DropLoadSky();
 				m_screen = SC_BASE;
 				m_r.SetLoadPulse(NULL, NULL);
 				m_loadLive = FALSE;
@@ -998,14 +1084,17 @@ void Game::Tick(float dt)
 	UpdateParticles(m_screen == SC_BATTLE ? gdt : dt);
 	if (m_evFlash > 0) m_evFlash = max(0.f, m_evFlash - dt);
 	if (m_evoCut) {
+		float prev = m_evoT;
 		m_evoT += dt;
-		if (m_evoT >= 2.75f) m_evoCut = 0;
+		if (prev < 1.4f && m_evoT >= 1.4f) TacSfx(TS_PROMOTE);
+		if (m_evoT >= 6.4f) m_evoCut = 0;
 	}
 	SyncBgm();
 	if (m_wantClose) return;
 	if (!m_r.Ready()) return;
-	if (!m_r.FrameReady()) return;
 	if (holdGame) return;
+	// スワップがまだ描き中なら場面は積まない。拍自体は捨てないので、ゲーム時間は進む。
+	if (!m_r.FrameReady()) return;
 	LARGE_INTEGER t0, t1, freq;
 	QueryPerformanceCounter(&t0);
 	QueryPerformanceFrequency(&freq);
@@ -1023,6 +1112,7 @@ void Game::Tick(float dt)
 	QueryPerformanceFrequency(&freq);
 	m_msPr = freq.QuadPart ? (float)((double)(t1.QuadPart - tPr.QuadPart) * 1000.0 / (double)freq.QuadPart) : 0.f;
 	m_r.EndFrameTextGc();
+	if (m_r.PresentBusy()) return;
 	float work = 0.f;
 	float span = 0.f;
 	if (freq.QuadPart)
@@ -1221,7 +1311,7 @@ void Game::RenderFrame()
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	}
 	m_r.BeginHud();
-	if (m_screen == SC_CREATE) m_r.GrabAvaPlate();
+	if (m_screen == SC_CREATE && avaWait) m_r.GrabAvaPlate();
 	m_btns.clear();
 	if (m_uiHoverScreen != m_screen || m_uiHoverShop != (m_shop != 0)) {
 		m_uiHover = -1;
@@ -1347,7 +1437,7 @@ void Game::OnMouseMove(int x, int y)
 	if (m_rDown || m_mDown || scout || lookPan) {
 		int dx = x - m_dragLastX, dy = y - m_dragLastY;
 		m_dragDist += fabsf((float)dx) + fabsf((float)dy);
-		if (m_rDown && m_dragDist > 6) {
+		if (m_rDown && !m_rOnUi && m_dragDist > 6) {
 			m_dragRot = TRUE;
 			m_camYawGoal += dx * .008f;
 			m_camYaw = m_camYawGoal;
@@ -1393,7 +1483,13 @@ void Game::OnMouseDown(int btn, int x, int y)
 		m_previewDrag = (m_screen == SC_CREATE && !onInfo && x > m_w * .46f && x < m_w * .78f);
 		m_monDrag = (m_screen == SC_BASE && m_codex == 4 && !m_downUi && x > m_w * .48f);
 	}
-	if (btn == 1) { m_rDown = TRUE; m_dragRot = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y; }
+	if (btn == 1) {
+		m_rDown = TRUE; m_dragRot = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y;
+		m_rOnUi = RightClosesUi();
+		if (!m_rOnUi) {
+			for (auto& b : m_btnsPrev) if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) { m_rOnUi = TRUE; break; }
+		}
+	}
 	if (btn == 2) {
 		m_mDown = TRUE; m_dragPan = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y;
 		float ix, iy, iw, ih;
@@ -1439,6 +1535,7 @@ void Game::OnMouseUp(int btn, int x, int y)
 			else { m_rclick = TRUE; NavBack(); }
 		}
 		m_dragRot = FALSE;
+		m_rOnUi = FALSE;
 	}
 	if (btn == 2) {
 		BOOL tap = m_mDown && m_dragDist <= 6.f;
@@ -2082,6 +2179,30 @@ void Game::NavConfirm()
 	m_activateId = m_focusId;
 }
 
+BOOL Game::RightClosesUi() const
+{
+	// 閉じる／戻ると同じ扱いにする画面。ここが偽だと右ドラッグが視点回転になり、タップが閉じに届かない。
+	if (m_showHelp || m_slotUi || m_sortieAsk || m_stashFull || m_jobRedo) return TRUE;
+	if (m_screen == SC_PARTY || m_screen == SC_CREATE || m_screen == SC_EVOLVE || m_screen == SC_RESULT || m_screen == SC_FAIL)
+		return TRUE;
+	if (m_screen == SC_BASE) {
+		if (m_shop || m_baseOpt) return TRUE;
+		if (m_codex && m_codex != 4) return TRUE;
+		if (m_codex == 4) {
+			float x = U(24), y = U(24), w = min(U(520.f), (float)m_w * .46f), h = (float)m_h - U(108);
+			if (m_mx >= x && m_my >= y && m_mx < x + w && m_my < y + h) return TRUE;
+			if (m_my >= (float)m_h - U(34) - U(10)) return TRUE;
+		}
+	}
+	if (m_screen == SC_BATTLE) {
+		if (m_statOpen) return TRUE;
+		if (m_phase == PH_LEVELUP || m_phase == PH_MENU || m_phase == PH_P_CMD
+			|| m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON)
+			return TRUE;
+	}
+	return FALSE;
+}
+
 void Game::NavBack()
 {
 	if (m_showHelp) { m_showHelp = FALSE; TacSfx(TS_CANCEL); return; }
@@ -2102,7 +2223,7 @@ void Game::NavBack()
 		TacSfx(TS_CANCEL);
 		return;
 	}
-	if (m_jobRedo == 1) { TacSfx(TS_CANCEL); return; }
+	if (m_jobRedo == 1) { m_jobRedo = 0; TacSfx(TS_CANCEL); return; }
 	if (m_slotUi) {
 		if (m_textFocus) { m_textFocus = 0; TacSfx(TS_CANCEL); return; }
 		if (m_slotUi == 5) m_slotUi = 4;
@@ -2127,6 +2248,7 @@ void Game::NavBack()
 		TacSfx(TS_CANCEL);
 		break;
 	case SC_EVOLVE:
+		if (m_evoCut) { m_evoCut = 0; TacSfx(TS_CANCEL); break; }
 		if (m_evPick > 0) { m_evPick--; if (m_evPick == 0) m_evTarget = -1; m_evPartner[0] = m_evPartner[1] = -1; }
 		else if (m_evFromParty) { m_evFromParty = 0; EnterParty(); }
 		else EnterBase();
@@ -2136,13 +2258,24 @@ void Game::NavBack()
 		if (m_stashFull) { m_stashFull = 0; m_shopFit = 0; TacSfx(TS_CANCEL); break; }
 		BattleCancel();
 		break;
+	case SC_RESULT:
+		m_showBuilt = FALSE;
+		EnterBase();
+		TacSfx(TS_CANCEL);
+		break;
+	case SC_FAIL:
+		m_wantClose = TRUE;
+		break;
 	case SC_BASE:
 		if (m_sortieAsk) { m_sortieAsk = 0; TacSfx(TS_CANCEL); }
 		else if (m_mapLook) { m_mapLook = 0; m_showYaw = m_camYaw; TacSfx(TS_CANCEL); }
 		else if (!m_homeUi && !m_codex && !m_shop && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3 && !m_baseOpt) { m_homeUi = 1; TacSfx(TS_OPEN); }
 		else if (m_codex) {
-			if (m_textFocus == 4) { m_textFocus = 0; TacSfx(TS_CANCEL); }
-			else { m_codex = 0; TacSfx(TS_CANCEL); }
+			// 閉じるボタンと同じく、技能・成長・錬金・ジョブツリー・敵図鑑をまとめて閉じる。
+			m_textFocus = 0;
+			m_imeComp[0] = 0;
+			m_codex = 0;
+			TacSfx(TS_CANCEL);
 		}
 		else if (m_shop && m_sellAsk) { m_sellAsk = 0; m_textFocus = 0; TacSfx(TS_CANCEL); }
 		else if (m_shop && m_shopFit == 13) { m_shopFit = 4; TacSfx(TS_CANCEL); }
@@ -2636,14 +2769,15 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 
 void Game::RenderPortraits()
 {
+	int nWant = 0;
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
+		if (m_portraitWant[s] > 0) nWant++;
+		else m_portraitKey[s] = m_portraitWant[s];
+	}
+	if (nWant <= 0) return;
 	M4 camView = m_r.m_view, camProj = m_r.m_proj;
 	V3 camEye = m_r.m_eye;
 	float camT = m_r.m_time;
-	m_r.SetSight(NULL, 0, 0);
-	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
-	m_r.SetAmbient(RGBA8(206, 192, 178), RGBA8(148, 116, 94), .58f, .55f);
-	m_r.SetLight(Norm(v3(.42f, .84f, -.40f)), v3(0, 0, 0), 3.5f);
-	m_r.SetShadowEnabled(FALSE);
 	auto look = [](const CharData& c) -> unsigned {
 		unsigned h = (unsigned)c.gender;
 		h = h * 16777619u ^ (unsigned)c.cls;
@@ -2713,6 +2847,7 @@ void Game::RenderPortraits()
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		int want = m_portraitWant[s];
 		if (want <= 0) { m_portraitKey[s] = want; continue; }
+		if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
 		if (!paint(s, want)) continue;
 		m_portraitKey[s] = want;
 	}
@@ -2762,8 +2897,6 @@ void Game::PrepareMenuPortraits()
 		}
 	} else if (m_screen == SC_RESULT) {
 		for (int i = 0; i < m_resultN; i++) add(m_resultRoster[i]);
-	} else if (m_screen == SC_CREATE && m_editIdx >= 0) {
-		add(m_editIdx);
 	}
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++)
 		m_portraitWant[s] = s < n ? idx[s] + 1 : 0;
@@ -2865,13 +2998,13 @@ static void WindField(float time, float x, float z, float& ox, float& oz, float&
 	else if (theme == TH_STATION) mag = 0.4f;
 	else if (theme == TH_CITADEL) mag = 0.7f;
 	else if (theme == TH_LANTERN) mag = 0.55f;
-	ox = (air.bx + air.mx) * mag * 1.7f;
-	oz = (air.bz + air.mz) * mag * 1.7f;
+	ox = (air.bx + air.mx) * mag * 3.4f;
+	oz = (air.bz + air.mz) * mag * 3.4f;
 	float s = sinf(x * 0.41f + time * 0.55f) * cosf(z * 0.33f - time * 0.37f);
 	float c = cosf(x * 0.27f - time * 0.48f) * sinf(z * 0.36f + time * 0.29f);
 	ox += -c * (0.7f + mag * 0.35f);
 	oz += s * (0.7f + mag * 0.35f);
-	lift = air.y * mag * 1.5f + s * 0.35f;
+	lift = air.y * mag * 2.8f + s * 0.35f;
 	if (theme == TH_VOLCANO) lift += 1.15f;
 	else if (theme == TH_SEABED) lift -= 0.35f;
 	else if (theme == TH_SWAMP) lift += 0.25f;
@@ -3382,6 +3515,9 @@ void Game::UpdateParticles(float dt)
 			m_parts.push_back(s);
 		}
 	};
+	int airTh = 0;
+	if (m_screen == SC_BATTLE) airTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+	else airTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
 	for (size_t i = 0; i < m_parts.size();) {
 		Particle& p = m_parts[i];
 		p.life -= dt;
@@ -3392,9 +3528,6 @@ void Game::UpdateParticles(float dt)
 		}
 		if (p.wxHit == 8) {
 			float wx = 0.f, wz = 0.f, lift = 0.f;
-			int airTh = 0;
-			if (m_screen == SC_BATTLE) airTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
-			else airTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
 			WindField(m_time, p.p.x, p.p.z, wx, wz, lift, airTh);
 			float follow = dt * 1.8f;
 			p.v.x += (wx - p.v.x) * follow;
@@ -3466,9 +3599,10 @@ void Game::UpdateParticles(float dt)
 			}
 		} else {
 			TacAir air = TacAirHeld(m_time);
-			p.v.x += (air.bx + air.mx) * 2.4f * dt;
-			p.v.z += (air.bz + air.mz) * 2.1f * dt;
-			p.v.y += air.y * 1.6f * dt;
+			// そよ風は常時、強風・暴風・上下は同じ周期。速い弾は初速が勝つ。
+			p.v.x += (air.bx * 7.5f + air.mx * 5.5f) * dt;
+			p.v.z += (air.bz * 6.8f + air.mz * 5.0f) * dt;
+			p.v.y += air.y * 4.2f * dt;
 		}
 		V3 prev = p.p;
 		p.v.y -= p.grav * dt;
@@ -4297,11 +4431,15 @@ void Game::DrawShowcase3D()
 		int pend = m_r.CountPendingAvatars(n, model, ava, cup);
 		m_r.BeginAvaBatch(pend > 0 ? pend : 1);
 	}
+	M4 showW[MAX_PARTY];
+	for (int i = 0; i < showN; i++)
+		showW[i] = ActorWorld(m_showAct[i], m_showPos[i], faceYaw[i]);
 	m_r.BeginInstBatch();
 	for (int i = 0; i < showN; i++) {
+		if (!m_r.InLight(m_showPos[i], 3.5f)) continue;
 		Actor& a = m_showAct[i];
 		if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
-		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], faceYaw[i]), dp, m_time);
+		ActorDraw(m_r, m_lib, a, showW[i], dp, m_time);
 	}
 	m_r.EndInstBatch();
 	m_r.BeginMainPass();
@@ -4310,10 +4448,12 @@ void Game::DrawShowcase3D()
 	m_r.DrawWater();
 	m_r.BeginInstBatch();
 	for (int i = 0; i < showN; i++) {
+		if (!m_r.InView(m_showPos[i], 3.5f)) continue;
 		Actor& a = m_showAct[i];
+		if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
 		DrawParams d = dp;
 		d.outline = .014f;
-		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], faceYaw[i]), d, m_time);
+		ActorDraw(m_r, m_lib, a, showW[i], d, m_time);
 	}
 	m_r.EndInstBatch();
 	if (m_screen == SC_BATTLE || m_screen == SC_BASE || m_screen == SC_RESULT)
@@ -5842,6 +5982,7 @@ void Game::DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear
 		else if (mode == 3) can = gear && GearCanWear(c.cls, gear);
 		else can = 1;
 		if ((mode == 1 || mode == 2) && ln != line) continue;
+		if (!can) continue;
 		if (n >= MAX_ROSTER) break;
 		row[n].who = i;
 		row[n].can = can;
@@ -5904,13 +6045,28 @@ void Game::DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear
 	int extra = n - shown;
 	float pw = min(U(820.f), (float)m_w - U(16));
 	float ph = U(34) + (shown < 1 ? 1 : shown) * rowH + (extra > 0 ? rowH : 0) + U(14);
-	float lx = ax + aw + U(10);
-	float ly = ay;
-	if (lx + pw > (float)m_w - U(8)) lx = ax - pw - U(10);
-	if (lx < U(8)) lx = U(8);
-	if (ly + ph > (float)m_h - U(8)) ly = (float)m_h - ph - U(8);
-	if (ly < U(8)) ly = U(8);
-	m_r.HudPanel(lx, ly, pw, ph, RGBA8(14, 16, 28, 236), RGBA8(212, 176, 96));
+	const float gap = U(18);
+	const float margin = U(8);
+	float lx = ax;
+	if (lx + pw > (float)m_w - margin) lx = (float)m_w - pw - margin;
+	if (lx < margin) lx = margin;
+	float below = ay + ah + gap;
+	float above = ay - ph - gap;
+	BOOL belowOk = below + ph <= (float)m_h - margin;
+	BOOL aboveOk = above >= margin;
+	float ly;
+	if (ay + ah * 0.5f < (float)m_h * 0.45f) {
+		if (belowOk) ly = below;
+		else if (aboveOk) ly = above;
+		else ly = margin;
+	} else {
+		if (aboveOk) ly = above;
+		else if (belowOk) ly = below;
+		else ly = (float)m_h - ph - margin;
+	}
+	if (ly < margin) ly = margin;
+	if (ly + ph > (float)m_h - margin) ly = (float)m_h - ph - margin;
+	m_r.HudPanel(lx, ly, pw, ph, RGBA8(16, 20, 34, 200), RGBA8(212, 176, 96));
 	m_r.HudText(title, lx + U(12), ly + U(16), U(15), RGBA8(255, 226, 150), 0, 1);
 	if (mode == 3 || mode == 4) {
 		const wchar_t* leg = LangPick14(
@@ -5939,14 +6095,14 @@ void Game::DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear
 	for (int i = 0; i < shown; i++) {
 		const Row& r = row[i];
 		const CharData& c = m_save.roster[r.who];
-		DWORD nameC = r.can ? RGBA8(214, 244, 220) : RGBA8(150, 146, 154);
-		DWORD dim = r.can ? RGBA8(186, 198, 214) : RGBA8(120, 118, 126);
+		DWORD nameC = RGBA8(214, 244, 220);
+		DWORD dim = RGBA8(186, 198, 214);
 		float x = lx + U(10);
-		m_r.HudRect(x, yy - U(8), U(4), U(16), r.can ? RGBA8(96, 214, 128) : RGBA8(150, 84, 84));
+		m_r.HudRect(x, yy - U(8), U(4), U(16), RGBA8(96, 214, 128));
 		x += U(10);
 		wchar_t mark[8];
-		swprintf_s(mark, L"%s ", r.can ? L"○" : L"×");
-		m_r.HudText(mark, x, yy, px, r.can ? RGBA8(120, 220, 140) : RGBA8(220, 110, 110), 0, 1);
+		swprintf_s(mark, L"○ ");
+		m_r.HudText(mark, x, yy, px, RGBA8(120, 220, 140), 0, 1);
 		x += m_r.TextWidth(mark, px, 1);
 		float namePx = FitTextPx(c.name, U(108), px, 1);
 		m_r.HudText(c.name, x, yy, namePx, nameC, 0, 1);
@@ -6640,6 +6796,8 @@ void Game::AdoptActiveSlot(BOOL leaveBattle)
 	}
 	ApplyAudio();
 	m_qHold = -1;
+	m_qFine = TacTierNotch(TacQualityWanted(m_save));
+	m_r.SetQualityPlus(0);
 	ApplyQualityNow(TacQualityWanted(m_save));
 	if (leaveBattle || m_screen == SC_BATTLE || m_screen == SC_RESULT) EnterBase();
 	else {
@@ -6965,22 +7123,51 @@ void Game::DrawPerfHud()
 	if (fps > 999.f) fps = 999.f;
 	float ms = 1000.f / fps;
 	if (ms > 999.f) ms = 999.f;
-	int fps10 = (int)(fps * 10.f + 0.5f);
-	int ms10 = (int)(ms * 10.f + 0.5f);
-	if (fps10 > 9999) fps10 = 9999;
-	if (ms10 > 9999) ms10 = 9999;
 	int q = QualityNow();
+	int pace = PaceHz();
+	int plus = m_r.QualityPlus();
+	static int s_fps10 = 0, s_ms10 = 0, s_q = -1, s_pace = -1, s_auto = -1, s_plus = -999;
+	static float s_stamp = -10.f, s_homeScale = 1.f;
+	if (s_fps10 <= 0 || fabsf(m_time - s_stamp) >= 0.15f || s_q != q || s_pace != pace || s_auto != (int)m_save.quality || s_plus != plus) {
+		s_fps10 = (int)(fps * 10.f + 0.5f);
+		s_ms10 = (int)(ms * 10.f + 0.5f);
+		if (s_fps10 > 9999) s_fps10 = 9999;
+		if (s_ms10 > 9999) s_ms10 = 9999;
+		s_q = q;
+		s_pace = pace;
+		s_auto = (int)m_save.quality;
+		s_plus = plus;
+		s_stamp = m_time;
+	}
+	int fps10 = s_fps10;
+	int ms10 = s_ms10;
 	const wchar_t* mode = LangPick14(L"モード", L"mode", L"mode", L"modo", L"modo", L"모드", L"模式", L"وضع", L"режим", L"Modus", L"modo", L"modus", L"tryb", L"mod");
+	// 細段の符号は FPS 表示にだけ出す。設定画面の名前は変えない。
+	// + は限界突破のみ +4 以上を数字で、ほかは記号 3 つまで。超軽量の下は - / -- / -N。
+	wchar_t sign[12];
+	sign[0] = 0;
+	if (plus > 0) {
+		if (q == 6 && plus > 3) swprintf_s(sign, L"+%d", plus);
+		else { int n = plus > 3 ? 3 : plus, i = 0; for (; i < n; i++) sign[i] = L'+'; sign[i] = 0; }
+	} else if (plus < 0) {
+		int mm = -plus;
+		if (mm > 2) swprintf_s(sign, L"-%d", mm);
+		else { int i = 0; for (; i < mm; i++) sign[i] = L'-'; sign[i] = 0; }
+	}
+	wchar_t qlabel[48];
+	swprintf_s(qlabel, L"%s%s", TT(TacQualityTx(q)), sign);
 	wchar_t line[220];
 	if (m_save.quality == TAC_Q_AUTO)
-		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, PaceHz(), mode, TT(TX_SET_Q_AUTO), TT(TacQualityTx(q)));
+		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, pace, mode, TT(TX_SET_Q_AUTO), qlabel);
 	else
-		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, PaceHz(), mode, TT(TacQualityTx(q)));
+		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, pace, mode, qlabel);
 	float px = U(13);
 	if (px < 11.f) px = 11.f;
 	float pad = U(8);
+	const BOOL onHome = (m_screen == SC_BASE && m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3);
+	if (onHome && s_homeScale < 0.99f) px = max(9.f, px * s_homeScale);
 	float tw = m_r.TextWidth(line, px, 0);
-	float th = px + U(8);
+	float th = px + (onHome && s_homeScale < 0.99f ? U(6) : U(8));
 	float bw = tw + pad * 2.f;
 	float x = (float)m_w - bw - U(10);
 	float y = U(8);
@@ -7025,7 +7212,7 @@ void Game::DrawPerfHud()
 				if (x + bw > m_hud.col - U(4)) x = max(m_hud.margin, m_hud.col - U(4) - bw);
 			}
 		}
-	} else if (m_screen == SC_BASE && m_homeUi && !m_mapLook && !m_shop && !m_codex && !m_slotUi && m_jobRedo != 1 && m_jobRedo != 3) {
+	} else if (onHome) {
 		float margin = max(8.f, min(U(20), (float)m_w * .02f));
 		float pw = min(U(330), (float)m_w - margin * 2.f);
 		float ph = min((float)m_h - margin * 2.f, (float)m_h - 8.f);
@@ -7037,10 +7224,15 @@ void Game::DrawPerfHud()
 		float right = margin + pw - U(8);
 		float free = right - titleR;
 		if (free < bw && free > 48.f) {
-			px = max(9.f, px * free / bw);
+			float scale = free / bw;
+			s_homeScale *= scale;
+			if (s_homeScale < 0.45f) s_homeScale = 0.45f;
+			px = max(9.f, px * scale);
 			tw = m_r.TextWidth(line, px, 0);
 			th = px + U(6);
 			bw = tw + pad * 2.f;
+		} else if (free > bw * 1.18f && s_homeScale < 1.f) {
+			s_homeScale = 1.f;
 		}
 		if (bw <= free) {
 			x = right - bw;
@@ -7640,6 +7832,7 @@ void Game::DrawCreate3D()
 	M4 view = MLookAtLH(eye + shift, look + shift, v3(0, 1, 0));
 	M4 proj = MPerspLH(.55f, (float)m_w / max(1, m_h), .05f, 60.f);
 	m_r.SetCamera(view, proj, eye, m_time);
+	m_r.SetStageWind(FALSE);
 	m_r.SetTheme(-1);
 	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
 	m_r.SetAmbient(RGBA8(210, 196, 182), RGBA8(150, 118, 96), .60f, .55f);
@@ -7659,6 +7852,8 @@ void Game::DrawCreate3D()
 	m_r.BeginInstBatch();
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
 	m_r.EndInstBatch();
+	m_r.SetStageWind(TRUE);
+	m_r.SetPreviewPost(TRUE);
 }
 
 void Game::DrawCreateUi()
@@ -8737,54 +8932,107 @@ void Game::DrawEvoCut()
 {
 	if (m_click || m_activateId >= 0) { m_evoCut = 0; m_click = FALSE; m_activateId = -1; return; }
 	float t = m_evoT;
-	float cover = 0;
-	if (t < 0.32f) cover = Smooth01(t / 0.32f);
-	else if (t < 0.55f) cover = 1.f - Smooth01((t - 0.32f) / 0.23f);
-	else if (t >= 2.15f && t < 2.42f) cover = Smooth01((t - 2.15f) / 0.27f);
-	else if (t >= 2.42f) cover = 1.f - Smooth01((t - 2.42f) / 0.28f);
-	float show = 0;
-	if (t > 0.42f && t < 2.2f) {
-		float inn = Smooth01((t - 0.42f) / 0.22f);
-		float out = t > 1.85f ? 1.f - Smooth01((t - 1.85f) / 0.28f) : 1.f;
-		show = inn * out;
+	float W = (float)m_w, H = (float)m_h;
+	// 全画面の職進化モーション。暗転→旧職が砕け→光柱→新職名が画面を占める。
+	m_r.HudRect(0, 0, W, H, RGBA8(6, 2, 14, 245));
+	// 斜めの光帯（背景モーション）
+	for (int i = 0; i < 7; i++) {
+		float u = fmodf(t * 0.22f + i * 0.14f, 1.f);
+		float x = -W * 0.2f + u * W * 1.4f;
+		int al = (int)((0.35f + 0.35f * sinf(t * 3.f + i)) * 70);
+		m_r.HudRect(x, 0, U(48), H, RGBA8(80, 40, 140, al));
 	}
-	float bar = U(78);
-	if (show > 0.01f) {
-		int a = (int)(230 * show);
-		m_r.HudRect(0, 0, (float)m_w, bar, RGBA8(0, 0, 0, a));
-		m_r.HudRect(0, (float)m_h - bar, (float)m_w, bar, RGBA8(0, 0, 0, a));
-		m_r.HudRect(0, bar - U(4), (float)m_w, U(4), RGBA8(255, 210, 120, (int)(255 * show)));
-		m_r.HudRect(0, (float)m_h - bar, (float)m_w, U(4), RGBA8(190, 140, 255, (int)(255 * show)));
-		float bh = U(168);
-		float by = m_h * .34f;
-		float slide = (1.f - Smooth01((t - 0.42f) / 0.22f)) * m_w;
-		m_r.HudRectGrad(-slide, by, (float)m_w, bh, RGBA8(18, 8, 28, (int)(210 * show)), RGBA8(70, 28, 90, (int)(230 * show)));
-		m_r.HudRect(-slide, by, (float)m_w, U(6), RGBA8(255, 220, 140, (int)(255 * show)));
-		m_r.HudRect(slide, by + bh - U(6), (float)m_w, U(6), RGBA8(210, 160, 255, (int)(255 * show)));
-		const wchar_t* nm = (m_evoRoster >= 0 && m_evoRoster < MAX_ROSTER && m_save.roster[m_evoRoster].used) ? m_save.roster[m_evoRoster].name : L"";
-		m_r.HudText(TT(TX_EV_TITLE), m_w * .5f, by + U(28), U(22), RGBA8(255, 226, 150), 1, 1, 1, show);
-		m_r.HudText(ClassName(m_evoTo), m_w * .5f, by + bh * .48f, U(52), RGBA8(255, 236, 190), 1, 1, 1, show);
-		wchar_t line[160];
-		swprintf_s(line, L"%s    %s  →  %s", nm, ClassName(m_evoFrom), ClassName(m_evoTo));
-		m_r.HudText(line, m_w * .5f, by + bh * .82f, U(16), RGBA8(240, 236, 248), 1, 0, 1, show);
-		float ps = U(120);
-		DrawPortrait(RosterPortrait(m_evoRoster), m_w * .5f - ps * .5f, by - ps - U(16), ps, RGBA8(220, 180, 255));
-	}
-	if (cover > 0.001f) {
-		int rows = 9;
-		float rh = (float)m_h / rows + 1;
+	float iris = 0;
+	if (t < 0.7f) iris = 1.f - Smooth01(t / 0.7f);
+	else if (t > 5.1f) iris = Smooth01((t - 5.1f) / 0.9f);
+	if (iris > 0.01f) {
+		int rows = 16;
+		float rh = H / rows + 1.f;
 		for (int i = 0; i < rows; i++) {
-			float lag = i * .06f;
-			float c = Clampf(cover * (1.f + rows * .06f) - lag, 0, 1);
-			float w = c * m_w;
-			float y = i * ((float)m_h / rows);
-			if (i & 1) m_r.HudRect((float)m_w - w, y, w, rh, RGBA8(10, 6, 16, 255));
-			else m_r.HudRect(0, y, w, rh, RGBA8(10, 6, 16, 255));
-			if (c > 0 && c < 1) {
-				if (i & 1) m_r.HudRect((float)m_w - w - U(6), y, U(6), rh, RGBA8(255, 220, 150, 220));
-				else m_r.HudRect(w, y, U(6), rh, RGBA8(255, 220, 150, 220));
+			float lag = i * 0.028f;
+			float c = Clampf(iris * 1.55f - lag, 0, 1);
+			float w = c * W;
+			float y = i * (H / rows);
+			if (i & 1) m_r.HudRect(W - w, y, w, rh, RGBA8(4, 2, 10, 255));
+			else m_r.HudRect(0, y, w, rh, RGBA8(4, 2, 10, 255));
+			if (c > 0.02f && c < 0.98f) {
+				DWORD edge = (i & 1) ? RGBA8(255, 210, 120, 240) : RGBA8(190, 150, 255, 240);
+				if (i & 1) m_r.HudRect(W - w - U(10), y, U(10), rh, edge);
+				else m_r.HudRect(w, y, U(10), rh, edge);
 			}
 		}
+	}
+	float cx = W * 0.5f;
+	float cy = H * 0.44f;
+	const wchar_t* nm = (m_evoRoster >= 0 && m_evoRoster < MAX_ROSTER && m_save.roster[m_evoRoster].used) ? m_save.roster[m_evoRoster].name : L"";
+	float fadeLate = t > 5.2f ? 1.f - Smooth01((t - 5.2f) / 0.9f) : 1.f;
+	// 旧職名が画面中央から砕けて散る
+	if (t < 1.85f && m_evoFrom >= 0) {
+		float a = t < 0.35f ? Smooth01(t / 0.35f) : (t > 1.15f ? 1.f - Smooth01((t - 1.15f) / 0.55f) : 1.f);
+		float shatter = max(0.f, t - 0.9f);
+		for (int i = 0; i < 6; i++) {
+			float ang = i * 1.047f + t * 0.6f;
+			float dist = shatter * (U(40) + i * U(28));
+			float tx = cx + cosf(ang) * dist;
+			float ty = cy - U(20) + sinf(ang) * dist * 0.55f - shatter * H * 0.08f;
+			float sc = U(34) * (1.f - shatter * 0.35f);
+			int al = (int)(a * fadeLate * (1.f - shatter * 0.7f) * 255);
+			if (al > 8) m_r.HudText(ClassName(m_evoFrom), tx, ty, sc, RGBA8(160, 150, 180, al), 1, 1);
+		}
+		if (shatter < 0.05f)
+			m_r.HudText(ClassName(m_evoFrom), cx, cy - U(20), U(44), RGBA8(170, 164, 186), 1, 1, 1, a * fadeLate);
+	}
+	// 肖像が画面の主役になるまで拡大
+	float pIn = Smooth01(Clampf((t - 0.15f) / 1.05f, 0, 1));
+	float bob = sinf(t * 2.6f) * U(10);
+	float spin = sinf(t * 1.7f) * U(6);
+	float ps = U(72) + U(280) * pIn;
+	if (fadeLate > 0.05f && m_evoRoster >= 0)
+		DrawPortrait(RosterPortrait(m_evoRoster), cx - ps * 0.5f + spin, cy - ps * 0.92f + bob, ps, RGBA8(240, 200, 255));
+	// 閃光
+	if (t > 1.15f && t < 2.05f) {
+		float f = 1.f - fabsf((t - 1.45f) / 0.55f);
+		if (f > 0) {
+			m_r.HudRect(0, 0, W, H, RGBA8(255, 246, 220, (int)(220 * f)));
+			m_r.HudRect(cx - U(20), 0, U(40), H, RGBA8(255, 255, 255, (int)(180 * f)));
+		}
+	}
+	// 光の輪が画面いっぱいに広がる
+	if (t > 1.35f && fadeLate > 0.02f) {
+		float u = t - 1.35f;
+		for (int i = 0; i < 8; i++) {
+			float life = fmodf(u * 0.38f + i * 0.125f, 1.f);
+			float rad = U(28) + life * min(W, H) * 0.62f;
+			int al = (int)((1.f - life) * 210.f * fadeLate);
+			DWORD col = (i & 1) ? RGBA8(255, 214, 120, al) : RGBA8(180, 140, 255, al);
+			float th = U(5) + (1.f - life) * U(3);
+			m_r.HudRect(cx - rad, cy - rad, rad * 2.f, th, col);
+			m_r.HudRect(cx - rad, cy + rad - th, rad * 2.f, th, col);
+			m_r.HudRect(cx - rad, cy - rad, th, rad * 2.f, col);
+			m_r.HudRect(cx + rad - th, cy - rad, th, rad * 2.f, col);
+		}
+		// 縦の光柱
+		float beam = Smooth01(Clampf((t - 1.4f) / 0.5f, 0, 1)) * fadeLate;
+		if (beam > 0.02f) {
+			int al = (int)(beam * 120);
+			m_r.HudRect(cx - U(36), 0, U(72), H, RGBA8(255, 230, 160, al));
+			m_r.HudRect(cx - U(12), 0, U(24), H, RGBA8(255, 255, 255, al + 40));
+		}
+	}
+	float show = 0;
+	if (t > 1.55f) show = Smooth01((t - 1.55f) / 0.4f) * fadeLate;
+	if (show > 0.02f && m_evoTo >= 0) {
+		float pulse = 1.f + 0.06f * sinf(t * 8.f);
+		float titleY = H * 0.12f + sinf(t * 2.2f) * U(4);
+		m_r.HudText(TT(TX_EV_TITLE), cx, titleY, U(36) * pulse, RGBA8(255, 226, 150), 1, 1, 1, show);
+		// 新職名を画面中央に超大きく
+		float nameSz = min(U(92.f), W * 0.12f) * pulse;
+		m_r.HudText(ClassName(m_evoTo), cx, cy + U(48), nameSz, RGBA8(255, 246, 214), 1, 1, 1, show);
+		wchar_t line[180];
+		swprintf_s(line, L"%s    %s  →  %s", nm, m_evoFrom >= 0 ? ClassName(m_evoFrom) : L"", ClassName(m_evoTo));
+		m_r.HudText(line, cx, H * 0.84f, U(24), RGBA8(240, 232, 255), 1, 0, 1, show);
+		m_r.HudText(LangPick14(L"職が進化した！", L"Job evolved!", L"Classe évoluée !", L"Classe evoluta!", L"¡Clase evolucionada!", L"직업이 진화했다!", L"职业进化了！", L"تطور الصف!", L"Класс эволюционировал!", L"Beruf entwickelt!", L"Classe evoluiu!", L"Klasse geëvolueerd!", L"Klasa ewoluowała!", L"Sınıf evrildi!"),
+			cx, H * 0.90f, U(18), RGBA8(255, 210, 140), 1, 0, 1, show * 0.9f);
 	}
 }
 
@@ -9212,7 +9460,9 @@ void Game::DrawEvolveUi()
 		for (int k = 0; k < nt; k++) {
 			const ClassDef& cd = ClassInfo(tgt[k]);
 			wchar_t nth[96], l[160];
-			swprintf_s(nth, TT(TX_JOB_NTH), step + 1, ClassName(tgt[k]));
+			// 次職番号は対象の職段(tier)を正とする。JobPathCount は履歴が伸びると過大になり 10次職・12次職 等の誤表示を招く。
+			int nthNo = cd.tier >= 1 ? cd.tier : step + 1;
+			swprintf_s(nth, TT(TX_JOB_NTH), nthNo, ClassName(tgt[k]));
 			swprintf_s(l, L"%s   %s", nth, TT(gtx[Clampi(cd.group, 0, G_COUNT - 1)]));
 			if (Btn(ID_EV_TGT0 + k, c1, ty, colW, rowH - U(6), l, TRUE, m_evTarget == tgt[k], U(16))) {
 				m_evTarget = tgt[k]; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 2;

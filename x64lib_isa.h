@@ -144,3 +144,13 @@ int x64lib_has_avx10_512(void)
 	}
 	return v;
 }
+
+#if defined(__cplusplus)
+inline
+#else
+static __inline
+#endif
+int x64lib_has_wide512(void)
+{
+	return (x64lib_has_avx512() || x64lib_has_avx10_512()) ? 1 : 0;
+}

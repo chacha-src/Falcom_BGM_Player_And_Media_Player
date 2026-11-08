@@ -1874,6 +1874,74 @@ static void ConnectFeet(Map& m)
 	}
 }
 
+// 最後の保険。到達済みの足場から一番近い「未到達の足場」まで、障害物・空白を貫いて
+// 同じ高さの平地回廊を必ず1本掘り、確実に繋ぐ。StairOnce/EaseAll/BridgeOnce が
+// 幾何的に詰んでも、これは地形を平地化するだけなので失敗しない。1回で1領域が繋がる。
+static bool ForceLink(Map& m)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	if (!BfsFeet(m, seen)) return false;
+	static BYTE reach[MAPN][MAPN];
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int on = 0;
+		for (int L = 0; L < LAY_N; L++) if (seen[L][z][x]) { on = 1; break; }
+		reach[z][x] = (BYTE)on;
+	}
+	// 到達済みセルすべてを始点に、格子全体を（地形を無視して）幅優先。最初に当たった
+	// 未到達の立てる土台を目標とし、そこまでの最短経路を掘る。
+	static int prev[MAPN][MAPN];
+	static BYTE vis[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	memset(vis, 0, sizeof(vis));
+	int qh = 0, qt = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) if (reach[z][x]) {
+		vis[z][x] = 1; prev[z][x] = -1; qx[qt] = x; qz[qt] = z; qt++;
+	}
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int tx = -1, tz = -1;
+	while (qh < qt && tx < 0) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+			vis[nz][nx] = 1;
+			prev[nz][nx] = z * MAPN + x;
+			bool stand = false;
+			for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[nz][nx], L)) { stand = true; break; }
+			if (stand && !reach[nz][nx]) { tx = nx; tz = nz; break; }
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	if (tx < 0) return false; // 未到達の足場なし＝全て繋がっている
+	// 経路を集める（目標→到達済みの起点）。
+	static int px[MAPN * MAPN], pz[MAPN * MAPN];
+	int np = 0;
+	int cx = tx, cz = tz;
+	while (np < MAPN * MAPN) {
+		 px[np] = cx; pz[np] = cz; np++;
+		int p = prev[cz][cx];
+		if (p < 0) break;           // 到達済み起点に着いた
+		cx = p % MAPN; cz = p / MAPN;
+	}
+	if (np < 2) return false;
+	// 起点が「どの層で到達済みか」の高さに合わせて回廊を平地化する（端のつなぎ目を段差 0 にする）。
+	int scx = px[np - 1], scz = pz[np - 1];
+	int hBase = 2;
+	for (int L = 0; L < LAY_N; L++) if (seen[L][scz][scx]) { hBase = LayerHt(m.c[scz][scx], L); break; }
+	hBase = Clampi(hBase, 1, MAXH);
+	// 目標セルと中間セル（起点は触らない）を同じ高さの平地にならす。
+	for (int i = 0; i < np - 1; i++) FlattenStand(m.c[pz[i]][px[i]], hBase);
+	return true;
+}
+
+static void ForceConnectFeet(Map& m)
+{
+	for (int i = 0; i < 400; i++) {
+		if (FeetLinked(m)) return;
+		if (!ForceLink(m)) return;
+	}
+}
+
 static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 {
 	memset(&m, 0, sizeof(m));
@@ -2562,11 +2630,15 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
-	for (int attempt = 0; attempt < 6; attempt++) {
+	for (int attempt = 0; attempt < 60; attempt++) {
 		GenerateMapBody(m, stage, seed + (DWORD)attempt * 9973u, theme);
 		ConnectFeet(m);
 		if (FeetLinked(m)) return;
 	}
+	// 6 回とも全足場が繋がらない配置（例: 3マス幅の通路を 3x3 の障害物が塞ぐ）は、
+	// 障害物を貫く平地回廊を強制的に掘って、スタート→ボス（全ての敵足場）を必ず歩けるようにする。
+	// FeetLinked が通る＝立てる全マスが一繋がり＝クリア不能マップを出さない保証。
+	ForceConnectFeet(m);
 }
 
 // ============================================================ クラス
@@ -3073,13 +3145,13 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 90, -1, -1, 0, EL_EARTH, 2, 0, EF_STUN, 0 },
 	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 140, -1, -1, 0, EL_FIRE, 2, 10, EF_NONE, 0 },
 	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 10, 90, 1, 2, 1, EL_HOLY, 2, 5, EF_NONE, 0 },
-	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 90, 2, 5, 1, EL_WIND, 2, 0, EF_NONE, 0 },
+	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 120, 2, 5, 1, EL_WIND, 3, 0, EF_NONE, 0 },
 	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 110, -1, -1, 0, EL_DARK, 2, 20, EF_POISON, 0 },
 	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 16, 140, -1, -1, 0, EL_HOLY, 3, 20, EF_NONE, 0 },
 	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 2, 0, EF_BURN, 0 },
-	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_FREEZE, 0 },
+	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 3, 0, EF_FREEZE, 0 },
 	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 4, 0, EF_STUN, 0 },
-	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 14, 2, 6, 3, EL_FIRE, 1, 0, EF_BURN, 0 },
+	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 14, 2, 6, 3, EL_FIRE, 3, 0, EF_BURN, 0 },
 	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 2, 0, EF_NONE, 0 },
 	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 3, 0, EF_NONE, 0 },
 	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 2, 0, EF_CONFUSE, 0 },
@@ -3097,44 +3169,44 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_P_REGEN, TX_SKD_P_REGEN, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_P_CRIT, TX_SKD_P_CRIT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_E_VENOM, TX_SKD_E_VENOM, SK_PHYS, 4, 120, 1, 1, 0, EL_POISON, 1, 0, EF_POISON, 1 },
-	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_BURN, 1 },
+	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 2, 0, EF_BURN, 1 },
 	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 0, 125, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_E_DRAIN, TX_SKD_E_DRAIN, SK_PHYS, 5, 100, 1, 1, 0, EL_DARK, 1, 0, EF_DRAIN, 1 },
 	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 0, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLEEP, 1 },
 	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 0, 110, 0, 0, 1, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_REFRESH, TX_SKD_REFRESH, SK_BUFF, 8, 0, 1, 1, 0, EL_HOLY, 1, 0, EF_REACT, 0 },
 	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 115, 0, 0, 1, EL_NONE, 1, 0, EF_DEFDOWN, 0 },
-	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 180, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
+	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 220, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
 	{ TX_SK_VENOMEDGE, TX_SKD_VENOMEDGE, SK_PHYS, 6, 80, 1, 2, 0, EL_POISON, 2, 0, EF_POISON, 0 },
 	{ TX_SK_SANCTUARY, TX_SKD_SANCTUARY, SK_HEAL, 14, 16, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_SMITE, TX_SKD_SMITE, SK_MAGIC, 10, 16, 1, 3, 0, EL_HOLY, 2, 10, EF_NONE, 0 },
-	{ TX_SK_GRAVITY, TX_SKD_GRAVITY, SK_MAGIC, 12, 12, 1, 3, 1, EL_EARTH, 1, 0, EF_SLOW, 0 },
+	{ TX_SK_GRAVITY, TX_SKD_GRAVITY, SK_MAGIC, 12, 12, 1, 3, 1, EL_EARTH, 3, 0, EF_SLOW, 0 },
 	{ TX_SK_WARCRY, TX_SKD_WARCRY, SK_BUFF, 8, 0, 0, 0, 1, EL_FIRE, 1, 0, EF_BUFF_ATK, 0 },
 	{ TX_SK_RENEW, TX_SKD_RENEW, SK_HEAL, 12, 40, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 0, 1, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
 	{ TX_SK_GODSLASH, TX_SKD_GODSLASH, SK_PHYS, 22, 150, -1, -1, 0, EL_HOLY, 2, 20, EF_NONE, 0 },
-	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 18, 1, 4, 1, EL_DARK, 1, 0, EF_BLIND, 0 },
-	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 16, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 18, 1, 4, 1, EL_DARK, 3, 0, EF_BLIND, 0 },
+	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 16, 0, 0, 3, EL_FIRE, 4, 0, EF_NONE, 0 },
 	{ TX_SK_TRANSMUTE, TX_SKD_TRANSMUTE, SK_BUFF, 4, 0, 0, 1, 0, EL_EARTH, 1, 0, EF_BUFF_ATK, 0 },
 };
 static_assert(sizeof(kSkill) / sizeof(kSkill[0]) == SKL_ART0, "base skill table");
 
 static const SkillDef kWide[] = {
-	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 80, 2, 6, 2, EL_WIND, 2, 0, EF_NONE, 0 },
-	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 70, 2, 6, 4, EL_HOLY, 2, 0, EF_NONE, 0 },
-	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 100, 0, 0, 2, EL_WIND, 1, 0, EF_SLOW, 0 },
+	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 110, 2, 6, 2, EL_WIND, 3, 0, EF_NONE, 0 },
+	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 95, 2, 6, 4, EL_HOLY, 3, 0, EF_NONE, 0 },
+	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 100, 0, 0, 2, EL_WIND, 2, 0, EF_SLOW, 0 },
 	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 1, 0, EF_BURN, 0 },
-	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_FREEZE, 0 },
-	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_STUN, 0 },
-	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 14, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 4, 0, EF_BURN, 0 },
+	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 4, 0, EF_FREEZE, 0 },
+	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 4, 0, EF_STUN, 0 },
+	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 14, 0, 0, 4, EL_HOLY, 4, 0, EF_NONE, 0 },
 	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_BLEED, 0, SH_LINE },
 	{ TX_SK_FANSLASH, TX_SKD_FANSLASH, SK_PHYS, 12, 80, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
-	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 90, 2, 6, 5, EL_WIND, 2, 0, EF_NONE, 0, SH_LINE },
-	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 80, 2, 6, 3, EL_WIND, 2, 0, EF_NONE, 0, SH_FAN },
-	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 1, 0, EF_NONE, 0, SH_LINE },
-	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_FREEZE, 0, SH_LINE },
-	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_STUN, 0, SH_LINE },
+	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 120, 2, 6, 5, EL_WIND, 3, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 110, 2, 6, 3, EL_WIND, 3, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 3, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 3, 0, EF_FREEZE, 0, SH_LINE },
+	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 3, 0, EF_STUN, 0, SH_LINE },
 	{ TX_SK_HEALBEAM, TX_SKD_HEALBEAM, SK_HEAL, 12, 14, 1, 3, 4, EL_HOLY, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_HEALFAN, TX_SKD_HEALFAN, SK_HEAL, 14, 12, 1, 2, 3, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_RAMPAGE, TX_SKD_RAMPAGE, SK_PHYS, 8, 70, -1, -1, 0, EL_NONE, 6, 0, EF_NONE, 0 },
@@ -5416,12 +5488,22 @@ static int TerrainAvoPct(const Battle& b, const Unit& d)
 	return TerrainInfo(b.map.At(d.x, d.z).t).avoPct;
 }
 
+static int AttackElem(const Unit& a, int skill)
+{
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	int el = sd ? sd->element : EL_NONE;
+	if (el != EL_NONE) return el;
+	const GearDef* w = GearOf(a.ch.reserved[6]);
+	if (w && w->kind == 0 && w->elem >= EL_FIRE && w->elem <= EL_POISON) return w->elem;
+	return EL_NONE;
+}
+
 static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 {
 	if (d.team != TEAM_ENEMY || &a == &d) return 0;
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	int magic = sd ? (sd->kind == SK_MAGIC) : (UnitMagAttack(a) != 0);
-	int el = sd ? sd->element : EL_NONE;
+	int el = AttackElem(a, skill);
 	int ranged;
 	if (magic) ranged = 1;
 	else if (sd && sd->rMax >= 0) ranged = (sd->rMin >= 2 || sd->rMax >= 2) ? 1 : 0;
@@ -5481,11 +5563,16 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		int atk = UnitStat(a, S_STR) + UnitWeaponPow(a);
 		if (sd && skill == SKL_HOLYBLADE) atk += UnitStat(a, S_MAG) / 2;
 		if (UnitHasSkill(a, SKL_P_MIGHT)) atk = atk * 115 / 100;
-		if (!sd && (WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1))
-			atk = atk * 6 / 5;
+		bool bowish = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1
+			|| skill == SKL_PIERCE || skill == SKL_SNIPE || skill == SKL_ARROWRAIN
+			|| skill == SKL_ARROWLINE || skill == SKL_ARROWFAN || skill == SKL_CRESCENT;
+		if (bowish) atk += UnitStat(a, S_DEX);
+		if (!sd && bowish) atk = atk * 6 / 5;
 		float mult = sd ? sd->power / 100.f : 1.f;
+		if (bowish && sd) mult *= 1.85f; // 弓スキルは高防御相手でも通るよう底上げ
 		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
+		if (bowish) df *= 0.42f; // 暗黒戦士級の高DEFでも2〜3ダメに潰れない
 		if (sd && sd->effect == EF_IGNDEF) df *= .5f;
 		{
 			int pen = UnitStat(a, S_PEN);
@@ -5493,6 +5580,10 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			if (pen > 0) df *= (100 - pen) / 100.f;
 		}
 		dm = atk * mult - df;
+		if (bowish) {
+			int floorv = max(18, (UnitStat(a, S_STR) + UnitStat(a, S_DEX) * 2) / 3);
+			if (dm < (float)floorv) dm = (float)floorv;
+		}
 		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (UnitHasPas(d, PAS_EVADE2) ? 16 : 0);
 		hit = 90 + UnitStat(a, S_DEX) + UnitStat(a, S_LUK) / 4 - evade + (sd ? 6 : 0);
 		if (a.blind > 0) hit -= 28;
@@ -5526,7 +5617,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 	if (WeaponOf(a) == WT_BOW && UnitMoveType(d) == MV_FLY) { hit += 20; dm *= 1.15f; }
 	{
 		bool bow = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1;
-		int elw = sd ? sd->element : EL_NONE;
+		int elw = AttackElem(a, skill);
 		int wx = TacWx(b.weather);
 		if (wx == WX_RAIN || wx == WX_STORM) {
 			if (elw == EL_FIRE) dm *= wx == WX_STORM ? 0.70f : 0.75f;
@@ -5563,8 +5654,12 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (pct > 0) dm *= (100 + pct) / 100.f;
 	}
 	{
-		int el = sd ? sd->element : EL_NONE;
+		int el = AttackElem(a, skill);
 		dm *= AilmentBreak(d, el);
+		{
+			const GearDef* arm = GearOf(d.ch.reserved[7]);
+			if (arm && arm->kind == 1 && el != EL_NONE && arm->elem == el) dm *= 0.72f;
+		}
 		if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE2)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE2))
 			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER2)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY2))
 			|| (el == EL_DARK && UnitHasPas(d, PAS_DARK2)))
@@ -5596,6 +5691,61 @@ float AilmentBreak(const Unit& d, int el)
 	if (d.sleep > 0 && el == EL_THUNDER) return 2.f;
 	if (d.defDown > 0 && el == EL_EARTH) return 2.f;
 	return 1.f;
+}
+
+// 反対属性が当たったとき、燃える体が凍る、のように状態と見た目の属性を入れ替える。
+// すでにスタン等で動けないときは、その拘束は残し、新しい拘束は足さない。
+static int BreakAilment(Unit& d, int el, int* fromEl)
+{
+	if (fromEl) *fromEl = EL_NONE;
+	if (el == EL_NONE) return EL_NONE;
+	if (d.burn > 0 && el == EL_ICE) {
+		if (fromEl) *fromEl = EL_FIRE;
+		d.burn = 0;
+		if (!UnitAilmentHeld(d) && !UnitHasPas(d, PAS_NOSLEEP)) d.freeze = 2;
+		return EL_ICE;
+	}
+	if (d.freeze > 0 && el == EL_FIRE) {
+		if (fromEl) *fromEl = EL_ICE;
+		d.freeze = 0;
+		if (d.burn <= 0) d.burn = 2;
+		return EL_FIRE;
+	}
+	if ((d.stun > 0 || d.bleed > 0) && el == EL_WIND) {
+		if (fromEl) *fromEl = d.stun > 0 ? EL_THUNDER : EL_NONE;
+		d.stun = 0;
+		d.bleed = 0;
+		return EL_WIND;
+	}
+	if ((d.confuse > 0 || d.defDown > 0) && el == EL_EARTH) {
+		if (fromEl) *fromEl = EL_EARTH;
+		d.confuse = 0;
+		d.defDown = 0;
+		return EL_EARTH;
+	}
+	if ((d.slow > 0 || d.sleep > 0) && el == EL_THUNDER) {
+		if (fromEl) *fromEl = EL_THUNDER;
+		d.slow = 0;
+		d.sleep = 0;
+		if (d.stun <= 0 && !UnitAilmentHeld(d) && !UnitHasPas(d, PAS_NOSTUN)) d.stun = 1;
+		return EL_THUNDER;
+	}
+	if (d.poison > 0 && el == EL_HOLY) {
+		if (fromEl) *fromEl = EL_POISON;
+		d.poison = 0;
+		return EL_HOLY;
+	}
+	if (d.blind > 0 && el == EL_POISON) {
+		if (fromEl) *fromEl = EL_NONE;
+		d.blind = 0;
+		if (d.poison <= 0 && !UnitHasPas(d, PAS_NOPOISON)) d.poison = 2;
+		return EL_POISON;
+	}
+	if (d.silence > 0 && el == EL_DARK) {
+		if (fromEl) *fromEl = EL_DARK;
+		return EL_DARK;
+	}
+	return EL_NONE;
 }
 
 static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
@@ -6211,7 +6361,7 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
 	double e = (8.0 + (double)stage * 0.48) * (0.38 + 0.32 * frac) * lvK;
 	if (d.boss) e *= 1.25;
-	if (UnitIsLucky(d)) e *= 3.0;
+	// ラッキー☆の×3は AwardExp / Preview 側で明示適用（ここだと見積と実付与の差が分かりにくい）。
 	if (e < 1.0) return 1;
 	if (e > 2000000000.0) return 2000000000;
 	return (int)(e + 0.5);
@@ -6409,9 +6559,10 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		int waves = (sd->kind == SK_HEAL || sd->kind == SK_BUFF) ? 1 : max(1, sd->hits);
 		for (int wave = 0; wave < waves && n < maxOut; wave++)
 		for (int k = 0; k < nt && n < maxOut; k++) {
+			if (targets[k] < 0 || targets[k] >= b.nUnits) continue;
 			Unit& d = b.u[targets[k]];
 			bool corpse = d.hp <= 0;
-			if (corpse && sd->effect != EF_RAISE && (sd->kind == SK_HEAL || sd->kind == SK_BUFF)) continue;
+			if (corpse && sd->effect != EF_RAISE) continue;
 			Strike s = {};
 			s.attacker = ai; s.defender = targets[k]; s.skill = skill; s.volley = wave;
 			if (sd->kind == SK_HEAL) {
@@ -6459,6 +6610,9 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					AddCp(a, 2 + s.dmg / 20);
 					AddCp(d, 3 + s.dmg / 20);
 					bool held = UnitAilmentHeld(d);
+					int fromEl = EL_NONE;
+					int react = BreakAilment(d, AttackElem(a, skill), &fromEl);
+					if (react) { s.react = react; s.reactFrom = fromEl; }
 					if (s.dmg > 0 && !(held && TurnFx(sd->effect))) d.sleep = 0;
 					if (sd->effect != EF_NONE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
 					if (d.hp <= 0) {
@@ -6471,6 +6625,42 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				}
 			}
 			out[n++] = s;
+			if (s.kill || s.overkill) {
+				for (int t2 = k + 1; t2 < nt; t2++) if (targets[t2] == targets[k]) targets[t2] = -1;
+			}
+		}
+		if (di >= 0 && di < b.nUnits && n < maxOut && sd->kind != SK_HEAL && sd->kind != SK_BUFF) {
+			int saw = 0, missed = 0;
+			for (int i = 0; i < n; i++) {
+				if (out[i].counter || out[i].attacker != ai || out[i].defender != di) continue;
+				saw = 1;
+				if (!out[i].hit) missed = 1;
+			}
+			Unit& d0 = b.u[di];
+			if (saw && missed && d0.hp > 0 && a.hp > 0 && d0.team != a.team
+				&& d0.sleep <= 0 && d0.stun <= 0 && d0.freeze <= 0) {
+				int dmg, hit, crit;
+				StrikeCalc(b, d0, a, -1, dmg, hit, crit);
+				Strike s = {};
+				s.attacker = di; s.defender = ai; s.skill = -1; s.counter = 1;
+				// MISS 起点の反撃は必ず命中（双方とも）。命中ロールはしない。
+				s.hit = 1;
+				if (a.hp > 0) {
+					s.crit = (int)(r.Next() % 100) < crit;
+					s.dmg = s.crit ? dmg * 2 : dmg;
+					if ((long long)s.dmg >= (long long)a.hp * 2) s.overkill = 1;
+					a.hp -= s.dmg;
+					int fromEl = EL_NONE;
+					int react = BreakAilment(a, AttackElem(d0, -1), &fromEl);
+					if (react) { s.react = react; s.reactFrom = fromEl; }
+					if (a.hp <= 0) {
+						if (!a.pasUsed && UnitHasPas(a, PAS_GUARD)) { a.hp = 1; a.pasUsed = 1; }
+						else if (GutsHold(a, d0, r)) s.guts = 1;
+						else { a.hp = 0; ClearAilments(a); s.kill = 1; }
+					}
+				}
+				out[n++] = s;
+			}
 		}
 		return n;
 	}
@@ -6484,8 +6674,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		Unit& x = atkTurn ? a : d;
 		Unit& y = atkTurn ? d : a;
 		if (x.hp <= 0 || n >= maxOut) return true;
-		bool corpse = y.hp <= 0;
-		if (corpse && !atkTurn) return true;
+		if (y.hp <= 0) return true;
 		int sk = atkTurn ? skill : -1;
 		int dmg, hit, crit;
 		StrikeCalc(b, x, y, sk, dmg, hit, crit);
@@ -6495,13 +6684,6 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		s.skill = sk;
 		s.counter = atkTurn ? 0 : 1;
 		s.volley = volley;
-		if (corpse) {
-			s.hit = 1;
-			s.overkill = 1;
-			s.crit = (int)(r.Next() % 100) < crit;
-			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
-			AddCp(x, 2 + s.dmg / 20);
-		} else {
 		s.hit = (int)(r.Next() % 100) < hit;
 		if (s.hit) {
 			s.crit = (int)(r.Next() % 100) < crit;
@@ -6517,6 +6699,9 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			}
 			bool held = UnitAilmentHeld(y);
 			int fx = (sk >= 0) ? SkillInfo(sk).effect : EF_NONE;
+			int fromEl = EL_NONE;
+			int react = BreakAilment(y, AttackElem(x, sk), &fromEl);
+			if (react) { s.react = react; s.reactFrom = fromEl; }
 			if (s.dmg > 0 && !(held && TurnFx(fx))) y.sleep = 0;
 			if (fx != EF_NONE && fx != EF_DRAIN && fx != EF_IGNDEF)
 				s.landed = ApplyEffect(b, x, y, fx, r) ? 1 : 0;
@@ -6527,18 +6712,48 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			}
 			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (160 + (s.crit ? 80 : 0)));
 		}
-		}
 		out[n++] = s;
-		return s.kill != 0;
+		return s.kill != 0 || s.overkill != 0;
 	};
+	int missed = 0;
 	for (int v = 0; aLeft > 0 && n < maxOut; aLeft--, v++) {
 		if (a.hp <= 0) break;
-		swing(true, v);
+		int before = n;
+		if (swing(true, v)) break; // kill / overkill で余剰段を止める
+		if (n > before && !out[n - 1].hit) missed = 1;
+	}
+	// 攻撃側が1段でも MISS したら、反撃権が無くても必ず1回カウンター（睡眠・スタン・凍結中は除く）。
+	int missCounter = 0;
+	if (missed && d.hp > 0 && a.hp > 0 && d.team != a.team
+		&& d.sleep <= 0 && d.stun <= 0 && d.freeze <= 0) {
+		if (dLeft < 1) dLeft = 1;
+		missCounter = 1;
 	}
 	for (int v = 0; dLeft > 0 && n < maxOut; dLeft--, v++) {
 		if (a.hp <= 0 || d.hp <= 0) break;
 		if (d.sleep > 0 || d.stun > 0) break;
+		int before = n;
 		if (swing(false, v)) break;
+		// MISS 起点の反撃は命中を強制（振れ幅でまた外さない）。
+		if (missCounter && n > before && out[n - 1].counter && !out[n - 1].hit && a.hp > 0) {
+			Strike& cs = out[n - 1];
+			int dmg, hit, crit;
+			StrikeCalc(b, d, a, -1, dmg, hit, crit);
+			cs.hit = 1;
+			cs.crit = (int)(r.Next() % 100) < crit;
+			cs.dmg = cs.crit ? dmg * 2 : dmg;
+			if ((long long)cs.dmg >= (long long)a.hp * 2) cs.overkill = 1;
+			a.hp -= cs.dmg;
+			int fromEl = EL_NONE;
+			int react = BreakAilment(a, AttackElem(d, -1), &fromEl);
+			if (react) { cs.react = react; cs.reactFrom = fromEl; }
+			if (a.hp <= 0) {
+				if (!a.pasUsed && UnitHasPas(a, PAS_GUARD)) { a.hp = 1; a.pasUsed = 1; }
+				else if (GutsHold(a, d, r)) cs.guts = 1;
+				else { a.hp = 0; ClearAilments(a); cs.kill = 1; }
+			}
+		}
+		missCounter = 0; // 強制は1発だけ
 	}
 	return n;
 }
@@ -6656,11 +6871,12 @@ static int ReadyCt(const Unit* u, const int* ct, int i)
 	return ct ? ct[i] : u[i].ct;
 }
 
-static int PickReady(const Unit* u, int n, int lastTeam, const int* ct)
+static int PickReady(const Unit* u, int n, int lastTeam, const int* ct, const BYTE* also)
 {
 	int bestP = -1, bestE = -1;
 	for (int i = 0; i < n; i++) {
-		if (!u[i].alive || u[i].alert != 1) continue;
+		// alert 0 は未発見。行動順に入れない。also は「次の手番から入る」予告だけ。
+		if (!u[i].alive || (u[i].alert != 1 && !(also && also[i]))) continue;
 		int c = ReadyCt(u, ct, i);
 		if (c < 1000) continue;
 		int& best = (u[i].team == TEAM_PLAYER) ? bestP : bestE;
@@ -6680,7 +6896,7 @@ static int PickReady(const Unit* u, int n, int lastTeam, const int* ct)
 int Battle::NextActor()
 {
 	for (int guard = 0; guard < 100000; guard++) {
-		int best = PickReady(u, nUnits, lastActTeam, NULL);
+		int best = PickReady(u, nUnits, lastActTeam, NULL, NULL);
 		if (best >= 0) {
 			lastActTeam = u[best].team;
 			return best;
@@ -6689,6 +6905,8 @@ int Battle::NextActor()
 	}
 	return -1;
 }
+
+static int TurnJoinGoal(const Battle& b, const int* ct, int ui, const BYTE* also);
 
 int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) const
 {
@@ -6700,9 +6918,18 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 		last = u[acting].team;
 	}
 	if (insertAt) *insertAt = -1;
+	// 気づいた敵（alert 2）は次の手番の直前に順へ入る。予告も同じ位置にする。未発見は入れない。
+	BYTE also[MAX_UNITS];
+	memset(also, 0, sizeof(also));
+	for (int i = 0; i < nUnits; i++) {
+		if (!u[i].alive || u[i].team != TEAM_ENEMY || u[i].alert != 2) continue;
+		int goal = TurnJoinGoal(*this, ct, i, also);
+		if (goal >= 0 && ct[i] < goal) ct[i] = goal;
+		also[i] = 1;
+	}
 	int got = 0;
 	for (int guard = 0; guard < 100000 && got < n; guard++) {
-		int best = PickReady(u, nUnits, last, ct);
+		int best = PickReady(u, nUnits, last, ct, also);
 		if (best >= 0) {
 			if (insertAt && *insertAt < 0 && best == acting) *insertAt = got;
 			out[got++] = best;
@@ -6711,7 +6938,7 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 			continue;
 		}
 		bool any = false;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) { ct[i] += Speed(*this, u[i]); any = true; }
+		for (int i = 0; i < nUnits; i++) if (u[i].alive && (u[i].alert == 1 || also[i])) { ct[i] += Speed(*this, u[i]); any = true; }
 		if (!any) break;
 	}
 	return got;
@@ -7299,7 +7526,13 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (closeBy) u.alert = 1;
 		}
 	}
-	WakeNearPlayers(b, 16, 1);
+	// 未発見のままの敵は、最初の敵味方の混成順に入れない。時計も持たせない。
+	// 奇襲は全員、夜襲は近くの敵だけ、上で既に alert 1。接近したあとに順へ入る。
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY || u.alert != 0) continue;
+		u.ct = 0;
+	}
 	// どの特殊戦でも、ボス以外の雑魚を独立抽選。1体とは限らない。
 	for (int i = 0; i < b.nUnits; i++) {
 		Unit& u = b.u[i];
@@ -7440,7 +7673,7 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	{
 		int rcv = UnitStat(u, S_RCV);
 		if (rcv > 0 && u.hp < u.ch.stat[S_HP]) {
-			int h = max(1, u.ch.stat[S_HP] * rcv / 100);
+			int h = rcv;
 			int before = u.hp;
 			u.hp = min(u.ch.stat[S_HP], u.hp + h);
 			*healOut += u.hp - before;
@@ -7484,19 +7717,19 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	return 0;
 }
 
-void JoinTurnClock(Battle& b, int ui)
+static int TurnJoinGoal(const Battle& b, const int* ct, int ui, const BYTE* also)
 {
-	if (ui < 0 || ui >= b.nUnits) return;
-	Unit& u = b.u[ui];
-	if (!u.alive || u.alert != 1) return;
+	if (ui < 0 || ui >= b.nUnits) return -1;
 	int top = 0, n = 0;
 	for (int i = 0; i < b.nUnits; i++) {
-		if (i == ui || !b.u[i].alive || b.u[i].alert != 1) continue;
-		if (b.u[i].ct > top) top = b.u[i].ct;
+		if (i == ui || !b.u[i].alive) continue;
+		if (b.u[i].alert != 1 && !(also && also[i])) continue;
+		int c = ct ? ct[i] : b.u[i].ct;
+		if (c > top) top = c;
 		n++;
 	}
-	if (n <= 0) return;
-	int spd = Speed(b, u);
+	if (n <= 0) return -1;
+	int spd = Speed(b, b.u[ui]);
 	int goal;
 	if (top >= 1000) {
 		goal = 1000 + (spd % 37);
@@ -7506,6 +7739,16 @@ void JoinTurnClock(Battle& b, int ui)
 		if (goal < 0) goal = 0;
 		if (goal < top * 3 / 4) goal = top * 3 / 4;
 	}
+	return goal;
+}
+
+void JoinTurnClock(Battle& b, int ui)
+{
+	if (ui < 0 || ui >= b.nUnits) return;
+	Unit& u = b.u[ui];
+	if (!u.alive || u.alert != 1) return;
+	int goal = TurnJoinGoal(b, NULL, ui, NULL);
+	if (goal < 0) return;
 	if (u.ct < goal) u.ct = goal;
 }
 
@@ -8236,17 +8479,63 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 
 // ============================================================ 武具（生成表: tactics_src/gear_catalog.inc）
 #include "tactics_src/gear_catalog.inc"
-int GearCount() { return kGearN; }
+#include "tactics_src/gear_extra.inc"
+static GearDef s_gearEx[GEAR_EX_N];
+static int s_gearExOk = 0;
+static void EnsureGearEx()
+{
+	if (s_gearExOk) return;
+	for (int i = 0; i < GEAR_EX_N; i++) {
+		const GearExSpec& e = kGearExSpec[i];
+		GearDef& d = s_gearEx[i];
+		memset(&d, 0, sizeof(d));
+		d.line = e.line;
+		d.kind = e.kind;
+		d.price = e.price;
+		d.str = e.str;
+		d.mag = e.mag;
+		d.def = e.def;
+		d.res = e.res;
+		d.stage = 40;
+		d.req = e.req;
+		d.elem = e.elem;
+		d.shop = 1;
+		d.joint0 = e.kind ? 3 : 0;
+		d.joint1 = e.kind ? 2 : 1;
+		if (e.kind) { d.mesh0 = 26; d.mesh1 = 38; }
+		else switch (e.line) {
+		case 0: d.mesh0 = 20; d.mesh1 = 17; break;
+		case 1: d.mesh0 = 1; d.mesh1 = 18; break;
+		case 2: d.mesh0 = 4; d.mesh1 = 47; break;
+		case 3: d.mesh0 = 9; d.mesh1 = 50; break;
+		case 4: d.mesh0 = -1; d.mesh1 = 32; d.att0 = "2H_Staff"; break;
+		default: d.mesh0 = 44; d.mesh1 = 33; break;
+		}
+	}
+	s_gearExOk = 1;
+}
+int GearCount() { EnsureGearEx(); return kGearN + GEAR_EX_N; }
 const GearDef* GearOf(int id)
 {
-	if (id < 1 || id > kGearN) return NULL;
-	return &kGear[id - 1];
+	if (id < 1) return NULL;
+	if (id <= kGearN) return &kGear[id - 1];
+	EnsureGearEx();
+	int x = id - kGearN - 1;
+	if (x < 0 || x >= GEAR_EX_N) return NULL;
+	return &s_gearEx[x];
 }
 const wchar_t* GearName(int id)
 {
-	if (id < 1 || id > kGearN) return L"?";
-	const wchar_t* const* s = kGearNm[id - 1];
-	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (id < 1) return L"?";
+	if (id <= kGearN) {
+		const wchar_t* const* s = kGearNm[id - 1];
+		return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	}
+	int x = id - kGearN - 1;
+	if (x < 0 || x >= GEAR_EX_N) return L"?";
+	const wchar_t* ja = kGearExSpec[x].ja;
+	const wchar_t* en = kGearExSpec[x].en;
+	return LangPick14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en);
 }
 const wchar_t* GearRole(const GearDef* g)
 {
@@ -8416,7 +8705,7 @@ int MonsterDropLine(int monster)
 }
 bool StashAdd(SaveData& s, int id)
 {
-	if (id < 1 || id > kGearN || s.gearN < 0 || s.gearN >= GEAR_STASH) return false;
+	if (id < 1 || id > GearCount() || s.gearN < 0 || s.gearN >= GEAR_STASH) return false;
 	s.gearId[s.gearN++] = id;
 	return true;
 }
@@ -8429,10 +8718,11 @@ void StashRemoveAt(SaveData& s, int index)
 }
 bool GearBuy(SaveData& s, int index)
 {
-	if (index < 0 || index >= kGearN) return false;
-	if (s.gold < kGear[index].price) return false;
+	if (index < 0 || index >= GearCount()) return false;
+	const GearDef* g = GearOf(index + 1);
+	if (!g || s.gold < g->price) return false;
 	if (!StashAdd(s, index + 1)) return false;
-	s.gold -= kGear[index].price;
+	s.gold -= g->price;
 	return true;
 }
 bool GearSellAt(SaveData& s, int index)
@@ -8526,9 +8816,11 @@ int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r)
 		int reqLo = 1, reqHi = cap;
 		if (pass == 0 || pass == 2) reqLo = cap;
 		else if (pass == 1) reqLo = cap > 1 ? cap - 1 : 1;
-		for (int i = 0; i < kGearN && n < 512; i++) {
-			int req = kGear[i].req > 0 ? kGear[i].req : 1;
-			if (wantLine >= 0 && kGear[i].line != wantLine) continue;
+		for (int i = 0; i < GearCount() && n < 512; i++) {
+			const GearDef* g = GearOf(i + 1);
+			if (!g || g->shop) continue; // 属性・ユニークは店のみ
+			int req = g->req > 0 ? g->req : 1;
+			if (wantLine >= 0 && g->line != wantLine) continue;
 			if (req < reqLo || req > reqHi) continue;
 			pool[n++] = i;
 		}
@@ -8536,7 +8828,7 @@ int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r)
 	if (n < 1) return -1;
 	int gi = pool[r.Range(0, n - 1)];
 	if (!StashAdd(s, gi + 1)) {
-		s.gold += max(1, kGear[gi].price / 3);
+		s.gold += max(1, GearOf(gi + 1) ? GearOf(gi + 1)->price / 3 : 1);
 		return -1;
 	}
 	return gi + 1;
@@ -9710,7 +10002,10 @@ static void EvoAttachRecent(CharData& c)
 	const ClassDef& cd = ClassInfo(c.cls);
 	if (cd.tier < 2) return;
 	int gate = PromoteLevel(cd.tier - 1);
-	if (gate >= 9999 || c.lv > gate + 3) return;
+	// お試し窓は「現職に昇格した直後」[gate, gate+3] の時だけ。下限を欠くと、
+	// レベルがその職の正規昇格レベルに遠く届かないキャラ（職エディタ等で段だけ先走った状態）にも
+	// 偽のお試しが付き、Lv77 なのに「お試し Lv183」や 10次/12次職の誤表示を招く。
+	if (gate >= 9999 || c.lv < gate || c.lv > gate + 3) return;
 	int best = -1, score = -1;
 	int last = C_JOB0 + TAC_JOB_N;
 	for (int p = 0; p < last; p++) {
@@ -9860,6 +10155,28 @@ static bool JobRailFix(CharData& c)
 	return true;
 }
 
+// レベルで許される段(JobStepsForLevel)を超えた職は、履歴をたどって段相応の一番進んだ職へ戻す。
+// 旧セーブ等の「Lv は低いのに職段だけ高い」不整合は、偽お試し・次職番号の誤表示・在戦で進化が起きない、の元凶になる。
+// 段を正せば呼び出し側で CharRecalcProgress を回し、能力も現職・Lv 相応へ組み直す。
+static bool JobLevelClamp(CharData& c)
+{
+	if (!c.used) return false;
+	int maxTier = JobStepsForLevel(c.lv);
+	if (ClassInfo(c.cls).tier <= maxTier) return false;
+	int newCls = -1, cut = -1;
+	for (int i = 0; i < JOB_PATH_N; i++) {
+		int v = c.jobPath[i];
+		if (v < 0) break;
+		if (ClassInfo(v).tier <= maxTier) { newCls = v; cut = i; }
+	}
+	if (newCls < 0 || newCls == c.cls) return false;
+	c.cls = newCls;
+	for (int i = cut + 1; i < JOB_PATH_N; i++) c.jobPath[i] = -1;
+	c.trialFrom = -1;
+	c.trialLv = 0;
+	return true;
+}
+
 bool SaveLoad(SaveData& s)
 {
 	SaveDefaults(s);
@@ -9958,8 +10275,9 @@ bool SaveLoad(SaveData& s)
 		c.cls = Clampi(c.cls, 0, C_JOB0 + JobCount() - 1);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
 		if (JobRailFix(c)) rail = true;
+		bool heal = JobLevelClamp(c);   // 段がレベルを追い越した不整合を是正
 		JobFixTrial(c);
-		if (recalc) CharRecalcProgress(c);
+		if (recalc || heal) CharRecalcProgress(c);
 		CharGrantReached(c);
 		if (c.lv == 1) {
 			const ClassDef& cd = ClassInfo(c.cls);
@@ -9996,7 +10314,7 @@ bool SaveLoad(SaveData& s)
 	if (s.rosterCap < 20 || s.rosterCap > MAX_ROSTER || (s.rosterCap % 20) != 0) s.rosterCap = 20;
 	for (int i = s.partyCap; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.gearN = Clampi(s.gearN, 0, GEAR_STASH);
-	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > kGearN) s.gearId[i] = 1;
+	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > GearCount()) s.gearId[i] = 1;
 	TrophyLoad();
 	CraftLoad();
 	if (rail) SaveWrite(s);

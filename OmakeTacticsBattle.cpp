@@ -2,6 +2,7 @@
 #include "OmakeTacticsGame.h"
 #include "OmakeTacticsAudio.h"
 #include "DatArchive.h"
+#include "simd_kernels.h"
 #include <math.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -48,19 +49,22 @@ static float AngLerp(float a, float b, float t)
 }
 
 // 死亡中・倒れ終わり。待機や被弾に替えると一度起きてから、蘇生の先頭（倒れた姿勢）でもう一度倒れる。
-static BOOL PoseGround(const Actor& a, const Unit& u, float dieT)
+// shownHp を渡すと（カットシーン中の m_dispHp）予測解決後の u.hp=0 で先に倒れモーションにしない。
+static BOOL PoseGround(const Actor& a, const Unit& u, float dieT, float shownHp = -1.f)
 {
 	if (a.clip == CL_DEATH) return TRUE;
 	if (dieT >= 0.f) return TRUE;
-	if (!u.alive || u.hp <= 0) return TRUE;
+	if (!u.alive && shownHp < 0.f) return TRUE;
+	float hp = shownHp >= 0.f ? shownHp : (float)u.hp;
+	if (hp <= 0.5f) return TRUE;
 	return FALSE;
 }
 
 // 起き上がりの途中も切らない。蘇生クリップの先頭は倒れた姿勢なので、途中で待機に戻すと落ちてからまた起きる。
-static BOOL PoseKeep(const Actor& a, const Unit& u, float dieT)
+static BOOL PoseKeep(const Actor& a, const Unit& u, float dieT, float shownHp = -1.f)
 {
 	if (a.clip == CL_SPAWN) return TRUE;
-	return PoseGround(a, u, dieT);
+	return PoseGround(a, u, dieT, shownHp);
 }
 
 // 既に倒れている体は、落下をもう一度再生せず終わりの姿勢で止める。
@@ -687,6 +691,9 @@ void Game::ResumeBattle(int kind)
 	for (int i = 0; i < MAX_UNITS; i++) m_expGain[i] = s->expGain[i];
 	m_bossDown = s->bossDown;
 	m_ai = s->ai;
+	memset(m_visAil, 0, sizeof(m_visAil));
+	memset(m_ailBlend, 0, sizeof(m_ailBlend));
+	memset(m_ailBlendEl, 0, sizeof(m_ailBlendEl));
 	m_ordSnapN = 0;
 	m_ordLeave = -1;
 	m_importBind = 0;
@@ -1072,6 +1079,12 @@ void Game::EndBattle(int victory)
 void Game::BeginTurn()
 {
 	if (CheckBattleOver()) return;
+	// 前の手番で気づいた敵を、次の行動者を決める前に順へ入れる。未発見（alert 0）は入れない。
+	for (int i = 0; i < m_b.nUnits; i++)
+		if (m_b.u[i].alive && m_b.u[i].team == TEAM_ENEMY && m_b.u[i].alert == 2) {
+			m_b.u[i].alert = 1;
+			JoinTurnClock(m_b, i);
+		}
 	int ui = m_b.NextActor();
 	if (ui < 0) {
 		if (m_demo) { DemoLeave(); return; }
@@ -1084,7 +1097,14 @@ void Game::BeginTurn()
 	TurnStartEffects(m_b, ui, &heal, &poison, &burn, &bleed);
 	V3 hp = v3(u.px, u.py + m_act[ui].height + .2f, u.pz);
 	wchar_t s[48];
-	if (heal > 0) { swprintf_s(s, L"+%s", TacNum(heal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE); TacSfx(TS_HEAL); }
+	// 状態異常の DoT と同時の自然回復が「緑の+」に見えて異常が回復しているように誤解されるのを防ぐ。
+	// DoT があるターンは回復ポップを抑え、被害側を先に見せる。
+	int dotSum = poison + burn + bleed;
+	int showHeal = heal;
+	if (dotSum > 0) {
+		showHeal = heal - dotSum;
+		if (showHeal < 0) showHeal = 0;
+	}
 	if (poison > 0) {
 		swprintf_s(s, L"-%s %s", TacNum(poison), EffectWord(EF_POISON));
 		AddPopup(hp, s, RGBA8(190, 120, 255), 1, MSG_BURST);
@@ -1101,6 +1121,7 @@ void Game::BeginTurn()
 		AddPopup(hp, s, RGBA8(220, 40, 50), 1, MSG_BURST);
 		Burst(v3(u.px, u.py + .3f, u.pz), 8, .6f, .08f, .7f, .75f, .05f, .05f, 0, 0, 1.2f, 0, .2f);
 	}
+	if (showHeal > 0) { swprintf_s(s, L"+%s", TacNum(showHeal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE, dotSum > 0 ? .2f : 0.f); TacSfx(TS_HEAL); }
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
 		u.hp = 0; u.alive = 0; u.killed = 1;
@@ -1140,11 +1161,6 @@ void Game::BeginTurn()
 	swprintf_s(b, L"%s  %s", TT(u.team == TEAM_PLAYER ? TX_BT_TURN_PLAYER : TX_BT_TURN_ENEMY), nm);
 	AddBanner(b, NULL, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130), 2, 1.3f, MSG_FACE);
 	m_lastTeam = u.team;
-	for (int i = 0; i < m_b.nUnits; i++)
-		if (m_b.u[i].alive && m_b.u[i].team == TEAM_ENEMY && m_b.u[i].alert == 2) {
-			m_b.u[i].alert = 1;
-			JoinTurnClock(m_b, i);
-		}
 	if (u.team == TEAM_PLAYER) {
 		int warned = WakeNearPlayers(m_b, 16);
 		if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
@@ -1225,7 +1241,7 @@ BOOL Game::CheckBattleOver()
 	AddBanner(TT(win ? TX_BT_VICTORY : TX_BT_DEFEAT), win && m_bossDown ? TT(TX_BT_BOSS) : NULL, win ? RGBA8(255, 226, 120) : RGBA8(190, 160, 220), 1, 2.8f, win ? MSG_DEPTH : MSG_DROP);
 	TacSfx(win ? TS_WIN : TS_LOSE);
 	if (win) {
-		for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].hp > 0 && !PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) ActorPlay(m_act[i], CL_CHEER, 1, .2f);
+		for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].hp > 0 && !PoseKeep(m_act[i], m_b.u[i], m_dieT[i], m_dispHp[i])) ActorPlay(m_act[i], CL_CHEER, 1, .2f);
 		for (int i = 0; i < m_b.nUnits; i++) {
 			Unit& u = m_b.u[i];
 			if (!u.alive || u.team != TEAM_PLAYER) continue;
@@ -1668,15 +1684,7 @@ void Game::ComputeOverlays()
 
 static void AvxCopy(void* dst, const void* src, size_t n)
 {
-	unsigned char* d = (unsigned char*)dst;
-	const unsigned char* s = (const unsigned char*)src;
-	size_t i = 0;
-	for (; i + 32 <= n; i += 32) {
-		__m256 v = _mm256_loadu_ps((const float*)(s + i));
-		_mm256_storeu_ps((float*)(d + i), v);
-	}
-	if (i < n) memcpy(d + i, s + i, n - i);
-	_mm256_zeroupper();
+	SimdKernels::Get().Copy(dst, src, n);
 }
 
 struct OvWork {
@@ -3032,7 +3040,15 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		else if (!FormPickAim(m_b, ui, skill, fx, fz)) FormDir(0, 1, fx, fz);
 		a.face = atan2f((float)fx, (float)fz);
 	}
-	for (int i = 0; i < m_b.nUnits; i++) { m_preHp[i] = m_b.u[i].hp; m_dispHp[i] = (float)m_b.u[i].hp; }
+	for (int i = 0; i < m_b.nUnits; i++) {
+		m_preHp[i] = m_b.u[i].hp;
+		m_dispHp[i] = (float)m_b.u[i].hp;
+		const Unit& vu = m_b.u[i];
+		VisAil& va = m_visAil[i];
+		va.poison = vu.poison; va.slow = vu.slow; va.defDown = vu.defDown;
+		va.sleep = vu.sleep; va.confuse = vu.confuse; va.stun = vu.stun; va.freeze = vu.freeze;
+		va.burn = vu.burn; va.bleed = vu.bleed; va.blind = vu.blind; va.silence = vu.silence;
+	}
 	if (target >= 0 && target < m_b.nUnits && m_b.u[ui].team == TEAM_PLAYER && m_b.u[target].team == TEAM_ENEMY) {
 		int g = m_b.u[target].grp;
 		int fresh = 0;
@@ -3235,7 +3251,7 @@ void Game::PoseFormAllies()
 	}
 	for (int i = 0; i < m_cutAllyN; i++) {
 		int id = m_cutAlly[i];
-		if (id == m_cutA || id < 0 || PoseKeep(m_act[id], m_b.u[id], m_dieT[id])) continue;
+		if (id == m_cutA || id < 0 || PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) continue;
 		Actor& ac = m_act[id];
 		ActorPlay(ac, allyClip, 0, .12f);
 		ac.skillPose = m_seqSkill;
@@ -3401,7 +3417,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 		if (!h.hit) {
 			BOOL landed = FALSE;
 			for (int q = 0; q < st.nHits; q++) if (st.hits[q].defender == d && st.hits[q].hit) landed = TRUE;
-			if (!landed && !PoseGround(m_act[d], du, m_dieT[d])) {
+			if (!landed && !PoseGround(m_act[d], du, m_dieT[d], m_dispHp[d])) {
 				m_act[d].recoil = 0.f;
 				ActorPlay(m_act[d], CL_DODGE, 0, .06f);
 			}
@@ -3438,8 +3454,24 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			if (sfxOnce(ally && kind != SK_MAGIC ? 16 : 32)) TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), ally);
 		}
 		if (visible || !cutView) {
-			StrikeFx(st.skill, el, kind, UnitMotionStyle(m_b.u[h.attacker], st.skill), ActorPos(h.attacker), mid, h.crit || cutView);
+			int playEl = el;
+			if (playEl == EL_NONE && h.attacker >= 0 && h.attacker < m_b.nUnits) {
+				const GearDef* w = GearOf(m_b.u[h.attacker].ch.reserved[6]);
+				if (w && w->kind == 0 && w->elem >= EL_FIRE && w->elem <= EL_POISON) playEl = w->elem;
+			}
+			StrikeFx(st.skill, playEl, kind, UnitMotionStyle(m_b.u[h.attacker], st.skill), ActorPos(h.attacker), mid, h.crit || cutView);
+			if (h.react && h.react != playEl)
+				ElementFx(h.react, SK_MAGIC, mid, mid, TRUE);
 			if (h.crit) Burst(mid, 30, 7.f, .09f, .5f, 1.f, .95f, .6f, 3, 1, 3.f, .06f, .2f);
+		}
+		if (h.hit) {
+			// 属性入れ替え（炎→氷など）は直前の属性を残して滑らかにクロスフェードする。
+			if (h.reactFrom > 0) { m_ailBlend[d] = 1.05f; m_ailBlendEl[d] = h.reactFrom; }
+			// 食らったこの瞬間に初めて見た目の異常を更新（予測解決の段階では動かさない）。
+			VisAil& va = m_visAil[d];
+			va.poison = du.poison; va.slow = du.slow; va.defDown = du.defDown;
+			va.sleep = du.sleep; va.confuse = du.confuse; va.stun = du.stun; va.freeze = du.freeze;
+			va.burn = du.burn; va.bleed = du.bleed; va.blind = du.blind; va.silence = du.silence;
 		}
 		{
 			wchar_t an[40], dn[40], line[160];
@@ -3468,7 +3500,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			else if (sfxOnce(256)) TacSfx(TS_DEATH);
 			if (m_act[d].clip != CL_DEATH) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
 			if (m_dieT[d] < 0) m_dieT[d] = 0;
-		} else if (!PoseGround(m_act[d], du, m_dieT[d])) {
+		} else if (!PoseGround(m_act[d], du, m_dieT[d], m_dispHp[d])) {
 			int guard = !h.crit && kind != SK_MAGIC && UnitFacing(m_b.u[h.attacker], du) == 0;
 			ActorPlay(m_act[d], guard ? CL_BLOCK : (h.crit ? CL_HIT_B : CL_HIT_A), 0, .06f);
 		}
@@ -3536,7 +3568,7 @@ void Game::UpdateSeq(float dt)
 					float wind = full * ActorWindup(ca, m_r, clip);
 					ca.animSpeed = Clampf(wind / max(0.25f, need), 0.12f, 1.15f);
 				}
-				if (m_cutD >= 0 && !PoseKeep(m_act[m_cutD], m_b.u[m_cutD], m_dieT[m_cutD])) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
+				if (m_cutD >= 0 && !PoseKeep(m_act[m_cutD], m_b.u[m_cutD], m_dieT[m_cutD], m_dispHp[m_cutD])) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
 				PoseFormAllies();
 				if (m_cutKind == 3) BindSummonCut();
 				if (m_seqSkill >= 0) {
@@ -3591,7 +3623,7 @@ void Game::UpdateSeq(float dt)
 				for (int i = 0; i < m_b.nUnits; i++) m_lunge[i] = 0;
 				for (int i = 0; i < m_b.nUnits; i++) {
 					m_act[i].animSpeed = 1.f;
-					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) continue;
+					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i], m_dispHp[i])) continue;
 					ActorPlay(m_act[i], CL_IDLE, 1, .1f);
 				}
 			}
@@ -3621,7 +3653,7 @@ void Game::UpdateSeq(float dt)
 				for (int i = 0; i < m_b.nUnits; i++) m_lunge[i] = 0;
 				for (int i = 0; i < m_b.nUnits; i++) {
 					m_act[i].animSpeed = 1.f;
-					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) continue;
+					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i], m_dispHp[i])) continue;
 					ActorPlay(m_act[i], CL_IDLE, 1, .1f);
 				}
 				return;
@@ -3672,7 +3704,7 @@ void Game::UpdateSeq(float dt)
 			default: break;
 			}
 			for (int i = 0; i < nm; i++) {
-				if (mem[i] == A || PoseKeep(m_act[mem[i]], m_b.u[mem[i]], m_dieT[mem[i]])) continue;
+				if (mem[i] == A || PoseKeep(m_act[mem[i]], m_b.u[mem[i]], m_dieT[mem[i]], m_dispHp[mem[i]])) continue;
 				Actor& ma = m_act[mem[i]];
 				BOOL posed = m_seqCut && m_cutStage == 2 && ma.clip == allyClip && ma.t > 0.05f;
 				if (posed) ma.t = ActorClipLen(ma, m_lib, m_r, allyClip) * ActorWindup(ma, m_r, allyClip);
@@ -3683,7 +3715,7 @@ void Game::UpdateSeq(float dt)
 			}
 		}
 		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f && !follow;
-		if (!held && !PoseGround(aa, au, m_dieT[A])) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
+		if (!held && !PoseGround(aa, au, m_dieT[A], m_dispHp[A])) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
 		aa.skillPose = st.skill;
 		aa.animSpeed = cast ? 1.0f : 1.05f;
 		m_stepL = ActorClipLen(aa, m_lib, m_r, clip) / aa.animSpeed;
@@ -3762,7 +3794,7 @@ void Game::UpdateSeq(float dt)
 		if (m_cutKind == 2 && m_seqCut && m_cutStage == 2) {
 			for (int i = 0; i < m_cutAllyN; i++) {
 				int id = m_cutAlly[i];
-				if (id != A && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id])) m_lunge[id] = m_lunge[A] * .8f;
+				if (id != A && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) m_lunge[id] = m_lunge[A] * .8f;
 				else if (id != A) m_lunge[id] = 0;
 			}
 		}
@@ -3814,7 +3846,12 @@ void Game::UpdateSeq(float dt)
 	if (m_seqT >= m_stepTi) {
 		int due = min(span, (int)((m_seqT - m_stepTi) / kGap));
 		while (m_seqImpact <= due) {
-			SeqImpact(st, minV + m_seqImpact);
+			int v = minV + m_seqImpact;
+			BOOL stop = FALSE;
+			for (int k = 0; k < st.nHits; k++)
+				if (st.hits[k].volley < v && (st.hits[k].kill || st.hits[k].overkill)) stop = TRUE;
+			if (stop) break;
+			SeqImpact(st, v);
 			m_seqImpact++;
 		}
 	}
@@ -3830,8 +3867,18 @@ void Game::UpdateSeq(float dt)
 			const SeqStep& nx = m_seq[m_seqCur + 1];
 			chain = nx.attacker == A && nx.skill == st.skill && !nx.counter && nx.nHits > 0 && nx.hits[0].volley > 0;
 		}
-		if (!chain && !PoseKeep(aa, m_b.u[A], m_dieT[A])) ActorPlay(aa, CL_IDLE, 1, .15f);
+		if (!chain && !PoseKeep(aa, m_b.u[A], m_dieT[A], m_dispHp[A])) ActorPlay(aa, CL_IDLE, 1, .15f);
 		m_lunge[A] = 0;
+		BOOL ended = FALSE;
+		for (int k = 0; k < st.nHits; k++) if (st.hits[k].kill || st.hits[k].overkill) ended = TRUE;
+		if (ended) {
+			while (m_seqCur + 1 < m_seqN) {
+				const SeqStep& nx = m_seq[m_seqCur + 1];
+				BOOL extra = nx.attacker == A && nx.skill == st.skill && !nx.counter && nx.nHits > 0 && nx.hits[0].volley > 0;
+				if (!extra) break;
+				m_seqCur++;
+			}
+		}
 		m_seqCur++;
 		m_seqT = 0;
 		m_seqImpact = 0;
@@ -3979,6 +4026,7 @@ void Game::AwardExp()
 	m_promoAsk = 0;
 	long long gain[MAX_UNITS] = {};
 	int coopHit[MAX_UNITS] = {};
+	unsigned char luckyHit[MAX_UNITS] = {};
 	int aoeN[MAX_UNITS] = {};
 	unsigned char aoeSeen[MAX_PARTY][(MAX_UNITS + 7) / 8] = {};
 	int aoeMap[MAX_UNITS];
@@ -4024,6 +4072,11 @@ void Game::AwardExp()
 			if (s.overkill && e > 1) e *= 2;
 			e /= 2;
 			if (e < 1) e = 1;
+			// ☆ラッキーはここで明示的に3倍（表示の「☆×3」と一致させる）。
+			if (UnitIsLucky(d)) {
+				e *= 3;
+				luckyHit[s.attacker] = 1;
+			}
 		}
 		if (s.hit && e > 1 && d.team == TEAM_ENEMY) {
 			int coop = PlayerCoop(m_b, m_strk, m_strkN, s.defender);
@@ -4081,11 +4134,13 @@ void Game::AwardExp()
 			AddLog(lvline, RGBA8(140, 255, 150));
 		}
 		{
-			wchar_t s[80];
+			wchar_t s[160];
 			int need = ExpToNext(u.ch.lv);
 			int left = u.ch.lv >= TAC_LV_MAX ? 0 : (int)min(2000000000LL, max(0LL, (long long)need - pool));
 			long long show = g > 2000000000LL ? 2000000000LL : g;
-			if (coopHit[i])
+			if (luckyHit[i])
+				swprintf_s(s, L"%s +%s  ☆×3  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_EXP_LEFT), TacNum(left));
+			else if (coopHit[i])
 				swprintf_s(s, L"%s +%s %s  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_BT_COOP), TT(TX_EXP_LEFT), TacNum(left));
 			else
 				swprintf_s(s, L"%s +%s  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_EXP_LEFT), TacNum(left));
@@ -4110,11 +4165,19 @@ void Game::UpdateUnitsVisual(float dt)
 		BOOL moving = (m_phase == PH_MOVING || m_phase == PH_E_MOVE) && m_moveUnit == i;
 		BOOL loco = a.clip == CL_IDLE || a.clip == CL_WALK || a.clip == CL_RUN || a.clip == CL_2H_IDLE
 			|| (a.clip >= CL_IDLE_GLANCE_L && a.clip <= CL_IDLE_CROSS);
-		if (u.alive && u.hp > 0 && !moving && a.clip != CL_DEATH && a.clip != CL_SPAWN && a.clip != CL_HIT_A && a.clip != CL_HIT_B) {
+		VisAil av = m_visAil[i];
+		if (m_phase != PH_ACTION) {
+			av.poison = u.poison; av.slow = u.slow; av.defDown = u.defDown;
+			av.sleep = u.sleep; av.confuse = u.confuse; av.stun = u.stun; av.freeze = u.freeze;
+			av.burn = u.burn; av.bleed = u.bleed; av.blind = u.blind; av.silence = u.silence;
+		}
+		if (m_ailBlend[i] > 0.f) m_ailBlend[i] = max(0.f, m_ailBlend[i] - dt);
+		BOOL bodyUp = u.alive && ((m_phase == PH_ACTION) ? (m_dispHp[i] > 0.5f) : (u.hp > 0));
+		if (bodyUp && !moving && a.clip != CL_DEATH && a.clip != CL_SPAWN && a.clip != CL_HIT_A && a.clip != CL_HIT_B) {
 			int hold = 0;
-			if (u.freeze > 0) hold = 3;
-			else if (u.sleep > 0) hold = 2;
-			else if (u.stun > 0) hold = 1;
+			if (av.freeze > 0) hold = 3;
+			else if (av.sleep > 0) hold = 2;
+			else if (av.stun > 0) hold = 1;
 			if (hold == 3) {
 				a.poseHold = 3;
 				a.animSpeed = 0.f;
@@ -4128,20 +4191,22 @@ void Game::UpdateUnitsVisual(float dt)
 				if (a.poseHold) ActorPlay(a, CL_IDLE, 1, .2f);
 				a.poseHold = 0;
 				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
-				if (u.slow > 0) a.animSpeed = 0.55f;
-				else if (u.confuse > 0) a.animSpeed = 1.35f;
+				if (av.slow > 0) a.animSpeed = 0.55f;
+				else if (av.confuse > 0) a.animSpeed = 1.35f;
 				else a.animSpeed = 1.f;
 			}
 		}
-		if (u.alive && u.hp > 0 && m_parts.size() < 2600) {
+		if (bodyUp && m_parts.size() < 2600) {
 			float h = a.height > 0.35f ? a.height : 1.1f;
 			float rad = max(0.42f, h * 0.42f);
 			int span = UnitSpan(u);
 			if (span > 1) rad *= (float)span * 0.65f;
+			// カットシーン中も ActorPos（演壇側）に異常パーティクルを出す。マップ座標だと画面外で消える。
+			V3 ap = ActorPos(i);
 			auto mote = [&](float y, float ang, float out, int shape, float r, float g, float b, float up, float grav, float life, float sz, int add) {
 				if ((int)m_parts.size() >= 2800) return;
 				Particle q = {};
-				q.p = v3(u.px + cosf(ang) * rad * out, u.py + y, u.pz + sinf(ang) * rad * out);
+				q.p = v3(ap.x + cosf(ang) * rad * out, ap.y + y, ap.z + sinf(ang) * rad * out);
 				q.v = v3(cosf(ang) * 0.12f, up, sinf(ang) * 0.12f);
 				q.life = q.max = life;
 				q.size = sz;
@@ -4152,46 +4217,47 @@ void Game::UpdateUnitsVisual(float dt)
 			};
 			float tm = m_time + i * 0.37f;
 			float flame = 0.18f + h * 0.16f;
-			if (u.burn > 0) {
+			int extra = (m_ailBlend[i] > 0.f) ? m_ailBlendEl[i] : 0;
+			if (av.burn > 0 || extra == EL_FIRE) {
 				for (int k = 0; k < 8; k++) {
 					float ang = tm * 2.1f + k * 0.785f;
 					float y = fmodf(tm * 0.9f + k * 0.13f, 1.f) * h * 0.95f;
 					mote(y, ang, 0.9f, 5, 1.f, 0.28f + (k & 1) * 0.35f, 0.04f, 1.35f, -0.55f, 0.42f, flame, 1);
 				}
 			}
-			if (u.poison > 0) {
+			if (av.poison > 0 || extra == EL_POISON) {
 				for (int k = 0; k < 5; k++)
 					mote(fmodf(tm * 0.45f + k * 0.2f, 1.f) * h, -tm * 1.1f + k * 1.256f, 0.95f, 0, 0.25f, 0.95f, 0.2f, 0.55f, -0.2f, 0.7f, flame * 0.85f, 1);
 			}
-			if (u.bleed > 0) {
+			if (av.bleed > 0) {
 				for (int k = 0; k < 5; k++)
 					mote(h * (0.3f + (k % 3) * 0.2f), k * 1.25f, 0.5f, 0, 0.9f, 0.03f, 0.04f, 0.02f, 2.6f, 0.4f, 0.08f + h * 0.03f, 0);
 			}
-			if (u.blind > 0) {
+			if (av.blind > 0) {
 				for (int k = 0; k < 4; k++)
 					mote(h * 0.84f, tm * 0.6f + k * 1.57f, 0.75f, 0, 0.04f, 0.04f, 0.06f, 0.04f, 0.f, 0.5f, flame, 0);
 			}
-			if (u.silence > 0) {
+			if (av.silence > 0 || extra == EL_DARK) {
 				for (int k = 0; k < 4; k++)
 					mote(h * 0.55f, tm * 1.4f + k * 1.57f, 1.05f, 7, 0.55f, 0.22f, 1.f, 0.12f, 0.f, 0.55f, flame * 0.65f, 1);
 			}
-			if (u.slow > 0) {
+			if (av.slow > 0) {
 				for (int k = 0; k < 3; k++)
 					mote(0.06f, tm * 0.35f + k * 2.1f, 0.85f, 0, 0.42f, 0.3f, 0.1f, 0.06f, 0.5f, 0.6f, flame * 0.75f, 0);
 			}
-			if (u.confuse > 0) {
+			if (av.confuse > 0 || extra == EL_EARTH) {
 				for (int k = 0; k < 4; k++)
 					mote(h * 0.92f, tm * 3.f + k * 1.57f, 0.8f, 2, 0.9f, 0.15f, 0.95f, 0.18f, 0.f, 0.4f, flame * 0.5f, 1);
 			}
-			if (u.stun > 0) {
+			if (av.stun > 0 || extra == EL_THUNDER) {
 				for (int k = 0; k < 3; k++)
 					mote(h * 0.95f, tm * 2.4f + k * 2.09f, 0.65f, 2, 1.f, 0.85f, 0.2f, 0.25f, 0.f, 0.35f, flame * 0.4f, 1);
 			}
-			if (u.sleep > 0) {
+			if (av.sleep > 0) {
 				for (int k = 0; k < 3; k++)
 					mote(0.12f + k * 0.08f, tm * 0.5f + k * 2.1f, 0.7f, 0, 0.55f, 0.7f, 1.f, 0.12f, 0.f, 0.8f, flame * 0.7f, 1);
 			}
-			if (u.freeze > 0) {
+			if (av.freeze > 0 || extra == EL_ICE) {
 				for (int k = 0; k < 4; k++)
 					mote(h * (0.15f + k * 0.22f), k * 1.57f + 0.4f, 1.2f, 6, 0.9f, 0.97f, 1.f, 0.f, 0.f, 0.8f, 0.07f + h * 0.03f, 1);
 			}
@@ -4220,7 +4286,8 @@ void Game::UpdateUnitsVisual(float dt)
 				u.dissolve = min(cap, u.dissolve + dt * .9f);
 			}
 		}
-		if ((!u.alive || u.hp <= 0) && a.clip != CL_DEATH && a.clip != CL_SPAWN) HoldCorpse(a);
+		BOOL shownDead = !u.alive || ((m_phase == PH_ACTION) ? (m_dispHp[i] <= 0.5f) : (u.hp <= 0));
+		if (shownDead && a.clip != CL_DEATH && a.clip != CL_SPAWN) HoldCorpse(a);
 		else if (!a.loop && a.clip != CL_DEATH && ActorClipDone(a, m_lib, m_r) && !(m_phase == PH_ACTION && i == (m_seqCur < m_seqN ? m_seq[m_seqCur].attacker : -1))) {
 			if (u.alive && u.hp > 0 && (m_dieT[i] < 0 || a.clip == CL_SPAWN)) {
 				a.animSpeed = 1.f;
@@ -4656,35 +4723,69 @@ void Game::DrawBattle3D()
 			if (m_hoverUnit == i && m_phase != PH_ACTION) dp.rim = .9f;
 			if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && CanTarget(m_cur, i, m_phase == PH_P_TARGET ? -1 : m_cmdSkill))
 				dp.flash = max(dp.flash, .25f + .2f * sinf(m_time * 7.f));
-			if (u.alive) {
-				if (u.freeze > 0) {
-					dp.tint = RGBA8(225, 242, 255);
-					dp.flash = 0.84f;
-					dp.emissive = 0.65f;
-					dp.rim = 0.15f;
-				} else if (u.burn > 0) {
-					dp.tint = RGBA8(255, 110, 28);
-					dp.emissive = 1.25f;
-					dp.flash = max(dp.flash, 0.12f + 0.08f * sinf(m_time * 14.f));
-					dp.rim = 1.f;
-				} else if (u.poison > 0) {
-					dp.tint = RGBA8(150, 255, 90);
-					dp.emissive = 0.45f;
-					dp.rim = 0.7f;
-				} else if (u.bleed > 0) {
-					dp.tint = RGBA8(255, 70, 70);
-					dp.emissive = 0.35f;
-				} else if (u.silence > 0) {
-					dp.tint = RGBA8(190, 140, 255);
-					dp.emissive = 0.4f;
-				} else if (u.blind > 0) {
-					dp.tint = RGBA8(70, 70, 80);
-					dp.emissive = 0.05f;
-				} else if (u.slow > 0) {
-					dp.tint = RGBA8(170, 140, 90);
-				} else if (u.confuse > 0) {
-					dp.tint = RGBA8(230, 140, 255);
-					dp.emissive = 0.25f;
+			// カットシーン中は予測解決済みの u.* ではなく、着弾まで据え置く m_visAil を使う。
+			// （入った瞬間に死亡／凍結モーションになるのを防ぐ。着弾で SeqImpact が更新する）
+			VisAil vt = (m_phase == PH_ACTION) ? m_visAil[i] : VisAil{};
+			if (m_phase != PH_ACTION) {
+				vt.poison = u.poison; vt.slow = u.slow; vt.defDown = u.defDown;
+				vt.sleep = u.sleep; vt.confuse = u.confuse; vt.stun = u.stun; vt.freeze = u.freeze;
+				vt.burn = u.burn; vt.bleed = u.bleed; vt.blind = u.blind; vt.silence = u.silence;
+			}
+			int blendEl = (m_ailBlend[i] > 0.f) ? m_ailBlendEl[i] : 0;
+			float blendK = Clampf(m_ailBlend[i] / 1.05f, 0.f, 1.f);
+			if (u.alive && (m_phase != PH_ACTION || m_dispHp[i] > 0.5f)) {
+				auto applyAilTint = [&](int freeze, int burn, int poison, int bleed, int silence, int blind, int slow, int confuse) {
+					if (freeze > 0) {
+						dp.tint = RGBA8(225, 242, 255);
+						dp.flash = 0.84f;
+						dp.emissive = 0.65f;
+						dp.rim = 0.15f;
+					} else if (burn > 0) {
+						dp.tint = RGBA8(255, 110, 28);
+						dp.emissive = 1.25f;
+						dp.flash = max(dp.flash, 0.12f + 0.08f * sinf(m_time * 14.f));
+						dp.rim = 1.f;
+					} else if (poison > 0) {
+						dp.tint = RGBA8(150, 255, 90);
+						dp.emissive = 0.45f;
+						dp.rim = 0.7f;
+					} else if (bleed > 0) {
+						dp.tint = RGBA8(255, 70, 70);
+						dp.emissive = 0.35f;
+					} else if (silence > 0) {
+						dp.tint = RGBA8(190, 140, 255);
+						dp.emissive = 0.4f;
+					} else if (blind > 0) {
+						dp.tint = RGBA8(70, 70, 80);
+						dp.emissive = 0.05f;
+					} else if (slow > 0) {
+						dp.tint = RGBA8(170, 140, 90);
+					} else if (confuse > 0) {
+						dp.tint = RGBA8(230, 140, 255);
+						dp.emissive = 0.25f;
+					}
+				};
+				applyAilTint(vt.freeze, vt.burn, vt.poison, vt.bleed, vt.silence, vt.blind, vt.slow, vt.confuse);
+				// 炎↔氷などの入れ替え中は旧属性の色を残してクロスフェード。
+				if (blendK > 0.02f && blendEl > 0) {
+					DWORD keep = dp.tint;
+					float em = dp.emissive, fl = dp.flash, rm = dp.rim;
+					if (blendEl == EL_FIRE) { dp.tint = RGBA8(255, 110, 28); dp.emissive = 1.25f; dp.rim = 1.f; }
+					else if (blendEl == EL_ICE) { dp.tint = RGBA8(225, 242, 255); dp.emissive = 0.65f; dp.flash = 0.84f; dp.rim = 0.15f; }
+					else if (blendEl == EL_POISON) { dp.tint = RGBA8(150, 255, 90); dp.emissive = 0.45f; }
+					else if (blendEl == EL_THUNDER) { dp.tint = RGBA8(255, 236, 120); dp.emissive = 0.8f; }
+					else if (blendEl == EL_DARK) { dp.tint = RGBA8(190, 140, 255); dp.emissive = 0.4f; }
+					else if (blendEl == EL_EARTH) { dp.tint = RGBA8(230, 140, 255); dp.emissive = 0.25f; }
+					auto lerpB = [](DWORD a, DWORD b, float t) -> DWORD {
+						int ar = (a >> 0) & 255, ag = (a >> 8) & 255, ab = (a >> 16) & 255, aa = (a >> 24) & 255;
+						int br = (b >> 0) & 255, bg = (b >> 8) & 255, bb = (b >> 16) & 255, ba = (b >> 24) & 255;
+						int r = (int)(br + (ar - br) * t), g = (int)(bg + (ag - bg) * t), bl = (int)(bb + (ab - bb) * t), al = (int)(ba + (aa - ba) * t);
+						return RGBA8(r, g, bl, al);
+					};
+					dp.tint = lerpB(keep, dp.tint, blendK);
+					dp.emissive = em + (dp.emissive - em) * (1.f - blendK);
+					dp.flash = fl + (dp.flash - fl) * (1.f - blendK);
+					dp.rim = rm + (dp.rim - rm) * (1.f - blendK);
 				}
 			}
 			V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
@@ -4694,7 +4795,8 @@ void Game::DrawBattle3D()
 				m_r.SetDepthTest(FALSE);
 			}
 			ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
-			if (u.alive && u.freeze > 0 && m_lib.ice.vb) {
+			BOOL showIce = (m_phase == PH_ACTION ? vt.freeze > 0 : u.freeze > 0) && (m_phase != PH_ACTION || m_dispHp[i] > 0.5f);
+			if (u.alive && showIce && m_lib.ice.vb) {
 				DrawParams ip;
 				ip.noTess = 1;
 				ip.tint = RGBA8(236, 248, 255, 210);
@@ -6626,6 +6728,7 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 					if (over && e > 1) e *= 2;
 					e /= 2;
 					if (e < 1) e = 1;
+					if (UnitIsLucky(d)) e *= 3; // 見積もりも実付与と同じ☆×3
 					swingOpt += e;
 					if (hp > 0) {
 						hp -= dmg;
@@ -8339,7 +8442,9 @@ void Game::DrawPromoteOffer()
 		m_btnSfx = -2;
 		const ClassDef& cd = ClassInfo(tgt[k]);
 		wchar_t nth[96], lab[160];
-		swprintf_s(nth, TT(TX_JOB_NTH), step + 1, ClassName(tgt[k]));
+		// 次職番号は対象の職段(tier)を正とする。JobPathCount は履歴が伸びると過大になり誤った段数を表示する。
+		int nthNo = cd.tier >= 1 ? cd.tier : step + 1;
+		swprintf_s(nth, TT(TX_JOB_NTH), nthNo, ClassName(tgt[k]));
 		swprintf_s(lab, L"%s   %s", nth, TT(gtx[Clampi(cd.group, 0, G_COUNT - 1)]));
 		if (Btn(ID_BT_PROMO0 + k, x + U(16), ty, w - U(32), U(34), lab, TRUE, FALSE, U(16))) {
 			take(tgt[k]);
@@ -9094,19 +9199,27 @@ void Game::DrawBattleUi()
 			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), fadeA(RGBA8(8, 8, 12, 200)));
 			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), fadeA(u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50)));
 		}
-		if (!(m_seqCut && m_cutStage == 0) && u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0 || u.freeze > 0 || u.burn > 0 || u.bleed > 0 || u.blind > 0 || u.silence > 0)) {
+		// カットシーンでも異常アイコンは出す。行動中は着弾前の m_visAil（予測で先に変わらない）。
+		{
+			VisAil vi = (m_phase == PH_ACTION) ? m_visAil[i] : VisAil{};
+			if (m_phase != PH_ACTION) {
+				vi.poison = u.poison; vi.slow = u.slow; vi.defDown = u.defDown;
+				vi.sleep = u.sleep; vi.confuse = u.confuse; vi.stun = u.stun; vi.freeze = u.freeze;
+				vi.burn = u.burn; vi.bleed = u.bleed; vi.blind = u.blind; vi.silence = u.silence;
+			}
+		if (u.alive && (vi.sleep > 0 || vi.confuse > 0 || vi.stun > 0 || vi.poison > 0 || vi.slow > 0 || vi.defDown > 0 || vi.freeze > 0 || vi.burn > 0 || vi.bleed > 0 || vi.blind > 0 || vi.silence > 0)) {
 			int kinds[12], efs[12], nk = 0;
-			if (u.sleep > 0) { kinds[nk] = 0; efs[nk++] = EF_SLEEP; }
-			if (u.confuse > 0) { kinds[nk] = 1; efs[nk++] = EF_CONFUSE; }
-			if (u.stun > 0) { kinds[nk] = 2; efs[nk++] = EF_STUN; }
-			if (u.poison > 0) { kinds[nk] = 3; efs[nk++] = EF_POISON; }
-			if (u.slow > 0) { kinds[nk] = 4; efs[nk++] = EF_SLOW; }
-			if (u.defDown > 0) { kinds[nk] = 5; efs[nk++] = EF_DEFDOWN; }
-			if (u.freeze > 0) { kinds[nk] = 6; efs[nk++] = EF_FREEZE; }
-			if (u.burn > 0) { kinds[nk] = 7; efs[nk++] = EF_BURN; }
-			if (u.bleed > 0) { kinds[nk] = 8; efs[nk++] = EF_BLEED; }
-			if (u.blind > 0) { kinds[nk] = 9; efs[nk++] = EF_BLIND; }
-			if (u.silence > 0) { kinds[nk] = 10; efs[nk++] = EF_SILENCE; }
+			if (vi.sleep > 0) { kinds[nk] = 0; efs[nk++] = EF_SLEEP; }
+			if (vi.confuse > 0) { kinds[nk] = 1; efs[nk++] = EF_CONFUSE; }
+			if (vi.stun > 0) { kinds[nk] = 2; efs[nk++] = EF_STUN; }
+			if (vi.poison > 0) { kinds[nk] = 3; efs[nk++] = EF_POISON; }
+			if (vi.slow > 0) { kinds[nk] = 4; efs[nk++] = EF_SLOW; }
+			if (vi.defDown > 0) { kinds[nk] = 5; efs[nk++] = EF_DEFDOWN; }
+			if (vi.freeze > 0) { kinds[nk] = 6; efs[nk++] = EF_FREEZE; }
+			if (vi.burn > 0) { kinds[nk] = 7; efs[nk++] = EF_BURN; }
+			if (vi.bleed > 0) { kinds[nk] = 8; efs[nk++] = EF_BLEED; }
+			if (vi.blind > 0) { kinds[nk] = 9; efs[nk++] = EF_BLIND; }
+			if (vi.silence > 0) { kinds[nk] = 10; efs[nk++] = EF_SILENCE; }
 			float s = U(26);
 			float gap = s + U(4);
 			float x0 = sx - (nk - 1) * gap * .5f;
@@ -9119,6 +9232,7 @@ void Game::DrawBattleUi()
 					m_r.HudText(EffectWord(efs[k]), ix, y0 - s * 0.95f, U(12), RGBA8(255, 255, 255), 1, 1);
 			}
 		}
+		} // vis ail block
 	}
 	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && m_cursorValid && m_cur >= 0) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);

@@ -39,56 +39,16 @@ float vnoise(float2 p)
 }
 float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
 
-float TacGateT(float s, float th)
+// 本体シェーダと同じ b4。8 サンプルは CPU が1回だけ計算する。
+cbuffer AirNow : register(b4)
 {
-	if (s <= th) return 0;
-	float u = saturate((s - th) / (1.0 - th));
-	return u * u * (3.0 - 2.0 * u);
-}
-
-float2 AirBreezeAtT(float t)
-{
-	float breeze = 0.62 + 0.38 * sin(t * 0.31);
-	float a = t * 0.11;
-	return float2(cos(a), sin(a)) * (0.40 * breeze);
-}
-float2 AirMainAtT(float t)
-{
-	float strong = TacGateT(sin(t * 0.17 + 0.6), 0.55);
-	float gale = TacGateT(sin(t * 0.083 + 2.4), 0.90);
-	float aS = t * 0.047 + 1.9;
-	float aG = t * 0.031 + 4.4;
-	return float2(cos(aS), sin(aS)) * strong * 1.30 + float2(cos(aG), sin(aG)) * gale * 2.70;
-}
-float AirLiftAtT(float t)
-{
-	float down = TacGateT(sin(t * 0.13 + 1.2), 0.72);
-	float up = TacGateT(sin(t * 0.19 + 3.6), 0.78);
-	return up * 0.95 - down * 1.15;
-}
-float2 AirBreezeT()
-{
-	float2 s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirBreezeAtT(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-float2 AirMainT()
-{
-	float2 s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirMainAtT(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-float AirLiftT()
-{
-	float s = 0;
-	[unroll] for (int i = 0; i < 8; i++) s += AirLiftAtT(Eye.w - i * (4.0 / 60.0));
-	return s * 0.125;
-}
-
-float GustAmtT()
-{
-	return saturate(length(AirMainT()) / 2.70 + length(AirBreezeT()) * 0.45 + abs(AirLiftT()) * 0.28);
-}
+	float4 AirB;
+	float4 AirL;
+};
+float2 AirBreezeT() { return AirB.xy; }
+float2 AirMainT() { return AirB.zw; }
+float AirLiftT() { return AirL.x; }
+float GustAmtT() { return AirL.y; }
 
 float3 FallLeanT(float3 w, float3 n, float amount)
 {
@@ -98,9 +58,9 @@ float3 FallLeanT(float3 w, float3 n, float amount)
 	float g = saturate(length(AirMainT()) / 2.70);
 	float br = saturate(length(AirBreezeT()) / 0.40);
 	float hgt = saturate((w.y + 9.0) / 30.0);
-	w.x += dir.x * (g * 0.85 + br * 0.22) * hgt * amount;
-	w.z += dir.y * (g * 0.70 + br * 0.18) * hgt * amount;
-	w.y += AirLiftT() * hgt * amount * 0.16;
+	w.x += dir.x * (g * 1.25 + br * 0.35) * hgt * amount;
+	w.z += dir.y * (g * 1.05 + br * 0.28) * hgt * amount;
+	w.y += AirLiftT() * hgt * amount * 0.28;
 	float flutter = sin(w.y * 1.85 + Eye.w * 3.4 + w.x * 0.45);
 	w += n * flutter * (0.03 + g * 0.11) * saturate(amount * 1.4);
 	return w;
@@ -108,16 +68,20 @@ float3 FallLeanT(float3 w, float3 n, float amount)
 
 float3 Sway(float3 w, float amt)
 {
-	if (amt <= 0.001) return w;
+	float vert = amt - Extra.w;
+	if (vert < 0) vert = 0;
+	float bend = saturate(vert) + saturate(vert - 1.0) * 0.22;
+	if (bend <= 0.001) return w;
 	float2 m = AirMainT();
 	float2 b = AirBreezeT();
+	float lift = AirLiftT();
 	float g = saturate(length(m) / 2.70);
 	float t = Eye.w;
-	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.5 + sin(t * 2.9 + w.x * 1.7) * 0.25;
-	float k = amt * (0.55 + g * 2.2);
-	w.x += s * k * 0.05 + b.x * amt * 0.10 + m.x * amt * 0.07;
-	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * k * 0.04 + b.y * amt * 0.08 + m.y * amt * 0.055;
-	w.y += AirLiftT() * amt * 0.045;
+	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.55 + sin(t * 2.9 + w.x * 1.7) * 0.28;
+	float flick = bend * (0.06 + g * 0.18);
+	w.x += s * flick + b.x * bend * 0.38 + m.x * bend * 0.26;
+	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * flick * 0.85 + b.y * bend * 0.32 + m.y * bend * 0.22;
+	w.y += lift * bend * 0.16;
 	return w;
 }
 
@@ -137,7 +101,7 @@ TC VST(VSIn v)
 			else if (th > 8.5 && th < 9.5) amp = 0.08;
 			else if (th > 7.5 && th < 8.5) amp = 0.016;
 			else if (th > 6.5) amp = 0.012;
-			amp *= 1.0 + GustAmtT() * 1.8;
+			amp *= 1.0 + GustAmtT() * 3.0;
 			float2 flow = v.c.rg * 2.0 - 1.0;
 			float rush = saturate(v.c.b * 1.35);
 			float spd = lerp(0.45, 2.6, rush);

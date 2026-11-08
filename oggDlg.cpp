@@ -1121,6 +1121,12 @@ static CString BuildCpuInstructionListString()
 	if (CpuIsaHasAvx10())
 		avx2 += L"AVX10 ";
 	{
+		char extras[256];
+		if (CpuIsaFormatExtras(extras, (int)sizeof(extras)) > 0) {
+			avx2 += CString(extras);
+		}
+	}
+	{
 		CString gpu = BuildGpuInfoString();
 		if (!gpu.IsEmpty()) {
 			avx2 += L" / GPU: ";
@@ -7542,6 +7548,11 @@ BOOL COggDlg::OnInitDialog()
 		avx2 += "AVX512 ";
 	if (CpuIsaHasAvx10())
 		avx2 += "AVX10 ";
+	{
+		char extras[256];
+		if (CpuIsaFormatExtras(extras, (int)sizeof(extras)) > 0)
+			avx2 += CString(extras);
+	}
 	/* GPU(DXGI)列挙は起動をブロックするため DeferredHeavy へ。ここでは命令一覧のみ。 */
 	m_os3.SetWindowText(avx2);
 

@@ -512,6 +512,25 @@ if errorlevel 1 exit /b 1</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
     </ClCompile>
+    <ClCompile Include="AnalyzerFftAvx10.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="PianoRollGoertzelAvx10.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="simd_kernels.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="simd_kernels_avx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="simd_kernels_avx10.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="Vst3Host.cpp" />
     <ClCompile Include="VstMidiEngine.cpp" />
     <ClCompile Include="Sf2Vst2.cpp">
@@ -1181,6 +1200,10 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="ExportTagUi.h" />
     <ClInclude Include="CPianoRollTuneDlg.h" />
     <ClInclude Include="PianoRollGoertzelAvx2.h" />
+    <ClInclude Include="cpu_isa.h" />
+    <ClInclude Include="simd_kernels.h" />
+    <ClInclude Include="simd_audio.h" />
+    <ClInclude Include="x64lib_isa.h" />
     <ClInclude Include="KpiHostClient.h" />
     <ClInclude Include="kpi_host_ipc.h" />
     <ClInclude Include="ALACAudioTypes.h" />

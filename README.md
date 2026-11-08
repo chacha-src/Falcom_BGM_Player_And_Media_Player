@@ -2,6 +2,7 @@
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
+本格派タクティクスRPG「らいらX」
 
 **対応OS:** Windows 11 以降
 
@@ -481,6 +482,8 @@ Copyright (C) PrePrayerPower Soft
 
 # oggYSEDbgm Media Player "Raira"
 Nihon Falcom BGM Player / High-Performance Media Player
+Authentic tactics RPG "Raira X"
+
 
 **Compatible OS:** Windows 11 or later
 

@@ -1957,7 +1957,9 @@ void CPianoRoll::UpdateNoteStates()
         const bool strongMidOnset = onsetBoost &&
             (i >= PianoRoll108::BASS_END && i < PianoRoll108::EDGE_HI) &&
             (sigStrength >= absFloor * 3.0f);
-        const int attackNeed = strongMidOnset ? 1 : AttackFramesForKey(i);
+        // 高音は1フレームでも点ける。2フレーム待ちだと単音・短い高音が消える。
+        const bool highPick = picked[i] && i >= 72 && sigStrength >= absFloor;
+        const int attackNeed = (strongMidOnset || highPick) ? 1 : AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
         if (!cur) {
@@ -1978,6 +1980,9 @@ void CPianoRoll::UpdateNoteStates()
             int gapLimit = VisGapFrames(i);
             if (m_envPeak[i] > 0.12f)
                 gapLimit += VIS_GAP_SUSTAIN_BONUS;
+            // 一度しっかり鳴った音は、減衰中の欠測で長音が途切れないように少し長く繋ぐ。
+            if (m_consecActive[i] >= 8)
+                gapLimit += 6;
             const int releaseLimit = TemporalFrames(i, RELEASE_FRAMES);
             const bool gapDetected =
                 m_unpickedFrames[i] >= gapLimit ||
@@ -1996,6 +2001,8 @@ void CPianoRoll::UpdateNoteStates()
     // PickNotes が捨てた部分音が gap で残っているなら即切る。
     for (int i = PianoRoll108::MUSIC_LOW_FLOOR; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i] || picked[i]) continue;
+        // 長く鳴っている音は欠測のあいだ倍音扱いでも切らない。長音が途中で消える。
+        if (m_consecActive[i] >= 8) continue;
         if (!PianoKey::IsHarmonicOfAnyActive(blend, i, picked,
             PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.80f))
             continue;

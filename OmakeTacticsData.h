@@ -799,6 +799,8 @@ struct Strike {
 	int volley;        // 多段の何射目か。同じ射は同時に着弾する
 	int overkill;      // 残HPの2倍以上、またはトドメ後の段
 	int guts;          // 1=レベル差で根性。HP1で残った
+	int react;         // 相性でエフェクトが移るとき、移った先の属性。0=なし
+	int reactFrom;     // 移る前の属性（燃える→凍る、の元）
 };
 struct Forecast {
 	int dmg, hit, crit;     // 1 回あたり
@@ -954,6 +956,58 @@ inline int TacQualityFixedAt(int slot)
 	if (slot < 0) slot = 0;
 	if (slot > 6) slot = 6;
 	return ord[slot];
+}
+
+// 内部の細段。保存の 0..7 も設定の名前も変えない。見た目を滑らかに動かすためだけの実行時の値。
+// 段を 0.25 刻みの notch で表す。rank = notch * 0.25。
+// アンカー notch: 超軽量0 軽量4 標準8 高12 超綺麗16 最高20 限界突破24。
+// 下は超軽量より下へ（古いノートで 1/10 まで落とせるように負の notch を用意）。
+// 上は限界突破だけ開放（将来のGPUで +10 を超えてもっと綺麗にできるように）。
+enum { TAC_NOTCH_FLOOR = -8, TAC_NOTCH_LIMIT = 24, TAC_NOTCH_OPEN = 24 + 60 };
+// 設定段(0..6) → アンカー notch。
+inline int TacTierNotch(int q)
+{
+	switch (q) {
+	case 4: return 0;   // 超軽量
+	case 0: return 4;   // 軽量
+	case 1: return 8;   // 標準
+	case 2: return 12;  // 高
+	case 3: return 16;  // 超綺麗
+	case 5: return 20;  // 最高
+	case 6: return 24;  // 限界突破
+	}
+	return 8;
+}
+// notch → アンカー段(0..6) と + 数（限界突破は 0..開放、下限段は負）。
+inline void TacNotchSplit(int notch, int& q, int& plus)
+{
+	if (notch >= TAC_NOTCH_LIMIT) { q = 6; plus = notch - TAC_NOTCH_LIMIT; return; }
+	if (notch < 0) { q = 4; plus = notch; return; }   // 超軽量の下。負の + 記号で表す
+	static const int tierQ[6] = { 4, 0, 1, 2, 3, 5 }; // 超軽量 軽量 標準 高 超綺麗 最高
+	q = tierQ[notch >> 2];
+	plus = notch & 3;                                 // 0..3
+}
+inline int TacNotchFromTierPlus(int q, int plus) { return TacTierNotch(q) + plus; }
+// 設定段ごとの細段の天井 notch。限界突破は開放、ほかは +3 まで。
+inline int TacTierCeilNotch(int q)
+{
+	if (q == 6) return TAC_NOTCH_OPEN;
+	return TacTierNotch(q) + 3;
+}
+inline float TacQRankNotch(int notch) { return (float)notch * 0.25f; }
+inline float TacQRank(int q, int plus) { return TacQRankNotch(TacNotchFromTierPlus(q, plus)); }
+// rank 0=超軽量 1=軽量 2=標準 3=高 4=超綺麗 5=最高 6=限界突破。vHi は rank 8.5(限界突破+10)。
+// 床（rank<0）は v0 を 0 へ薄め、天井（rank>6）は同じ傾きで伸ばし続ける（締めは使う側）。
+inline float TacQLerp(float rank, float v0, float v1, float v2, float v3, float v4, float v5, float v6, float vHi)
+{
+	if (rank <= 0.f) return v0 * Clampf(1.f + rank * 0.5f, 0.f, 1.f);
+	if (rank <= 1.f) return v0 + (v1 - v0) * rank;
+	if (rank <= 2.f) return v1 + (v2 - v1) * (rank - 1.f);
+	if (rank <= 3.f) return v2 + (v3 - v2) * (rank - 2.f);
+	if (rank <= 4.f) return v3 + (v4 - v3) * (rank - 3.f);
+	if (rank <= 5.f) return v4 + (v5 - v4) * (rank - 4.f);
+	if (rank <= 6.f) return v5 + (v6 - v5) * (rank - 5.f);
+	return v6 + (vHi - v6) * ((rank - 6.f) / 2.5f);
 }
 
 struct SaveData {
@@ -1166,6 +1220,8 @@ struct GearDef {
 	int joint0, joint1;
 	const char* att0;
 	const char* att1;
+	int elem;     // 0=なし。EL_FIRE..EL_POISON。武器は攻撃属性、防具はその属性を軽減
+	int shop;     // 1=店売りのみ。敵ドロップしない
 };
 int GearCount();
 const GearDef* GearOf(int id);

@@ -141,6 +141,7 @@ private:
 	BOOL Recover();
 	void PulseQuality(float work, float span);
 	void ApplyQualityNow(int q);
+	void ApplyQualityFine(int idx);
 	void PickQuality(int delta);
 	int QualityNow() const;
 	// 保存の拍は利用者の選択のまま。自動の保険（一段ずつ下げ、余力で一段上げ）は実行時だけ上書きする。
@@ -170,6 +171,7 @@ private:
 	void NavMove(int dx, int dy);
 	void NavConfirm();
 	void NavBack();
+	BOOL RightClosesUi() const;
 	void DrawBanners(float dt);
 	void DrawPopups(float dt);
 	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life, int pat);
@@ -370,7 +372,7 @@ private:
 	Renderer m_r;
 	Library m_lib;
 	SaveData m_save;
-	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz, m_qSlots;
+	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz, m_qSlots, m_qFine;
 	int m_syncArm, m_syncArmN, m_syncRun;
 	BOOL m_qDrew;
 	float m_qCoolT, m_syncLock;
@@ -412,7 +414,7 @@ private:
 	int m_downX, m_downY;
 	BOOL m_click, m_rclick;
 	int m_clickX, m_clickY;
-	BOOL m_dragRot, m_dragPan, m_downUi;
+	BOOL m_dragRot, m_dragPan, m_downUi, m_rOnUi;
 	int m_dragLastX, m_dragLastY;
 	float m_dragDist;
 	Fix<UiBtn, 96> m_btns, m_btnsPrev;
@@ -662,6 +664,13 @@ private:
 	float m_dispHp[MAX_UNITS];
 	int m_preHp[MAX_UNITS];
 	float m_dieT[MAX_UNITS];
+	// カットシーン中は着弾まで、攻撃前の状態異常を見せる。着弾で実体へ合わせる。
+	struct VisAil {
+		int poison, slow, defDown, sleep, confuse, stun, freeze, burn, bleed, blind, silence;
+	};
+	VisAil m_visAil[MAX_UNITS];
+	float m_ailBlend[MAX_UNITS];
+	int m_ailBlendEl[MAX_UNITS];
 	float m_faceShow[MAX_UNITS];
 	float m_lunge[MAX_UNITS];
 	Strike m_strk[96];

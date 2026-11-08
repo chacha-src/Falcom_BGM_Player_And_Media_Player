@@ -6,6 +6,7 @@
 #include "OmakeTacticsText.h"
 #include "Soft3DTexRes.h"
 #include "Soft3DTextD2D.h"
+#include "simd_kernels.h"
 #include <d3dcompiler.h>
 #include <d3d11_1.h>
 #include <dxgi1_3.h>
@@ -20,6 +21,8 @@
 #define TAC_REL(p) do { if (p) { (p)->Release(); (p) = NULL; } } while (0)
 
 namespace otac {
+
+static void TacBindCacheDrop();
 
 // 描画コマンドは固定配列。new / delete / std::vector は使わない。
 enum { TAC_DRAWQ = 4096 };
@@ -37,6 +40,7 @@ struct TacDrawCmd {
 	ID3D11RasterizerState* rs;
 	ID3D11DepthStencilState* depth;
 	UINT nIdx;
+	UINT iBase;
 	UINT stride;
 	UINT vbOff;
 	DXGI_FORMAT ibFmt;
@@ -62,7 +66,37 @@ static int g_cbPoolI = 0;
 // 枠を回して、飛行中のバッファは触らない。
 enum { TAC_CB_RING = 256 };
 struct TacCbRing { ID3D11Buffer* b[TAC_CB_RING]; int n, i; ID3D11Buffer* cur; };
-static TacCbRing g_frameR, g_boneR, g_skinBoneR, g_skinParmR, g_clothR, g_softR, g_hairSimR, g_hairClothR;
+static TacCbRing g_frameR, g_airR, g_boneR, g_skinBoneR, g_skinParmR, g_clothR, g_softR, g_hairSimR, g_hairClothR;
+struct ClothPend {
+	Renderer::AvaCache* ac;
+	void* ci;
+	ID3D11UnorderedAccessView* vert;
+	ID3D11Buffer* clothB;
+	ID3D11Buffer* boneB;
+	ID3D11Buffer* softB;
+	unsigned char parm[1536];
+	int cloth, soft;
+};
+static ClothPend g_pend[Renderer::CLOTH_INST];
+static int g_pendN, g_pendBusy;
+static ID3D11Buffer* g_clothGate;
+static ID3D11Buffer* g_clStB; static ID3D11UnorderedAccessView* g_clStU;
+static ID3D11Buffer* g_clCnB; static ID3D11ShaderResourceView* g_clCnS;
+static ID3D11Buffer* g_clPfB; static ID3D11ShaderResourceView* g_clPfS;
+static ID3D11Buffer* g_clPmB; static ID3D11ShaderResourceView* g_clPmS;
+struct HairPend {
+	void* hi;
+	ID3D11UnorderedAccessView* vert;
+	ID3D11Buffer* simB;
+	ID3D11Buffer* clothB;
+	unsigned char parm[608];
+	unsigned char cloth[672];
+	int vn;
+};
+static HairPend g_hair[Renderer::HAIR_INST];
+static int g_hairN, g_hairBusy;
+static ID3D11Buffer* g_hStB; static ID3D11UnorderedAccessView* g_hStU;
+static ID3D11Buffer* g_hPmB; static ID3D11ShaderResourceView* g_hPmS;
 static void TacCbRingFree(TacCbRing& r)
 {
 	for (int i = 0; i < r.n; i++) TAC_REL(r.b[i]);
@@ -144,7 +178,7 @@ static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacOb
 	g_objValid = TRUE;
 }
 
-void GpuMesh::Release() { TAC_REL(vb); TAC_REL(ib); nIdx = 0; }
+void GpuMesh::Release() { TAC_REL(vb); TAC_REL(ib); nIdx = 0; iBase = 0; }
 
 int Rig::Find(const char* n) const
 {
@@ -172,10 +206,12 @@ Renderer::Renderer()
 	m_fadeAbove = -1;
 	m_cutDeck = -1;
 	m_cutActors = FALSE;
+	m_stageWind = TRUE;
+	m_previewPost = FALSE;
 	m_cutActorGen = 0;
 	m_fadeX = m_fadeZ = -1;
-	m_w = m_h = 0; m_quality = 1; m_gpu = 0; m_allowTess = TRUE; m_tessOn = FALSE; m_bindKey = -1; m_hudPipe = 0; m_lastPsSrv = NULL; m_dsWant = NULL; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
-	m_dev = NULL; m_ctx = NULL; m_ctx1 = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_avaPlate = NULL; m_avaPlateW = m_avaPlateH = 0; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
+	m_w = m_h = 0; m_quality = 1; m_qPlus = 0; m_gpu = 0; m_allowTess = TRUE; m_tessOn = FALSE; m_bindKey = -1; m_hudPipe = 0; m_lastPsSrv = NULL; m_dsWant = NULL; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
+	m_dev = NULL; m_ctx = NULL; m_ctx1 = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_loadSky = NULL; m_loadSkyW = m_loadSkyH = 0; m_avaPlate = NULL; m_avaPlateW = m_avaPlateH = 0; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_sceneTex = NULL; m_sceneRtv = NULL; m_sceneSrv = NULL;
 	m_refTex = NULL; m_refRtv = NULL; m_refSrv = NULL; m_refDs = NULL; m_refDsv = NULL;
 	m_refW = m_refH = 0; m_refBlur = 0; m_reflecting = 0;
@@ -211,11 +247,15 @@ Renderer::Renderer()
 	m_hairScratchSB = NULL; m_hairScratchUAV = NULL; m_hairScratchSRV = NULL;
 	memset(m_hairV0, 0, sizeof(m_hairV0));
 	memset(m_hairVN, 0, sizeof(m_hairVN));
+	memset(m_hairI0, 0, sizeof(m_hairI0));
+	memset(m_hairIN, 0, sizeof(m_hairIN));
+	memset(m_hairVMin, 0, sizeof(m_hairVMin));
+	memset(m_hairVMax, 0, sizeof(m_hairVMax));
 	m_scalpModel = -1;
 	m_capC = RGBA8(70, 70, 70);
 	for (int s = 0; s < TAC_SCALP_CACHE; s++) m_scalps[s].model = -1;
 	m_ilS = m_ilB = m_ilK = m_ilH = m_ilP = m_ilPT = NULL;
-	m_cbFrame = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u;
+	m_cbFrame = m_cbAir = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u;
 	m_sLin = m_sCmp = m_sClamp = NULL;
 	m_rsBack = m_rsFront = m_rsNone = m_rsShadow = m_rsHud = NULL;
 	m_dsWrite = m_dsRead = m_dsOff = NULL;
@@ -251,6 +291,8 @@ Renderer::Renderer()
 	memset(m_avaWait, 0xFF, sizeof(m_avaWait));
 	memset(m_text, 0, sizeof(m_text));
 	memset(m_textHash, 0, sizeof(m_textHash));
+	for (int i = 0; i < TAC_TEXTN; i++) m_textNext[i] = -1;
+	for (int i = 0; i < TAC_TEXTH; i++) m_textHead[i] = -1;
 }
 
 Renderer::~Renderer() { Release(); }
@@ -261,7 +303,7 @@ void Renderer::ReleaseTargets()
 	if (m_ctx) m_ctx->OMSetRenderTargets(0, NULL, NULL);
 	if (m_msRtv == m_bbRtv) m_msRtv = NULL;
 	TAC_REL(m_msRtv); TAC_REL(m_msTex);
-	TAC_REL(m_bbRtv); TAC_REL(m_bb); TAC_REL(m_avaPlate); m_avaPlateW = m_avaPlateH = 0;
+	TAC_REL(m_bbRtv); TAC_REL(m_bb); TAC_REL(m_loadSky); m_loadSkyW = m_loadSkyH = 0; TAC_REL(m_avaPlate); m_avaPlateW = m_avaPlateH = 0;
 	TAC_REL(m_sceneSrv); TAC_REL(m_sceneRtv); TAC_REL(m_sceneTex);
 	TAC_REL(m_refSrv); TAC_REL(m_refRtv); TAC_REL(m_refTex); TAC_REL(m_refDsv); TAC_REL(m_refDs);
 	TAC_REL(m_blASrv); TAC_REL(m_blARtv); TAC_REL(m_blA);
@@ -279,6 +321,8 @@ void Renderer::Release()
 	m_avaReady = 0;
 	ClearMonPack();
 	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
+	for (int ti = 0; ti < TAC_TEXTN; ti++) m_textNext[ti] = -1;
+	for (int ti = 0; ti < TAC_TEXTH; ti++) m_textHead[ti] = -1;
 	m_terrain.Release();
 	for (int i = 0; i < 16; i++) {
 		m_terrainChunk[i].Release();
@@ -345,11 +389,16 @@ void Renderer::Release()
 	TacCbRingFree(g_skinBoneR); TacCbRingFree(g_skinParmR); TacCbRingFree(g_hairClothR);
 	for (int ci = 0; ci < 3; ci++) TAC_REL(m_csCloth[ci]);
 	TAC_REL(m_cbCloth); TacCbRingFree(g_clothR);
+	TAC_REL(g_clothGate);
+	TAC_REL(g_clStU); TAC_REL(g_clStB); TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clPfS); TAC_REL(g_clPfB); TAC_REL(g_clPmS); TAC_REL(g_clPmB);
+	g_pendN = 0;
+	TAC_REL(g_hStU); TAC_REL(g_hStB); TAC_REL(g_hPmS); TAC_REL(g_hPmB);
+	g_hairN = 0;
 	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft); TacCbRingFree(g_softR);
 	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim); TacCbRingFree(g_hairSimR);
 	ReleaseHair();
 	TAC_REL(m_ilS); TAC_REL(m_ilB); TAC_REL(m_ilK); TAC_REL(m_ilH); TAC_REL(m_ilP); TAC_REL(m_ilPT);
-	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
+	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbAir); TacCbRingFree(g_airR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
 	for (int i = 0; i < g_cbPoolN; i++) TAC_REL(g_cbPool[i]);
 	g_cbPoolN = 0;
 	g_cbPoolI = 0;
@@ -365,6 +414,7 @@ void Renderer::Release()
 	TAC_REL(m_qDisjoint); TAC_REL(m_qTs0); TAC_REL(m_qTs1); m_gpuArmed = FALSE;
 	TAC_REL(m_swap);
 	if (m_ctx) { m_ctx->ClearState(); m_ctx->Flush(); }
+	TacBindCacheDrop();
 	TAC_REL(m_ctx1);
 	TAC_REL(m_ctx);
 	TAC_REL(m_dev);
@@ -407,9 +457,10 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	m_w = max(8, (int)(rc.right - rc.left)); m_h = max(8, (int)(rc.bottom - rc.top));
 	DXGI_SWAP_CHAIN_DESC1 sd = {};
 	sd.Width = m_w; sd.Height = m_h; sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; sd.SampleDesc.Count = 1;
-	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.BufferCount = 2; sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.BufferCount = 3; sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	sd.Scaling = DXGI_SCALING_STRETCH; sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 	hr = f2 ? f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap) : E_FAIL;
+	if (FAILED(hr) && f2) { sd.BufferCount = 2; hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap); }
 	if (FAILED(hr) && f2) { sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; sd.BufferCount = 1; hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap); }
 	if (f2) f2->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
 	if (xd) {
@@ -434,8 +485,8 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	return TRUE;
 }
 
-static BOOL TacQRich(int q) { return q == 2 || q == 3 || q == 5 || q == 6; }
-static BOOL TacQFx(int q) { return q == 1 || TacQRich(q); }
+static BOOL TacQRich(int q, int plus) { return q == 2 || q == 3 || q == 5 || q == 6 || (q == 1 && plus >= 2); }
+static BOOL TacQFx(int q) { return q == 1 || q == 2 || q == 3 || q == 5 || q == 6; }
 static BOOL TacQUltra(int q) { return q == 3 || q == 5 || q == 6; }
 
 static int TacQFootprint(int q)
@@ -620,6 +671,14 @@ BOOL Renderer::SetQuality(int q)
 	return rebuilt;
 }
 
+void Renderer::SetQualityPlus(int plus)
+{
+	// 細段の + 数。超軽量の下は負、限界突破は +10 を超えて伸ばす。見た目だけでセーブには出さない。
+	if (plus < TAC_NOTCH_FLOOR) plus = TAC_NOTCH_FLOOR;
+	if (plus > TAC_NOTCH_OPEN - TAC_NOTCH_LIMIT) plus = TAC_NOTCH_OPEN - TAC_NOTCH_LIMIT;
+	m_qPlus = plus;
+}
+
 static BOOL MakeColorRt(ID3D11Device* dev, int w, int h, ID3D11Texture2D** tex, ID3D11RenderTargetView** rtv, ID3D11ShaderResourceView** srv)
 {
 	D3D11_TEXTURE2D_DESC td = {};
@@ -750,6 +809,7 @@ BOOL Renderer::Resize(int w, int h)
 	if (w == m_w && h == m_h) return TRUE;
 	ReleaseTargets();
 	m_ctx->ClearState();
+	TacBindCacheDrop();
 	DXGI_SWAP_CHAIN_DESC1 d = {};
 	m_swap->GetDesc1(&d);
 	HRESULT hr = m_swap->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, d.Flags);
@@ -765,6 +825,7 @@ BOOL Renderer::RefreshSurface()
 	if (!m_swap || !m_ctx) return FALSE;
 	ReleaseTargets();
 	m_ctx->ClearState();
+	TacBindCacheDrop();
 	DXGI_SWAP_CHAIN_DESC1 d = {};
 	m_swap->GetDesc1(&d);
 	HRESULT hr = m_swap->ResizeBuffers(0, m_w, m_h, DXGI_FORMAT_UNKNOWN, d.Flags);
@@ -778,7 +839,12 @@ BOOL Renderer::RefreshSurface()
 
 BOOL Renderer::FrameReady()
 {
-	return TRUE;
+	// 前の絵がまだ画面に出ていない。同じ場面をもう一度積むと GPU が遅れ、次の Present も失敗する。
+	// ここは出し直しだけ。まだ描き中なら、この拍のシーン記録はしない。ゲームの更新は呼び出し側で済んでいる。
+	if (!m_presentBusy) return TRUE;
+	if (!m_swap) { m_presentBusy = FALSE; return TRUE; }
+	Present(0, 0);
+	return !m_presentBusy;
 }
 
 // ============================================================ シェーダ・状態
@@ -996,6 +1062,8 @@ BOOL Renderer::CreateShaders()
 			for (int i = 0; i < 3; i++) TAC_REL(m_csCloth[i]);
 			m_cbCloth = NULL;
 		} else TacCbRingMake(m_dev, g_clothR, bd.ByteWidth);
+		bd.ByteWidth = 16;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_clothGate))) g_clothGate = NULL;
 		static const struct { const char* e; int rid; } sf[2] = {
 			{ "CSSoft", IDR_CSO_TAC_CSSOFT }, { "CSSoftWrite", IDR_CSO_TAC_CSSOFTW } };
 		for (int i = 0; i < 2; i++) {
@@ -1033,6 +1101,9 @@ BOOL Renderer::CreateStates()
 	bd.ByteWidth = (sizeof(FrameCB) + 15) & ~15;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbFrame))) return FALSE;
 	TacCbRingMake(m_dev, g_frameR, bd.ByteWidth);
+	bd.ByteWidth = 32;
+	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbAir))) return FALSE;
+	TacCbRingMake(m_dev, g_airR, bd.ByteWidth);
 	bd.ByteWidth = 48 * 16;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbRipple))) return FALSE;
 	bd.ByteWidth = 64 + 16 * 4;
@@ -3296,7 +3367,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 							if (best != headJ || bw < 200) continue;
 							float dx = v.p[0] - skin.skullC[0], dy = v.p[1] - skin.skullC[1], dz = v.p[2] - skin.skullC[2];
 							float r = sqrtf(dx * dx + dy * dy + dz * dz);
-							if (r < 1e-5f) continue;
+							if (r < 1e-5f || r > 0.20f) continue; // 翼や袖など頭の骨に付いた長い頂点は頭蓋にしない
 							float s = dy / r;
 							float el = asinf(s < -1.f ? -1.f : (s > 1.f ? 1.f : s));
 							int ia = (int)floorf((atan2f(dx, dz) + 3.14159265f) * (SKULL_NA / 6.2831853f));
@@ -3317,6 +3388,16 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 							if (ie > 0) best = fmaxf(best, skin.skullR[(ie - 1) * SKULL_NA + ia]);
 							if (ie < SKULL_NE - 1) best = fmaxf(best, skin.skullR[(ie + 1) * SKULL_NA + ia]);
 							R = best;
+						}
+						// 眼窩など内側だけ測れた区画は隣より細い。その方位の風で毛が頭蓋へ入る。
+						for (int pass = 0; pass < 2; pass++) for (int ie = 0; ie < SKULL_NE; ie++) for (int ia = 0; ia < SKULL_NA; ia++) {
+							float& R = skin.skullR[ie * SKULL_NA + ia];
+							float nb = R;
+							nb = fmaxf(nb, skin.skullR[ie * SKULL_NA + (ia + 1) % SKULL_NA]);
+							nb = fmaxf(nb, skin.skullR[ie * SKULL_NA + (ia + SKULL_NA - 1) % SKULL_NA]);
+							if (ie > 0) nb = fmaxf(nb, skin.skullR[(ie - 1) * SKULL_NA + ia]);
+							if (ie + 1 < SKULL_NE) nb = fmaxf(nb, skin.skullR[(ie + 1) * SKULL_NA + ia]);
+							if (nb > 0.05f && R < nb - 0.025f) R = nb - 0.025f;
 						}
 					}
 				}
@@ -7864,13 +7945,130 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			expose[k] = hit ? 1 : 2;
 		}
 	}
+	// 高さ 13 段は ProfR と同じ式で先に補間する。当たる布は角度の 2 点だけ読む。
+	// 並びは omake_tactics_cloth.hlsl の RAD0。胴 16 の直後、足 4 × 13 × PF、最後にその最大。
+	prof.reserve(Renderer::CLOTH_SEGS * PN + 16 + 4 * 13 * PF + 4);
 	for (int i = 0; i < 16; i++) prof.push_back(nc.torsoR[i]);
+	float radMax[4] = { 0, 0, 0, 0 };
+	for (int s = 0; s < 4; s++) {
+		for (int k = 0; k < 13; k++) {
+			const float t = (float)k / 12.f;
+			float ft = (t + 0.08f) / 1.16f;
+			if (ft < 0.f) ft = 0.f;
+			if (ft > 1.f) ft = 1.f;
+			ft *= (float)(PT - 1);
+			int t0 = (int)ft;
+			if (t0 > PT - 2) t0 = PT - 2;
+			if (t0 < 0) t0 = 0;
+			const float a = ft - (float)t0;
+			for (int p = 0; p < PF; p++) {
+				const float r0 = prof[s * PN + t0 * PF + p];
+				const float r1 = prof[s * PN + (t0 + 1) * PF + p];
+				const float r = r0 + (r1 - r0) * a;
+				if (r > radMax[s]) radMax[s] = r;
+				prof.push_back(r);
+			}
+		}
+	}
+	for (int s = 0; s < 4; s++) prof.push_back(radMax[s]);
 	if (sewn) { nodes.clear(); verts.clear(); nc.clothN = 0; nc.clothVN = 0; }
 	else { nc.clothN = NN; nc.clothVN = verts.size(); }
 	nc.clothHip = jHips;
 	nc.clothAxis[0] = cx;
 	nc.clothAxis[1] = cz;
 	nc.clothY0 = y0;
+}
+
+// 髪の根は、今描く素体の頭と同じバインド位置に置く。カタログ側の頭蓋は素体より低いことがあり、
+// そこへ髪を載せると根が顔へ残り、頭頂が禿げる。
+static void MeasureHostSkull(Renderer::CreatureSkin& skin, int headJ, float neckY)
+{
+	skin.crownOk = 0;
+	skin.crown[0] = skin.crown[1] = skin.crown[2] = 0.f;
+	skin.skullC[0] = skin.skullC[1] = skin.skullC[2] = 0.f;
+	memset(skin.skullR, 0, sizeof(skin.skullR));
+	if (headJ < 0) return;
+	const int nvb = (int)skin.bind.size();
+	if (nvb < 8) return;
+	const int nmh = (int)skin.meshHair.size();
+	float yTop = -1e9f;
+	for (int i = 0; i < nvb; i++) {
+		const Renderer::CSkinV& v = skin.bind[i];
+		if (i < nmh && skin.meshHair[i]) continue;
+		int best = 0, bw = -1;
+		for (int c = 0; c < 4; c++) if ((int)v.w[c] > bw) { bw = (int)v.w[c]; best = (int)v.j[c]; }
+		if (best == headJ && bw >= 200 && v.p[1] > yTop) yTop = v.p[1];
+	}
+	if (yTop < 0.4f) return;
+	double sx = 0, sz = 0;
+	int n = 0;
+	for (int i = 0; i < nvb; i++) {
+		const Renderer::CSkinV& v = skin.bind[i];
+		if (i < nmh && skin.meshHair[i]) continue;
+		int best = 0, bw = -1;
+		for (int c = 0; c < 4; c++) if ((int)v.w[c] > bw) { bw = (int)v.w[c]; best = (int)v.j[c]; }
+		if (best != headJ || bw < 200 || v.p[1] < yTop - 0.035f) continue;
+		sx += v.p[0]; sz += v.p[2]; n++;
+	}
+	if (n < 1) return;
+	skin.crown[0] = (float)(sx / n);
+	skin.crown[1] = yTop;
+	skin.crown[2] = (float)(sz / n);
+	skin.crownOk = 1;
+	if (neckY < 0.f) neckY = yTop - 0.30f;
+	float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+	for (int i = 0; i < nvb; i++) {
+		const Renderer::CSkinV& v = skin.bind[i];
+		if (v.p[1] < yTop - 0.10f || (i < nmh && skin.meshHair[i])) continue;
+		int best = 0, bw = -1;
+		for (int c = 0; c < 4; c++) if ((int)v.w[c] > bw) { bw = (int)v.w[c]; best = (int)v.j[c]; }
+		if (best != headJ || bw < 200) continue;
+		if (v.p[0] < x0) x0 = v.p[0];
+		if (v.p[0] > x1) x1 = v.p[0];
+		if (v.p[2] < z0) z0 = v.p[2];
+		if (v.p[2] > z1) z1 = v.p[2];
+	}
+	if (!(x0 < x1 && z0 < z1)) return;
+	skin.skullC[0] = (x0 + x1) * 0.5f;
+	skin.skullC[1] = yTop - 0.095f;
+	skin.skullC[2] = (z0 + z1) * 0.5f;
+	for (int i = 0; i < nvb; i++) {
+		const Renderer::CSkinV& v = skin.bind[i];
+		if (v.p[1] < neckY + 0.012f || (i < nmh && skin.meshHair[i])) continue;
+		int best = 0, bw = -1;
+		for (int c = 0; c < 4; c++) if ((int)v.w[c] > bw) { bw = (int)v.w[c]; best = (int)v.j[c]; }
+		if (best != headJ || bw < 200) continue;
+		float dx = v.p[0] - skin.skullC[0], dy = v.p[1] - skin.skullC[1], dz = v.p[2] - skin.skullC[2];
+		float r = sqrtf(dx * dx + dy * dy + dz * dz);
+		if (r < 1e-5f || r > 0.20f) continue;
+		float s = dy / r;
+		float el = asinf(s < -1.f ? -1.f : (s > 1.f ? 1.f : s));
+		int ia = (int)floorf((atan2f(dx, dz) + 3.14159265f) * (SKULL_NA / 6.2831853f));
+		int ie = (int)floorf((el + 0.6f) * (SKULL_NE / 2.1707963f));
+		ia = ((ia % SKULL_NA) + SKULL_NA) % SKULL_NA;
+		if (ie < 0 || ie >= SKULL_NE) continue;
+		float& R = skin.skullR[ie * SKULL_NA + ia];
+		if (r > R) R = r;
+	}
+	for (int pass = 0; pass < 6; pass++) for (int ie = 0; ie < SKULL_NE; ie++) for (int ia = 0; ia < SKULL_NA; ia++) {
+		float& R = skin.skullR[ie * SKULL_NA + ia];
+		if (R > 0.02f) continue;
+		float best = R;
+		best = fmaxf(best, skin.skullR[ie * SKULL_NA + (ia + 1) % SKULL_NA]);
+		best = fmaxf(best, skin.skullR[ie * SKULL_NA + (ia + SKULL_NA - 1) % SKULL_NA]);
+		if (ie > 0) best = fmaxf(best, skin.skullR[(ie - 1) * SKULL_NA + ia]);
+		if (ie < SKULL_NE - 1) best = fmaxf(best, skin.skullR[(ie + 1) * SKULL_NA + ia]);
+		R = best;
+	}
+	for (int pass = 0; pass < 2; pass++) for (int ie = 0; ie < SKULL_NE; ie++) for (int ia = 0; ia < SKULL_NA; ia++) {
+		float& R = skin.skullR[ie * SKULL_NA + ia];
+		float nb = R;
+		nb = fmaxf(nb, skin.skullR[ie * SKULL_NA + (ia + 1) % SKULL_NA]);
+		nb = fmaxf(nb, skin.skullR[ie * SKULL_NA + (ia + SKULL_NA - 1) % SKULL_NA]);
+		if (ie > 0) nb = fmaxf(nb, skin.skullR[(ie - 1) * SKULL_NA + ia]);
+		if (ie + 1 < SKULL_NE) nb = fmaxf(nb, skin.skullR[(ie + 1) * SKULL_NA + ia]);
+		if (nb > 0.05f && R < nb - 0.025f) R = nb - 0.025f;
+	}
 }
 
 BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner)
@@ -8743,7 +8941,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		if (!MakeMesh(nc.gm, pv.data(), sizeof(VtxS), (UINT)pv.size(), idx.data(), (UINT)idx.size())) return FALSE;
 		nc.gm.tex = TEX_WHITE;
 		if (nc.clothN > 0 && nc.clothN <= CLOTH_NODES && clothN.size() == nc.clothN && clothV.size() == nc.clothVN
-			&& clothP.size() == CLOTH_SEGS * CLOTH_PT * CLOTH_PF + 16) {
+			&& clothP.size() == CLOTH_SEGS * CLOTH_PT * CLOTH_PF + 16 + 4 * 13 * CLOTH_PF + 4) {
 			const void* src[3] = { clothN.data(), clothV.data(), clothP.data() };
 			const UINT cnt[3] = { (UINT)nc.clothN, (UINT)nc.clothVN, (UINT)clothP.size() };
 			const UINT stride[3] = { (UINT)sizeof(ClothGpuN), (UINT)sizeof(ClothGpuV), 4u };
@@ -8789,6 +8987,13 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			}
 		} else nc.softN = nc.softVN = 0;
 		FlashAvaLocal(100);
+		{
+			const int jHead = SegJoint(segJ, m_avaSeg, ns, "Head");
+			const int jNeck = SegJoint(segJ, m_avaSeg, ns, "Neck");
+			float neckY = -1.f;
+			if (jNeck >= 0 && jNeck < md.nJ) neckY = MInverse(md.invBind[jNeck]).m[13];
+			MeasureHostSkull(nc.skin, jHead, neckY);
+		}
 		if (m_avaBatchI + 1 < (m_avaBatchN < 1 ? 1 : m_avaBatchN)) m_avaBatchI++;
 		m_avaCache.push_back(std::move(nc));
 		ac = &m_avaCache.back();
@@ -8907,6 +9112,255 @@ static void TacGrav(const M4& world, float g, float out[3])
 	out[0] = d.x / L * g; out[1] = d.y / L * g; out[2] = d.z / L * g;
 }
 
+static void TacBufCopy(ID3D11DeviceContext* ctx, ID3D11Buffer* dst, UINT dstOff, ID3D11Buffer* src, UINT srcOff, UINT bytes)
+{
+	if (!ctx || !dst || !src || !bytes) return;
+	D3D11_BOX box;
+	box.left = srcOff;
+	box.right = srcOff + bytes;
+	box.top = 0;
+	box.bottom = 1;
+	box.front = 0;
+	box.back = 1;
+	ctx->CopySubresourceRegion(dst, 0, dstOff, 0, 0, src, 0, &box);
+}
+
+static void TacClothGate(ID3D11DeviceContext* ctx, unsigned on)
+{
+	if (!ctx || !g_clothGate) return;
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (FAILED(ctx->Map(g_clothGate, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return;
+	unsigned f[4] = { on, 0, 0, 0 };
+	memcpy(ms.pData, f, sizeof(f));
+	ctx->Unmap(g_clothGate, 0);
+	ctx->CSSetConstantBuffers(2, 1, &g_clothGate);
+}
+
+static BOOL TacClothBatchReady(ID3D11Device* dev)
+{
+	if (g_clStU && g_clCnS && g_clPfS && g_clPmS) return TRUE;
+	if (!dev) return FALSE;
+	const UINT inst = (UINT)Renderer::CLOTH_INST;
+	const UINT nodes = (UINT)Renderer::CLOTH_NODES;
+	D3D11_BUFFER_DESC bd = {};
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+	bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+	bd.StructureByteStride = 16;
+	bd.ByteWidth = inst * nodes * 8u * 16u;
+	D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+	ud.Format = DXGI_FORMAT_UNKNOWN;
+	ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+	ud.Buffer.NumElements = inst * nodes * 8u;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_clStB)) || FAILED(dev->CreateUnorderedAccessView(g_clStB, &ud, &g_clStU))) {
+		TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	bd.StructureByteStride = 96;
+	bd.ByteWidth = inst * nodes * 96u;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_clCnB))) { TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE; }
+	D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+	sd.Format = DXGI_FORMAT_UNKNOWN;
+	sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+	sd.Buffer.NumElements = inst * nodes;
+	if (FAILED(dev->CreateShaderResourceView(g_clCnB, &sd, &g_clCnS))) {
+		TAC_REL(g_clCnB); TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	bd.StructureByteStride = 4;
+	bd.ByteWidth = inst * 2048u * 4u;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_clPfB))) {
+		TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	sd.Buffer.NumElements = inst * 2048u;
+	if (FAILED(dev->CreateShaderResourceView(g_clPfB, &sd, &g_clPfS))) {
+		TAC_REL(g_clPfB); TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	bd = {};
+	bd.ByteWidth = inst * 1536u;
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_clPmB))) {
+		TAC_REL(g_clPfS); TAC_REL(g_clPfB); TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	sd = {};
+	sd.Format = DXGI_FORMAT_R32_TYPELESS;
+	sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFEREX;
+	sd.BufferEx.NumElements = bd.ByteWidth / 4u;
+	sd.BufferEx.Flags = D3D11_BUFFEREX_SRV_FLAG_RAW;
+	if (FAILED(dev->CreateShaderResourceView(g_clPmB, &sd, &g_clPmS))) {
+		TAC_REL(g_clPmB); TAC_REL(g_clPfS); TAC_REL(g_clPfB); TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clStU); TAC_REL(g_clStB); return FALSE;
+	}
+	return TRUE;
+}
+
+static BOOL TacHairBatchReady(ID3D11Device* dev)
+{
+	if (g_hStU && g_hPmS) return TRUE;
+	if (!dev) return FALSE;
+	const UINT inst = (UINT)Renderer::HAIR_INST;
+	const UINT els = (UINT)Renderer::HAIR_G * 5u;
+	D3D11_BUFFER_DESC bd = {};
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+	bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+	bd.StructureByteStride = 16;
+	bd.ByteWidth = inst * els * 16u;
+	D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+	ud.Format = DXGI_FORMAT_UNKNOWN;
+	ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+	ud.Buffer.NumElements = inst * els;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_hStB)) || FAILED(dev->CreateUnorderedAccessView(g_hStB, &ud, &g_hStU))) {
+		TAC_REL(g_hStU); TAC_REL(g_hStB); return FALSE;
+	}
+	bd = {};
+	bd.ByteWidth = inst * 1280u;
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+	if (FAILED(dev->CreateBuffer(&bd, NULL, &g_hPmB))) {
+		TAC_REL(g_hStU); TAC_REL(g_hStB); return FALSE;
+	}
+	D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+	sd.Format = DXGI_FORMAT_R32_TYPELESS;
+	sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFEREX;
+	sd.BufferEx.NumElements = bd.ByteWidth / 4u;
+	sd.BufferEx.Flags = D3D11_BUFFEREX_SRV_FLAG_RAW;
+	if (FAILED(dev->CreateShaderResourceView(g_hPmB, &sd, &g_hPmS))) {
+		TAC_REL(g_hPmB); TAC_REL(g_hStU); TAC_REL(g_hStB); return FALSE;
+	}
+	return TRUE;
+}
+
+static void TacHairSimRaw(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ComputeShader* sh,
+	ID3D11ShaderResourceView* guide, ID3D11ShaderResourceView* vert,
+	ID3D11UnorderedAccessView* st, const void* parm, const void* cloth)
+{
+	if (!ctx || !sh || !st || !parm || !guide || !TacHairBatchReady(dev)) return;
+	unsigned char blob[1280];
+	memcpy(blob, parm, 608);
+	if (cloth) memcpy(blob + 608, cloth, 672);
+	else memset(blob + 608, 0, 672);
+	ID3D11ShaderResourceView* noneS[3] = { NULL, NULL, NULL };
+	ID3D11UnorderedAccessView* noneU = NULL;
+	ctx->CSSetShaderResources(0, 3, noneS);
+	ctx->CSSetUnorderedAccessViews(0, 1, &noneU, NULL);
+	D3D11_BOX box;
+	box.left = 0;
+	box.right = 1280;
+	box.top = 0;
+	box.bottom = 1;
+	box.front = 0;
+	box.back = 1;
+	ctx->UpdateSubresource(g_hPmB, 0, &box, blob, 0, 0);
+	ID3D11ShaderResourceView* sv[3] = { guide, vert, g_hPmS };
+	ctx->CSSetShaderResources(0, 3, sv);
+	UINT z = 0;
+	ctx->CSSetUnorderedAccessViews(0, 1, &st, &z);
+	ctx->CSSetShader(sh, NULL, 0);
+	ctx->Dispatch(1, 1, 1);
+}
+
+void Renderer::FlushClothPend()
+{
+	if (g_pendBusy || g_pendN <= 0 || !m_ctx) return;
+	g_pendBusy = 1;
+	const int n = g_pendN;
+	ID3D11UnorderedAccessView* noneU[2] = { NULL, NULL };
+	ID3D11ShaderResourceView* noneS[4] = { NULL, NULL, NULL, NULL };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+	m_ctx->CSSetShaderResources(0, 4, noneS);
+	BOOL together = n >= 2 && m_csCloth[1] && TacClothBatchReady(m_dev);
+	if (together) {
+		for (int i = 0; i < n; i++) {
+			ClothPend& j = g_pend[i];
+			if (!j.cloth || !j.ac || !j.ci || !((ClothInst*)j.ci)->sb || !j.ac->clothSB[0] || !j.ac->clothSB[2]) { together = FALSE; break; }
+		}
+	}
+	if (together) {
+		static unsigned char pack[Renderer::CLOTH_INST * 1536];
+		for (int i = 0; i < n; i++) memcpy(pack + (size_t)i * 1536u, g_pend[i].parm, 1536u);
+		D3D11_BOX box;
+		box.left = 0;
+		box.right = (UINT)n * 1536u;
+		box.top = 0;
+		box.bottom = 1;
+		box.front = 0;
+		box.back = 1;
+		m_ctx->UpdateSubresource(g_clPmB, 0, &box, pack, 0, 0);
+	}
+	if (together) {
+		for (int i = 0; i < n; i++) {
+			ClothPend& j = g_pend[i];
+			UINT cn = (UINT)j.ac->clothN * 96u;
+			if (cn > 512u * 96u) cn = 512u * 96u;
+			TacBufCopy(m_ctx, g_clCnB, (UINT)i * 512u * 96u, j.ac->clothSB[0], 0, cn);
+			D3D11_BUFFER_DESC pd = {};
+			j.ac->clothSB[2]->GetDesc(&pd);
+			UINT pb = pd.ByteWidth;
+			if (pb > 2048u * 4u) pb = 2048u * 4u;
+			TacBufCopy(m_ctx, g_clPfB, (UINT)i * 2048u * 4u, j.ac->clothSB[2], 0, pb);
+			TacBufCopy(m_ctx, g_clStB, (UINT)i * 512u * 8u * 16u, ((ClothInst*)j.ci)->sb, 0, 512u * 8u * 16u);
+		}
+		TacClothGate(m_ctx, 1);
+		ID3D11ShaderResourceView* sv[4] = { g_clCnS, NULL, g_clPfS, g_clPmS };
+		m_ctx->CSSetShaderResources(0, 4, sv);
+		ID3D11UnorderedAccessView* uv[2] = { NULL, g_clStU };
+		UINT zc[2] = { 0, 0 };
+		m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+		m_ctx->CSSetShader(m_csCloth[1], NULL, 0);
+		m_ctx->Dispatch((UINT)n, 1, 1);
+		m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+		for (int i = 0; i < n; i++)
+			TacBufCopy(m_ctx, ((ClothInst*)g_pend[i].ci)->sb, 0, g_clStB, (UINT)i * 512u * 8u * 16u, 512u * 8u * 16u);
+	} else {
+		TacClothGate(m_ctx, 0);
+		for (int i = 0; i < n; i++) {
+			ClothPend& j = g_pend[i];
+			if (!j.cloth || !j.ac || !j.ci || !((ClothInst*)j.ci)->uav || !j.clothB) continue;
+			ID3D11Buffer* cbs[2] = { j.clothB, j.boneB };
+			m_ctx->CSSetConstantBuffers(0, 2, cbs);
+			m_ctx->CSSetShaderResources(0, 3, j.ac->clothSRV);
+			ID3D11UnorderedAccessView* uv[2] = { j.vert, ((ClothInst*)j.ci)->uav };
+			UINT zc[2] = { 0, 0 };
+			m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+			m_ctx->CSSetShader(m_csCloth[1], NULL, 0);
+			m_ctx->Dispatch(1, 1, 1);
+		}
+		m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+	}
+	for (int i = 0; i < n; i++) {
+		ClothPend& j = g_pend[i];
+		if (j.cloth && j.ac && j.ci && ((ClothInst*)j.ci)->uav && j.vert && j.clothB && m_csCloth[2]) {
+			ID3D11Buffer* cbs[2] = { j.clothB, j.boneB };
+			m_ctx->CSSetConstantBuffers(0, 2, cbs);
+			m_ctx->CSSetShaderResources(0, 3, j.ac->clothSRV);
+			ID3D11UnorderedAccessView* uv[2] = { j.vert, ((ClothInst*)j.ci)->uav };
+			UINT zc[2] = { 0, 0 };
+			m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+			m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
+			m_ctx->Dispatch(((UINT)j.ac->clothVN + 63u) / 64u, 1, 1);
+		}
+		if (j.soft && j.ac && j.ci && ((ClothInst*)j.ci)->softUav && j.vert && j.softB && m_csSoft[0] && m_csSoft[1]) {
+			ID3D11Buffer* cb1 = j.softB;
+			m_ctx->CSSetConstantBuffers(0, 1, &cb1);
+			ID3D11ShaderResourceView* sv[2] = { j.ac->softSRV[0], j.ac->softSRV[1] };
+			m_ctx->CSSetShaderResources(0, 2, sv);
+			ID3D11UnorderedAccessView* uv[2] = { j.vert, ((ClothInst*)j.ci)->softUav };
+			UINT zc[2] = { 0, 0 };
+			m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+			m_ctx->CSSetShader(m_csSoft[0], NULL, 0);
+			m_ctx->Dispatch(1, 1, 1);
+			m_ctx->CSSetShader(m_csSoft[1], NULL, 0);
+			m_ctx->Dispatch(((UINT)j.ac->softVN + 63u) / 64u, 1, 1);
+		}
+	}
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+	m_ctx->CSSetShaderResources(0, 4, noneS);
+	g_pendN = 0;
+	g_pendBusy = 0;
+}
+
 void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp)
 {
 	if (m_inPortrait) return;
@@ -8916,6 +9370,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	const BOOL canSoft = !m_inPortrait && owner && src.outUAV && ac.softN > 0 && ac.softN <= SOFT_MAX && ac.softVN > 0
 		&& ac.softSRV[0] && ac.softSRV[1] && m_cbSoft && m_csSoft[0] && m_csSoft[1];
 	if (!canSkirt && !canSoft) return;
+	int deferCloth = 0;
 	ClothInst* ci = NULL;
 	if (m_inPortrait) {
 		for (ClothInst& x : m_clothInst) if (x.slot == m_portraitSlot) { ci = &x; break; }
@@ -8952,7 +9407,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	ci->prevFly = dp.fly;
 	ci->prevGait = dp.gait;
 	if (!reset) { delta.m[12] = 0.f; delta.m[13] = 0.f; delta.m[14] = 0.f; }
-	if (m_cutActors) reset = 1;
+	// カットでも風を溜める。1.5m を超える移動だけ、上の判定で置き直す。
 	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
 	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
 	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
@@ -9052,13 +9507,14 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		float gsum[3] = {};
 		WindAdd(gsum, ci->strong.d, ci->strong.amp, ci->strong.env);
 		WindAdd(gsum, ci->gale.d, ci->gale.amp, ci->gale.env);
-		cb.wind[0] = gsum[0];
-		cb.wind[1] = gsum[1];
-		cb.wind[2] = gsum[2];
-		cb.air[0] = ci->breeze.d[0];
-		cb.air[1] = ci->breeze.d[1];
-		cb.air[2] = ci->breeze.d[2];
-		cb.air[3] = ci->up.d[1] * ci->up.amp * ci->up.env + ci->down.d[1] * ci->down.amp * ci->down.env;
+		const float stage = m_stageWind ? 2.35f : 1.f;
+		cb.wind[0] = gsum[0] * stage;
+		cb.wind[1] = gsum[1] * stage;
+		cb.wind[2] = gsum[2] * stage;
+		cb.air[0] = ci->breeze.d[0] * stage;
+		cb.air[1] = ci->breeze.d[1] * stage;
+		cb.air[2] = ci->breeze.d[2] * stage;
+		cb.air[3] = (ci->up.d[1] * ci->up.amp * ci->up.env + ci->down.d[1] * ci->down.amp * ci->down.env) * stage;
 	}
 	TacGrav(world, 9.2f, cb.grav);
 	cb.grav[3] = ac.clothY0;
@@ -9090,11 +9546,28 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	if (step) {
 		m_ctx->CSSetShader(m_csCloth[0], NULL, 0);
 		m_ctx->Dispatch(((UINT)ac.clothN + 63u) / 64u, 1, 1);
-		m_ctx->CSSetShader(m_csCloth[1], NULL, 0);
-		m_ctx->Dispatch(1, 1, 1);
+		// 人数が揃ってから拘束だけ同時に走らせる。描く前に FlushClothPend が書き戻す。
+		if (m_instOn && g_pendN < CLOTH_INST && ci->sb && ci->uav && ac.clothSB[0] && ac.clothSB[2] && src.outUAV) {
+			ClothPend& j = g_pend[g_pendN++];
+			memset(&j, 0, sizeof(j));
+			j.ac = &ac;
+			j.ci = ci;
+			j.vert = src.outUAV;
+			j.clothB = clothB;
+			j.boneB = TacCbCur(g_skinBoneR, m_cbSkinBone);
+			memcpy(j.parm, &cb, sizeof(cb));
+			j.cloth = 1;
+			deferCloth = 1;
+		} else {
+			TacClothGate(m_ctx, 0);
+			m_ctx->CSSetShader(m_csCloth[1], NULL, 0);
+			m_ctx->Dispatch(1, 1, 1);
+		}
 	}
-	m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
-	m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
+	if (!deferCloth) {
+		m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
+		m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
+	}
 	}
 	}
 	}
@@ -9125,14 +9598,15 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 			}
 			if (ac.clothHip >= 0 && ac.clothHip < pose.nJ) scb.bone[5] = pose.palette[ac.clothHip];
 			scb.sim[0] = dt; scb.sim[1] = dt * 60.f; scb.sim[2] = reset ? 1.f : 0.f; scb.sim[3] = hs;
-			scb.wind[0] = ci->strong.d[0] * ci->strong.amp * ci->strong.env + ci->gale.d[0] * ci->gale.amp * ci->gale.env;
-			scb.wind[1] = ci->strong.d[1] * ci->strong.amp * ci->strong.env + ci->gale.d[1] * ci->gale.amp * ci->gale.env;
-			scb.wind[2] = ci->strong.d[2] * ci->strong.amp * ci->strong.env + ci->gale.d[2] * ci->gale.amp * ci->gale.env;
+			const float stage = m_stageWind ? 2.35f : 1.f;
+			scb.wind[0] = (ci->strong.d[0] * ci->strong.amp * ci->strong.env + ci->gale.d[0] * ci->gale.amp * ci->gale.env) * stage;
+			scb.wind[1] = (ci->strong.d[1] * ci->strong.amp * ci->strong.env + ci->gale.d[1] * ci->gale.amp * ci->gale.env) * stage;
+			scb.wind[2] = (ci->strong.d[2] * ci->strong.amp * ci->strong.env + ci->gale.d[2] * ci->gale.amp * ci->gale.env) * stage;
 			scb.wind[3] = dp.fly > 0.5f ? 2.f : 0.f;
-			scb.air[0] = ci->breeze.d[0];
-			scb.air[1] = ci->breeze.d[1];
-			scb.air[2] = ci->breeze.d[2];
-			scb.air[3] = ci->up.d[1] * ci->up.amp * ci->up.env + ci->down.d[1] * ci->down.amp * ci->down.env;
+			scb.air[0] = ci->breeze.d[0] * stage;
+			scb.air[1] = ci->breeze.d[1] * stage;
+			scb.air[2] = ci->breeze.d[2] * stage;
+			scb.air[3] = (ci->up.d[1] * ci->up.amp * ci->up.env + ci->down.d[1] * ci->down.amp * ci->down.env) * stage;
 			TacGrav(world, 9.2f, scb.grav);
 			const int jChest = ac.softBone[0];
 			const M4 chest = (jChest >= 0 && jChest < pose.nJ) ? pose.palette[jChest] : MIdent();
@@ -9184,19 +9658,24 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 			if (softB) {
 				memcpy(ms.pData, &scb, sizeof(scb));
 				m_ctx->Unmap(softB, 0);
-				ID3D11Buffer* cb1 = softB;
-				m_ctx->CSSetConstantBuffers(0, 1, &cb1);
-				ID3D11ShaderResourceView* sv[2] = { ac.softSRV[0], ac.softSRV[1] };
-				m_ctx->CSSetShaderResources(0, 2, sv);
-				ID3D11UnorderedAccessView* uv[2] = { src.outUAV, ci->softUav };
-				UINT zc[2] = { 0, 0 };
-				m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
-				if (step) {
-					m_ctx->CSSetShader(m_csSoft[0], NULL, 0);
-					m_ctx->Dispatch(1, 1, 1);
+				if (deferCloth && g_pendN > 0) {
+					g_pend[g_pendN - 1].soft = 1;
+					g_pend[g_pendN - 1].softB = softB;
+				} else {
+					ID3D11Buffer* cb1 = softB;
+					m_ctx->CSSetConstantBuffers(0, 1, &cb1);
+					ID3D11ShaderResourceView* sv[2] = { ac.softSRV[0], ac.softSRV[1] };
+					m_ctx->CSSetShaderResources(0, 2, sv);
+					ID3D11UnorderedAccessView* uv[2] = { src.outUAV, ci->softUav };
+					UINT zc[2] = { 0, 0 };
+					m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+					if (step) {
+						m_ctx->CSSetShader(m_csSoft[0], NULL, 0);
+						m_ctx->Dispatch(1, 1, 1);
+					}
+					m_ctx->CSSetShader(m_csSoft[1], NULL, 0);
+					m_ctx->Dispatch(((UINT)ac.softVN + 63u) / 64u, 1, 1);
 				}
-				m_ctx->CSSetShader(m_csSoft[1], NULL, 0);
-				m_ctx->Dispatch(((UINT)ac.softVN + 63u) / 64u, 1, 1);
 			}
 		}
 	}
@@ -9232,7 +9711,7 @@ void Renderer::ReleaseHair()
 	TAC_REL(m_hairScratchUAV);
 	TAC_REL(m_hairScratchSB);
 	ReleaseHairInst();
-	for (int s = 0; s < 16; s++) { m_hairV0[s] = 0; m_hairVN[s] = 0; }
+	for (int s = 0; s < 16; s++) { m_hairV0[s] = 0; m_hairVN[s] = 0; m_hairI0[s] = 0; m_hairIN[s] = 0; m_hairVMin[s] = 0; m_hairVMax[s] = -1; }
 	m_hairNv = 0;
 	m_scalpModel = -1;
 	m_capBind.clear();
@@ -9240,7 +9719,72 @@ void Renderer::ReleaseHair()
 	for (int s = 0; s < TAC_SCALP_CACHE; s++) { m_scalps[s].model = -1; m_scalps[s].draw.Release(); m_scalps[s].bind.clear(); }
 }
 
-void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth, float gait, float fly)
+void Renderer::FlushHairPend()
+{
+	if (g_hairBusy || g_hairN <= 0 || !m_ctx) return;
+	g_hairBusy = 1;
+	const int n = g_hairN;
+	ID3D11UnorderedAccessView* noneU[2] = { NULL, NULL };
+	ID3D11ShaderResourceView* noneS[3] = { NULL, NULL, NULL };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+	m_ctx->CSSetShaderResources(0, 3, noneS);
+	const UINT stBytes = (UINT)HAIR_G * 5u * 16u;
+	BOOL together = n >= 2 && m_csHair[0] && m_hairGuide && m_hairVert && TacHairBatchReady(m_dev);
+	if (together) {
+		for (int i = 0; i < n; i++) {
+			HairInst* hi = (HairInst*)g_hair[i].hi;
+			if (!hi || !hi->sb || !g_hair[i].simB || !g_hair[i].clothB || !g_hair[i].vert) { together = FALSE; break; }
+		}
+	}
+	if (together) {
+		for (int i = 0; i < n; i++) {
+			HairInst* hi = (HairInst*)g_hair[i].hi;
+			TacBufCopy(m_ctx, g_hStB, (UINT)i * stBytes, hi->sb, 0, stBytes);
+		}
+		static unsigned char pack[Renderer::HAIR_INST * 1280];
+		for (int i = 0; i < n; i++) {
+			memcpy(pack + i * 1280, g_hair[i].parm, 608);
+			memcpy(pack + i * 1280 + 608, g_hair[i].cloth, 672);
+		}
+		m_ctx->UpdateSubresource(g_hPmB, 0, NULL, pack, 0, 0);
+		TacClothGate(m_ctx, 1);
+		ID3D11ShaderResourceView* sv[3] = { m_hairGuide, m_hairVert, g_hPmS };
+		m_ctx->CSSetShaderResources(0, 3, sv);
+		ID3D11UnorderedAccessView* uv = g_hStU;
+		UINT z = 0;
+		m_ctx->CSSetUnorderedAccessViews(0, 1, &uv, &z);
+		m_ctx->CSSetShader(m_csHair[0], NULL, 0);
+		m_ctx->Dispatch((UINT)n, 1, 1);
+		m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+		m_ctx->CSSetShaderResources(0, 3, noneS);
+		for (int i = 0; i < n; i++) {
+			HairInst* hi = (HairInst*)g_hair[i].hi;
+			TacBufCopy(m_ctx, hi->sb, 0, g_hStB, (UINT)i * stBytes, stBytes);
+		}
+	}
+	for (int i = 0; i < n; i++) {
+		HairPend& j = g_hair[i];
+		HairInst* hi = (HairInst*)j.hi;
+		if (!hi || !hi->uav || !j.vert || !j.simB || !j.clothB || j.vn <= 0) continue;
+		if (!together)
+			TacHairSimRaw(m_dev, m_ctx, m_csHair[0], m_hairGuide, m_hairVert, hi->uav, j.parm, j.cloth);
+		ID3D11Buffer* cbs[2] = { j.simB, j.clothB };
+		m_ctx->CSSetConstantBuffers(0, 2, cbs);
+		ID3D11ShaderResourceView* sv[2] = { m_hairGuide, m_hairVert };
+		m_ctx->CSSetShaderResources(0, 2, sv);
+		ID3D11UnorderedAccessView* uv[2] = { hi->uav, j.vert };
+		UINT zc[2] = { 0, 0 };
+		m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+		m_ctx->CSSetShader(m_csHair[1], NULL, 0);
+		m_ctx->Dispatch(((UINT)j.vn + 63u) / 64u, 1, 1);
+	}
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
+	m_ctx->CSSetShaderResources(0, 3, noneS);
+	g_hairN = 0;
+	g_hairBusy = 0;
+}
+
+void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal, ID3D11UnorderedAccessView* vertUAV, float cape, float girth, float gait, float fly, const void* clothMem)
 {
 	if (m_inPortrait) return;
 	ID3D11UnorderedAccessView* dst = vertUAV ? vertUAV : m_hairUAV;
@@ -9272,7 +9816,11 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	}
 	if (!hi) {
 		if (m_hairInst.size() < HAIR_INST) { m_hairInst.push_back(HairInst()); hi = &m_hairInst.back(); }
-		else { hi = &m_hairInst[0]; for (HairInst& x : m_hairInst) if (x.frame < hi->frame) hi = &x; }
+		else {
+			if (g_hairN > 0) FlushHairPend();
+			hi = &m_hairInst[0];
+			for (HairInst& x : m_hairInst) if (x.frame < hi->frame) hi = &x;
+		}
 		hi->style = -1; hi->valid = 0;
 	}
 	if (portrait) {
@@ -9292,9 +9840,10 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	if (hi->capeBit != capeNow) reset = 1;
 	hi->capeBit = capeNow;
 	M4 delta = MIdent();
+	M4 rootDelta = MIdent();
 	if (!reset) {
-		delta = MMul(hi->world, MInverse(world));
-		const float* t = &delta.m[12];
+		rootDelta = MMul(hi->world, MInverse(world));
+		const float* t = &rootDelta.m[12];
 		float dx = world.m[12] - hi->world.m[12];
 		float dy = world.m[13] - hi->world.m[13];
 		float dz = world.m[14] - hi->world.m[14];
@@ -9304,7 +9853,19 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	}
 	hi->prevFly = fly;
 	hi->prevGait = gait;
-	if (!reset) { delta.m[12] = 0.f; delta.m[13] = 0.f; delta.m[14] = 0.f; }
+	if (!reset) {
+		// 体の回転だけを残す。平行移動はモデル空間の髪を引きずらない。
+		rootDelta.m[12] = 0.f; rootDelta.m[13] = 0.f; rootDelta.m[14] = 0.f;
+		delta = rootDelta;
+		// 攻撃で頭だけ回ると、髪はモデル空間に残って頭が抜け、禿げて見える。頭の骨に乗せてから風を足す。
+		if (hi->placeOk) {
+			const M4 headDelta = MMul(MInverse(hi->place), place);
+			const float hx = headDelta.m[12], hy = headDelta.m[13], hz = headDelta.m[14];
+			if (hx * hx + hy * hy + hz * hz > 0.75f * 0.75f) reset = 1;
+			else delta = MMul(headDelta, rootDelta);
+		}
+	}
+	if (reset) delta = MIdent();
 	const BOOL step = reset || (hi->frame != m_frame && dtRaw > 1e-4f);
 	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
 	float velUse[3] = { hi->vel[0], hi->vel[1], hi->vel[2] };
@@ -9327,6 +9888,11 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	cb.sim[2] = reset ? 1.f : 0.f;
 	cb.sim[3] = m_time;
 	TacWind(m_time, world, velUse, 0.52f, gait, fly, cb.wind, cb.air, NULL);
+	if (m_stageWind) {
+		const float stage = 2.35f;
+		cb.wind[0] *= stage; cb.wind[1] *= stage; cb.wind[2] *= stage;
+		cb.air[0] *= stage; cb.air[1] *= stage; cb.air[2] *= stage; cb.air[3] *= stage;
+	}
 	cb.wind[3] = cape > 0.5f ? 1.f : 0.f;
 	TacGrav(world, 4.6f, cb.grav);
 	// 体型の太さ。胴はそのまま、首と腕は肉の付き方が半分ほど。
@@ -9398,7 +9964,8 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	if (!hairSim) return;
 	memcpy(ms.pData, &cb, sizeof(cb));
 	m_ctx->Unmap(hairSim, 0);
-	ID3D11Buffer* cbs[2] = { hairSim, TacCbCur(g_hairClothR, m_cbHairCloth) };
+	ID3D11Buffer* clothB = TacCbCur(g_hairClothR, m_cbHairCloth);
+	ID3D11Buffer* cbs[2] = { hairSim, clothB };
 	m_ctx->CSSetConstantBuffers(0, 2, cbs);
 	ID3D11ShaderResourceView* sv[2] = { m_hairGuide, m_hairVert };
 	m_ctx->CSSetShaderResources(0, 2, sv);
@@ -9412,6 +9979,8 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	m_ctx->CSSetShader(m_csHair[1], NULL, 0);
 	m_ctx->Dispatch(((UINT)m_hairVN[style] + 63u) / 64u, 1, 1);
 	hi->frame = m_frame;
+	hi->place = place;
+	hi->placeOk = 1;
 	if (step) { hi->time = m_time; hi->world = world; hi->valid = 1; }
 }
 
@@ -9526,15 +10095,61 @@ void Renderer::LoadHairPack()
 	ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
 	if (FAILED(m_dev->CreateUnorderedAccessView(m_hairVB, &ud, &m_hairUAV))) { ReleaseHair(); return; }
 	bd = {};
-	bd.ByteWidth = ((ni * 2u) + 3u) & ~3u;
 	bd.Usage = D3D11_USAGE_IMMUTABLE;
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	static Buf<WORD> ib;
-	ib.assign(idx, idx + ni);
-	ib.resize(bd.ByteWidth / 2, 0);
+	// 全髪型が一つの索引に入っている。描くのは今の髪型だけにして、残りのカードを頂点シェーダに通さない。
+	{
+		int cnt[16];
+		memset(cnt, 0, sizeof(cnt));
+		auto sty = [&](UINT v) -> int {
+			if (v >= nv) return 0;
+			int s = (int)(rec[v * 10 + 9] + 0.5f);
+			return (s >= 1 && s <= 15) ? s : 0;
+		};
+		for (UINT t = 0; t + 2 < ni; t += 3) {
+			int s0 = sty(idx[t]), s1 = sty(idx[t + 1]), s2 = sty(idx[t + 2]);
+			int s = (s1 == s2) ? s1 : s0;
+			if (s < 0 || s > 15) s = 0;
+			cnt[s] += 3;
+		}
+		int sum = 0;
+		for (int s = 0; s < 16; s++) { m_hairI0[s] = sum; m_hairIN[s] = cnt[s]; sum += cnt[s]; }
+		ib.resize(sum > 0 ? sum : 1);
+		if (ib.size() < sum) { ReleaseHair(); return; }
+		int cur[16];
+		for (int s = 0; s < 16; s++) cur[s] = m_hairI0[s];
+		for (UINT t = 0; t + 2 < ni; t += 3) {
+			int s0 = sty(idx[t]), s1 = sty(idx[t + 1]), s2 = sty(idx[t + 2]);
+			int s = (s1 == s2) ? s1 : s0;
+			if (s < 0 || s > 15) s = 0;
+			int w = cur[s];
+			ib[(size_t)w] = idx[t];
+			ib[(size_t)w + 1] = idx[t + 1];
+			ib[(size_t)w + 2] = idx[t + 2];
+			cur[s] = w + 3;
+		}
+		for (int s = 0; s < 16; s++) { m_hairVMin[s] = (int)nv; m_hairVMax[s] = -1; }
+		for (UINT i = 0; i < nv; i++) {
+			int s = sty(i);
+			if ((int)i < m_hairVMin[s]) m_hairVMin[s] = (int)i;
+			if ((int)i > m_hairVMax[s]) m_hairVMax[s] = (int)i;
+		}
+		for (int s = 0; s < 16; s++) {
+			int a = m_hairI0[s], b = a + m_hairIN[s];
+			for (int k = a; k < b; k++) {
+				int v = (int)ib[(size_t)k];
+				if (v < m_hairVMin[s]) m_hairVMin[s] = v;
+				if (v > m_hairVMax[s]) m_hairVMax[s] = v;
+			}
+		}
+		bd.ByteWidth = (((UINT)sum * 2u) + 3u) & ~3u;
+		ib.resize((int)(bd.ByteWidth / 2), 0);
+		m_hairDraw.nIdx = (UINT)sum;
+	}
 	sd.pSysMem = ib.data();
 	if (FAILED(m_dev->CreateBuffer(&bd, &sd, &m_hairDraw.ib))) { ReleaseHair(); return; }
-	m_hairDraw.nIdx = ni;
+	m_hairDraw.iBase = 0;
 	m_hairDraw.stride = 36;
 	m_hairDraw.i32 = 0;
 	m_hairDraw.tex = -2;
@@ -9805,7 +10420,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		DrawParams dc = dp;
 		dc.outline = 0.f;
 		dc.twoSided = 1;
-		dc.sway = 0.f;
+		dc.sway = dp.sway;
 		dc.rim = 0.02f;
 		dc.noTess = 1;
 		if (got) {
@@ -9865,6 +10480,20 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	const CreatureSkin* hs = NULL;
 	for (int k = 0; k < (int)m_skins.size(); k++)
 		if (m_skins[k].model == model && m_skins[k].crownOk) { hs = &m_skins[k]; break; }
+	// 素体を描いているときは、カタログの頭蓋ではなく、その素体の頭の骨に髪の根を合わせる。
+	BOOL hostSkull = FALSE;
+	if (avatar > 0) {
+		const AvaModel* amHost = NULL;
+		for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { amHost = &x; break; }
+		int ciHost = -1;
+		if (amHost) {
+			for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == amHost->gender && ++n == avatar) { ciHost = k; break; }
+		}
+		const AvaCache* host = NULL;
+		for (const AvaCache& c : m_avaCache) if (c.model == model && c.cos == ciHost && c.skin.crownOk && c.skin.skullC[1] > 0.4f) { host = &c; break; }
+		if (!host) for (const AvaCache& c : m_avaCache) if (c.model == model && c.skin.crownOk && c.skin.skullC[1] > 0.4f) { host = &c; break; }
+		if (host) { hs = &host->skin; hostSkull = TRUE; }
+	}
 	if (hairFresh) {
 	const AvaModel* am = NULL;
 	for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { am = &x; break; }
@@ -9910,6 +10539,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	const M4 hairPlace = MMul(hairSeg, pose.palette[headJ]);
 	m_ctx->Unmap(skinBone, 0);
 	float cloth[36 + 4 + SKULL_NA * SKULL_NE];
+	static_assert(sizeof(cloth) == 672, "hair cloth");
 	memset(cloth, 0, sizeof(cloth));
 	if (hs && hs->skullC[1] > 0.4f) {
 		cloth[36] = hs->skullC[0]; cloth[37] = hs->skullC[1]; cloth[38] = hs->skullC[2]; cloth[39] = 1.f;
@@ -9940,7 +10570,14 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	prm.nip0[2] = m_time;
 	prm.bust[0] = -1.f;
 	prm.info[1] = (float)nj;
-	prm.extra[1] = m_hairNv;
+	UINT vBase = 0, vEnd = m_hairNv;
+	if (style >= 1 && style < 16 && m_hairVMax[style] >= m_hairVMin[style] && m_hairVMin[style] >= 0) {
+		vBase = (UINT)m_hairVMin[style];
+		vEnd = (UINT)m_hairVMax[style] + 1u;
+		if (vEnd > m_hairNv) vEnd = m_hairNv;
+	}
+	prm.extra[0] = vBase;
+	prm.extra[1] = vEnd;
 	ID3D11Buffer* skinParm = TacCbAcquire(g_skinParmR, m_ctx, m_cbSkinParm, ms);
 	if (!skinParm) return FALSE;
 	memcpy(ms.pData, &prm, sizeof(prm));
@@ -9955,10 +10592,14 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	if (TacQueueUses(hairVB)) FlushQueuedDraws();
 	UINT cnt = 0;
 	m_ctx->CSSetUnorderedAccessViews(0, 1, &hairUAV, &cnt);
+	const BOOL hairSim = style >= 1 && style < 16 && m_hairVN[style] > 0 && m_csHair[0] && m_csHair[1]
+		&& m_cbHairSim && m_hairGuide && m_hairVert;
+	// 模擬は位置と法線だけを書く。色はスキンが書く。ここを省くとロングが透明になる。
 	m_ctx->CSSetShader(m_csSkin, NULL, 0);
-	m_ctx->Dispatch((m_hairNv + 63u) / 64u, 1, 1);
-	if (style >= 1 && style < 16 && m_hairVN[style] > 0 && m_csHair[0] && m_csHair[1] && m_hairGuide && m_hairVert)
-		RunHair(model, style, headJ, pose, world, owner, hairPlace, pose.palette[headJ], hairUAV, (float)dp.cape, dp.girth, dp.gait, dp.fly);
+	if (vEnd > vBase)
+		m_ctx->Dispatch(((vEnd - vBase) + 63u) / 64u, 1, 1);
+	if (hairSim)
+		RunHair(model, style, headJ, pose, world, owner, hairPlace, pose.palette[headJ], hairUAV, (float)dp.cape, dp.girth, dp.gait, dp.fly, cloth);
 	{
 		ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
 		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
@@ -9972,13 +10613,14 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		CapMem* got = NULL;
 		if (owner) {
 			for (int i = 0; i < 48; i++)
-				if (capMem[i].owner == owner && capMem[i].frame == m_frame && capMem[i].n == (int)m_capBind.size() && capMem[i].v.size() == capMem[i].n) {
+				if (capMem[i].owner == owner && capMem[i].frame == m_frame && (hostSkull || (capMem[i].n == (int)m_capBind.size() && capMem[i].v.size() == capMem[i].n))) {
 					got = &capMem[i];
 					break;
 				}
 		}
 		static Buf<VtxS> posed;
 		if (!got) {
+		if (!hostSkull) {
 		posed.resize(m_capBind.size());
 		if (posed.size() == m_capBind.size()) {
 			for (int i = 0; i < m_capBind.size(); i++) {
@@ -9998,7 +10640,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			DrawParams dc = dp;
 			dc.outline = 0.f;
 			dc.twoSided = 1;
-			dc.sway = 0.f;
+			dc.sway = dp.sway;
 			dc.rim = 0.02f;
 			dc.mode = 7.f;
 			dc.noTess = 1;
@@ -10017,15 +10659,25 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 				got = &capMem[slot];
 			}
 		}
-		} else {
+		} else if (owner) {
+			int slot = -1;
+			for (int i = 0; i < 48; i++) if (capMem[i].owner == owner || capMem[i].owner == NULL) { slot = i; break; }
+			if (slot < 0) slot = (int)(m_frame % 48u);
+			capMem[slot].owner = owner;
+			capMem[slot].frame = m_frame;
+			capMem[slot].n = 0;
+			capMem[slot].domeOk = 0;
+			got = &capMem[slot];
+		}
+		} else if (!hostSkull && got->n > 0) {
 			DrawParams dc = dp;
 			dc.outline = 0.f;
 			dc.twoSided = 1;
-			dc.sway = 0.f;
+			dc.sway = dp.sway;
 			dc.rim = 0.02f;
 			dc.mode = 7.f;
 			dc.noTess = 1;
-			DrawStaticVerts(m_capDraw, got->v.data(), (UINT)got->n, world, dc);
+			if (!hostSkull) DrawStaticVerts(m_capDraw, got->v.data(), (UINT)got->n, world, dc);
 		}
 		// ポニーテールの渦はカードが地肌と同じ深さで、頭頂だけ地肌が残る。頭蓋の外 8mm の笠でその穴を塞ぐ。
 		if (hs && hs->crownOk && hs->skullC[1] > 0.4f) {
@@ -10058,7 +10710,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 					DrawParams dc = dp;
 					dc.outline = 0.f;
 					dc.twoSided = 1;
-					dc.sway = 0.f;
+					dc.sway = dp.sway;
 					dc.rim = 0.02f;
 					dc.mode = 7.f;
 					dc.noTess = 1;
@@ -10114,7 +10766,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 						DrawParams dc = dp;
 						dc.outline = 0.f;
 						dc.twoSided = 1;
-						dc.sway = 0.f;
+						dc.sway = dp.sway;
 						dc.rim = 0.02f;
 						dc.mode = 7.f;
 						dc.noTess = 1;
@@ -10129,7 +10781,14 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	DrawParams hd = dp;
 	if (hd.mode < 0.5f) hd.mode = 7.f;
 	hd.noTess = 1;
+	UINT keepN = m_hairDraw.nIdx, keepB = m_hairDraw.iBase;
+	if (style >= 1 && style < 16 && m_hairIN[style] >= 3) {
+		m_hairDraw.iBase = (UINT)m_hairI0[style];
+		m_hairDraw.nIdx = (UINT)m_hairIN[style];
+	}
 	DrawStatic(m_hairDraw, world, hd);
+	m_hairDraw.nIdx = keepN;
+	m_hairDraw.iBase = keepB;
 	m_hairDraw.vb = saved;
 	return TRUE;
 }
@@ -10294,10 +10953,69 @@ void Renderer::EvalPoseLocal(const Model& m, const Q4* rot, const V3* trans, con
 	FinishPose(m, out, mods);
 }
 
+// 同じ時刻の風は定数バッファも中身も同じ。ClearState のあとだけ結び直す。
+static int g_shaderAirOk = 0;
+static float g_shaderAirTime = 0.f;
+static int g_fcbLive = 0;
+static unsigned char g_fcbSnap[1024];
+static int g_ptSavedOk = 0;
+static unsigned char g_ptSavedFcb[1024];
+static M4 g_ptSavedLvp;
+static void TacBindCacheDrop()
+{
+	g_shaderAirOk = 0;
+	g_fcbLive = 0;
+}
+
+// マップシェーダが頂点と画素のたびに回していた 8 サンプル。服の TacAirHeld（32）とは別式。
+static void TacUploadShaderAir(ID3D11DeviceContext* ctx, ID3D11Buffer* fallback, float time)
+{
+	if (g_shaderAirOk && g_shaderAirTime == time) return;
+	float bx = 0.f, bz = 0.f, mx = 0.f, mz = 0.f, y = 0.f;
+	for (int i = 0; i < 8; ++i) {
+		const float t = time - (float)i * (4.f / 60.f);
+		const float breeze = 0.62f + 0.38f * sinf(t * 0.31f);
+		const float a = t * 0.11f;
+		bx += cosf(a) * (0.40f * breeze);
+		bz += sinf(a) * (0.40f * breeze);
+		const float strong = TacGate(sinf(t * 0.17f + 0.6f), 0.55f);
+		const float gale = TacGate(sinf(t * 0.083f + 2.4f), 0.90f);
+		const float aS = t * 0.047f + 1.9f;
+		const float aG = t * 0.031f + 4.4f;
+		mx += cosf(aS) * strong * 1.30f + cosf(aG) * gale * 2.70f;
+		mz += sinf(aS) * strong * 1.30f + sinf(aG) * gale * 2.70f;
+		const float down = TacGate(sinf(t * 0.13f + 1.2f), 0.72f);
+		const float up = TacGate(sinf(t * 0.19f + 3.6f), 0.78f);
+		y += up * 0.95f - down * 1.15f;
+	}
+	const float inv = 0.125f;
+	bx *= inv; bz *= inv; mx *= inv; mz *= inv; y *= inv;
+	float gust = sqrtf(mx * mx + mz * mz) / 2.70f + sqrtf(bx * bx + bz * bz) * 0.45f + fabsf(y) * 0.28f;
+	if (gust < 0.f) gust = 0.f;
+	if (gust > 1.f) gust = 1.f;
+	float o[8] = { bx, bz, mx, mz, y, gust, 0.f, 0.f };
+	D3D11_MAPPED_SUBRESOURCE ms;
+	ID3D11Buffer* b = TacCbAcquire(g_airR, ctx, fallback, ms);
+	if (!b) return;
+	memcpy(ms.pData, o, sizeof(o));
+	ctx->Unmap(b, 0);
+	ctx->VSSetConstantBuffers(4, 1, &b);
+	ctx->PSSetConstantBuffers(4, 1, &b);
+	ctx->HSSetConstantBuffers(4, 1, &b);
+	ctx->DSSetConstantBuffers(4, 1, &b);
+	g_shaderAirTime = time;
+	g_shaderAirOk = 1;
+}
+
 // ============================================================ フレーム
 void Renderer::UpdateFrameCB()
 {
 	FlushQueuedDraws();
+	static_assert(sizeof(m_fcb) <= sizeof(g_fcbSnap), "frame cb");
+	if (g_fcbLive && memcmp(g_fcbSnap, &m_fcb, sizeof(m_fcb)) == 0) {
+		TacUploadShaderAir(m_ctx, m_cbAir, m_fcb.eye[3]);
+		return;
+	}
 	D3D11_MAPPED_SUBRESOURCE ms;
 	ID3D11Buffer* b = TacCbAcquire(g_frameR, m_ctx, m_cbFrame, ms);
 	if (!b) return;
@@ -10307,6 +11025,9 @@ void Renderer::UpdateFrameCB()
 	m_ctx->PSSetConstantBuffers(0, 1, &b);
 	m_ctx->HSSetConstantBuffers(0, 1, &b);
 	m_ctx->DSSetConstantBuffers(0, 1, &b);
+	memcpy(g_fcbSnap, &m_fcb, sizeof(m_fcb));
+	g_fcbLive = 1;
+	TacUploadShaderAir(m_ctx, m_cbAir, m_fcb.eye[3]);
 }
 
 void Renderer::BeginFrame()
@@ -10321,28 +11042,27 @@ void Renderer::BeginFrame()
 		TacAvaReset();
 	}
 	m_frame++;
+	m_previewPost = FALSE;
 	m_fcb.q[0] = (float)m_quality;
-	float tess = 0.f, disp = 0.f, dof = 0.f;
-	if (m_quality == 1) dof = 0.42f;
-	else if (m_quality == 2) { tess = 2.6f; dof = 0.55f; }
-	else if (m_quality == 3) { tess = 5.2f; disp = 0.055f; dof = 1.f; }
-	else if (m_quality == 5) { tess = 6.8f; disp = 0.08f; dof = 1.25f; }
-	else if (m_quality == 6) { tess = 8.6f; disp = 0.11f; dof = 1.55f; }
-	m_fcb.q[1] = tess;
-	m_fcb.q[2] = disp;
-	m_fcb.q[3] = dof;
+	// 無印の整数はこれまでの段と同じ。+ は隣の段へ寄せ、限界突破+10 だけ少し上。
+	float rank = TacQRank(m_quality, m_qPlus);
+	m_fcb.q[1] = TacQLerp(rank, 0.f, 0.f, 0.f, 2.6f, 5.2f, 6.8f, 8.6f, 10.2f);
+	m_fcb.q[2] = TacQLerp(rank, 0.f, 0.f, 0.f, 0.f, 0.055f, 0.08f, 0.11f, 0.135f);
+	m_fcb.q[3] = TacQLerp(rank, 0.f, 0.f, 0.42f, 0.55f, 1.f, 1.25f, 1.55f, 1.8f);
 	m_fcb.sight[0] = m_fcb.sight[1] = m_fcb.sight[2] = m_fcb.sight[3] = 0;
 	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
 	m_fcb.camNear[0] = m_fcb.camNear[1] = m_fcb.camNear[2] = m_fcb.camNear[3] = 0;
 	m_fcb.camFwd[0] = m_fcb.camFwd[1] = m_fcb.camFwd[2] = m_fcb.camFwd[3] = 0;
 	m_fcb.wxPack[0] = (float)m_wx;
 	m_fcb.wxPack[1] = (float)m_hour;
-	m_fcb.wxPack[2] = m_fcb.wxPack[3] = 0;
+	m_fcb.wxPack[2] = TacQRank(m_quality, m_qPlus);
+	m_fcb.wxPack[3] = 0;
 	m_fcb.reflectInfo[0] = m_fcb.reflectInfo[1] = m_fcb.reflectInfo[2] = m_fcb.reflectInfo[3] = 0;
 	m_cutDeck = -1;
 	ID3D11Buffer* frame = TacCbCur(g_frameR, m_cbFrame);
 	m_ctx->VSSetConstantBuffers(0, 1, &frame);
 	m_ctx->PSSetConstantBuffers(0, 1, &frame);
+	TacUploadShaderAir(m_ctx, m_cbAir, m_fcb.eye[3]);
 	if (m_cbRipple) {
 		m_ctx->VSSetConstantBuffers(3, 1, &m_cbRipple);
 		m_ctx->PSSetConstantBuffers(3, 1, &m_cbRipple);
@@ -10373,6 +11093,17 @@ void Renderer::SetCamera(const M4& view, const M4& proj, V3 eye, float time)
 void Renderer::SetLight(V3 dir, V3 focus, float radius)
 {
 	dir = Norm(dir);
+	// マップだけ、光の高さを保ったまま水平にゆっくり回す。約3分で一周。
+	// キャラの向きは決まらないので、一方だけが陰に固定されないようにする。顔枠と作成プレビューは止めたまま。
+	if (radius > 5.f) {
+		float yaw = fmodf(m_time * 0.035f, 6.2831853f);
+		float c = cosf(yaw), s = sinf(yaw);
+		float x = dir.x * c - dir.z * s;
+		float z = dir.x * s + dir.z * c;
+		dir.x = x;
+		dir.z = z;
+		dir = Norm(dir);
+	}
 	m_fcb.light[0] = dir.x; m_fcb.light[1] = dir.y; m_fcb.light[2] = dir.z; m_fcb.light[3] = m_shSrv ? 1.f : 0.f;
 	V3 up = fabsf(dir.y) > .95f ? v3(0, 0, 1) : v3(0, 1, 0);
 	M4 lv = MLookAtLH(v3(0, 0, 0), v3(-dir.x, -dir.y, -dir.z), up);
@@ -10480,6 +11211,7 @@ BOOL Renderer::BeginReflectPass(float planeY, V3 lookAt)
 	m_ctx->PSSetShaderResources(8, 1, &refOff);
 	ID3D11RenderTargetView* rt = m_refRtv;
 	m_ctx->OMSetRenderTargets(1, &rt, m_refDsv);
+	// 反射の色も消す。残すと前フレームの反射が透けて残る。
 	float cc[4] = { 0.04f, 0.05f, 0.07f, 1.f };
 	m_ctx->ClearRenderTargetView(m_refRtv, cc);
 	m_ctx->ClearDepthStencilView(m_refDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
@@ -10527,26 +11259,23 @@ void Renderer::ReuseReflect(float planeY)
 void Renderer::BeginMainPass()
 {
 	FlushQueuedDraws();
-	PollStageLook();
+	if (!m_inPortrait) PollStageLook();
 	m_pass = m_inPortrait ? PASS_PORTRAIT : PASS_MAIN;
 	if (m_inPortrait) {
 		int sx = (m_portraitSlot % 6) * PORTRAIT_PX, sy = (m_portraitSlot / 6) * PORTRAIT_PX;
 		D3D11_VIEWPORT vp = { (float)sx, (float)sy, (float)PORTRAIT_PX, (float)PORTRAIT_PX, 0, 1 };
 		m_ctx->RSSetViewports(1, &vp);
-		// 枠の色は消さないと、選択順で枠が入れ替わったとき前の髪が残る。
+		// 枠の色は消さないと、選択順で枠が入れ替わったとき前の髪が残る。深度は BeginPortrait で全面クリア済み。
 		if (m_ctx1) {
 			D3D11_RECT rc;
 			rc.left = sx; rc.top = sy; rc.right = sx + PORTRAIT_PX; rc.bottom = sy + PORTRAIT_PX;
 			m_ctx1->ClearView(m_ptRtv, m_ptClear, &rc, 1);
-			if (m_ptDsv) {
-				float zd[4] = { 1, 1, 1, 1 };
-				m_ctx1->ClearView(m_ptDsv, zd, &rc, 1);
-			}
-		} else m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
+		}
 	} else {
 		BOOL mrt = TacQFx(m_quality) && m_zRtv && m_zSrv;
 		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
 		m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
+		// MSAA の色バッファは必ず消す。消さないと空で塗られないサンプル（シルエット端・薄い翼）に前フレームが残り、透けて見える。
 		float cc[4] = { .4f, .55f, .75f, 1 };
 		m_ctx->ClearRenderTargetView(m_msRtv, cc);
 		if (mrt) { float zc[4] = { 1, 1, 1, 1 }; m_ctx->ClearRenderTargetView(m_zRtv, zc); }
@@ -10609,7 +11338,7 @@ void Renderer::BindForPass(BOOL skinned, BOOL outline)
 {
 	BOOL tess = m_allowTess && !skinned && !outline && !m_inPortrait && !m_reflecting
 		&& m_pass != PASS_SHADOW
-		&& TacQRich(m_quality) && m_vsT && m_hsT && m_dsT;
+		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
 	int key = (tess ? 1 : 0) | (skinned ? 2 : 0) | (outline ? 4 : 0)
 		| ((int)m_pass << 3) | (m_inPortrait ? 64 : 0) | (m_reflecting ? 128 : 0)
 		| (m_psOverride ? 256 : 0) | (m_quality << 9);
@@ -10730,8 +11459,14 @@ void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M
 
 void Renderer::FlushQueuedDraws()
 {
+	if (g_hairN > 0 && !g_drawFlush) FlushHairPend();
+	if (g_pendN > 0 && !g_drawFlush) FlushClothPend();
 	if (g_drawN <= 0 || !m_ctx || g_drawFlush) return;
 	g_drawFlush = TRUE;
+	// キュー再生中は各コマンドの深度状態を結ぶ。最後のコマンド（たとえば α の水は深度書き込み無し）が
+	// 呼び出し側の m_dsWant を上書きしたまま抜けると、このあとのキャラ一括描画が深度を書かず、
+	// 両面の体は内側が見えて透け、奥のキャラの翼が手前へ回る。呼び出し前の意図へ必ず戻す。
+	ID3D11DepthStencilState* savedWant = m_dsWant;
 	ID3D11Buffer* vb = NULL;
 	ID3D11Buffer* ib = NULL;
 	UINT stride = 0xFFFFFFFFu, vbOff = 0xFFFFFFFFu;
@@ -10777,10 +11512,16 @@ void Renderer::FlushQueuedDraws()
 			ibFmt = c.ibFmt;
 		}
 		TacUploadObj(m_ctx, m_cbObj, c.obj, m_tessOn);
-		m_ctx->DrawIndexed(c.nIdx, 0, 0);
+		m_ctx->DrawIndexed(c.nIdx, c.iBase, 0);
 	}
 	g_drawN = 0;
 	g_drawFlush = FALSE;
+	// 深度状態を呼び出し前へ戻し、GPU の結びも合わせる。これをしないと直後のキャラ描画へ漏れる。
+	m_dsWant = savedWant;
+	{
+		ID3D11DepthStencilState* want = m_dsWant ? m_dsWant : m_dsWrite;
+		if (want != depth) m_ctx->OMSetDepthStencilState(want, 0);
+	}
 	if (m_tessOn) {
 		m_ctx->HSSetShader(NULL, NULL, 0);
 		m_ctx->DSSetShader(NULL, NULL, 0);
@@ -10801,11 +11542,12 @@ void Renderer::EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams
 	c.vb = m.vb;
 	c.ib = m.ib;
 	c.nIdx = m.nIdx;
+	c.iBase = m.iBase;
 	c.stride = m.stride;
 	c.vbOff = (m.vb == m_vbDyn) ? m_dynOff : 0;
 	c.ibFmt = m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 	BOOL tess = !outline && m_allowTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
-		&& TacQRich(m_quality) && m_vsT && m_hsT && m_dsT;
+		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
 	c.il = m_ilS;
 	c.topo = tess ? D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST : D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 	c.vs = tess ? m_vsT : ((m_pass == PASS_SHADOW && m_vsSh && dp.mode == 0.f) ? m_vsSh : m_vsS);
@@ -10850,7 +11592,7 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 			m_ctx->VSSetShader(m_vsSh, NULL, 0);
 			m_bindKey = -1;
 		}
-		m_ctx->DrawIndexed(m.nIdx, 0, 0);
+		m_ctx->DrawIndexed(m.nIdx, m.iBase, 0);
 		return;
 	}
 	ID3D11ShaderResourceView* srv = (m.tex == -2 && m_hairSrv) ? m_hairSrv : SrvFor(m.tex);
@@ -10863,29 +11605,21 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 	if (dp.outline > 0 && !alpha) {
 		BindForPass(FALSE, TRUE);
 		SetObj(world, dp, dp.outline);
-		m_ctx->DrawIndexed(m.nIdx, 0, 0);
+		m_ctx->DrawIndexed(m.nIdx, m.iBase, 0);
 		m_bindKey = -1;
 	}
 	BindForPass(FALSE, FALSE);
 	SetObj(world, dp, 0);
 	if (m_psOverride) m_ctx->PSSetShader(m_psOverride, NULL, 0);
 	if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
-	m_ctx->DrawIndexed(m.nIdx, 0, 0);
+	m_ctx->DrawIndexed(m.nIdx, m.iBase, 0);
 	if (dp.twoSided) m_ctx->RSSetState(m_reflecting ? m_rsFront : m_rsBack);
 	if (alpha) m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
 static void AvxCopy(void* dst, const void* src, size_t n)
 {
-	unsigned char* d = (unsigned char*)dst;
-	const unsigned char* s = (const unsigned char*)src;
-	size_t i = 0;
-	for (; i + 32 <= n; i += 32) {
-		__m256 v = _mm256_loadu_ps((const float*)(s + i));
-		_mm256_storeu_ps((float*)(d + i), v);
-	}
-	if (i < n) memcpy(d + i, s + i, n - i);
-	_mm256_zeroupper();
+	SimdKernels::Get().Copy(dst, src, n);
 }
 
 enum { TAC_INST_N = 64, TAC_INST_G = 96 };
@@ -10950,6 +11684,8 @@ void Renderer::BeginInstBatch()
 void Renderer::EndInstBatch()
 {
 	if (!m_instOn) return;
+	FlushHairPend();
+	FlushClothPend();
 	FlushInst();
 	FlushQueuedDraws();
 	m_instOn = FALSE;
@@ -10964,7 +11700,7 @@ BOOL Renderer::PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp)
 	if (((dp.tint >> 24) & 255) < 255) return FALSE;
 	if (m_pass == PASS_SHADOW && ((dp.tint >> 24) & 255) < 128) return FALSE;
 	BOOL tess = m_allowTess && !dp.noTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
-		&& TacQRich(m_quality) && m_vsT && m_hsT && m_dsT;
+		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
 	if (tess) return FALSE;
 	if (m_dsWant && m_dsWant != m_dsWrite) return FALSE;
 	int alpha = (((dp.tint >> 24) & 255) < 255) ? 1 : 0;
@@ -11208,7 +11944,8 @@ void Renderer::DrawTerrain()
 				int layer = ci + 1;
 				if (m_cutDeck >= 0 && layer != m_cutDeck) continue;
 				int cx = ch & 3, cz = ch >> 2;
-				if (!InView(v3(cx * 16.f + 8.f, 3.f, cz * 16.f + 8.f), 14.f)) continue;
+				V3 cMid = v3(cx * 16.f + 8.f, 3.f, cz * 16.f + 8.f);
+				if (m_pass == PASS_SHADOW ? !InLight(cMid, 14.f) : !InView(cMid, 14.f)) continue;
 				int above = !m_reflecting && m_cutDeck < 0 && gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && layer > m_fadeAbove;
 				if (m_pass == PASS_SHADOW) {
 					if (!above) DrawStatic(cover, m_sceneShift, dp);
@@ -11243,23 +11980,25 @@ void Renderer::DrawTerrain()
 		dp.outline = 0;
 		DrawStatic(b.mesh, m_sceneShift, dp);
 	}
-	m_psOverride = m_psLava;
-	for (int i = 0; i < 16; i++) {
-		BoundMesh& c = m_lavaChunk[i];
-		if (!c.mesh.vb || c.rad <= 0.f) continue;
-		if (!BoundVisible(c.cx, c.cy, c.cz, c.rad)) continue;
-		DrawParams lp;
-		lp.mode = 2.f;
-		lp.twoSided = 1;
-		lp.noTess = 1;
-		DrawStatic(c.mesh, m_sceneShift, lp);
-	}
-	if (m_lava.vb) {
-		DrawParams lp;
-		lp.mode = 2.f;
-		lp.twoSided = 1;
-		lp.noTess = 1;
-		DrawStatic(m_lava, m_sceneShift, lp);
+	if (m_pass != PASS_SHADOW) {
+		m_psOverride = m_psLava;
+		for (int i = 0; i < 16; i++) {
+			BoundMesh& c = m_lavaChunk[i];
+			if (!c.mesh.vb || c.rad <= 0.f) continue;
+			if (!BoundVisible(c.cx, c.cy, c.cz, c.rad)) continue;
+			DrawParams lp;
+			lp.mode = 2.f;
+			lp.twoSided = 1;
+			lp.noTess = 1;
+			DrawStatic(c.mesh, m_sceneShift, lp);
+		}
+		if (m_lava.vb) {
+			DrawParams lp;
+			lp.mode = 2.f;
+			lp.twoSided = 1;
+			lp.noTess = 1;
+			DrawStatic(m_lava, m_sceneShift, lp);
+		}
 	}
 	m_psOverride = NULL;
 }
@@ -11457,6 +12196,10 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			}
 			float t = 1.f - p.life / max(1e-4f, p.max);
 			float sz = Lerpf(p.size, p.size1, t);
+			float rad = sz * 1.8f;
+			if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
+			if (rad < 0.2f) rad = 0.2f;
+			if (!mapXform && !InView(pos, rad)) continue;
 			float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 			int bi = p.add ? 1 : 0;
 			if (vn[bi] >= PN) continue;
@@ -11527,6 +12270,10 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		}
 		float t = 1.f - p.life / max(1e-4f, p.max);
 		float sz = Lerpf(p.size, p.size1, t);
+		float rad = sz * 1.8f;
+		if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
+		if (rad < 0.2f) rad = 0.2f;
+		if (!mapXform && !InView(pos, rad)) continue;
 		float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 		V3 ax = right * sz, ay = up * sz;
 		if (p.stretch > 0) {
@@ -12787,6 +13534,14 @@ BOOL Renderer::BeginPortrait(int slot)
 	FlushQueuedDraws();
 	if (!m_inPortrait) {
 		m_inPortrait = TRUE;
+		memcpy(g_ptSavedFcb, &m_fcb, sizeof(m_fcb));
+		g_ptSavedLvp = m_lightVP;
+		g_ptSavedOk = 1;
+		SetSight(NULL, 0, 0);
+		SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
+		SetAmbient(RGBA8(206, 192, 178), RGBA8(148, 116, 94), .58f, .55f);
+		SetLight(Norm(v3(.42f, .84f, -.40f)), v3(0, 0, 0), 3.5f);
+		SetShadowEnabled(FALSE);
 		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
 		m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 		ID3D11ShaderResourceView* sh = NULL;
@@ -12811,8 +13566,15 @@ void Renderer::EndPortrait()
 void Renderer::FinishPortraits()
 {
 	FlushQueuedDraws();
+	const BOOL wasPortrait = m_inPortrait;
 	m_inPortrait = FALSE;
+	if (wasPortrait && g_ptSavedOk) {
+		memcpy(&m_fcb, g_ptSavedFcb, sizeof(m_fcb));
+		m_lightVP = g_ptSavedLvp;
+		g_ptSavedOk = 0;
+	}
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
+	if (wasPortrait) UpdateFrameCB();
 }
 
 // ============================================================ HUD
@@ -12853,25 +13615,18 @@ BOOL Renderer::ApplyPost()
 		m_ctx->Draw(3, 0);
 	};
 	ID3D11ShaderResourceView* src = m_sceneSrv;
-	if (m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && (TacQUltra(m_quality) ? m_psDofU : m_psDofH)) {
+	// 作成プレビューは Q.w を負にする。シェーダは場面そのものを返すだけなので、全面の書き写しをしない。
+	float qRank = TacQRank(m_quality, m_qPlus);
+	if (m_fcb.q[3] >= 0.f && m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && (qRank >= 2.f ? (qRank >= 3.5f ? m_psDofU : m_psDofH) : NULL)) {
 		if (m_msaa > 1 && m_zTex && m_zRes)
 			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
 		DrawParams df;
-		df.emissive = (m_quality == 1) ? 4.f : 6.f;
-		if (m_quality == 3) df.emissive = 14.f;
-		else if (m_quality == 5) df.emissive = 18.f;
-		else if (m_quality == 6) df.emissive = 24.f;
+		df.emissive = TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 14.f, 18.f, 24.f, 28.f);
 		df.hue = 0.16f;
-		fs(TacQUltra(m_quality) ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
+		fs(qRank >= 3.5f ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
 		src = m_dofSrv;
 	}
-	int nblur = 3;
-	if (m_quality == 4) nblur = 0;
-	else if (m_quality <= 0) nblur = 2;
-	else if (m_quality == 2) nblur = 4;
-	else if (m_quality == 3) nblur = 5;
-	else if (m_quality == 5) nblur = 6;
-	else if (m_quality == 6) nblur = 8;
+	int nblur = (int)(TacQLerp(qRank, 0.f, 2.f, 3.f, 4.f, 5.f, 6.f, 8.f, 8.f) + 0.5f);
 	if (m_gpu == 3 && m_quality < 5) nblur = min(nblur, 2);
 	if (nblur > 0) {
 	DrawParams ex;
@@ -12906,12 +13661,81 @@ BOOL Renderer::ApplyPost()
 	return TRUE;
 }
 
+BOOL Renderer::LoadSkyReady() const
+{
+	return m_loadSky && m_loadSkyW == m_w && m_loadSkyH == m_h && m_w > 0 && m_h > 0;
+}
+
+void Renderer::DropLoadSky()
+{
+	if (m_ctx) {
+		ID3D11RenderTargetView* nullRT = NULL;
+		m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
+	}
+	TAC_REL(m_loadSky);
+	m_loadSkyW = m_loadSkyH = 0;
+}
+
+void Renderer::RememberLoadSky()
+{
+	if (!m_ctx || !m_dev || !m_bb || m_w < 1 || m_h < 1) return;
+	D3D11_TEXTURE2D_DESC bd = {};
+	m_bb->GetDesc(&bd);
+	if ((int)bd.Width != m_w || (int)bd.Height != m_h || bd.SampleDesc.Count != 1) return;
+	if (!m_loadSky || m_loadSkyW != m_w || m_loadSkyH != m_h) {
+		TAC_REL(m_loadSky);
+		D3D11_TEXTURE2D_DESC td = {};
+		td.Width = bd.Width;
+		td.Height = bd.Height;
+		td.MipLevels = 1;
+		td.ArraySize = 1;
+		td.Format = bd.Format;
+		td.SampleDesc.Count = 1;
+		td.Usage = D3D11_USAGE_DEFAULT;
+		if (FAILED(m_dev->CreateTexture2D(&td, NULL, &m_loadSky))) { m_loadSkyW = m_loadSkyH = 0; return; }
+		m_loadSkyW = m_w;
+		m_loadSkyH = m_h;
+	}
+	ID3D11RenderTargetView* nullRT = NULL;
+	m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
+	m_ctx->CopyResource(m_loadSky, m_bb);
+	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
+	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
+	m_ctx->RSSetViewports(1, &vp);
+}
+
+void Renderer::ShowLoadSky()
+{
+	if (!m_ctx || !m_bb || !m_bbRtv || !LoadSkyReady()) return;
+	FlushQueuedDraws();
+	ClearTess();
+	m_inPortrait = FALSE;
+	ID3D11ShaderResourceView* unb[9] = {};
+	m_ctx->PSSetShaderResources(0, 9, unb);
+	ID3D11RenderTargetView* nullRT = NULL;
+	m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
+	m_ctx->CopyResource(m_bb, m_loadSky);
+	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
+	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
+	m_ctx->RSSetViewports(1, &vp);
+	m_fcb.screen[0] = (float)m_w;
+	m_fcb.screen[1] = (float)m_h;
+	m_fcb.screen[2] = 1.f / (float)m_w;
+	m_fcb.screen[3] = 1.f / (float)m_h;
+	UpdateFrameCB();
+	m_hud.clear();
+	m_hudSrv = m_srv[TEX_WHITE];
+	m_hudPipe = 0;
+}
+
 void Renderer::BeginHud()
 {
 	FlushQueuedDraws();
 	m_inPortrait = FALSE;
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
 	ClearTess();
+	// 作成プレビューは空が画面の大半。負の被写界で、空の画素だけ重いサンプルを省く。マップはそのまま。
+	if (m_previewPost) { m_fcb.q[3] = -1.f; UpdateFrameCB(); }
 	if (!ApplyPost() && m_msaa > 1 && m_msTex && m_bb)
 		m_ctx->ResolveSubresource(m_bb, 0, m_msTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
 	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
@@ -13052,15 +13876,34 @@ void Renderer::HudQuad(ID3D11ShaderResourceView* srv, const float* xy, const flo
 	m_hud.push_back(p[0]); m_hud.push_back(p[2]); m_hud.push_back(p[3]);
 }
 
+static void TacTextUnlink(int* head, int* next, UINT hash, int slot)
+{
+	if (!hash || slot < 0) return;
+	int b = (int)(hash & 1023u);
+	int prev = -1;
+	for (int i = head[b]; i >= 0; ) {
+		int nxt = next[i];
+		if (i == slot) {
+			if (prev < 0) head[b] = nxt;
+			else next[prev] = nxt;
+			next[slot] = -1;
+			return;
+		}
+		prev = i;
+		i = nxt;
+	}
+}
+
 TextSprite* Renderer::GetText(const wchar_t* s, float px, int bold, int shadow, int box, float boxW, float boxH)
 {
 	if (!s || !s[0]) return NULL;
+	static_assert(TAC_TEXTH == 1024, "text buckets");
 	wchar_t key[TAC_TEXTK];
 	_snwprintf_s(key, _TRUNCATE, L"%d|%d|%d|%d|%d|%s", (int)(px * 4), bold, shadow, box ? (int)boxW : 0, box ? (int)boxH : 0, s);
 	UINT hv = 2166136261u;
 	for (const wchar_t* p = key; *p; p++) { hv ^= (UINT)*p; hv *= 16777619u; }
 	if (!hv) hv = 1;
-	for (int ti = 0; ti < TAC_TEXTN; ti++) {
+	for (int ti = m_textHead[hv & 1023u]; ti >= 0; ti = m_textNext[ti]) {
 		if (m_textHash[ti] != hv || !m_text[ti].live) continue;
 		if (!wcscmp(m_text[ti].key, key)) { m_text[ti].sp.lastFrame = m_frame; return &m_text[ti].sp; }
 	}
@@ -13104,11 +13947,16 @@ TextSprite* Renderer::GetText(const wchar_t* s, float px, int bold, int shadow, 
 	}
 	Soft3DTextD2D_Release(cv);
 	if (!ts.srv) { TAC_REL(ts.tex); return NULL; }
-	if (m_text[slot].live) { TAC_REL(m_text[slot].sp.srv); TAC_REL(m_text[slot].sp.tex); }
+	if (m_text[slot].live) {
+		TacTextUnlink(m_textHead, m_textNext, m_textHash[slot], slot);
+		TAC_REL(m_text[slot].sp.srv); TAC_REL(m_text[slot].sp.tex);
+	}
 	m_text[slot].live = 1;
 	wcsncpy_s(m_text[slot].key, key, _TRUNCATE);
 	m_text[slot].sp = ts;
 	m_textHash[slot] = hv;
+	m_textNext[slot] = m_textHead[hv & 1023u];
+	m_textHead[hv & 1023u] = slot;
 	return &m_text[slot].sp;
 }
 
@@ -13197,7 +14045,12 @@ void Renderer::EndFrameTextGc()
 	if (live < 400) return;
 	for (int ti = 0; ti < TAC_TEXTN; ti++) {
 		if (!m_text[ti].live) continue;
-		if (m_frame - m_text[ti].sp.lastFrame > 300) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
+		if (m_frame - m_text[ti].sp.lastFrame > 300) {
+			TacTextUnlink(m_textHead, m_textNext, m_textHash[ti], ti);
+			TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex);
+			m_text[ti].live = 0;
+			m_textHash[ti] = 0;
+		}
 	}
 }
 
@@ -13215,19 +14068,20 @@ BOOL Renderer::ProjectToScreen(V3 p, float& sx, float& sy) const
 
 static BOOL TacInClip(const float* m, V3 p, float r)
 {
-	if (r < .6f) r = .6f;
+	float rad = (r < .6f ? .6f : r) * 1.15f + .5f;
 	float x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
 	float y = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
 	float z = p.x * m[2] + p.y * m[6] + p.z * m[10] + m[14];
 	float w = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
-	float pad = r * (fabsf(m[0]) + fabsf(m[4]) + fabsf(m[8]));
-	if (pad < r) pad = r;
-	pad += .45f * (fabsf(w) + 1.f);
-	if (w + pad < .02f) return FALSE;
-	float ww = fabsf(w) + pad;
-	if (x < -ww || x > ww) return FALSE;
-	if (y < -ww || y > ww) return FALSE;
-	if (z < -pad || z > ww) return FALSE;
+	float dx = rad * sqrtf(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
+	float dy = rad * sqrtf(m[1] * m[1] + m[5] * m[5] + m[9] * m[9]);
+	float dz = rad * sqrtf(m[2] * m[2] + m[6] * m[6] + m[10] * m[10]);
+	float dw = rad * sqrtf(m[3] * m[3] + m[7] * m[7] + m[11] * m[11]);
+	float wMax = w + dw;
+	if (wMax < .02f) return FALSE;
+	if (x < -wMax - dx || x > wMax + dx) return FALSE;
+	if (y < -wMax - dy || y > wMax + dy) return FALSE;
+	if (z < -dz || z > wMax + dz) return FALSE;
 	return TRUE;
 }
 
@@ -13251,7 +14105,7 @@ BOOL Renderer::BoundVisible(float cx, float cy, float cz, float rad) const
 
 void Renderer::ScreenRay(float sx, float sy, V3& org, V3& dir) const
 {
-	M4 inv = MInverse(m_vp);
+	M4 inv = m_inPortrait ? MInverse(m_vp) : m_fcb.invVP;
 	float nx = sx / m_w * 2.f - 1.f, ny = 1.f - sy / m_h * 2.f;
 	V3 a = MXformPt(inv, v3(nx, ny, 0.f));
 	V3 b = MXformPt(inv, v3(nx, ny, 1.f));

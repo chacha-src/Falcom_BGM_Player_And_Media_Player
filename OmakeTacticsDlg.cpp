@@ -594,6 +594,7 @@ void COmakeTacticsDlg::DrainInput()
 
 LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 {
+	static int windowCheckFlag = 0;
 	if (m_destroying || m_inPace || !m_gameOk) {
 		InterlockedExchange(&m_pacePosted, 0);
 		return 0;
@@ -611,16 +612,20 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	int hz = m_game.PaceHz();
 	if (hz < 30) hz = 30;
 	m_paceHz = hz;
-	m_fg = (::GetForegroundWindow() == m_hWnd);
-	{
-		static int pri = -1;
-		int want = m_fg ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL;
-		if (pri != want) {
-			SetThreadPriority(GetCurrentThread(), want);
-			if (m_paceThread) SetThreadPriority(m_paceThread, want);
-			pri = want;
+	if (windowCheckFlag == 0) {
+		m_fg = (::GetForegroundWindow() == m_hWnd);
+		{
+			static int pri = -1;
+			int want = m_fg ? THREAD_PRIORITY_TIME_CRITICAL : THREAD_PRIORITY_NORMAL;
+			if (pri != want) {
+				SetThreadPriority(GetCurrentThread(), want);
+				if (m_paceThread) SetThreadPriority(m_paceThread, want);
+				pri = want;
+			}
 		}
 	}
+	windowCheckFlag++;
+	windowCheckFlag = windowCheckFlag % 10;
 	if (!IsIconic() && IsWindowVisible()) {
 		LARGE_INTEGER a0, a1, af;
 		QueryPerformanceCounter(&a0);

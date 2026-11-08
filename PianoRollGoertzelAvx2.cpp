@@ -63,8 +63,10 @@ void PianoRollGoertzelBatchAvx2(
 
 #if defined(_M_X64)
     static int use512 = -1;
+    static int use10 = 0;
     if (use512 < 0) {
         const CpuIsa& isa = CpuIsaGet();
+        use10 = isa.avx10_512 ? 1 : 0;
         use512 = (isa.avx512 || isa.avx10_512) ? 1 : 0;
     }
     if (use512) {
@@ -75,7 +77,10 @@ void PianoRollGoertzelBatchAvx2(
         for (; key < end8; key += 8) {
             for (int k = 0; k < 8; ++k)
                 coeffs8[k] = coeffs[key + k];
-            PianoRollGoertzel8_AVX512(samples, numSamples, coeffs8, out8);
+            if (use10)
+                PianoRollGoertzel8_AVX10(samples, numSamples, coeffs8, out8);
+            else
+                PianoRollGoertzel8_AVX512(samples, numSamples, coeffs8, out8);
             for (int k = 0; k < 8; ++k)
                 rawOut[key - keyBegin + k] = out8[k];
         }
