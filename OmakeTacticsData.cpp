@@ -4764,12 +4764,16 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
 		// 味方は成長率×2で体力が伸びる。敵の体力だけ同じ方向に合わせ、攻撃は別の曲線で足す。
+		// 序盤（〜Lv35）は従来どおり。会心が2倍なので、ステージ60〜70帯で雑魚が1発で落ちない厚みを足す。
 		if (s == S_HP) {
 			v *= 2;
 			int bulk = 0;
 			if (u.ch.lv >= 12) {
 				bulk = 12 + (u.ch.lv - 12);
-				if (bulk > 90) bulk = 90;
+				if (u.ch.lv >= 36) bulk += (u.ch.lv - 36);
+				if (u.ch.lv >= 72) bulk += (u.ch.lv - 72);
+				if (u.ch.lv >= 120) bulk += (u.ch.lv - 120) / 2;
+				if (bulk > 280) bulk = 280;
 			}
 			v = v * (100 + bulk) / 100;
 		}
@@ -5494,7 +5498,7 @@ static int TerrainAvoPct(const Battle& b, const Unit& d)
 	return TerrainInfo(b.map.At(d.x, d.z).t).avoPct;
 }
 
-// 味方だけ。Lv1 は 1。ステージ60（敵HP 2000〜3000）で、力100前後の近接と魔力が届く傾き。
+// 味方だけ。Lv1 は 1。近接は通常攻撃が届き、会心でも雑魚HPを丸ごと消さない厚みと組む。
 static float TacAllyScale(const Unit& a, float perLv)
 {
 	if (a.team != TEAM_PLAYER) return 1.f;

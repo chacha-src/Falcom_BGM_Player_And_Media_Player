@@ -1,7 +1,7 @@
-// アバターの衣装。腰の帯は骨に残し、股と尻はずらさない。
-// それより下は軽い伸縮の布。位置は前フレームが決め、足は半径の外へ押すだけ。
-// 戻りは重力と風。足の骨へは戻さない。前後左右のどこへも流れ、反対側で反射して戻ることもある。
-// ミニスカートは腰の近くなのでほぼ動かない。状態はキャラごと。影と本描画で二度積分しない。
+// アバターの衣装。腰の付け根だけ骨に残し、それより下は布。
+// 足は体積の外へ押すだけ。戻りは重力と摩擦と風。足では引き戻さない。
+// 裾ほどよく流れ、ミニスカートはロングの同じ高さ（無い布の分）だけ軽く揺れる。
+// 状態はキャラごと。影と本描画で二度積分しない。
 cbuffer ClothParm : register(b0)
 {
 	row_major float4x4 Delta;  // 前のフレームのモデル空間から今のモデル空間へ（移動と向きの慣性）
@@ -155,18 +155,41 @@ void LoadClothBatch(uint gid, uint slot)
 #define Limb gPrm.Limb
 #define Grav gPrm.Grav
 
+float3 GravDown()
+{
+	float gl = length(Grav.xyz);
+	return gl > 1e-4 ? Grav.xyz / gl : float3(0, -1, 0);
+}
+
+// 腰の左右・前後を、重力に垂直な向きへ。横たわりで片方が重力に沿うと成分が消え、
+// スカートの輪が足の中へ潰れる。消えた軸はもう一方と重力から作り直す。
+void FlatAxes(out float3 ehx, out float3 ehz, out float3 down)
+{
+	down = GravDown();
+	float3 hx = Hips[0].xyz;
+	float3 hz = Hips[2].xyz;
+	ehx = hx - down * dot(hx, down);
+	ehz = hz - down * dot(hz, down);
+	float exl = length(ehx), ezl = length(ehz);
+	if (exl < 0.20) {
+		ehx = cross(down, ezl > 0.20 ? (ehz / ezl) : Hips[1].xyz);
+		exl = length(ehx);
+	}
+	ehx = exl > 1e-4 ? ehx / exl : float3(1, 0, 0);
+	if (ezl < 0.20) {
+		ehz = cross(ehx, down);
+		if (dot(ehz, hz) < 0) ehz = -ehz;
+		ezl = length(ehz);
+	}
+	ehz = ezl > 1e-4 ? ehz / ezl : cross(ehx, down);
+}
+
 void BuildLegs(uint gid)
 {
 	if (gid == 0) {
-		float3 down = length(Grav.xyz) > 1e-4 ? Grav.xyz / length(Grav.xyz) : float3(0, -1, 0);
+		float3 ehx, ehz, down;
+		FlatAxes(ehx, ehz, down);
 		float3 waistC = mul(float4(Mode.y, Grav.w, Mode.z, 1), Hips).xyz;
-		float3 hx = Hips[0].xyz;
-		float3 hz = Hips[2].xyz;
-		float3 ehx = hx - down * dot(hx, down);
-		float3 ehz = hz - down * dot(hz, down);
-		float exl = length(ehx), ezl = length(ehz);
-		ehx = exl > 1e-4 ? ehx / exl : float3(1, 0, 0);
-		ehz = ezl > 1e-4 ? ehz / ezl : float3(0, 0, 1);
 		gDown = down;
 		gEhx = ehx;
 		gEhz = ehz;
@@ -290,124 +313,274 @@ float3 SheetSide(float3 p, float allow, float sign)
 	return p + (allow - allow) * sign * float3(0, 0, 0);
 }
 
-// 足は高さごとに太さが違う障害物。布は外へ押すだけ。足が離れても足では戻さず、重力と摩擦と風に任せる。
-// slitCode 0 は筒。足が開いたり前後に動いたりした分だけスカートが滑らかに外側へ変形・押し上げられて付いてきて、足は絶対に突き抜けない。
-// 1 は前布、2 以上は後ろ布。前後それぞれの側を保ったまま連続的に横へ分かれ、足が露出する。股の前は分けない。
-float3 LegPush(float3 p, float bindX, float bindY, float bindZ, float slitCode, float pad)
+// 立っていると 0。仰向け・横向きは 1。起き上がりの途中はその間。
+float LieAmt()
 {
+	float3 upB = Hips[1].xyz;
+	float ul = length(upB);
+	if (ul < 1e-4) return 0;
+	upB /= ul;
+	return 1.0 - smoothstep(0.22, 0.78, abs(dot(upB, gDown)));
+}
+
+// 横たわりと起き上がり。足の断面の中にいる布を、重力と逆（上）の表面まで出す。
+// 横方向の押し出しだけでは、腿の上に落ちた裾が中に残る。
+float3 LiftTop(float3 p, float pad, float lie)
+{
+	if (lie < 0.02) return p;
 	float sc = max(Sim.w, 1e-4);
+	float3 up = -gDown;
+	uint ns = min(Cnt.y, 6u);
+	[loop] for (int rep = 0; rep < 2; rep++) {
+		[loop] for (uint s = 0; s < ns; s++) {
+			float4 A = Seg[s * 4];
+			float3 ax = Seg[s * 4 + 1].xyz;
+			float len = max(A.w, 1e-4);
+			float3 q = mul(float4(p / sc, 1), Inv[s]).xyz - A.xyz;
+			float tRaw = dot(q, ax) / len;
+			if (tRaw < -0.12 || tRaw > 1.20) continue;
+			float tc = saturate(tRaw);
+			float3 rv = q - ax * (tc * len);
+			float3 u = Seg[s * 4 + 2].xyz;
+			float3 wv = Seg[s * 4 + 3].xyz;
+			float3 upL = mul(up, (float3x3)Inv[s]);
+			float upLen = length(upL);
+			upL = upLen > 1e-4 ? upL / upLen : u;
+			float h = dot(rv, upL);
+			float side2 = max(dot(rv, rv) - h * h, 0);
+			float phi = atan2(dot(upL, wv), dot(upL, u));
+			float R = ProfR(s, tc, phi) + pad + 0.010;
+			if (R < 0.03) R = 0.03;
+			if (side2 >= R * R) continue;
+			float half = sqrt(R * R - side2);
+			if (h >= half) continue;
+			p += up * ((half - h) * lie * sc);
+		}
+	}
+	return p;
+}
+
+// 正面の股。腰から約 22cm まではほぼ動かさず、そこから下は普通に流す。
+float GroinHold(float x, float y, float z)
+{
+	float az = abs(atan2(x - Mode.y, z - Mode.z));
+	float front = smoothstep(1.15, 2.20, az);
+	float drop = max(Grav.w - y, 0);
+	return front * (1.0 - smoothstep(0.05, 0.22, drop));
+}
+
+// 筒は頂点ごと表面へ出す。スリットはシートのまま押したあとなので、ここで割らない。
+float3 ClothFinish(float3 p, float pad, float sheet)
+{
+	if (sheet < 0.5) p = CollideBody(p, -pad, 1, 0u);
+	p = LiftTop(p, pad, LieAmt());
+	return p;
+}
+
+// その高さの肌の半径。角度は押し出す向きではなく、骨から布を見た向き。
+float LegRadius(uint s, float t, float3 dirW)
+{
+	float3 ax = gPB[s] - gPA[s];
+	float axl = length(ax);
+	float3 axN = axl > 1e-4 ? ax / axl : float3(0, -1, 0);
+	float3 perp = dirW - axN * dot(dirW, axN);
+	float pl = length(perp);
+	float3 dirP = pl > 1e-4 ? perp / pl : gPU[s];
+	float phi = atan2(dot(dirP, gPW[s]), dot(dirP, gPU[s]));
+	float fp = (phi / 6.2831853 + 0.5) * PF;
+	fp = fmod(fp, (float)PF);
+	if (fp < 0) fp += PF;
+	float fl = floor(fp);
+	uint i0 = (uint)fl % PF;
+	uint i1 = (i0 + 1u) % PF;
+	float ft = saturate(t) * (float)(NSLICE - 1);
+	uint t0 = min((uint)ft, (uint)(NSLICE - 2));
+	float a = ft - (float)t0;
+	uint o0 = RAD0 + s * NSLICE * PF;
+	float r0 = lerp(Prof[gProf0 + o0 + t0 * PF + i0], Prof[gProf0 + o0 + t0 * PF + i1], fp - fl);
+	float r1 = lerp(Prof[gProf0 + o0 + (t0 + 1u) * PF + i0], Prof[gProf0 + o0 + (t0 + 1u) * PF + i1], fp - fl);
+	return lerp(r0, r1, a) + 0.012;
+}
+
+// 太もも・すね共通。
+// 1) 体の前後面：前後の壁は「真前・真後ろの帯」に掛け、脇へ向かうほど減衰させる。
+//    非スリット（筒）は円周が閉じた 1 枚の布なので、脇まで前後の壁を掛けると隣り合う頂点の押し出し量に
+//    段差が出てサイドが前後に開く。筒は真正面・真後ろだけにし、脇は下の連続 360° 外周押し出しに任せる。
+// 2) 360° 断面外周：その高さの骨断面 O から連続的な水平外向きへ半径 R まで出す。
+void PushSeg(inout float3 q, uint s, float pad, float sc, bool isShin, float bindFront, float bindLat, bool isSlit)
+{
+	float3 AB = gPB[s] - gPA[s];
+	float axl = length(AB);
+	if (axl < 1e-4) return;
+	float3 axN = AB / axl;
+	float myH = dot(q, gDown);
+	float hA = dot(gPA[s], gDown);
+	float hB = dot(gPB[s], gDown);
+	float dhAB = hB - hA;
+	float tRef = abs(dhAB) > 0.03 ? saturate((myH - hA) / dhAB) : saturate(dot(q - gPA[s], axN) / axl);
+	float3 Sref = gPA[s] + AB * tRef;
+	float3 fwdB = -gEhz;
+	float3 hip = gPA[s & 1u];
+	float fSeg = dot(q - Sref, fwdB);
+	float fHip = dot(q - hip, fwdB);
+	float fLo = isSlit ? 0.015 : 0.055;
+	float fHi = isSlit ? 0.065 : 0.115;
+	float wFront = smoothstep(fLo, fHi, bindFront);
+	if (isSlit && bindFront > -0.015 && fSeg > 0.025 && fHip > 0.025)
+		wFront = max(wFront, smoothstep(0.025, 0.075, min(fSeg, fHip)));
+	float wBack = smoothstep(isSlit ? 0.020 : 0.055, isSlit ? 0.070 : 0.115, -bindFront) * (1.0 - smoothstep(-0.01, 0.03, max(fSeg, fHip)));
+	bool doFront = wFront > 0.01;
+	bool doBack = !doFront && (wBack > 0.01);
+	float wSide = doFront ? wFront : wBack;
+
+	if (doFront || doBack) {
+		float3 flat = doFront ? fwdB : -fwdB;
+		if (!isShin) {
+			float hTol = 0.140;
+			float bestExt = -1e9;
+			float bestMot = 0.0;
+			float3 m0 = Limb[s].xyz / sc;
+			uint sEnd = s + 2u;
+			float3 m1 = sEnd < 6u ? Limb[sEnd].xyz / sc : m0;
+			[loop] for (int k = 0; k <= 8; k++) {
+				float t = (float)k / 8.0;
+				float3 S = gPA[s] + AB * t;
+				float dh = abs(dot(S, gDown) - myH);
+				if (dh > hTol) continue;
+				float R = LegRadius(s, t, flat) + pad;
+				if (R < 0.03) R = 0.085;
+				float3 rel = q - S;
+				float lat = abs(dot(rel, gEhx));
+				float latLim = R + (isSlit ? 0.055 : 0.032);
+				if (lat >= latLim) continue;
+				float sAdv = max(dot(S - gPA[s], flat), 0.0);
+				float sideF = dot(rel, flat);
+				if (sideF > R || sideF < -(R + sAdv + 0.08)) continue;
+				float wLat = sqrt(saturate(1.0 - (lat / latLim) * (lat / latLim)));
+				float wH = 1.0 - smoothstep(0.065, hTol, dh);
+				float ext = dot(S, flat) + R * lerp(isSlit ? 0.84 : 0.80, 1.05, wLat * wH);
+				if (ext > bestExt) {
+					bestExt = ext;
+					bestMot = max(dot(lerp(m0, m1, t), flat), 0.0);
+				}
+			}
+			float clothF = dot(q, flat);
+			if (bestExt > -1e8 && clothF < bestExt) {
+				float toss = bestMot > 0.04 ? saturate((bestMot - 0.04) / 0.12) * 0.025 : 0.0;
+				float push = (bestExt + toss - clothF) * wSide;
+				if (push > 0.44) push = 0.44;
+				q += flat * push;
+			}
+			float3 knee = gPB[s];
+			float kAdv = dot(knee - gPA[s], fwdB);
+			float dhK = abs(dot(knee, gDown) - myH);
+			if (doFront && kAdv > 0.14 && dhK < 0.16) {
+				float Rk = LegRadius(s, 1.0, fwdB) + pad;
+				if (Rk < 0.03) Rk = 0.085;
+				float latK = abs(dot(q - knee, gEhx));
+				float latLimK = Rk + (isSlit ? 0.080 : 0.050);
+				if (latK < latLimK) {
+					float fk = dot(q - knee, fwdB);
+					if (fk < Rk && fk > -(kAdv + Rk + 0.14)) {
+						float wK = sqrt(saturate(1.0 - (latK / latLimK) * (latK / latLimK)));
+						float targetF = dot(knee, fwdB) + Rk * lerp(isSlit ? 0.86 : 0.82, 1.05, wK);
+						float curF = dot(q, fwdB);
+						if (curF < targetF) {
+							float pushK = min((targetF - curF) * wSide, 0.48);
+							q += fwdB * pushK;
+						}
+					}
+				}
+			}
+		} else {
+			if (dhAB > 0.10 && myH >= hA - 0.03 && myH <= hB + 0.02) {
+				float Rs = LegRadius(s, tRef, flat) + pad;
+				if (Rs < 0.03) Rs = 0.065;
+				float3 relS = q - Sref;
+				float latS = abs(dot(relS, gEhx));
+				float sideS = dot(relS, flat);
+				float latLimS = Rs + 0.040;
+				if (latS < latLimS && sideS < Rs && sideS > -(Rs + 0.06)) {
+					float wLatS = sqrt(saturate(1.0 - (latS / latLimS) * (latS / latLimS)));
+					float targetS = dot(Sref, flat) + Rs * lerp(0.86, 1.0, wLatS);
+					float curS = dot(q, flat);
+					if (curS < targetS) {
+						float push = min((targetS - curS) * wSide, 0.22);
+						q += flat * push;
+					}
+				}
+			}
+		}
+	}
+
+	float along = dot(q - gPA[s], axN);
+	float aMax = isShin ? axl + 0.02 : axl + 0.05;
+	if (along < -0.02 || along > aMax) return;
+	float t = saturate(along / axl);
+	float3 O = gPA[s] + axN * (t * axl);
+	float3 rel = q - O;
+	rel -= axN * dot(rel, axN);
+	float d = length(rel);
+	float outSign = s == 0u || s == 2u ? -1.0 : 1.0;
+	// 現在の断面相対ベクトルとバインドの方位を混ぜ、前・横・後ろが 360° 滑らかにつながる外向きを作る。
+	// 非スリットでも不連続なジャンプが一切起きないため、脇が前後に開かず、かつ脚の中にも入らない。
+	float3 bDir = gEhx * bindLat + fwdB * bindFront;
+	float bl = length(bDir);
+	bDir = bl > 1e-4 ? bDir / bl : (gEhx * outSign);
+	float3 hRel = (q - O) - gDown * dot(q - O, gDown);
+	if (dot(hRel, gEhx) * outSign < -0.010) hRel += gEhx * ((-0.010 * outSign) - dot(hRel, gEhx));
+	float3 mixH = hRel + bDir * 0.045;
+	float3 dirR = mixH - axN * dot(mixH, axN);
+	float dlR = length(dirR);
+	if (dlR > 1e-4) dirR /= dlR;
+	else {
+		float3 fallback = bDir - axN * dot(bDir, axN);
+		float flb = length(fallback);
+		dirR = flb > 1e-4 ? fallback / flb : gPU[s];
+	}
+	float R = LegRadius(s, t, dirR) + pad + 0.004;
+	if (R < 0.03) R = isShin ? 0.065 : 0.085;
+	if (d < R) {
+		q = O + axN * (along - t * axl) + dirR * R;
+	}
+}
+
+float3 PushFaces(float3 q, float pad, float sc, float bindFront, float bindLat, bool isSlit)
+{
+	uint ns = gNLeg;
+	uint nLeg = min(ns, 2u);
+	[loop] for (uint leg = 0; leg < nLeg; leg++) {
+		if (leg < ns) PushSeg(q, leg, pad, sc, false, bindFront, bindLat, isSlit);
+		uint shin = leg + 2u;
+		if (shin < ns) PushSeg(q, shin, pad, sc, true, bindFront, bindLat, isSlit);
+	}
+	return q;
+}
+
+// 足は体積の外へ押すだけ。左右の足、前後左右、少しでも大きくても同じ。
+// 面は腰から見た今の位置。太もも断面では取り直さない。戻りは重力と風と摩擦。
+float3 LegPush(float3 p, float bindX, float bindY, float bindZ, float slitCode, float pad, float carry)
+{
+	float sc = max(Sim.w, 1e-4) + carry * 0.0;
 	float3 down = gDown;
 	float3 waistC = gWaist;
-	float3 ehx = gEhx;
-	float3 ehz = gEhz;
 	if (pad < 0.008) pad = 0.016;
+	if (Sim.z > 0.5) pad += 0.016;
 	float3 dpm = p / sc - waistC;
 	float hY0 = Grav.w - dot(dpm, down);
 	if (hY0 > Grav.w + 0.02) return p;
 	float drop = max(Grav.w - bindY, 0.0);
 	if (drop <= 0.015) return p;
-	uint ns = gNLeg;
-	float2 bindV = float2(bindX - Mode.y, bindZ - Mode.z);
-	float az = abs(atan2(bindV.x, bindV.y));
-	float groin = smoothstep(1.25, 2.35, az) * (1.0 - smoothstep(0.05, 0.18, drop));
 	bool isSlit = slitCode >= 0.5;
-	float slitOpen = isSlit ? saturate((drop - 0.08) / 0.16) * (1.0 - groin) : 0.0;
-
-	float yP = -dot(dpm, down);
-	float2 vP = float2(dot(dpm, ehx), dot(dpm, ehz));
-
-	// Closed (tube): smooth support-function envelope. For the vertex azimuth, over
-	// every leg height slice, need = proj(center) + horizontal half-width; take the max.
-	// Rsk is C1 in (azimuth,height) so neighbours move almost identically (no tearing),
-	// and placing the vertex at radius Rsk always lands it outside every leg. The leg
-	// motion only pushes the cloth out; return is left to gravity, friction and wind.
-	if (!isSlit) {
-		float cr = length(vP);
-		float2 d2 = cr > 1e-4 ? vP / cr : (length(bindV) > 1e-4 ? normalize(bindV) : float2(0, -1));
-		float3 dW = ehx * d2.x + ehz * d2.y;
-		float Rsk = cr;
-		[loop] for (uint s = 0; s < ns; s++) {
-			float Rlim = gRmax[s] + pad + 0.012;
-			float yA = dot(gPA[s], down);
-			float yB = dot(gPB[s], down);
-			// どの断面も高さか横位置で届かない足は、半径を読まない。
-			if (yP + max(yA, yB) <= -Rlim || yP + min(yA, yB) >= Rlim) continue;
-			float bA = dot(gPA[s], ehx) * d2.x + dot(gPA[s], ehz) * d2.y;
-			float bB = dot(gPB[s], ehx) * d2.x + dot(gPB[s], ehz) * d2.y;
-			if (max(bA, bB) + Rlim <= Rsk) continue;
-			float phi = atan2(dot(dW, gPW[s]), dot(dW, gPU[s]));
-			float fp = (phi / 6.2831853 + 0.5) * PF;
-			float fl = floor(fp);
-			float pb = fp - fl;
-			uint p0 = (uint)(fl + PF) % PF;
-			uint p1 = (p0 + 1u) % PF;
-			uint o0 = RAD0 + s * NSLICE * PF;
-			[loop] for (int k = 0; k < NSLICE; k++) {
-				float t = (float)k / (float)(NSLICE - 1);
-				float3 O = lerp(gPA[s], gPB[s], t);
-				float base = dot(O, ehx) * d2.x + dot(O, ehz) * d2.y;
-				if (base + Rlim <= Rsk) continue;
-				float dy = yP + dot(O, down);
-				if (abs(dy) >= Rlim) continue;
-				float Rleg = lerp(Prof[gProf0 + o0 + (uint)k * PF + p0], Prof[gProf0 + o0 + (uint)k * PF + p1], pb) + pad + 0.012;
-				if (abs(dy) >= Rleg) continue;
-				float half = sqrt(Rleg * Rleg - dy * dy);
-				Rsk = max(Rsk, base + half);
-			}
-		}
-		if (Rsk > cr + 1e-5) p += dW * min(Rsk - cr, 0.40) * sc;
-		return p;
-	}
-
-	// Slit: forward-support envelope. Push the panel along its own outward (front/back)
-	// axis just enough to stay in front of the leg at this (lateral,height), keeping the
-	// groin covered and the leg from poking through, while the panel's side edges (the
-	// slit) open smoothly to expose the leg. Everything is continuous -> no mesh tearing.
-	float uSign = slitCode < 1.5 ? 1.0 : -1.0;
-	float3 fwdW = -ehz * uSign;
-	float fCur = dot(dpm, fwdW);
-	float latCur = dot(dpm, ehx);
-	float needF = fCur;
-	[loop] for (uint s = 0; s < ns; s++) {
-		float Rlim = gRmax[s] + pad + 0.012;
-		float yA = dot(gPA[s], down);
-		float yB = dot(gPB[s], down);
-		if (yP + max(yA, yB) <= -Rlim || yP + min(yA, yB) >= Rlim) continue;
-		float latA = dot(gPA[s], ehx);
-		float latB = dot(gPB[s], ehx);
-		float latLo = min(latA, latB);
-		float latHi = max(latA, latB);
-		float gap = latCur < latLo ? (latLo - latCur) : (latCur > latHi ? (latCur - latHi) : 0.0);
-		if (gap >= Rlim) continue;
-		float phi = atan2(dot(fwdW, gPW[s]), dot(fwdW, gPU[s]));
-		float fp = (phi / 6.2831853 + 0.5) * PF;
-		float fl = floor(fp);
-		float pb = fp - fl;
-		uint p0 = (uint)(fl + PF) % PF;
-		uint p1 = (p0 + 1u) % PF;
-		uint o0 = RAD0 + s * NSLICE * PF;
-		float R2 = Rlim * Rlim;
-		[loop] for (int k = 0; k < NSLICE; k++) {
-			float t = (float)k / (float)(NSLICE - 1);
-			float3 O = lerp(gPA[s], gPB[s], t);
-			float dy = yP + dot(O, down);
-			float dLat = latCur - dot(O, ehx);
-			if (dy * dy + dLat * dLat >= R2) continue;
-			float Rleg = lerp(Prof[gProf0 + o0 + (uint)k * PF + p0], Prof[gProf0 + o0 + (uint)k * PF + p1], pb) + pad + 0.012;
-			float rem = Rleg * Rleg - dy * dy - dLat * dLat;
-			if (rem <= 0.0) continue;
-			float need = dot(O, fwdW) + sqrt(rem);
-			needF = max(needF, need);
-		}
-	}
-	float df = needF - fCur;
-	if (df > 1e-5) {
-		float sgn = latCur / (abs(latCur) + 0.04);
-		float dxLat = sgn * min(df, 0.05) * slitOpen;
-		float lift = min(df * 0.05, 0.014) * saturate(drop / 0.16);
-		p += (fwdW * df + ehx * dxLat - down * lift) * sc;
-	}
-	return p;
+	float bindFront = Mode.z - bindZ;
+	float bindLat = bindX - Mode.y;
+	float3 q = PushFaces(dpm, pad, sc, bindFront, bindLat, isSlit);
+	p += (q - dpm) * sc;
+	// 筒は足の形にも沿わせる。横たわりは上へ出す。そのあと、面の外をもう一度確かめる。
+	p = ClothFinish(p, pad, isSlit ? 1.0 : 0.0);
+	q = p / sc - waistC;
+	q = PushFaces(q, pad, sc, bindFront, bindLat, isSlit);
+	return (q + waistC) * sc;
 }
 
 // 脚の最小半径は 2.6cm。1 回の移動を 1.2cm にすると、表面から中心までは越えられない。
@@ -480,12 +653,6 @@ float3 BonePos(ClothN c)
 	float4x4 acc = (float4x4)0;
 	[unroll] for (int k = 0; k < 4; k++) acc += Bones[min(c.j[k], 63u)] * c.w[k];
 	return mul(float4(c.x.xyz, 1), acc).xyz;
-}
-
-float3 GravDown()
-{
-	float gl = length(Grav.xyz);
-	return gl > 1e-4 ? Grav.xyz / gl : float3(0, -1, 0);
 }
 
 // 飛行中、前の裾が靴の骨に乗って遠くまで運ばれていたら、腰から垂れた位置へ戻す。
@@ -565,19 +732,15 @@ float3 BackHang(float3 x, float ySlit, float3 skinned)
 }
 
 // 腰の傾きでスカート全体が横や後ろへ振れないよう、腰の中心から水平の向きだけを保ち、縦は重力の向きへ垂らす。
+// 横たわりで前後軸が重力に重なっても、輪の幅は水平のまま残す。
 float3 LevelHang(float3 x)
 {
 	float drop = Grav.w - x.y;
-	float3 down = GravDown();
+	float3 ehx, ehz, down;
+	FlatAxes(ehx, ehz, down);
 	float3 waistC = mul(float4(Mode.y, Grav.w, Mode.z, 1), Hips).xyz;
-	float3 hx = Hips[0].xyz;
-	float3 hz = Hips[2].xyz;
-	float lx = length(hx), lz = length(hz);
-	float3 rx = hx - down * dot(hx, down);
-	float3 rz = hz - down * dot(hz, down);
-	float rxl = length(rx), rzl = length(rz);
-	if (rxl > 1e-4) rx *= lx / rxl; else rx = hx;
-	if (rzl > 1e-4) rz *= lz / rzl; else rz = hz;
+	float3 rx = ehx * length(Hips[0].xyz);
+	float3 rz = ehz * length(Hips[2].xyz);
 	return (waistC + rx * (x.x - Mode.y) + rz * (x.z - Mode.z) + down * drop) * Sim.w;
 }
 
@@ -593,11 +756,11 @@ float PelvisCover(float y)
 	return 1.0 - smoothstep(0.025, 0.07, Grav.w - y);
 }
 
-// 股から裾へ。膝まで待たない。上は弱く、長いスカートほどふわふわする。
+// 腰からの丈。ロングの裾（約 50cm）で最大。ミニスカートは同じ曲線の腰付近なので軽く揺れる。
 float Flow(float y)
 {
 	float drop = max(Grav.w - y, 0);
-	return saturate((drop - 0.035) / 0.11);
+	return saturate((drop - 0.04) / 0.46);
 }
 
 // 正面の股間。カメラは前上から見るので、腰から腿のつけ根までは前布を体に残す。横と後ろ、それより下は靡かせる。
@@ -767,21 +930,25 @@ float Rush()
 }
 
 // 飛行中（止まっていても翼は羽ばたく）。前からの微風乱気流で前後・左右・上下に揺れる。
-// 前（角度が ±π）と後ろ（0）で位相と強さをずらし、飛行移動中はさらに大きく弾む。
+// 前（角度が ±π）と後ろ（0）で位相と強さをずらし、飛行移動中は重さと上下動で裾がびよんびよん波打つ。
+// 後ろスカートも脚が後ろへ流れたとき、重力で股の間（足と足の間）へ自然に垂れ落ちる成分を持つ。
 float3 FlightGust(ClothN c, float flow)
 {
 	float az = atan2(c.x.x - Mode.y, c.x.z - Mode.z);
 	float front = smoothstep(1.05, 2.30, abs(az));
-	float ph = lerp(1.35, 0.05, front) + sin(az) * 0.45;
+	float backMid = (1.0 - smoothstep(0.0, 1.05, abs(az))) * (1.0 - smoothstep(0.02, 0.14, abs(c.x.x - Mode.y)));
+	float drop = max(Grav.w - c.x.y, 0);
+	float ph = lerp(1.35, 0.05, front) + sin(az) * 0.45 - drop * 6.5;
 	float t = Mode.w;
 	float flyMove = saturate(Wind.w - 1.0);
-	float boost = 1.0 + 0.85 * flyMove;
+	float boost = 1.0 + 1.15 * flyMove;
 	float gZ = sin(t * 3.8 + ph) * 0.65 + sin(t * 7.6 + ph * 1.3 + 1.1) * 0.35;
 	float gX = sin(t * 2.9 + az * 1.5 + 0.7) * 0.55 + cos(t * 5.4 - ph) * 0.25;
-	float gY = sin(t * 6.2 + ph * 0.8) * 0.65 + cos(t * 10.5 + az) * 0.35;
+	float gY = sin(t * 6.8 + ph * 0.8) * 0.60 + sin(t * 10.5 - drop * 9.0 + az * 0.5) * (0.40 + 0.55 * front * flyMove);
 	float3 down = GravDown();
-	float3 wave = float3(gX * 0.32, 0, gZ) - down * (gY * 0.42);
-	return wave * (0.00060 * boost * saturate(flow) * Sim.w);
+	float3 wave = float3(gX * 0.32, 0, gZ) - down * (gY * (0.45 + 0.45 * front * flyMove));
+	float3 between = ( -gEhz * (0.38 * flyMove) + down * (0.20 * flyMove) ) * backMid;
+	return (wave * (0.00060 * boost) + between * 0.00075) * saturate(flow) * Sim.w;
 }
 
 [numthreads(64, 1, 1)]
@@ -804,12 +971,19 @@ void CSClothStep(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 		vel = 0;
 		prevRest = rest;
 	} else {
-		// モーション変更や歩行・飛行で腰（rest）が動いたとき、前のスカートの位置をそのまま残し、慣性でぴよんぴよん弾ませる。
+		// モーション変更や歩行・走り・飛行で腰（rest）が上下・前後に動いたとき、前のスカートの位置を残し、慣性と重力でびよんびよん波打たせる。
+		// 体の向きが急に変わったフレームは布を連れて回り、足の反対側へ遅れないようにする。
 		float3 dRest = rest - prevRest;
 		float drl = length(dRest);
 		if (drl > 0.10 * Sim.w) dRest *= (0.10 * Sim.w) / drl;
-		off -= dRest * (0.82 * flow);
-		vel -= (dRest / dt) * (0.38 * flow);
+		float cth = clamp((Delta[0].x + Delta[1].y + Delta[2].z - 1.0) * 0.5, -1.0, 1.0);
+		float sharp = 1.0 - smoothstep(0.34, 0.94, cth);
+		float lag = lerp(0.82, 0.20, sharp);
+		float3 down0 = GravDown();
+		float3 dVert = down0 * dot(dRest, down0);
+		float3 dHorz = dRest - dVert;
+		off -= (dHorz * lag + dVert * lerp(0.95, 0.25, sharp)) * flow;
+		vel -= ((dHorz * lerp(0.38, 0.08, sharp) + dVert * lerp(0.72, 0.14, sharp)) / dt) * flow;
 	}
 	float3 gust = Wind.xyz + Air.xyz;
 	float gAmp = length(gust);
@@ -827,14 +1001,15 @@ void CSClothStep(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	target += GustRipple(c, gDir, side, up, reach, 1.0, 1.0);
 	target += GravDown() * (sag * 0.02 * flow * Sim.w);
 	if (Wind.w > 0.5) target += FlightGust(c, flow * free) * 80.0;
-	// 腰の移動（dRest）で生まれた弾み（vel）だけを減衰ばねで揺らし、風は maxStep の一定速度で滑らかに出入りさせる。
-	float damp = exp(-dt * (Wind.w > 0.5 ? 4.0 : 6.0));
-	vel = (vel - off * (14.0 * dt)) * damp;
-	if (length(rest - prevRest) < 1e-5 && Wind.w < 0.5) vel *= 0.25;
+	// 腰の上下動や足の蹴りで生まれた弾み（vel）を減衰ばねでびよんびよんと波打たせ、風と重力へ滑らかに戻す。
+	float rush = Rush();
+	float damp = exp(-dt * (Wind.w > 0.5 ? 3.2 : lerp(5.2, 3.4, rush)));
+	vel = (vel - off * (15.5 * dt)) * damp;
+	if (length(rest - prevRest) < 1e-5 && Wind.w < 0.5 && rush < 0.05) vel *= 0.25;
 	float vl = length(vel);
-	float maxV = 0.45 * max(Sim.w, 0.2);
+	float maxV = 0.52 * max(Sim.w, 0.2);
 	if (vl > maxV) vel *= maxV / vl;
-	off += vel * dt * 0.30;
+	off += vel * dt * 0.42;
 	float3 delta = target - off;
 	float dl = length(delta);
 	// 風で出るときは速く、足で押された後やモーション切り替え後に重力と摩擦で戻るときは滑らかな速度で戻す。
@@ -843,12 +1018,15 @@ void CSClothStep(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	float maxStep = stepRate * dt * max(Sim.w, 0.2);
 	if (dl > maxStep && dl > 1e-6) delta *= maxStep / dl;
 	off += delta;
-	// 上下の伸び縮みは腰の揺れで ±4cm まで許し、垂れたスカートがぴよんぴよん動くようにする。
+	// 上下の伸び縮みは腰の揺れや飛行・走りの弾みで ±6.5cm まで許し、垂れたスカートがびよんびよん波打つようにする。
 	float vComp = dot(off, up);
-	float vLim = (0.045 + saturate((abs(Air.w) - 0.62) / 0.9) * 0.18) * flow * max(Sim.w, 0.2);
+	float vLim = (0.065 + 0.025 * max(saturate(Wind.w - 1.0), rush) + saturate((abs(Air.w) - 0.62) / 0.9) * 0.18) * flow * max(Sim.w, 0.2);
 	if (abs(vComp) > vLim) off += up * (clamp(vComp, -vLim, vLim) - vComp);
-	// 足は今の位置で押すだけ。押した分はずれに混ぜ、足が離れたあとは重力と摩擦と風だけで戻る。腰の帯は押さない。
-	float3 pushed = c.p.w > 0.5 ? rest : LegPush(rest + off, c.x.x, c.x.y, c.x.z, c.q.z, 0.016);
+	// 股は風ではほとんど動かさない。足に入っている分だけ外へ出し、その分はずれに残す。
+	float hold = GroinHold(c.x.x, c.x.y, c.x.z);
+	off *= (1.0 - hold);
+	vel *= (1.0 - hold);
+	float3 pushed = c.p.w > 0.5 ? rest : LegPush(rest + off, c.x.x, c.x.y, c.x.z, c.q.z, 0.016, 0.0);
 	off = pushed - rest;
 	St[gSt0 + id] = float4(pushed, 0);
 	St[gSt0 + NMAX + id] = float4(rest, 0);
@@ -887,7 +1065,8 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 		off = c.p.w > 0.5 ? float3(0, 0, 0) : St[gSt0 + 3 * NMAX + id].xyz;
 	}
 	float flow = on ? Flow(c.x.y) : 0;
-	float lim = lerp(0.18, 0.55, saturate(flow)) * max(Sim.w, 0.2);
+	// 腰とミニは軽く、ロングの裾だけ 0.55m まで。舞台の風で上段が腕まで残らない。
+	float lim = lerp(0.05, 0.55, saturate(flow)) * max(Sim.w, 0.2);
 	[unroll] for (int it = 0; it < 4; it++) {
 		gP[id] = on ? off : float3(0, 0, 0);
 		GroupMemoryBarrierWithGroupSync();
@@ -905,7 +1084,19 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 			off = acc / cnt;
 			float ol = length(off);
 			if (ol > lim && ol > 1e-5) off *= lim / ol;
-			float3 pushed = LegPush(rest + off, c.x.x, c.x.y, c.x.z, c.q.z, 0.016);
+			off *= (1.0 - GroinHold(c.x.x, c.x.y, c.x.z));
+			// ならしたあとの最後だけ、足が動いた分を一度載せる。
+			float carry = it == 3 ? 1.0 : 0.0;
+			float3 before = rest + off;
+			float3 pushed = LegPush(before, c.x.x, c.x.y, c.x.z, c.q.z, 0.016, carry);
+			if (carry > 0.5) {
+				float3 shove = pushed - before;
+				float3 vel = St[gSt0 + 2 * NMAX + id].xyz + shove * 3.5;
+				float vl = length(vel);
+				float maxV = 0.9 * max(Sim.w, 0.2);
+				if (vl > maxV) vel *= maxV / vl;
+				St[gSt0 + 2 * NMAX + id] = float4(vel, 0);
+			}
 			off = pushed - rest;
 		}
 		GroupMemoryBarrierWithGroupSync();
@@ -947,21 +1138,18 @@ void CSClothWrite(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	if (wsum > 1e-5) disp /= wsum;
 	float coverV = PelvisCover(c.p.y);
 	float hangV = (Cnt.x > 1u ? 1.0 : 0.0) * HangIn(c.p.y) * (1.0 - saturate(Mode.x)) * (1.0 - coverV) * saturate(c.p.w);
-	float3 down = GravDown();
-	float3 hx = Hips[0].xyz, hz = Hips[2].xyz;
-	float3 ehx = hx - down * dot(hx, down);
-	float3 ehz = hz - down * dot(hz, down);
-	ehx = length(ehx) > 1e-4 ? normalize(ehx) : float3(1, 0, 0);
-	ehz = length(ehz) > 1e-4 ? normalize(ehz) : float3(0, 0, 1);
+	float3 ehx, ehz, down;
+	FlatAxes(ehx, ehz, down);
 	float3 nHang = ehx * c.n.x - down * c.n.y + ehz * c.n.z;
 	float3 hungV = LevelHang(c.p.xyz) + down * (saturate(max(Grav.w - c.p.y, 0) / 0.45) * 0.02 * Sim.w);
 	float3 p = lerp(s, hungV, hangV) + disp * saturate(c.p.w);
+	// 股は垂れた位置に戻してから、足の外だけ出す。押したあとに戻すと足の中へ入る。
+	p = lerp(p, hungV, GroinHold(c.p.x, c.p.y, c.p.z));
 	p = HipOut(p);
 	uint span = c.a.w & 3u;
 	float slitCode = span == 1u ? 1.0 : (span == 2u ? 2.0 : 0.0);
 	float skin = c.n.w < 0.0 ? -c.n.w : 0.016;
-	// 連続な支持関数で押すので頂点ごとに差が出ず、三角形は裂けない。そのまま使う。
-	p = LegPush(p, c.p.x, c.p.y, c.p.z, slitCode, skin);
+	p = LegPush(p, c.p.x, c.p.y, c.p.z, slitCode, skin, 0.0);
 	float3 def = (p - hungV) / max(Sim.w, 1e-4);
 	float dropV = max(Grav.w - c.p.y, 0.12);
 	nHang -= down * clamp(dot(nHang, def) / dropV * 0.35, -0.35, 0.35);

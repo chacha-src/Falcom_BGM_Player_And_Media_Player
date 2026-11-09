@@ -703,9 +703,10 @@ void CutGhost(float4 spos, float3 w, float ny)
 {
 	float gh = AllyGhost(w);
 	if (ny > 0.62) gh *= saturate((w.y - 0.18) * 6.0);
-	if (gh < 0.02) return;
-	float h = frac(sin(dot(spos.xy, float2(12.9898, 78.233))) * 43758.5453);
-	clip(1.0 - gh * 0.93 - h);
+	// 点を残すと、残った床が深度を書いてスカートや裾の一部だけ隠す。帯は全部捨てる。
+	// 人・モンスターはこの関数を通さない。
+	if (gh < 0.40) return;
+	clip(-1 - abs(spos.x) * 0);
 }
 
 float3 FogAt(float3 col, float3 w)
@@ -730,20 +731,16 @@ GOut Emit(float4 c, float3 w)
 }
 GOut EmitZ(float4 c, float z) { GOut o; o.c = c; o.z = z; return o; }
 
-// カメラ前方で、いちばん近いキャラより手前の面だけ抜く。奥はそのまま。
+// カメラ前方で、体より手前の地形・水面・小物だけ抜く。奥はそのまま。
+// ディザで点を残すと深度がスカートに被さる。人・モンスターはこの関数を通さない。
 void CamShell(float4 spos, float3 w)
 {
 	float a0 = CamNear.x;
 	float a1 = CamNear.y;
 	if (a1 <= a0 + 0.001) return;
 	float d = dot(w - Eye.xyz, CamFwd.xyz);
-	// 視点が岩にめり込んだときのレンズ周りの殻だけ消す。寄りカットの体は奥にあるので残す。
-	if (d < a0 && length(w - Eye.xyz) < 0.28) { clip(-1); return; }
-	float keep = saturate((d - a0) / (a1 - a0));
-	keep = keep * keep;
-	if (keep > 0.985) return;
-	float h = frac(sin(dot(spos.xy, float2(12.9898, 78.233))) * 43758.5453);
-	clip(keep - h);
+	if (d >= a1) return;
+	clip(-1 - abs(spos.x) * 0);
 }
 
 float3 DetailN(float3 n, float3 w)
@@ -844,6 +841,7 @@ float3 FamSkin(float3 painted, float3 n, float3 w, float slice)
 
 GOut PSM(PSIn i)
 {
+	// 人・モンスター・服。カットの手前フェード（CamShell）は掛けない。
 	// 人の体・服・髪（輪郭色 a>1.5）。地形の細かい法線は肌と布をまだらにし、浅い角度の縁の光は紺を灰色に飛ばす。
 	const float person = OutlineColor.a > 1.5 ? 1. : 0.;
 	float3 n = normalize(i.n);

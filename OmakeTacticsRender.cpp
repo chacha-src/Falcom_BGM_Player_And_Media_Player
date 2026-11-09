@@ -7559,9 +7559,8 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		}
 	}
 	float span = y0 - yMin;
-	// ミニスカートは靡かせない。裾が股の近くなので、動かすとカメラから股間が見える。
-	const BOOL mini = span < 0.38f;
 	// ミニスカートだけ裾を 9cm 足す。腰は動かさない。丈のあるドレスと水着の下は対象外。
+	// 揺れはロングの同じ丈として扱う（無い布の分は動かない）。ここでは固定しない。
 	if (span > 0.12f && span < 0.36f) {
 		const float extra = 0.09f;
 		for (int i = 0; i < n; i++) {
@@ -7758,6 +7757,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 				}
 			}
 			// 裾の段は縁の三角形が覆うことや前後の丈の差で片側だけ残ることがあるので、一つ上から数え始めてよい。
+			// 連続して 4 段（約 20cm）以上開いているときだけスリットとする。閉じたロングスカートの裾の細かい三角形隙間をスリットと誤認しない。
 			// 切れ目の無かった段にも一番近い開いた段の角度を入れておき、裾（r=M）や境の段で角度が 0 に飛ばないようにする。
 			for (int sd = 0; sd < 2; sd++) {
 				int top = M + 1, cnt = 0;
@@ -7765,7 +7765,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 					if (gap[r][sd]) { top = r; cnt++; }
 					else if (cnt > 0 || r < M - 1) break;
 				}
-				if (cnt >= 2) {
+				if (cnt >= 4) {
 					slitTop[sd] = top;
 					for (int r = 0; r <= M; r++) {
 						if (gap[r][sd]) continue;
@@ -7947,7 +7947,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		o.p[0] = 0.022f + 0.09f * t + 0.03f * o.q[0];
 		o.p[1] = 0.12f - 0.09f * t;
 		o.p[2] = 0.55f + 0.45f * t;
-		o.p[3] = (r == 0 || mini) ? 1.f : 0.f;
+		o.p[3] = (r == 0) ? 1.f : 0.f;
 		// 両脇スリット：前（1）と後ろ（2）を一貫した脇の角度で分け、スリット上端での段差を作らない。
 		if (topBoth <= M && r > 0) {
 			const BOOL isFront = fabsf(th) > gapOf(r, th < 0.f ? 0 : 1);
@@ -8022,9 +8022,9 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			if (a == jUA[0] || a == jUA[1]) { armBone[j] = 1; break; }
 		}
 	}
-	// 腰より下のスカート頂点に腕・手の骨が混ざっていると、腕を振ったときにその頂点だけ外れてメッシュが裂ける。腰の骨へ移す。
+	// 付け根の 2cm だけ、腕の重みが残ると振った瞬間に頂点が裂ける。それより下は布に任せる。
 	for (int i = 0; i < n; i++) {
-		if (!isSk[i]) continue;
+		if (!isSk[i] || jHips < 0 || jHips > 255) continue;
 		Renderer::CSkinV& s = V[nb + i];
 		if (s.p[1] > y0 + 0.02f) continue;
 		for (int c = 0; c < 4; c++) {
@@ -9795,11 +9795,14 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	cb.mode[3] = m_time;
 	float head[3] = {};
 	TacWind(m_time, world, velUse, 0.48f, dp.gait, dp.fly, cb.wind, cb.air, head);
-	// 服は歩きも飛行もマップの風だけ。移動で作った向かい風はかけない。
+	// 地上の歩き・走りは移動で前から風が当たる。飛行と静止はマップの風だけ。
 	// 飛行中（停止でも翼は羽ばたく）は Wind.w を 1 より大きくし、弱い乱れを足す。
-	cb.wind[0] -= head[0] * 0.48f;
-	cb.wind[1] -= head[1] * 0.48f;
-	cb.wind[2] -= head[2] * 0.48f;
+	const BOOL groundMove = dp.fly <= 0.5f && dp.gait > 0.04f;
+	if (!groundMove) {
+		cb.wind[0] -= head[0] * 0.48f;
+		cb.wind[1] -= head[1] * 0.48f;
+		cb.wind[2] -= head[2] * 0.48f;
+	}
 	const float moveSp = sqrtf(velUse[0] * velUse[0] + velUse[2] * velUse[2]);
 	const float moveFly = fmaxf(dp.gait, Clampf(moveSp / 3.5f, 0.f, 1.2f));
 	cb.wind[3] = dp.fly > 0.5f ? (1.f + moveFly) : 0.f;
@@ -9821,6 +9824,11 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		cb.wind[0] = gsum[0] * stage;
 		cb.wind[1] = gsum[1] * stage;
 		cb.wind[2] = gsum[2] * stage;
+		if (groundMove) {
+			cb.wind[0] += head[0] * 0.48f;
+			cb.wind[1] += head[1] * 0.48f;
+			cb.wind[2] += head[2] * 0.48f;
+		}
 		cb.air[0] = ci->breeze.d[0] * stage;
 		cb.air[1] = ci->breeze.d[1] * stage;
 		cb.air[2] = ci->breeze.d[2] * stage;
@@ -9882,7 +9890,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
 		m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
 	}
-	}
+		}
 	}
 	}
 	if (canSoft) {

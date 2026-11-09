@@ -1477,7 +1477,6 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	try {
 	if (!CCustomBlurDialogExBase::OnInitDialog())
 		return FALSE;
-
 	SyncBannerSoft3DCamFromSave();
 
 	// 子コントロールを親の再描画で塗り潰さない(スタティック消失・リスト欠け・ちらつき防止)

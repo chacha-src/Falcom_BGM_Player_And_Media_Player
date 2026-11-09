@@ -5844,6 +5844,7 @@ void Game::DrawCutIn3D()
 	}
 	if (sightN <= 0) { sightXz[0] = 0.f; sightXz[1] = 0.f; sightN = 1; }
 	m_r.SetSight(sightXz, sightN, (float)TacSightTiles(m_b.weather));
+	float cutHide = 0.f, cutSolid = 0.f;
 	int fadeAbove = -1, fadeX = -1, fadeZ = -1;
 	if (m_cutA >= 0 && m_cutA < m_b.nUnits && Map::In(m_b.u[m_cutA].x, m_b.u[m_cutA].z)) {
 		const Unit& au = m_b.u[m_cutA];
@@ -5877,22 +5878,30 @@ void Game::DrawCutIn3D()
 			float h = m_act[id].height;
 			if (h < 0.4f) h = 0.9f;
 			if (m_act[id].proc != 3 && h > 1.32f) h = 1.32f;
-			float d = Dot(p + v3(0, h * 0.45f, 0) - eye, fwd);
+			// 胸と裾の近い方。スカートは軸より前に出るので、境界は軸のすぐ奥に置く。
+			float dC = Dot(p + v3(0, h * 0.45f, 0) - eye, fwd);
+			float dH = Dot(p + v3(0, h * 0.08f, 0) - eye, fwd);
+			float d = dC < dH ? dC : dH;
 			if (d > 0.35f && d < nearSub) nearSub = d;
 		};
 		takeId(m_cutA);
 		takeId(m_cutD);
 		if (m_sumOn && !m_sumHide) {
 			float h = m_sumAct.height > 0.4f ? m_sumAct.height : 1.2f;
-			float d = Dot(m_sumPos + v3(0, h * 0.4f, 0) - eye, fwd);
+			float dC = Dot(m_sumPos + v3(0, h * 0.45f, 0) - eye, fwd);
+			float dH = Dot(m_sumPos + v3(0, h * 0.08f, 0) - eye, fwd);
+			float d = dC < dH ? dC : dH;
 			if (d > 0.35f && d < nearSub) nearSub = d;
 		}
 		if (nearSub < 0.6f) nearSub = Len(look - eye);
-		// 体と手元の武器より手前の床・壁だけ抜く。境界を体の奥に置くと胸が穴になる。
-		float solid = nearSub - 0.85f;
-		float hide = solid - 1.25f;
-		if (hide < 0.06f) hide = 0.06f;
-		if (solid < hide + 0.35f) solid = hide + 0.35f;
+		// 手前の地形・水面・小物だけ捨てる。人・モンスターは後でフェードを切って描く。
+		// 境界を体の 0.8m 手前で止めると、残った床がスカートに被さる。
+		float solid = nearSub + 0.06f;
+		float hide = solid - 0.50f;
+		if (hide < 0.05f) hide = 0.05f;
+		if (solid < hide + 0.08f) solid = hide + 0.08f;
+		cutHide = hide;
+		cutSolid = solid;
 		m_r.SetCamNear(hide, solid, 1.f);
 		m_r.SetCamFwd(fwd.x, fwd.y, fwd.z);
 	}
@@ -5982,6 +5991,9 @@ void Game::DrawCutIn3D()
 	m_r.DrawTerrain();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
+	// 地形と水面はフェード済み。ここから人・モンスターは欠かさず描く。
+	m_r.SetCamNear(0.f, 0.f, 0.f);
+	m_r.CommitFrame();
 	m_r.ResetActorPipe();
 	m_r.BeginInstBatch();
 	for (int k = 0; k < nId; k++) {
@@ -6002,6 +6014,8 @@ void Game::DrawCutIn3D()
 		ActorDraw(m_r, m_lib, m_sumAct, sumWorld(), dp, m_time);
 	}
 	m_r.EndInstBatch();
+	m_r.SetCamNear(cutHide, cutSolid, 1.f);
+	m_r.CommitFrame();
 	if (m_sumOn) DrawSummonGate();
 	if (m_sumOn && m_sumHit && (m_cutStageT - SumStrikeSpan()) < 0.55f && (m_sumFx == SUM_FX_ICE || m_sumFx == SUM_FX_HOLY)) {
 		DrawParams sig = {};
