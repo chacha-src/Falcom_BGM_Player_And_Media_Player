@@ -295,6 +295,8 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 	s_inst = this;
+	ModifyStyle(0, WS_CLIPCHILDREN);
+	EnableAero(FALSE);
 
 	auto flatBtn = [](CCustomStandardButton& b) {
 		if (!b.GetSafeHwnd()) return;
@@ -364,8 +366,8 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 		m_stripLanes.SetAeroMode(FALSE);
 		auto mkStripHgt = [&](CCustomComboBox& cb, int id) {
 			if (!cb.GetSafeHwnd())
-				cb.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-					CRect(0, 0, 44, 120), this, id);
+				cb.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+					CRect(0, 0, 44, 28), this, id);
 			cb.SetAeroMode(FALSE);
 		};
 		mkStripHgt(m_stripHgt0, IDC_SASAMI_STRIP_HGT0);
@@ -376,8 +378,8 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 		SyncStripCombos();
 	}
 	if (!m_pasteMode.GetSafeHwnd())
-		m_pasteMode.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-			CRect(0, 0, 100, 120), this, IDC_SASAMI_PASTE_MODE);
+		m_pasteMode.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 100, 28), this, IDC_SASAMI_PASTE_MODE);
 	m_pasteMode.ResetContent();
 	m_pasteMode.AddString(LL14(L"上書き", L"Overwrite", L"Écraser", L"Sovrascrivi", L"Sobrescribir",
 		L"덮어쓰기", L"覆盖", L"استبدال", L"Замена", L"Überschreiben", L"Sobrescrever", L"Overschrijven", L"Nadpisz", L"Üzerine yaz"));
@@ -836,11 +838,12 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	const int sbH = ScStaffScrollGutterH();
 	auto layoutCombo = [&](CCustomComboBox& c, int x, int y, int w, int h, int dropW = 0) {
 		if (!c.GetSafeHwnd()) return;
-		c.MoveWindow(x, y, w, h);
-		const int closedH = (h - 4 > 22) ? (h - 4) : 22;
-		const int dropH = (closedH > 28) ? closedH : 28;
+		c.ModifyStyle(0, WS_CLIPSIBLINGS);
+		const int visH = (h > 28) ? 28 : (h < 22 ? 22 : h);
+		c.MoveWindow(x, y, w, visH);
+		const int closedH = (visH - 4 > 18) ? (visH - 4) : 18;
 		c.SetItemHeight(-1, closedH);
-		c.SetItemHeight(0, dropH);
+		c.SetItemHeight(0, 20);
 		if (dropW > 0) c.SetDroppedWidth(dropW);
 	};
 	int y = cap + pad;
@@ -969,11 +972,7 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	InvalidateRect(m_bodyRc, FALSE);
 	if (m_rollRc.Width() > 0)
 		InvalidateRect(m_rollRc, FALSE);
-	{
-		CRect chrome(0, cap, rc.Width(), m_bodyRc.top);
-		if (chrome.Height() > 0)
-			InvalidateRect(chrome, FALSE);
-	}
+	ScStaffRepaintChrome(this, m_bodyRc.top);
 	UpdateHelpBar();
 }
 
@@ -997,6 +996,8 @@ BOOL CSasamiFmScoreDlg::OnEraseBkgnd(CDC* pDC)
 	CRect rc;
 	GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int saved = pDC->SaveDC();
+	ScStaffExcludeChildWindows(*pDC, this);
 	CRect chrome(0, cap, rc.right, (m_bodyRc.top > cap) ? m_bodyRc.top : rc.bottom);
 	if (chrome.Height() > 0) {
 #if CCUSTOM_AERO_SUPPORT
@@ -1028,6 +1029,7 @@ BOOL CSasamiFmScoreDlg::OnEraseBkgnd(CDC* pDC)
 		pDC->FillSolidRect(&side, RGB(236, 240, 238));
 #endif
 	}
+	pDC->RestoreDC(saved);
 	return TRUE;
 }
 
@@ -1153,6 +1155,7 @@ void CSasamiFmScoreDlg::OnPaint()
 {
 	CPaintDC dc(this);
 	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
+	ScStaffExcludeChildWindows(dc, this);
 	CRect panel = m_bodyRc;
 	if (panel.Width() < 8 || panel.Height() < 8)
 		return;
@@ -3570,7 +3573,6 @@ void CSasamiFmScoreDlg::AutoArrangeRefresh()
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
-	ScStaffInvalidateBelowCaption(this);
 }
 
 int CSasamiFmScoreDlg::AutoArrangePreview()
@@ -3588,24 +3590,6 @@ static int FmAaPreview(void* ctx) { return ((CSasamiFmScoreDlg*)ctx)->AutoArrang
 
 void CSasamiFmScoreDlg::OpenAutoArrange()
 {
-	if (ScAutoArrangeCountNotes(m_doc.ev, m_doc.evCount) <= 0) {
-		m_status.SetWindowText(LL14(
-			L"音符が無いのでアレンジできません。",
-			L"No notes, so there is nothing to arrange.",
-			L"Aucune note : impossible d'arranger.",
-			L"Nessuna nota: niente da arrangiare.",
-			L"No hay notas: no se puede arreglar.",
-			L"음표가 없어 편곡할 수 없습니다.",
-			L"没有音符，无法编曲。",
-			L"لا توجد نغمات، لا يمكن التوزيع.",
-			L"Нет нот — аранжировать нечего.",
-			L"Keine Noten, nichts zu arrangieren.",
-			L"Sem notas, não há o que arranjar.",
-			L"Geen noten, niets om te arrangeren.",
-			L"Brak nut, nie ma czego aranżować.",
-			L"Nota yok, düzenlenecek bir şey yok."));
-		return;
-	}
 	ScAutoArrangeHost host;
 	memset(&host, 0, sizeof(host));
 	host.ev = m_doc.ev;
@@ -3622,7 +3606,9 @@ void CSasamiFmScoreDlg::OpenAutoArrange()
 	host.refresh = FmAaRefresh;
 	host.preview = FmAaPreview;
 	host.stop = FmAaStop;
-	if (ScAutoArrangeDlgRun(&host) == IDOK) {
+	const int aaOk = (ScAutoArrangeDlgRun(&host) == IDOK) ? 1 : 0;
+	ScStaffRepaintChrome(this, m_bodyRc.top);
+	if (aaOk) {
 		m_status.SetWindowText(LL14(
 			L"自動伴奏を入れました。元に戻すで消せます。",
 			L"Accompaniment added. Undo removes it.",
@@ -4050,7 +4036,9 @@ void CSasamiFmScoreDlg::NotifyEdited()
 	RefreshBoundRoll();
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
-	ScStaffInvalidateBelowCaption(this);
+	ScStaffInvalidateBodyRect(this, m_bodyRc);
+	if (m_rollRc.Width() > 0)
+		InvalidateRect(m_rollRc, FALSE);
 }
 
 void CSasamiFmScoreDlg::RefreshBoundRoll()

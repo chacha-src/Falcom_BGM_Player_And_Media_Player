@@ -1309,8 +1309,8 @@ static void FillMsg(ScAutoArrangeResult* out)
 	if (!out) return;
 	if (out->err == SC_AE_NONOTES) {
 		wcsncpy_s(out->msg, LL14(
-			L"音符が無いのでアレンジできません。",
-			L"No notes, so there is nothing to arrange.",
+			L"音符が無いので、本体の長さで小節数を指定してください。",
+			L"No notes — set body length to choose how many bars to write.",
 			L"Aucune note : impossible d'arranger.",
 			L"Nessuna nota: niente da arrangiare.",
 			L"No hay notas: no se puede arreglar.",
@@ -1405,8 +1405,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (!ev || !evCount || !opt || evMax <= 0) return SC_AE_NONOTES;
 	const int totalNotes = ScAutoArrangeCountNotes(ev, *evCount);
 	const int explicitTargets = opt->targetMask != 0;
-	/* 0 音でも、対象パートが明示されていればアレンジデータから丸ごと生成する。 */
-	if (totalNotes <= 0 && !explicitTargets) {
+	/* 0 音でも、対象パート指定か本体小節数があればゼロから生成する。 */
+	if (totalNotes <= 0 && !explicitTargets && opt->genBars <= 0) {
 		if (out) { out->err = SC_AE_NONOTES; FillMsg(out); }
 		return SC_AE_NONOTES;
 	}
@@ -1654,8 +1654,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (lead0 == 0xFFFFFFFFu) { lead0 = introTicks; lead1 = noteEnd; }
 	if (noteEnd == 0) {
 		int gb = opt->genBars > 0 ? opt->genBars : 16;
-		noteEnd = (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
+		noteEnd = introTicks + (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
 		lead0 = introTicks; lead1 = noteEnd;
+	} else if (opt->genBars > 0) {
+		uint32_t want = introTicks + (uint32_t)(opt->genBars * ScStaffMeterTicksPerMeasure(defN, defD));
+		if (noteEnd < want) noteEnd = want;
+		if (lead1 < want) lead1 = want;
 	}
 
 	uint32_t breakT0 = 0xFFFFFFFFu, breakT1 = 0;

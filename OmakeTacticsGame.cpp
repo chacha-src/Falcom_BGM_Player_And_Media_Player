@@ -112,7 +112,7 @@ Game::Game()
 	m_qOkN = 0;
 	m_qCoolT = 0;
 	m_qHz = 0;
-	m_qSlots = 1;
+	m_qSlots = 0;
 	m_qFine = TacTierNotch(1);
 	m_syncArm = -1;
 	m_syncArmN = 0;
@@ -771,10 +771,8 @@ int Game::QualityNow() const
 
 int Game::SyncNow() const
 {
-	if (m_save.quality == TAC_Q_AUTO) {
-		int v = (m_syncRun >= 0) ? m_syncRun : TacHzDefaultI();
-		return Clampi(v, 0, TAC_HZ_N - 1);
-	}
+	if (m_syncRun >= 0) return Clampi(m_syncRun, 0, TAC_HZ_N - 1);
+	if (m_save.quality == TAC_Q_AUTO) return TacHzDefaultI();
 	return Clampi(TacVsync(m_save), 0, TAC_HZ_N - 1);
 }
 
@@ -815,6 +813,7 @@ void Game::PickQuality(int delta)
 		m_syncArm = 0;
 		m_syncArmN = 0;
 		m_qFine = TacTierNotch(6);
+		m_qSlots = 0;
 		m_r.SetQualityPlus(0);
 		ApplyQualityNow(6);
 	} else {
@@ -822,6 +821,7 @@ void Game::PickQuality(int delta)
 		TacQualityUserLock(m_save);
 		m_syncRun = -1;
 		m_qFine = TacTierNotch(q);
+		m_qSlots = 0;
 		m_r.SetQualityPlus(0);
 		ApplyQualityNow(q);
 	}
@@ -845,36 +845,49 @@ void Game::PulseQuality(float work, float span)
 	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.25f) return;
 	if (m_syncLock > 0) return;
 	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
-	if (autoOn) {
-		// 代表 Hz は残す（144/165 ディスプレイに合わせるため）。1 段ずつしか動かさない。
-		// フレームレート確認と描画段は交互。限界突破+++で一度、上の Hz を見る。
-		// 上げられるなら Hz を上げ、無理なら +4 へ。+5 以降は本当に余白があるときだけ。
-		static const int kCand[] = { 240, 165, 144, 120, 90, 72, 60 };
-		const int nCand = (int)(sizeof(kCand) / sizeof(kCand[0]));
+	int wantedQ = TacQualityWanted(m_save);
+	// 画質と拍を一緒に探る。自動は代表 Hz の天井まで。手動の限界突破は、指定した Hz が天井。
+	// 限界突破までは画質を上げ、そこから +N を足しつつ、今の +N のまま上の拍へ挑戦する。
+	// 挑戦先で少し溢れたら + を 1 つ外してその拍に残る。厳しければ拍を戻し、+N は連れ返す。
+	// 戻した先では +N を上下して収める。無印まで落ちたときだけ拍を 1 段下げる。
+	// 1/60 だけ特別で、標準、軽量、1/30 と行き来する。1/30 で標準に届いたら 1/60 へ戻す。
+	if (autoOn || wantedQ == 6) {
+		static const int kRep[] = { 30, 60, 72, 90, 120, 144, 165, 240 };
+		const int nRep = (int)(sizeof(kRep) / sizeof(kRep[0]));
+		const int kTiny = 0;                 // 最軽量（超軽量）
+		const int kLight = TacTierNotch(0);  // 軽量
+		const int kStd = TacTierNotch(1);    // 標準
+		int capHz = 240;
+		if (!autoOn) capHz = TacVsyncHz(m_save);
+		if (capHz < 30) capHz = 30;
 		auto nextUp = [&](int curHz) {
 			int best = 0;
-			for (int c = 0; c < nCand; ++c) {
-				int h = kCand[c];
-				if (h > curHz && (best == 0 || h < best)) best = h;
+			for (int c = 0; c < nRep; ++c) {
+				int h = kRep[c];
+				if (h > curHz && h <= capHz && (best == 0 || h < best)) best = h;
 			}
+			if (capHz > curHz && capHz <= 540 && TacHzAt(TacHzIndexOf(capHz)) == capHz && (best == 0 || capHz < best))
+				best = capHz;
 			return best;
 		};
 		auto nextDn = [&](int curHz) {
 			int best = 0;
-			for (int c = 0; c < nCand; ++c) {
-				int h = kCand[c];
-				if (h < curHz && h > best) best = h;
+			for (int c = 0; c < nRep; ++c) {
+				int h = kRep[c];
+				if (h >= 60 && h < curHz && h > best) best = h;
 			}
 			return best;
 		};
 		auto applyHz = [&](int nhz) {
+			if (nhz < 30) nhz = 30;
+			if (nhz > capHz) nhz = capHz;
 			int idx = TacHzIndexOf(nhz);
-			if (idx < TacHzIndexOf(60)) idx = TacHzIndexOf(60);
 			m_syncRun = idx;
 			m_qHz = TacHzAt(idx);
+			if (m_qCoolT < 0.20f) m_qCoolT = 0.20f;
 		};
 		auto applyNotch = [&](int next) {
-			if (next < TAC_NOTCH_FLOOR) next = TAC_NOTCH_FLOOR;
+			if (next < kTiny) next = kTiny;
 			if (next > TAC_NOTCH_OPEN) next = TAC_NOTCH_OPEN;
 			if (next == m_qFine) return;
 			m_qFine = next;
@@ -883,117 +896,155 @@ void Game::PulseQuality(float work, float span)
 			m_r.SetQualityPlus(plus);
 			ApplyQualityNow(q);
 		};
-		if (m_syncArm < 0) m_syncArm = 0;
+		if (m_syncRun < 0) {
+			m_syncRun = TacHzIndexOf(autoOn ? 240 : capHz);
+			m_syncArm = 0;
+			m_qHold = 0;
+		}
 		float g = m_r.GpuMs();
 		if (g <= 0.05f) return;
 		int cur = TacHzAt(m_syncRun);
-		if (cur < 60) cur = 60;
+		if (cur > capHz) {
+			int fit = 30;
+			for (int c = 0; c < nRep; ++c) if (kRep[c] <= capHz && kRep[c] > fit) fit = kRep[c];
+			if (TacHzAt(TacHzIndexOf(capHz)) == capHz) fit = capHz;
+			applyHz(fit);
+			m_qOkN = 0;
+			m_qMissN = 0;
+			m_qHold = 0;
+			return;
+		}
+		if (cur < 30) cur = 30;
 		float period = 1000.f / (float)cur;
 		int up = nextUp(cur);
 		int dn = nextDn(cur);
-		const int gate = TAC_NOTCH_LIMIT + 3; // 限界突破+++
-		const int soft = TAC_NOTCH_LIMIT + 4; // +4
-		const bool canUp = up && g <= (1000.f / (float)up) * 0.82f;
-		const bool miss = g > period * 1.08f; // 今の拍に乗れていない。画質より先に拍を下げる
-		const bool over = g > period * 0.98f;
-		const bool tight = g > period * 0.90f;
-		const bool room = g <= period * 0.72f;
+		const bool over = g > period * 1.02f;
 		const bool spare = g <= period * 0.55f;
-		const bool crowded = g > period * 0.62f;
-		if (m_syncRun < TacHzIndexOf(60)) applyHz(60);
-		// 0 = フレームレート、1 = 描画。結論が出たら相手へ渡す。
-		if (m_syncArm == 0) {
-			if (canUp) {
-				m_qOkN++;
-				m_qMissN = 0;
-				if (m_qOkN >= 16) {
-					applyHz(up);
-					m_qHold = 0;
-					m_qOkN = 0;
-					m_syncArmN = 0;
-					m_syncArm = 1;
-				}
-			} else if (dn && (miss || (over && m_qFine <= TAC_NOTCH_LIMIT))) {
-				m_qMissN++;
-				m_qOkN = 0;
-				if (m_qMissN >= 6) {
-					applyHz(dn);
-					m_qHold = 0;
-					m_qMissN = 0;
-					m_syncArmN = 0;
-					m_syncArm = 1;
-				}
-			} else {
-				m_qOkN = 0;
-				m_qMissN = 0;
-				m_syncArmN++;
-				int waitNo = (m_qFine > soft) ? 6 : 12;
-				if (m_syncArmN >= waitNo) {
-					m_qHold = 1; // 上の Hz は今回は無理。描画側が + を判断してよい
-					m_syncArmN = 0;
-					m_syncArm = 1;
-				}
-			}
+		int notch = m_qFine;
+		if (notch > TAC_NOTCH_OPEN) notch = TAC_NOTCH_OPEN;
+		if (m_qHold < 0) m_qHold = 0;
+		// 1 つ外して収まった。すぐ足し戻さない。
+		if (!over && m_qHold == 2) { m_qHold = 4; m_qSlots = 0; }
+		float slackLine = (m_qHold == 4 && notch >= TAC_NOTCH_LIMIT) ? 0.78f : 0.90f;
+		const bool slack = g <= period * slackLine;
+		// 失敗した拍は、+ を下げたか、今の + で余裕が出るまでやり直さない。
+		if (m_syncArm > 0 && m_qSlots > 0 && notch < m_qSlots) m_syncArm = 0;
+		if (m_syncArm > 0 && up == m_syncArm) {
+			if (spare || (up && g <= (1000.f / (float)up) * 0.80f)) m_syncArm = 0;
+		} else if (spare) m_syncArm = 0;
+		// 今の +N の計測で次の拍を試す。かなり入りそうなら早く、際どいなら + を足してから。
+		bool comfy = false;
+		bool very = false;
+		if (notch >= TAC_NOTCH_LIMIT && cur > 30 && up && up != m_syncArm) {
+			float nextP = 1000.f / (float)up;
+			comfy = g <= nextP * 1.06f;
+			very = g <= nextP * 0.82f;
+		}
+		const int needPhase = very ? 1 : 2;
+		const bool trySoon = comfy && (m_syncArmN >= needPhase || notch >= TAC_NOTCH_OPEN);
+		// 上げた拍が枠内で落ち着いたら、挑戦中の印を外す。
+		if (!over && m_qHold == 1 && !slack && !trySoon) {
+			m_qOkN++;
+			m_qMissN = 0;
+			if (m_qOkN >= 12) { m_qHold = 0; m_qOkN = 0; m_qSlots = 0; }
+			return;
+		}
+		if (notch < kTiny) {
+			applyNotch(kTiny);
+			m_qOkN = 0;
+			m_qMissN = 0;
+			m_qHold = 0;
+			return;
+		}
+		int nextN = notch;
+		int nextH = cur;
+		int holdOut = m_qHold;
+		bool grewPlus = false;
+		if (over) {
+			m_qMissN++;
+			m_qOkN = 0;
+			int needM = (g > period * 1.20f) ? 3 : 6;
+			if (m_qHold == 1 || m_qHold == 2) needM = (g > period * 1.20f) ? 2 : 4;
+			if (m_qMissN < needM) return;
+			const bool mild = (m_qHold == 1 && dn > 0 && notch > TAC_NOTCH_LIMIT && g <= period * 1.12f);
+			if (mild) {
+				// 挑戦先で + を 1 つ外せば収まりそう。拍はそのまま。
+				nextN = notch - 1;
+				holdOut = 2;
+			} else if ((m_qHold == 1 || m_qHold == 2) && dn > 0) {
+				// 厳しければ拍を戻す。外した + は元に戻して連れ帰る。
+				if (m_qHold == 2 && notch < TAC_NOTCH_OPEN) nextN = notch + 1;
+				m_syncArm = cur;
+				m_qSlots = nextN;
+				nextH = dn;
+				holdOut = 4;
+			} else if (notch > TAC_NOTCH_LIMIT) {
+				nextN = notch - 1;
+				holdOut = 4;
+			} else if (cur > 60 && dn > 0) {
+				m_syncArm = cur;
+				m_qSlots = notch;
+				nextH = dn;
+				holdOut = 0;
+			} else if (cur > 30) {
+				if (notch > kLight) { nextN = notch - 1; holdOut = 4; }
+				else { nextH = 30; nextN = kLight; holdOut = 0; }
+			} else if (notch > kTiny) {
+				nextN = notch - 1;
+				holdOut = 4;
+			} else { m_qMissN = 0; return; }
 		} else {
-			int notch = m_qFine;
-			if (notch < TAC_NOTCH_FLOOR) notch = TAC_NOTCH_FLOOR;
-			if (notch > TAC_NOTCH_OPEN) notch = TAC_NOTCH_OPEN;
-			int next = notch;
-			int floorN = (cur <= 60 && over) ? TAC_NOTCH_FLOOR : TAC_NOTCH_LIMIT;
-			const bool probed = (m_qHold == 1);
-			bool acted = false;
-			if ((over && notch > floorN) || (tight && notch > TAC_NOTCH_LIMIT)) {
-				m_qMissN++;
-				m_qOkN = 0;
-				if (m_qMissN >= 6) { next = notch - 1; acted = true; }
-			} else if (notch > soft && crowded) {
-				next = notch - 1; // +5 より上で余白が無いなら、Hz を見たあと 1 段戻す
-				acted = true;
-			} else if (notch < gate && room && probed) {
-				m_qOkN++;
-				m_qMissN = 0;
-				if (m_qOkN >= 14) { next = notch + 1; acted = true; }
-			} else if (notch == gate && probed && !tight) {
-				// +++ で上の Hz を見て無理だった。ここから +4。
-				m_qOkN++;
-				m_qMissN = 0;
-				if (m_qOkN >= 12) { next = notch + 1; acted = true; }
-			} else if (notch >= soft && notch < TAC_NOTCH_OPEN && spare && probed && up == 0) {
-				// +5 以降は「もう上の代表 Hz が無い（= 拍は天井）」ときだけ開放する。
-				// 下に上げ余地の Hz があるうちは +4 で止め、余力はフレームレート側へ回す。
-				m_qOkN++;
-				m_qMissN = 0;
-				if (m_qOkN >= 28) { next = notch + 1; acted = true; }
-			} else {
+			int leave = 60;
+			if (leave > capHz) leave = capHz;
+			const bool holdStd30 = (cur <= 30 && notch >= kStd && leave > 30);
+			const bool tryHz = trySoon;
+			if (!slack && !holdStd30 && !tryHz) {
 				m_qOkN = 0;
 				m_qMissN = 0;
-				m_syncArm = 0;
-				m_syncArmN = 0;
 				return;
 			}
-			if (acted) {
-				if (next != notch) {
-					applyNotch(next);
-					m_qHold = 0; // 画質を動かしたので、次は必ずフレームレートを見る
-				}
+			m_qOkN++;
+			m_qMissN = 0;
+			int need = 10;
+			if (holdStd30) {
+				need = 10;
+				nextH = leave;
+				holdOut = 0;
+			} else if (cur <= 30) {
+				if (notch < kStd && slack) { nextN = notch + 1; holdOut = 0; }
+				else { m_qOkN = 0; return; }
+			} else if (notch < TAC_NOTCH_LIMIT && slack) {
+				nextN = notch + 1;
+				holdOut = 0;
+			} else if (tryHz) {
+				need = 10;
+				nextH = up;
+				holdOut = 1;
+			} else if (slack && notch < TAC_NOTCH_OPEN) {
+				need = 8;
+				nextN = notch + 1;
+				holdOut = 0;
+				grewPlus = true;
+			} else {
 				m_qOkN = 0;
-				m_qMissN = 0;
-				m_syncArmN = 0;
-				m_syncArm = 0;
+				return;
 			}
+			if (m_qOkN < need) return;
 		}
+		if (nextN != notch) applyNotch(nextN);
+		if (nextH != cur) applyHz(nextH);
+		if (grewPlus && comfy && m_syncArmN < 2) m_syncArmN++;
+		if (nextH != cur || nextN < notch) m_syncArmN = 0;
+		m_qHold = holdOut;
+		m_qOkN = 0;
+		m_qMissN = 0;
 		return;
 	}
 	m_syncRun = -1;
 
-	// 細段（notch, 0.25 刻み）を 1 段ずつ上下。設定段が天井、床は絶対最下段（古いノート向けに超軽量の下まで）。
-	// 設定の名前も保存値も変えず、内部の + / - 段だけを動かす。段差をまたいでも 0.25 ずつなので見た目は滑らか。
-	int ceilQ = autoOn ? 6 : TacQualityWanted(m_save);
+	// 限界突破以外の手動段。指定の Hz は動かさず、その段の細分だけを上下する。
+	int ceilQ = TacQualityWanted(m_save);
 	int ceilNotch = TacTierCeilNotch(ceilQ);
-	// 自動時：まだ上位フレームレートへ上がれる余地がある間は、画質の開放段(限界突破+N)を無印で止めて
-	// GPUの余力を残し、1/120・1/144 などへの上りルートを確保する。Hz天井に達して初めて+Nを開放する。
-	bool hzCeil = !autoOn || (m_qHold >= 30);
-	if (!hzCeil && ceilNotch > TAC_NOTCH_LIMIT) ceilNotch = TAC_NOTCH_LIMIT;
 	int floorNotch = TAC_NOTCH_FLOOR;
 	int notch = m_qFine;
 	if (notch < floorNotch) notch = floorNotch;
@@ -6884,6 +6935,7 @@ void Game::AdoptActiveSlot(BOOL leaveBattle)
 	ApplyAudio();
 	m_qHold = -1;
 	m_qFine = TacTierNotch(TacQualityWanted(m_save));
+	m_qSlots = 0;
 	m_r.SetQualityPlus(0);
 	ApplyQualityNow(TacQualityWanted(m_save));
 	if (leaveBattle || m_screen == SC_BATTLE || m_screen == SC_RESULT) EnterBase();

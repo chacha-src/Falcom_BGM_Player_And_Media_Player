@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "ogg.h"
+#include "CCustomControl.h"
 #include "CSasamiStaffCore.h"
 #include "CSasamiScoreArrange.h"
 #include "SasamiToneNames.h"
@@ -535,6 +536,86 @@ void ScStaffInvalidateBelowCaption(CWnd* w)
 	const int cap = CCC_GetCustomCaptionHeight(w->GetSafeHwnd());
 	if (cap > 0 && cap < rc.bottom) rc.top = cap;
 	if (rc.Height() > 0)
+		w->InvalidateRect(&rc, FALSE);
+}
+
+void ScStaffExcludeChildWindows(CDC& dc, CWnd* parent)
+{
+	if (!parent || !parent->GetSafeHwnd()) return;
+	HWND p = parent->GetSafeHwnd();
+	for (HWND h = ::GetWindow(p, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		RECT cr;
+		if (!::GetWindowRect(h, &cr)) continue;
+		::MapWindowPoints(NULL, p, (LPPOINT)&cr, 2);
+		dc.ExcludeClipRect(&cr);
+	}
+}
+
+void ScStaffForceOpaqueKids(CWnd* parent)
+{
+	if (!parent || !parent->GetSafeHwnd()) return;
+	HWND p = parent->GetSafeHwnd();
+	const int cap = CCC_GetCustomCaptionHeight(p);
+	for (HWND h = ::GetWindow(p, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		RECT wr;
+		if (!::GetWindowRect(h, &wr)) continue;
+		::MapWindowPoints(NULL, p, (LPPOINT)&wr, 2);
+		if (wr.bottom <= cap) continue;
+		CWnd* pw = CWnd::FromHandlePermanent(h);
+		if (!pw) continue;
+		if (auto* b = dynamic_cast<CCustomStandardButton*>(pw)) {
+			b->SetAeroMode(FALSE);
+			b->SetFlat(TRUE);
+			b->Invalidate(FALSE);
+			continue;
+		}
+		if (auto* c = dynamic_cast<CCustomCheckBox*>(pw)) {
+			c->SetAeroMode(FALSE);
+			c->Invalidate(FALSE);
+			continue;
+		}
+		if (auto* cb = dynamic_cast<CCustomComboBox*>(pw)) {
+			cb->SetAeroMode(FALSE);
+			cb->Invalidate(FALSE);
+			continue;
+		}
+		if (auto* st = dynamic_cast<CCustomStatic*>(pw)) {
+			st->SetAeroMode(FALSE);
+			st->Invalidate(FALSE);
+			continue;
+		}
+		if (auto* ed = dynamic_cast<CCustomEdit*>(pw)) {
+			ed->SetAeroMode(FALSE);
+			ed->Invalidate(FALSE);
+			continue;
+		}
+	}
+}
+
+void ScStaffRepaintChrome(CWnd* w, int bodyTop)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return;
+	CRect rc;
+	w->GetClientRect(&rc);
+	const int cap = CCC_GetCustomCaptionHeight(w->GetSafeHwnd());
+	int bot = bodyTop;
+	if (bot <= cap) bot = rc.bottom;
+	if (bot > rc.bottom) bot = rc.bottom;
+	CRect chrome(0, cap, rc.right, bot);
+	if (chrome.Height() <= 0) return;
+	ScStaffForceOpaqueKids(w);
+	w->RedrawWindow(&chrome, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE | RDW_ALLCHILDREN);
+}
+
+void ScStaffInvalidateBodyRect(CWnd* w, const CRect& body)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return;
+	CRect rc = body;
+	const int cap = CCC_GetCustomCaptionHeight(w->GetSafeHwnd());
+	if (rc.top < cap) rc.top = cap;
+	if (rc.Width() > 0 && rc.Height() > 0)
 		w->InvalidateRect(&rc, FALSE);
 }
 

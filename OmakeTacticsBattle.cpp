@@ -3804,7 +3804,7 @@ void Game::UpdateSeq(float dt)
 		if (m_cutStage == 3) {
 			if (m_cutKind == 3 && m_sumOn) SummonLeave(dt);
 			// 召喚は攻撃のあと、種類ごとの退場が見えるまで結果を出さない。
-			if (m_cutStageT >= ((m_cutKind == 3 && m_sumOn) ? SummonDepartNeed() : 0.3f)) {
+			if (m_cutStageT >= ((m_cutKind == 3 && m_sumOn) ? SummonDepartNeed() : 0.62f)) {
 				m_cutStage = 4; m_cutStageT = 0;
 				KillCutParts(m_parts);
 				m_popups.clear();
@@ -4655,9 +4655,15 @@ void Game::DrawBattle3D()
 	m_r.SetCamNear(0.f, 0.f, 0.f);
 	Env e;
 	ThemeEnv(m_b.map.theme, e);
-	V3 target = m_camTarget + v3(0, .4f, 0);
+	V3 stable = m_camTarget + v3(0, .4f, 0);
+	V3 target = stable;
 	if (m_shake > 0) target = target + v3(m_rng.F(-1, 1), m_rng.F(-1, 1) * .5f, m_rng.F(-1, 1)) * (m_shake * .08f);
 	ApplyZoomHold();
+	{
+		V3 dir = v3(sinf(m_camYaw) * cosf(m_camPitch), sinf(m_camPitch), cosf(m_camYaw) * cosf(m_camPitch));
+		V3 eye = stable + dir * m_camDist;
+		m_r.SetMenuCamera(MLookAtLH(eye, stable, v3(0, 1, 0)), MPerspLH(.62f, (float)m_w / max(1, m_h), .1f, 400.f));
+	}
 	SetupCamera(target, m_camYaw, m_camPitch, m_camDist, .62f);
 	{
 		m_r.SetFog(m_camDist * 1.4f, m_camDist * 4.2f + 18.f, .35f, e.fog);
@@ -5566,6 +5572,56 @@ void Game::DrawSummonGate()
 	m_r.DrawStatic(m_lib.orb, w, sig);
 }
 
+// 0攻撃 1射撃 2魔法 3回復 4補助 5戦技 6陣形 7召喚
+static int CutFamily(int kind, int skill, int pat)
+{
+	if (kind == 1) return 5;
+	if (kind == 2) return 6;
+	if (kind == 3) return 7;
+	if (skill >= 0) {
+		const SkillDef& sd = SkillInfo(skill);
+		if (sd.kind == SK_HEAL) return 3;
+		if (sd.kind == SK_BUFF) return 4;
+		if (sd.kind == SK_MAGIC) return 2;
+	}
+	if (pat == 4) return 1;
+	return 0;
+}
+
+static void CutLeaveCam(int fam, float u, V3 focus, float h, V3 posA, V3 posD, V3& look, V3& eye)
+{
+	if (u < 0.f) u = 0.f;
+	if (u > 1.f) u = 1.f;
+	float e = u * u * (3.f - 2.f * u);
+	look = focus + v3(0, h * .45f, 0);
+	if (fam == 1) {
+		look = Lerp(posD + v3(0, .55f, 0), focus + v3(0, h * .5f, 0), e);
+		eye = look + v3(Lerpf(1.15f, 3.4f, e), Lerpf(.35f, 1.7f, e), Lerpf(-1.7f, -.35f, e));
+	} else if (fam == 2) {
+		float ang = e * 2.5f;
+		float rad = Lerpf(1.7f, 3.8f, e);
+		look = focus + v3(0, Lerpf(h * .4f, h * .9f, e), 0);
+		eye = look + v3(cosf(ang) * rad, Lerpf(.6f, 2.8f, e), sinf(ang) * rad);
+	} else if (fam == 3) {
+		look = focus + v3(0, Lerpf(h * .35f, h * .85f, e), 0);
+		eye = look + v3(Lerpf(.35f, .9f, e), Lerpf(.55f, 2.4f, e), Lerpf(-1.7f, -2.9f, e));
+	} else if (fam == 4) {
+		float ang = .5f + e * 1.35f;
+		float rad = Lerpf(2.1f, 4.2f, e);
+		eye = look + v3(cosf(ang) * rad, Lerpf(1.05f, 2.7f, e), sinf(ang) * rad);
+	} else if (fam == 5) {
+		look = Lerp(posA + v3(0, h * .5f, 0), focus + v3(0, h * .7f, 0), e);
+		eye = look + v3(Lerpf(.8f, 3.5f, e * e), Lerpf(.45f, 2.3f, e), Lerpf(-1.15f, -2.7f, e));
+	} else if (fam == 6) {
+		look = focus + v3(0, Lerpf(.6f, .2f, e), 0);
+		eye = look + v3(Lerpf(2.3f, .35f, e), Lerpf(1.6f, 6.4f, e), Lerpf(-2.5f, -.5f, e));
+	} else {
+		float ang = -.35f + e * 1.9f;
+		float rad = Lerpf(2.5f, 4.6f, e);
+		eye = look + v3(sinf(ang) * rad, Lerpf(.85f, 1.9f, e), -cosf(ang) * rad);
+	}
+}
+
 void Game::DrawCutIn3D()
 {
 	m_r.SetTheme(m_b.map.theme);
@@ -5589,13 +5645,15 @@ void Game::DrawCutIn3D()
 		float h = m_cutA >= 0 ? m_act[m_cutA].height : 1.f;
 		if (h > 1.32f && !(m_cutA >= 0 && m_act[m_cutA].proc == 3)) h = 1.32f;
 		look = a + v3(0, h * .55f, 0);
-		if (m_cutStage == 1) {
+		if (m_cutStage == 3) {
+			CutLeaveCam(5, m_cutStageT / 0.62f, look, h, m_cutPosA, m_cutPosD, look, eye);
+		} else if (m_cutStage == 1) {
 			float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
 			float ang = t * (IsCraftSuper(m_seqSkill) ? 1.7f : 1.15f);
 			float rad = Lerpf(2.7f, 1.25f, u);
 			float elev = Lerpf(.15f, 1.45f, u);
 			eye = look + v3(cosf(ang) * rad, elev, sinf(ang) * rad);
-		} else if (m_cutStage == 2 || m_cutStage == 3) {
+		} else if (m_cutStage == 2) {
 			float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + .8f;
 			float ang = -0.9f - u * 1.35f;
 			float dist = Lerpf(4.4f, 2.35f, Smooth01(min(1.f, u)));
@@ -5609,10 +5667,12 @@ void Game::DrawCutIn3D()
 	} else if (m_cutKind == 2) {
 		look = centerOf(m_cutAllyPos, m_cutAllyN);
 		if (m_cutFoeN > 0) look = Lerp(look, centerOf(m_cutFoePos, m_cutFoeN), .28f);
-		if (m_cutStage == 1) {
+		if (m_cutStage == 3) {
+			CutLeaveCam(6, m_cutStageT / 0.62f, look, 1.f, m_cutPosA, m_cutPosD, look, eye);
+		} else if (m_cutStage == 1) {
 			float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
 			eye = look + v3(Lerpf(.15f, 2.5f, u), Lerpf(6.2f, 1.7f, u), Lerpf(-.15f, -2.6f, u));
-		} else if (m_cutStage == 2 || m_cutStage == 3) {
+		} else if (m_cutStage == 2) {
 			float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + 1.f;
 			float ang = -0.2f - u * .7f;
 			int spread = max(m_cutAllyN, m_cutFoeN);
@@ -5690,8 +5750,13 @@ void Game::DrawCutIn3D()
 			eye = look + v3(cosf(ang) * 1.9f, .55f + u * .3f, sinf(ang) * 1.9f);
 		} else if (pat == 13) eye = look + v3(Lerpf(-1.4f, 1.6f, u), Lerpf(.15f, .7f, u), Lerpf(-1.8f, -1.1f, u));
 		else eye = look + v3(Lerpf(1.6f, 1.1f, u), Lerpf(.1f, .25f, u), Lerpf(-1.2f, -.9f, u));
-	} else if (m_cutStage == 2 || m_cutStage == 3) {
-		float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + 1.1f;
+	} else if (m_cutStage == 3) {
+		V3 focus = v3(0, .72f, 0);
+		float h = (m_cutA >= 0) ? m_act[m_cutA].height : 1.f;
+		if (h > 1.32f && !(m_cutA >= 0 && m_act[m_cutA].proc == 3)) h = 1.32f;
+		CutLeaveCam(CutFamily(0, m_seqSkill, m_cutPat), m_cutStageT / 0.62f, focus, h, m_cutPosA, m_cutPosD, look, eye);
+	} else if (m_cutStage == 2) {
+		float u = m_cutStageT;
 		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .72f, 0);
 		float extra = max(0, spread - 1) * .55f;
@@ -7895,7 +7960,7 @@ void Game::DrawCommandMenu()
 	float bh = min(U(40.f), max(18.f, (float)m_h * 0.055f));
 	float sx, sy;
 	float x = m_w * .62f, y = m_h * .36f;
-	if (m_r.ProjectToScreen(v3(u.px, u.py + m_act[m_cur].height, u.pz), sx, sy)) {
+	if (m_r.ProjectMenu(v3(u.px, u.py + m_act[m_cur].height, u.pz), sx, sy)) {
 		float xHi = (float)m_w - w - 8.f;
 		if (m_hud.col > w + 24.f) xHi = min(xHi, m_hud.col - w - 8.f);
 		x = FitLo(sx + U(70), 8.f, max(8.f, xHi));
@@ -8801,16 +8866,24 @@ void Game::DrawCutInUi()
 	switch (m_cutStage) {
 	case 0: cover = Smooth01(m_cutStageT / .35f); break;
 	case 1: case 2: cover = 1.f - Smooth01((m_cutStage == 1 ? m_cutStageT : 1.f) / .3f); break;
-	case 3: cover = Smooth01(m_cutStageT / .3f); break;
+	case 3: cover = Smooth01(m_cutStageT / .62f); break;
 	case 4: cover = 1.f - Smooth01(m_cutStageT / .3f); break;
 	}
 	BOOL arena = m_cutStage >= 1 && m_cutStage <= 3;
+	int fam = CutFamily(m_cutKind, m_seqSkill, m_cutPat);
 	if (arena) {
 		float bar = m_cutKind == 1 ? U(84) : (m_cutKind == 2 ? U(70) : U(56));
+		if (fam == 3) bar = U(42);
+		else if (fam == 2) bar = U(68);
+		else if (fam == 4) bar = U(48);
+		else if (fam == 1) bar = U(50);
 		DWORD edge = m_cutKind == 2 ? RGBA8(120, 196, 255) : (m_seqSkill >= 0 ? ElemColor(SkillInfo(m_seqSkill).element) : RGBA8(255, 220, 140));
+		if (fam == 3) edge = RGBA8(255, 214, 150);
+		else if (fam == 4) edge = RGBA8(160, 210, 255);
+		else if (fam == 1) edge = RGBA8(210, 226, 255);
 		m_r.HudRect(0, 0, (float)m_w, bar, RGBA8(0, 0, 0, m_cutKind ? 230 : 200));
 		m_r.HudRect(0, (float)m_h - bar, (float)m_w, bar, RGBA8(0, 0, 0, m_cutKind ? 230 : 200));
-		if (m_cutKind) {
+		if (m_cutKind || fam == 1 || fam == 2 || fam == 3 || fam == 4) {
 			m_r.HudRect(0, bar - U(4), (float)m_w, U(4), edge);
 			m_r.HudRect(0, (float)m_h - bar, (float)m_w, U(4), edge);
 		}
@@ -8856,23 +8929,32 @@ void Game::DrawCutInUi()
 				BOOL sum = m_cutKind == 3;
 				const wchar_t* title = craft ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
 				float by = m_h * (ougi || form || sum ? .32f : (craft || m_ult ? .4f : .6f));
+				if (fam == 3) by = m_h * .72f;
+				else if (fam == 2) by = m_h * .22f;
+				else if (fam == 4) by = m_h * .48f;
 				float bh2 = ougi ? U(168) : (form || sum ? U(150) : (craft ? U(132) : (m_ult ? U(120) : U(84))));
-				float slide = (1.f - u) * m_w;
-				m_r.HudRectGrad(-slide, by, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(210 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(230 * a)));
+				if (fam == 3) bh2 = U(72);
+				float travel = (1.f - u) * m_w;
+				float slideX = (fam == 1 || fam == 3) ? -travel : travel;
+				float slideY = 0.f;
+				if (fam == 2) { slideX = 0.f; slideY = -travel * .28f; }
+				else if (fam == 3) { slideX = 0.f; slideY = travel * .22f; }
+				else if (fam == 4) { slideX = 0.f; slideY = 0.f; }
+				m_r.HudRectGrad(-slideX, by + slideY, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(210 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(230 * a)));
 				float edgeH = (ougi || form || craft) ? U(7) : U(3);
-				m_r.HudRect(-slide, by, (float)m_w, edgeH, RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
-				m_r.HudRect(slide, by + bh2 - edgeH, (float)m_w, edgeH, RGBA8(255, 220, 120, (int)(255 * a)));
+				m_r.HudRect(-slideX, by + slideY, (float)m_w, edgeH, RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
+				m_r.HudRect(slideX, by + slideY + bh2 - edgeH, (float)m_w, edgeH, RGBA8(255, 220, 120, (int)(255 * a)));
 				if (craft || form || sum) {
 					float pulse = .5f + .5f * sinf(m_time * 6.f);
-					m_r.HudRect(m_w * .08f - slide, by + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
-					m_r.HudRect(m_w * .92f + slide, by + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
+					m_r.HudRect(m_w * .08f - slideX, by + slideY + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
+					m_r.HudRect(m_w * .92f + slideX, by + slideY + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
 				}
-				m_r.HudText(title, m_w * .5f, by + bh2 * .48f, ougi ? U(72) : (form || sum ? U(56) : (craft ? U(58) : (m_ult ? U(64) : U(44)))), ec, 1, 1, 1, a);
+				m_r.HudText(title, m_w * .5f, by + slideY + bh2 * .48f, ougi ? U(72) : (form || sum ? U(56) : (craft ? U(58) : (m_ult ? U(64) : U(44)))), ec, 1, 1, 1, a);
 				const wchar_t* kind = ougi ? TT(TX_OUGI) : (craft ? TT(TX_CRAFT) : (form ? TT(TX_SK_TAB_FORM) : (sum ? SummonWord() : (m_ult ? TT(TX_BT_ULT) : NULL))));
-				if (kind) m_r.HudText(kind, m_w * .5f, by + U(22), form || ougi ? U(24) : U(18), form ? RGBA8(255, 220, 130) : RGBA8(255, 226, 150), 1, 1, 1, a);
+				if (kind) m_r.HudText(kind, m_w * .5f, by + slideY + U(22), form || ougi ? U(24) : U(18), form ? RGBA8(255, 220, 130) : RGBA8(255, 226, 150), 1, 1, 1, a);
 				wchar_t nm[64];
 				UnitTitle(m_b.u[m_cutA], nm, 64);
-				m_r.HudText(nm, m_w * .5f, by + bh2 * .82f, U(16), RGBA8(255, 255, 255), 1, 0, 1, a);
+				m_r.HudText(nm, m_w * .5f, by + slideY + bh2 * .82f, U(16), RGBA8(255, 255, 255), 1, 0, 1, a);
 			}
 			if (m_cutStage == 2) {
 				const wchar_t* title = m_cutKind == 1 ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
@@ -8885,16 +8967,50 @@ void Game::DrawCutInUi()
 	if (cover > 0) {
 		int rows = 9;
 		float rh = (float)m_h / rows + 1;
+		BOOL out = m_cutStage >= 3;
+		DWORD edge = RGBA8(255, 230, 160, 200);
+		if (fam == 2 && m_seqSkill >= 0) {
+			DWORD ec = ElemColor(SkillInfo(m_seqSkill).element);
+			edge = RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, 210);
+		} else if (fam == 3) edge = RGBA8(255, 210, 140, 210);
+		else if (fam == 4) edge = RGBA8(160, 210, 255, 210);
+		else if (fam == 1) edge = RGBA8(200, 220, 255, 210);
 		for (int i = 0; i < rows; i++) {
-			float lag = i * .06f;
+			int ord = out ? (rows - 1 - i) : i;
+			float lag = ord * .06f;
 			float c = Clampf(cover * (1.f + rows * .06f) - lag, 0, 1);
-			float w = c * m_w;
 			float y = i * ((float)m_h / rows);
-			if (i & 1) m_r.HudRect((float)m_w - w, y, w, rh, RGBA8(8, 6, 14, 255));
-			else m_r.HudRect(0, y, w, rh, RGBA8(8, 6, 14, 255));
-			if (c > 0 && c < 1) {
-				if (i & 1) m_r.HudRect((float)m_w - w - U(6), y, U(6), rh, RGBA8(255, 230, 160, 200));
-				else m_r.HudRect(w, y, U(6), rh, RGBA8(255, 230, 160, 200));
+			if (fam == 2) {
+				float hh = rh * c;
+				float yy = out ? (y + rh - hh) : y;
+				m_r.HudRect(0, yy, (float)m_w, hh, RGBA8(10, 8, 22, 255));
+				if (c > 0.f && c < 1.f) m_r.HudRect(0, out ? yy : (yy + hh - U(4)), (float)m_w, U(4), edge);
+			} else if (fam == 3) {
+				float w = c * (float)m_w;
+				float x = ((float)m_w - w) * .5f;
+				m_r.HudRect(x, y, w, rh, RGBA8(28, 18, 10, 255));
+				if (c > 0.f && c < 1.f) {
+					m_r.HudRect(x, y, U(4), rh, edge);
+					m_r.HudRect(x + w - U(4), y, U(4), rh, edge);
+				}
+			} else if (fam == 4) {
+				float w = c * (float)m_w * .5f;
+				m_r.HudRect(0, y, w, rh, RGBA8(8, 12, 22, 255));
+				m_r.HudRect((float)m_w - w, y, w, rh, RGBA8(8, 12, 22, 255));
+				if (c > 0.f && c < 1.f) {
+					m_r.HudRect(w, y, U(4), rh, edge);
+					m_r.HudRect((float)m_w - w - U(4), y, U(4), rh, edge);
+				}
+			} else {
+				BOOL fromRight = out ? ((i & 1) == 0) : ((i & 1) != 0);
+				if (fam == 1) fromRight = out ? FALSE : TRUE;
+				float w = c * (float)m_w;
+				if (fromRight) m_r.HudRect((float)m_w - w, y, w, rh, RGBA8(8, 6, 14, 255));
+				else m_r.HudRect(0, y, w, rh, RGBA8(8, 6, 14, 255));
+				if (c > 0.f && c < 1.f) {
+					if (fromRight) m_r.HudRect((float)m_w - w - U(6), y, U(6), rh, edge);
+					else m_r.HudRect(w, y, U(6), rh, edge);
+				}
 			}
 		}
 	}

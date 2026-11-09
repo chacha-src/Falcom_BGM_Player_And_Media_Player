@@ -129,7 +129,7 @@ struct ScAutoArrangeOpt {
 	uint32_t drumMask;    /* ドラム出力に使う ch ビットマスク。0=自動 */
 	uint8_t drumSlot[32]; /* ドラム ch ごとの枠 0=ドラム1 1=ドラム2（VST2 用） */
 	uint8_t partRole[32]; /* 対象 ch ごとの役割 ScPartRole（AUTO=自動判定） */
-	int genBars;          /* 既存ノートが無いときに生成する小節数。0=既定(16) */
+	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16）。>0 なら少なくともこの小節数まで書く */
 };
 
 struct ScAutoArrangeResult {

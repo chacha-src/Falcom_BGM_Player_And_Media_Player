@@ -129,7 +129,10 @@ void CSasamiPianoRollDlg::BindFm(CSasamiFmScoreDlg* score)
 
 void CSasamiPianoRollDlg::Refresh()
 {
-	if (::IsWindow(m_hWnd)) ScStaffInvalidateBelowCaption(this);
+	if (!::IsWindow(m_hWnd)) return;
+	ScStaffInvalidateBodyRect(this, m_gridRc);
+	if (m_stripRc.Height() > 0)
+		InvalidateRect(m_stripRc, FALSE);
 }
 
 void CSasamiPianoRollDlg::DoDataExchange(CDataExchange* pDX)
@@ -280,7 +283,7 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	m_bInLayout = TRUE;
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	const int pad = 8, btnH = 28, cbH = 32, gap = 4;
+	const int pad = 8, btnH = 28, cbH = 28, gap = 4;
 	const int detail = m_chromeDetail ? 1 : 0;
 	auto vis = [&](CWnd& w, int show) {
 		if (!w.GetSafeHwnd()) return;
@@ -337,10 +340,9 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	auto layoutCombo = [&](CCustomComboBox& c, int ww, int dropW) {
 		if (!c.GetSafeHwnd() || !(c.GetStyle() & WS_VISIBLE)) return;
 		if (x > pad && x + ww > maxX) { y = rowBottom + 6; x = pad; }
-		const int closedH = (cbH - 4 > 22) ? (cbH - 4) : 22;
-		const int dropH = (closedH > 28) ? closedH : 28;
-		c.SetItemHeight(-1, closedH);
-		c.SetItemHeight(0, dropH);
+		c.ModifyStyle(0, WS_CLIPSIBLINGS);
+		c.SetItemHeight(-1, 18);
+		c.SetItemHeight(0, 20);
 		if (dropW > 0) c.SetDroppedWidth(dropW);
 		c.MoveWindow(x, y, ww, cbH);
 		rowBottom = max(rowBottom, y + cbH);
@@ -421,11 +423,13 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	FitRollKeys();
 	UpdateScrollBars();
 	m_bInLayout = FALSE;
+	ScStaffRepaintChrome(this, m_gridRc.top);
 }
 
 BOOL CSasamiPianoRollDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
+	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
 	if (m_isFm) s_fm = this; else s_midi = this;
 	CreateChrome();
@@ -461,7 +465,7 @@ void CSasamiPianoRollDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	LayoutChrome();
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 	(void)cx; (void)cy;
 }
 
@@ -479,11 +483,14 @@ BOOL CSasamiPianoRollDlg::OnEraseBkgnd(CDC* pDC)
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	if (capH > 0 && capH < rc.bottom) rc.top = capH;
 	if (rc.Height() <= 0) return TRUE;
+	const int saved = pDC->SaveDC();
+	ScStaffExcludeChildWindows(*pDC, this);
 #if CCUSTOM_AERO_SUPPORT
 	CCC_FillRectAlpha(pDC->GetSafeHdc(), rc, RGB(32, 34, 40), 255);
 #else
 	pDC->FillSolidRect(&rc, RGB(32, 34, 40));
 #endif
+	pDC->RestoreDC(saved);
 	return TRUE;
 }
 
@@ -1558,12 +1565,14 @@ void CSasamiPianoRollDlg::OnPaint()
 {
 	CPaintDC dc(this);
 	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
+	ScStaffExcludeChildWindows(dc, this);
 	CRect rc; GetClientRect(&rc);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int fillTop = (m_gridRc.top > capH) ? m_gridRc.top : capH;
 #if CCUSTOM_AERO_SUPPORT
-	CCC_FillRectAlpha(dc.GetSafeHdc(), CRect(0, capH, rc.right, rc.bottom), RGB(32, 34, 40), 255);
+	CCC_FillRectAlpha(dc.GetSafeHdc(), CRect(0, fillTop, rc.right, rc.bottom), RGB(32, 34, 40), 255);
 #else
-	dc.FillSolidRect(0, capH, rc.Width(), rc.Height() - capH, RGB(32, 34, 40));
+	dc.FillSolidRect(0, fillTop, rc.Width(), rc.Height() - fillTop, RGB(32, 34, 40));
 #endif
 	if (m_gridRc.Width() >= 8 && m_gridRc.Height() >= 8 && m_ev && m_evCount && m_ui && m_curPart) {
 		ScPianoRollPaint(dc, m_gridRc, &m_roll, m_ev, *m_evCount, m_ui, *m_curPart);
@@ -1778,7 +1787,9 @@ void CSasamiPianoRollDlg::OnTimer(UINT_PTR nIDEvent)
 	}
 	if (nIDEvent == 1) {
 		if (m_ui && m_ui->previewActive) {
-			ScStaffInvalidateBelowCaption(this);
+			ScStaffInvalidateBodyRect(this, m_gridRc);
+			if (m_stripRc.Height() > 0)
+				InvalidateRect(m_stripRc, FALSE);
 			ScStaffPreviewFinished(m_ui);
 		}
 		UpdateInfoBar();

@@ -178,6 +178,8 @@ BOOL CSasamiTextDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 	s_inst = this;
+	ModifyStyle(0, WS_CLIPCHILDREN);
+	EnableAero(FALSE);
 	m_edit.SetAeroMode(FALSE);
 
 	auto flatBtn = [](CCustomStandardButton& b) {
@@ -209,7 +211,6 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	if (m_btnPlay.GetSafeHwnd()) m_btnPlay.SetIcon(IDI_CTL_PLAY);
 	if (m_btnExport.GetSafeHwnd()) m_btnExport.SetIcon(IDI_UI_EXPORT);
 	if (m_btnHelp.GetSafeHwnd()) m_btnHelp.SetIcon(IDI_UI_HELP);
-	ModifyStyle(0, WS_CLIPCHILDREN);
 	m_edit.SetLimitText(4u * 1024u * 1024u);
 	m_edit.SetMmlSyntax(TRUE);
 	ApplyLang();
@@ -291,6 +292,7 @@ void CSasamiTextDlg::LayoutChrome()
 	y += 26;
 	m_bodyRc.SetRect(pad, y, rc.Width() - pad, rc.Height() - pad);
 	if (m_edit.GetSafeHwnd()) m_edit.MoveWindow(m_bodyRc);
+	ScStaffRepaintChrome(this, m_bodyRc.top);
 }
 
 void CSasamiTextDlg::OnSize(UINT nType, int cx, int cy)
@@ -306,6 +308,8 @@ BOOL CSasamiTextDlg::OnEraseBkgnd(CDC* pDC)
 	GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	CRect body(0, cap, rc.right, rc.bottom);
+	const int saved = pDC->SaveDC();
+	ScStaffExcludeChildWindows(*pDC, this);
 	if (body.Height() > 0) {
 #if CCUSTOM_AERO_SUPPORT
 		CCC_FillRectAlpha(pDC->GetSafeHdc(), body, RGB(240, 240, 245), 255);
@@ -313,16 +317,19 @@ BOOL CSasamiTextDlg::OnEraseBkgnd(CDC* pDC)
 		pDC->FillSolidRect(&body, RGB(240, 240, 245));
 #endif
 	}
+	pDC->RestoreDC(saved);
 	return TRUE;
 }
 
 void CSasamiTextDlg::OnPaint()
 {
 	CPaintDC dc(this);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
+	ScStaffExcludeChildWindows(dc, this);
 	CRect rc;
 	GetClientRect(&rc);
-	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	CRect body(0, cap, rc.right, rc.bottom);
+	const int fillTop = (m_bodyRc.top > 0) ? m_bodyRc.top : CCC_GetCustomCaptionHeight(m_hWnd);
+	CRect body(0, fillTop, rc.right, rc.bottom);
 	if (body.Height() > 0) {
 #if CCUSTOM_AERO_SUPPORT
 		CCC_FillRectAlpha(dc.GetSafeHdc(), body, RGB(240, 240, 245), 255);
@@ -330,7 +337,6 @@ void CSasamiTextDlg::OnPaint()
 		dc.FillSolidRect(&body, RGB(240, 240, 245));
 #endif
 	}
-	CCC_CaptionPaint(dc, m_hWnd);
 }
 
 void CSasamiTextDlg::RefreshChromeOpaque()

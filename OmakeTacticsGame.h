@@ -373,7 +373,9 @@ private:
 	Renderer m_r;
 	Library m_lib;
 	SaveData m_save;
-	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz, m_qSlots, m_qFine;
+	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz;
+	int m_qSlots; // 拍の挑戦に失敗したときの notch。0 はなし。
+	int m_qFine;
 	int m_syncArm, m_syncArmN, m_syncRun;
 	BOOL m_qDrew;
 	float m_qCoolT, m_syncLock;

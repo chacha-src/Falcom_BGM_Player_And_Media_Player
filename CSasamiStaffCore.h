@@ -280,6 +280,14 @@ void ScStaffInvalidateBelowCaption(CWnd* w);
 void ScStaffPresentNoActivate(CWnd* w);
 void ScStaffCaptionPaintThenExclude(CDC& dc, HWND h);
 void ScStaffSetWndTextIfChanged(CWnd* w, LPCWSTR text);
+/* 親の塗りがツールバー子を消さないよう、子 HWND をクリップから外す。 */
+void ScStaffExcludeChildWindows(CDC& dc, CWnd* parent);
+/* キャプション帯の子（最小/閉じる）は触らず、本文の CCustom 子を不透明に立て直す。 */
+void ScStaffForceOpaqueKids(CWnd* parent);
+/* キャプションより下・譜面より上の chrome を子ごと再描画（透過抜け対策）。 */
+void ScStaffRepaintChrome(CWnd* w, int bodyTop);
+/* キャプション帯に触れず body だけ Invalidate（再生ヘッド・編集通知用）。 */
+void ScStaffInvalidateBodyRect(CWnd* w, const CRect& body);
 void ScStaffDrawTimeSignature(CDC& dc, int cx, int staffTop, int gap, int numer, int denom, COLORREF col);
 void ScStaffSetMeter(ScStaffUi* u, int numer, int denom);
 /* Apply tick-0 clef / drum-part from the score into u->clef[] / clefAuto[]. */

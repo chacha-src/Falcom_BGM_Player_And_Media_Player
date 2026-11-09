@@ -202,7 +202,8 @@ Renderer::Renderer()
 	memset(m_hairOut, 0, sizeof(m_hairOut));
 	m_outStamp = 0;
 	m_frame = 0;
-	m_view = m_proj = m_vp = m_sceneShift = MIdent();
+	m_view = m_proj = m_vp = m_sceneShift = m_menuVp = MIdent();
+	m_menuCam = FALSE;
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
@@ -11419,6 +11420,12 @@ void Renderer::SetCamera(const M4& view, const M4& proj, V3 eye, float time)
 	m_fcb.eye[0] = eye.x; m_fcb.eye[1] = eye.y; m_fcb.eye[2] = eye.z; m_fcb.eye[3] = time;
 }
 
+void Renderer::SetMenuCamera(const M4& view, const M4& proj)
+{
+	m_menuVp = MMul(view, proj);
+	m_menuCam = TRUE;
+}
+
 void Renderer::SetLight(V3 dir, V3 focus, float radius)
 {
 	dir = Norm(dir);
@@ -14655,16 +14662,26 @@ void Renderer::EndFrameTextGc()
 	}
 }
 
-BOOL Renderer::ProjectToScreen(V3 p, float& sx, float& sy) const
+static BOOL ProjectWith(const float* m, float sw, float sh, V3 p, float& sx, float& sy)
 {
-	const float* m = m_vp.m;
 	float x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
 	float y = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
 	float w = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
 	if (w < 1e-4f) return FALSE;
-	sx = (x / w * .5f + .5f) * m_w;
-	sy = (1.f - (y / w * .5f + .5f)) * m_h;
+	sx = (x / w * .5f + .5f) * sw;
+	sy = (1.f - (y / w * .5f + .5f)) * sh;
 	return TRUE;
+}
+
+BOOL Renderer::ProjectToScreen(V3 p, float& sx, float& sy) const
+{
+	return ProjectWith(m_vp.m, (float)m_w, (float)m_h, p, sx, sy);
+}
+
+BOOL Renderer::ProjectMenu(V3 p, float& sx, float& sy) const
+{
+	const float* m = m_menuCam ? m_menuVp.m : m_vp.m;
+	return ProjectWith(m, (float)m_w, (float)m_h, p, sx, sy);
 }
 
 static BOOL TacInClip(const float* m, V3 p, float r)

@@ -5494,6 +5494,33 @@ static int TerrainAvoPct(const Battle& b, const Unit& d)
 	return TerrainInfo(b.map.At(d.x, d.z).t).avoPct;
 }
 
+// 味方だけ。Lv1 は 1。ステージ60（敵HP 2000〜3000）で、力100前後の近接と魔力が届く傾き。
+static float TacAllyScale(const Unit& a, float perLv)
+{
+	if (a.team != TEAM_PLAYER) return 1.f;
+	int lv = a.ch.lv;
+	if (lv < 2) return 1.f;
+	return 1.f + (lv - 1) * perLv;
+}
+
+// 標準攻撃の素点。職の力・魔力は幅があるので、ここから防御を引いた着弾を揃える。敵には使わない。
+static float TacBasicOffense(const Unit& a)
+{
+	if (a.team != TEAM_PLAYER) return -1.f;
+	int lv = a.ch.lv;
+	if (lv < 1) lv = 1;
+	return 8.f + (lv - 1) * 5.35f;
+}
+
+static void BlendBasic(const Unit& a, float& dm, float mit)
+{
+	float off = TacBasicOffense(a);
+	if (off < 0.f) return;
+	float fair = off - mit;
+	if (fair < 1.f) fair = 1.f;
+	dm = fair * 0.8f + dm * 0.2f;
+}
+
 static int AttackElem(const Unit& a, int skill)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
@@ -5549,7 +5576,19 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		float mult = sd ? (150 + sd->power * 5) / 100.f : 1.f;
 		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
-		dm = atk * mult - df * .8f;
+		float atkF = (float)atk;
+		if (sd && !IsSummonId(skill)) atkF *= TacAllyScale(a, 0.018f);
+		dm = atkF * mult - df * .8f;
+		if (!sd) BlendBasic(a, dm, df * .8f);
+		else if (a.team == TEAM_PLAYER && !IsSummonId(skill)) {
+			float off = TacBasicOffense(a);
+			if (off > 0.f) {
+				float fair = off - df * .8f;
+				if (fair < 1.f) fair = 1.f;
+				float floorv = fair * 0.8f + dm * 0.2f;
+				if (dm < floorv) dm = floorv;
+			}
+		}
 		if (sd && IsSummonId(skill)) {
 			// 魔力−魔防だけだと個位数になる。力＋武器と魔力の高い方を使い、見積もりの半分をさらに 1.5 倍する。
 			int phys = UnitStat(a, S_STR) + UnitWeaponPow(a);
@@ -5575,7 +5614,10 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (bowish) atk += UnitStat(a, S_DEX);
 		if (!sd && bowish) atk = atk * 6 / 5;
 		float mult = sd ? sd->power / 100.f : 1.f;
-		if (bowish && sd) mult *= 1.85f; // 弓スキルは高防御相手でも通るよう底上げ
+		// 弓スキルは防御を大きく抜くので、倍率は抑えめ。会心で敵HPを丸ごと消さない。
+		if (bowish && sd) mult *= 1.10f;
+		// 弓以外の物理。防御を引くと力100では数十ダメージになるので、レベルで戻す。
+		if (!bowish) mult *= TacAllyScale(a, 0.034f);
 		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
 		if (bowish) df *= 0.42f; // 暗黒戦士級の高DEFでも2〜3ダメに潰れない
@@ -5589,6 +5631,17 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (bowish) {
 			int floorv = max(18, (UnitStat(a, S_STR) + UnitStat(a, S_DEX) * 2) / 3);
 			if (dm < (float)floorv) dm = (float)floorv;
+		}
+		if (!sd) BlendBasic(a, dm, df);
+		else if (a.team == TEAM_PLAYER && sd->power >= 100) {
+			// 100%以上の技は、同じ防御を引いた標準攻撃を下回らない。上回る職はそのまま。
+			float off = TacBasicOffense(a);
+			if (off > 0.f) {
+				float fair = off - df;
+				if (fair < 1.f) fair = 1.f;
+				float floorv = fair * 0.8f + dm * 0.2f;
+				if (dm < floorv) dm = floorv;
+			}
 		}
 		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (UnitHasPas(d, PAS_EVADE2) ? 16 : 0);
 		hit = 90 + UnitStat(a, S_DEX) + UnitStat(a, S_LUK) / 4 - evade + (sd ? 6 : 0);
@@ -5775,7 +5828,13 @@ int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
 		int atk = UnitStat(a, S_MAG) + (sd ? 0 : UnitWeaponPow(a));
 		if (UnitHasSkill(a, SKL_P_SPELL)) atk = atk * 115 / 100;
 		float mult = sd ? (150 + sd->power * 5) / 100.f : 1.f;
-		dm = (float)atk * mult;
+		float atkF = (float)atk;
+		if (sd && !IsSummonId(skill)) atkF *= TacAllyScale(a, 0.018f);
+		dm = atkF * mult;
+		if (!sd) {
+			float off = TacBasicOffense(a);
+			if (off > 0.f) dm = off;
+		}
 		if (sd && IsSummonId(skill)) {
 			int phys = UnitStat(a, S_STR) + UnitWeaponPow(a);
 			float offense = (float)(phys > atk ? phys : atk);
@@ -5792,7 +5851,16 @@ int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
 			atk = atk * 6 / 5;
 		float mult = sd ? sd->power / 100.f : 1.f;
 		if (mult < 0.05f) mult = 1.f;
+		bool bowish = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1
+			|| skill == SKL_PIERCE || skill == SKL_SNIPE || skill == SKL_ARROWRAIN
+			|| skill == SKL_ARROWLINE || skill == SKL_ARROWFAN || skill == SKL_CRESCENT;
+		if (bowish && sd) mult *= 1.10f;
+		if (!bowish) mult *= TacAllyScale(a, 0.034f);
 		dm = (float)atk * mult;
+		if (!sd) {
+			float off = TacBasicOffense(a);
+			if (off > 0.f) dm = off;
+		}
 	}
 	int per = max(1, (int)(dm + 0.5f));
 	const wchar_t* kind = magic

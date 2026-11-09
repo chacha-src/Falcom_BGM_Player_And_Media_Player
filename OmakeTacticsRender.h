@@ -608,6 +608,9 @@ public:
 	BOOL DeviceLost() const { return m_lost; }
 
 	BOOL ProjectToScreen(V3 p, float& sx, float& sy) const;
+	// 揺れを混ぜない視点。コマンドメニューはこちらへ出す。
+	void SetMenuCamera(const M4& view, const M4& proj);
+	BOOL ProjectMenu(V3 p, float& sx, float& sy) const;
 	BOOL InView(V3 p, float radius) const;
 	BOOL InLight(V3 p, float radius) const;
 	BOOL BoundVisible(float cx, float cy, float cz, float rad) const;
@@ -618,6 +621,8 @@ public:
 
 	DWORD m_frame;
 	M4 m_view, m_proj, m_vp, m_sceneShift;
+	M4 m_menuVp;
+	BOOL m_menuCam;
 	V3 m_eye;
 	float m_time;
 
