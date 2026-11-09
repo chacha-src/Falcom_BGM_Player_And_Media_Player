@@ -8,6 +8,7 @@
 #include "OfflineHelp.h"
 #include "CSasamiCmdHelpDlg.h"
 #include "CSasamiStaffCore.h"
+#include "CSasamiSimpleInputDlg.h"
 #include "kb_sasami/source/sasami_write.h"
 #include <shlobj.h>
 
@@ -18,8 +19,10 @@ IMPLEMENT_DYNAMIC(CSasamiTextDlg, CCustomBlurDialogExBase)
 CSasamiTextDlg::CSasamiTextDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(CSasamiTextDlg::IDD, pParent)
 	, m_modeFm(0), m_b64Expanded(0), m_b64RefreshLock(FALSE), m_textDirty(0)
+	, m_chromeDetail(0)
 {
 	m_lastOut[0] = 0;
+	m_findBuf[0] = 0;
 	ScMidiDocClear(&m_midi);
 	ScFmDocClear(&m_fm);
 }
@@ -130,6 +133,9 @@ BEGIN_MESSAGE_MAP(CSasamiTextDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_TEXT_SCORE, OnBnClickedScore)
 	ON_BN_CLICKED(IDC_SASAMI_TEXT_MODE, OnBnClickedMode)
 	ON_BN_CLICKED(IDC_SASAMI_TEXT_B64FOLD, OnBnClickedB64Fold)
+	ON_BN_CLICKED(0x5F81, OnBnClickedFind)
+	ON_BN_CLICKED(0x5F82, OnBnClickedGoto)
+	ON_BN_CLICKED(0x5F83, OnBnClickedMore)
 	ON_EN_CHANGE(IDC_SASAMI_TEXT_EDIT, OnEnChange)
 	ON_WM_TIMER()
 END_MESSAGE_MAP()
@@ -157,6 +163,15 @@ void CSasamiTextDlg::ApplyLang()
 		? CString(LL14(L"FM音色編集", L"FM voice edit", L"Note timbre FM", L"Nota voce FM", L"Nota voz FM", L"FM 음색 메모", L"FM音色备注", L"ملاحظة صوت FM", L"Заметка FM", L"FM-Klang-Notiz", L"Nota voz FM", L"FM-klanknotitie", L"Notatka FM", L"FM ses notu"))
 		: CString(LL14(L"VST音色挿入", L"Insert VST", L"Insérer VST", L"Inserisci VST", L"Insertar VST", L"VST 삽입", L"插入VST", L"إدراج VST", L"Вставить VST", L"VST einfügen", L"Inserir VST", L"VST invoegen", L"Wstaw VST", L"VST ekle")));
 	m_btnExport.SetWindowText(LL14(L"書き出し", L"Export", L"Exporter", L"Esporta", L"Exportar", L"내보내기", L"导出", L"تصدير", L"Экспорт", L"Export", L"Exportar", L"Exporteren", L"Eksport", L"Disa aktar"));
+	if (m_btnFind.GetSafeHwnd())
+		m_btnFind.SetWindowText(LL14(L"検索", L"Find", L"Rechercher", L"Trova", L"Buscar", L"찾기", L"查找", L"بحث", L"Найти", L"Suchen", L"Localizar", L"Zoeken", L"Znajdź", L"Bul"));
+	if (m_btnGoto.GetSafeHwnd())
+		m_btnGoto.SetWindowText(LL14(L"行へ", L"Go line", L"Ligne", L"Riga", L"Línea", L"행으로", L"跳到行", L"سطر", L"К строке", L"Zeile", L"Linha", L"Regel", L"Wiersz", L"Satır"));
+	if (m_btnMore.GetSafeHwnd())
+		m_btnMore.SetWindowText(m_chromeDetail
+			? LL14(L"簡易▲", L"Less ▲", L"Moins ▲", L"Meno ▲", L"Menos ▲", L"간단히 ▲", L"精简▲", L"أقل ▲", L"Кратко ▲", L"Weniger ▲", L"Menos ▲", L"Minder ▲", L"Mniej ▲", L"Az ▲")
+			: LL14(L"詳細▼", L"More ▼", L"Plus ▼", L"Più ▼", L"Más ▼", L"자세히 ▼", L"详细▼", L"المزيد ▼", L"Ещё ▼", L"Mehr ▼", L"Mais ▼", L"Meer ▼", L"Więcej ▼", L"Daha ▼"));
+	UpdateInfoBar();
 }
 
 BOOL CSasamiTextDlg::OnInitDialog()
@@ -175,6 +190,18 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	if (m_btnScore.GetSafeHwnd()) flatBtn(m_btnScore);
 	if (m_btnMode.GetSafeHwnd()) flatBtn(m_btnMode);
 	if (m_btnB64Fold.GetSafeHwnd()) flatBtn(m_btnB64Fold);
+	auto mkBtn = [&](CCustomStandardButton& b, UINT id, LPCWSTR t) {
+		if (!b.GetSafeHwnd())
+			b.Create(t, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | BS_PUSHBUTTON, CRect(8, 8, 88, 36), this, id);
+		flatBtn(b);
+	};
+	mkBtn(m_btnFind, 0x5F81, L"Find");
+	mkBtn(m_btnGoto, 0x5F82, L"Go");
+	mkBtn(m_btnMore, 0x5F83, L"More");
+	if (!m_infoBar.GetSafeHwnd()) {
+		m_infoBar.Create(L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS, CRect(0, 0, 100, 20), this, 0x5F80);
+		m_infoBar.SetAeroMode(FALSE);
+	}
 	m_status.SetAeroMode(FALSE);
 	if (m_btnOpen.GetSafeHwnd()) m_btnOpen.SetIcon(IDI_UI_FOLDER);
 	if (m_btnSave.GetSafeHwnd()) m_btnSave.SetIcon(IDI_UI_FILE);
@@ -200,6 +227,8 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	ColorizeEdit();
 	SetupTooltips();
 	UpdateB64FoldButton();
+	UpdateInfoBar();
+	SetTimer(kTextCaretTimer, 250, NULL);
 	return TRUE;
 }
 
@@ -221,24 +250,45 @@ void CSasamiTextDlg::LayoutChrome()
 		w.MoveWindow(x, y, ww, btnH);
 		x += ww + 4;
 	};
+	const int detail = m_chromeDetail ? 1 : 0;
+	auto vis = [&](CWnd& w, int show) {
+		if (!w.GetSafeHwnd()) return;
+		w.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	};
+	vis(m_btnVst, detail);
+	vis(m_btnExport, detail);
+	vis(m_btnB64Fold, detail && !m_modeFm && ScMmlContainsVstB64(m_textFull));
+	vis(m_btnFind, 1);
+	vis(m_btnGoto, 1);
+	vis(m_btnMore, 1);
+	vis(m_infoBar, 1);
 	place(m_btnOpen, 64);
 	place(m_btnSave, 64);
 	place(m_btnNew, 64);
 	place(m_btnCompile, 72);
 	place(m_btnPlay, 88);
-	x += 8;
 	place(m_btnScore, 64);
 	place(m_btnMode, 72);
+	place(m_btnFind, 56);
+	place(m_btnGoto, 56);
+	place(m_btnHelp, 64);
+	place(m_btnMore, 64);
 	y += btnH + 4;
 	x = pad;
-	place(m_btnVst, 96);
-	place(m_btnExport, 72);
-	place(m_btnHelp, 64);
-	place(m_btnB64Fold, 72);
-	y += btnH + 6;
+	if (detail) {
+		place(m_btnVst, 96);
+		place(m_btnExport, 72);
+		place(m_btnB64Fold, 72);
+		y += btnH + 6;
+		x = pad;
+	}
+	if (m_infoBar.GetSafeHwnd()) {
+		m_infoBar.MoveWindow(pad, y, max(80, rc.Width() - pad * 2), 20);
+		y += 24;
+	}
 	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(pad, y, max(80, rc.Width() - pad * 2), 36);
-	y += 40;
+		m_status.MoveWindow(pad, y, max(80, rc.Width() - pad * 2), 22);
+	y += 26;
 	m_bodyRc.SetRect(pad, y, rc.Width() - pad, rc.Height() - pad);
 	if (m_edit.GetSafeHwnd()) m_edit.MoveWindow(m_bodyRc);
 }
@@ -298,9 +348,16 @@ void CSasamiTextDlg::RefreshChromeOpaque()
 	if (m_btnScore.GetSafeHwnd()) flatBtn(m_btnScore);
 	if (m_btnMode.GetSafeHwnd()) flatBtn(m_btnMode);
 	if (m_btnB64Fold.GetSafeHwnd()) flatBtn(m_btnB64Fold);
+	if (m_btnFind.GetSafeHwnd()) flatBtn(m_btnFind);
+	if (m_btnGoto.GetSafeHwnd()) flatBtn(m_btnGoto);
+	if (m_btnMore.GetSafeHwnd()) flatBtn(m_btnMore);
 	if (m_status.GetSafeHwnd()) {
 		m_status.SetAeroMode(FALSE);
 		m_status.Invalidate(FALSE);
+	}
+	if (m_infoBar.GetSafeHwnd()) {
+		m_infoBar.SetAeroMode(FALSE);
+		m_infoBar.Invalidate(FALSE);
 	}
 	CRect rc;
 	GetClientRect(&rc);
@@ -327,6 +384,10 @@ void CSasamiTextDlg::SetupTooltips()
 	tip(m_btnMode, LL14(L"MIDI と FM を切り替える", L"Switch MIDI and FM", L"Basculer MIDI / FM", L"Passa MIDI / FM", L"Cambiar MIDI / FM", L"MIDI와 FM 전환", L"切换 MIDI / FM", L"تبديل MIDI / FM", L"Переключить MIDI / FM", L"MIDI / FM umschalten", L"Alternar MIDI / FM", L"MIDI / FM wisselen", L"Przełącz MIDI / FM", L"MIDI / FM değiştir"));
 	tip(m_btnB64Fold, LL14(L"長い @VSTSTATEB64 を折る / 開く", L"Fold or expand long @VSTSTATEB64 lines", L"Plier / ouvrir B64", L"Piega / apri B64", L"Plegar / abrir B64", L"B64 접기 / 펼치기", L"折叠 / 展开 B64", L"طي / فتح B64", L"Свернуть / развернуть B64", L"B64 falten / öffnen", L"Dobrar / abrir B64", L"B64 vouwen / openen", L"Zwiń / rozwiń B64", L"B64 katla / aç"));
 	tip(m_status, LL14(L"エラーは「行: 内容」。Ctrl+Enter でその行へ", L"Errors show as line: message. Ctrl+Enter jumps there", L"Erreurs: ligne: message", L"Errori: riga: messaggio", L"Errores: línea: mensaje", L"오류는 행: 내용", L"错误为 行: 内容", L"الأخطاء: سطر", L"Ошибки: строка", L"Fehler: Zeile", L"Erros: linha", L"Fouten: regel", L"Błędy: wiersz", L"Hatalar: satır"));
+	tip(m_btnFind, LL14(L"検索（Ctrl+F）。F3 で次へ", L"Find (Ctrl+F). F3 next", L"Rechercher (Ctrl+F). F3 suivant", L"Trova (Ctrl+F). F3 successivo", L"Buscar (Ctrl+F). F3 siguiente", L"찾기 (Ctrl+F). F3 다음", L"查找（Ctrl+F）。F3 下一个", L"بحث (Ctrl+F)", L"Найти (Ctrl+F)", L"Suchen (Strg+F). F3 weiter", L"Localizar (Ctrl+F)", L"Zoeken (Ctrl+F)", L"Znajdź (Ctrl+F)", L"Bul (Ctrl+F)"));
+	tip(m_btnGoto, LL14(L"指定行へ移動（Ctrl+G）", L"Go to line (Ctrl+G)", L"Aller à la ligne (Ctrl+G)", L"Vai alla riga (Ctrl+G)", L"Ir a la línea (Ctrl+G)", L"행으로 이동 (Ctrl+G)", L"跳到行（Ctrl+G）", L"الانتقال إلى سطر (Ctrl+G)", L"К строке (Ctrl+G)", L"Zur Zeile (Strg+G)", L"Ir à linha (Ctrl+G)", L"Ga naar regel (Ctrl+G)", L"Idź do wiersza (Ctrl+G)", L"Satıra git (Ctrl+G)"));
+	tip(m_btnMore, LL14(L"VST / 書き出し / B64 を表示", L"Show VST / export / B64", L"Afficher VST / export / B64", L"Mostra VST / export / B64", L"Mostrar VST / export / B64", L"VST / 내보내기 / B64 표시", L"显示 VST / 导出 / B64", L"إظهار VST / تصدير / B64", L"Показать VST / экспорт / B64", L"VST / Export / B64 zeigen", L"Mostrar VST / export / B64", L"VST / export / B64 tonen", L"Pokaż VST / eksport / B64", L"VST / dışa aktar / B64 göster"));
+	tip(m_infoBar, LL14(L"モード・行:列・文字数・未反映", L"Mode, line:col, chars, dirty", L"Mode, ligne:col, caractères", L"Modo, riga:col, caratteri", L"Modo, línea:col, caracteres", L"모드·행:열·글자·미반영", L"模式、行:列、字数、未反映", L"الوضع والسطر", L"Режим, строка", L"Modus, Zeile:Spalte", L"Modo, linha:col", L"Modus, regel:kolom", L"Tryb, wiersz:kol", L"Mod, satır:sütun"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
@@ -351,12 +412,26 @@ BOOL CSasamiTextDlg::PreTranslateMessage(MSG* pMsg)
 		m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
 		const int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
 		if (pMsg->wParam == VK_F5) {
-			OnBnClickedPlay();
+			if (shift) StopPreview();
+			else OnBnClickedPlay();
 			return TRUE;
 		}
 		if (ctrl && pMsg->wParam == VK_RETURN) {
 			OnBnClickedCompile();
+			return TRUE;
+		}
+		if (ctrl && (pMsg->wParam == 'F' || pMsg->wParam == 'f')) {
+			OnBnClickedFind();
+			return TRUE;
+		}
+		if (ctrl && (pMsg->wParam == 'G' || pMsg->wParam == 'g')) {
+			OnBnClickedGoto();
+			return TRUE;
+		}
+		if (pMsg->wParam == VK_F3) {
+			FindNext(1);
 			return TRUE;
 		}
 	}
@@ -399,7 +474,7 @@ void CSasamiTextDlg::ApplyB64ViewToEdit()
 void CSasamiTextDlg::UpdateB64FoldButton()
 {
 	if (!m_btnB64Fold.GetSafeHwnd()) return;
-	const int show = (!m_modeFm && ScMmlContainsVstB64(m_textFull)) ? SW_SHOW : SW_HIDE;
+	const int show = (m_chromeDetail && !m_modeFm && ScMmlContainsVstB64(m_textFull)) ? SW_SHOW : SW_HIDE;
 	m_btnB64Fold.ShowWindow(show);
 	if (show == SW_HIDE) return;
 	m_btnB64Fold.SetWindowText(m_b64Expanded
@@ -433,6 +508,10 @@ void CSasamiTextDlg::OnTimer(UINT_PTR nIDEvent)
 		KillTimer(kTextScoreSyncTimer);
 		if (!m_b64RefreshLock)
 			PushTextToScore();
+		return;
+	}
+	if (nIDEvent == kTextCaretTimer) {
+		UpdateInfoBar();
 		return;
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
@@ -472,6 +551,7 @@ void CSasamiTextDlg::OnEnChange()
 	}
 	SyncTextFullFromEdit();
 	UpdateB64FoldButton();
+	UpdateInfoBar();
 	if (!m_b64RefreshLock)
 		ScheduleScoreSync();
 }
@@ -800,25 +880,194 @@ void CSasamiTextDlg::OnBnClickedInsertVst()
 	m_status.SetWindowText(L"Inserted @VST/@PROG/@BANK (also assign Tone gauge on MIDI score)");
 }
 
+void CSasamiTextDlg::UpdateInfoBar()
+{
+	if (!m_infoBar.GetSafeHwnd() || !m_edit.GetSafeHwnd()) return;
+	int a = 0, b = 0;
+	m_edit.GetSel(a, b);
+	const int nLine = m_edit.GetLineCount();
+	int line0 = m_edit.LineFromChar(a);
+	if (line0 < 0) line0 = 0;
+	const int lineIdx = m_edit.LineIndex(line0);
+	int col = a - (lineIdx >= 0 ? lineIdx : 0) + 1;
+	if (col < 1) col = 1;
+	const int nch = m_edit.GetWindowTextLength();
+	CString s;
+	s.Format(LL14(
+		L"%s  |  行 %d / %d  列 %d  |  %d 文字  |  %s  |  Ctrl+Enter 反映  F5 再生  Ctrl+F 検索",
+		L"%s  |  Line %d / %d  Col %d  |  %d chars  |  %s  |  Ctrl+Enter apply  F5 play  Ctrl+F find",
+		L"%s  |  Ligne %d / %d  Col %d  |  %d car.  |  %s  |  Ctrl+Entrée  F5  Ctrl+F",
+		L"%s  |  Riga %d / %d  Col %d  |  %d car.  |  %s  |  Ctrl+Invio  F5  Ctrl+F",
+		L"%s  |  Línea %d / %d  Col %d  |  %d car.  |  %s  |  Ctrl+Intro  F5  Ctrl+F",
+		L"%s  |  행 %d / %d  열 %d  |  %d 글자  |  %s  |  Ctrl+Enter 반영  F5 재생  Ctrl+F 찾기",
+		L"%s  |  行 %d / %d  列 %d  |  %d 字  |  %s  |  Ctrl+Enter 反映  F5 播放  Ctrl+F 查找",
+		L"%s  |  سطر %d / %d  عمود %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F",
+		L"%s  |  Стр. %d / %d  Стлб %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F",
+		L"%s  |  Zeile %d / %d  Sp. %d  |  %d Z.  |  %s  |  Strg+Enter  F5  Strg+F",
+		L"%s  |  Linha %d / %d  Col %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F",
+		L"%s  |  Regel %d / %d  Kol %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F",
+		L"%s  |  Wiersz %d / %d  Kol %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F",
+		L"%s  |  Satır %d / %d  Süt %d  |  %d  |  %s  |  Ctrl+Enter  F5  Ctrl+F"),
+		m_modeFm ? L"FM/OPNA" : L"MIDI/MICP",
+		line0 + 1, nLine, col, nch,
+		m_textDirty
+			? LL14(L"未反映", L"Unapplied", L"Non appliqué", L"Non applicato", L"Sin aplicar", L"미반영", L"未反映", L"غير مطبّق", L"Не применено", L"Nicht übernommen", L"Não aplicado", L"Niet toegepast", L"Niezastosowane", L"Uygulanmadı")
+			: LL14(L"同期済", L"Synced", L"Synchronisé", L"Sincronizzato", L"Sincronizado", L"동기됨", L"已同步", L"متزامن", L"Синхр.", L"Synchron", L"Sincronizado", L"Gesynchroniseerd", L"Zsynchronizowane", L"Eşitlendi"));
+	m_infoBar.SetWindowText(s);
+}
+
+void CSasamiTextDlg::InsertAtCaret(const wchar_t* s)
+{
+	if (!s || !m_edit.GetSafeHwnd()) return;
+	int a = 0, b = 0;
+	m_edit.GetSel(a, b);
+	CString t;
+	m_edit.GetWindowText(t);
+	CString ins(s);
+	t = t.Left(a) + ins + t.Mid(b);
+	m_edit.SetWindowText(t);
+	const int na = a + ins.GetLength();
+	m_edit.SetSel(na, na);
+	m_edit.SetFocus();
+	m_textDirty = 1;
+	SyncTextFullFromEdit();
+	ColorizeEdit();
+	UpdateInfoBar();
+	ScheduleScoreSync();
+}
+
+void CSasamiTextDlg::FindNext(int wrap)
+{
+	if (!m_edit.GetSafeHwnd()) return;
+	if (!m_findBuf[0]) {
+		OnBnClickedFind();
+		return;
+	}
+	CString t;
+	m_edit.GetWindowText(t);
+	int a = 0, b = 0;
+	m_edit.GetSel(a, b);
+	int found = t.Find(m_findBuf, b);
+	if (found < 0 && wrap)
+		found = t.Find(m_findBuf, 0);
+	if (found < 0) {
+		m_status.SetWindowText(LL14(L"見つかりません", L"Not found", L"Introuvable", L"Non trovato", L"No encontrado", L"없음", L"未找到", L"غير موجود", L"Не найдено", L"Nicht gefunden", L"Não encontrado", L"Niet gevonden", L"Nie znaleziono", L"Bulunamadı"));
+		RefreshChromeOpaque();
+		return;
+	}
+	const int n = (int)wcslen(m_findBuf);
+	m_edit.SetSel(found, found + n);
+	m_edit.SetFocus();
+	UpdateInfoBar();
+}
+
+void CSasamiTextDlg::StopPreview()
+{
+	ScStaffStopHostPreview(NULL);
+	m_status.SetWindowText(LL14(L"停止（Shift+F5）", L"Stopped (Shift+F5)", L"Arrêté (Shift+F5)", L"Fermato (Shift+F5)", L"Detenido (Shift+F5)", L"정지 (Shift+F5)", L"已停止（Shift+F5）", L"توقف (Shift+F5)", L"Стоп (Shift+F5)", L"Gestoppt (Umschalt+F5)", L"Parado (Shift+F5)", L"Gestopt (Shift+F5)", L"Zatrzymano (Shift+F5)", L"Durdu (Shift+F5)"));
+	RefreshChromeOpaque();
+}
+
+void CSasamiTextDlg::OnBnClickedFind()
+{
+	wchar_t buf[128];
+	wcsncpy_s(buf, m_findBuf, _TRUNCATE);
+	if (CSasamiSimpleInputDlg::AskText(this,
+		LL14(L"検索", L"Find", L"Rechercher", L"Trova", L"Buscar", L"찾기", L"查找", L"بحث", L"Найти", L"Suchen", L"Localizar", L"Zoeken", L"Znajdź", L"Bul"),
+		LL14(L"検索する文字列", L"Text to find", L"Texte à trouver", L"Testo da trovare", L"Texto a buscar", L"찾을 문자열", L"要查找的文字", L"النص للبحث", L"Текст поиска", L"Suchtext", L"Texto a localizar", L"Te zoeken tekst", L"Tekst do znalezienia", L"Aranacak metin"),
+		buf, 128) != IDOK)
+		return;
+	wcsncpy_s(m_findBuf, buf, _TRUNCATE);
+	FindNext(1);
+}
+
+void CSasamiTextDlg::OnBnClickedGoto()
+{
+	int a = 0, b = 0;
+	if (m_edit.GetSafeHwnd()) m_edit.GetSel(a, b);
+	int cur = m_edit.GetSafeHwnd() ? (m_edit.LineFromChar(a) + 1) : 1;
+	if (cur < 1) cur = 1;
+	const int maxL = m_edit.GetSafeHwnd() ? m_edit.GetLineCount() : 1;
+	int line = cur;
+	if (CSasamiSimpleInputDlg::AskNumber(this,
+		LL14(L"行へ移動", L"Go to line", L"Aller à la ligne", L"Vai alla riga", L"Ir a la línea", L"행으로 이동", L"跳到行", L"الانتقال إلى سطر", L"К строке", L"Zur Zeile", L"Ir à linha", L"Ga naar regel", L"Idź do wiersza", L"Satıra git"),
+		LL14(L"行番号 (1–)", L"Line number (1–)", L"Numéro de ligne (1–)", L"Numero riga (1–)", L"Número de línea (1–)", L"행 번호 (1–)", L"行号 (1–)", L"رقم السطر (1–)", L"Номер строки (1–)", L"Zeilennummer (1–)", L"Número da linha (1–)", L"Regelnummer (1–)", L"Numer wiersza (1–)", L"Satır numarası (1–)"),
+		cur, 1, max(1, maxL), &line) != IDOK)
+		return;
+	RevealErrorLine(line);
+	UpdateInfoBar();
+}
+
+void CSasamiTextDlg::OnBnClickedMore()
+{
+	m_chromeDetail = m_chromeDetail ? 0 : 1;
+	ApplyLang();
+	LayoutChrome();
+	RefreshChromeOpaque();
+}
+
 void CSasamiTextDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
+	(void)pWnd;
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
-	menu.AddCommand(IDC_SASAMI_TEXT_COMPILE, LL14(L"反映", L"Apply", L"Appliquer", L"Applica", L"Aplicar", L"반영", L"反映", L"تطبيق", L"Применить", L"Übernehmen", L"Aplicar", L"Toepassen", L"Zastosuj", L"Uygula"));
-	menu.AddCommand(IDC_SASAMI_TEXT_EXPORT, LL14(L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…", L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio export…", L"Exportar audio…", L"Audio exporteren…", L"Eksport audio…", L"Ses disa aktar…"));
+	CCustomPopupMenu* play = menu.AddSubMenu(LL14(
+		L"再生", L"Playback", L"Lecture", L"Riproduzione", L"Reproducción",
+		L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Wiedergabe",
+		L"Reprodução", L"Afspelen", L"Odtwarzanie", L"Çalma"));
+	if (play) {
+		play->AddCommand(IDC_SASAMI_TEXT_PLAY, LL14(L"再生確認\tF5", L"Preview\tF5", L"Aperçu\tF5", L"Anteprima\tF5", L"Vista previa\tF5", L"미리듣기\tF5", L"试听\tF5", L"معاينة\tF5", L"Превью\tF5", L"Vorschau\tF5", L"Prévia\tF5", L"Voorbeeld\tF5", L"Podgląd\tF5", L"Önizle\tF5"));
+		play->AddCommand(0x5F84, LL14(L"停止\tShift+F5", L"Stop\tShift+F5", L"Arrêter\tShift+F5", L"Ferma\tShift+F5", L"Detener\tShift+F5", L"정지\tShift+F5", L"停止\tShift+F5", L"إيقاف\tShift+F5", L"Стоп\tShift+F5", L"Stopp\tUmschalt+F5", L"Parar\tShift+F5", L"Stop\tShift+F5", L"Stop\tShift+F5", L"Dur\tShift+F5"));
+		play->AddCommand(IDC_SASAMI_TEXT_COMPILE, LL14(L"譜面へ反映\tCtrl+Enter", L"Apply to score\tCtrl+Enter", L"Appliquer\tCtrl+Entrée", L"Applica\tCtrl+Invio", L"Aplicar\tCtrl+Intro", L"악보 반영\tCtrl+Enter", L"反映到谱面\tCtrl+Enter", L"تطبيق\tCtrl+Enter", L"Применить\tCtrl+Enter", L"Übernehmen\tStrg+Enter", L"Aplicar\tCtrl+Enter", L"Toepassen\tCtrl+Enter", L"Zastosuj\tCtrl+Enter", L"Uygula\tCtrl+Enter"));
+	}
+	CCustomPopupMenu* ed = menu.AddSubMenu(LL14(
+		L"編集", L"Edit", L"Édition", L"Modifica", L"Editar",
+		L"편집", L"编辑", L"تحرير", L"Правка", L"Bearbeiten",
+		L"Editar", L"Bewerken", L"Edycja", L"Düzen"));
+	if (ed) {
+		ed->AddCommand(0x5F81, LL14(L"検索…\tCtrl+F", L"Find…\tCtrl+F", L"Rechercher…\tCtrl+F", L"Trova…\tCtrl+F", L"Buscar…\tCtrl+F", L"찾기…\tCtrl+F", L"查找…\tCtrl+F", L"بحث…\tCtrl+F", L"Найти…\tCtrl+F", L"Suchen…\tStrg+F", L"Localizar…\tCtrl+F", L"Zoeken…\tCtrl+F", L"Znajdź…\tCtrl+F", L"Bul…\tCtrl+F"));
+		ed->AddCommand(0x5F85, LL14(L"次を検索\tF3", L"Find next\tF3", L"Suivant\tF3", L"Successivo\tF3", L"Siguiente\tF3", L"다음 찾기\tF3", L"查找下一个\tF3", L"التالي\tF3", L"Далее\tF3", L"Weitersuchen\tF3", L"Próximo\tF3", L"Volgende\tF3", L"Następny\tF3", L"Sonraki\tF3"));
+		ed->AddCommand(0x5F82, LL14(L"行へ移動…\tCtrl+G", L"Go to line…\tCtrl+G", L"Aller à la ligne…\tCtrl+G", L"Vai alla riga…\tCtrl+G", L"Ir a la línea…\tCtrl+G", L"행으로…\tCtrl+G", L"跳到行…\tCtrl+G", L"إلى سطر…\tCtrl+G", L"К строке…\tCtrl+G", L"Zur Zeile…\tStrg+G", L"Ir à linha…\tCtrl+G", L"Naar regel…\tCtrl+G", L"Do wiersza…\tCtrl+G", L"Satıra git…\tCtrl+G"));
+	}
 	CCustomPopupMenu* sub = menu.AddSubMenu(LL14(L"挿入", L"Insert", L"Insérer", L"Inserisci", L"Insertar", L"삽입", L"插入", L"إدراج", L"Вставка", L"Einfügen", L"Inserir", L"Invoegen", L"Wstaw", L"Ekle"), L"");
-	if (sub)
-		sub->AddCommand(IDC_SASAMI_TEXT_VST, LL14(L"VSTコマンド", L"VST commands", L"Commandes VST", L"Comandi VST", L"Comandos VST", L"VST 명령", L"VST命令", L"أوامر VST", L"Команды VST", L"VST-Befehle", L"Comandos VST", L"VST-opdrachten", L"Polecenia VST", L"VST komutları"));
-	menu.AddCommand(IDC_SASAMI_TEXT_B64FOLD, LL14(L"B64折畳/展開", L"B64 fold/expand", L"B64 plier/ouvrir", L"B64 piega/apri", L"B64 plegar/abrir", L"B64 접기/펼침", L"B64折叠/展开", L"B64 طي/فتح", L"B64 свернуть/развернуть", L"B64 zu/auf", L"B64 dobrar/abrir", L"B64 dicht/open", L"B64 zwin/rozwin", L"B64 katla/ac"));
+	if (sub) {
+		sub->AddCommand(0x5F90, LL14(L"チャンネル #1 + テンポ", L"Channel #1 + tempo", L"Canal #1 + tempo", L"Canale #1 + tempo", L"Canal #1 + tempo", L"채널 #1 + 템포", L"通道 #1 + 速度", L"قناة #1", L"Канал #1", L"Kanal #1 + Tempo", L"Canal #1 + tempo", L"Kanaal #1 + tempo", L"Kanał #1 + tempo", L"Kanal #1 + tempo"));
+		sub->AddCommand(0x5F91, LL14(L"音符 cdefgab", L"Notes cdefgab", L"Notes cdefgab", L"Note cdefgab", L"Notas cdefgab", L"음표 cdefgab", L"音符 cdefgab", L"نغمات cdefgab", L"Ноты cdefgab", L"Noten cdefgab", L"Notas cdefgab", L"Noten cdefgab", L"Nuty cdefgab", L"Nota cdefgab"));
+		sub->AddCommand(0x5F92, LL14(L"ループ |:2 … :|", L"Loop |:2 … :|", L"Boucle |:2 … :|", L"Loop |:2 … :|", L"Bucle |:2 … :|", L"루프 |:2 … :|", L"循环 |:2 … :|", L"حلقة |:2 … :|", L"Цикл |:2 … :|", L"Schleife |:2 … :|", L"Loop |:2 … :|", L"Lus |:2 … :|", L"Pętla |:2 … :|", L"Döngü |:2 … :|"));
+		sub->AddCommand(0x5F93, LL14(L"ドラム @DRUM 1", L"Drum @DRUM 1", L"Batterie @DRUM 1", L"Batteria @DRUM 1", L"Batería @DRUM 1", L"드럼 @DRUM 1", L"鼓组 @DRUM 1", L"طبول @DRUM 1", L"Барабаны @DRUM 1", L"Drum @DRUM 1", L"Bateria @DRUM 1", L"Drum @DRUM 1", L"Perkusja @DRUM 1", L"Davul @DRUM 1"));
+		sub->AddCommand(0x5F94, LL14(L"拍子 @METER 4/4", L"Meter @METER 4/4", L"Mesure @METER 4/4", L"Metrica @METER 4/4", L"Compás @METER 4/4", L"박자 @METER 4/4", L"拍号 @METER 4/4", L"إيقاع @METER 4/4", L"Размер @METER 4/4", L"Takt @METER 4/4", L"Compasso @METER 4/4", L"Maatsoort @METER 4/4", L"Metrum @METER 4/4", L"Ölçü @METER 4/4"));
+		if (m_modeFm)
+			sub->AddCommand(0x5F95, LL14(L"OPNA ヘッダ", L"OPNA header", L"En-tête OPNA", L"Intestazione OPNA", L"Cabecera OPNA", L"OPNA 헤더", L"OPNA 头", L"ترويسة OPNA", L"Заголовок OPNA", L"OPNA-Kopf", L"Cabeçalho OPNA", L"OPNA-kop", L"Nagłówek OPNA", L"OPNA başlığı"));
+		else
+			sub->AddCommand(IDC_SASAMI_TEXT_VST, LL14(L"VSTコマンド", L"VST commands", L"Commandes VST", L"Comandi VST", L"Comandos VST", L"VST 명령", L"VST命令", L"أوامر VST", L"Команды VST", L"VST-Befehle", L"Comandos VST", L"VST-opdrachten", L"Polecenia VST", L"VST komutları"));
+	}
+	CCustomPopupMenu* file = menu.AddSubMenu(LL14(
+		L"ファイル", L"File", L"Fichier", L"File", L"Archivo",
+		L"파일", L"文件", L"ملف", L"Файл", L"Datei",
+		L"Arquivo", L"Bestand", L"Plik", L"Dosya"));
+	if (file) {
+		file->AddCommand(IDC_SASAMI_TEXT_EXPORT, LL14(L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…", L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio export…", L"Exportar audio…", L"Audio exporteren…", L"Eksport audio…", L"Ses disa aktar…"));
+		file->AddCommand(IDC_SASAMI_TEXT_B64FOLD, LL14(L"B64折畳/展開", L"B64 fold/expand", L"B64 plier/ouvrir", L"B64 piega/apri", L"B64 plegar/abrir", L"B64 접기/펼침", L"B64折叠/展开", L"B64 طي/فتح", L"B64 свернуть/развернуть", L"B64 zu/auf", L"B64 dobrar/abrir", L"B64 dicht/open", L"B64 zwin/rozwin", L"B64 katla/ac"));
+	}
 	menu.AddSeparator();
 	menu.AddCommand(IDC_SASAMI_TEXT_HELP, LL14(L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda", L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
 	const UINT cmd = menu.Track(point, this);
-	if (cmd) PostMessage(WM_COMMAND, cmd);
+	if (!cmd) return;
+	if (cmd == 0x5F84) { StopPreview(); return; }
+	if (cmd == 0x5F85) { FindNext(1); return; }
+	if (cmd == 0x5F90) { InsertAtCaret(L"\r\n#1\r\nt120\r\nl4 o4\r\n"); return; }
+	if (cmd == 0x5F91) { InsertAtCaret(L"cdef gab>c\r\n"); return; }
+	if (cmd == 0x5F92) { InsertAtCaret(L"|:2 \r\n:|\r\n"); return; }
+	if (cmd == 0x5F93) { InsertAtCaret(L"@DRUM 1\r\n"); return; }
+	if (cmd == 0x5F94) { InsertAtCaret(L"@METER 4/4\r\n"); return; }
+	if (cmd == 0x5F95) { InsertAtCaret(L"OPNA\r\n#1\r\nt120\r\n"); return; }
+	PostMessage(WM_COMMAND, cmd);
 }
 
 void CSasamiTextDlg::OnClose()
 {
 	KillTimer(kTextScoreSyncTimer);
+	KillTimer(kTextCaretTimer);
 	PersistSession();
 	/* Open/close without edits must not recompile — expand→fold corrupts engraving. */
 	if (m_textDirty) {

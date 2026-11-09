@@ -588,6 +588,9 @@ public:
 	     C000 バンク書、E000 IRQ ack。YM→FIRQ、VBlank→IRQ。
 	   Sys2: 骨格は同じ。CUS30 の代わり／併設で C140 @7000。 */
 	int NamcoM6809Active() const { return namcoM6809_ != NULL && soundRom_ != NULL; }
+	int AcHotchase() const;
+	void AcHotchaseMix(int16_t* stereo, int frames);
+	int AcGinganin() const;
 	struct mc6809* NamcoM6809Cpu() { return namcoM6809_; }
 	uint8_t NamcoM6809Read8(uint16_t addr);
 	void NamcoM6809Write8(uint16_t addr, uint8_t v);
@@ -658,6 +661,7 @@ public:
 	void Sys32TickYmIrq();
 	int MagmaxAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 5) ? 1 : 0; }
 	int BombjackAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 6) ? 1 : 0; }
+	int PopeyeAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 28) ? 1 : 0; }
 	int CalorieAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 7) ? 1 : 0; }
 	int SolomonAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 8) ? 1 : 0; }
 	int HalleysAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 9) ? 1 : 0; }

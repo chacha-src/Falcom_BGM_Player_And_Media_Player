@@ -78,6 +78,13 @@ float3 ReflectTap(float2 uv, float z)
 	return hit * w;
 }
 
+// 限界突破の Q.w=1.55 では従来どおり 1。上の段だけ、ぼかしの混ざりを滑らかに足す。
+float DofGain()
+{
+	float g = saturate(Q.w);
+	return g * lerp(1.0, 1.4, saturate((Q.w - 1.55) / 1.2));
+}
+
 float4 PSDofH(QOut i) : SV_Target
 {
 	float3 scene = Tex.SampleLevel(SL, i.uv, 0).rgb;
@@ -85,7 +92,7 @@ float4 PSDofH(QOut i) : SV_Target
 	if (Q.w < 0) return float4(scene, 1);
 	float z = Depth.SampleLevel(SL, i.uv, 0).r;
 	float focus = Params.w;
-	float coc = saturate((z - focus) * 2.4) * saturate(Q.w);
+	float coc = saturate((z - focus) * 2.4) * DofGain();
 	scene += ReflectTap(i.uv, z) * (Q.x > 1.5 ? 0.22 : 0.16);
 	scene *= 1. - min(Ao4(i.uv, z, Q.x > 1.5 ? 7.5 : 5.0), 0.5) * (Q.x > 1.5 ? 0.26 : 0.2);
 	float2 rad = Screen.zw * Params.z * coc;
@@ -112,7 +119,7 @@ float4 PSDofU(QOut i) : SV_Target
 	float focus = Params.w;
 	float farC = saturate((z - focus) * 1.7);
 	float nearC = saturate((focus * 0.42 - z) * 6.0);
-	float coc = max(farC, nearC) * saturate(Q.w);
+	float coc = max(farC, nearC) * DofGain();
 	scene += ReflectTap(i.uv, z) * (Q.x > 5.5 ? 0.34 : 0.26);
 	{
 		float ao = Ao12(i.uv, z, 6.5);

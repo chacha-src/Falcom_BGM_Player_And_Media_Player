@@ -42,9 +42,20 @@ protected:
 	int ReadHex(uint8_t* out, int maxOut);
 	void NotifyChanged();
 
+	/* パート種別(通常/ドラム1/ドラム2) — SysEx 発行と同じ場所で設定。
+	   ドキュメントへ SC_EV_DRUM(a=ドラム, b=枠) で保持し、GS/XG のリズムパート
+	   SysEx を曲に埋め込み＋ライブ VST へ即反映する。 */
+	afx_msg void OnPartKindApply();
+	void RefreshPartKind();
+	void ReflectDrumPart(int mode);          /* 0=通常 1=ドラム1 2=ドラム2 */
+	void UpsertPartSysex(const uint8_t* bytes, int n);
+
 	CCustomComboBox m_preset;
 	CCustomEdit m_hex, m_msb, m_lsb, m_data;
 	CCustomStandardButton m_btnRpn, m_btnNrpn, m_btnSysex, m_btnClose;
 	CCustomStatic m_hint;
+	CCustomStatic m_partLbl;
+	CCustomComboBox m_partKind;
+	CCustomStandardButton m_btnPartApply;
 	static CSasamiExcRpnDlg* s_inst;
 };

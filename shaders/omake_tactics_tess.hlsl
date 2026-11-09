@@ -132,7 +132,9 @@ float EdgeFactor(float3 a, float3 b)
 {
 	float d = distance((a + b) * 0.5, Eye.xyz);
 	float tf = max(Q.y, 1);
-	return max(lerp(tf, 1, saturate((d - 8) / 42)), 1);
+	// 近景( d<8 )は満タン tf(=8.6) のまま。中距離の減衰だけ少し手前から効かせ、
+	// 38 ユニットで tf=1 に落とす。中距離の変位がごく僅か滑らかになるだけでシルエットは維持。
+	return max(lerp(tf, 1, saturate((d - 8) / 30)), 1);
 }
 
 bool PatchOut(float4 a, float4 b, float4 c)
@@ -226,6 +228,12 @@ PSIn DST(TF factors, float3 b : SV_DomainLocation, const OutputPatch<TC, 3> p)
 			w += n * g * Q.z * amp;
 			float g2 = fbm2(w.xz * freq * 2.4 + Eye.w * drift * 1.6) - 0.5;
 			w += n * g2 * Q.z * amp * 0.35;
+			// 限界突破のテッセ 8.6 では 0。上の段でだけ、地面の細かい起伏を滑らかに足す。
+			float climb = saturate((Q.y - 8.6) / 5.4);
+			[branch] if (climb > 0.02) {
+				float g3 = fbm2(w.xz * freq * 4.8 + Eye.w * drift * 0.4) - 0.5;
+				w += n * g3 * Q.z * amp * 0.22 * climb;
+			}
 		}
 	}
 	PSIn o;

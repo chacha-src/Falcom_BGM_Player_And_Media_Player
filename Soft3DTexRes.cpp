@@ -87,6 +87,77 @@ static BOOL BonusImagePath(int id, wchar_t* path, int cch)
 	return TRUE;
 }
 
+// TACX: magic, ver u32, count u32, rec[count] { name[56], off u64, size u32, flags u32 } = 72 bytes, blobs
+static const BYTE* s_texView = NULL;
+static DWORD s_texBytes = 0;
+static int s_texN = 0;
+
+static BOOL TacTexEnsure()
+{
+	if (s_texView) return s_texN > 0;
+	wchar_t exe[MAX_PATH], path[MAX_PATH];
+	BonusExeDir(exe, MAX_PATH);
+	swprintf_s(path, L"%s\\tacticsbgm\\resource\\tactics\\tac_tex.bin", exe);
+	HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) { s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	DWORD sz = GetFileSize(hFile, NULL);
+	if (sz < 12 || sz > 512u * 1024u * 1024u) { CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!hMap) { CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	const BYTE* view = (const BYTE*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+	if (!view) { CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	if (memcmp(view, "TACX", 4) != 0) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	unsigned ver = 0, n = 0;
+	memcpy(&ver, view + 4, 4);
+	memcpy(&n, view + 8, 4);
+	if (ver != 1 || n == 0 || n > 4096) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	unsigned long long hdr = 12ull + 72ull * (unsigned long long)n;
+	if (hdr > sz) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	s_texView = view;
+	s_texBytes = sz;
+	s_texN = (int)n;
+	return TRUE;
+}
+
+BOOL BonusTexNamed(const char* rel, const BYTE** data, DWORD* len)
+{
+	if (data) *data = NULL;
+	if (len) *len = 0;
+	if (!rel || !rel[0] || !data || !len) return FALSE;
+	if (!TacTexEnsure() || s_texN <= 0 || s_texView == (const BYTE*)1) return FALSE;
+	char want[56] = {};
+	int i = 0;
+	for (; rel[i] && i < 55; i++) want[i] = (rel[i] == '\\') ? '/' : rel[i];
+	const BYTE* rec = s_texView + 12;
+	for (int k = 0; k < s_texN; k++) {
+		if (_stricmp((const char*)rec, want) == 0) {
+			unsigned long long off = 0;
+			unsigned size = 0;
+			memcpy(&off, rec + 56, 8);
+			memcpy(&size, rec + 64, 4);
+			if (off >= s_texBytes || size < 8 || off + size > s_texBytes) return FALSE;
+			*data = s_texView + (size_t)off;
+			*len = size;
+			return TRUE;
+		}
+		rec += 72;
+	}
+	return FALSE;
+}
+
+static BOOL BonusMapFromBin(int id, const BYTE** data, DWORD* len)
+{
+	wchar_t path[MAX_PATH];
+	if (!BonusImagePath(id, path, MAX_PATH)) return FALSE;
+	const wchar_t* res = wcsstr(path, L"\\resource\\");
+	if (!res) return FALSE;
+	res += 10;
+	char rel[96] = {};
+	int n = 0;
+	for (; res[n] && n < 95; n++) rel[n] = (res[n] == L'\\') ? '/' : (char)res[n];
+	return BonusTexNamed(rel, data, len);
+}
+
 BOOL BonusImageMap(int id, const BYTE** data, DWORD* len)
 {
 	if (data) *data = NULL;
@@ -101,6 +172,17 @@ BOOL BonusImageMap(int id, const BYTE** data, DWORD* len)
 			*len = s_slot[i].n;
 			return TRUE;
 		}
+	}
+	if (BonusMapFromBin(id, data, len) && *data) {
+		if (s_nslot < 32) {
+			s_slot[s_nslot].id = id;
+			s_slot[s_nslot].p = *data;
+			s_slot[s_nslot].n = *len;
+			s_slot[s_nslot].hMap = NULL;
+			s_slot[s_nslot].hFile = NULL;
+			s_nslot++;
+		}
+		return TRUE;
 	}
 	wchar_t path[MAX_PATH];
 	if (!BonusImagePath(id, path, MAX_PATH)) return FALSE;
@@ -133,6 +215,15 @@ BOOL BonusImageRead(int id, BYTE** data, DWORD* len)
 	if (data) *data = NULL;
 	if (len) *len = 0;
 	if (!data || !len || id <= 0) return FALSE;
+	const BYTE* mapped = NULL;
+	DWORD mn = 0;
+	if (BonusMapFromBin(id, &mapped, &mn) && mapped && mn >= 24) {
+		BYTE* b = (BYTE*)malloc(mn);
+		if (!b) return FALSE;
+		memcpy(b, mapped, mn);
+		*data = b; *len = mn;
+		return TRUE;
+	}
 	wchar_t path[MAX_PATH];
 	if (!BonusImagePath(id, path, MAX_PATH)) return FALSE;
 	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);

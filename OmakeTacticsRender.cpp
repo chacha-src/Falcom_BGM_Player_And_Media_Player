@@ -12,6 +12,7 @@
 #include <dxgi1_3.h>
 #include <wincodec.h>
 #include <algorithm>
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <immintrin.h>
@@ -23,6 +24,7 @@
 namespace otac {
 
 static void TacBindCacheDrop();
+static int TacMatOfName(const char* n);
 
 // 描画コマンドは固定配列。new / delete / std::vector は使わない。
 enum { TAC_DRAWQ = 4096 };
@@ -141,10 +143,12 @@ static void TacFillObj(TacObjCB& o, const M4& world, const DrawParams& dp, float
 	o.w = world;
 	o.tint[0] = (dp.tint & 255) / 255.f; o.tint[1] = ((dp.tint >> 8) & 255) / 255.f; o.tint[2] = ((dp.tint >> 16) & 255) / 255.f; o.tint[3] = ((dp.tint >> 24) & 255) / 255.f;
 	o.params[0] = outlineW; o.params[1] = dp.mode; o.params[2] = dp.emissive; o.params[3] = dp.hue;
-	o.extra[0] = dp.dissolve; o.extra[1] = dp.flash; o.extra[2] = dp.rim; o.extra[3] = dp.sway;
+	o.extra[0] = dp.dissolve; o.extra[1] = dp.flash; o.extra[2] = dp.rim;
+	o.extra[3] = dp.sway;
 	o.oc[0] = (dp.outlineColor & 255) / 255.f; o.oc[1] = ((dp.outlineColor >> 8) & 255) / 255.f; o.oc[2] = ((dp.outlineColor >> 16) & 255) / 255.f; o.oc[3] = ((dp.outlineColor >> 24) & 255) / 255.f;
 	// 輪郭パスも同じ印。滝の mode が残っても、体・装備・髪の頂点は流さない。
-	if (dp.noTess && dp.mode < 0.5f) o.oc[3] = 2.f;
+	// a=2 は人フラグ。a>=3 は Skin スロット+3。揺れは Extra.w のまま。
+	if (dp.noTess && dp.mode < 0.5f) o.oc[3] = (dp.matSlice >= 0) ? (3.f + (float)dp.matSlice) : 2.f;
 }
 
 static void TacBindObjBuf(ID3D11DeviceContext* ctx, ID3D11Buffer* b, BOOL tessOn)
@@ -233,6 +237,8 @@ Renderer::Renderer()
 	for (int gi = 0; gi < TH_COUNT; gi++) m_psGround[gi] = NULL;
 	m_psTheme = NULL;
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
+	m_skinArr = NULL; m_skinArrSrv = NULL;
+	m_gndX = NULL; m_gndXSrv = NULL;
 	m_photoTex = NULL; m_photoSrv = NULL; m_sphereTex = NULL; m_sphereSrv = NULL;
 	m_envTex = NULL; m_envSrv = NULL;
 	m_envTheme = -1; m_envBucket = -1; m_photoSide = 0; m_photoLive = 0;
@@ -243,6 +249,10 @@ Renderer::Renderer()
 	memset(m_hairCap, 0, sizeof(m_hairCap));
 	memset(m_hairCapN, 0, sizeof(m_hairCapN));
 	m_csHair[0] = m_csHair[1] = NULL; m_cbHairSim = NULL;
+	m_csWx = NULL; m_vsPWx = NULL;
+	m_wxGpuSB = NULL; m_wxGpuUAV = NULL; m_wxGpuSRV = NULL;
+	m_wxActSB = NULL; m_wxActSRV = NULL; m_wxHgtSB = NULL; m_wxHgtSRV = NULL;
+	m_cbWx = NULL; m_wxGpuN = 0; m_wxGpuWx = -1;
 	m_hairGuideSB = NULL; m_hairGuide = NULL; m_hairVertSB = NULL; m_hairVert = NULL;
 	m_hairScratchSB = NULL; m_hairScratchUAV = NULL; m_hairScratchSRV = NULL;
 	memset(m_hairV0, 0, sizeof(m_hairV0));
@@ -323,6 +333,7 @@ void Renderer::Release()
 	for (int ti = 0; ti < TAC_TEXTN; ti++) if (m_text[ti].live) { TAC_REL(m_text[ti].sp.srv); TAC_REL(m_text[ti].sp.tex); m_text[ti].live = 0; m_textHash[ti] = 0; }
 	for (int ti = 0; ti < TAC_TEXTN; ti++) m_textNext[ti] = -1;
 	for (int ti = 0; ti < TAC_TEXTH; ti++) m_textHead[ti] = -1;
+	DropHomeLand();
 	m_terrain.Release();
 	for (int i = 0; i < 16; i++) {
 		m_terrainChunk[i].Release();
@@ -384,6 +395,8 @@ void Renderer::Release()
 	TAC_REL(m_psTheme);
 	m_psOverride = NULL;
 	TAC_REL(m_groundSrv); TAC_REL(m_groundTex); TAC_REL(m_matSrv); TAC_REL(m_matTex);
+	TAC_REL(m_skinArrSrv); TAC_REL(m_skinArr);
+	TAC_REL(m_gndXSrv); TAC_REL(m_gndX);
 	DropLooks();
 	TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TAC_REL(m_cbHairCloth); TAC_REL(m_faceDummySRV); TAC_REL(m_faceDummy);
 	TacCbRingFree(g_skinBoneR); TacCbRingFree(g_skinParmR); TacCbRingFree(g_hairClothR);
@@ -396,6 +409,11 @@ void Renderer::Release()
 	g_hairN = 0;
 	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft); TacCbRingFree(g_softR);
 	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim); TacCbRingFree(g_hairSimR);
+	TAC_REL(m_csWx); TAC_REL(m_vsPWx);
+	TAC_REL(m_wxGpuUAV); TAC_REL(m_wxGpuSRV); TAC_REL(m_wxGpuSB);
+	TAC_REL(m_wxActSRV); TAC_REL(m_wxActSB);
+	TAC_REL(m_wxHgtSRV); TAC_REL(m_wxHgtSB);
+	TAC_REL(m_cbWx);
 	ReleaseHair();
 	TAC_REL(m_ilS); TAC_REL(m_ilB); TAC_REL(m_ilK); TAC_REL(m_ilH); TAC_REL(m_ilP); TAC_REL(m_ilPT);
 	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbAir); TacCbRingFree(g_airR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
@@ -722,7 +740,9 @@ BOOL Renderer::CreateTargets()
 	td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 	if (FAILED(hr = m_dev->CreateTexture2D(&td, NULL, &m_dsTex)) || FAILED(hr = m_dev->CreateDepthStencilView(m_dsTex, NULL, &m_dsv))) { m_lastHr = hr; return FALSE; }
 	if (!m_shTex) {
-		int ss = 4096;
+		// 影ラスタの塗り面積を素直に減らす。3072 でも 44 ユニット幅のライト錐台に対し ~70texel/unit あり、
+		// ソフトシャドウの柔らかさはほぼ据え置きで全画面 ~0.5-1ms の地力を稼ぐ。
+		int ss = 3072;
 		for (; ss >= 512; ss /= 2) {
 			D3D11_TEXTURE2D_DESC st = {};
 			st.Width = st.Height = ss; st.MipLevels = 1; st.ArraySize = 1; st.SampleDesc.Count = 1;
@@ -1090,6 +1110,76 @@ BOOL Renderer::CreateShaders()
 		if (!m_csHair[0] || !m_csHair[1] || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbHairSim))) {
 			TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim);
 		} else TacCbRingMake(m_dev, g_hairSimR, bd.ByteWidth);
+		{
+			ID3DBlob* bWx = NULL;
+			if (SUCCEEDED(LoadBlob("CSWx", "cs_5_0", IDR_CSO_TAC_CSWX, &bWx)) && bWx) {
+				if (FAILED(m_dev->CreateComputeShader(bWx->GetBufferPointer(), bWx->GetBufferSize(), NULL, &m_csWx))) m_csWx = NULL;
+				TAC_REL(bWx);
+			}
+			ID3DBlob* bVs = NULL;
+			if (SUCCEEDED(LoadBlob("VSPWX", "vs_5_0", IDR_CSO_TAC_VSPWX, &bVs)) && bVs) {
+				if (FAILED(m_dev->CreateVertexShader(bVs->GetBufferPointer(), bVs->GetBufferSize(), NULL, &m_vsPWx))) m_vsPWx = NULL;
+				TAC_REL(bVs);
+			}
+			if (m_csWx && m_vsPWx) {
+				D3D11_BUFFER_DESC pd = {};
+				pd.ByteWidth = (UINT)(WX_GPU_MAX * 80);
+				pd.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+				pd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+				pd.StructureByteStride = 80;
+				pd.Usage = D3D11_USAGE_DEFAULT;
+				if (FAILED(m_dev->CreateBuffer(&pd, NULL, &m_wxGpuSB))) m_wxGpuSB = NULL;
+				if (m_wxGpuSB) {
+					D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+					ud.Format = DXGI_FORMAT_UNKNOWN;
+					ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+					ud.Buffer.NumElements = WX_GPU_MAX;
+					if (FAILED(m_dev->CreateUnorderedAccessView(m_wxGpuSB, &ud, &m_wxGpuUAV))) m_wxGpuUAV = NULL;
+					D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+					sd.Format = DXGI_FORMAT_UNKNOWN;
+					sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+					sd.Buffer.NumElements = WX_GPU_MAX;
+					if (FAILED(m_dev->CreateShaderResourceView(m_wxGpuSB, &sd, &m_wxGpuSRV))) m_wxGpuSRV = NULL;
+				}
+				D3D11_BUFFER_DESC ad = {};
+				ad.ByteWidth = WX_GPU_ACT * 16;
+				ad.Usage = D3D11_USAGE_DYNAMIC;
+				ad.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				ad.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+				ad.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+				ad.StructureByteStride = 16;
+				if (FAILED(m_dev->CreateBuffer(&ad, NULL, &m_wxActSB))) m_wxActSB = NULL;
+				else {
+					D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+					sd.Format = DXGI_FORMAT_UNKNOWN;
+					sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+					sd.Buffer.NumElements = WX_GPU_ACT;
+					if (FAILED(m_dev->CreateShaderResourceView(m_wxActSB, &sd, &m_wxActSRV))) m_wxActSRV = NULL;
+				}
+				ad.ByteWidth = MAPN * MAPN * 4;
+				ad.StructureByteStride = 4;
+				if (FAILED(m_dev->CreateBuffer(&ad, NULL, &m_wxHgtSB))) m_wxHgtSB = NULL;
+				else {
+					D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+					sd.Format = DXGI_FORMAT_UNKNOWN;
+					sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+					sd.Buffer.NumElements = MAPN * MAPN;
+					if (FAILED(m_dev->CreateShaderResourceView(m_wxHgtSB, &sd, &m_wxHgtSRV))) m_wxHgtSRV = NULL;
+				}
+				ad.ByteWidth = 80;
+				ad.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+				ad.MiscFlags = 0;
+				ad.StructureByteStride = 0;
+				if (FAILED(m_dev->CreateBuffer(&ad, NULL, &m_cbWx))) m_cbWx = NULL;
+			}
+			if (!m_csWx || !m_vsPWx || !m_wxGpuUAV || !m_wxGpuSRV || !m_wxActSRV || !m_wxHgtSRV || !m_cbWx) {
+				TAC_REL(m_csWx); TAC_REL(m_vsPWx);
+				TAC_REL(m_wxGpuUAV); TAC_REL(m_wxGpuSRV); TAC_REL(m_wxGpuSB);
+				TAC_REL(m_wxActSRV); TAC_REL(m_wxActSB);
+				TAC_REL(m_wxHgtSRV); TAC_REL(m_wxHgtSB);
+				TAC_REL(m_cbWx);
+			}
+		}
 	}
 	return TRUE;
 }
@@ -1399,6 +1489,7 @@ static IWICImagingFactory* TacWicFactory()
 }
 
 static BOOL LockRc(int rid, const BYTE** data, DWORD* len);
+static int TacMatOfName(const char* n);
 
 // 縦長ストリップ（正方形 × slices）を配列にする。16 スロット表には入れない。
 static BOOL LoadStrip(ID3D11Device* dev, int rid, int slices, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
@@ -1419,7 +1510,7 @@ static BOOL LoadStrip(ID3D11Device* dev, int rid, int slices, ID3D11Texture2D** 
 		&& SUCCEEDED(cv->Initialize(fr, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, NULL, 0, WICBitmapPaletteTypeCustom))) {
 		UINT w = 0, h = 0;
 		cv->GetSize(&w, &h);
-		if (w >= 32 && w <= 512 && h == w * (UINT)slices) {
+		if (w >= 32 && w <= 1024 && h == w * (UINT)slices) {
 			px.resize((int)(w * h * 4));
 			if (px.data() && SUCCEEDED(cv->CopyPixels(NULL, w * 4, w * h * 4, px.data()))) {
 				D3D11_TEXTURE2D_DESC td = {};
@@ -1559,6 +1650,86 @@ static BOOL DecodeScaled(const BYTE* data, int len, int side, DWORD* dst)
 	}
 	TAC_REL(cv); TAC_REL(sc); TAC_REL(fr); TAC_REL(dec); TAC_REL(st);
 	return ok;
+}
+
+static BOOL LoadNamedArray(ID3D11Device* dev, int n, int side, const char* fmt, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
+{
+	*tex = NULL; *srv = NULL;
+	if (n < 1 || n > 256 || side < 32 || side > 512) return FALSE;
+	DWORD* px = (DWORD*)malloc((size_t)n * side * side * 4);
+	if (!px) return FALSE;
+	{
+		size_t nn = (size_t)n * (size_t)side * (size_t)side;
+		for (size_t i = 0; i < nn; i++) px[i] = 0x00C0C0C0u;
+	}
+	int got = 0;
+	for (int i = 0; i < n; i++) {
+		char name[64];
+		sprintf_s(name, fmt, i);
+		const BYTE* data = NULL;
+		DWORD len = 0;
+		if (!BonusTexNamed(name, &data, &len) || !data || len < 32) {
+			if (strstr(fmt, "mat/%03d")) {
+				sprintf_s(name, "mat/%02d.jpg", i);
+				if (!BonusTexNamed(name, &data, &len) || !data || len < 32) continue;
+			} else continue;
+		}
+		if (DecodeScaled(data, (int)len, side, px + (size_t)i * side * side)) got++;
+	}
+	BOOL ok = FALSE;
+	if (got >= (n > 8 ? n / 4 : 2)) {
+		D3D11_TEXTURE2D_DESC td = {};
+		td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 1; td.ArraySize = (UINT)n;
+		td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
+		td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA* sd = (D3D11_SUBRESOURCE_DATA*)malloc(sizeof(D3D11_SUBRESOURCE_DATA) * (size_t)n);
+		if (sd) {
+			for (int i = 0; i < n; i++) {
+				sd[i].pSysMem = px + (size_t)i * side * side;
+				sd[i].SysMemPitch = (UINT)side * 4;
+				sd[i].SysMemSlicePitch = 0;
+			}
+			if (SUCCEEDED(dev->CreateTexture2D(&td, sd, tex)) && *tex) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+				sv.Format = td.Format;
+				sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+				sv.Texture2DArray.MipLevels = 1;
+				sv.Texture2DArray.ArraySize = (UINT)n;
+				ok = SUCCEEDED(dev->CreateShaderResourceView(*tex, &sv, srv));
+			}
+			free(sd);
+		}
+	}
+	free(px);
+	if (!ok) { TAC_REL(*srv); TAC_REL(*tex); }
+	return ok;
+}
+
+static BOOL LoadSkinArray(ID3D11Device* dev, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
+{
+	if (LoadNamedArray(dev, 128, 256, "mat/%03d.jpg", tex, srv)) return TRUE;
+	if (LoadNamedArray(dev, 32, 256, "mat/%02d.jpg", tex, srv)) return TRUE;
+	DWORD px[16];
+	for (int i = 0; i < 16; i++) px[i] = 0xFFFFFFFFu;
+	D3D11_TEXTURE2D_DESC td = {};
+	td.Width = 4; td.Height = 4; td.MipLevels = 1; td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
+	td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd = {};
+	sd.pSysMem = px; sd.SysMemPitch = 16;
+	if (FAILED(dev->CreateTexture2D(&td, &sd, tex)) || !*tex) return FALSE;
+	D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+	sv.Format = td.Format;
+	sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+	sv.Texture2DArray.MipLevels = 1;
+	sv.Texture2DArray.ArraySize = 1;
+	if (FAILED(dev->CreateShaderResourceView(*tex, &sv, srv))) { TAC_REL(*tex); return FALSE; }
+	return TRUE;
+}
+
+static BOOL LoadGroundX(ID3D11Device* dev, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
+{
+	return LoadNamedArray(dev, 14, 512, "tactics/terrain/ph%d_b.jpg", tex, srv);
 }
 
 static BOOL MakeGpuArray(ID3D11Device* dev, ID3D11DeviceContext* ctx, int side, int slices, const DWORD* px, BOOL cube,
@@ -1920,7 +2091,10 @@ BOOL Renderer::CreateProcTextures()
 		if (!MakeTex(m_dev, m_ctx, p, S, S, TRUE, &m_tex[TEX_ATLAS], &m_srv[TEX_ATLAS])) return FALSE;
 	}
 	if (!LoadStrip(m_dev, IDR_TAC_DETAIL, 16, &m_groundTex, &m_groundSrv)) return FALSE;
-	if (!LoadStrip(m_dev, IDR_TAC_MAT, 8, &m_matTex, &m_matSrv)) return FALSE;
+	if (!LoadStrip(m_dev, IDR_TAC_MAT, 16, &m_matTex, &m_matSrv)
+		&& !LoadStrip(m_dev, IDR_TAC_MAT, 8, &m_matTex, &m_matSrv)) return FALSE;
+	LoadSkinArray(m_dev, &m_skinArr, &m_skinArrSrv);
+	LoadGroundX(m_dev, &m_gndX, &m_gndXSrv);
 	PollStageLook();
 	return TRUE;
 }
@@ -1990,11 +2164,16 @@ BOOL Renderer::MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; bd.CPUAccessFlags = dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 	D3D11_SUBRESOURCE_DATA sd = { v, 0, 0 };
 	if (FAILED(m_dev->CreateBuffer(&bd, &sd, &out.vb))) { LeaveCriticalSection(&g_meshCs); return FALSE; }
+	// 16bit 索引は 4 バイト境界まで埋める。偶数本なら元の並びのまま渡し、起動と衣装のたびに写さない。
 	bd.ByteWidth = ((ni * 2) + 3) & ~3u; bd.BindFlags = D3D11_BIND_INDEX_BUFFER; bd.Usage = D3D11_USAGE_IMMUTABLE; bd.CPUAccessFlags = 0;
 	static Buf<WORD> tmp;
-	tmp.assign(idx, idx + ni);
-	tmp.resize(bd.ByteWidth / 2, 0);
-	sd.pSysMem = tmp.data();
+	const WORD* ib = idx;
+	if (bd.ByteWidth != ni * 2) {
+		tmp.assign(idx, idx + ni);
+		tmp.resize(bd.ByteWidth / 2, 0);
+		ib = tmp.data();
+	}
+	sd.pSysMem = ib;
 	if (FAILED(m_dev->CreateBuffer(&bd, &sd, &out.ib))) { out.Release(); LeaveCriticalSection(&g_meshCs); return FALSE; }
 	out.nIdx = ni; out.stride = stride; out.i32 = 0;
 	LeaveCriticalSection(&g_meshCs);
@@ -2257,6 +2436,13 @@ void Renderer::FlashAvaPct(int pct)
 	}
 	if (m_inPortrait || !m_ctx || !m_bbRtv || !m_swap || m_w < 8 || m_h < 8) return;
 	if (pct == m_avaShown) return;
+	// 頂点ループから毎パーセント Present すると、衣装を替える待ちの大半が描画になる。80ms に一回、最後は必ず出す。
+	{
+		unsigned now = GetTickCount();
+		static unsigned tick = 0;
+		if (pct < 100 && tick != 0 && now - tick < 80) return;
+		tick = now;
+	}
 	m_avaShown = pct;
 	m_avaFlashed = TRUE;
 	M4 oldView = m_view, oldProj = m_proj, oldVp = m_vp;
@@ -2470,6 +2656,7 @@ BOOL Renderer::LoadAssets()
 		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(attIdx[k + 1], attIdx[k + 2]);
 		if (!MakeMesh(a.mesh, v.data(), sizeof(VtxS), nv, attIdx.data(), ni)) return FALSE;
 		a.mesh.tex = a.tex;
+		a.mesh.mat = TacMatOfName(a.name);
 		pulse();
 	}
 	statics.resize(nSt);
@@ -2504,6 +2691,60 @@ BOOL Renderer::LoadAssets()
 	pulse();
 	m_assetsOk = TRUE;
 	return TRUE;
+}
+
+static unsigned TacNameHash(const char* n)
+{
+	unsigned h = 2166136261u;
+	for (; n && *n; n++) h = (h ^ (unsigned char)*n) * 16777619u;
+	return h;
+}
+static int TacMatPick(int lo, int hi, unsigned h)
+{
+	if (hi < lo) hi = lo;
+	return lo + (int)(h % (unsigned)(hi - lo + 1));
+}
+static int TacMatOfName(const char* n)
+{
+	if (!n || !n[0]) return 8;
+	auto has = [&](const char* s) { return strstr(n, s) != NULL; };
+	unsigned h = TacNameHash(n);
+	// 0-23 武具。同じ型は隣へ固めてインスタンスとキューがまとまる。
+	if (has("Tower") || has("Rectangle")) return TacMatPick(16, 18, h);
+	if (has("Heater")) return TacMatPick(16, 18, h);
+	if (has("Round") && has("Shield")) return TacMatPick(19, 21, h);
+	if (has("Badge") || ((has("Gold") || has("Golden")) && has("Shield"))) return TacMatPick(22, 23, h);
+	if (has("Celtic") || has("Spike") || has("Shield")) return TacMatPick(16, 21, h);
+	if (has("Crossbow")) return TacMatPick(0, 3, h);
+	if (has("Bow")) return TacMatPick(0, 3, h);
+	if (has("Staff") || has("Wand")) return TacMatPick(4, 7, h);
+	if (has("Book") || has("Spellbook")) return TacMatPick(19, 21, h);
+	if (has("Knife") || has("Dagger") || has("Dart")) return TacMatPick(8, 10, h);
+	if (has("Claymore") || has("Sword_Big") || has("Sword_big") || has("2H_Sword")) return TacMatPick(11, 13, h);
+	if ((has("Gold") || has("Golden")) && has("Sword")) return TacMatPick(22, 23, h);
+	if (has("Sword") || has("Blade") || has("Spear") || has("Scythe") || has("Axe") || has("Hammer")) return TacMatPick(8, 15, h);
+	if (has("Cape") || has("Cloth") || has("Robe") || has("Hat") || has("Helmet") || has("Crown")) return TacMatPick(104, 111, h);
+	// 24-127 敵。科ごとに帯を分け、種名ハッシュで中を振る。
+	if (has("Slime") || has("Jelly") || has("Ooze") || has("Blob") || has("Gel") || has("Crystal") || has("Element")) return TacMatPick(72, 79, h);
+	if (has("Skel") || has("Bone") || has("Skull") || has("Wight") || has("Lich") || has("Ghost") || has("Wraith") || has("Spect") || has("Shade") || has("Phantom")) return TacMatPick(80, 87, h);
+	if (has("Golem") || has("Stone") || has("Rock") || has("Garg")) return TacMatPick(88, 95, h);
+	if (has("Dragon") || has("Wyvern") || has("Lizard") || has("Scale") || has("Snake") || has("Serpent") || has("Croc")) return TacMatPick(52, 63, h);
+	if (has("Bug") || has("Beetle") || has("Spider") || has("Scorp") || has("Insect") || has("Ant") || has("Wasp") || has("Fly") || has("Moth")) return TacMatPick(40, 51, h);
+	if (has("Wolf") || has("Bear") || has("Cat") || has("Fox") || has("Lion") || has("Tiger") || has("Dog")
+		|| has("Rat") || has("Bat") || has("Boar") || has("Fur") || has("Beast") || has("Were") || has("Sheep")
+		|| has("Bull") || has("Calf") || has("Horse") || has("Deer") || has("Mammoth")) return TacMatPick(24, 39, h);
+	if (has("Bird") || has("Harpy") || has("Griffin") || has("Eagle") || has("Owl") || has("Crow") || has("Chicken") || has("Hawk")) return TacMatPick(64, 71, h);
+	if (has("Plant") || has("Treant") || has("Mushroom") || has("Fung") || has("Vine") || has("Flower") || has("Weevil") || has("wood")) return TacMatPick(96, 103, h);
+	if (has("Ice") || has("Frost") || has("Snow")) return TacMatPick(72, 79, h);
+	if (has("Fire") || has("Lava") || has("Magma") || has("Infer") || has("Demon") || has("Imp") || has("Devil")) return TacMatPick(120, 127, h);
+	if (has("Fish") || has("Shark") || has("Kraken") || has("Squid") || has("Frog") || has("Tang") || has("Angler")) return TacMatPick(112, 119, h);
+	if (has("Orc") || has("Goblin") || has("Troll") || has("Ogre") || has("Giant") || has("Mage") || has("Witch") || has("Wizard")) return TacMatPick(104, 111, h);
+	return TacMatPick(24, 127, h);
+}
+
+static void ApplyMatSlice(DrawParams& d, const GpuMesh& m, ID3D11ShaderResourceView* arr)
+{
+	if (arr && m.mat >= 0 && d.matSlice < 0) d.matSlice = m.mat;
 }
 
 // packed=0 は頂点9 float。packed=1 は位置・法線 int16 と色バイト（TACP / TACQ）。
@@ -3238,6 +3479,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 			if (!R.MakeMesh(gm, poseV.data(), sizeof(VtxS), nv, idx.data(), ni)) return Bail();
 			R.LoadPulse((int)nc + 8, (int)nc + 8);
 			gm.tex = R.TexWhite();
+			if (strncmp(name, "Hum", 3) != 0) gm.mat = TacMatOfName(name);
 			ModelSetupJoints(m, &g);
 			if (strncmp(name, "Hum", 3) == 0 && m.nJ > 1 && nv > 80) {
 				// 関節位置と invBind はパックのまま。ここを書き換えると、その骨に乗った頂点だけスキンが外れて体が消える。
@@ -3516,6 +3758,7 @@ void Renderer::LoadCreaturePack()
 		GpuMesh gm;
 		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) continue;
 		gm.tex = TEX_WHITE;
+		if (strncmp(name, "Hum", 3) != 0) gm.mat = TacMatOfName(name);
 		if ((int)m_creatures.size() >= 160) { gm.Release(); return; }
 		m_creatures.push_back(gm);
 	}
@@ -3627,6 +3870,7 @@ void Renderer::DrawCreature(int i, const M4& world, const DrawParams& dp)
 	DrawParams d = dp;
 	d.noTess = 1;
 	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	ApplyMatSlice(d, m_creatures[i], m_skinArrSrv);
 	DrawStatic(m_creatures[i], world, d);
 }
 
@@ -3635,7 +3879,9 @@ void Renderer::DrawSkinnedCreature(int i, const Pose& pose, const M4& world, con
 	int slot = -1;
 	for (int k = 0; k < (int)m_skins.size(); k++) if (m_skins[k].model == i) { slot = k; break; }
 	if (slot < 0 || m_skins[slot].bind.empty() || slot >= (int)m_creatures.size()) return;
-	SkinAndDraw(m_skins[slot], m_creatures[slot], NULL, 0.f, pose, world, dp, NULL, owner);
+	DrawParams d = dp;
+	ApplyMatSlice(d, m_creatures[slot], m_skinArrSrv);
+	SkinAndDraw(m_skins[slot], m_creatures[slot], NULL, 0.f, pose, world, d, NULL, owner);
 }
 
 void Renderer::ReleaseSkinGpu(CreatureSkin& src)
@@ -4233,8 +4479,9 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	ID3D11ShaderResourceView* srvs[2] = { src.bindSRV, (faceOn && src.faceSRV) ? src.faceSRV : m_faceDummySRV };
 	m_ctx->CSSetShaderResources(0, 2, srvs);
 	if (TacQueueUses(outVB)) FlushQueuedDraws();
-	UINT cnt = 0;
-	m_ctx->CSSetUnorderedAccessViews(0, 1, &outUAV, &cnt);
+	ID3D11UnorderedAccessView* skinU[2] = { outUAV, NULL };
+	UINT cnts[2] = { 0, 0 };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, skinU, cnts);
 	m_ctx->CSSetShader(m_csSkin, NULL, 0);
 	m_ctx->Dispatch(((UINT)src.gpuNv + 63u) / 64u, 1, 1);
 	if (cloth && owner && !m_inPortrait) {
@@ -4405,6 +4652,7 @@ void Renderer::LoadGearPack()
 		GpuMesh gm;
 		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) { LoadPulse((int)i + 1, (int)n); continue; }
 		gm.tex = TEX_WHITE;
+		gm.mat = TacMatOfName(name);
 		if ((int)m_gear.size() >= 256) { gm.Release(); break; }
 		m_gear.push_back(gm);
 		// 持つ手の指の型。弩は引き金、弓は握り、矢と投げ矢は摘まむ。冠や鎧は手に持たない。
@@ -8759,12 +9007,63 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				for (int k = 0; k < nbA; k++)
 					bk.push_back(((unsigned long long)cellOf(sk.bind[k].p, 0, 0, 0) << 32) | (unsigned)k);
 				const int nk = bk.size();
-				if (nk > 0) qsort(bk.data(), nk, sizeof(unsigned long long), CmpU64);
-				// 重ね着はパックで肌から 4mm 以上・下の布から 3mm 以上離してある。ここで厚く揃えると襟がシャツと同じ面に潰れる。
+			if (nk > 0) qsort(bk.data(), nk, sizeof(unsigned long long), CmpU64);
+			// 27 近傍の二分探索は、セルごとの範囲表に替える。最近点の順はソート済みの並びのまま。
+			static Buf<int> hop, spLo, spHi;
+			static Buf<unsigned> spCell;
+			BOOL hashed = FALSE;
+			if (nk > 0) {
+				int nsp = 0;
+				for (int i = 0; i < nk; ) {
+					unsigned cell = (unsigned)(bk[i] >> 32);
+					while (i < nk && (unsigned)(bk[i] >> 32) == cell) i++;
+					nsp++;
+				}
+				int cap = 1;
+				while (cap < nsp * 2) cap <<= 1;
+				if (cap < 2) cap = 2;
+				hop.fill(cap, -1);
+				spCell.resize(nsp);
+				spLo.resize(nsp);
+				spHi.resize(nsp);
+				if (hop.size() >= cap && spCell.size() >= nsp && spLo.size() >= nsp && spHi.size() >= nsp) {
+					int si = 0, placed = 0;
+					for (int i = 0; i < nk; ) {
+						unsigned cell = (unsigned)(bk[i] >> 32);
+						int lo = i;
+						while (i < nk && (unsigned)(bk[i] >> 32) == cell) i++;
+						spCell[si] = cell;
+						spLo[si] = lo;
+						spHi[si] = i;
+						unsigned h = cell * 2654435761u;
+						for (int s = 0; s < cap; s++) {
+							int slot = (int)((h + (unsigned)s) & (unsigned)(cap - 1));
+							if (hop[slot] < 0) { hop[slot] = si; placed++; break; }
+						}
+						si++;
+					}
+					if (placed == nsp) hashed = TRUE;
+				}
+			}
+			auto spanOf = [&](unsigned cell, int& lo, int& hi) {
+				lo = hi = 0;
+				if (!hashed) return;
+				const int cap = hop.size();
+				unsigned h = cell * 2654435761u;
+				for (int s = 0; s < cap; s++) {
+					int slot = (int)((h + (unsigned)s) & (unsigned)(cap - 1));
+					int ix = hop[slot];
+					if (ix < 0) return;
+					if (spCell[ix] == cell) { lo = spLo[ix]; hi = spHi[ix]; return; }
+				}
+			};
+			// 重ね着はパックで肌から 4mm 以上・下の布から 3mm 以上離してある。ここで厚く揃えると襟がシャツと同じ面に潰れる。
 				const float pad = 0.004f;
 				const float reach = 0.04f;
 				// JK とスーツは体の外に乗っている。法線で押すと胸と裾の面が割れる。
-				for (int it = 0; it < 4 && !sewn; it++) for (int k = nbA; k < nvA; k++) {
+				for (int it = 0; it < 4 && !sewn; it++) {
+			int moved = 0;
+			for (int k = nbA; k < nvA; k++) {
 					if (k < (int)sk.cloth.size() && !sk.cloth[k]) continue;
 					CSkinV& d = sk.bind[k];
 					const int cj = DomJoint(d);
@@ -8773,10 +9072,16 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					float dA = 1e9f;
 					int nearA = -1;
 					for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-						const unsigned long long cell = cellOf(p, dx, dy, dz);
-						int lo = 0, hi = nk;
-						while (lo < hi) { int m = (lo + hi) >> 1; if ((bk[m] >> 32) < cell) lo = m + 1; else hi = m; }
-						for (int q = lo; q < nk && (bk[q] >> 32) == cell; q++) {
+					const unsigned cell = cellOf(p, dx, dy, dz);
+					int lo = 0, hi = nk;
+					if (hashed) spanOf(cell, lo, hi);
+					else {
+						const unsigned long long cell64 = cell;
+						while (lo < hi) { int m = (lo + hi) >> 1; if ((bk[m] >> 32) < cell64) lo = m + 1; else hi = m; }
+					}
+					const int qEnd = hashed ? hi : nk;
+					for (int q = lo; q < qEnd; q++) {
+						if (!hashed && (unsigned)(bk[q] >> 32) != cell) break;
 							const int i = (int)(bk[q] & 0xFFFFFFFFu);
 							const float* b = sk.bind[i].p;
 							const float d2 = (b[0] - p[0]) * (b[0] - p[0]) + (b[1] - p[1]) * (b[1] - p[1]) + (b[2] - p[2]) * (b[2] - p[2]);
@@ -8794,8 +9099,11 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 					if (side >= pad) continue;
 					const float push = pad - side;
 					d.p[0] += nx * push; d.p[1] += ny * push; d.p[2] += nz * push;
+					moved = 1;
 				}
+				if (!moved) break;
 			}
+		}
 		}
 		Buf<ClothGpuN> clothN;
 		Buf<ClothGpuV> clothV;
@@ -9357,6 +9665,7 @@ void Renderer::FlushClothPend()
 	}
 	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU, NULL);
 	m_ctx->CSSetShaderResources(0, 4, noneS);
+	TacClothGate(m_ctx, 0);
 	g_pendN = 0;
 	g_pendBusy = 0;
 }
@@ -9536,6 +9845,10 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	if (clothB) {
 	memcpy(ms.pData, &cb, sizeof(cb));
 	m_ctx->Unmap(clothB, 0);
+	// 天候 CS が Frame を b0、雨粒 UAV を u0 に残すと、腰への吸い込みになる。布の前に切る。
+	TacClothGate(m_ctx, 0);
+	ID3D11ShaderResourceView* noneWx[3] = { NULL, NULL, NULL };
+	m_ctx->CSSetShaderResources(11, 3, noneWx);
 	// b1 は直前の CSSkin で書いた骨の行列（座ったときに脚へ沿わせる分）。
 	ID3D11Buffer* cbs[2] = { clothB, TacCbCur(g_skinBoneR, m_cbSkinBone) };
 	m_ctx->CSSetConstantBuffers(0, 2, cbs);
@@ -10836,6 +11149,7 @@ void Renderer::DrawGear(int i, const M4& world, const DrawParams& dp)
 	DrawParams d = dp;
 	d.noTess = 1;
 	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	ApplyMatSlice(d, m_gear[i], m_skinArrSrv);
 	DrawStatic(m_gear[i], world, d);
 }
 
@@ -11007,6 +11321,15 @@ static void TacUploadShaderAir(ID3D11DeviceContext* ctx, ID3D11Buffer* fallback,
 	g_shaderAirOk = 1;
 }
 
+// 限界突破（rank 6）の値は動かさない。そこから上だけ、地形のテッセ・変位・被写界へ滑らかに寄せる。
+// +5（rank 7.25）でおよそ 3 割、+10 で半分、その先は far に漸近して段が飛んで見えないようにする。
+static float TacEaseAboveBreak(float rank, float atBreak, float far)
+{
+	if (rank <= 6.f) return atBreak;
+	float t = 1.f - expf(-(rank - 6.f) * 0.28f);
+	return atBreak + (far - atBreak) * t;
+}
+
 // ============================================================ フレーム
 void Renderer::UpdateFrameCB()
 {
@@ -11044,11 +11367,17 @@ void Renderer::BeginFrame()
 	m_frame++;
 	m_previewPost = FALSE;
 	m_fcb.q[0] = (float)m_quality;
-	// 無印の整数はこれまでの段と同じ。+ は隣の段へ寄せ、限界突破+10 だけ少し上。
+	// 無印の整数はこれまでの段と同じ。限界突破より上は世界を上げず、地形側だけ滑らかに伸ばす。
 	float rank = TacQRank(m_quality, m_qPlus);
-	m_fcb.q[1] = TacQLerp(rank, 0.f, 0.f, 0.f, 2.6f, 5.2f, 6.8f, 8.6f, 10.2f);
-	m_fcb.q[2] = TacQLerp(rank, 0.f, 0.f, 0.f, 0.f, 0.055f, 0.08f, 0.11f, 0.135f);
-	m_fcb.q[3] = TacQLerp(rank, 0.f, 0.f, 0.42f, 0.55f, 1.f, 1.25f, 1.55f, 1.8f);
+	// 限界突破までは従来の段。上は世界の画素を上げず、テッセ・変位・被写界だけ滑らかに伸ばす。
+	m_fcb.q[1] = TacQLerp(rank, 0.f, 0.f, 0.f, 2.6f, 5.2f, 6.8f, 8.6f, 8.6f);
+	m_fcb.q[2] = TacQLerp(rank, 0.f, 0.f, 0.f, 0.f, 0.055f, 0.08f, 0.11f, 0.11f);
+	m_fcb.q[3] = TacQLerp(rank, 0.f, 0.f, 0.42f, 0.55f, 1.f, 1.25f, 1.55f, 1.55f);
+	if (rank > 6.f) {
+		m_fcb.q[1] = TacEaseAboveBreak(rank, 8.6f, 14.f);
+		m_fcb.q[2] = TacEaseAboveBreak(rank, 0.11f, 0.18f);
+		m_fcb.q[3] = TacEaseAboveBreak(rank, 1.55f, 2.8f);
+	}
 	m_fcb.sight[0] = m_fcb.sight[1] = m_fcb.sight[2] = m_fcb.sight[3] = 0;
 	memset(m_fcb.ally, 0, sizeof(m_fcb.ally));
 	m_fcb.camNear[0] = m_fcb.camNear[1] = m_fcb.camNear[2] = m_fcb.camNear[3] = 0;
@@ -11306,7 +11635,9 @@ void Renderer::BeginMainPass()
 			ID3D11ShaderResourceView* refOff = NULL;
 			m_ctx->PSSetShaderResources(8, 1, &refOff);
 		}
+		if (m_gndXSrv) m_ctx->PSSetShaderResources(10, 1, &m_gndXSrv);
 	}
+	if (m_skinArrSrv) m_ctx->PSSetShaderResources(9, 1, &m_skinArrSrv);
 }
 
 void Renderer::ClearDepth()
@@ -11349,9 +11680,11 @@ void Renderer::BindForPass(BOOL skinned, BOOL outline)
 			m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			m_tessOn = FALSE;
 		}
+		m_ctx->GSSetShader(NULL, NULL, 0);
 		return;
 	}
 	m_bindKey = key;
+	m_ctx->GSSetShader(NULL, NULL, 0);
 	m_ctx->IASetInputLayout(skinned ? m_ilK : m_ilS);
 	if (tess) {
 		m_ctx->VSSetShader(m_vsT, NULL, 0);
@@ -11481,6 +11814,24 @@ void Renderer::FlushQueuedDraws()
 	ID3D11RasterizerState* rs = (ID3D11RasterizerState*)1;
 	ID3D11DepthStencilState* depth = (ID3D11DepthStencilState*)1;
 	D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	if (g_drawN > 1) {
+		std::sort(g_drawQ, g_drawQ + g_drawN, [](const TacDrawCmd& a, const TacDrawCmd& b) {
+			if (a.alpha != b.alpha) return a.alpha < b.alpha;
+			if (a.alpha) return a.seq < b.seq;
+			if (a.pre != b.pre) return a.pre < b.pre;
+			if (a.ps != b.ps) return (uintptr_t)a.ps < (uintptr_t)b.ps;
+			if (a.srv != b.srv) return (uintptr_t)a.srv < (uintptr_t)b.srv;
+			if (a.obj.oc[3] != b.obj.oc[3]) return a.obj.oc[3] < b.obj.oc[3];
+			if (a.vb != b.vb) return (uintptr_t)a.vb < (uintptr_t)b.vb;
+			if (a.ib != b.ib) return (uintptr_t)a.ib < (uintptr_t)b.ib;
+			if (a.rs != b.rs) return (uintptr_t)a.rs < (uintptr_t)b.rs;
+			if (a.blend != b.blend) return (uintptr_t)a.blend < (uintptr_t)b.blend;
+			if (a.depth != b.depth) return (uintptr_t)a.depth < (uintptr_t)b.depth;
+			if (a.hs != b.hs) return (uintptr_t)a.hs < (uintptr_t)b.hs;
+			if (a.vs != b.vs) return (uintptr_t)a.vs < (uintptr_t)b.vs;
+			return a.seq < b.seq;
+		});
+	}
 	for (int i = 0; i < g_drawN; ++i) {
 		const TacDrawCmd& c = g_drawQ[i];
 		if (c.il != il) { m_ctx->IASetInputLayout(c.il); il = c.il; }
@@ -11641,7 +11992,8 @@ static BOOL SameInstDp(const DrawParams& a, const DrawParams& b)
 	return a.tint == b.tint && a.outlineColor == b.outlineColor && a.twoSided == b.twoSided
 		&& a.outline == b.outline && a.mode == b.mode && a.emissive == b.emissive
 		&& a.hue == b.hue && a.dissolve == b.dissolve && a.flash == b.flash
-		&& a.rim == b.rim && a.sway == b.sway && a.noTess == b.noTess;
+		&& a.rim == b.rim && a.sway == b.sway && a.noTess == b.noTess
+		&& a.matSlice == b.matSlice;
 }
 
 void Renderer::ResetActorPipe()
@@ -11734,10 +12086,26 @@ void Renderer::FlushInst()
 	if (g_igN <= 0 || !m_ctx || !m_vsB || !m_ilB) { g_igN = 0; return; }
 	int nGrp = g_igN;
 	g_igN = 0;
+	if (nGrp > 1) {
+		std::sort(g_ig, g_ig + nGrp, [](const TacInstG& a, const TacInstG& b) {
+			if (a.alpha != b.alpha) return a.alpha < b.alpha;
+			if (a.tex != b.tex) return a.tex < b.tex;
+			if (a.dp.matSlice != b.dp.matSlice) return a.dp.matSlice < b.dp.matSlice;
+			if (a.vb != b.vb) return (uintptr_t)a.vb < (uintptr_t)b.vb;
+			if (a.ib != b.ib) return (uintptr_t)a.ib < (uintptr_t)b.ib;
+			return a.seq < b.seq;
+		});
+	}
 	BOOL gpu = FALSE;
 	ID3D11Buffer* boundVb = NULL;
 	ID3D11Buffer* boundIb = NULL;
 	ID3D11ShaderResourceView* boundSrv = (ID3D11ShaderResourceView*)1;
+	// グループ間で同じ値を毎回出し直していた描画ステートを、変わったときだけ発行する。
+	// 結果の GPU 状態は同一。ドライバ呼び出し（CPU 側）だけを減らす。見た目・挙動は不変。
+	ID3D11PixelShader* curPs = (ID3D11PixelShader*)1;
+	ID3D11RasterizerState* curRs = (ID3D11RasterizerState*)1;
+	ID3D11BlendState* curBlend = (ID3D11BlendState*)1;
+	ID3D11DepthStencilState* curDepth = (ID3D11DepthStencilState*)1;
 	for (int i = 0; i < nGrp; ++i) {
 		TacInstG& g = g_ig[i];
 		if (!g.vb || !g.ib || g.n <= 0) continue;
@@ -11753,6 +12121,11 @@ void Renderer::FlushInst()
 			boundVb = NULL;
 			boundIb = NULL;
 			boundSrv = (ID3D11ShaderResourceView*)1;
+			// DrawStaticNow は自前でステートを張り替えるので、追跡値を無効化して次群で必ず張り直す。
+			curPs = (ID3D11PixelShader*)1;
+			curRs = (ID3D11RasterizerState*)1;
+			curBlend = (ID3D11BlendState*)1;
+			curDepth = (ID3D11DepthStencilState*)1;
 			DrawStaticNow(one, g.w[0], g.dp);
 			continue;
 		}
@@ -11793,19 +12166,23 @@ void Renderer::FlushInst()
 				m_lastPsSrv = srv;
 			}
 		}
-		m_ctx->OMSetDepthStencilState(m_dsWant ? m_dsWant : m_dsWrite, 0);
+		{
+			ID3D11DepthStencilState* wantD = m_dsWant ? m_dsWant : m_dsWrite;
+			if (wantD != curDepth) { m_ctx->OMSetDepthStencilState(wantD, 0); curDepth = wantD; }
+		}
+		auto setPs = [&](ID3D11PixelShader* ps) { if (ps != curPs) { m_ctx->PSSetShader(ps, NULL, 0); curPs = ps; } };
+		auto setRs = [&](ID3D11RasterizerState* rs) { if (rs != curRs) { m_ctx->RSSetState(rs); curRs = rs; } };
+		auto setBl = [&](ID3D11BlendState* bl) { if (bl != curBlend) { m_ctx->OMSetBlendState(bl, NULL, 0xFFFFFFFF); curBlend = bl; } };
 		auto issue = [&](BOOL outline) {
 			SetObj(MIdent(), g.dp, outline ? g.dp.outline : 0.f);
 			if (m_pass == PASS_SHADOW) {
-				m_ctx->PSSetShader(NULL, NULL, 0);
-				m_ctx->RSSetState(m_rsShadow);
-				m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+				setPs(NULL);
+				setRs(m_rsShadow);
+				setBl(m_bsOpaque);
 			} else {
-				m_ctx->PSSetShader(outline ? m_psO : (m_psOverride ? m_psOverride : m_psM), NULL, 0);
-				if (outline) m_ctx->RSSetState(m_rsFront);
-				else if (g.dp.twoSided) m_ctx->RSSetState(m_rsNone);
-				else m_ctx->RSSetState(m_reflecting ? m_rsFront : m_rsBack);
-				m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+				setPs(outline ? m_psO : (m_psOverride ? m_psOverride : m_psM));
+				setRs(outline ? m_rsFront : (g.dp.twoSided ? m_rsNone : (m_reflecting ? m_rsFront : m_rsBack)));
+				setBl(m_bsOpaque);
 			}
 			m_ctx->DrawIndexedInstanced(g.nIdx, (UINT)g.n, 0, 0, 0);
 		};
@@ -11906,6 +12283,7 @@ void Renderer::DrawAttach(const Attach& a, const Pose& p, int joint, const M4& w
 	DrawParams d = dp;
 	d.noTess = 1;
 	if (d.mode > 0.5f && d.mode < 2.5f) d.mode = 0.f;
+	ApplyMatSlice(d, a.mesh, m_skinArrSrv);
 	DrawStatic(a.mesh, w, d);
 }
 
@@ -12078,6 +12456,8 @@ void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 	if (!q || n <= 0 || m_pass == PASS_SHADOW || !m_vbDyn) return;
 	DrawParams dp;
 	dp.mode = (float)cursorStyle;
+	// マスは半透明なので頂点αが草の風の重みになる。dissolve<0 は「風も波も掛けない」印。PSOV は Extra.x を読まない。
+	dp.dissolve = -1.f;
 	SetObj(MIdent(), dp, 0);
 	m_ctx->IASetInputLayout(m_ilS);
 	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -12329,6 +12709,128 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->OMSetBlendState(b ? m_bsAdd : m_bsPremul, NULL, 0xFFFFFFFF);
 		m_ctx->Draw((UINT)(bytes / sizeof(VtxP)), 0);
 	}
+	if (mrt) {
+		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
+		m_ctx->OMSetRenderTargets(2, rt, m_dsv);
+	}
+	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+	m_dsWant = m_dsWrite;
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+}
+
+void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64)
+{
+	if (!WxGpuReady() || !m_ctx) return;
+	int n = 4096;
+	if (m_quality <= 0 || m_quality == 4) n = 2048;
+	else if (m_quality >= 5) n = 8192;
+	else if (m_quality >= 3) n = 6144;
+	if (n > WX_GPU_MAX) n = WX_GPU_MAX;
+	n &= ~63;
+	int reset = (wx != m_wxGpuWx || n != m_wxGpuN) ? 1 : 0;
+	m_wxGpuWx = wx;
+	m_wxGpuN = n;
+	if (nAct < 0) nAct = 0;
+	if (nAct > WX_GPU_ACT) nAct = WX_GPU_ACT;
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (m_wxActSB && SUCCEEDED(m_ctx->Map(m_wxActSB, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
+		memset(ms.pData, 0, WX_GPU_ACT * 16);
+		if (act4 && nAct > 0) memcpy(ms.pData, act4, (size_t)nAct * 16);
+		m_ctx->Unmap(m_wxActSB, 0);
+	}
+	if (m_wxHgtSB && SUCCEEDED(m_ctx->Map(m_wxHgtSB, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
+		if (height64) memcpy(ms.pData, height64, MAPN * MAPN * sizeof(float));
+		else memset(ms.pData, 0, MAPN * MAPN * sizeof(float));
+		m_ctx->Unmap(m_wxHgtSB, 0);
+	}
+	if (m_cbWx && SUCCEEDED(m_ctx->Map(m_cbWx, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
+		float cb[20];
+		cb[0] = fwd.x; cb[1] = fwd.y; cb[2] = fwd.z; cb[3] = 0;
+		cb[4] = side.x; cb[5] = side.y; cb[6] = side.z; cb[7] = 0;
+		cb[8] = wind.x; cb[9] = wind.y; cb[10] = wind.z; cb[11] = gust;
+		cb[12] = dt; cb[13] = (float)nAct; cb[14] = (float)n; cb[15] = reset ? 1.f : 0.f;
+		int drip = 0;
+		if ((wx == WX_RAIN || wx == WX_STORM) && nAct > 0) {
+			drip = nAct * 6;
+			if (drip > n / 8) drip = n / 8;
+			if (drip < 8) drip = 8;
+		}
+		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = 0; cb[19] = 0;
+		memcpy(ms.pData, cb, sizeof(cb));
+		m_ctx->Unmap(m_cbWx, 0);
+	}
+	ID3D11ShaderResourceView* noneVS = NULL;
+	m_ctx->VSSetShaderResources(11, 1, &noneVS);
+	ID3D11UnorderedAccessView* noneU2[2] = { NULL, NULL };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU2, NULL);
+	ID3D11Buffer* frame = TacCbCur(g_frameR, m_cbFrame);
+	ID3D11Buffer* air = TacCbCur(g_airR, m_cbAir);
+	m_ctx->CSSetConstantBuffers(0, 1, &frame);
+	m_ctx->CSSetConstantBuffers(4, 1, &air);
+	m_ctx->CSSetConstantBuffers(5, 1, &m_cbWx);
+	ID3D11ShaderResourceView* srv[2] = { m_wxActSRV, m_wxHgtSRV };
+	m_ctx->CSSetShaderResources(12, 2, srv);
+	UINT cnt = 0;
+	m_ctx->CSSetUnorderedAccessViews(0, 1, &m_wxGpuUAV, &cnt);
+	m_ctx->CSSetShader(m_csWx, NULL, 0);
+	m_ctx->Dispatch((UINT)(n / 64), 1, 1);
+	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU2, NULL);
+	ID3D11ShaderResourceView* noneS[3] = { NULL, NULL, NULL };
+	m_ctx->CSSetShaderResources(11, 3, noneS);
+	m_ctx->CSSetShader(NULL, NULL, 0);
+	ID3D11Buffer* noneB = NULL;
+	m_ctx->CSSetConstantBuffers(0, 1, &noneB);
+	m_ctx->CSSetConstantBuffers(5, 1, &noneB);
+}
+
+void Renderer::DrawWxGpu()
+{
+	if (!WxGpuReady() || !m_ctx || m_pass == PASS_SHADOW || m_wxGpuN <= 0) return;
+	if (m_wxGpuWx == WX_CLEAR) return;
+	FlushQueuedDraws();
+	ClearTess();
+	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
+	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
+	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
+	M4 basis = MIdent();
+	basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z;
+	basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z;
+	basis.m[8] = fwd.x; basis.m[9] = fwd.y; basis.m[10] = fwd.z;
+	DrawParams bdp;
+	SetObj(basis, bdp, 0);
+	BOOL mrt = TacQFx(m_quality) && m_zRtv && m_msRtv && !m_inPortrait;
+	if (mrt) {
+		ID3D11RenderTargetView* one = m_msRtv;
+		m_ctx->OMSetRenderTargets(1, &one, m_dsv);
+	}
+	m_ctx->IASetInputLayout(NULL);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+	UINT stride = 0, off = 0;
+	ID3D11Buffer* noVb = NULL;
+	m_ctx->IASetVertexBuffers(0, 1, &noVb, &stride, &off);
+	m_ctx->VSSetShader(m_vsPWx, NULL, 0);
+	m_ctx->VSSetShaderResources(11, 1, &m_wxGpuSRV);
+	m_ctx->GSSetShader(m_gsP, NULL, 0);
+	ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
+	ID3D11Buffer* gcb[2] = { TacCbCur(g_frameR, m_cbFrame), objb };
+	m_ctx->GSSetConstantBuffers(0, 2, gcb);
+	m_ctx->PSSetShader(m_psP, NULL, 0);
+	m_ctx->RSSetState(m_rsNone);
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+	m_ctx->OMSetBlendState(m_bsAdd, NULL, 0xFFFFFFFF);
+	m_ctx->Draw((UINT)m_wxGpuN, 0);
+	ID3D11ShaderResourceView* none = NULL;
+	m_ctx->VSSetShaderResources(11, 1, &none);
+	m_ctx->PSSetShaderResources(11, 1, &none);
+	m_ctx->GSSetShader(NULL, NULL, 0);
+	ID3D11Buffer* gnone[2] = { NULL, NULL };
+	m_ctx->GSSetConstantBuffers(0, 2, gnone);
+	m_ctx->IASetInputLayout(m_ilS);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_ctx->VSSetShader(m_vsS, NULL, 0);
+	if (m_pass != PASS_SHADOW) m_ctx->PSSetShader(m_psM, NULL, 0);
+	m_ctx->RSSetState(m_reflecting ? m_rsFront : m_rsBack);
+	m_bindKey = -1;
 	if (mrt) {
 		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
 		m_ctx->OMSetRenderTargets(2, rt, m_dsv);
@@ -13005,6 +13507,101 @@ static void TacMeshBounds(const MeshBuild& mb, float& cx, float& cy, float& cz, 
 	rad = 0.5f * sqrtf(dx * dx + dy * dy + dz * dz) + 1.5f;
 }
 
+void Renderer::SwapHomeLand()
+{
+	HomeLand& p = m_homeLand;
+	auto swM = [](GpuMesh& a, GpuMesh& b) { GpuMesh t = a; a = b; b = t; };
+	swM(m_terrain, p.terrain);
+	for (int i = 0; i < 16; i++) {
+		swM(m_terrainChunk[i], p.terrainChunk[i]);
+		swM(m_cover1[i], p.cover1[i]);
+		swM(m_cover2[i], p.cover2[i]);
+		swM(m_cover3[i], p.cover3[i]);
+		swM(m_cover4[i], p.cover4[i]);
+		BoundMesh w = m_waterChunk[i]; m_waterChunk[i] = p.waterChunk[i]; p.waterChunk[i] = w;
+		BoundMesh l = m_lavaChunk[i]; m_lavaChunk[i] = p.lavaChunk[i]; p.lavaChunk[i] = l;
+	}
+	swM(m_water, p.water);
+	swM(m_lava, p.lava);
+	int aN = m_props.n, bN = p.props.n;
+	int m = aN > bN ? aN : bN;
+	for (int i = 0; i < m; i++) {
+		PropBatch t = m_props.v[i];
+		m_props.v[i] = p.props.v[i];
+		p.props.v[i] = t;
+	}
+	m_props.n = bN;
+	p.props.n = aN;
+	DWORD wc = m_waterColor; m_waterColor = p.waterColor; p.waterColor = wc;
+	int th = m_theme; m_theme = p.drawTheme; p.drawTheme = th;
+	int pn = m_puffN > p.puffN ? m_puffN : p.puffN;
+	if (pn > 24) pn = 24;
+	for (int i = 0; i < pn; i++) { SceneryPuff t = m_puff[i]; m_puff[i] = p.puff[i]; p.puff[i] = t; }
+	int puffN = m_puffN; m_puffN = p.puffN; p.puffN = puffN;
+	int mini = m_miniN; m_miniN = p.miniN; p.miniN = mini;
+	for (int i = 0; i < LAY_N; i++) {
+		ID3D11Texture2D* tx = m_texMiniL[i]; m_texMiniL[i] = p.texMini[i]; p.texMini[i] = tx;
+		ID3D11ShaderResourceView* sv = m_srvMiniL[i]; m_srvMiniL[i] = p.srvMini[i]; p.srvMini[i] = sv;
+	}
+}
+
+void Renderer::ReleaseHomeLandGpu()
+{
+	HomeLand& p = m_homeLand;
+	p.terrain.Release();
+	for (int i = 0; i < 16; i++) {
+		p.terrainChunk[i].Release();
+		p.cover1[i].Release();
+		p.cover2[i].Release();
+		p.cover3[i].Release();
+		p.cover4[i].Release();
+		p.waterChunk[i].mesh.Release();
+		p.waterChunk[i].rad = 0;
+		p.lavaChunk[i].mesh.Release();
+		p.lavaChunk[i].rad = 0;
+	}
+	p.water.Release();
+	p.lava.Release();
+	for (int i = 0; i < p.props.size(); i++) p.props[i].mesh.Release();
+	p.props.clear();
+	for (int i = 0; i < LAY_N; i++) { TAC_REL(p.srvMini[i]); TAC_REL(p.texMini[i]); }
+	p.puffN = 0;
+	p.miniN = 0;
+	p.live = FALSE;
+}
+
+void Renderer::ParkHomeLand(int stage, int theme, DWORD seed)
+{
+	if (m_homeLand.live) return;
+	BOOL any = m_terrain.vb != NULL;
+	if (!any) for (int i = 0; i < 16; i++) if (m_terrainChunk[i].vb) { any = TRUE; break; }
+	if (!any) for (int i = 0; i < m_props.size(); i++) if (m_props[i].mesh.vb) { any = TRUE; break; }
+	if (!any) return;
+	SwapHomeLand();
+	m_homeLand.live = TRUE;
+	m_homeLand.stage = stage;
+	m_homeLand.theme = theme;
+	m_homeLand.seed = seed;
+}
+
+BOOL Renderer::HomeLandParked(int stage, int theme, DWORD seed) const
+{
+	return m_homeLand.live && m_homeLand.stage == stage && m_homeLand.theme == theme && m_homeLand.seed == seed;
+}
+
+void Renderer::RestoreHomeLand()
+{
+	if (!m_homeLand.live) return;
+	SwapHomeLand();
+	ReleaseHomeLandGpu();
+}
+
+void Renderer::DropHomeLand()
+{
+	if (!m_homeLand.live) return;
+	ReleaseHomeLandGpu();
+}
+
 BOOL Renderer::BuildTerrain(Map& m)
 {
 	m_theme = Clampi(m.theme, 0, TH_COUNT - 1);
@@ -13358,13 +13955,13 @@ BOOL Renderer::BuildTerrain(Map& m)
 		flush(treeMb, TEX_WHITE, 0);
 		flush(rockMb, TEX_WHITE, 1);
 		flush(proc, TEX_WHITE, 4);
-		flush(tentMb, texOf(sTent), 3);
-		flush(flagMb, texOf(sFlag), 3);
-		flush(lilyMb, texOf(sLily), 3);
-		flush(plantMb, texOf(sPlant), 3);
-		flush(lantMb, texOf(sLant), 3);
-		flush(pumpMb, texOf(sPump), 3);
-		flush(kitMb, TEX_WHITE, 3);
+		flush(tentMb, texOf(sTent), 5);
+		flush(flagMb, texOf(sFlag), 5);
+		flush(lilyMb, texOf(sLily), 8);
+		flush(plantMb, texOf(sPlant), 8);
+		flush(lantMb, texOf(sLant), 6);
+		flush(pumpMb, texOf(sPump), 7);
+		flush(kitMb, TEX_WHITE, 6);
 	}
 	flush(wood, TEX_WHITE, 2);
 	flush(sceneMb, TEX_WHITE, 3);
@@ -13553,6 +14150,8 @@ BOOL Renderer::BeginPortrait(int slot)
 		if (m_envSrv) m_ctx->PSSetShaderResources(7, 1, &m_envSrv);
 		ID3D11ShaderResourceView* refOff = NULL;
 		m_ctx->PSSetShaderResources(8, 1, &refOff);
+		if (m_skinArrSrv) m_ctx->PSSetShaderResources(9, 1, &m_skinArrSrv);
+		if (m_gndXSrv) m_ctx->PSSetShaderResources(10, 1, &m_gndXSrv);
 	}
 	m_portraitSlot = slot;
 	return TRUE;
@@ -13621,7 +14220,9 @@ BOOL Renderer::ApplyPost()
 		if (m_msaa > 1 && m_zTex && m_zRes)
 			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
 		DrawParams df;
-		df.emissive = TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 14.f, 18.f, 24.f, 28.f);
+		// ぼかし半径。限界突破の 24 は据え置き、上の段だけ被写界を滑らかに広げる。
+		df.emissive = (qRank > 6.f) ? TacEaseAboveBreak(qRank, 24.f, 46.f)
+			: TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 14.f, 18.f, 24.f, 24.f);
 		df.hue = 0.16f;
 		fs(qRank >= 3.5f ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
 		src = m_dofSrv;
@@ -13710,8 +14311,8 @@ void Renderer::ShowLoadSky()
 	FlushQueuedDraws();
 	ClearTess();
 	m_inPortrait = FALSE;
-	ID3D11ShaderResourceView* unb[9] = {};
-	m_ctx->PSSetShaderResources(0, 9, unb);
+	ID3D11ShaderResourceView* unb[11] = {};
+	m_ctx->PSSetShaderResources(0, 11, unb);
 	ID3D11RenderTargetView* nullRT = NULL;
 	m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
 	m_ctx->CopyResource(m_bb, m_loadSky);

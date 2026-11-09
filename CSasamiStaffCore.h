@@ -220,13 +220,16 @@ struct ScStaffUi {
 	int loopBTick;         /* -1 = unset */
 	uint32_t playheadTick; /* live playhead while previewing */
 	int previewActive;
+	int previewEngineSeen; /* 1 after playy went 0 during this preview */
 	int transportMode;     /* 0=none 1=set marker 2=set A 3=set B */
 	int markerSeekArmed;   /* seek to marker once after preview starts */
 	uint32_t previewOriginTick; /* wav-from-marker: playhead = origin + heard */
 	int previewWavMode;        /* 1 = score preview via wavout (ignore MIDI seek) */
 	int followViewW;       /* score grid width for playhead auto-scroll (0=off) */
-	int clef[32];          /* 0=treble 1=bass 2=grand (G+F) 3=drum/kit */
+	int clef[32];          /* 0=treble 1=bass 2=grand (G+F) 3=drum/kit — display */
+	int clefAuto[32];      /* 1=auto G/F/grand from note range; 0=user lock */
 	wchar_t vstLabel[32][40]; /* Tone row: VST basename / FM voice name */
+	int vstIsVst3[32];     /* 1=dedicated VST3 (GM drum map unknown → oval heads) */
 	wchar_t progLabel[32][40]; /* Prog row under Tone: "Prog 68" / "ALG3 FB5" */
 	int dragMode;          /* 0=none 1=resize-dur 2=move-pitch/tick */
 	int meterNumer;        /* time signature numerator (default 4) */
@@ -264,10 +267,29 @@ void ScStaffMeterAtTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom, int* outNumer, int* outDenom);
 uint32_t ScStaffSnapToBarTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom);
+/* 1始まり小節・拍。outRem は拍内の余り tick。 */
+void ScStaffBarBeatFromTick(const ScEvent* ev, int evCount, uint32_t tick,
+	int defNumer, int defDenom, int* outBar, int* outBeat, int* outRem);
+uint32_t ScStaffTickFromBar(const ScEvent* ev, int evCount, int bar1,
+	int defNumer, int defDenom);
+uint32_t ScStaffLastContentTick(const ScEvent* ev, int evCount);
+void ScStaffScrollTickIntoView(ScStaffUi* u, const ScEvent* ev, int evCount,
+	uint32_t tick, int viewW);
+/* キャプション帯を Invalidate しない（アクリルタイトル文字のちらつき防止）。 */
+void ScStaffInvalidateBelowCaption(CWnd* w);
+void ScStaffPresentNoActivate(CWnd* w);
+void ScStaffCaptionPaintThenExclude(CDC& dc, HWND h);
+void ScStaffSetWndTextIfChanged(CWnd* w, LPCWSTR text);
 void ScStaffDrawTimeSignature(CDC& dc, int cx, int staffTop, int gap, int numer, int denom, COLORREF col);
 void ScStaffSetMeter(ScStaffUi* u, int numer, int denom);
-/* Apply tick-0 clef / drum-part from the score into u->clef[]. MIDI only. */
+/* Apply tick-0 clef / drum-part from the score into u->clef[] / clefAuto[]. */
 void ScStaffApplyDocClef(ScStaffUi* u, const ScEvent* ev, int n);
+/* Auto: no notes→G, only <C4→F, only ≥C4→G, mixed→grand. Locked tracks unchanged. */
+void ScStaffRefreshAutoClefs(ScStaffUi* u, const ScEvent* ev, int n);
+/* Cycle Auto→G→F→G+F→Dr→Auto (SSG skips Dr). Returns 1 if the track is auto afterwards. */
+int ScStaffCycleClefChip(ScStaffUi* u, int track);
+int ScStaffDropKindAt(ScEvent* ev, int* n, int kind, int ch, uint32_t tick);
+int ScStaffDropKindOnCh(ScEvent* ev, int* n, int kind, int ch);
 
 int ScStaffLineGap(const ScStaffUi* u);
 int ScStaffH(const ScStaffUi* u); /* one 5-line staff height */
@@ -435,6 +457,9 @@ uint32_t ScStaffTickFromSec(double sec, int tempoT);
 int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT);
 /* Stop host preview (Space toggle / dialog close). */
 void ScStaffStopHostPreview(ScStaffUi* u);
+/* 試し再生が終わっていたら previewActive を下ろし、VST クリック試聴用の process() を再開。 */
+int ScStaffPreviewFinished(ScStaffUi* u);
+void ScStaffRestoreLiveAudioAfterPreview(void);
 /* Live host play of baked score (mpw2/mpsmv/fpy). Prefer over wavout when VST-bound. */
 int ScStaffPreviewViaHost(LPCTSTR builtPath, ScStaffUi* u, int tempoT);
 /* Wavout built path → temp WAV → host play (score-local, from previewOriginTick). */

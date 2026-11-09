@@ -257,6 +257,7 @@ Game::Game()
 	m_shake = 0;
 	m_sceneAcc = 0;
 	m_wxAcc = 0;
+	m_wxSplashAcc = 0;
 	m_wxMeshWait = 0;
 	m_wxMesh = 0;
 	m_wxEventT = 6.f;
@@ -356,6 +357,7 @@ Game::Game()
 	m_cutA = m_cutD = -1;
 	m_cutAllyN = m_cutFoeN = 0;
 	m_cutKind = 0;
+	m_cutPat = 0;
 	m_seqCaster = m_seqPrimary = -1;
 	m_seqSkill = -1;
 	m_battleStage = 1;
@@ -608,7 +610,6 @@ BOOL Game::Recover()
 		LoadBattleCast();
 		m_importBind = 1;
 		m_r.BuildTerrain(m_b.map);
-		m_r.BuildMinimap(m_b.map);
 		for (int i = 0; i < m_b.nUnits; i++) ActorForUnit(i);
 		m_showBuilt = FALSE;
 	} else {
@@ -957,7 +958,9 @@ void Game::PulseQuality(float work, float span)
 				m_qOkN++;
 				m_qMissN = 0;
 				if (m_qOkN >= 12) { next = notch + 1; acted = true; }
-			} else if (notch >= soft && notch < TAC_NOTCH_OPEN && spare && probed) {
+			} else if (notch >= soft && notch < TAC_NOTCH_OPEN && spare && probed && up == 0) {
+				// +5 以降は「もう上の代表 Hz が無い（= 拍は天井）」ときだけ開放する。
+				// 下に上げ余地の Hz があるうちは +4 で止め、余力はフレームレート側へ回す。
 				m_qOkN++;
 				m_qMissN = 0;
 				if (m_qOkN >= 28) { next = notch + 1; acted = true; }
@@ -2259,7 +2262,6 @@ void Game::NavBack()
 		BattleCancel();
 		break;
 	case SC_RESULT:
-		m_showBuilt = FALSE;
 		EnterBase();
 		TacSfx(TS_CANCEL);
 		break;
@@ -3364,6 +3366,8 @@ void Game::UpdateParticles(float dt)
 		else if (wx == WX_HEAT) rate = 18.f;
 		if (QualityNow() <= 0) rate *= 0.45f;
 		else if (QualityNow() == 4) rate *= 0.3f;
+		BOOL gpuWx = m_r.WxGpuReady();
+		if (gpuWx) rate = 0.f;
 		// 雨は一定ではない。ゆっくりした強弱と突風で土砂降りと小降りを行き来させる。
 		float wetGust = 0.f;
 		if (wx == WX_RAIN || wx == WX_STORM) {
@@ -3458,6 +3462,38 @@ void Game::UpdateParticles(float dt)
 			}
 			m_parts.push_back(q);
 		}
+		if (!(gpuWx && (wx == WX_RAIN || wx == WX_STORM))) {
+			if ((wx == WX_RAIN || wx == WX_STORM) && m_b.nUnits > 0) {
+				float splashRate = (wx == WX_STORM ? 7.5f : 4.2f) * (0.35f + wetGust * 1.1f);
+				m_wxSplashAcc += dt * splashRate;
+				int guardS = 0;
+				while (m_wxSplashAcc >= 1.f && guardS < 4 && (int)m_parts.size() < 3600) {
+					m_wxSplashAcc -= 1.f;
+					guardS++;
+					int ui = m_rng.Range(0, m_b.nUnits - 1);
+					if (ui < 0 || ui >= m_b.nUnits) continue;
+					const Unit& u = m_b.u[ui];
+					if (!u.alive || m_dispHp[ui] <= 1.f) continue;
+					V3 ap = ActorPos(ui);
+					float ht = m_act[ui].height;
+					if (ht < 0.3f) ht = 0.8f;
+					if (ht > 1.6f) ht = 1.6f;
+					if (!m_r.InView(ap + v3(0, ht * 0.6f, 0), 1.8f)) continue;
+					int fromHair = m_rng.F() < 0.45f ? 1 : 0;
+					V3 sp = ap + v3(m_rng.F(-0.12f, 0.12f), ht * (fromHair ? m_rng.F(0.78f, 1.02f) : m_rng.F(0.38f, 0.72f)), m_rng.F(-0.12f, 0.12f));
+					float w = ((wx == WX_STORM) ? 6.5f : 2.4f) * (0.7f + wetGust * 1.4f);
+					Particle q = {};
+					q.p = sp;
+					q.v = wind * w + v3(m_rng.F(-0.8f, 0.8f), m_rng.F(0.4f, 2.2f), m_rng.F(-0.8f, 0.8f));
+					q.life = q.max = m_rng.F(0.28f, 0.55f);
+					q.size = 0.028f; q.size1 = 0.01f;
+					q.r = 0.78f; q.g = 0.88f; q.b = 1.f; q.a = 0.85f;
+					q.shape = 0; q.add = 1; q.grav = 14.f; q.drag = 0.45f; q.stretch = 0.03f;
+					q.wxHit = 0; q.nHit = 0;
+					m_parts.push_back(q);
+				}
+			} else m_wxSplashAcc = 0;
+		} else m_wxSplashAcc = 0;
 		if (wx == WX_SAND || wx == WX_HAIL) {
 			int row = ((int)(m_time * 8.f) & 63);
 			if (row < 0) row = 0;
@@ -3515,6 +3551,16 @@ void Game::UpdateParticles(float dt)
 			m_parts.push_back(s);
 		}
 	};
+	if (m_r.WxGpuReady() && m_screen == SC_BATTLE) {
+		int wxx = TacWx(m_b.weather);
+		if (wxx == WX_RAIN || wxx == WX_STORM) {
+			for (int k = 0; k < 8; k++) {
+				int sx = (int)floorf(m_eye.x + m_rng.F(-10.f, 10.f));
+				int sz = (int)floorf(m_eye.z + m_rng.F(-10.f, 10.f));
+				soak(sx, sz, wxx == WX_STORM ? 2 : 1);
+			}
+		}
+	}
 	int airTh = 0;
 	if (m_screen == SC_BATTLE) airTh = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 	else airTh = Clampi(m_showMap.theme, 0, TH_COUNT - 1);
@@ -3698,13 +3744,46 @@ void Game::UpdateParticles(float dt)
 		}
 		++i;
 	}
+	if (m_r.WxGpuReady()) {
+		int wxG = (m_screen == SC_BATTLE) ? TacWx(m_b.weather) : WX_CLEAR;
+		static float hgt[MAPN * MAPN];
+		if (m_screen == SC_BATTLE) {
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
+				hgt[z * MAPN + x] = m_b.map.StandY(x, z);
+		} else memset(hgt, 0, sizeof(hgt));
+		float act[Renderer::WX_GPU_ACT * 4];
+		int nAct = 0;
+		if (m_screen == SC_BATTLE) {
+			for (int i = 0; i < m_b.nUnits && nAct < Renderer::WX_GPU_ACT; i++) {
+				if (!m_b.u[i].alive || m_dispHp[i] <= 1.f) continue;
+				V3 ap = ActorPos(i);
+				float ht = m_act[i].height;
+				if (ht < 0.3f) ht = 0.8f;
+				if (ht > 1.6f) ht = 1.6f;
+				if (!m_r.InView(ap + v3(0, ht * 0.6f, 0), 2.2f)) continue;
+				int b = nAct * 4;
+				act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
+				nAct++;
+			}
+		}
+		V3 eye = m_eye;
+		V3 fwd = m_camTarget - eye;
+		float fl = Len(fwd);
+		fwd = fl > 0.2f ? fwd * (1.f / fl) : v3(0, 0, 1);
+		V3 side = Cross(v3(0, 1, 0), fwd);
+		if (Len(side) < 0.2f) side = v3(1, 0, 0);
+		else side = Norm(side);
+		float windAng = 0.6f + sinf(m_time * 0.13f) * 0.4f;
+		V3 wind = v3(cosf(windAng), 0, sinf(windAng));
+		float gust = (wxG == WX_RAIN || wxG == WX_STORM) ? TacBurst(m_time) : 0.f;
+		m_r.TickWxGpu(dt, wxG, fwd, side, wind, gust, nAct, act, hgt);
+	}
 	if (m_wxMesh && m_screen == SC_BATTLE) {
 		m_wxMeshWait -= dt;
 		if (m_wxMeshWait <= 0.f) {
 			m_wxMesh = 0;
 			m_wxMeshWait = 0.45f;
 			m_r.BuildTerrain(m_b.map);
-			m_r.BuildMinimap(m_b.map);
 		}
 	}
 	UpdateWeatherEvents(dt);
@@ -4097,7 +4176,14 @@ void Game::BuildShowcase()
 	if (!m_loaded) return;
 	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_ABS);
 	RollMapSeed(st, FALSE);
-	if (!m_showBuilt || m_showStage != st || m_showTheme != m_themeSel) {
+	if (m_r.HomeLandParked(st, m_themeSel, m_mapSeed)) {
+		m_r.RestoreHomeLand();
+		m_showTheme = m_themeSel;
+		m_showBuilt = TRUE;
+		m_showStage = st;
+		if (m_loadLive && m_loadB > m_loadA) NoteLoad(m_loadA + (m_loadB - m_loadA) / 4);
+	} else if (!m_showBuilt || m_showStage != st || m_showTheme != m_themeSel) {
+		m_r.DropHomeLand();
 		GenerateMap(m_showMap, st, m_mapSeed, m_themeSel);
 		m_showTheme = m_themeSel;
 		m_r.BuildTerrain(m_showMap);
@@ -4458,6 +4544,7 @@ void Game::DrawShowcase3D()
 	m_r.EndInstBatch();
 	if (m_screen == SC_BATTLE || m_screen == SC_BASE || m_screen == SC_RESULT)
 		m_r.DrawParticles(m_parts.data(), m_parts.size());
+	if (m_screen == SC_BATTLE) m_r.DrawWxGpu();
 }
 
 struct CodexHit {
@@ -7758,12 +7845,12 @@ static void ApplyCreatePreview(Actor& a, BOOL showWing, BOOL ground)
 static void CharPreviewIn(const CharData& c, const Actor& a, int& style, int& idle, BOOL& fly)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
-	idle = (cd.weaponLook == WL_AXE2 || cd.weaponLook == WL_SWORD2) ? CL_2H_IDLE : CL_IDLE;
 	Unit u;
 	memset(&u, 0, sizeof(u));
 	u.monster = -1;
 	u.ch = c;
 	style = UnitMotionStyle(u, -1);
+	idle = (style == AS_CHOP2 || cd.weaponLook == WL_AXE2 || cd.weaponLook == WL_SWORD2) ? CL_2H_IDLE : CL_IDLE;
 	fly = cd.moveType == MV_FLY || a.wings > 0;
 }
 
@@ -9656,7 +9743,6 @@ void Game::DrawResultUi()
 		bx += bw + gap;
 	}
 	if (Btn(ID_RS_BASE, bx, by, bw, U(42), TT(TX_BT_TOBASE), TRUE, FALSE, U(17))) {
-		m_showBuilt = FALSE;
 		EnterBase();
 		return;
 	}

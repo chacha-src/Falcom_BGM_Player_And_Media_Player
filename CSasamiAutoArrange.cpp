@@ -97,7 +97,67 @@ static const wchar_t* StyleNm(int style)
 	case SC_AS_PIANO: return LL14(L"ピアノトリオ", L"Piano trio", L"Trio piano", L"Trio pianistico", L"Trío de piano", L"피아노 트리오", L"钢琴三重奏", L"ثلاثي بيانو", L"Фортепианное трио", L"Klaviertrio", L"Trio de piano", L"Pianotrio", L"Trio fortepianowe", L"Piyano üçlüsü");
 	case SC_AS_FANFARE: return LL14(L"ファンファーレ", L"Fanfare", L"Fanfare", L"Fanfara", L"Fanfarria", L"팬파레", L"号角", L"فانفار", L"Фанфары", L"Fanfare", L"Fanfarra", L"Fanfare", L"Fanfara", L"Fanfar");
 	case SC_AS_SLOWROCK: return LL14(L"スローロック", L"Slow rock", L"Rock lent", L"Rock lento", L"Rock lento", L"슬로우 록", L"慢摇滚", L"روك بطيء", L"Медленный рок", L"Slow-Rock", L"Rock lento", L"Langzame rock", L"Wolny rock", L"Yavaş rock");
+	case SC_AS_JAZZ: return LL14(L"ジャズ", L"Jazz", L"Jazz", L"Jazz", L"Jazz", L"재즈", L"爵士", L"جاز", L"Джаз", L"Jazz", L"Jazz", L"Jazz", L"Jazz", L"Caz");
+	case SC_AS_SWINGJAZZ: return LL14(L"スウィングジャズ", L"Swing jazz", L"Jazz swing", L"Swing jazz", L"Jazz swing", L"스윙 재즈", L"摇摆爵士", L"سوينغ جاز", L"Свинг-джаз", L"Swing-Jazz", L"Jazz swing", L"Swingjazz", L"Swing jazz", L"Swing caz");
+	case SC_AS_BEBOP: return LL14(L"ビバップ", L"Bebop", L"Bebop", L"Bebop", L"Bebop", L"비밥", L"比波普", L"بيبوب", L"Бибоп", L"Bebop", L"Bebop", L"Bebop", L"Bebop", L"Bebop");
+	case SC_AS_BLUES: return LL14(L"ブルース", L"Blues", L"Blues", L"Blues", L"Blues", L"블루스", L"布鲁斯", L"بلوز", L"Блюз", L"Blues", L"Blues", L"Blues", L"Blues", L"Blues");
+	case SC_AS_SLOWBLUES: return LL14(L"スローブルース", L"Slow blues", L"Blues lent", L"Blues lento", L"Blues lento", L"슬로우 블루스", L"慢布鲁斯", L"بلوز بطيء", L"Медленный блюз", L"Slow-Blues", L"Blues lento", L"Langzame blues", L"Wolny blues", L"Yavaş blues");
+	case SC_AS_ROCKNROLL: return LL14(L"ロックンロール", L"Rock'n'roll", L"Rock'n'roll", L"Rock'n'roll", L"Rock'n'roll", L"로큰롤", L"摇滚乐", L"روك أند رول", L"Рок-н-ролл", L"Rock'n'Roll", L"Rock'n'roll", L"Rock-'n-roll", L"Rock'n'roll", L"Rock'n'roll");
+	case SC_AS_GOSPEL: return LL14(L"ゴスペル", L"Gospel", L"Gospel", L"Gospel", L"Góspel", L"가스펠", L"福音", L"غوسبل", L"Госпел", L"Gospel", L"Gospel", L"Gospel", L"Gospel", L"Gospel");
+	case SC_AS_SOUL: return LL14(L"ソウル", L"Soul", L"Soul", L"Soul", L"Soul", L"소울", L"灵魂乐", L"سول", L"Соул", L"Soul", L"Soul", L"Soul", L"Soul", L"Soul");
+	case SC_AS_RNB: return LL14(L"R&B", L"R&B", L"R&B", L"R&B", L"R&B", L"R&B", L"节奏布鲁斯", L"آر أند بي", L"R&B", L"R&B", L"R&B", L"R&B", L"R&B", L"R&B");
+	case SC_AS_NEOSOUL: return LL14(L"ネオソウル", L"Neo soul", L"Neo soul", L"Neo soul", L"Neo soul", L"네오 소울", L"新灵魂乐", L"نيو سول", L"Нео-соул", L"Neo-Soul", L"Neo soul", L"Neo soul", L"Neo soul", L"Neo soul");
+	case SC_AS_COUNTRY: return LL14(L"カントリー", L"Country", L"Country", L"Country", L"Country", L"컨트리", L"乡村", L"كانتري", L"Кантри", L"Country", L"Country", L"Country", L"Country", L"Country");
+	case SC_AS_PUNK: return LL14(L"パンク", L"Punk", L"Punk", L"Punk", L"Punk", L"펑크", L"朋克", L"بانك", L"Панк", L"Punk", L"Punk", L"Punk", L"Punk", L"Punk");
+	case SC_AS_GRUNGE: return LL14(L"グランジ", L"Grunge", L"Grunge", L"Grunge", L"Grunge", L"그런지", L"垃圾摇滚", L"غرانج", L"Гранж", L"Grunge", L"Grunge", L"Grunge", L"Grunge", L"Grunge");
+	case SC_AS_SKA: return LL14(L"スカ", L"Ska", L"Ska", L"Ska", L"Ska", L"스카", L"斯卡", L"سكا", L"Ска", L"Ska", L"Ska", L"Ska", L"Ska", L"Ska");
+	case SC_AS_KAYOKYOKU: return LL14(L"歌謡曲", L"Kayokyoku", L"Kayokyoku", L"Kayokyoku", L"Kayokyoku", L"가요", L"歌谣曲", L"كايوكيوكو", L"Каёкёку", L"Kayokyoku", L"Kayokyoku", L"Kayokyoku", L"Kayokyoku", L"Kayokyoku");
+	case SC_AS_ANISON: return LL14(L"アニソン", L"Anime song", L"Chanson d'anime", L"Canzone anime", L"Canción de anime", L"애니송", L"动漫歌曲", L"أغنية أنمي", L"Анисон", L"Anime-Song", L"Canção de anime", L"Animelied", L"Piosenka anime", L"Anime şarkısı");
+	case SC_AS_CHIPTUNE: return LL14(L"チップチューン", L"Chiptune", L"Chiptune", L"Chiptune", L"Chiptune", L"칩튠", L"芯片音乐", L"تشيبتيون", L"Чиптюн", L"Chiptune", L"Chiptune", L"Chiptune", L"Chiptune", L"Chiptune");
+	case SC_AS_TRAP: return LL14(L"トラップ", L"Trap", L"Trap", L"Trap", L"Trap", L"트랩", L"陷阱", L"تراب", L"Трэп", L"Trap", L"Trap", L"Trap", L"Trap", L"Trap");
+	case SC_AS_DRILL: return LL14(L"ドリル", L"Drill", L"Drill", L"Drill", L"Drill", L"드릴", L"钻头", L"دريل", L"Дрилл", L"Drill", L"Drill", L"Drill", L"Drill", L"Drill");
+	case SC_AS_AFROBEAT: return LL14(L"アフロビート", L"Afrobeat", L"Afrobeat", L"Afrobeat", L"Afrobeat", L"아프로비트", L"非洲节拍", L"أفروبيت", L"Афробит", L"Afrobeat", L"Afrobeat", L"Afrobeat", L"Afrobeat", L"Afrobeat");
+	case SC_AS_SWING3: return LL14(L"ジャズワルツ", L"Jazz waltz", L"Valse jazz", L"Valzer jazz", L"Vals jazz", L"재즈 왈츠", L"爵士华尔兹", L"فالس جاز", L"Джаз-вальс", L"Jazz-Walzer", L"Valsa jazz", L"Jazzwals", L"Walc jazzowy", L"Caz valsi");
+	case SC_AS_TANGO: return LL14(L"タンゴ", L"Tango", L"Tango", L"Tango", L"Tango", L"탱고", L"探戈", L"تانغو", L"Танго", L"Tango", L"Tango", L"Tango", L"Tango", L"Tango");
+	case SC_AS_FLAMENCO: return LL14(L"フラメンコ", L"Flamenco", L"Flamenco", L"Flamenco", L"Flamenco", L"플라멩코", L"弗拉门戈", L"فلامنكو", L"Фламенко", L"Flamenco", L"Flamenco", L"Flamenco", L"Flamenco", L"Flamenko");
+	case SC_AS_SURF: return LL14(L"サーフロック", L"Surf rock", L"Surf rock", L"Surf rock", L"Surf rock", L"서프 록", L"冲浪摇滚", L"سيرف روك", L"Сёрф-рок", L"Surf-Rock", L"Surf rock", L"Surfrock", L"Surf rock", L"Surf rock");
+	case SC_AS_LOFI: return LL14(L"ローファイ", L"Lo-fi", L"Lo-fi", L"Lo-fi", L"Lo-fi", L"로파이", L"低保真", L"لو-فاي", L"Лоу-фай", L"Lo-fi", L"Lo-fi", L"Lo-fi", L"Lo-fi", L"Lo-fi");
+	case SC_AS_DRUMSOLO: return LL14(L"ドラムソロ", L"Drum solo", L"Solo batterie", L"Assolo batteria", L"Solo batería", L"드럼 솔로", L"鼓独奏", L"منفرد طبول", L"Соло ударных", L"Drumsolo", L"Solo de bateria", L"Drumsolo", L"Solo perkusji", L"Davul solosu");
+	case SC_AS_EDM: return LL14(L"EDM", L"EDM", L"EDM", L"EDM", L"EDM", L"EDM", L"电子舞曲", L"إي دي إم", L"EDM", L"EDM", L"EDM", L"EDM", L"EDM", L"EDM");
+	case SC_AS_DUBSTEP: return LL14(L"ダブステップ", L"Dubstep", L"Dubstep", L"Dubstep", L"Dubstep", L"덥스텝", L"回响贝斯", L"دبستيب", L"Дабстеп", L"Dubstep", L"Dubstep", L"Dubstep", L"Dubstep", L"Dubstep");
+	case SC_AS_SYNTHWAVE: return LL14(L"シンセウェイブ", L"Synthwave", L"Synthwave", L"Synthwave", L"Synthwave", L"신스웨이브", L"合成波", L"سينث ويف", L"Синтвейв", L"Synthwave", L"Synthwave", L"Synthwave", L"Synthwave", L"Synthwave");
 	default: return L"?";
+	}
+}
+
+/* テーマのジャンル見出し（ダイアログのグループ化用）。 */
+const wchar_t* ScAutoStyleGroupName(int style)
+{
+	switch (style) {
+	case SC_AS_JAZZ: case SC_AS_SWINGJAZZ: case SC_AS_BEBOP: case SC_AS_SWING3:
+	case SC_AS_BLUES: case SC_AS_SLOWBLUES: case SC_AS_ROCKNROLL:
+		return LL14(L"ジャズ／ブルース", L"Jazz / Blues", L"Jazz / Blues", L"Jazz / Blues", L"Jazz / Blues", L"재즈／블루스", L"爵士／布鲁斯", L"جاز / بلوز", L"Джаз / Блюз", L"Jazz / Blues", L"Jazz / Blues", L"Jazz / Blues", L"Jazz / Blues", L"Caz / Blues");
+	case SC_AS_GOSPEL: case SC_AS_SOUL: case SC_AS_RNB: case SC_AS_NEOSOUL: case SC_AS_FUNK: case SC_AS_DISCO:
+		return LL14(L"ソウル／ファンク", L"Soul / Funk", L"Soul / Funk", L"Soul / Funk", L"Soul / Funk", L"소울／펑크", L"灵魂／放克", L"سول / فانك", L"Соул / Фанк", L"Soul / Funk", L"Soul / Funk", L"Soul / Funk", L"Soul / Funk", L"Soul / Funk");
+	case SC_AS_ROCK: case SC_AS_METAL: case SC_AS_PUNK: case SC_AS_GRUNGE: case SC_AS_SURF: case SC_AS_SLOWROCK:
+		return LL14(L"ロック", L"Rock", L"Rock", L"Rock", L"Rock", L"록", L"摇滚", L"روك", L"Рок", L"Rock", L"Rock", L"Rock", L"Rock", L"Rock");
+	case SC_AS_TECHNO: case SC_AS_HOUSE: case SC_AS_TRANCE: case SC_AS_DNB: case SC_AS_BREAKS:
+	case SC_AS_EDM: case SC_AS_DUBSTEP: case SC_AS_SYNTHWAVE:
+		return LL14(L"エレクトロニカ", L"Electronica", L"Électronique", L"Elettronica", L"Electrónica", L"일렉트로니카", L"电子乐", L"إلكترونيكا", L"Электроника", L"Electronica", L"Eletrônica", L"Electronica", L"Elektronika", L"Elektronik");
+	case SC_AS_HIPHOP: case SC_AS_TRAP: case SC_AS_DRILL: case SC_AS_LOFI:
+		return LL14(L"ヒップホップ", L"Hip-hop", L"Hip-hop", L"Hip-hop", L"Hip-hop", L"힙합", L"嘻哈", L"هيب هوب", L"Хип-хоп", L"Hip-Hop", L"Hip-hop", L"Hiphop", L"Hip-hop", L"Hip-hop");
+	case SC_AS_BOSSA: case SC_AS_SAMBA: case SC_AS_LATIN: case SC_AS_TANGO: case SC_AS_FLAMENCO: case SC_AS_AFROBEAT:
+		return LL14(L"ラテン／ワールド", L"Latin / World", L"Latin / Monde", L"Latino / World", L"Latino / World", L"라틴／월드", L"拉丁／世界", L"لاتيني / عالمي", L"Латино / Этно", L"Latin / World", L"Latino / World", L"Latijn / Wereld", L"Latynoski / World", L"Latin / Dünya");
+	case SC_AS_KAYOKYOKU: case SC_AS_ANISON: case SC_AS_CITYPOP: case SC_AS_ENKA:
+		return LL14(L"J-POP／歌謡", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-POP／가요", L"J-POP／歌谣", L"جي-بوب / كايو", L"J-Pop / Каё", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-Pop / Kayo", L"J-Pop / Kayo");
+	case SC_AS_ORCH: case SC_AS_FANFARE: case SC_AS_MARCH: case SC_AS_WALTZ: case SC_AS_BALLAD:
+	case SC_AS_PIANO: case SC_AS_ACOUSTIC: case SC_AS_AMBIENT:
+		return LL14(L"アコースティック／劇伴", L"Acoustic / Score", L"Acoustique / BO", L"Acustico / Colonna", L"Acústico / BSO", L"어쿠스틱／극반", L"原声／配乐", L"أكوستيك / موسيقى", L"Акустика / Score", L"Akustisch / Score", L"Acústico / Trilha", L"Akoestisch / Score", L"Akustyczny / Ścieżka", L"Akustik / Score");
+	case SC_AS_GAME: case SC_AS_CHIPTUNE: case SC_AS_FUSION: case SC_AS_COUNTRY:
+	case SC_AS_SHUFFLE: case SC_AS_POLKA: case SC_AS_REGGAE: case SC_AS_DRUMSOLO:
+		return LL14(L"その他", L"Other", L"Autre", L"Altro", L"Otro", L"기타", L"其他", L"أخرى", L"Прочее", L"Sonstiges", L"Outro", L"Overig", L"Inne", L"Diğer");
+	default:
+		return LL14(L"ビート", L"Beats", L"Rythmes", L"Ritmi", L"Ritmos", L"비트", L"节拍", L"إيقاعات", L"Биты", L"Beats", L"Batidas", L"Beats", L"Bity", L"Ritimler");
 	}
 }
 
@@ -396,6 +456,300 @@ static void LoadStyle(int id, StylePat* s)
 		s->progBass = 32; s->progChord = 61;
 		break;
 	case SC_AS_SLOWROCK:
+		s->power = 1;
+		s->drum[DV_KICK] = Bits("x.......x.x.....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_RIDE] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1.......2.......");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 8;
+		s->progChord = 29;
+		break;
+	case SC_AS_JAZZ:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_RIDE] = Bits("x..x.xx..x.x");
+		s->drum[DV_HAT] = Bits("...x.....x..");
+		s->drum[DV_KICK] = Bits("x...........");
+		s->drum[DV_RIM] = Bits("......x.....");
+		Bass(s->bass, "1..2..5..7..");
+		s->chord = Bits("..x.....x...");
+		s->chordSlots = 2;
+		s->progBass = 32; s->progChord = 0;
+		break;
+	case SC_AS_SWINGJAZZ:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_RIDE] = Bits("x..x.xx..x.x");
+		s->drum[DV_HAT] = Bits("...x.....x..");
+		s->drum[DV_KICK] = Bits("x.....x.....");
+		s->drum[DV_SNARE] = Bits("...x.....x..");
+		Bass(s->bass, "1..5..2..7..");
+		s->chord = Bits("x..x..x..x..");
+		s->chordSlots = 1;
+		s->progBass = 32; s->progChord = 26;
+		break;
+	case SC_AS_BEBOP:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_RIDE] = Bits("x..x.xx..x.x");
+		s->drum[DV_HAT] = Bits("...x.....x..");
+		s->drum[DV_KICK] = Bits("x..x..x...x.");
+		s->drum[DV_SNARE] = Bits("..x...x.x..x");
+		Bass(s->bass, "1.2.3.5.6.7.");
+		s->chord = Bits("..x.....x...");
+		s->chordSlots = 1;
+		s->progBass = 32; s->progChord = 0;
+		break;
+	case SC_AS_BLUES:
+		s->swing = 1;
+		s->drum[DV_KICK] = Bits("x.......x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1.3.5.6.6.5.3.1.");
+		s->chord = Bits("x.x.x.x.x.x.x.x.");
+		s->chordSlots = 1;
+		s->progBass = 32; s->progChord = 26;
+		break;
+	case SC_AS_SLOWBLUES:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_KICK] = Bits("x.....x.....");
+		s->drum[DV_SNARE] = Bits("...x.....x..");
+		s->drum[DV_HAT] = Bits("x.xx.xx.xx.x");
+		Bass(s->bass, "1..3..5..6..");
+		s->chord = Bits("x.....x.....");
+		s->chordSlots = 3;
+		s->arp = 1;
+		s->progBass = 32; s->progChord = 0;
+		break;
+	case SC_AS_ROCKNROLL:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_KICK] = Bits("x.....x.....");
+		s->drum[DV_SNARE] = Bits("...x.....x..");
+		s->drum[DV_HAT] = Bits("x.xx.xx.xx.x");
+		Bass(s->bass, "1..1..5..5..");
+		s->chord = Bits("x..x..x..x..");
+		s->chordSlots = 1;
+		s->progBass = 33; s->progChord = 25;
+		break;
+	case SC_AS_GOSPEL:
+		s->drum[DV_KICK] = Bits("x.......x.x.....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1..5..3.6..2..5.");
+		s->chord = Bits("x...x...x...x...");
+		s->chordSlots = 4;
+		s->arp = 1;
+		s->progBass = 32; s->progChord = 16;
+		break;
+	case SC_AS_SOUL:
+		s->drum[DV_KICK] = Bits("x.....x.x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_TOM] = Bits("............x...");
+		Bass(s->bass, "1..1.5..1..5.3.2");
+		s->chord = Bits("..x...x...x...x.");
+		s->chordSlots = 2;
+		s->progBass = 33; s->progChord = 17;
+		break;
+	case SC_AS_RNB:
+		s->swing = 1;
+		s->drum[DV_KICK] = Bits("x......x..x.....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_CLAP] = Bits("....x.......x...");
+		Bass(s->bass, "1.....5.1...2...");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->progBass = 38; s->progChord = 4;
+		break;
+	case SC_AS_NEOSOUL:
+		s->swing = 1;
+		s->drum[DV_KICK] = Bits("x....x.x..x.....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.xxx.x.xx.xx.x.");
+		Bass(s->bass, "1....57.2....4.3");
+		s->chord = Bits("x.......x...x...");
+		s->chordSlots = 4;
+		s->progBass = 33; s->progChord = 4;
+		break;
+	case SC_AS_COUNTRY:
+		s->drum[DV_KICK] = Bits("x...x...x...x...");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("xxxxxxxxxxxxxxxx");
+		Bass(s->bass, "1...5...1...5...");
+		s->chord = Bits("..x...x...x...x.");
+		s->chordSlots = 2;
+		s->progBass = 32; s->progChord = 25;
+		break;
+	case SC_AS_PUNK:
+		s->power = 1;
+		s->drum[DV_KICK] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1111111111111111");
+		s->chord = Bits("x.x.x.x.x.x.x.x.");
+		s->progChord = 29;
+		break;
+	case SC_AS_GRUNGE:
+		s->power = 1;
+		s->drum[DV_KICK] = Bits("x.......x..x....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_RIDE] = Bits("x...x...x...x...");
+		Bass(s->bass, "1...1...1.2.3...");
+		s->chord = Bits("x.......x.......");
+		s->progChord = 29;
+		break;
+	case SC_AS_SKA:
+		s->drum[DV_KICK] = Bits("........x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("..x...x...x...x.");
+		Bass(s->bass, "1.2.3.4.5.4.3.2.");
+		s->chord = Bits("..x...x...x...x.");
+		s->progBass = 33; s->progChord = 25;
+		break;
+	case SC_AS_KAYOKYOKU:
+		s->drum[DV_KICK] = Bits("x.......x.x.....");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1..5..3.6..2..5.");
+		s->chord = Bits("x...x...x...x...");
+		s->chordSlots = 4;
+		s->progBass = 32; s->progChord = 48;
+		break;
+	case SC_AS_ANISON:
+		s->drum[DV_KICK] = Bits("x..x..x.x.x..x..");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("xxxxxxxxxxxxxxxx");
+		s->drum[DV_OHAT] = Bits("..............x.");
+		Bass(s->bass, "1.1.5.5.6.6.4.4.");
+		s->chord = Bits("x.x.x.x.x.x.x.x.");
+		s->chordSlots = 2;
+		s->progBass = 38; s->progChord = 4;
+		break;
+	case SC_AS_CHIPTUNE:
+		s->drum[DV_KICK] = Bits("x.......x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1.1.5.5.1.1.5.5.");
+		s->chord = Bits("xxxxxxxxxxxxxxxx");
+		s->chordSlots = 1;
+		s->arp = 1;
+		s->progBass = 80; s->progChord = 80;
+		break;
+	case SC_AS_TRAP:
+		s->drum[DV_KICK] = Bits("x.....x...x.....");
+		s->drum[DV_SNARE] = Bits("........x.......");
+		s->drum[DV_HAT] = Bits("x.x.x.xxx.x.xxxx");
+		Bass(s->bass, "1.......1.....1.");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->progBass = 38; s->progChord = 89;
+		break;
+	case SC_AS_DRILL:
+		s->drum[DV_KICK] = Bits("x.....x..x..x...");
+		s->drum[DV_SNARE] = Bits("........x.......");
+		s->drum[DV_HAT] = Bits("x.xx.x.xx.xx.x.x");
+		Bass(s->bass, "1.......7.....6.");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->progBass = 38; s->progChord = 89;
+		break;
+	case SC_AS_AFROBEAT:
+		s->drum[DV_KICK] = Bits("x..x..x...x.x...");
+		s->drum[DV_RIM] = Bits("..x..x...x...x..");
+		s->drum[DV_HAT] = Bits("x.xxx.xxx.xxx.xx");
+		s->drum[DV_TOM] = Bits("....x.......x...");
+		Bass(s->bass, "1..1.5.1..2.4..5");
+		s->chord = Bits("x..x..x..x..x..x");
+		s->arp = 1;
+		s->progBass = 33; s->progChord = 17;
+		break;
+	case SC_AS_SWING3:
+		s->div = 12; s->swing = 1;
+		s->drum[DV_RIDE] = Bits("x..x..x..x..");
+		s->drum[DV_HAT] = Bits("...x.....x..");
+		s->drum[DV_KICK] = Bits("x...........");
+		Bass(s->bass, "1...5...3...");
+		s->chord = Bits("...x..x..x..");
+		s->chordSlots = 1;
+		s->progBass = 32; s->progChord = 0;
+		break;
+	case SC_AS_TANGO:
+		s->drum[DV_KICK] = Bits("x..x..x.x.......");
+		s->drum[DV_RIM] = Bits("............x...");
+		Bass(s->bass, "1..1..1.5.......");
+		s->chord = Bits("x..x..x.x...x...");
+		s->chordSlots = 1;
+		s->arp = 1;
+		s->progBass = 32; s->progChord = 40;
+		break;
+	case SC_AS_FLAMENCO:
+		s->drum[DV_CLAP] = Bits("x..x..x.x.x.x.x.");
+		s->drum[DV_RIM] = Bits("..x..x...x...x..");
+		Bass(s->bass, "1..1..5.1..4..5.");
+		s->chord = Bits("x..x..x.x.x.x.x.");
+		s->arp = 1;
+		s->progBass = 24; s->progChord = 24;
+		break;
+	case SC_AS_SURF:
+		s->drum[DV_KICK] = Bits("x.......x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_TOM] = Bits("..........x.x...");
+		Bass(s->bass, "1.1.1.1.5.5.5.5.");
+		s->chord = Bits("x.x.x.x.x.x.x.x.");
+		s->chordSlots = 2;
+		s->progBass = 29; s->progChord = 29;
+		break;
+	case SC_AS_LOFI:
+		s->swing = 1;
+		s->drum[DV_KICK] = Bits("x.......x....x..");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1.....5.1.....3.");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->arp = 1;
+		s->progBass = 33; s->progChord = 4;
+		break;
+	case SC_AS_DRUMSOLO:
+		s->drum[DV_KICK] = Bits("x.x..x..x.x..x..");
+		s->drum[DV_SNARE] = Bits("..x.x..xx..x.x.x");
+		s->drum[DV_TOM] = Bits(".x...x.x..x.x.x.");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_CRASH] = Bits("x...............");
+		Bass(s->bass, "1.......1.......");
+		s->chordSlots = 0;
+		s->progBass = 32;
+		break;
+	case SC_AS_EDM:
+		s->drum[DV_KICK] = Bits("x...x...x...x...");
+		s->drum[DV_CLAP] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("..x...x...x...x.");
+		s->drum[DV_OHAT] = Bits("..............x.");
+		Bass(s->bass, "1...1...1...1...");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->progBass = 38; s->progChord = 81;
+		break;
+	case SC_AS_DUBSTEP:
+		s->drum[DV_KICK] = Bits("x...............");
+		s->drum[DV_SNARE] = Bits("........x.......");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		Bass(s->bass, "1.......1.......");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->progBass = 38; s->progChord = 81;
+		break;
+	case SC_AS_SYNTHWAVE:
+		s->drum[DV_KICK] = Bits("x.......x.......");
+		s->drum[DV_SNARE] = Bits("....x.......x...");
+		s->drum[DV_HAT] = Bits("x.x.x.x.x.x.x.x.");
+		s->drum[DV_TOM] = Bits("..............xx");
+		Bass(s->bass, "1.1.1.1.6.6.6.6.");
+		s->chord = Bits("x.......x.......");
+		s->chordSlots = 4;
+		s->arp = 1;
+		s->progBass = 38; s->progChord = 88;
+		break;
 	default:
 		s->power = 1;
 		s->drum[DV_KICK] = Bits("x.......x.x.....");
@@ -406,6 +760,120 @@ static void LoadStyle(int id, StylePat* s)
 		s->chordSlots = 8;
 		s->progChord = 29;
 		break;
+	}
+}
+
+static int TonicPc(int keySig); /* 下で定義。進行記述用に前方宣言。 */
+
+/* --- コード進行プロファイル -------------------------------------------------
+   off = 主音からの半音。type = 上の CH_*。小節 index をこの配列で巡回し、
+   既存ノートが無い（＝コードを拾えない）小節や書き換え対象の土台に使う。
+   「コード運び」をテーマに合わせることで、無音からでも破綻しない伴奏になる。 */
+struct ProgStep { int8_t off; uint8_t type; };
+struct ProgRef { const ProgStep* p; int len; };
+
+static const ProgStep PG_POP1465[]  = { {0,CH_MAJ},{7,CH_MAJ},{9,CH_MIN},{5,CH_MAJ} };          /* I  V  vi IV */
+static const ProgStep PG_POP6415[]  = { {9,CH_MIN},{5,CH_MAJ},{0,CH_MAJ},{7,CH_MAJ} };          /* vi IV I  V  */
+static const ProgStep PG_POP50s[]   = { {0,CH_MAJ},{9,CH_MIN},{5,CH_MAJ},{7,CH_MAJ} };          /* I  vi IV V  */
+static const ProgStep PG_CANON[]    = { {0,CH_MAJ},{7,CH_MAJ},{9,CH_MIN},{4,CH_MIN},{5,CH_MAJ},{0,CH_MAJ},{5,CH_MAJ},{7,CH_MAJ} };
+static const ProgStep PG_JAZ251[]   = { {2,CH_M7},{7,CH_7},{0,CH_MAJ7},{0,CH_MAJ7} };           /* ii V I   */
+static const ProgStep PG_JAZ1625[]  = { {0,CH_MAJ7},{9,CH_M7},{2,CH_M7},{7,CH_7} };             /* I vi ii V */
+static const ProgStep PG_RHYTHM[]   = { {0,CH_MAJ7},{9,CH_7},{2,CH_M7},{7,CH_7} };              /* rhythm changes */
+static const ProgStep PG_BLUES12[]  = { {0,CH_7},{0,CH_7},{0,CH_7},{0,CH_7},{5,CH_7},{5,CH_7},{0,CH_7},{0,CH_7},{7,CH_7},{5,CH_7},{0,CH_7},{7,CH_7} };
+static const ProgStep PG_BLUESQ[]   = { {0,CH_7},{5,CH_7},{0,CH_7},{7,CH_7} };
+static const ProgStep PG_MINAEOL[]  = { {0,CH_MIN},{10,CH_MAJ},{8,CH_MAJ},{7,CH_MAJ} };         /* i VII VI V */
+static const ProgStep PG_MIN1647[]  = { {0,CH_MIN},{8,CH_MAJ},{5,CH_MIN},{7,CH_7} };            /* i VI iv V */
+static const ProgStep PG_ANDAL[]    = { {0,CH_MIN},{10,CH_MAJ},{8,CH_MAJ},{7,CH_MAJ} };         /* Andalusian */
+static const ProgStep PG_GOSPEL[]   = { {0,CH_MAJ7},{4,CH_7},{9,CH_M7},{2,CH_M7},{7,CH_7},{0,CH_MAJ7} };
+static const ProgStep PG_SOULVAMP[] = { {0,CH_7},{5,CH_7} };
+static const ProgStep PG_JROYAL[]   = { {5,CH_MAJ7},{7,CH_7},{9,CH_MIN},{4,CH_MIN} };           /* 王道 IV V iii vi */
+static const ProgStep PG_JKOMORI[]  = { {5,CH_MAJ},{7,CH_MAJ},{0,CH_MAJ},{9,CH_MIN} };          /* 小室 IV V I vi */
+static const ProgStep PG_TANGO[]    = { {0,CH_MIN},{7,CH_7},{0,CH_MIN},{5,CH_MIN} };
+static const ProgStep PG_POWER[]    = { {0,CH_POW},{5,CH_POW},{7,CH_POW},{5,CH_POW} };
+
+#define PGR(a) { a, (int)(sizeof(a)/sizeof((a)[0])) }
+
+static int StyleProgList(int style, ProgRef out[4])
+{
+	switch (style) {
+	case SC_AS_JAZZ: case SC_AS_SWINGJAZZ: case SC_AS_BEBOP: case SC_AS_SWING3:
+		out[0] = PGR(PG_JAZ251); out[1] = PGR(PG_JAZ1625); out[2] = PGR(PG_RHYTHM); out[3] = PGR(PG_CANON); return 4;
+	case SC_AS_BLUES: case SC_AS_SLOWBLUES: case SC_AS_ROCKNROLL:
+		out[0] = PGR(PG_BLUES12); out[1] = PGR(PG_BLUESQ); out[2] = PGR(PG_POP1465); return 3;
+	case SC_AS_GOSPEL:
+		out[0] = PGR(PG_GOSPEL); out[1] = PGR(PG_JAZ1625); out[2] = PGR(PG_POP1465); return 3;
+	case SC_AS_SOUL: case SC_AS_RNB: case SC_AS_NEOSOUL: case SC_AS_FUNK: case SC_AS_DISCO: case SC_AS_AFROBEAT:
+		out[0] = PGR(PG_SOULVAMP); out[1] = PGR(PG_POP6415); out[2] = PGR(PG_JROYAL); return 3;
+	case SC_AS_ROCK: case SC_AS_METAL: case SC_AS_PUNK: case SC_AS_GRUNGE: case SC_AS_SURF: case SC_AS_SLOWROCK:
+		out[0] = PGR(PG_POWER); out[1] = PGR(PG_POP1465); out[2] = PGR(PG_POP50s); return 3;
+	case SC_AS_KAYOKYOKU: case SC_AS_ANISON: case SC_AS_CITYPOP: case SC_AS_ENKA:
+		out[0] = PGR(PG_JROYAL); out[1] = PGR(PG_JKOMORI); out[2] = PGR(PG_CANON); out[3] = PGR(PG_POP1465); return 4;
+	case SC_AS_TRAP: case SC_AS_DRILL: case SC_AS_DUBSTEP: case SC_AS_SYNTHWAVE: case SC_AS_AMBIENT: case SC_AS_LOFI:
+		out[0] = PGR(PG_MINAEOL); out[1] = PGR(PG_MIN1647); out[2] = PGR(PG_POP6415); return 3;
+	case SC_AS_LATIN: case SC_AS_BOSSA: case SC_AS_SAMBA:
+		out[0] = PGR(PG_JAZ1625); out[1] = PGR(PG_SOULVAMP); out[2] = PGR(PG_JAZ251); return 3;
+	case SC_AS_TANGO: case SC_AS_FLAMENCO:
+		out[0] = PGR(PG_ANDAL); out[1] = PGR(PG_TANGO); return 2;
+	case SC_AS_CHIPTUNE: case SC_AS_GAME: case SC_AS_FANFARE: case SC_AS_MARCH: case SC_AS_ORCH:
+		out[0] = PGR(PG_CANON); out[1] = PGR(PG_POP1465); out[2] = PGR(PG_POP50s); return 3;
+	default:
+		out[0] = PGR(PG_POP1465); out[1] = PGR(PG_POP6415); out[2] = PGR(PG_POP50s); out[3] = PGR(PG_CANON); return 4;
+	}
+}
+
+static int StyleProgression(int style, int variation, ProgStep* out, int cap)
+{
+	ProgRef list[4];
+	int n = StyleProgList(style, list);
+	if (n < 1) return 0;
+	if (variation < 0) variation = 0;
+	const ProgRef& r = list[variation % n];
+	int len = r.len < cap ? r.len : cap;
+	for (int i = 0; i < len; i++) out[i] = r.p[i];
+	return len;
+}
+
+int ScAutoStyleVariationCount(int style)
+{
+	ProgRef list[4];
+	return StyleProgList(style, list);
+}
+
+/* --- 軽量 RNG（xorshift、std/alloc 不使用）：毎回違うアレンジを出すため --- */
+struct Rng { uint32_t s; };
+static void RngSeed(Rng* r, uint32_t seed) { r->s = seed ? seed : 0x9E3779B9u; }
+static uint32_t RngNext(Rng* r) { uint32_t x = r->s; x ^= x << 13; x ^= x >> 17; x ^= x << 5; r->s = x ? x : 0x1234567u; return r->s; }
+static int RngRange(Rng* r, int lo, int hi) { if (hi <= lo) return lo; return lo + (int)(RngNext(r) % (uint32_t)(hi - lo + 1)); }
+
+static const wchar_t* PcName(int pc)
+{
+	static const wchar_t* k[12] = { L"C", L"C#", L"D", L"Eb", L"E", L"F", L"F#", L"G", L"Ab", L"A", L"Bb", L"B" };
+	return k[((pc % 12) + 12) % 12];
+}
+static const wchar_t* ChTypeSuffix(int type)
+{
+	switch (type) {
+	case CH_MIN: return L"m"; case CH_7: return L"7"; case CH_M7: return L"m7";
+	case CH_MAJ7: return L"maj7"; case CH_SUS: return L"sus4"; case CH_DIM: return L"dim";
+	case CH_POW: return L"5"; default: return L"";
+	}
+}
+
+void ScAutoStyleProgDesc(int style, int variation, int keySig, wchar_t* buf, int cch)
+{
+	if (!buf || cch <= 0) return;
+	buf[0] = 0;
+	ProgStep steps[16];
+	int n = StyleProgression(style, variation, steps, 16);
+	int tonic = TonicPc(keySig);
+	int pos = 0;
+	for (int i = 0; i < n && pos < cch - 12; i++) {
+		if (i > 0) { buf[pos++] = L' '; buf[pos++] = L'-'; buf[pos++] = L' '; buf[pos] = 0; }
+		const wchar_t* nm = PcName(tonic + steps[i].off);
+		const wchar_t* sf = ChTypeSuffix(steps[i].type);
+		while (*nm && pos < cch - 2) buf[pos++] = *nm++;
+		while (*sf && pos < cch - 2) buf[pos++] = *sf++;
+		buf[pos] = 0;
 	}
 }
 
@@ -689,11 +1157,16 @@ static void EnsureMelodic(Ctx* c, ScStaffUi* ui, int ch, int role, int prog, int
 	MarkUi(ui, ch, role == 0 ? 1 : 0, anySolo);
 }
 
-static void EnsureDrum(Ctx* c, ScStaffUi* ui, int ch, int anySolo)
+static void EnsureDrum(Ctx* c, ScStaffUi* ui, int ch, int slot, int anySolo)
 {
 	if (ch < 0) return;
-	if (!c->isFm && !ScMidiPartDefaultDrum(ch) && !HasKind(c->ev, *c->n, ch, SC_EV_DRUM))
-		Push(c, 0, ch, SC_EV_DRUM, 1, 0, 0, 0);
+	/* a=1(ドラム) は native stream 用。b にドラム枠(0=1,1=2) を載せる(native では無視)。
+	   既定ドラム ch でも slot>0 のときは枠を残すため DRUM イベントを書く。 */
+	if (!c->isFm) {
+		int needEvt = (!ScMidiPartDefaultDrum(ch) || slot > 0);
+		if (needEvt && !HasKind(c->ev, *c->n, ch, SC_EV_DRUM))
+			Push(c, 0, ch, SC_EV_DRUM, 1, (uint8_t)(slot ? 1 : 0), 0, 0);
+	}
 	if (!HasKind(c->ev, *c->n, ch, SC_EV_CLEF))
 		Push(c, 0, ch, SC_EV_CLEF, 3, 0, 0, 0);
 	MarkUi(ui, ch, 3, anySolo);
@@ -930,10 +1403,22 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		out->chDrum = out->chBass = out->chChord = out->chHarm = -1;
 	}
 	if (!ev || !evCount || !opt || evMax <= 0) return SC_AE_NONOTES;
-	if (ScAutoArrangeCountNotes(ev, *evCount) <= 0) {
+	const int totalNotes = ScAutoArrangeCountNotes(ev, *evCount);
+	const int explicitTargets = opt->targetMask != 0;
+	/* 0 音でも、対象パートが明示されていればアレンジデータから丸ごと生成する。 */
+	if (totalNotes <= 0 && !explicitTargets) {
 		if (out) { out->err = SC_AE_NONOTES; FillMsg(out); }
 		return SC_AE_NONOTES;
 	}
+	Rng rng;
+	{
+		uint32_t seed = (uint32_t)opt->seed;
+		if (!seed) seed = GetTickCount() ^ ((uint32_t)opt->style * 2654435761u) ^ ((uint32_t)(opt->variation + 1) * 40503u);
+		RngSeed(&rng, seed);
+	}
+	const int variation = opt->variation < 0 ? 0 : opt->variation;
+	const int useProg = opt->useProg || explicitTargets || totalNotes <= 0;
+	const int rewrite = (opt->mode == SC_AM_REWRITE);
 
 	const int isFm = opt->isFm ? 1 : 0;
 	int chMax = isFm ? SC_FM_TOTAL : SC_MIDI_CH;
@@ -1059,14 +1544,71 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		chChord = PickEmpty(notes, lim, isFm, melodyCh, chordSrc, chBass, isFm ? preferChFm : preferMid, isFm ? 9 : 13);
 	if ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0)
 		chHarm = PickEmpty(notes, lim, isFm, melodyCh, chBass, chChord, isFm ? preferHFm : preferMid, isFm ? 9 : 13);
-	int canLayer = (chDrum >= 0 || chBass >= 0 || chChord >= 0);
+
+	/* --- v2: 明示ターゲット / 役割割り当て / 複数ドラム ch -------------------
+	   ユーザーがチェックしたパートだけをアレンジ対象にし、drumMask の ch を
+	   ドラム出力に使う。メロディ役は書き換えでも消さず、強弱/ハモリで作り込む。 */
+	int drumChs[8]; uint8_t drumChSlot[8]; int nDrum = 0;
+	int extraCh[8]; int nExtra = 0;
+	uint32_t deleteMask = 0;
+	if (explicitTargets) {
+		for (int ch = 0; ch < lim && ch < 32 && nDrum < 8; ch++) {
+			if (!((opt->drumMask >> ch) & 1u)) continue;
+			drumChs[nDrum] = ch;
+			drumChSlot[nDrum] = opt->drumSlot[ch] ? 1 : 0;
+			nDrum++;
+		}
+		chBass = chChord = chHarm = melodyCh = -1;
+		int pend[32]; int nPend = 0;
+		for (int ch = 0; ch < lim && ch < 32; ch++) {
+			if (!((opt->targetMask >> ch) & 1u)) continue;
+			if ((opt->drumMask >> ch) & 1u) continue;
+			int role = opt->partRole[ch];
+			if (role == SC_PR_AUTO) {
+				if (notes[ch] <= 0 || notes[ch] >= 1000000) { pend[nPend++] = ch; continue; }
+				int ratio = tickCount[ch] ? (polyTicks[ch] * 100) / tickCount[ch] : 0;
+				int avg = notes[ch] ? sumPitch[ch] / notes[ch] : 60;
+				if (ratio >= 50) role = SC_PR_CHORD;
+				else if (avg <= 48) role = SC_PR_BASS;
+				else role = SC_PR_MELODY;
+			}
+			switch (role) {
+			case SC_PR_BASS: if (chBass < 0) chBass = ch; else if (nExtra < 8) extraCh[nExtra++] = ch; break;
+			case SC_PR_CHORD: case SC_PR_PAD: if (chChord < 0) chChord = ch; else if (nExtra < 8) extraCh[nExtra++] = ch; break;
+			case SC_PR_HARMONY: if (chHarm < 0) chHarm = ch; else if (nExtra < 8) extraCh[nExtra++] = ch; break;
+			case SC_PR_ARPEGGIO: if (nExtra < 8) extraCh[nExtra++] = ch; break;
+			case SC_PR_MELODY: default: if (melodyCh < 0) melodyCh = ch; else if (nExtra < 8) extraCh[nExtra++] = ch; break;
+			}
+		}
+		for (int i = 0; i < nPend; i++) {
+			int ch = pend[i];
+			if (chBass < 0) chBass = ch;
+			else if (chChord < 0) chChord = ch;
+			else if (chHarm < 0) chHarm = ch;
+			else if (nExtra < 8) extraCh[nExtra++] = ch;
+		}
+		chDrum = nDrum > 0 ? drumChs[0] : -1;
+		if (rewrite) {
+			for (int i = 0; i < nDrum; i++) deleteMask |= (1u << drumChs[i]);
+			if (chBass >= 0) deleteMask |= (1u << chBass);
+			if (chChord >= 0) deleteMask |= (1u << chChord);
+			if (chHarm >= 0) deleteMask |= (1u << chHarm);
+			for (int i = 0; i < nExtra; i++) deleteMask |= (1u << extraCh[i]);
+		}
+	} else if (chDrum >= 0) {
+		drumChs[0] = chDrum; drumChSlot[0] = 0; nDrum = 1;
+	}
+
+	int canLayer = (nDrum > 0 || chBass >= 0 || chChord >= 0 || nExtra > 0);
 	int canMel = ((opt->jobs & SC_AJ_MEL_VOL) && melodyCh >= 0)
-		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0 && (chHarm >= 0 || opt->pitchMode >= 2));
+		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0 && (chHarm >= 0 || opt->pitchMode >= 2))
+		|| (explicitTargets && melodyCh >= 0);
 	if (!canLayer && !canMel) {
 		if (out) { out->err = SC_AE_EMPTY; FillMsg(out); }
 		return SC_AE_EMPTY;
 	}
-	if (!canLayer) layers = 0;
+	if (explicitTargets) layers = canLayer ? (SC_AJ_DRUM | SC_AJ_BASS | SC_AJ_CHORD) : 0;
+	else if (!canLayer) layers = 0;
 
 	int doIntro = (opt->jobs & SC_AJ_INTRO) && opt->introBars > 0 && layers;
 	int doBreak = (opt->jobs & SC_AJ_BREAK) && opt->breakBars > 0 && layers;
@@ -1110,6 +1652,11 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		if (end > lead1) lead1 = end;
 	}
 	if (lead0 == 0xFFFFFFFFu) { lead0 = introTicks; lead1 = noteEnd; }
+	if (noteEnd == 0) {
+		int gb = opt->genBars > 0 ? opt->genBars : 16;
+		noteEnd = (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
+		lead0 = introTicks; lead1 = noteEnd;
+	}
 
 	uint32_t breakT0 = 0xFFFFFFFFu, breakT1 = 0;
 	int naturalBreak = 0;
@@ -1242,18 +1789,57 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		}
 	}
 
+	/* テーマのコード進行を、既存ノートでコードを拾えない本体小節へ適用。
+	   これで無音からの生成や空き小節でも「らしい」コード運びになる。 */
+	if (useProg && nBars > 0) {
+		ProgStep prog[16];
+		int pn = StyleProgression(opt->style, variation, prog, 16);
+		if (pn > 0) {
+			int tonic2 = TonicPc(opt->defKey);
+			int bix = 0;
+			for (int i = 0; i < nBars; i++) {
+				if (bars[i].section != SEC_BODY) { continue; }
+				if (!bars[i].voiced) {
+					const ProgStep& ps = prog[(bix + (variation % pn)) % pn];
+					bars[i].root = ((tonic2 + ps.off) % 12 + 12) % 12;
+					bars[i].type = ps.type;
+				}
+				bix++;
+			}
+		}
+	}
+
+	/* 書き換え: 対象 ch（メロディ役以外）の既存ノートを先に消す。 */
+	int removedNotes = 0;
+	if (deleteMask) {
+		int w = 0;
+		for (int i = 0; i < *evCount; i++) {
+			int ch = (int)ev[i].ch;
+			if (ch >= 0 && ch < 32 && ((deleteMask >> ch) & 1u) && IsNoteKind(ev[i].kind)) {
+				removedNotes++;
+				continue;
+			}
+			if (w != i) ev[w] = ev[i];
+			w++;
+		}
+		*evCount = w;
+	}
+
 	int anySolo = 0;
 	if (opt->ui) {
 		for (int i = 0; i < opt->ui->trackCount && i < 32; i++)
 			if (opt->ui->solo[i]) anySolo = 1;
 	}
-	Ctx ctx = { ev, evCount, evMax, isFm, 0, 0, opt->jobs };
+	int ctxJobs = opt->jobs;
+	if (explicitTargets && melodyCh >= 0) ctxJobs |= (SC_AJ_MEL_VOL | SC_AJ_MEL_PITCH);
+	Ctx ctx = { ev, evCount, evMax, isFm, 0, 0, ctxJobs };
 	StylePat st;
 	LoadStyle(opt->style, &st);
-	if (chDrum >= 0) EnsureDrum(&ctx, opt->ui, chDrum, anySolo);
+	for (int i = 0; i < nDrum; i++) EnsureDrum(&ctx, opt->ui, drumChs[i], drumChSlot[i], anySolo);
 	if (chBass >= 0) EnsureMelodic(&ctx, opt->ui, chBass, 0, st.progBass, anySolo);
 	if (chChord >= 0) EnsureMelodic(&ctx, opt->ui, chChord, 1, st.progChord, anySolo);
 	if (chHarm >= 0) EnsureMelodic(&ctx, opt->ui, chHarm, 2, st.progChord, anySolo);
+	for (int i = 0; i < nExtra; i++) EnsureMelodic(&ctx, opt->ui, extraCh[i], 1, st.progChord, anySolo);
 
 	int bodyIx = 0;
 	int nEmit = *evCount;
@@ -1302,7 +1888,15 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		} else if (b.section == SEC_BODY && (bodyIx % 4) == 3) {
 			drm[DV_SNARE] = (uint16_t)(drm[DV_SNARE] | (div >= 16 ? 0xF000 : 0x0E00));
 		}
-		int occupiedDrum = (b.section == SEC_BODY) && BarHas(ev, nEmit, chDrum, b.t0, b.t0 + (uint32_t)b.len);
+		/* バリエーション: 本体小節にたまにゴーストや追いキックを足し、毎回同じにしない。 */
+		if (b.section == SEC_BODY && RngRange(&rng, 0, 7) == 0)
+			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (1u << (div >= 16 ? 14 : 10)));
+		int occDrum[8];
+		for (int i = 0; i < nDrum; i++)
+			occDrum[i] = (b.section == SEC_BODY) && BarHas(ev, nEmit, drumChs[i], b.t0, b.t0 + (uint32_t)b.len);
+		int occExtra[8];
+		for (int i = 0; i < nExtra; i++)
+			occExtra[i] = (b.section == SEC_BODY) && BarHas(ev, nEmit, extraCh[i], b.t0, b.t0 + (uint32_t)b.len);
 		int occupiedBass = (b.section == SEC_BODY) && BarHas(ev, nEmit, chBass, b.t0, b.t0 + (uint32_t)b.len);
 		int occupiedCh = (b.section == SEC_BODY) && BarHas(ev, nEmit, chChord, b.t0, b.t0 + (uint32_t)b.len);
 		for (int slot = 0; slot < div && !ctx.overflow; slot++) {
@@ -1313,12 +1907,24 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			if (tick >= b.t0 + (uint32_t)b.len) continue;
 			uint16_t bit = (uint16_t)(1u << slot);
 			int vel = 78 + ((slot % 4) == 0 ? 28 : (slot & 1) ? -8 : 8);
-			if (!occupiedDrum && chDrum >= 0) {
-				int drumDur = isFm ? 2 : (slotDur > 12 ? 12 : slotDur);
+			vel += RngRange(&rng, -5, 6); /* ヒューマナイズ */
+			if (vel < 1) vel = 1;
+			if (vel > 127) vel = 127;
+			/* 複数ドラム ch: 枠0=本体(キック/スネア/タム/クラップ/リム)、枠1=シンバル系。
+			   1 ch のときは全部そのパートに書く。 */
+			int drumDur = isFm ? 2 : (slotDur > 12 ? 12 : slotDur);
+			for (int di = 0; di < nDrum; di++) {
+				if (occDrum[di]) continue;
+				int kslot = drumChSlot[di];
 				for (int v = 0; v < DV_COUNT; v++) {
+					if (nDrum > 1) {
+						int isCym = (v == DV_HAT || v == DV_OHAT || v == DV_RIDE || v == DV_CRASH);
+						if (kslot == 1 && !isCym) continue;
+						if (kslot == 0 && isCym) continue;
+					}
 					if (v == DV_HAT && (drm[DV_OHAT] & bit)) continue;
 					if (drm[v] & bit)
-						PlaceDrum(&ctx, chDrum, tick, v, v == DV_HAT ? vel - 18 : vel, drumDur);
+						PlaceDrum(&ctx, drumChs[di], tick, v, v == DV_HAT ? vel - 18 : vel, drumDur);
 				}
 			}
 			if (!occupiedBass && chBass >= 0 && slot < 16 && bass[slot]) {
@@ -1343,6 +1949,15 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				if (dur < 2) dur = 2;
 				PlaceChord(&ctx, chChord, ct, dur, vel - 8, b.root, b.type, st.power, st.arp);
 			}
+			/* 追加で選ばれた旋律パートはアルペジオのコード層として鳴らす。 */
+			if (!skipChord && nExtra > 0 && (chordSlots == 0 ? slot == 0 : (chordMask & bit))) {
+				int dur = (chordSlots <= 0) ? (b.len - 2) : chordSlots * slotDur;
+				if (dur < 2) dur = 2;
+				for (int ei = 0; ei < nExtra; ei++) {
+					if (occExtra[ei]) continue;
+					PlaceChord(&ctx, extraCh[ei], tick, dur, vel - 12, b.root, b.type, st.power, 1);
+				}
+			}
 		}
 		if (b.section == SEC_BODY) bodyIx++;
 	}
@@ -1352,14 +1967,23 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 
 	if (out) {
 		out->added = ctx.added;
+		out->removed = removedNotes;
 		out->chDrum = chDrum;
 		out->chBass = chBass;
 		out->chChord = chChord;
 		out->chHarm = chHarm;
-		out->err = ctx.overflow ? SC_AE_OVERFLOW : (ctx.added > 0 ? SC_AE_OK : SC_AE_EMPTY);
+		uint32_t used = 0;
+		for (int i = 0; i < nDrum; i++) used |= (1u << drumChs[i]);
+		for (int i = 0; i < nExtra; i++) used |= (1u << extraCh[i]);
+		if (chBass >= 0) used |= (1u << chBass);
+		if (chChord >= 0) used |= (1u << chChord);
+		if (chHarm >= 0) used |= (1u << chHarm);
+		if (melodyCh >= 0) used |= (1u << melodyCh);
+		out->usedMask = used;
+		out->err = ctx.overflow ? SC_AE_OVERFLOW : ((ctx.added > 0 || removedNotes > 0) ? SC_AE_OK : SC_AE_EMPTY);
 		FillMsg(out);
 	}
-	return ctx.overflow ? SC_AE_OVERFLOW : (ctx.added > 0 ? SC_AE_OK : SC_AE_EMPTY);
+	return ctx.overflow ? SC_AE_OVERFLOW : ((ctx.added > 0 || removedNotes > 0) ? SC_AE_OK : SC_AE_EMPTY);
 }
 
 void ScAutoArrangeReleaseEmptySolo(ScStaffUi* ui, const ScEvent* ev, int n)

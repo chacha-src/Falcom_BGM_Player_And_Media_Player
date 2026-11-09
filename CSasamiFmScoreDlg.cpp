@@ -178,6 +178,7 @@ void CSasamiFmScoreDlg::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
+	ON_WM_ACTIVATE()
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
@@ -490,7 +491,7 @@ void CSasamiFmScoreDlg::OnCbnStrip()
 	m_ui.helpTopic = SC_HELP_STRIP;
 	RefreshStrip();
 	LayoutChrome();
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 	UpdateHelpBar();
 }
 
@@ -577,6 +578,18 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		m_ui.markerTick = 0;
 		m_status.SetWindowText(LL14(L"マーカー→0 (Home)。Space で先頭から再生。", L"Marker → 0 (Home). Space plays from start.", L"Marqueur → 0 (Home). Espace lit depuis le début.", L"Marcatore → 0 (Home). Spazio riproduce dall’inizio.", L"Marcador → 0 (Home). Espacio reproduce desde el inicio.", L"마커→0 (Home). Space로 처음부터 재생.", L"标记→0 (Home)。Space 从开头播放。", L"علامة → 0 (Home). Space للتشغيل من البداية.", L"Маркер → 0 (Home). Space — воспроизведение с начала.", L"Markierung → 0 (Pos1). Leertaste spielt vom Anfang.", L"Marcador → 0 (Home). Espaço toca do início.", L"Markering → 0 (Home). Spatie speelt vanaf start.", L"Znacznik → 0 (Home). Spacja odtwarza od początku.", L"İşaret → 0 (Home). Space baştan çalar."));
 		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	if ((GetKeyState(VK_SHIFT) & 0x8000) && nChar == VK_SPACE) {
+		/* その場再生の特別ルート: 選択範囲(無ければ現在小節)を全パートで即試聴。 */
+		if (m_ui.previewActive) {
+			ScStaffStopHostPreview(&m_ui);
+			KillTimer(1);
+			KillTimer(kScFmPreviewTimer);
+			InvalidateRect(m_bodyRc, FALSE);
+		} else {
+			PreviewRangeInstant();
+		}
 		return;
 	}
 	if (nChar == VK_SPACE) {
@@ -971,6 +984,13 @@ void CSasamiFmScoreDlg::OnSize(UINT nType, int cx, int cy)
 		LayoutChrome();
 }
 
+void CSasamiFmScoreDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CCustomBlurDialogExBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState != WA_INACTIVE && !bMinimized)
+		CSasamiNotePaletteDlg::BindComposerNotify(this);
+}
+
 BOOL CSasamiFmScoreDlg::OnEraseBkgnd(CDC* pDC)
 {
 	if (!pDC) return TRUE;
@@ -1132,23 +1152,18 @@ void CSasamiFmScoreDlg::SyncPropFromSel()
 void CSasamiFmScoreDlg::OnPaint()
 {
 	CPaintDC dc(this);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
 	CRect panel = m_bodyRc;
-	if (panel.Width() < 8 || panel.Height() < 8) {
-		CCC_CaptionPaint(dc, m_hWnd);
+	if (panel.Width() < 8 || panel.Height() < 8)
 		return;
-	}
 	CDC mem;
 	mem.CreateCompatibleDC(&dc);
 	CBitmap bmp;
-	if (!bmp.CreateCompatibleBitmap(&dc, panel.Width(), panel.Height())) {
-		CCC_CaptionPaint(dc, m_hWnd);
+	if (!bmp.CreateCompatibleBitmap(&dc, panel.Width(), panel.Height()))
 		return;
-	}
 	CBitmap* old = mem.SelectObject(&bmp);
-	if (!old) {
-		CCC_CaptionPaint(dc, m_hWnd);
+	if (!old)
 		return;
-	}
 	mem.FillSolidRect(0, 0, panel.Width(), panel.Height(), RGB(236, 240, 238));
 	CRect track = m_trackRc; track.OffsetRect(-panel.left, -panel.top);
 	CRect grid = m_gridRc; grid.OffsetRect(-panel.left, -panel.top);
@@ -1183,7 +1198,6 @@ void CSasamiFmScoreDlg::OnPaint()
 	mem.SelectObject(old);
 	if (m_ui.showRollSplit && m_rollRc.Width() > 8)
 		ScPianoRollPaint(dc, m_rollRc, &m_rollView, m_doc.ev, m_doc.evCount, &m_ui, m_curCh);
-	CCC_CaptionPaint(dc, m_hWnd);
 	dc.SetBkMode(TRANSPARENT);
 	dc.SetTextColor(RGB(40, 55, 45));
 	CFont* oldLab = dc.SelectObject(GetFont());
@@ -1791,7 +1805,10 @@ void CSasamiFmScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	if (gaugeTrack >= 0 && gaugeZone != SC_GAUGE_NONE) {
 		m_curCh = gaugeTrack;
 		m_ch.SetCurSel(m_curCh);
-		OpenVoiceEditor();
+		if (gaugeZone == SC_GAUGE_CLEF)
+			CycleClefTrack(gaugeTrack);
+		else
+			OpenVoiceEditor();
 		return;
 	}
 	int tr = ScStaffHitTrack(m_trackRc, &m_ui, point);
@@ -2067,7 +2084,10 @@ void CSasamiFmScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 	if (gaugeTrack >= 0 && gaugeZone != SC_GAUGE_NONE) {
 		m_curCh = gaugeTrack;
 		m_ch.SetCurSel(m_curCh);
-		OpenVoiceEditor();
+		if (gaugeZone == SC_GAUGE_CLEF)
+			CycleClefTrack(gaugeTrack);
+		else
+			OpenVoiceEditor();
 		return;
 	}
 	int hitTr = -1;
@@ -2159,6 +2179,7 @@ LRESULT CSasamiFmScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		const int cmdId = (int)(l & 0xFF);
 		if ((cmdId >= SASAMI_PAL_CMD_METER_24 && cmdId <= SASAMI_PAL_CMD_TR_ALL_MINUS)
 			|| (cmdId >= SASAMI_PAL_CMD_METER_14 && cmdId <= SASAMI_PAL_CMD_METER_74)
+			|| cmdId == SASAMI_PAL_CMD_CLEF_AUTO
 			|| (cmdId >= SASAMI_PAL_CMD_KEY_BASE && cmdId < SASAMI_PAL_CMD_KEY_BASE + 15)) {
 			ApplyLayoutPalCmd(cmdId);
 			return 0;
@@ -2420,9 +2441,7 @@ void CSasamiFmScoreDlg::OnBnClickedTempo()
 void CSasamiFmScoreDlg::OnBnClickedVoice()
 {
 	if (ScStaffIsFmSsgTrack(1, m_curCh)) {
-		m_ui.clef[m_curCh] = (m_ui.clef[m_curCh] + 1) % 3; /* G/F/grand — no Voice chip */
-		UpdateScrollBars();
-		InvalidateRect(m_bodyRc, FALSE);
+		CycleClefTrack(m_curCh);
 		m_status.SetWindowText(LL14(
 			L"SSG: 譜表切替（@neiro/Voiceなし）",
 			L"SSG: clef cycle (no @neiro / Voice)",
@@ -2442,6 +2461,7 @@ void CSasamiFmScoreDlg::OnBnClickedVoice()
 	}
 	if (ScStaffIsOpnaRhythmTrack(1, m_curCh)) {
 		m_ui.clef[m_curCh] = 3;
+		m_ui.clefAuto[m_curCh] = 0;
 		m_status.SetWindowText(LL14(
 			L"RHY: ドラム譜表固定（BD SD TOP HH TOM RIM）",
 			L"RHY: drum staff fixed (BD SD TOP HH TOM RIM)",
@@ -2489,7 +2509,7 @@ void CSasamiFmScoreDlg::PickBuiltinNeiro()
 	m_status.SetWindowText(st);
 }
 
-int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick)
+int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick, uint32_t toTick)
 {
 	int anySolo = 0;
 	for (int i = 0; i < m_ui.trackCount; i++) if (m_ui.solo[i]) { anySolo = 1; break; }
@@ -2514,6 +2534,15 @@ int CSasamiFmScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTi
 			tmp->evCount = nn;
 			HeapFree(GetProcessHeap(), 0, shifted);
 		}
+	}
+	/* 終端 tick 指定(その場再生の範囲切り出し)。窓長より後に始まるイベントを落とす。 */
+	if (toTick > fromTick && tmp->evCount > 0) {
+		const uint32_t winLen = toTick - fromTick;
+		int w2 = 0;
+		for (int i = 0; i < tmp->evCount; i++) {
+			if (tmp->ev[i].tick < winLen) tmp->ev[w2++] = tmp->ev[i];
+		}
+		tmp->evCount = w2;
 	}
 	SasamiWriteFm* wr = (SasamiWriteFm*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(SasamiWriteFm));
 	if (!wr) { HeapFree(GetProcessHeap(), 0, tmp); return 0; }
@@ -2595,6 +2624,7 @@ void CSasamiFmScoreDlg::LoadFromDoc(const ScFmDoc& src)
 	m_ui.markerTick = 0;
 	m_ui.playheadTick = 0;
 	SyncMeterFromDoc();
+	ScStaffApplyDocClef(&m_ui, m_doc.ev, m_doc.evCount);
 	RefreshToneLabels();
 	RefreshPartEnabled(1);
 	RefreshStrip();
@@ -2698,6 +2728,75 @@ void CSasamiFmScoreDlg::OnBnClickedPlay()
 }
 
 
+/* その場再生の範囲決定: (1)時間範囲選択 (2)ループA–B (3)選択音符の外接 (4)現在カーソル小節。 */
+int CSasamiFmScoreDlg::ComputePreviewRange(uint32_t* pT0, uint32_t* pT1)
+{
+	uint32_t t0 = 0, t1 = 0;
+	if (m_ui.selRangeValid && m_ui.selRangeT1 > m_ui.selRangeT0) {
+		t0 = m_ui.selRangeT0; t1 = m_ui.selRangeT1;
+	} else if (m_ui.loopATick >= 0 && m_ui.loopBTick > m_ui.loopATick) {
+		t0 = (uint32_t)m_ui.loopATick; t1 = (uint32_t)m_ui.loopBTick;
+	} else if (m_ui.nSel > 0) {
+		uint32_t lo = 0xFFFFFFFFu, hi = 0; int found = 0;
+		for (int k = 0; k < m_ui.nSel; k++) {
+			const int idx = m_ui.selList[k];
+			if (idx < 0 || idx >= m_doc.evCount) continue;
+			const ScEvent& e = m_doc.ev[idx];
+			if (e.kind != SC_EV_FM_NOTE && e.kind != SC_EV_FM_REST && e.kind != SC_EV_TIE) continue;
+			if (e.tick < lo) lo = e.tick;
+			const uint32_t end = e.tick + (e.dur ? e.dur : 1u);
+			if (end > hi) hi = end;
+			found = 1;
+		}
+		if (found) { t0 = lo; t1 = hi; }
+	}
+	if (t1 <= t0) {
+		const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+		const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+		const uint32_t barStart = ScStaffSnapToBarTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, mn, md);
+		int bn = mn, bd = md;
+		ScStaffMeterAtTick(m_doc.ev, m_doc.evCount, barStart, mn, md, &bn, &bd);
+		uint32_t barLen = (uint32_t)ScStaffMeterTicksPerMeasure(bn, bd);
+		if (barLen == 0) barLen = (uint32_t)ScStaffTicksPerMeasure(&m_ui);
+		if (barLen == 0) barLen = (uint32_t)(SC_PPQN * 4);
+		t0 = barStart; t1 = barStart + barLen;
+	}
+	if (pT0) *pT0 = t0;
+	if (pT1) *pT1 = t1;
+	return (t1 > t0) ? 1 : 0;
+}
+
+/* 範囲を全パート(ミュート/ソロは尊重)で切り出して即試聴。Shift+Space / 右クリックから。 */
+void CSasamiFmScoreDlg::PreviewRangeInstant()
+{
+	uint32_t t0 = 0, t1 = 0;
+	if (!ComputePreviewRange(&t0, &t1)) return;
+	if (m_ui.previewActive) {
+		ScStaffStopHostPreview(&m_ui);
+		KillTimer(1);
+		KillTimer(kScFmPreviewTimer);
+	}
+	wchar_t path[MAX_PATH];
+	if (!BuildToTemp(path, MAX_PATH, t0, t1)) return;
+	m_ui.markerTick = t0;
+	int ok = ScStaffPreviewViaHost(path, &m_ui, m_doc.tempoT);
+	if (!ok)
+		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
+	if (!ok) {
+		m_ui.previewActive = 0;
+		m_status.SetWindowText(LL14(L"範囲試聴に失敗（ホスト／wavout）", L"Range preview failed (host / wavout)", L"Échec aperçu plage", L"Anteprima intervallo non riuscita", L"Falló vista previa de rango",
+			L"범위 미리듣기 실패", L"范围试听失败", L"فشل معاينة النطاق", L"Превью диапазона не удалось", L"Bereichsvorschau fehlgeschlagen", L"Falha na prévia do intervalo", L"Bereikvoorbeeld mislukt", L"Podgląd zakresu nieudany", L"Aralık önizleme başarısız"));
+		return;
+	}
+	SetTimer(1, 33, NULL);
+	CString st;
+	st.Format(LL14(L"範囲試聴 tick %u–%u — Spaceで停止", L"Range preview tick %u–%u — Space to stop", L"Aperçu plage tick %u–%u — Espace = stop", L"Anteprima intervallo tick %u–%u — Spazio = stop", L"Vista previa rango tick %u–%u — Espacio = stop",
+		L"범위 미리듣기 tick %u–%u — Space 정지", L"范围试听 tick %u–%u — Space停止", L"معاينة النطاق tick %u–%u — Space للإيقاف", L"Превью диапазона tick %u–%u — Space = стоп", L"Bereichsvorschau tick %u–%u — Leertaste = Stop", L"Prévia intervalo tick %u–%u — Espaço = parar", L"Bereikvoorbeeld tick %u–%u — Spatie = stop", L"Podgląd zakresu tick %u–%u — Spacja = stop", L"Aralık önizleme tick %u–%u — Space = dur"),
+		(unsigned)t0, (unsigned)t1);
+	m_status.SetWindowText(st);
+	InvalidateRect(m_bodyRc, FALSE);
+}
+
 void CSasamiFmScoreDlg::OnBnClickedMark() { m_ui.transportMode = 1; }
 void CSasamiFmScoreDlg::OnBnClickedLoopA() { m_ui.transportMode = 2; }
 void CSasamiFmScoreDlg::OnBnClickedLoopB() { m_ui.transportMode = 3; }
@@ -2721,12 +2820,16 @@ void CSasamiFmScoreDlg::OnBnClickedShowAll()
 
 void CSasamiFmScoreDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == kScFmPreviewTimer) {
+	if (nIDEvent == 1 || nIDEvent == kScFmPreviewTimer) {
 		if (ScStaffSyncPreviewPlayhead(&m_ui, m_doc.tempoT)) {
 			ApplyFollowScroll();
 			UpdateScrollBars();
 			InvalidateRect(m_bodyRc, FALSE);
 			if (m_ui.showRollSplit) InvalidateRect(m_rollRc, FALSE);
+		}
+		if (ScStaffPreviewFinished(&m_ui)) {
+			KillTimer(1);
+			KillTimer(kScFmPreviewTimer);
 		}
 		return;
 	}
@@ -2746,9 +2849,7 @@ void CSasamiFmScoreDlg::OnTimer(UINT_PTR nIDEvent)
 	}
 	if (nIDEvent == 9125) {
 		KillTimer(9125);
-		CRect wr; GetWindowRect(&wr);
-		CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
-		CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
+		CSasamiNotePaletteDlg::OpenComposerPalettes(this);
 		return;
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
@@ -3169,6 +3270,10 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		L"再生確認", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa",
 		L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau",
 		L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+	menu.AddCommand(9089, LL14(
+		L"範囲をその場再生\tShift+Space", L"Preview range here\tShift+Space", L"Aperçu de la plage\tShift+Espace", L"Anteprima intervallo\tShift+Spazio", L"Vista previa del rango\tShift+Espacio",
+		L"범위 즉시 재생\tShift+Space", L"就地试听范围\tShift+Space", L"معاينة النطاق\tShift+Space", L"Прослушать диапазон\tShift+Space", L"Bereich sofort anhören\tUmschalt+Leer",
+		L"Prévia do intervalo\tShift+Espaço", L"Bereik direct beluisteren\tShift+Spatie", L"Odsłuchaj zakres\tShift+Spacja", L"Aralığı burada çal\tShift+Space"));
 	menu.AddCommand(IDC_SASAMI_FM_EXPORT, LL14(
 		L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…",
 		L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio exportieren…",
@@ -3185,6 +3290,10 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	const UINT cmd = menu.Track(point, this);
 	if (cmd == 9088) {
 		ExportStandardMidi();
+		return;
+	}
+	if (cmd == 9089) {
+		PreviewRangeInstant();
 		return;
 	}
 	auto afterMark = [&](uint8_t kind) {
@@ -3461,7 +3570,7 @@ void CSasamiFmScoreDlg::AutoArrangeRefresh()
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 }
 
 int CSasamiFmScoreDlg::AutoArrangePreview()
@@ -3640,7 +3749,7 @@ LRESULT CSasamiFmScoreDlg::OnPalQueryState(WPARAM, LPARAM lParam)
 	st->meterN = mn;
 	st->meterD = md;
 	st->keySig = ScStaffKeySigAtTick(m_doc.ev, m_doc.evCount, barTick, m_ui.keySig);
-	st->clef = ScStaffClefModeAt(&m_ui, m_curCh, barTick, m_doc.ev, m_doc.evCount);
+	st->clef = m_ui.clefAuto[m_curCh] ? 4 : ScStaffClefModeAt(&m_ui, m_curCh, barTick, m_doc.ev, m_doc.evCount);
 	st->nSel = m_ui.nSel;
 	st->previewNote = -1;
 	st->curCh = m_curCh;
@@ -3660,7 +3769,7 @@ LRESULT CSasamiFmScoreDlg::OnPalLayout(WPARAM w, LPARAM l)
 		const uint32_t barTick = ScStaffSnapToBarTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, defN, defD);
 		ApplyMeterAtBar(barTick, (int)w, b);
 		if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
-			pal->Invalidate(FALSE);
+			pal->InvalidateBody();
 	}
 	return 0;
 }
@@ -3713,12 +3822,27 @@ void CSasamiFmScoreDlg::ApplyLayoutPalCmd(int cmdId)
 		}
 		goto refresh_pal;
 	}
+	if (cmdId == SASAMI_PAL_CMD_CLEF_AUTO) {
+		if (!ScStaffIsOpnaRhythmTrack(1, m_curCh)) {
+			HistPush();
+			m_ui.clefAuto[m_curCh] = 1;
+			ScStaffDropKindOnCh(m_doc.ev, &m_doc.evCount, SC_EV_CLEF, m_curCh);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			UpdateScrollBars();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		goto refresh_pal;
+	}
 	if (cmdId >= SASAMI_PAL_CMD_CLEF_G && cmdId <= SASAMI_PAL_CMD_CLEF_DR) {
 		const int clef = cmdId - SASAMI_PAL_CMD_CLEF_G;
 		HistPush();
+		m_ui.clefAuto[m_curCh] = 0;
 		ScFmAddClef(&m_doc, barTick, m_curCh, clef);
-		if (barTick == 0)
-			m_ui.clef[m_curCh] = clef;
+		m_ui.clef[m_curCh] = clef;
+		if (ScStaffIsOpnaRhythmTrack(1, m_curCh)) {
+			m_ui.clef[m_curCh] = 3;
+			m_ui.clefAuto[m_curCh] = 0;
+		}
 		ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 		UpdateScrollBars();
 		InvalidateRect(m_bodyRc, FALSE);
@@ -3754,7 +3878,7 @@ void CSasamiFmScoreDlg::ApplyLayoutPalCmd(int cmdId)
 	}
 refresh_pal:
 	if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
-		pal->Invalidate(FALSE);
+		pal->InvalidateBody();
 }
 
 void CSasamiFmScoreDlg::ApplyMeterAtBar(uint32_t tick, int numer, int denom)
@@ -3886,7 +4010,31 @@ void CSasamiFmScoreDlg::OnBnClickedRoll()
 	m_ui.showRollSplit ^= 1;
 	LayoutChrome();
 	CSasamiPianoRollDlg::OpenForFm(this);
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
+}
+
+void CSasamiFmScoreDlg::CycleClefTrack(int tr)
+{
+	if (tr < 0 || tr >= 32) return;
+	if (ScStaffIsOpnaRhythmTrack(1, tr)) {
+		m_ui.clef[tr] = 3;
+		m_ui.clefAuto[tr] = 0;
+		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	HistPush();
+	m_curCh = tr;
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+	const int nowAuto = ScStaffCycleClefChip(&m_ui, tr);
+	if (nowAuto)
+		ScStaffDropKindOnCh(m_doc.ev, &m_doc.evCount, SC_EV_CLEF, tr);
+	else
+		ScFmAddClef(&m_doc, 0, tr, m_ui.clef[tr]);
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	UpdateScrollBars();
+	InvalidateRect(m_bodyRc, FALSE);
+	if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
+		pal->InvalidateBody();
 }
 
 void CSasamiFmScoreDlg::HistPush()
@@ -3900,7 +4048,9 @@ void CSasamiFmScoreDlg::NotifyEdited()
 {
 	SyncTextIfOpen();
 	RefreshBoundRoll();
-	Invalidate(FALSE);
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	UpdateScrollBars();
+	ScStaffInvalidateBelowCaption(this);
 }
 
 void CSasamiFmScoreDlg::RefreshBoundRoll()

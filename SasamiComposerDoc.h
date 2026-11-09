@@ -227,6 +227,9 @@ int ScFmAddClef(ScFmDoc* d, uint32_t tick, int ch, int clef);
 int ScMidiPartDefaultDrum(int ch0);
 int ScMidiPartIsDrum(const ScEvent* ev, int n, int ch0, uint32_t tick);
 int ScMidiAddDrum(ScMidiDoc* d, uint32_t tick, int ch, int drum);
+/* ドラム枠 0=ドラム1 1=ドラム2（VST2 マルチ/VST3 ルーティング用。native では無視）。 */
+int ScMidiAddDrumEx(ScMidiDoc* d, uint32_t tick, int ch, int drum, int slot);
+int ScMidiPartDrumSlot(const ScEvent* ev, int n, int ch0, uint32_t tick);
 int ScMidiAddKey(ScMidiDoc* d, uint32_t tick, int keySig);
 int ScFmAddKey(ScFmDoc* d, uint32_t tick, int keySig);
 int ScFmAddEx(ScFmDoc* d, uint32_t tick, int ch, int exN, int data);

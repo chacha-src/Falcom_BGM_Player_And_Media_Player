@@ -707,21 +707,42 @@ int ScMidiPartIsDrum(const ScEvent* ev, int n, int ch0, uint32_t tick)
 	return d;
 }
 
-int ScMidiAddDrum(ScMidiDoc* d, uint32_t tick, int ch, int drum)
+/* 枠(slot): 0=ドラム1 1=ドラム2。SC_EV_DRUM.b に載せる（native stream では a のみ参照
+   するため無視される）。VST2 マルチティンバー(ドラム2枠)/VST3 のルーティング用。 */
+int ScMidiPartDrumSlot(const ScEvent* ev, int n, int ch0, uint32_t tick)
+{
+	int slot = 0;
+	if (!ev || n <= 0 || ch0 < 0 || ch0 >= SC_MIDI_CH) return 0;
+	for (int i = 0; i < n; i++) {
+		if (ev[i].kind != SC_EV_DRUM) continue;
+		if ((int)ev[i].ch != ch0) continue;
+		if (ev[i].tick > tick) continue;
+		slot = (ev[i].a && ev[i].b) ? 1 : 0;
+	}
+	return slot;
+}
+
+int ScMidiAddDrumEx(ScMidiDoc* d, uint32_t tick, int ch, int drum, int slot)
 {
 	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
 	drum = drum ? 1 : 0;
+	slot = slot ? 1 : 0;
 	for (int i = d->evCount - 1; i >= 0; i--) {
 		if (d->ev[i].kind != SC_EV_DRUM || d->ev[i].ch != (uint8_t)ch) continue;
 		for (int j = i; j + 1 < d->evCount; j++)
 			d->ev[j] = d->ev[j + 1];
 		d->evCount--;
 	}
-	/* GM default (ch10/26 drum) needs no event. */
-	if (tick == 0 && drum == ScMidiPartDefaultDrum(ch))
+	/* GM default (ch10/26 drum) で枠も既定(1) なら無印で良い。 */
+	if (tick == 0 && drum == ScMidiPartDefaultDrum(ch) && slot == 0)
 		return 1;
 	if (d->evCount >= SC_EV_MAX) return 0;
-	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_DRUM, (uint8_t)drum, 0, 0, 0);
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_DRUM, (uint8_t)drum, (uint8_t)slot, 0, 0);
+}
+
+int ScMidiAddDrum(ScMidiDoc* d, uint32_t tick, int ch, int drum)
+{
+	return ScMidiAddDrumEx(d, tick, ch, drum, 0);
 }
 
 int ScMidiAddKey(ScMidiDoc* d, uint32_t tick, int keySig)

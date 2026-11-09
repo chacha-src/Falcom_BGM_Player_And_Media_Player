@@ -49,12 +49,19 @@ protected:
 	afx_msg void OnBnClickedScore();
 	afx_msg void OnBnClickedMode();
 	afx_msg void OnBnClickedB64Fold();
+	afx_msg void OnBnClickedFind();
+	afx_msg void OnBnClickedGoto();
+	afx_msg void OnBnClickedMore();
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnEnChange();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 
 	void LayoutChrome();
 	void ApplyLang();
+	void UpdateInfoBar();
+	void FindNext(int wrap);
+	void InsertAtCaret(const wchar_t* s);
+	void StopPreview();
 	void RevealErrorLine(int errLine);
 	void RefreshChromeOpaque();
 	int CompileAndBuild(wchar_t* outPath, int outCch, int* isFm);
@@ -76,7 +83,8 @@ protected:
 	CCustomStandardButton m_btnVst;
 	CCustomStandardButton m_btnExport;
 	CCustomStandardButton m_btnB64Fold;
-	CCustomStatic m_status;
+	CCustomStandardButton m_btnFind, m_btnGoto, m_btnMore;
+	CCustomStatic m_status, m_infoBar;
 	CToolTipCtrl m_tooltip;
 	CRect m_bodyRc;
 	ScMidiDoc m_midi;
@@ -88,6 +96,8 @@ protected:
 	int m_textDirty;
 	CString m_textFull;
 	wchar_t m_lastOut[MAX_PATH];
+	wchar_t m_findBuf[128];
+	int m_chromeDetail;
 	static CSasamiTextDlg* s_inst;
-	enum { kTextScoreSyncTimer = 7103 };
+	enum { kTextScoreSyncTimer = 7103, kTextCaretTimer = 7104 };
 };

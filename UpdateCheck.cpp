@@ -1185,6 +1185,22 @@ static bool WriteTacOggBytes(const CString& dir, const wchar_t* fileOnly, const 
 
 // 書庫に無かった曲は、後段で https://ppp.oohara.jp/download/ の単体ファイルを足す。
 static void FillMissingTacOggs(const CString& destDir);
+static time_t FileWriteTimeUtc(const CString& path);
+static void SetFileWriteTimeUtc(const CString& path, time_t t);
+
+static bool TacOggLocalFresh(const CString& dest, time_t arcUtc, ULONGLONG arcSz)
+{
+	WIN32_FILE_ATTRIBUTE_DATA a;
+	if (!GetFileAttributesEx(dest, GetFileExInfoStandard, &a)) return false;
+	if (arcUtc > 0 && FileWriteTimeUtc(dest) + 2 >= arcUtc) return true;
+	if (arcUtc <= 0) {
+		ULARGE_INTEGER ull;
+		ull.LowPart = a.nFileSizeLow;
+		ull.HighPart = a.nFileSizeHigh;
+		if (ull.QuadPart == arcSz) return true;
+	}
+	return false;
+}
 
 // 書庫内の tacticsbgm\*.ogg（無ければ直下の既知 ogg）を destDir\tacticsbgm へ出す。無くても更新は成功。
 static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
@@ -1205,10 +1221,14 @@ static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 			const wchar_t* file = name;
 			for (const wchar_t* p = name; *p; ++p)
 				if (*p == L'\\' || *p == L'/') file = p + 1;
+			CString dest = bgmDir + _T("\\") + file;
+			time_t arcT = SevenZipMTimeUtc(&a, i);
+			if (TacOggLocalFresh(dest, arcT, 0)) continue;
 			const Byte* data = NULL;
 			size_t sz = 0;
 			if (!SevenZipExtractIndex(&a, i, &data, &sz)) continue;
-			WriteTacOggBytes(bgmDir, file, data, sz);
+			if (WriteTacOggBytes(bgmDir, file, data, sz) && arcT > 0)
+				SetFileWriteTimeUtc(dest, arcT);
 		}
 		SevenZipClose(&a);
 		return;
@@ -1239,6 +1259,23 @@ static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 		const wchar_t* file = full;
 		for (const wchar_t* p = full; *p; ++p)
 			if (*p == L'\\' || *p == L'/') file = p + 1;
+		CString destZip = bgmDir + _T("\\") + file;
+		time_t zipT = 0;
+		if (fi.dosDate) {
+			FILETIME localFt = {}, utcFt = {};
+			if (DosDateTimeToFileTime((WORD)(fi.dosDate >> 16), (WORD)fi.dosDate, &localFt)
+				&& LocalFileTimeToFileTime(&localFt, &utcFt)) {
+				ULARGE_INTEGER ull;
+				ull.LowPart = utcFt.dwLowDateTime;
+				ull.HighPart = utcFt.dwHighDateTime;
+				if (ull.QuadPart >= 116444736000000000ULL)
+					zipT = (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+			}
+		}
+		if (TacOggLocalFresh(destZip, zipT, fi.uncompressed_size)) {
+			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+			continue;
+		}
 		if (unzOpenCurrentFile(uf) != UNZ_OK) {
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;
@@ -1260,7 +1297,8 @@ static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 			}
 		}
 		unzCloseCurrentFile(uf);
-		if (ok) WriteTacOggBytes(bgmDir, file, buf, (size_t)need);
+		if (ok && WriteTacOggBytes(bgmDir, file, buf, (size_t)need) && zipT > 0)
+			SetFileWriteTimeUtc(destZip, zipT);
 		free(buf);
 		if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 	}
@@ -2947,7 +2985,7 @@ bool EnsureBonusImages(int kind)
 {
 	static const TCHAR* kZip[3] = { _T("oggmeiro.7z"), _T("oggrace.7z"), _T("oggtactics.7z") };
 	static const TCHAR* kUtc[3] = { _T("meiro.utc"), _T("race.utc"), _T("tactics.utc") };
-	static const TCHAR* kKey[3] = { _T("meiro\\m_wall0.png"), _T("race\\r_forest.png"), _T("tactics\\tac_detail.png") };
+	static const TCHAR* kKey[3] = { _T("meiro\\m_wall0.png"), _T("race\\r_forest.png"), _T("tactics\\tac_tex.bin") };
 	if (kind < 0 || kind > 2) return false;
 	TCHAR exeBuf[MAX_PATH] = {};
 	GetModuleFileName(NULL, exeBuf, MAX_PATH);

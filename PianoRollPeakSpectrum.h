@@ -136,8 +136,8 @@ namespace PianoRollPeakSpectrum
                 // 高域で和音が密集しても基準フロアの 1.6 倍までに抑え、メロディ消失を防ぐ
                 if (midBandFloor > 0.0f && locFloor > midBandFloor * 1.6f)
                     locFloor = midBandFloor * 1.6f;
-                // C6 以上の床を中域の 0.45 倍で止めると、弱い高音・長い高音がピークにならない。
-                const float floorMul = (k >= 84) ? 0.16f : 0.45f;
+                // C6 以上の床は中域の 0.45 倍で止める。緩めすぎると高域が雑音で満ちる。
+                const float floorMul = 0.45f;
                 if (locFloor < midBandFloor * floorMul)
                     locFloor = midBandFloor * floorMul;
                 m_noisePow[k] = locFloor;
@@ -176,7 +176,7 @@ namespace PianoRollPeakSpectrum
                 // 高域の床は中域(350Hz–3.2kHz)からの借り物で、実音より高い。C6 以上に一番きつい S/N を掛けると高音が消える。
                 float snrMul = 0.85f;
                 if (kn < 60) snrMul = 0.70f;
-                else if (kn >= 84) snrMul = 0.35f;
+                else if (kn >= 84) snrMul = 1.00f;
                 const float snrNeed = snrLin * snrMul;
                 if (pkPow < 1.0e-20f || pkPow <= np0 * snrNeed) continue;
                 m_peakBin[np] = (float)b + delta;

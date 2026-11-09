@@ -72,6 +72,8 @@ call :job vs_5_0 VSP shaders\omake_tactics.hlsl tac_VSP tac_vsp
 call :job vs_5_0 VSPT shaders\omake_tactics.hlsl tac_VSPT tac_vspt
 call :job gs_5_0 GSP shaders\omake_tactics.hlsl tac_GSP tac_gsp
 call :job ps_5_0 PSP shaders\omake_tactics.hlsl tac_PSP tac_psp
+call :job cs_5_0 CSWx shaders\omake_tactics.hlsl tac_CSWx tac_cswx
+call :job vs_5_0 VSPWX shaders\omake_tactics.hlsl tac_VSPWX tac_vspwx
 call :job vs_5_0 VSQ shaders\omake_tactics.hlsl tac_VSQ tac_vsq
 call :job ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky
 call :job ps_5_0 PSSKY0 shaders\omake_tactics.hlsl tac_PSSKY0 tac_pssky0

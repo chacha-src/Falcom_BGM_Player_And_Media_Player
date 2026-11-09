@@ -10,7 +10,20 @@ enum {
 	IDC_SAA_LPITCH = 4921,
 	IDC_SAA_LINTRO = 4922,
 	IDC_SAA_LBREAK = 4923,
-	IDC_SAA_LEND = 4924
+	IDC_SAA_LEND = 4924,
+	/* v2 追加コントロール（ダイアログ内ローカル ID。resource.h は使わない） */
+	IDC_SAA_LPROG = 4930,
+	IDC_SAA_PROG = 4931,
+	IDC_SAA_PROGDESC = 4932,
+	IDC_SAA_MODE_OVER = 4933,
+	IDC_SAA_MODE_RW = 4934,
+	IDC_SAA_LTARGET = 4935,
+	IDC_SAA_LDRUM = 4936,
+	IDC_SAA_VARY = 4937,
+	IDC_SAA_REROLL = 4938,
+	IDC_SAA_LGROUP = 4939,
+	IDC_SAA_TGT_BASE = 4960,   /* +ch */
+	IDC_SAA_DRM_BASE = 5000    /* +ch */
 };
 
 class CSasamiAutoArrangeDlg : public CCustomBlurDialogExBase
@@ -35,17 +48,27 @@ protected:
 	void Restore();
 	int ApplyNow(ScAutoArrangeResult* r);
 	void ShowResult(const ScAutoArrangeResult& r);
+	afx_msg void OnStyleChanged();
+	afx_msg void OnProgChanged();
+	afx_msg void OnReroll();
+	void RefillProg();
+	void UpdateProgDesc();
+	int NumCh() const;
 
 	const ScAutoArrangeHost* m_host;
 	ScEvent* m_snap;
 	int m_snapN;
 	int m_keep;
 	int m_uiSnap;
+	int m_seed;
 	int m_vis[32], m_mute[32], m_solo[32], m_clef[32];
 	CCustomStatic m_styleLbl, m_pitchLbl, m_introLbl, m_breakLbl, m_endLbl, m_hint, m_status;
-	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars;
-	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending;
-	CCustomStandardButton m_preview, m_ok, m_cancel;
+	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl;
+	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog;
+	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending, m_vary;
+	CCustomRadioButton m_modeOver, m_modeRw;
+	CCustomCheckBox m_tgt[32], m_drm[32];
+	CCustomStandardButton m_preview, m_reroll, m_ok, m_cancel;
 };
 
 IMPLEMENT_DYNAMIC(CSasamiAutoArrangeDlg, CCustomBlurDialogExBase)
@@ -55,14 +78,25 @@ BEGIN_MESSAGE_MAP(CSasamiAutoArrangeDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_BN_CLICKED(IDC_SAA_PREVIEW, OnPreview)
+	ON_BN_CLICKED(IDC_SAA_REROLL, OnReroll)
+	ON_CBN_SELCHANGE(IDC_SAA_STYLE, OnStyleChanged)
+	ON_CBN_SELCHANGE(IDC_SAA_PROG, OnProgChanged)
 	ON_BN_CLICKED(IDOK, OnOK)
 	ON_BN_CLICKED(IDCANCEL, OnCancel)
 END_MESSAGE_MAP()
 
 CSasamiAutoArrangeDlg::CSasamiAutoArrangeDlg(const ScAutoArrangeHost* host, CWnd* parent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_AUTO_ARRANGE, parent)
-	, m_host(host), m_snap(NULL), m_snapN(0), m_keep(0), m_uiSnap(0)
+	, m_host(host), m_snap(NULL), m_snapN(0), m_keep(0), m_uiSnap(0), m_seed(0)
 {
+}
+
+int CSasamiAutoArrangeDlg::NumCh() const
+{
+	int n = (m_host && m_host->ui && m_host->ui->trackCount > 0) ? m_host->ui->trackCount : (m_host && m_host->isFm ? SC_FM_TOTAL : 16);
+	if (n < 1) n = 1;
+	if (n > 32) n = 32;
+	return n;
 }
 
 CSasamiAutoArrangeDlg::~CSasamiAutoArrangeDlg()
@@ -102,6 +136,32 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	o->defMeterD = m_host->defMeterD;
 	o->defKey = m_host->defKey;
 	o->ui = m_host->ui;
+
+	/* --- v2 --- */
+	o->mode = (m_modeRw.GetSafeHwnd() && m_modeRw.GetCheck() == BST_CHECKED) ? SC_AM_REWRITE : SC_AM_OVERLAY;
+	int pv = m_prog.GetSafeHwnd() ? m_prog.GetCurSel() : 0;
+	o->variation = pv < 0 ? 0 : pv;
+	o->useProg = 1;
+	/* 「毎回少し変える」ON のとき種を 0（自動＝毎回違う）。OFF で固定し再現可能に。 */
+	int vary = (m_vary.GetSafeHwnd() && m_vary.GetCheck() == BST_CHECKED);
+	o->seed = vary ? 0 : (m_seed ? m_seed : 0x5A5A1234);
+	o->genBars = 0;
+	const int nCh = NumCh();
+	uint32_t tgt = 0, drm = 0;
+	for (int ch = 0; ch < nCh && ch < 32; ch++) {
+		if (m_tgt[ch].GetSafeHwnd() && m_tgt[ch].GetCheck() == BST_CHECKED) tgt |= (1u << ch);
+		if (m_drm[ch].GetSafeHwnd() && m_drm[ch].GetCheck() == BST_CHECKED) drm |= (1u << ch);
+	}
+	/* ドラム ch も対象扱いにしておく（書き換え時に消して作り直すため）。 */
+	o->targetMask = tgt | drm;
+	o->drumMask = drm;
+	/* 枠の自動割り当て: チェック順で 0,1,0,1…（枠0=本体, 枠1=シンバル/ドラム2）。 */
+	memset(o->drumSlot, 0, sizeof(o->drumSlot));
+	memset(o->partRole, 0, sizeof(o->partRole));
+	int di = 0;
+	for (int ch = 0; ch < nCh && ch < 32; ch++) {
+		if (drm & (1u << ch)) { o->drumSlot[ch] = (uint8_t)(di & 1); di++; }
+	}
 }
 
 void CSasamiAutoArrangeDlg::Restore()
@@ -248,16 +308,122 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	m_breakBars.SetAeroMode(FALSE);
 	m_endBars.SetAeroMode(FALSE);
 
+	/* --- v2: ジャンル見出し / コード進行 / 書き換え・重ね / 対象パート / ドラム ch --- */
+	m_groupLbl.Create(L"", WS_CHILD | WS_VISIBLE, z, this, IDC_SAA_LGROUP);
+
+	m_progLbl.Create(LL14(L"コード進行", L"Chord progression", L"Progression", L"Progressione", L"Progresión", L"코드 진행", L"和弦进行", L"تتابع الأكوردات", L"Последовательность", L"Akkordfolge", L"Progressão", L"Akkoordenschema", L"Progresja", L"Akor dizisi"),
+		WS_CHILD | WS_VISIBLE, z, this, IDC_SAA_LPROG);
+	m_prog.Create(WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 200), this, IDC_SAA_PROG);
+	m_prog.SetAeroMode(FALSE);
+	m_progDesc.Create(L"", WS_CHILD | WS_VISIBLE, z, this, IDC_SAA_PROGDESC);
+
+	m_modeOver.Create(LL14(L"重ねる（空きを埋める）", L"Overlay (fill gaps)", L"Superposer (combler)", L"Sovrapponi (riempi)", L"Superponer (rellenar)", L"겹치기(빈곳 채움)", L"叠加(填空)", L"تركيب (ملء الفراغ)", L"Наложить (заполнить)", L"Überlagern (Lücken)", L"Sobrepor (preencher)", L"Overlay (gaten)", L"Nałóż (wypełnij)", L"Üst üste (boşluk)"),
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON, z, this, IDC_SAA_MODE_OVER);
+	m_modeRw.Create(LL14(L"書き換える（進行に沿って作り直す）", L"Rewrite (regen on progression)", L"Réécrire (sur la grille)", L"Riscrivi (sulla griglia)", L"Reescribir (sobre la grid)", L"재작성(진행대로)", L"改写(按进行重做)", L"إعادة كتابة (حسب التتابع)", L"Переписать (по сетке)", L"Neu schreiben (nach Folge)", L"Reescrever (pela grade)", L"Herschrijf (op schema)", L"Przepisz (wg progresji)", L"Yeniden yaz (diziye göre)"),
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON, z, this, IDC_SAA_MODE_RW);
+	m_modeOver.SetCheck(BST_CHECKED);
+
+	m_vary.Create(LL14(L"毎回少し変える", L"Vary each time", L"Varier à chaque fois", L"Varia ogni volta", L"Variar cada vez", L"매번 조금 변화", L"每次略有变化", L"تغيير بسيط كل مرة", L"Менять каждый раз", L"Jedes Mal variieren", L"Variar sempre", L"Elke keer variëren", L"Zmieniaj za każdym razem", L"Her seferinde değiştir"),
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_VARY);
+	m_vary.SetCheck(BST_CHECKED);
+
+	m_targetLbl.Create(LL14(L"アレンジ対象パート（無指定なら自動）", L"Target parts (none = auto)", L"Parties cibles (aucune = auto)", L"Parti bersaglio (nessuna = auto)", L"Partes objetivo (ninguna = auto)", L"대상 파트(미지정=자동)", L"编曲目标声部(未选=自动)", L"الأجزاء الهدف (لا شيء = تلقائي)", L"Целевые партии (нет = авто)", L"Zielstimmen (keine = auto)", L"Partes alvo (nenhuma = auto)", L"Doelpartijen (geen = auto)", L"Partie docelowe (brak = auto)", L"Hedef partiler (yok = oto)"),
+		WS_CHILD | WS_VISIBLE, z, this, IDC_SAA_LTARGET);
+	m_drumLbl.Create(LL14(L"ドラム出力 ch（複数可）", L"Drum output ch (multi)", L"Batterie ch (multi)", L"Batteria ch (multi)", L"Batería ch (multi)", L"드럼 출력 ch(복수)", L"鼓输出 ch(可多选)", L"قناة الطبل (متعدد)", L"Каналы ударных (неск.)", L"Drum-Kanäle (mehr.)", L"Canais de bateria", L"Drumkanalen (meer)", L"Kanały perkusji", L"Davul kanalları"),
+		WS_CHILD | WS_VISIBLE, z, this, IDC_SAA_LDRUM);
+
+	{
+		const int nCh = NumCh();
+		for (int ch = 0; ch < nCh && ch < 32; ch++) {
+			wchar_t cap[8];
+			_snwprintf_s(cap, _TRUNCATE, L"%d", ch + 1);
+			m_tgt[ch].Create(cap, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_TGT_BASE + ch);
+			m_drm[ch].Create(cap, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_DRM_BASE + ch);
+		}
+	}
+
+	m_reroll.Create(LL14(L"再抽選", L"Re-roll", L"Relancer", L"Rigenera", L"Re-generar", L"다시 뽑기", L"重新生成", L"إعادة", L"Пересоздать", L"Neu würfeln", L"Re-gerar", L"Opnieuw", L"Losuj ponownie", L"Yeniden"),
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP, z, this, IDC_SAA_REROLL);
+	m_reroll.SetFlat(TRUE);
+
+	RefillProg();
+
 	CFont* font = GetFont();
-	CWnd* kids[] = { &m_styleLbl, &m_style, &m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
+	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_progLbl, &m_prog, &m_progDesc,
+		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl,
+		&m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
 		&m_intro, &m_brk, &m_ending, &m_introLbl, &m_breakLbl, &m_endLbl, &m_introBars, &m_breakBars, &m_endBars,
-		&m_pitchLbl, &m_pitch, &m_hint, &m_status, &m_preview, &m_ok, &m_cancel };
+		&m_pitchLbl, &m_pitch, &m_hint, &m_status, &m_preview, &m_reroll, &m_ok, &m_cancel };
 	for (int i = 0; i < (int)(sizeof(kids) / sizeof(kids[0])); i++)
 		if (kids[i]->GetSafeHwnd() && font) kids[i]->SetFont(font);
+	{
+		const int nCh = NumCh();
+		for (int ch = 0; ch < nCh && ch < 32; ch++) {
+			if (m_tgt[ch].GetSafeHwnd() && font) m_tgt[ch].SetFont(font);
+			if (m_drm[ch].GetSafeHwnd() && font) m_drm[ch].SetFont(font);
+		}
+	}
 
-	SetWindowPos(NULL, 0, 0, 560, 560, SWP_NOMOVE | SWP_NOZORDER);
+	{
+		const int nCh = NumCh();
+		const int grows = (nCh + 7) / 8;
+		int h = 700 + (grows > 2 ? (grows - 2) * 44 : 0);
+		if (h > 900) h = 900;
+		SetWindowPos(NULL, 0, 0, 600, h, SWP_NOMOVE | SWP_NOZORDER);
+	}
 	LayoutChrome();
 	return TRUE;
+}
+
+/* 選択テーマのジャンル見出しと、使えるコード進行で進行コンボを埋め直す。 */
+void CSasamiAutoArrangeDlg::RefillProg()
+{
+	if (!m_prog.GetSafeHwnd()) return;
+	int style = m_style.GetCurSel();
+	if (style < 0 || style >= SC_AS_COUNT) style = SC_AS_16BEAT;
+	if (m_groupLbl.GetSafeHwnd())
+		m_groupLbl.SetWindowText(ScAutoStyleGroupName(style));
+	m_prog.ResetContent();
+	int vc = ScAutoStyleVariationCount(style);
+	if (vc < 1) vc = 1;
+	int key = m_host ? m_host->defKey : 0;
+	for (int v = 0; v < vc; v++) {
+		wchar_t d[256];
+		ScAutoStyleProgDesc(style, v, key, d, 256);
+		m_prog.AddString(d[0] ? d : L"-");
+	}
+	m_prog.SetCurSel(0);
+	UpdateProgDesc();
+}
+
+void CSasamiAutoArrangeDlg::UpdateProgDesc()
+{
+	if (!m_progDesc.GetSafeHwnd()) return;
+	int style = m_style.GetCurSel();
+	if (style < 0 || style >= SC_AS_COUNT) style = SC_AS_16BEAT;
+	int v = m_prog.GetSafeHwnd() ? m_prog.GetCurSel() : 0;
+	if (v < 0) v = 0;
+	wchar_t d[256];
+	ScAutoStyleProgDesc(style, v, m_host ? m_host->defKey : 0, d, 256);
+	m_progDesc.SetWindowText(d);
+}
+
+void CSasamiAutoArrangeDlg::OnStyleChanged()
+{
+	RefillProg();
+}
+
+void CSasamiAutoArrangeDlg::OnProgChanged()
+{
+	UpdateProgDesc();
+}
+
+void CSasamiAutoArrangeDlg::OnReroll()
+{
+	/* 種を変えて試し聴き。決定時は現在の見た目どおりに適用される。 */
+	m_seed = (int)(GetTickCount() | 1);
+	if (m_vary.GetSafeHwnd()) m_vary.SetCheck(BST_UNCHECKED);
+	OnPreview();
 }
 
 void CSasamiAutoArrangeDlg::LayoutChrome()
@@ -268,12 +434,36 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	const int x = 16;
 	int y = cap + 10;
 	const int w = rc.Width() - 32;
-	if (w < 80) return;
+	if (w < 120) return;
 	const int col = w / 2;
-	m_styleLbl.MoveWindow(x, y, w, 16);
+	const int nCh = NumCh();
+	const int gcols = 8;
+	const int cellW = w / gcols;
+	const int grows = (nCh + gcols - 1) / gcols;
+
+	/* パターン＋ジャンル見出し */
+	m_styleLbl.MoveWindow(x, y, 120, 16);
+	m_groupLbl.MoveWindow(x + 124, y, w - 124, 16);
 	y += 18;
 	m_style.MoveWindow(x, y, w, 220);
 	y += 30;
+
+	/* コード進行 */
+	m_progLbl.MoveWindow(x, y, 120, 16);
+	m_progDesc.MoveWindow(x + 124, y, w - 124, 16);
+	y += 18;
+	m_prog.MoveWindow(x, y, w, 200);
+	y += 30;
+
+	/* 書き換え / 重ね + 毎回変える + 再抽選 */
+	m_modeOver.MoveWindow(x, y, col, 22);
+	m_modeRw.MoveWindow(x + col, y, col, 22);
+	y += 26;
+	m_vary.MoveWindow(x, y, col, 22);
+	m_reroll.MoveWindow(x + col, y, 110, 24);
+	y += 30;
+
+	/* 生成ジョブ */
 	m_drum.MoveWindow(x, y, col - 8, 22);
 	m_bass.MoveWindow(x + col, y, col, 22);
 	y += 26;
@@ -281,11 +471,11 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_melVol.MoveWindow(x + col, y, col, 22);
 	y += 26;
 	m_melPitch.MoveWindow(x, y, w, 22);
-	y += 30;
-	m_intro.MoveWindow(x, y, 140, 22);
-	m_brk.MoveWindow(x + 150, y, 140, 22);
-	m_ending.MoveWindow(x + 300, y, w - 300, 22);
 	y += 28;
+	m_intro.MoveWindow(x, y, 120, 22);
+	m_brk.MoveWindow(x + 130, y, 120, 22);
+	m_ending.MoveWindow(x + 260, y, w - 260, 22);
+	y += 26;
 	const int lw = (w - 16) / 3;
 	m_introLbl.MoveWindow(x, y, lw, 16);
 	m_breakLbl.MoveWindow(x + lw + 8, y, lw, 16);
@@ -294,14 +484,35 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_introBars.MoveWindow(x, y, lw, 140);
 	m_breakBars.MoveWindow(x + lw + 8, y, lw, 140);
 	m_endBars.MoveWindow(x + (lw + 8) * 2, y, lw, 140);
-	y += 32;
-	m_pitchLbl.MoveWindow(x, y, w, 16);
+	y += 30;
+	m_pitchLbl.MoveWindow(x, y, 140, 16);
+	m_pitch.MoveWindow(x + 150, y, w - 150, 140);
+	y += 28;
+
+	/* 対象パート格子 */
+	m_targetLbl.MoveWindow(x, y, w, 16);
 	y += 18;
-	m_pitch.MoveWindow(x, y, w, 140);
-	y += 32;
-	m_hint.MoveWindow(x, y, w, 72);
-	y += 76;
-	m_status.MoveWindow(x, y, w, 36);
+	for (int ch = 0; ch < nCh && ch < 32; ch++) {
+		int r = ch / gcols, c = ch % gcols;
+		if (m_tgt[ch].GetSafeHwnd())
+			m_tgt[ch].MoveWindow(x + c * cellW, y + r * 22, cellW - 2, 20);
+	}
+	y += grows * 22 + 6;
+
+	/* ドラム ch 格子 */
+	m_drumLbl.MoveWindow(x, y, w, 16);
+	y += 18;
+	for (int ch = 0; ch < nCh && ch < 32; ch++) {
+		int r = ch / gcols, c = ch % gcols;
+		if (m_drm[ch].GetSafeHwnd())
+			m_drm[ch].MoveWindow(x + c * cellW, y + r * 22, cellW - 2, 20);
+	}
+	y += grows * 22 + 8;
+
+	m_hint.MoveWindow(x, y, w, 56);
+	y += 60;
+	m_status.MoveWindow(x, y, w, 32);
+
 	const int bw = 110, bh = 28, gap = 8;
 	int bx = rc.Width() - 16 - (bw * 3 + gap * 2);
 	if (bx < 16) bx = 16;

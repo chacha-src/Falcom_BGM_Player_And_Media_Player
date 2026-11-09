@@ -699,8 +699,8 @@ void Game::ResumeBattle(int kind)
 	m_importBind = 0;
 	LoadBattleCast();
 	m_importBind = 1;
+	if (m_showBuilt) m_r.ParkHomeLand(m_showStage, m_showTheme, m_mapSeed);
 	m_r.BuildTerrain(m_b.map);
-	m_r.BuildMinimap(m_b.map);
 	m_showBuilt = FALSE;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
@@ -853,8 +853,8 @@ void Game::StartBattle(int stage)
 	m_importBind = 1;
 	m_battleStage = stage;
 	m_logN = 0;
+	if (m_showBuilt) m_r.ParkHomeLand(m_showStage, m_showTheme, m_mapSeed);
 	m_r.BuildTerrain(m_b.map);
-	m_r.BuildMinimap(m_b.map);
 	m_showBuilt = FALSE;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
@@ -2427,7 +2427,6 @@ BOOL Game::OpenChestAt(int ui, int x, int z)
 	FaceTowards(ui, x, z);
 	TacSfx(TS_CHEST);
 	m_r.BuildTerrain(m_b.map);
-	m_r.BuildMinimap(m_b.map);
 	return TRUE;
 }
 
@@ -2526,7 +2525,6 @@ void Game::BattleConfirmCursor()
 				AddPopup(CellCenter(m_cx, m_cz) + v3(0, .6f, 0), TT(fence ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
 				TacSfx(TS_DOOR);
 				m_r.BuildTerrain(m_b.map);
-				m_r.BuildMinimap(m_b.map);
 				FinishUnitTurn(1);
 				return;
 			}
@@ -2660,7 +2658,6 @@ void Game::ApplyTerrace(int tx, int tz)
 	if (m_cur < 0 || !CanTerrace(m_b, m_cur, tx, tz)) { TacSfx(TS_ERROR); return; }
 	DoTerrace(m_b, m_cur, tx, tz);
 	m_r.BuildTerrain(m_b.map);
-	m_r.BuildMinimap(m_b.map);
 	const Cell& c = m_b.map.At(tx, tz);
 	wchar_t s[48];
 	swprintf_s(s, L"%s  H%d", TT(TX_BT_CLIMB), (int)c.h);
@@ -2885,12 +2882,10 @@ void Game::UpdateMove(float dt)
 			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_LEVER), RGBA8(120, 230, 210), 1, MSG_SLAB);
 			TacSfx(TS_DOOR);
 			m_r.BuildTerrain(m_b.map);
-			m_r.BuildMinimap(m_b.map);
 		} else if (tile == GM_DROP) {
 			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_DROP), RGBA8(255, 150, 60), 1, MSG_DROP);
 			TacSfx(u.alive ? TS_HURT : TS_FALL);
 			m_r.BuildTerrain(m_b.map);
-			m_r.BuildMinimap(m_b.map);
 			if (!u.alive || u.hp <= 0) {
 				u.hp = 0; u.alive = 0; u.killed = 1;
 				if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
@@ -3028,6 +3023,7 @@ void Game::PickSkillCursor(int skill)
 }
 
 // ============================================================ アクション
+static int CutPatFor(const Unit& u, int skill);
 void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 {
 	Unit& a = m_b.u[ui];
@@ -3095,6 +3091,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	m_seqImpact = 0;
 	m_ult = IsUltimateSkill(skill) || (anyCrit && skill >= 0);
 	m_cutKind = IsSummonId(skill) ? 3 : (IsCraftId(skill) ? 1 : (IsFormSkill(skill) ? 2 : 0));
+	m_cutPat = CutPatFor(m_b.u[ui], skill);
 	m_sumOn = 0;
 	m_sumHit = 0;
 	m_seqCut = m_ult || m_cutKind != 0 || (!m_save.battleAnim && (skill >= 0 || anyCrit));
@@ -3112,6 +3109,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		m_cutPosD = (m_cutD >= 0 && CutFind(m_cutD, &side, &idx)) ? CutStand(side, idx) : v3(1.25f, 0, 0);
 	} else {
 		m_cutKind = 0;
+		m_cutPat = 0;
 		m_cutAllyN = m_cutFoeN = 0;
 		if (skill >= 0)
 			AddBanner(IsCraftId(skill) ? CraftName(skill) : SkillLabel(skill), NULL, ElemColor(SkillInfo(skill).element), 2, 1.4f, MSG_SLAB);
@@ -3125,6 +3123,34 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	memset(m_ovThreat, 0, sizeof(m_ovThreat));
 }
 
+static int CutPatFor(const Unit& u, int skill)
+{
+	if (skill < 0) return (u.monster >= 0) ? 13 : 0;
+	if (IsSummonId(skill) || IsCraftId(skill) || IsFormSkill(skill)) {
+		if (u.monster >= 0) return 13;
+	}
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.kind == SK_HEAL) {
+		if (sd.effect == EF_RAISE || sd.area >= 3 || sd.shape == SH_FAN) return 11;
+		return 10;
+	}
+	if (sd.kind == SK_BUFF) return 12;
+	if (sd.kind == SK_MAGIC) {
+		if (sd.element == EL_ICE || sd.element == EL_HOLY) return 6;
+		if (sd.element == EL_THUNDER || sd.element == EL_POISON) return 7;
+		if (sd.element == EL_DARK) return 8;
+		if (sd.element == EL_WIND || sd.element == EL_EARTH) return 9;
+		return 5;
+	}
+	int st = UnitMotionStyle(u, skill);
+	if (st == AS_SHOOT || st == AS_SHOOT1) return 4;
+	if (u.monster >= 0) return 13;
+	if (sd.shape == SH_LINE || st == AS_STAB) return 3;
+	if (sd.shape == SH_FAN || st == AS_SPIN) return 2;
+	if (sd.power >= 150 || st == AS_CHOP2) return 1;
+	return 0;
+}
+
 BOOL Game::CutFind(int ui, int* side, int* idx) const
 {
 	for (int i = 0; i < m_cutAllyN; i++) if (m_cutAlly[i] == ui) { if (side) *side = 0; if (idx) *idx = i; return TRUE; }
@@ -3134,7 +3160,8 @@ BOOL Game::CutFind(int ui, int* side, int* idx) const
 
 V3 Game::CutStand(int side, int idx) const
 {
-	if (m_cutKind != 0) {
+	BOOL staged = m_cutKind != 0 || (m_cutPat >= 5 && m_cutPat <= 12);
+	if (staged) {
 		if (side == 0 && idx >= 0 && idx < m_cutAllyN) return m_cutAllyPos[idx];
 		if (side == 1 && idx >= 0 && idx < m_cutFoeN) return m_cutFoePos[idx];
 	}
@@ -3186,7 +3213,20 @@ void Game::GatherCut()
 
 void Game::LayoutSpecialCut()
 {
-	if (m_cutKind == 0) return;
+	if (m_cutKind == 0) {
+		if (m_cutPat < 5 || m_cutPat > 12) return;
+		for (int i = 0; i < m_cutAllyN; i++) {
+			float z = (i & 1) ? .42f : -.22f;
+			m_cutAllyPos[i] = v3(-1.85f - i * .38f, 0, z);
+		}
+		for (int i = 0; i < m_cutFoeN; i++) {
+			int cols = m_cutFoeN > 6 ? 4 : 3;
+			int col = i % cols;
+			int row = i / cols;
+			m_cutFoePos[i] = v3(.72f + row * .62f, 0, (col - (cols - 1) * .5f) * .5f);
+		}
+		return;
+	}
 	for (int i = 0; i < m_cutFoeN; i++) {
 		int cols = m_cutFoeN > 12 ? 6 : (m_cutFoeN > 6 ? 4 : 3);
 		int col = i % cols;
@@ -3231,7 +3271,18 @@ float Game::CutIntroLen() const
 	if (m_cutKind == 2) return 1.75f;
 	if (m_cutKind == 3) return 2.45f;
 	if (m_ult) return 2.15f;
-	return m_seqSkill >= 0 ? 1.05f : .45f;
+	switch (m_cutPat) {
+	case 1: return 1.35f;
+	case 2: return 1.25f;
+	case 3: return 0.95f;
+	case 4: return 1.15f;
+	case 5: case 6: case 7: case 8: case 9: return 1.45f;
+	case 10: return 1.2f;
+	case 11: return 1.55f;
+	case 12: return 1.3f;
+	case 13: return 1.25f;
+	default: return m_seqSkill >= 0 ? 1.05f : .45f;
+	}
 }
 
 void Game::PoseFormAllies()
@@ -3245,6 +3296,8 @@ void Game::PoseFormAllies()
 	case FM_TRI: allyClip = CL_2H_CHOP; break;
 	case FM_DIA: allyClip = CL_1H_CHOP; break;
 	case FM_ECHELON: allyClip = CL_1H_SHOOT; break;
+	case FM_PINCER: allyClip = CL_2H_CHOP; break;
+	case FM_WING: allyClip = CL_2H_SPIN; break;
 	case FM_CIRCLE: allyClip = CL_CAST_LONG; break;
 	case FM_PAIR: allyClip = CL_CAST_RAISE; break;
 	default: break;
@@ -3264,11 +3317,61 @@ void Game::PoseFormAllies()
 
 void Game::CutDressFx()
 {
-	if (m_cutKind == 0 || m_cutA < 0) return;
+	if (m_cutA < 0) return;
 	if (m_cutStage != 1 && m_cutStage != 2) return;
 	const SkillDef* sd = m_seqSkill >= 0 ? &SkillInfo(m_seqSkill) : NULL;
 	DWORD ec = sd ? ElemColor(sd->element) : RGBA8(170, 210, 255);
 	float r = (ec & 255) / 255.f, g = ((ec >> 8) & 255) / 255.f, b = ((ec >> 16) & 255) / 255.f;
+	if (m_cutKind == 0) {
+		V3 a = m_cutPosA + v3(0, .15f, 0);
+		V3 d = (m_cutD >= 0 ? m_cutPosD : v3(1.2f, 0, 0)) + v3(0, .5f, 0);
+		float u = fmodf(m_cutStageT * 2.2f, 1.f);
+		switch (m_cutPat) {
+		case 1:
+			if (m_cutStage == 2) Burst(Lerp(a + v3(0, .55f, 0), d, u), 3, .55f, .1f, .2f, r, g, b, 3, 1, .2f, .05f, .1f);
+			break;
+		case 2: {
+			float ang = m_time * 8.f;
+			Burst(a + v3(cosf(ang) * .85f, .42f, sinf(ang) * .85f), 2, .35f, .1f, .2f, r, g, b, 6, 1, 0, 0, .2f);
+			break;
+		}
+		case 3:
+			if (m_cutStage == 2) Burst(Lerp(a + v3(0, .7f, 0), d, fmodf(m_cutStageT * 3.2f, 1.f)), 2, .2f, .07f, .14f, r, g, b, 3, 1, 0, .06f, 0);
+			break;
+		case 4:
+			Burst(Lerp(a + v3(0, .85f, 0), d, fmodf(m_cutStageT * 3.4f, 1.f)), 1, 0, .07f, .12f, r, g, b, 0, 1, 0, .08f, 0);
+			break;
+		case 5:
+			Burst(a + v3(0, .2f, 0), 3, .85f, .14f, .35f, 1.f, .42f, .12f, 5, 1, -1.2f, 0, .6f);
+			break;
+		case 6:
+			Burst(a + v3(0, .9f, 0), 2, .22f, .12f, .4f, .7f, .9f, 1.f, 2, 1, .2f, 0, .1f);
+			break;
+		case 7:
+			Burst(Lerp(a + v3(0, 1.1f, 0), d, fmodf(m_cutStageT * 4.2f, 1.f)), 2, 2.2f, .06f, .1f, 1.f, 1.f, .55f, 3, 1, 0, .12f, 0);
+			break;
+		case 8:
+			Burst(a + v3(0, .08f, 0), 2, .4f, .16f, .45f, .32f, .1f, .48f, 0, 0, .15f, 0, .2f);
+			break;
+		case 9:
+			Burst(a + v3(0, .5f, 0), 2, 1.7f, .1f, .28f, .72f, 1.f, .82f, 2, 1, 0, .05f, .4f);
+			break;
+		case 10:
+		case 11:
+			Burst((m_cutD >= 0 ? m_cutPosD : m_cutPosA) + v3(0, .22f, 0), 2, .2f, .1f, .35f, .55f, 1.f, .7f, 1, 1, -.4f, 0, .5f);
+			break;
+		case 12:
+			Burst(a + v3(0, .05f, 0), 1, .15f, .12f, .4f, 1.f, .92f, .55f, 1, 1, .2f, 0, .3f);
+			break;
+		case 13:
+			Burst(a + v3(0, .05f, 0), 2, .6f, .1f, .25f, r, g, b, 2, 1, .3f, 0, .4f);
+			break;
+		default:
+			if (m_cutStage == 2) Burst(Lerp(a + v3(0, .7f, 0), d, u), 2, .4f, .08f, .18f, r, g, b, 3, 1, 0, .04f, 0);
+			break;
+		}
+		return;
+	}
 	if (m_cutKind == 1) {
 		BOOL ougi = IsCraftSuper(m_seqSkill);
 		int rings = ougi ? 2 : 1;
@@ -3308,6 +3411,31 @@ void Game::CutDressFx()
 	}
 }
 
+M4 Game::CutSceneXform() const
+{
+	float ax = 0.f, az = 0.f, ay = 0.f;
+	int an = 0;
+	auto add = [&](int id) {
+		if (id < 0 || id >= m_b.nUnits) return;
+		ax += m_b.u[id].px;
+		az += m_b.u[id].pz;
+		an++;
+	};
+	add(m_cutA);
+	if (m_cutD >= 0) add(m_cutD);
+	if (an > 0) { ax /= (float)an; az /= (float)an; }
+	int atx = (int)floorf(ax), atz = (int)floorf(az);
+	if (Map::In(atx, atz)) ay = m_b.map.StandY(atx, atz);
+	else if (m_cutA >= 0 && m_cutA < m_b.nUnits) ay = m_b.map.StandY(m_b.u[m_cutA].x, m_b.u[m_cutA].z);
+	float face = 0.f;
+	if (m_cutA >= 0 && m_cutA < m_b.nUnits && m_cutD >= 0 && m_cutD < m_b.nUnits) {
+		float dx = m_b.u[m_cutD].px - m_b.u[m_cutA].px;
+		float dz = m_b.u[m_cutD].pz - m_b.u[m_cutA].pz;
+		face = (dx * dx + dz * dz > 0.04f) ? atan2f(dx, dz) : m_b.u[m_cutA].face;
+	} else if (m_cutA >= 0 && m_cutA < m_b.nUnits) face = m_b.u[m_cutA].face;
+	return MMul(MTrans(-ax, -ay, -az), MRotY(PI * 0.5f - face));
+}
+
 V3 Game::ActorPos(int ui) const
 {
 	float kb = m_act[ui].recoil * .42f;
@@ -3318,6 +3446,14 @@ V3 Game::ActorPos(int ui) const
 			float lx = m_lunge[ui];
 			p.x += side == 0 ? (lx - kb) : (kb - lx);
 			p.y += m_b.u[ui].hover;
+			if (m_cutStage == 3) {
+				const Unit& u = m_b.u[ui];
+				V3 mapP = UnitGroundPos(u);
+				mapP.y += u.hover;
+				V3 onStage = MXformPt(CutSceneXform(), mapP);
+				float uBlend = Smooth01(m_cutStageT / 0.3f);
+				p = Lerp(p, onStage, uBlend);
+			}
 			return p;
 		}
 	}
@@ -3529,18 +3665,71 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 // 弓を装備していれば弦を引く。既定の弩は両手で構えて撃つ。
 static int UnitAttackClip(const Unit& u, int variant, int skill)
 {
-	return AttackClipFor(UnitMotionStyle(u, skill), variant);
+	return AttackClipFor(UnitMotionStyle(u, skill), variant, skill);
 }
 
 static int CutClipFor(const Unit& u, int skill, int variant)
 {
+	if (IsSummonId(skill)) {
+		int fx = skill >= 0 ? ((skill * 11) % 12) : 0;
+		if (fx == SUM_FX_FIRE || fx == SUM_FX_BOLT || fx == SUM_FX_WIND) return CL_CAST_LONG;
+		if (fx == SUM_FX_ICE || fx == SUM_FX_HOLY) return CL_CAST_RAISE;
+		if (fx == SUM_FX_DARK || fx == SUM_FX_MIASMA) return CL_TAUNT;
+		if (fx == SUM_FX_SPIKE || fx == SUM_FX_WEB) return CL_SPAWN;
+		return CL_CAST_SHOOT;
+	}
+	if (IsCraftId(skill)) {
+		if (IsCraftSuper(skill)) return variant ? CL_CAST_LONG : CL_TAUNT;
+		int line = (skill - CRAFT_BASE) / CRAFT_PER_LINE;
+		if (line == 0 || line == 3) return CL_CAST_RAISE;
+		if (line == 1 || line == 4) return CL_INTERACT;
+		if (line == 2 || line == 5) return CL_USE;
+		return variant ? CL_CAST_SHOOT : CL_CAST_LONG;
+	}
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	if (sd && IsFormSkill(skill)) {
-		if (FormOf(skill) == FM_CIRCLE) return CL_CAST_LONG;
-		if (FormOf(skill) == FM_PAIR) return CL_CAST_RAISE;
+		switch (FormOf(skill)) {
+		case FM_CIRCLE: return CL_CAST_LONG;
+		case FM_PAIR: return CL_CAST_RAISE;
+		case FM_CROSS: case FM_WALL: case FM_SQUARE: return CL_2H_SPIN;
+		case FM_BACK: case FM_CHAIN: return CL_1H_STAB;
+		case FM_TRI: return CL_2H_CHOP;
+		case FM_DIA: return CL_1H_CHOP;
+		case FM_ECHELON: return CL_1H_SHOOT;
+		case FM_PINCER: return CL_2H_CHOP;
+		case FM_WING: return CL_2H_SPIN;
+		default: return CL_1H_SLICE;
+		}
 	}
-	if (sd && sd->kind != SK_PHYS) return CastClipFor(sd->kind);
+	if (sd && sd->kind != SK_PHYS) return CastClipFor(sd->kind, skill);
+	if (u.monster >= 0) {
+		int st = UnitMotionStyle(u, skill);
+		if (st != AS_SHOOT && st != AS_SHOOT1 && st != AS_CAST) {
+			int pat = (u.monster * 3 + variant + (skill >= 0 ? skill : 0)) % 6;
+			switch (pat) {
+			case 0: return CL_PUNCH;
+			case 1: return CL_1H_STAB;
+			case 2: return CL_2H_CHOP;
+			case 3: return CL_2H_SPIN;
+			case 4: return CL_TAUNT;
+			default: return CL_1H_SLICE;
+			}
+		}
+	}
 	return UnitAttackClip(u, variant, skill);
+}
+
+static void KillCutParts(Fix<Particle, 4096>& parts)
+{
+	for (int i = 0; i < parts.size();) {
+		const Particle& p = parts[i];
+		if (p.wxHit == 0 && p.p.x * p.p.x + p.p.z * p.p.z < 64.f && p.p.y > -2.f && p.p.y < 10.f) {
+			parts[i] = parts.back();
+			parts.pop_back();
+			continue;
+		}
+		i++;
+	}
 }
 
 void Game::UpdateSeq(float dt)
@@ -3559,7 +3748,7 @@ void Game::UpdateSeq(float dt)
 				if (m_cutD >= 0) m_lunge[m_cutD] = 0;
 				{
 					int sk0 = (m_seqN > 0) ? m_seq[0].skill : -1;
-					int clip = CutClipFor(m_b.u[m_cutA], sk0, sk0 >= 0 ? 1 : 0);
+					int clip = CutClipFor(m_b.u[m_cutA], sk0, sk0 >= 0 ? ((sk0 * 3 + m_cutPat) & 1) : 0);
 					Actor& ca = m_act[m_cutA];
 					ActorPlay(ca, clip, 0, .06f);
 					ca.skillPose = sk0;
@@ -3617,6 +3806,7 @@ void Game::UpdateSeq(float dt)
 			// 召喚は攻撃のあと、種類ごとの退場が見えるまで結果を出さない。
 			if (m_cutStageT >= ((m_cutKind == 3 && m_sumOn) ? SummonDepartNeed() : 0.3f)) {
 				m_cutStage = 4; m_cutStageT = 0;
+				KillCutParts(m_parts);
 				m_popups.clear();
 				for (auto& p : m_deferPopups) m_popups.push_back(p);
 				m_deferPopups.clear();
@@ -3647,6 +3837,7 @@ void Game::UpdateSeq(float dt)
 			if (m_seqCut && m_cutKind == 3 && m_sumOn) {
 				if (!m_sumHit || m_cutStageT < SummonStrikeNeed()) return;
 				m_cutStage = 4; m_cutStageT = 0;
+				KillCutParts(m_parts);
 				m_popups.clear();
 				for (auto& p : m_deferPopups) m_popups.push_back(p);
 				m_deferPopups.clear();
@@ -3684,7 +3875,7 @@ void Game::UpdateSeq(float dt)
 	int span = maxV - minV;
 	BOOL follow = seenV && minV > 0 && span == 0 && !st.counter;
 	if (m_seqT == 0) {
-		int clip = cast ? CastClipFor(sd->kind) : UnitAttackClip(au, sd ? 1 : (m_seqCur & 1), st.skill);
+		int clip = CutClipFor(au, st.skill, sd ? ((st.skill + m_cutPat) & 1) : (m_seqCur & 1));
 		if (sd && IsFormSkill(st.skill)) {
 			if (FormOf(st.skill) == FM_CIRCLE) clip = CL_CAST_LONG;
 			else if (FormOf(st.skill) == FM_PAIR) clip = CL_CAST_RAISE;
@@ -3699,6 +3890,8 @@ void Game::UpdateSeq(float dt)
 			case FM_TRI: allyClip = CL_2H_CHOP; break;
 			case FM_DIA: allyClip = CL_1H_CHOP; break;
 			case FM_ECHELON: allyClip = CL_1H_SHOOT; break;
+			case FM_PINCER: allyClip = CL_2H_CHOP; break;
+			case FM_WING: allyClip = CL_2H_SPIN; break;
 			case FM_CIRCLE: allyClip = CL_CAST_LONG; break;
 			case FM_PAIR: allyClip = CL_CAST_RAISE; break;
 			default: break;
@@ -4186,9 +4379,11 @@ void Game::UpdateUnitsVisual(float dt)
 				a.poseHold = hold;
 				a.animSpeed = hold == 2 ? 0.22f : 0.4f;
 				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
-				if (a.clip != CL_IDLE && a.clip != CL_2H_IDLE) ActorPlay(a, CL_IDLE, 1, .18f);
+				int idleClip = (UnitMotionStyle(u, -1) == AS_CHOP2) ? CL_2H_IDLE : CL_IDLE;
+				if (a.clip != CL_IDLE && a.clip != CL_2H_IDLE) ActorPlay(a, idleClip, 1, .18f);
 			} else if (!hold && (loco || a.poseHold)) {
-				if (a.poseHold) ActorPlay(a, CL_IDLE, 1, .2f);
+				int idleClip = (UnitMotionStyle(u, -1) == AS_CHOP2) ? CL_2H_IDLE : CL_IDLE;
+				if (a.poseHold) ActorPlay(a, idleClip, 1, .2f);
 				a.poseHold = 0;
 				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
 				if (av.slow > 0) a.animSpeed = 0.55f;
@@ -4457,6 +4652,7 @@ void Game::DrawBattle3D()
 	m_r.SetStageId(m_b.stage);
 	m_r.SetSceneShift(MIdent());
 	m_r.SetCutDeck(-1);
+	m_r.SetCamNear(0.f, 0.f, 0.f);
 	Env e;
 	ThemeEnv(m_b.map.theme, e);
 	V3 target = m_camTarget + v3(0, .4f, 0);
@@ -4831,6 +5027,7 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
+	m_r.DrawWxGpu();
 }
 
 // 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
@@ -5465,16 +5662,36 @@ void Game::DrawCutIn3D()
 			eye = look + v3(2.2f, 1.15f, -2.4f);
 		}
 	} else if (m_cutStage == 1 && m_seqSkill >= 0) {
-		float u = Smooth01(m_cutStageT / 1.05f);
+		float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
 		V3 a = m_cutPosA;
 		float h = m_act[m_cutA].height;
 		if (h > 1.32f && m_act[m_cutA].proc != 3) h = 1.32f;
 		look = a + v3(0, h * .6f, 0);
-		eye = look + v3(Lerpf(1.6f, 1.1f, u), Lerpf(.1f, .25f, u), Lerpf(-1.2f, -.9f, u));
+		int pat = m_cutPat;
+		if (pat == 1) eye = look + v3(Lerpf(2.2f, 1.4f, u), Lerpf(-.05f, .45f, u), Lerpf(-1.6f, -.7f, u));
+		else if (pat == 2) {
+			float ang = u * 2.2f;
+			eye = look + v3(cosf(ang) * 1.7f, .35f, sinf(ang) * 1.7f);
+		} else if (pat == 3) eye = look + v3(Lerpf(.4f, .15f, u), Lerpf(.55f, .35f, u), Lerpf(-2.1f, -1.4f, u));
+		else if (pat == 4) {
+			eye = look + v3(Lerpf(-.2f, .3f, u), Lerpf(.4f, .55f, u), Lerpf(-2.0f, -1.5f, u));
+			look = Lerp(look, m_cutPosD + v3(0, .5f, 0), u * .35f);
+		} else if (pat == 5) eye = look + v3(Lerpf(2.4f, 1.2f, u), Lerpf(.05f, .85f, u), Lerpf(-.4f, -1.6f, u));
+		else if (pat == 6) eye = look + v3(Lerpf(.2f, 1.5f, u), Lerpf(2.4f, 1.1f, u), Lerpf(-1.8f, -1.2f, u));
+		else if (pat == 7) eye = look + v3(Lerpf(-1.8f, 1.1f, u), Lerpf(1.6f, .7f, u), Lerpf(-.5f, -1.4f, u));
+		else if (pat == 8) eye = look + v3(Lerpf(1.2f, .8f, u), Lerpf(-.15f, .25f, u), Lerpf(1.6f, -.9f, u));
+		else if (pat == 9) eye = look + v3(Lerpf(-2.2f, 1.8f, u), Lerpf(.9f, .45f, u), Lerpf(-.8f, -1.5f, u));
+		else if (pat == 10) eye = look + v3(Lerpf(.9f, .55f, u), Lerpf(.35f, .42f, u), Lerpf(-1.1f, -.75f, u));
+		else if (pat == 11) {
+			look = v3(0, .8f, 0);
+			eye = look + v3(Lerpf(.3f, 1.6f, u), Lerpf(3.2f, 1.8f, u), Lerpf(-.4f, -2.2f, u));
+		} else if (pat == 12) {
+			float ang = -0.4f + u * 1.1f;
+			eye = look + v3(cosf(ang) * 1.9f, .55f + u * .3f, sinf(ang) * 1.9f);
+		} else if (pat == 13) eye = look + v3(Lerpf(-1.4f, 1.6f, u), Lerpf(.15f, .7f, u), Lerpf(-1.8f, -1.1f, u));
+		else eye = look + v3(Lerpf(1.6f, 1.1f, u), Lerpf(.1f, .25f, u), Lerpf(-1.2f, -.9f, u));
 	} else if (m_cutStage == 2 || m_cutStage == 3) {
 		float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + 1.1f;
-		// 自キャラは -X。正方向に回すと敵が手前に来るので、反対へ回す。
-		float ang = -0.35f - u * 0.85f;
 		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .72f, 0);
 		float extra = max(0, spread - 1) * .55f;
@@ -5485,7 +5702,25 @@ void Game::DrawCutIn3D()
 		}
 		float dist = (m_cutFoeN <= 0 ? 2.6f : 3.35f) + extra;
 		dist = Lerpf(dist + .45f, dist, Smooth01(min(1.f, u * 1.4f)));
-		eye = v3(sinf(ang) * dist, 1.15f + sinf(u * 1.7f) * .06f, -cosf(ang) * dist);
+		float ang = -0.35f - u * 0.85f;
+		float elev = 1.15f + sinf(u * 1.7f) * .06f;
+		int pat = m_cutPat;
+		float h = (m_cutA >= 0) ? m_act[m_cutA].height : 1.f;
+		if (h > 1.32f && !(m_cutA >= 0 && m_act[m_cutA].proc == 3)) h = 1.32f;
+		if (pat == 1) { ang = -0.55f - u * 0.55f; elev = 0.85f; dist *= 1.08f; }
+		else if (pat == 2) { ang = 0.4f + u * 1.4f; elev = 1.35f; }
+		else if (pat == 3) { ang = -0.15f; elev = 0.55f; dist = Lerpf(2.4f, 1.85f, Smooth01(min(1.f, u))); look = m_cutPosD + v3(0, .5f, 0); }
+		else if (pat == 4) { ang = 1.15f; elev = 0.95f; look = Lerp(m_cutPosA, m_cutPosD, .45f) + v3(0, .6f, 0); }
+		else if (pat == 5) { ang = -0.9f - u * .4f; elev = 0.55f; dist *= 1.15f; }
+		else if (pat == 6) { ang = -0.2f; elev = 2.1f; dist *= 1.1f; }
+		else if (pat == 7) { ang = -1.4f + u * 0.3f; elev = 1.55f; }
+		else if (pat == 8) { ang = 0.8f + u * 0.5f; elev = 0.35f; }
+		else if (pat == 9) { ang = -0.35f - u * 1.6f; elev = 1.25f; dist *= 1.2f; }
+		else if (pat == 10) { ang = -0.25f; elev = 0.7f; dist *= 0.78f; look = m_cutPosD + v3(0, .65f, 0); }
+		else if (pat == 11) { ang = -0.4f - u * .3f; elev = 2.4f; dist *= 1.25f; }
+		else if (pat == 12) { ang = t * .35f; elev = 1.1f; }
+		else if (pat == 13) { ang = -0.7f - u * 0.5f; elev = 0.95f; look = m_cutPosA + v3(0, h * .5f, 0); }
+		eye = v3(sinf(ang) * dist, elev, -cosf(ang) * dist);
 		if (m_shake > .3f) eye = Lerp(eye, look, .1f);
 	} else {
 		int spread = max(m_cutAllyN, m_cutFoeN);
@@ -5498,7 +5733,9 @@ void Game::DrawCutIn3D()
 			extra = 3.4f + rows * .55f;
 		}
 		float dist = (m_cutFoeN <= 0 ? 2.8f : 3.8f) + extra;
-		eye = v3(.3f + sw, 1.05f, -dist);
+		float yaw = .3f + sw + (m_cutPat % 5) * .12f;
+		float elev = 1.05f + (m_cutPat == 6 || m_cutPat == 11 ? .55f : 0.f);
+		eye = v3(yaw, elev, -dist);
 		if (m_shake > .3f) { eye = Lerp(eye, look, .12f); }
 	}
 	if (m_shake > 0) look = look + v3(m_rng.F(-1, 1), m_rng.F(-1, 1), 0) * (m_shake * .03f);
@@ -5521,35 +5758,23 @@ void Game::DrawCutIn3D()
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
 	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 160.f);
 	m_r.SetCamera(view, proj, eye, m_time);
-	float ax = 0.f, az = 0.f, ay = 0.f;
-	int an = 0;
-	auto addAnchor = [&](int id) {
-		if (id < 0 || id >= m_b.nUnits) return;
-		ax += m_b.u[id].px;
-		az += m_b.u[id].pz;
-		an++;
-	};
-	addAnchor(m_cutA);
-	if (m_cutD >= 0) addAnchor(m_cutD);
-	if (an > 0) { ax /= (float)an; az /= (float)an; }
-	int atx = (int)floorf(ax), atz = (int)floorf(az);
-	if (Map::In(atx, atz)) ay = m_b.map.StandY(atx, atz);
-	else if (m_cutA >= 0 && m_cutA < m_b.nUnits) ay = m_b.map.StandY(m_b.u[m_cutA].x, m_b.u[m_cutA].z);
-	float face = 0.f;
-	if (m_cutA >= 0 && m_cutA < m_b.nUnits && m_cutD >= 0 && m_cutD < m_b.nUnits) {
-		float dx = m_b.u[m_cutD].px - m_b.u[m_cutA].px;
-		float dz = m_b.u[m_cutD].pz - m_b.u[m_cutA].pz;
-		face = (dx * dx + dz * dz > 0.04f) ? atan2f(dx, dz) : m_b.u[m_cutA].face;
-	} else if (m_cutA >= 0 && m_cutA < m_b.nUnits) face = m_b.u[m_cutA].face;
 	// 敵が立つ +X へ、マップ上の相手の方向を回す。床は戦闘地点の高さ。
-	M4 scene = MMul(MTrans(-ax, -ay, -az), MRotY(PI * 0.5f - face));
+	M4 scene = CutSceneXform();
 	m_r.SetSceneShift(scene);
 	float sightXz[32];
 	int sightN = 0;
-	for (int i = 0; i < m_cutAllyN && sightN < 16; i++) {
-		V3 sp = CutStand(0, i);
+	auto addSight = [&](int id) {
+		if (id < 0 || id >= m_b.nUnits || sightN >= 16) return;
+		V3 sp = ActorPos(id);
 		sightXz[sightN * 2] = sp.x;
 		sightXz[sightN * 2 + 1] = sp.z;
+		sightN++;
+	};
+	for (int i = 0; i < m_cutAllyN; i++) addSight(m_cutAlly[i]);
+	for (int i = 0; i < m_cutFoeN; i++) addSight(m_cutFoe[i]);
+	if (m_sumOn && sightN < 16) {
+		sightXz[sightN * 2] = m_sumPos.x;
+		sightXz[sightN * 2 + 1] = m_sumPos.z;
 		sightN++;
 	}
 	if (sightN <= 0) { sightXz[0] = 0.f; sightXz[1] = 0.f; sightN = 1; }
@@ -5603,7 +5828,7 @@ void Game::DrawCutIn3D()
 		float hide = solid - 1.25f;
 		if (hide < 0.06f) hide = 0.06f;
 		if (solid < hide + 0.35f) solid = hide + 0.35f;
-		m_r.SetCamNear(hide, solid);
+		m_r.SetCamNear(hide, solid, 1.f);
 		m_r.SetCamFwd(fwd.x, fwd.y, fwd.z);
 	}
 	int ids[CUT_ALLY_MAX + CUT_FOE_MAX];
@@ -5668,6 +5893,17 @@ void Game::DrawCutIn3D()
 	m_r.BeginMainPass();
 	{
 		float rip[TAC_RIPN * 4];
+		float ax = 0.f, az = 0.f;
+		int an = 0;
+		auto addRip = [&](int id) {
+			if (id < 0 || id >= m_b.nUnits) return;
+			ax += m_b.u[id].px;
+			az += m_b.u[id].pz;
+			an++;
+		};
+		addRip(m_cutA);
+		if (m_cutD >= 0) addRip(m_cutD);
+		if (an > 0) { ax /= (float)an; az /= (float)an; }
 		float c = scene.m[0], s = scene.m[8];
 		for (int i = 0; i < TAC_RIPN; i++) {
 			float rx = m_rip[i][0] - ax, rz = m_rip[i][2] - az;
@@ -5754,6 +5990,7 @@ void Game::DrawCutIn3D()
 		}
 	}
 	m_r.DrawParticles(m_parts.data(), (int)m_parts.size(), &scene);
+	m_r.DrawWxGpu();
 	m_r.SetCutActors(FALSE);
 	m_r.SetSceneShift(MIdent());
 	m_r.SetCutDeck(-1);
@@ -8063,7 +8300,6 @@ void Game::DrawCommandMenu()
 				AddPopup(CellCenter(ox, oz) + v3(0, .6f, 0), TT(brk ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
 				TacSfx(TS_DOOR);
 				m_r.BuildTerrain(m_b.map);
-				m_r.BuildMinimap(m_b.map);
 				FinishUnitTurn(1);
 			}
 			return;

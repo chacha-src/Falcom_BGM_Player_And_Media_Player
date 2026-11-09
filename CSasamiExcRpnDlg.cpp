@@ -5,6 +5,71 @@
 
 CSasamiExcRpnDlg* CSasamiExcRpnDlg::s_inst = NULL;
 
+/* 動的生成するパート種別コントロールのローカルID(リソース非依存)。 */
+enum {
+	IDC_SAE_PARTLBL   = 5200,
+	IDC_SAE_PARTKIND  = 5201,
+	IDC_SAE_PARTAPPLY = 5202,
+};
+
+/* GS=vstMultiDll / XG=vstExtraPath。両方空は GS 既定(MIDI マッパーも GS 互換)。 */
+static int ExcUseXgMulti(void)
+{
+	return (savedata.vstExtraPath[0] && !savedata.vstMultiDll[0]) ? 1 : 0;
+}
+
+/* リズムパート指定 SysEx を組み立てる。mode: 0=通常 1=ドラム1 2=ドラム2。
+   戻り値=バイト数、outPort にライブ送出ポート(0..2)を返す。 */
+static int ExcBuildRhythmPartSysex(uint8_t* out, int ch0, int mode, int* outPort)
+{
+	const int portIdx = (ch0 / 16) & 1;         /* 1..16=port0, 17..32=port1 */
+	const int part0 = ch0 % 16;                 /* ポート内 0..15 */
+	if (outPort) *outPort = portIdx;
+	int n = 0;
+	if (ExcUseXgMulti()) {
+		/* XG Multi Part — Part Mode: 0=Normal 2=Drums1 3=Drums2 (チェックサム無し)。 */
+		const uint8_t vv = (mode == 2) ? 3 : (mode == 1) ? 2 : 0;
+		out[n++] = 0xF0; out[n++] = 0x43; out[n++] = 0x10; out[n++] = 0x4C;
+		out[n++] = 0x08; out[n++] = (uint8_t)part0; out[n++] = 0x07; out[n++] = vv;
+		out[n++] = 0xF7;
+	} else {
+		/* GS Use For Rhythm Part: 0=通常 1=MAP1(ドラム1) 2=MAP2(ドラム2)。
+		   アドレス 40 1n 15。ブロック: part10→0x10, 1..9→0x11..0x19, 11..16→0x1A..0x1F。 */
+		const int p = part0 + 1;
+		int blk;
+		if (p == 10) blk = 0x10;
+		else if (p >= 1 && p <= 9) blk = 0x10 + p;
+		else blk = 0x10 + (p - 1);
+		const uint8_t vv = (mode == 2) ? 2 : (mode == 1) ? 1 : 0;
+		const uint8_t aH = 0x40, aM = (uint8_t)blk, aL = 0x15;
+		const int sum = (int)aH + (int)aM + (int)aL + (int)vv;
+		const uint8_t chk = (uint8_t)((0x80 - (sum & 0x7F)) & 0x7F);
+		out[n++] = 0xF0; out[n++] = 0x41; out[n++] = 0x10; out[n++] = 0x42; out[n++] = 0x12;
+		out[n++] = aH; out[n++] = aM; out[n++] = aL; out[n++] = vv; out[n++] = chk;
+		out[n++] = 0xF7;
+	}
+	return n;
+}
+
+/* 既存のリズムパート SysEx(当該パート分)かどうか。GS/XG 両対応。差し替え用。 */
+static int ExcIsRhythmPartSysexForPart(const uint8_t* b, int len, int ch0)
+{
+	const int part0 = ch0 % 16;
+	const int p = part0 + 1;
+	if (len >= 11 && b[0] == 0xF0 && b[1] == 0x41 && b[3] == 0x42 && b[4] == 0x12
+		&& b[5] == 0x40 && b[7] == 0x15) {
+		int blk;
+		if (p == 10) blk = 0x10;
+		else if (p >= 1 && p <= 9) blk = 0x10 + p;
+		else blk = 0x10 + (p - 1);
+		return (b[6] == (uint8_t)blk) ? 1 : 0;
+	}
+	if (len >= 9 && b[0] == 0xF0 && b[1] == 0x43 && b[3] == 0x4C
+		&& b[4] == 0x08 && b[6] == 0x07)
+		return (b[5] == (uint8_t)part0) ? 1 : 0;
+	return 0;
+}
+
 struct SasamiExcPreset {
 	const wchar_t* name;
 	const uint8_t* bytes;
@@ -60,6 +125,7 @@ CSasamiExcRpnDlg* CSasamiExcRpnDlg::OpenOwned(CWnd* owner, ScMidiDoc* doc, int c
 		s_inst->BringWindowToTop();
 		CString h; h.Format(L"MIDI %d tick %u", ch0 + 1, (unsigned)tick);
 		s_inst->RefreshHint(h);
+		s_inst->RefreshPartKind();
 		return s_inst;
 	}
 	s_inst = new CSasamiExcRpnDlg(owner);
@@ -109,6 +175,7 @@ BEGIN_MESSAGE_MAP(CSasamiExcRpnDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_EXC_NRPN, OnBnClickedNrpn)
 	ON_BN_CLICKED(IDC_SASAMI_EXC_SYSEX, OnBnClickedSysex)
 	ON_BN_CLICKED(IDC_SASAMI_EXC_CLOSE, OnBnClickedClose)
+	ON_BN_CLICKED(IDC_SAE_PARTAPPLY, OnPartKindApply)
 END_MESSAGE_MAP()
 
 void CSasamiExcRpnDlg::ApplyLang()
@@ -118,6 +185,18 @@ void CSasamiExcRpnDlg::ApplyLang()
 	m_btnNrpn.SetWindowText(LL14(L"NRPNを入れる", L"Insert NRPN", L"Insérer NRPN", L"Inserisci NRPN", L"Insertar NRPN", L"NRPN 넣기", L"插入 NRPN", L"إدراج NRPN", L"Вставить NRPN", L"NRPN einfügen", L"Inserir NRPN", L"NRPN invoegen", L"Wstaw NRPN", L"NRPN ekle"));
 	m_btnSysex.SetWindowText(LL14(L"SysExを入れる", L"Insert SysEx", L"Insérer SysEx", L"Inserisci SysEx", L"Insertar SysEx", L"SysEx 넣기", L"插入 SysEx", L"إدراج SysEx", L"Вставить SysEx", L"SysEx einfügen", L"Inserir SysEx", L"SysEx invoegen", L"Wstaw SysEx", L"SysEx ekle"));
 	m_btnClose.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	if (m_partLbl.GetSafeHwnd())
+		m_partLbl.SetWindowText(LL14(L"パート種別", L"Part type", L"Type de partie", L"Tipo parte", L"Tipo de parte", L"파트 종류", L"声部类型", L"نوع الجزء", L"Тип партии", L"Parttyp", L"Tipo de parte", L"Parttype", L"Typ partii", L"Parça türü"));
+	if (m_partKind.GetSafeHwnd()) {
+		const int keep = m_partKind.GetCurSel();
+		m_partKind.ResetContent();
+		m_partKind.AddString(LL14(L"通常パート", L"Normal part", L"Partie normale", L"Parte normale", L"Parte normal", L"일반 파트", L"普通声部", L"جزء عادي", L"Обычная партия", L"Normale Part", L"Parte normal", L"Normale part", L"Zwykła partia", L"Normal parça"));
+		m_partKind.AddString(LL14(L"ドラム1", L"Drum 1", L"Batterie 1", L"Batteria 1", L"Batería 1", L"드럼 1", L"鼓组 1", L"طبول 1", L"Барабаны 1", L"Drum 1", L"Bateria 1", L"Drum 1", L"Perkusja 1", L"Davul 1"));
+		m_partKind.AddString(LL14(L"ドラム2", L"Drum 2", L"Batterie 2", L"Batteria 2", L"Batería 2", L"드럼 2", L"鼓组 2", L"طبول 2", L"Барабаны 2", L"Drum 2", L"Bateria 2", L"Drum 2", L"Perkusja 2", L"Davul 2"));
+		m_partKind.SetCurSel((keep >= 0 && keep <= 2) ? keep : 0);
+	}
+	if (m_btnPartApply.GetSafeHwnd())
+		m_btnPartApply.SetWindowText(LL14(L"種別を適用", L"Apply type", L"Appliquer", L"Applica", L"Aplicar", L"종류 적용", L"应用类型", L"تطبيق النوع", L"Применить", L"Übernehmen", L"Aplicar tipo", L"Toepassen", L"Zastosuj", L"Uygula"));
 	RefreshHint(LL14(
 		L"プリセットで欄を埋めます。RPNは「RPNを入れる」、SysExは「SysExを入れる」。",
 		L"Preset fills the fields. RPN presets use Insert RPN. SysEx presets use Insert SysEx.",
@@ -156,11 +235,23 @@ BOOL CSasamiExcRpnDlg::OnInitDialog()
 	m_msb.SetWindowText(L"0");
 	m_lsb.SetWindowText(L"0");
 	m_data.SetWindowText(L"2");
+
+	/* --- パート種別(通常/ドラム1/ドラム2)を動的生成(リソース非依存) --- */
+	const CRect z(0, 0, 10, 10);
+	m_partLbl.Create(L"", WS_CHILD | WS_VISIBLE, z, this, IDC_SAE_PARTLBL);
+	m_partLbl.SetAeroMode(FALSE);
+	m_partKind.Create(WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST,
+		CRect(0, 0, 10, 160), this, IDC_SAE_PARTKIND);
+	m_partKind.SetAeroMode(FALSE);
+	m_btnPartApply.Create(L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, z, this, IDC_SAE_PARTAPPLY);
+	m_btnPartApply.SetAeroMode(FALSE); m_btnPartApply.SetFlat(TRUE);
+
 	ApplyLang();
+	RefreshPartKind();
 	OnCbnPreset();
 	if (!ScRestoreWndGeom(this, savedata.sasamiNotePropsX, savedata.sasamiNotePropsY,
-		savedata.sasamiNotePropsW, savedata.sasamiNotePropsH, 460, 240))
-		SetWindowPos(NULL, 0, 0, 620, 360, SWP_NOMOVE | SWP_NOZORDER);
+		savedata.sasamiNotePropsW, savedata.sasamiNotePropsH, 500, 320))
+		SetWindowPos(NULL, 0, 0, 620, 400, SWP_NOMOVE | SWP_NOZORDER);
 	LayoutChrome();
 	return TRUE;
 }
@@ -185,6 +276,11 @@ void CSasamiExcRpnDlg::LayoutChrome()
 	if (m_btnNrpn.GetSafeHwnd()) { m_btnNrpn.MoveWindow(x, y, 104, 28); x += 112; }
 	if (m_btnSysex.GetSafeHwnd()) { m_btnSysex.MoveWindow(x, y, 104, 28); x += 112; }
 	if (m_btnClose.GetSafeHwnd()) m_btnClose.MoveWindow(x, y, 86, 28);
+	y += 40;
+	/* パート種別(通常/ドラム1/ドラム2)行。 */
+	if (m_partLbl.GetSafeHwnd()) m_partLbl.MoveWindow(pad, y + 5, 108, 20);
+	if (m_partKind.GetSafeHwnd()) m_partKind.MoveWindow(pad + 112, y, 138, 160);
+	if (m_btnPartApply.GetSafeHwnd()) m_btnPartApply.MoveWindow(pad + 258, y, 96, 28);
 	y += 40;
 	if (m_hint.GetSafeHwnd()) m_hint.MoveWindow(pad, y, rc.Width() - pad * 2, max(50, rc.Height() - y - pad));
 }
@@ -315,6 +411,87 @@ void CSasamiExcRpnDlg::NotifyChanged()
 {
 	if (m_notify && ::IsWindow(m_notify))
 		::PostMessage(m_notify, WM_SASAMI_EXC_RPN_CHANGED, 1, 0);
+}
+
+/* 現在のパート種別をドキュメントから読んでコンボへ反映。 */
+void CSasamiExcRpnDlg::RefreshPartKind()
+{
+	if (!m_partKind.GetSafeHwnd() || !m_doc) return;
+	const int drum = ScMidiPartIsDrum(m_doc->ev, m_doc->evCount, m_ch, 0);
+	const int slot = ScMidiPartDrumSlot(m_doc->ev, m_doc->evCount, m_ch, 0);
+	const int mode = drum ? (slot ? 2 : 1) : 0;
+	m_partKind.SetCurSel(mode);
+}
+
+/* GS/XG リズムパート SysEx を曲(tick0)へ差し替え挿入。プール枠は再利用しリーク防止。 */
+void CSasamiExcRpnDlg::UpsertPartSysex(const uint8_t* bytes, int n)
+{
+	if (!m_doc || !bytes || n <= 0) return;
+	int firstPool = -1;
+	for (int i = 0; i < m_doc->evCount; ) {
+		ScEvent& e = m_doc->ev[i];
+		if (e.kind == SC_EV_SYSEX && e.tick == 0 && (int)e.ch == m_ch) {
+			const int pi = e.a;
+			if (pi >= 0 && pi < m_doc->sysexCount
+				&& ExcIsRhythmPartSysexForPart(m_doc->sysex[pi], m_doc->sysexLen[pi], m_ch)) {
+				if (firstPool < 0) {
+					int cp = n;
+					if (cp > ScMidiDoc::SC_SYSEX_BYTES) cp = ScMidiDoc::SC_SYSEX_BYTES;
+					memcpy(m_doc->sysex[pi], bytes, (size_t)cp);
+					m_doc->sysexLen[pi] = (uint16_t)cp;
+					firstPool = pi;
+					i++;
+					continue;
+				}
+				/* 重複イベントは取り除く(枠は残るが有限・再読込で解消)。 */
+				for (int j = i; j + 1 < m_doc->evCount; j++)
+					m_doc->ev[j] = m_doc->ev[j + 1];
+				m_doc->evCount--;
+				continue;
+			}
+		}
+		i++;
+	}
+	if (firstPool < 0)
+		ScMidiAddSysex(m_doc, 0, m_ch, bytes, n);
+}
+
+/* パート種別(0=通常 1=ドラム1 2=ドラム2)をドキュメント＋ライブ VST に反映。 */
+void CSasamiExcRpnDlg::ReflectDrumPart(int mode)
+{
+	if (!m_doc) return;
+	if (mode < 0) mode = 0; if (mode > 2) mode = 2;
+	const int drum = (mode != 0) ? 1 : 0;
+	const int slot = (mode == 2) ? 1 : 0;
+	/* 1) 真実の保持元: SC_EV_DRUM(native stream / 譜面 / アレンジが参照)。 */
+	ScMidiAddDrumEx(m_doc, 0, m_ch, drum, slot);
+
+	/* 2) VST3 等「専用音源(マルチでない)」がロード済みなら音色自体がドラム。
+	      GS/XG の SysEx は不要・無意味なので挿入も送出もしない。 */
+	const int part1 = m_ch + 1;
+	const int dedicated = (VstLivePartIsLoaded(part1) && !VstLivePartIsMulti(part1)) ? 1 : 0;
+	if (!dedicated) {
+		uint8_t sx[16];
+		int port = 0;
+		const int n = ExcBuildRhythmPartSysex(sx, m_ch, mode, &port);
+		if (n > 0) {
+			/* 曲へ永続(VST2 マルチティンバー再生時に効く)。 */
+			UpsertPartSysex(sx, n);
+			/* その場でライブ VST へ即反映。 */
+			VstLiveMidiSysex(port, sx, n);
+		}
+	}
+	NotifyChanged();
+}
+
+void CSasamiExcRpnDlg::OnPartKindApply()
+{
+	const int mode = m_partKind.GetSafeHwnd() ? m_partKind.GetCurSel() : 0;
+	ReflectDrumPart(mode < 0 ? 0 : mode);
+	RefreshHint(
+		mode == 2 ? LL14(L"このパートをドラム2に設定しました。", L"Set this part to Drum 2.", L"Partie réglée sur Batterie 2.", L"Parte impostata su Batteria 2.", L"Parte ajustada a Batería 2.", L"이 파트를 드럼 2로 설정했습니다.", L"已将此声部设为鼓组 2。", L"تم ضبط هذا الجزء على طبول 2.", L"Партия задана как Барабаны 2.", L"Part auf Drum 2 gesetzt.", L"Parte definida como Bateria 2.", L"Part op Drum 2 gezet.", L"Ustawiono partię na Perkusja 2.", L"Parça Davul 2 olarak ayarlandı.")
+		: mode == 1 ? LL14(L"このパートをドラム1に設定しました。", L"Set this part to Drum 1.", L"Partie réglée sur Batterie 1.", L"Parte impostata su Batteria 1.", L"Parte ajustada a Batería 1.", L"이 파트를 드럼 1로 설정했습니다.", L"已将此声部设为鼓组 1。", L"تم ضبط هذا الجزء على طبول 1.", L"Партия задана как Барабаны 1.", L"Part auf Drum 1 gesetzt.", L"Parte definida como Bateria 1.", L"Part op Drum 1 gezet.", L"Ustawiono partię na Perkusja 1.", L"Parça Davul 1 olarak ayarlandı.")
+		: LL14(L"このパートを通常パートに設定しました。", L"Set this part to a normal part.", L"Partie réglée en partie normale.", L"Parte impostata su parte normale.", L"Parte ajustada a parte normal.", L"이 파트를 일반 파트로 설정했습니다.", L"已将此声部设为普通声部。", L"تم ضبط هذا الجزء كجزء عادي.", L"Партия задана как обычная.", L"Part auf normale Part gesetzt.", L"Parte definida como parte normal.", L"Part op normale part gezet.", L"Ustawiono partię jako zwykłą.", L"Parça normal parçaya ayarlandı."));
 }
 
 void CSasamiExcRpnDlg::OnBnClickedRpn()

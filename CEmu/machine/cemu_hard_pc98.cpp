@@ -5017,7 +5017,9 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 			opnWriteCount_++;
 		}
 		break;
-	case EXT_CMD: extCmd_ = data; break;
+	/* 読はホストのコマンド。NTMDP/MIDEP は受領の印に 80h を書いてすぐ読み戻す。
+	   書込をコマンドへ残すと 80h しか見えず、再生分岐に入らない。 */
+	case EXT_CMD: break;
 	case EXT_SONG: extSong_ = (extSong_ & 0xff00) | data; break;
 	case EXT_SONG + 1: extSong_ = (extSong_ & 0x00ff) | ((uint16_t)data << 8); break;
 	case EXT_PARAM: extParam_ = (extParam_ & 0xff00) | data; break;

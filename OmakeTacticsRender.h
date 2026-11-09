@@ -103,10 +103,11 @@ struct GpuMesh {
 	UINT nIdx;
 	UINT stride;
 	int tex;       // テクスチャ番号（-1=白）
+	int mat;       // Skin 配列スロット（-1=なし）
 	int glow;
 	int i32;       // 32bit インデックス
 	UINT iBase;   // DrawIndexed の開始インデックス。0 なら先頭から
-	GpuMesh() : vb(NULL), ib(NULL), nIdx(0), stride(0), tex(-1), glow(0), i32(0), iBase(0) {}
+	GpuMesh() : vb(NULL), ib(NULL), nIdx(0), stride(0), tex(-1), mat(-1), glow(0), i32(0), iBase(0) {}
 	void Release();
 };
 
@@ -214,7 +215,8 @@ struct DrawParams {
 	int cape;            // 1 なら背中にマントがある。髪はマントの厚みの外を流す
 	float girth;         // 体型の胴の太さ（標準 1）。髪は太った胴・首・腕の外を流す
 	float gait;          // 0=止まっている 歩き・走り・飛行移動。その場の見本でも向かい風を足す
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f), gait(0) {}
+	int matSlice;        // Skin 配列。-1=使わない。noTess の武具・敵で OutlineColor.a に載せる
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f), gait(0), matSlice(-1) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -527,7 +529,7 @@ public:
 	void DrawSkinned(const Model& m, const Pose& p, const M4& world, const DrawParams& dp);
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
 	void SetSceneShift(const M4& m) { m_sceneShift = m; }
-	void SetCamNear(float hide, float solid) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; }
+	void SetCamNear(float hide, float solid, float ghost = 0.f) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; m_fcb.camNear[2] = ghost; }
 	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; m_fcb.camFwd[3] = 1.f; }
 	void DrawTerrain();
 	BOOL GroundChunkVisible() const;
@@ -541,10 +543,19 @@ public:
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n, const M4* mapXform = NULL);
 	void DrawRibbon(const Buf<VtxP>& v);
+	enum { WX_GPU_MAX = 8192, WX_GPU_ACT = 80 };
+	BOOL WxGpuReady() const { return m_csWx != NULL && m_wxGpuUAV != NULL && m_vsPWx != NULL && m_gsP != NULL; }
+	void TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64);
+	void DrawWxGpu();
 
 	// 地形
 	BOOL BuildTerrain(Map& m);
 	void BuildMinimap(const Map& m);
+	// 拠点の地形を戦闘の地形と別に残す。段・気候・種が同じなら、帰るときに作り直さない。
+	void ParkHomeLand(int stage, int theme, DWORD seed);
+	BOOL HomeLandParked(int stage, int theme, DWORD seed) const;
+	void RestoreHomeLand();
+	void DropHomeLand();
 	ID3D11ShaderResourceView* MinimapSrv(int layer = 0) {
 		if (layer < 0 || layer >= 3) layer = 0;
 		return m_srvMiniL[layer] ? m_srvMiniL[layer] : m_srvMiniL[0];
@@ -805,6 +816,10 @@ private:
 	int m_envTheme, m_envBucket, m_photoSide, m_photoLive;
 	ID3D11Texture2D* m_matTex;
 	ID3D11ShaderResourceView* m_matSrv;
+	ID3D11Texture2D* m_skinArr;
+	ID3D11ShaderResourceView* m_skinArrSrv;
+	ID3D11Texture2D* m_gndX;
+	ID3D11ShaderResourceView* m_gndXSrv;
 	ID3D11ComputeShader* m_csSkin;
 	ID3D11ComputeShader* m_csCloth[3];   // 格子を進める・辺を保って押し出す・頂点へ書く
 	ID3D11ComputeShader* m_csSoft[2];    // 胸と袖を進める・頂点へ書く
@@ -827,6 +842,18 @@ private:
 	int m_hairCapN[16];
 	ID3D11ComputeShader* m_csHair[2];
 	ID3D11Buffer* m_cbHairSim;
+	ID3D11ComputeShader* m_csWx;
+	ID3D11VertexShader* m_vsPWx;
+	ID3D11Buffer* m_wxGpuSB;
+	ID3D11UnorderedAccessView* m_wxGpuUAV;
+	ID3D11ShaderResourceView* m_wxGpuSRV;
+	ID3D11Buffer* m_wxActSB;
+	ID3D11ShaderResourceView* m_wxActSRV;
+	ID3D11Buffer* m_wxHgtSB;
+	ID3D11ShaderResourceView* m_wxHgtSRV;
+	ID3D11Buffer* m_cbWx;
+	int m_wxGpuN;
+	int m_wxGpuWx;
 	ID3D11Buffer* m_hairGuideSB;
 	ID3D11ShaderResourceView* m_hairGuide;
 	ID3D11Buffer* m_hairVertSB;
@@ -938,6 +965,30 @@ private:
 	int m_hour;
 	SceneryPuff m_puff[24];
 	int m_puffN;
+	// 戦闘へ入る直前の拠点。live のとき GPU メッシュはこちらにあり、描画中の地形は戦闘側。
+	struct HomeLand {
+		BOOL live;
+		int stage, theme, drawTheme;
+		DWORD seed;
+		DWORD waterColor;
+		int puffN, miniN;
+		GpuMesh terrain;
+		GpuMesh terrainChunk[16];
+		GpuMesh cover1[16], cover2[16], cover3[16], cover4[16];
+		GpuMesh water, lava;
+		BoundMesh waterChunk[16], lavaChunk[16];
+		Fix<PropBatch, 192> props;
+		SceneryPuff puff[24];
+		ID3D11Texture2D* texMini[LAY_N];
+		ID3D11ShaderResourceView* srvMini[LAY_N];
+		HomeLand() : live(FALSE), stage(0), theme(0), drawTheme(0), seed(0), waterColor(0), puffN(0), miniN(0)
+		{
+			memset(puff, 0, sizeof(puff));
+			for (int i = 0; i < LAY_N; i++) { texMini[i] = NULL; srvMini[i] = NULL; }
+		}
+	} m_homeLand;
+	void SwapHomeLand();
+	void ReleaseHomeLandGpu();
 
 	// フレーム定数
 	struct FrameCB {

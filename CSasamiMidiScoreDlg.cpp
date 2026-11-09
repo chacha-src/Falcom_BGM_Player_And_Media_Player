@@ -32,21 +32,54 @@ extern CPlayList* pl;
 enum { kScPreviewTimer = 7101 };
 enum { kScMetroTimer = 7102 };
 
+/* 譜面2①: 音価・臨時記号・スナップ・ズーム ツールバーの動的コントロールID。 */
+enum {
+	IDC_SAE_DV_BASE  = 0x5F30,  /* 全/2/4/8/16/32 → +0..+5 */
+	IDC_SAE_DV_DOT   = 0x5F40,
+	IDC_SAE_DV_TRIP  = 0x5F41,
+	IDC_SAE_DV_REST  = 0x5F42,
+	IDC_SAE_DV_TIE   = 0x5F43,
+	IDC_SAE_ACC_SHP  = 0x5F44,
+	IDC_SAE_ACC_NAT  = 0x5F45,
+	IDC_SAE_ACC_FLT  = 0x5F46,
+	IDC_SAE_KEYSIG   = 0x5F47,
+	IDC_SAE_SNAP     = 0x5F48,
+	IDC_SAE_ZOOM     = 0x5F49,
+	IDC_SAE_RANGEPLAY= 0x5F50,
+	IDC_SAE_BARPREV  = 0x5F51,
+	IDC_SAE_BARNEXT  = 0x5F52,
+	IDC_SAE_BARGO    = 0x5F53,
+	IDC_SAE_EDBAR    = 0x5F54,
+	IDC_SAE_MUTE     = 0x5F55,
+	IDC_SAE_SOLO     = 0x5F56,
+	IDC_SAE_MORE     = 0x5F57,
+	IDC_SAE_INFO     = 0x5F58,
+};
+
 static void ScMidiSetVstLabel(ScStaffUi* u, int part0, const wchar_t* path)
 {
-	if (!u || part0 < 0 || part0 >= 32 || !path || !path[0]) return;
+	if (!u || part0 < 0 || part0 >= 32) return;
+	if (!path || !path[0]) {
+		u->vstLabel[part0][0] = 0;
+		u->vstIsVst3[part0] = 0;
+		return;
+	}
+	const size_t n = wcslen(path);
+	u->vstIsVst3[part0] = (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
 	const wchar_t* base = wcsrchr(path, L'\\');
 	if (!base) base = wcsrchr(path, L'/');
 	base = base ? base + 1 : path;
 	wcsncpy_s(u->vstLabel[part0], base, _TRUNCATE);
 	wchar_t* dot = wcsrchr(u->vstLabel[part0], L'.');
 	if (dot) *dot = 0;
-	/* Kit plugs: default grand → drum staff (C1 bottom) so octave-1 pads sit on lines. */
-	if (u->clef[part0] == 2) {
-		const wchar_t* n = u->vstLabel[part0];
-		if (StrStrIW(n, L"Groove") || StrStrIW(n, L"Battery")
-			|| StrStrIW(n, L"Drum") || StrStrIW(n, L"BFD"))
+	/* Kit plugs: auto/treble/grand → drum staff (C1 bottom) so octave-1 pads sit on lines. */
+	if (u->clefAuto[part0] || u->clef[part0] == 0 || u->clef[part0] == 2) {
+		const wchar_t* nm = u->vstLabel[part0];
+		if (StrStrIW(nm, L"Groove") || StrStrIW(nm, L"Battery")
+			|| StrStrIW(nm, L"Drum") || StrStrIW(nm, L"BFD")) {
 			u->clef[part0] = 3;
+			u->clefAuto[part0] = 0;
+		}
 	}
 }
 
@@ -60,7 +93,7 @@ CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_blankCur(NULL), m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_bInLayout(FALSE), m_propMode(0)
 	, m_pendingEdClosePart(0), m_pendingEdCloseProg(-1), m_pendingEdOpenPart(0)
 	, m_clipN(0), m_clipBase(0), m_clipSpan(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
-	, m_metroBeat(0), m_metroTimer(0)
+	, m_metroBeat(0), m_metroTimer(0), m_chromeDetail(0)
 {
 	m_drawCursors.pencil = NULL;
 	m_drawCursors.line = NULL;
@@ -153,6 +186,7 @@ void CSasamiMidiScoreDlg::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
+	ON_WM_ACTIVATE()
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
@@ -208,6 +242,24 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_STEP, OnCbnStrip)
 	ON_CBN_SELCHANGE(IDC_SASAMI_PASTE_MODE, OnCbnPasteMode)
+	ON_CONTROL_RANGE(BN_CLICKED, IDC_SAE_DV_BASE, IDC_SAE_DV_BASE + 5, OnDurButton)
+	ON_BN_CLICKED(IDC_SAE_DV_DOT, OnDvDot)
+	ON_BN_CLICKED(IDC_SAE_DV_TRIP, OnDvTriplet)
+	ON_BN_CLICKED(IDC_SAE_DV_REST, OnDvRest)
+	ON_BN_CLICKED(IDC_SAE_DV_TIE, OnDvTie)
+	ON_BN_CLICKED(IDC_SAE_ACC_SHP, OnAccSharp)
+	ON_BN_CLICKED(IDC_SAE_ACC_NAT, OnAccNatural)
+	ON_BN_CLICKED(IDC_SAE_ACC_FLT, OnAccFlat)
+	ON_BN_CLICKED(IDC_SAE_KEYSIG, OnBnKeySig)
+	ON_CBN_SELCHANGE(IDC_SAE_SNAP, OnCbnSnap)
+	ON_CBN_SELCHANGE(IDC_SAE_ZOOM, OnCbnZoom)
+	ON_BN_CLICKED(IDC_SAE_RANGEPLAY, OnBnClickedRangePlay)
+	ON_BN_CLICKED(IDC_SAE_BARPREV, OnBnClickedBarPrev)
+	ON_BN_CLICKED(IDC_SAE_BARNEXT, OnBnClickedBarNext)
+	ON_BN_CLICKED(IDC_SAE_BARGO, OnBnClickedBarGo)
+	ON_BN_CLICKED(IDC_SAE_MUTE, OnBnClickedMute)
+	ON_BN_CLICKED(IDC_SAE_SOLO, OnBnClickedSolo)
+	ON_BN_CLICKED(IDC_SAE_MORE, OnBnClickedMore)
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, OnPalDur)
 	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, OnPalQueryState)
 	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, OnPalLayout)
@@ -280,9 +332,50 @@ void CSasamiMidiScoreDlg::ApplyLang()
 	if (m_btnRoll.GetSafeHwnd())
 		m_btnRoll.SetWindowText(LL14(L"ピアノロール", L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll",
 			L"피아노 롤", L"钢琴卷帘", L"رول البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Piano-roll", L"Rolka", L"Piyano rulosu"));
+	if (m_btnRangePlay.GetSafeHwnd())
+		m_btnRangePlay.SetWindowText(LL14(L"範囲再生", L"Range", L"Plage", L"Intervallo", L"Rango",
+			L"범위재생", L"范围试听", L"نطاق", L"Диапазон", L"Bereich", L"Intervalo", L"Bereik", L"Zakres", L"Aralık"));
+	if (m_btnBarPrev.GetSafeHwnd()) m_btnBarPrev.SetWindowText(L"<");
+	if (m_btnBarNext.GetSafeHwnd()) m_btnBarNext.SetWindowText(L">");
+	if (m_btnBarGo.GetSafeHwnd())
+		m_btnBarGo.SetWindowText(LL14(L"小節へ", L"Go bar", L"Mesure", L"Battuta", L"Compás",
+			L"마디로", L"到小节", L"مازورة", L"К такту", L"Zum Takt", L"Ao compasso", L"Naar maat", L"Do taktu", L"Ölçüye"));
+	if (m_btnMute.GetSafeHwnd())
+		m_btnMute.SetWindowText(LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Mute",
+			L"뮤트", L"静音", L"كتم", L"Мьют", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+	if (m_btnSolo.GetSafeHwnd())
+		m_btnSolo.SetWindowText(LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo",
+			L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo"));
+	if (m_btnMore.GetSafeHwnd())
+		m_btnMore.SetWindowText(m_chromeDetail
+			? LL14(L"詳細▲", L"More ▲", L"Plus ▲", L"Altro ▲", L"Más ▲", L"상세▲", L"详细▲", L"المزيد▲", L"Ещё▲", L"Mehr▲", L"Mais▲", L"Meer▲", L"Więcej▲", L"Daha▲")
+			: LL14(L"詳細▼", L"More ▼", L"Plus ▼", L"Altro ▼", L"Más ▼", L"상세▼", L"详细▼", L"المزيد▼", L"Ещё▼", L"Mehr▼", L"Mais▼", L"Meer▼", L"Więcej▼", L"Daha▼"));
+	/* 譜面2①: ツールバーの言語化。音価/臨時記号は記号固定、休符/タイ/調号は言語化。 */
+	if (m_dvRest.GetSafeHwnd())
+		m_dvRest.SetWindowText(LL14(L"休", L"R", L"S", L"P", L"S", L"쉼", L"休", L"سك", L"П", L"P", L"P", L"R", L"P", L"S"));
+	if (m_dvTie.GetSafeHwnd())
+		m_dvTie.SetWindowText(L"\u2040");
+	if (m_btnKeySig.GetSafeHwnd())
+		m_btnKeySig.SetWindowText(LL14(L"調号", L"Key", L"Clé", L"Chiave", L"Clave", L"조표", L"调号", L"مفتاح", L"Ключ", L"Tonart", L"Clave", L"Sleutel", L"Tonacja", L"Anahtar"));
+	if (m_snap.GetSafeHwnd()) {
+		const int keep = m_snap.GetCurSel();
+		m_snap.ResetContent();
+		m_snap.AddString(LL14(L"スナップ:音価", L"Snap: note", L"Aimant: note", L"Aggancio: nota", L"Ajuste: nota", L"스냅:음가", L"吸附:音符", L"محاذاة: نغمة", L"Привязка: нота", L"Raster: Note", L"Ajuste: nota", L"Snap: noot", L"Przyciągaj: nuta", L"Yapış: nota"));
+		m_snap.AddString(LL14(L"スナップ:1/16", L"Snap: 1/16", L"Aimant: 1/16", L"Aggancio: 1/16", L"Ajuste: 1/16", L"스냅:1/16", L"吸附:1/16", L"محاذاة: 1/16", L"Привязка: 1/16", L"Raster: 1/16", L"Ajuste: 1/16", L"Snap: 1/16", L"Przyciągaj: 1/16", L"Yapış: 1/16"));
+		m_snap.SetCurSel(keep >= 0 ? keep : (m_ui.snapFit ? 0 : 1));
+	}
+	if (m_zoom.GetSafeHwnd()) {
+		const int keep = m_zoom.GetCurSel();
+		m_zoom.ResetContent();
+		static const wchar_t* zl[] = { L"50%", L"75%", L"100%", L"150%", L"200%", L"300%" };
+		for (int i = 0; i < 6; i++) m_zoom.AddString(zl[i]);
+		m_zoom.AddString(LL14(L"最大", L"Max", L"Max", L"Max", L"Máx", L"최대", L"最大", L"الأقصى", L"Макс", L"Max", L"Máx", L"Max", L"Maks", L"Maks"));
+		m_zoom.SetCurSel(keep >= 0 ? keep : 2);
+	}
 	if (m_stripLanes.GetSafeHwnd())
 		SyncStripCombos();
 	SyncMidiInCombos();
+	SyncDurToolbar();
 	UpdateHelpBar();
 }
 
@@ -310,6 +403,13 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	if (!m_btnKey.GetSafeHwnd())
 		m_btnKey.Create(L"鍵盤", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(0, 0, 64, 28), this, 0x5F21);
 	flatBtn(m_btnKey);
+	if (m_btnRangePlay.GetSafeHwnd()) flatBtn(m_btnRangePlay);
+	if (m_btnBarPrev.GetSafeHwnd()) flatBtn(m_btnBarPrev);
+	if (m_btnBarNext.GetSafeHwnd()) flatBtn(m_btnBarNext);
+	if (m_btnBarGo.GetSafeHwnd()) flatBtn(m_btnBarGo);
+	if (m_btnMute.GetSafeHwnd()) flatBtn(m_btnMute);
+	if (m_btnSolo.GetSafeHwnd()) flatBtn(m_btnSolo);
+	if (m_btnMore.GetSafeHwnd()) flatBtn(m_btnMore);
 	/* Score tool icons (embedded res\\ui_score / ui_ctl / ui_icons). */
 	if (m_btnOpen.GetSafeHwnd()) m_btnOpen.SetIcon(IDI_UI_FOLDER);
 	if (m_btnSave.GetSafeHwnd()) m_btnSave.SetIcon(IDI_UI_FILE);
@@ -347,14 +447,61 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	if (m_midiInMode.GetSafeHwnd()) m_midiInMode.SetAeroMode(FALSE);
 	if (m_follow.GetSafeHwnd()) m_follow.SetAeroMode(FALSE);
 	if (m_helpBar.GetSafeHwnd()) m_helpBar.SetAeroMode(FALSE);
+
+	/* 譜面2①: 音価・臨時記号・スナップ・ズーム ツールバー（動的生成・CCustom）。 */
+	auto mkTB = [&](CCustomStandardButton& b, int id, const wchar_t* txt) {
+		if (!b.GetSafeHwnd())
+			b.Create(txt, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(0, 0, 30, 28), this, id);
+		b.SetWindowText(txt);
+		b.SetAeroMode(FALSE); b.SetFlat(TRUE);
+	};
+	mkTB(m_dvWhole, IDC_SAE_DV_BASE + 0, L"1");
+	mkTB(m_dvHalf, IDC_SAE_DV_BASE + 1, L"2");
+	mkTB(m_dvQuarter, IDC_SAE_DV_BASE + 2, L"4");
+	mkTB(m_dv8, IDC_SAE_DV_BASE + 3, L"8");
+	mkTB(m_dv16, IDC_SAE_DV_BASE + 4, L"16");
+	mkTB(m_dv32, IDC_SAE_DV_BASE + 5, L"32");
+	mkTB(m_dvDot, IDC_SAE_DV_DOT, L".");
+	mkTB(m_dvTriplet, IDC_SAE_DV_TRIP, L"3");
+	mkTB(m_dvRest, IDC_SAE_DV_REST, L"R");
+	mkTB(m_dvTie, IDC_SAE_DV_TIE, L"\u2040");       /* ⁀ tie */
+	mkTB(m_accSharp, IDC_SAE_ACC_SHP, L"\u266F");   /* ♯ */
+	mkTB(m_accNatural, IDC_SAE_ACC_NAT, L"\u266E"); /* ♮ */
+	mkTB(m_accFlat, IDC_SAE_ACC_FLT, L"\u266D");    /* ♭ */
+	mkTB(m_btnKeySig, IDC_SAE_KEYSIG, L"\u266F\u266D");
+	if (!m_snap.GetSafeHwnd())
+		m_snap.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 96, 160), this, IDC_SAE_SNAP);
+	m_snap.SetAeroMode(FALSE);
+	if (!m_zoom.GetSafeHwnd())
+		m_zoom.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 96, 200), this, IDC_SAE_ZOOM);
+	m_zoom.SetAeroMode(FALSE);
+
+	/* 譜面UX: 範囲再生・小節ジャンプ・Mute/Solo・詳細パネル・情報バー */
+	auto mkNav = [&](CCustomStandardButton& b, int id, const wchar_t* txt) {
+		if (!b.GetSafeHwnd())
+			b.Create(txt, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(0, 0, 48, 28), this, id);
+		b.SetAeroMode(FALSE); b.SetFlat(TRUE);
+	};
+	mkNav(m_btnRangePlay, IDC_SAE_RANGEPLAY, L"Range");
+	mkNav(m_btnBarPrev, IDC_SAE_BARPREV, L"<");
+	mkNav(m_btnBarNext, IDC_SAE_BARNEXT, L">");
+	mkNav(m_btnBarGo, IDC_SAE_BARGO, L"Go");
+	mkNav(m_btnMute, IDC_SAE_MUTE, L"M");
+	mkNav(m_btnSolo, IDC_SAE_SOLO, L"S");
+	mkNav(m_btnMore, IDC_SAE_MORE, L"...");
+	if (!m_edBar.GetSafeHwnd())
+		m_edBar.Create(WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_AUTOHSCROLL, CRect(0, 0, 40, 22), this, IDC_SAE_EDBAR);
+	m_edBar.SetAeroMode(FALSE);
+	m_edBar.SetWindowText(L"1");
+	if (!m_infoBar.GetSafeHwnd())
+		m_infoBar.Create(L"", WS_CHILD | WS_VISIBLE, CRect(0, 0, 10, 10), this, IDC_SAE_INFO);
+	m_infoBar.SetAeroMode(FALSE);
+
 	ApplyLang();
-	m_ch.ResetContent();
-	for (int i = 0; i < SC_MIDI_CH; i++) {
-		wchar_t s[32];
-		_snwprintf_s(s, _TRUNCATE, L"Ch %d", i + 1);
-		m_ch.AddString(s);
-	}
-	m_ch.SetCurSel(0);
+	RefreshChComboLabels();
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(0);
 	m_edNote.SetWindowText(L"");
 	m_edGt.SetWindowText(L"100");
 	m_edVel.SetWindowText(L"100");
@@ -405,12 +552,25 @@ BOOL CSasamiMidiScoreDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
+	if (pMsg->message == WM_KEYDOWN && m_edBar.GetSafeHwnd()
+		&& pMsg->hwnd == m_edBar.GetSafeHwnd()
+		&& pMsg->wParam == VK_RETURN) {
+		OnBnClickedBarGo();
+		return TRUE;
+	}
 	if (pMsg->message == WM_KEYDOWN) {
 		const int ctrlNow = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
 		const int arrow = (pMsg->wParam == VK_UP || pMsg->wParam == VK_DOWN
 			|| pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT);
 		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME
-			|| (!ctrlNow && (pMsg->wParam == 'Q' || pMsg->wParam == 'q'))
+			|| pMsg->wParam == VK_PRIOR || pMsg->wParam == VK_NEXT
+			|| pMsg->wParam == VK_END || pMsg->wParam == VK_TAB
+			|| pMsg->wParam == VK_OEM_4 || pMsg->wParam == VK_OEM_6
+			|| (!ctrlNow && (pMsg->wParam == 'Q' || pMsg->wParam == 'q'
+				|| pMsg->wParam == 'M' || pMsg->wParam == 'm'
+				|| pMsg->wParam == 'S' || pMsg->wParam == 's'
+				|| pMsg->wParam == 'G' || pMsg->wParam == 'g'))
+			|| (ctrlNow && (pMsg->wParam == 'G' || pMsg->wParam == 'g'))
 			|| (ctrlNow && arrow)
 			|| ScStaffWantsScoreKey((UINT)pMsg->wParam, ctrlNow)) {
 			CWnd* f = GetFocus();
@@ -456,6 +616,24 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 		L"새로 — 악보/텍스트 지우기", L"新建 — 清空谱面与文本", L"جديد — مسح", L"Новый — очистить", L"Neu — leeren", L"Novo — limpar", L"Nieuw — wissen", L"Nowy — wyczyść", L"Yeni — temizle"));
 	tip(m_btnPlay, LL14(L"マーカーからプレビュー（Space=再生/停止）", L"Preview from marker (Space = play/stop)", L"Aperçu depuis le marqueur (Espace)", L"Anteprima dal marcatore (Spazio)", L"Vista previa desde marcador (Espacio)",
 		L"마커부터 미리듣기 (Space)", L"从标记预览（Space）", L"معاينة من العلامة (Space)", L"Превью с маркера (Space)", L"Vorschau ab Markierung (Leertaste)", L"Prévia do marcador (Espaço)", L"Voorbeeld vanaf markering (Spatie)", L"Podgląd od znacznika (Spacja)", L"İşaretten önizle (Space)"));
+	tip(m_btnRangePlay, LL14(L"選択範囲（無ければ現在小節）を全パートで即試聴（Shift+Space）", L"Instant range preview — selection or current bar, all parts (Shift+Space)", L"Aperçu plage immédiat (Shift+Espace)", L"Anteprima intervallo (Shift+Spazio)", L"Vista previa de rango (Shift+Espacio)",
+		L"범위 즉시 재생 (Shift+Space)", L"范围即听（Shift+Space）", L"معاينة النطاق (Shift+Space)", L"Превью диапазона (Shift+Space)", L"Bereich sofort (Umschalt+Leer)", L"Prévia do intervalo (Shift+Espaço)", L"Bereik direct (Shift+Spatie)", L"Podgląd zakresu (Shift+Spacja)", L"Aralık önizleme (Shift+Space)"));
+	tip(m_btnBarPrev, LL14(L"前の小節（PageUp / [）", L"Previous bar (PageUp / [)", L"Mesure précédente (Page préc. / [)", L"Battuta precedente (Pag↑ / [)", L"Compás anterior (Re Pág / [)",
+		L"이전 마디 (PageUp / [)", L"上一小节 (PageUp / [)", L"المازورة السابقة", L"Предыдущий такт", L"Vorheriger Takt (Bild↑ / [)", L"Compasso anterior", L"Vorige maat", L"Poprzedni takt", L"Önceki ölçü"));
+	tip(m_btnBarNext, LL14(L"次の小節（PageDown / ]）", L"Next bar (PageDown / ])", L"Mesure suivante (Page suiv. / ])", L"Battuta successiva (Pag↓ / ])", L"Compás siguiente (Av Pág / ])",
+		L"다음 마디 (PageDown / ])", L"下一小节 (PageDown / ])", L"المازورة التالية", L"Следующий такт", L"Nächster Takt (Bild↓ / ])", L"Compasso seguinte", L"Volgende maat", L"Następny takt", L"Sonraki ölçü"));
+	tip(m_btnBarGo, LL14(L"小節番号へジャンプ（Ctrl+G）", L"Jump to bar number (Ctrl+G)", L"Aller à la mesure (Ctrl+G)", L"Vai alla battuta (Ctrl+G)", L"Ir al compás (Ctrl+G)",
+		L"마디로 이동 (Ctrl+G)", L"跳到小节 (Ctrl+G)", L"الانتقال إلى المازورة", L"Перейти к такту", L"Zum Takt (Strg+G)", L"Ir ao compasso", L"Ga naar maat", L"Idź do taktu", L"Ölçüye git"));
+	tip(m_edBar, LL14(L"小節番号。Enter で移動", L"Bar number. Enter jumps", L"Numéro de mesure. Entrée pour aller", L"Numero battuta. Invio per andare", L"Número de compás. Intro para ir",
+		L"마디 번호. Enter로 이동", L"小节号。Enter 跳转", L"رقم المازورة", L"Номер такта", L"Taktnummer. Eingabe springt", L"Número do compasso", L"Maatnummer", L"Numer taktu", L"Ölçü numarası"));
+	tip(m_btnMute, LL14(L"現在パートをミュート（M）", L"Mute current part (M)", L"Muet la partie (M)", L"Muto la parte (M)", L"Silenciar parte (M)",
+		L"현재 파트 뮤트 (M)", L"静音当前声部 (M)", L"كتم الجزء (M)", L"Мьют партии (M)", L"Part stumm (M)", L"Mudo da parte (M)", L"Part dempen (M)", L"Wycisz partię (M)", L"Partiyi sessiz (M)"));
+	tip(m_btnSolo, LL14(L"現在パートをソロ（S）", L"Solo current part (S)", L"Solo la partie (S)", L"Solo la parte (S)", L"Solo de la parte (S)",
+		L"현재 파트 솔로 (S)", L"独奏当前声部 (S)", L"منفرد الجزء (S)", L"Соло партии (S)", L"Part solo (S)", L"Solo da parte (S)", L"Part solo (S)", L"Solo partii (S)", L"Parti solo (S)"));
+	tip(m_btnMore, LL14(L"詳細パネル（MIDI In / CC / プロパティ）の表示切替", L"Toggle detail panel (MIDI In / CC / properties)", L"Panneau détails", L"Pannello dettagli", L"Panel de detalles",
+		L"상세 패널 전환", L"切换详细面板", L"لوحة التفاصيل", L"Панель подробностей", L"Detailleiste umschalten", L"Painel de detalhes", L"Detailpaneel", L"Panel szczegółów", L"Ayrıntı paneli"));
+	tip(m_infoBar, LL14(L"小節・拍子・テンポ・調・パート・選択の現在位置", L"Current bar, meter, tempo, key, part, selection", L"Position actuelle", L"Posizione attuale", L"Posición actual",
+		L"현재 위치 정보", L"当前位置信息", L"الموضع الحالي", L"Текущая позиция", L"Aktuelle Position", L"Posição atual", L"Huidige positie", L"Bieżąca pozycja", L"Geçerli konum"));
 	tip(m_btnExport, LL14(L"コンパイルMIDIからオーディオ書き出し", L"Audio export from compiled MIDI", L"Export audio depuis MIDI compilé", L"Esporta audio da MIDI compilato", L"Exportar audio desde MIDI compilado",
 		L"컴파일 MIDI에서 오디오보내기", L"从编译MIDI导出音频", L"تصدير صوت من MIDI", L"Экспорт аудио из MIDI", L"Audio-Export aus MIDI", L"Exportar áudio do MIDI", L"Audio exporteren uit MIDI", L"Eksport audio z MIDI", L"MIDI'den ses dışa aktar"));
 	tip(m_btnPencil, LL14(L"音符ツール — 五線に音符・休符を配置（CCレーン描画は下の「鉛筆/直線/曲線」コンボ）", L"Note tool — place notes/rests on staff (CC lanes use Pencil/Line/Curve combo below)", L"Notes — portée (CC = combo)", L"Note — pentagramma (CC = combo)", L"Notas — pentagrama (CC = combo)",
@@ -539,6 +717,10 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	int y = cap + pad;
 	int x = pad;
 	const int right = rc.right - pad;
+	auto vis = [&](CWnd& w, int show) {
+		if (!w.GetSafeHwnd()) return;
+		w.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	};
 	auto place = [&](CWnd& w, int minW) {
 		if (!w.GetSafeHwnd() || !(w.GetStyle() & WS_VISIBLE)) return;
 		const int ww = ScChromeButtonWidth(&w, minW, 168);
@@ -547,111 +729,137 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 		x += ww + 4;
 	};
 	auto groupGap = [&]() { x += 10; };
-	/* File, then listen, then help — the first things a new score needs. */
-	place(m_btnOpen, 64);
-	place(m_btnSave, 64);
-	place(m_btnNew, 64);
+	const int detail = m_chromeDetail ? 1 : 0;
+
+	/* 1行目: ファイル / 再生 / 位置 / アレンジ / 表示 */
+	vis(m_btnOpen, 1); vis(m_btnSave, 1); vis(m_btnNew, 1);
+	vis(m_btnPlay, 1); vis(m_btnRangePlay, 1); vis(m_btnExport, 1);
+	vis(m_btnMark, 1); vis(m_btnLoopA, 1); vis(m_btnLoopB, 1); vis(m_btnLoopClr, 1);
+	vis(m_follow, 1); vis(m_btnArr, 1); vis(m_btnShowAll, 1);
+	vis(m_btnText, 1); vis(m_btnRoll, 1); vis(m_btnHelp, 1); vis(m_btnMore, 1);
+	place(m_btnOpen, 56); place(m_btnSave, 56); place(m_btnNew, 56);
 	groupGap();
-	place(m_btnPlay, 88);
-	place(m_btnExport, 72);
+	place(m_btnPlay, 80); place(m_btnRangePlay, 72); place(m_btnExport, 64);
 	groupGap();
-	place(m_btnHelp, 64);
-	y += btnH + 6;
-	x = pad;
-	/* Write tools, then which channel they write to. */
-	place(m_btnPencil, 64);
-	place(m_btnErase, 72);
-	place(m_btnSel, 64);
-	place(m_btnTempo, 64);
-	place(m_btnKey, 64);
-	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
-	groupGap();
-	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
-	y += btnH + 6;
-	x = pad;
-	const int propY = y;
-	const int labW = 44;
-	const int edW = 52;
-	auto field = [&](CWnd& ed) {
-		if (!ed.GetSafeHwnd()) return;
-		ed.MoveWindow(x + labW, propY, edW, 22);
-		x += labW + edW + 8;
-	};
-	field(m_edNote);
-	field(m_edGt);
-	field(m_edVel);
-	place(m_btnPropUpd, 56);
-	y += btnH + 6;
-	x = pad;
-	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
-	layoutCombo(m_stripStep, x, y, 88, cbH, 120); x += 94;
-	layoutCombo(m_stripDraw, x, y, 132, cbH, 168); x += 138;
-	layoutCombo(m_pasteMode, x, y, 100, cbH, 120);
-	y += cbH + 6;
-	if (m_ui.stripCount >= 1) {
-		x = pad;
-		const int avail = max(480, rc.Width() - pad * 2);
-		const int hgtW = 88;
-		const int kindW = min(260, max(200, (avail - hgtW * 3 - 24) / 3));
-		layoutCombo(m_stripKind0, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
-		layoutCombo(m_stripHgt0, x, y, hgtW, cbH, 100); x += hgtW + 4;
-		layoutCombo(m_stripKind1, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
-		layoutCombo(m_stripHgt1, x, y, hgtW, cbH, 100); x += hgtW + 4;
-		layoutCombo(m_stripKind2, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
-		layoutCombo(m_stripHgt2, x, y, hgtW, cbH, 100);
-		if (m_stripKind0.GetSafeHwnd()) m_stripKind0.ShowWindow(SW_SHOW);
-		if (m_stripHgt0.GetSafeHwnd()) m_stripHgt0.ShowWindow(SW_SHOW);
-		if (m_stripKind1.GetSafeHwnd())
-			m_stripKind1.ShowWindow(m_ui.stripCount >= 2 ? SW_SHOW : SW_HIDE);
-		if (m_stripHgt1.GetSafeHwnd())
-			m_stripHgt1.ShowWindow(m_ui.stripCount >= 2 ? SW_SHOW : SW_HIDE);
-		if (m_stripKind2.GetSafeHwnd())
-			m_stripKind2.ShowWindow(m_ui.stripCount >= 3 ? SW_SHOW : SW_HIDE);
-		if (m_stripHgt2.GetSafeHwnd())
-			m_stripHgt2.ShowWindow(m_ui.stripCount >= 3 ? SW_SHOW : SW_HIDE);
-		y += cbH + 6;
-	} else {
-		if (m_stripKind0.GetSafeHwnd()) m_stripKind0.ShowWindow(SW_HIDE);
-		if (m_stripHgt0.GetSafeHwnd()) m_stripHgt0.ShowWindow(SW_HIDE);
-		if (m_stripKind1.GetSafeHwnd()) m_stripKind1.ShowWindow(SW_HIDE);
-		if (m_stripHgt1.GetSafeHwnd()) m_stripHgt1.ShowWindow(SW_HIDE);
-		if (m_stripKind2.GetSafeHwnd()) m_stripKind2.ShowWindow(SW_HIDE);
-		if (m_stripHgt2.GetSafeHwnd()) m_stripHgt2.ShowWindow(SW_HIDE);
-		y += 2;
-	}
-	x = pad;
-	/* Where you are, then other views of the same song. */
-	place(m_btnMark, 48);
-	place(m_btnLoopA, 28);
-	place(m_btnLoopB, 28);
-	place(m_btnLoopClr, 52);
-	place(m_btnShowAll, 48);
-	groupGap();
-	place(m_btnText, 72);
-	place(m_btnRoll, 96);
-	place(m_btnFx, 96);
-	y += btnH + 6;
-	x = pad;
-	/* Record, then writing helpers that used to be abbreviated. */
-	layoutCombo(m_midiInDev, x, y, 168, cbH); x += 174;
-	layoutCombo(m_midiInCh, x, y, 72, cbH); x += 78;
-	layoutCombo(m_midiInMode, x, y, 110, cbH); x += 116;
-	place(m_btnArr, 72);
-	if (m_btnLayout.GetSafeHwnd()) m_btnLayout.ShowWindow(SW_SHOW);
-	place(m_btnLayout, 56);
-	place(m_btnChord, 56);
-	place(m_btnPatt, 80);
+	place(m_btnMark, 44); place(m_btnLoopA, 26); place(m_btnLoopB, 26); place(m_btnLoopClr, 48);
 	if (m_follow.GetSafeHwnd()) {
-		const int fw = 96;
-		if (x > pad && x + fw > right) { y += btnH + 4; x = pad; }
-		m_follow.MoveWindow(x, y, fw, btnH);
-		x += fw + 4;
+		if (x > pad && x + 88 > right) { y += btnH + 4; x = pad; }
+		m_follow.MoveWindow(x, y, 88, btnH); x += 94;
 	}
-	y += cbH + 4;
+	groupGap();
+	place(m_btnArr, 64);
+	place(m_btnShowAll, 48);
+	place(m_btnText, 64);
+	place(m_btnRoll, 88);
+	place(m_btnHelp, 56);
+	place(m_btnMore, 64);
+	y += btnH + 6;
+	x = pad;
+
+	/* 2行目: 入力ツール / 音価 / 臨時記号 / スナップ・ズーム / パート / 小節ナビ */
+	vis(m_btnPencil, 1); vis(m_btnErase, 1); vis(m_btnSel, 1);
+	vis(m_btnPal, 1); vis(m_btnTempo, 1); vis(m_btnKey, 1);
+	place(m_btnPencil, 56); place(m_btnErase, 64); place(m_btnSel, 56);
+	place(m_btnPal, 56); place(m_btnTempo, 56); place(m_btnKey, 56);
+	groupGap();
+	place(m_dvWhole, 26); place(m_dvHalf, 26); place(m_dvQuarter, 26);
+	place(m_dv8, 26); place(m_dv16, 30); place(m_dv32, 30);
+	place(m_dvDot, 22); place(m_dvTriplet, 22); place(m_dvRest, 30); place(m_dvTie, 26);
+	groupGap();
+	place(m_accSharp, 22); place(m_accNatural, 22); place(m_accFlat, 22);
+	place(m_btnKeySig, 48);
+	if (m_snap.GetSafeHwnd()) {
+		if (x > pad && x + 96 > right) { y += btnH + 4; x = pad; }
+		layoutCombo(m_snap, x, y, 96, btnH + 4, 120); x += 102;
+	}
+	if (m_zoom.GetSafeHwnd()) {
+		if (x > pad && x + 72 > right) { y += btnH + 4; x = pad; }
+		layoutCombo(m_zoom, x, y, 72, btnH + 4, 100); x += 78;
+	}
+	groupGap();
+	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 118, btnH + 4, 160); x += 124; }
+	place(m_btnMute, 56); place(m_btnSolo, 48);
+	groupGap();
+	place(m_btnBarPrev, 26);
+	if (m_edBar.GetSafeHwnd()) {
+		if (x > pad && x + 44 > right) { y += btnH + 4; x = pad; }
+		m_edBar.MoveWindow(x, y + 2, 40, 22); x += 44;
+	}
+	place(m_btnBarNext, 26);
+	place(m_btnBarGo, 56);
+	y += btnH + 6;
+
+	/* 3行目: 位置情報 HUD（小節/拍子/BPM/調/パート/選択） */
+	if (m_infoBar.GetSafeHwnd()) {
+		m_infoBar.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
+		m_infoBar.ShowWindow(SW_SHOW);
+	}
+	y += 24;
+
+	/* 詳細パネル（MIDI In / プロパティ / 編曲補助 / CC）。既定は閉じて譜面を広く。 */
+	vis(m_edNote, detail); vis(m_edGt, detail); vis(m_edVel, detail); vis(m_btnPropUpd, detail);
+	vis(m_midiInDev, detail); vis(m_midiInCh, detail); vis(m_midiInMode, detail);
+	vis(m_btnLayout, detail); vis(m_btnChord, detail); vis(m_btnPatt, detail); vis(m_btnFx, detail);
+	vis(m_pasteMode, detail);
+	vis(m_stripLanes, detail); vis(m_stripStep, detail); vis(m_stripDraw, detail);
+	if (detail) {
+		x = pad;
+		const int propY = y;
+		const int labW = 44;
+		const int edW = 52;
+		auto field = [&](CWnd& ed) {
+			if (!ed.GetSafeHwnd()) return;
+			ed.MoveWindow(x + labW, propY, edW, 22);
+			x += labW + edW + 8;
+		};
+		field(m_edNote);
+		field(m_edGt);
+		field(m_edVel);
+		place(m_btnPropUpd, 52);
+		groupGap();
+		layoutCombo(m_midiInDev, x, y, 150, cbH); x += 156;
+		layoutCombo(m_midiInCh, x, y, 64, cbH); x += 70;
+		layoutCombo(m_midiInMode, x, y, 100, cbH); x += 106;
+		place(m_btnLayout, 52);
+		place(m_btnChord, 52);
+		place(m_btnPatt, 72);
+		place(m_btnFx, 80);
+		layoutCombo(m_pasteMode, x, y, 88, cbH, 120);
+		y += cbH + 6;
+		x = pad;
+		layoutCombo(m_stripLanes, x, y, 110, cbH, 140); x += 116;
+		layoutCombo(m_stripStep, x, y, 80, cbH, 120); x += 86;
+		layoutCombo(m_stripDraw, x, y, 120, cbH, 168);
+		y += cbH + 6;
+		if (m_ui.stripCount >= 1) {
+			x = pad;
+			const int avail = max(480, rc.Width() - pad * 2);
+			const int hgtW = 88;
+			const int kindW = min(260, max(200, (avail - hgtW * 3 - 24) / 3));
+			layoutCombo(m_stripKind0, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
+			layoutCombo(m_stripHgt0, x, y, hgtW, cbH, 100); x += hgtW + 4;
+			layoutCombo(m_stripKind1, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
+			layoutCombo(m_stripHgt1, x, y, hgtW, cbH, 100); x += hgtW + 4;
+			layoutCombo(m_stripKind2, x, y, kindW, cbH, kindW + 64); x += kindW + 4;
+			layoutCombo(m_stripHgt2, x, y, hgtW, cbH, 100);
+			vis(m_stripKind0, 1); vis(m_stripHgt0, 1);
+			vis(m_stripKind1, m_ui.stripCount >= 2); vis(m_stripHgt1, m_ui.stripCount >= 2);
+			vis(m_stripKind2, m_ui.stripCount >= 3); vis(m_stripHgt2, m_ui.stripCount >= 3);
+			y += cbH + 6;
+		} else {
+			vis(m_stripKind0, 0); vis(m_stripHgt0, 0);
+			vis(m_stripKind1, 0); vis(m_stripHgt1, 0);
+			vis(m_stripKind2, 0); vis(m_stripHgt2, 0);
+		}
+	} else {
+		vis(m_stripKind0, 0); vis(m_stripHgt0, 0);
+		vis(m_stripKind1, 0); vis(m_stripHgt1, 0);
+		vis(m_stripKind2, 0); vis(m_stripHgt2, 0);
+	}
 	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 22);
-	y += 26;
-	const int helpH = 72;
+		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
+	y += 22;
+	const int helpH = 48;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
 	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
 	const int chromeBottom = y;
@@ -729,6 +937,13 @@ void CSasamiMidiScoreDlg::OnSize(UINT nType, int cx, int cy)
 		LayoutChrome();
 }
 
+void CSasamiMidiScoreDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CCustomBlurDialogExBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState != WA_INACTIVE && !bMinimized)
+		CSasamiNotePaletteDlg::BindComposerNotify(this);
+}
+
 BOOL CSasamiMidiScoreDlg::OnEraseBkgnd(CDC* pDC)
 {
 	if (!pDC) return TRUE;
@@ -772,10 +987,62 @@ BOOL CSasamiMidiScoreDlg::OnEraseBkgnd(CDC* pDC)
 
 void CSasamiMidiScoreDlg::UpdateHelpBar()
 {
-	if (!m_helpBar.GetSafeHwnd()) return;
-	wchar_t buf[512];
-	ScStaffFormatHelpBar(buf, 512, &m_ui, 0, m_curCh);
-	m_helpBar.SetWindowText(buf);
+	if (m_helpBar.GetSafeHwnd()) {
+		wchar_t buf[512];
+		ScStaffFormatHelpBar(buf, 512, &m_ui, 0, m_curCh);
+		ScStaffSetWndTextIfChanged(&m_helpBar, buf);
+	}
+	UpdateInfoBar();
+}
+
+void CSasamiMidiScoreDlg::UpdateInfoBar()
+{
+	if (!m_infoBar.GetSafeHwnd()) return;
+	const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+	const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+	const uint32_t tk = m_ui.previewActive ? m_ui.playheadTick : m_ui.markerTick;
+	int bar = 1, beat = 1, rem = 0;
+	ScStaffBarBeatFromTick(m_doc.ev, m_doc.evCount, tk, mn, md, &bar, &beat, &rem);
+	int curN = mn, curD = md;
+	ScStaffMeterAtTick(m_doc.ev, m_doc.evCount, tk, mn, md, &curN, &curD);
+	int bpm = ScStaffBpmFromTempoT(m_doc.tempoT);
+	{
+		const int col = ScStaffStripTickToCol(&m_ui, tk);
+		if (col >= 0 && col < SC_STRIP_COLS_MAX && m_ui.globalTempoStrip[col] >= 40)
+			bpm = (int)m_ui.globalTempoStrip[col];
+	}
+	const int ks = ScStaffKeySigAtTick(m_doc.ev, m_doc.evCount, tk, m_ui.keySig);
+	const int drum = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, m_curCh, 0);
+	const int slot = ScMidiPartDrumSlot(m_doc.ev, m_doc.evCount, m_curCh, 0);
+	const wchar_t* partKind = drum
+		? (slot ? LL14(L"ドラム2", L"Drum2", L"Batt.2", L"Batt.2", L"Bat.2", L"드럼2", L"鼓2", L"طبول2", L"Бар.2", L"Drum2", L"Bat.2", L"Drum2", L"Per.2", L"Davul2")
+			: LL14(L"ドラム1", L"Drum1", L"Batt.1", L"Batt.1", L"Bat.1", L"드럼1", L"鼓1", L"طبول1", L"Бар.1", L"Drum1", L"Bat.1", L"Drum1", L"Per.1", L"Davul1"))
+		: LL14(L"通常", L"Melodic", L"Mélod.", L"Melod.", L"Melód.", L"일반", L"普通", L"عادي", L"Обычн.", L"Melod.", L"Melód.", L"Melod.", L"Melod.", L"Melodik");
+	wchar_t dur[96];
+	ScStaffFormatDurationStatus(dur, 96, &m_ui);
+	CString s;
+	s.Format(LL14(
+		L"小節 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  選択 %d  |  %s  %s",
+		L"Bar %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sel %d  |  %s  %s",
+		L"Mes. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sél. %d  |  %s  %s",
+		L"Batt. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sel. %d  |  %s  %s",
+		L"Comp. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sel. %d  |  %s  %s",
+		L"마디 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  선택 %d  |  %s  %s",
+		L"小节 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  选中 %d  |  %s  %s",
+		L"ماز. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  تحديد %d  |  %s  %s",
+		L"Такт %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Выд. %d  |  %s  %s",
+		L"Takt %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Ausw. %d  |  %s  %s",
+		L"Comp. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sel. %d  |  %s  %s",
+		L"Maat %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Sel. %d  |  %s  %s",
+		L"Takt %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Zazn. %d  |  %s  %s",
+		L"Ölçü %d.%d  |  %d/%d  |  BPM %d  |  %s  |  MIDI %d %s  |  Seç. %d  |  %s  %s"),
+		bar, beat, curN, curD, bpm, ScStaffKeySigName(ks),
+		m_curCh + 1, partKind, m_ui.nSel, ScStaffToolName(m_ui.tool), dur);
+	ScStaffSetWndTextIfChanged(&m_infoBar, s);
+	if (m_edBar.GetSafeHwnd() && GetFocus() != &m_edBar) {
+		CString b; b.Format(L"%d", bar);
+		ScStaffSetWndTextIfChanged(&m_edBar, b);
+	}
 }
 
 static int StripComboKind(const CComboBox& cb)
@@ -873,7 +1140,7 @@ void CSasamiMidiScoreDlg::OnCbnStrip()
 	m_ui.helpTopic = SC_HELP_STRIP;
 	RefreshStrip();
 	LayoutChrome();
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 	UpdateHelpBar();
 }
 
@@ -927,7 +1194,7 @@ void CSasamiMidiScoreDlg::OnPaint()
 	CPaintDC dc(this);
 	CRect rc;
 	GetClientRect(&rc);
-	CCC_CaptionPaint(dc, m_hWnd);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
 
 	/* Chrome labels — never blit staff bitmap over toolbar buttons. */
 	dc.SetBkMode(TRANSPARENT);
@@ -1352,7 +1619,7 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 {
 	for (int i = 0; i < m_ui.trackCount && i < 32; i++) {
 		if (!m_doc.bind.vstPath[i][0])
-			m_ui.vstLabel[i][0] = 0;
+			ScMidiSetVstLabel(&m_ui, i, NULL);
 		else
 			ScMidiSetVstLabel(&m_ui, i, m_doc.bind.vstPath[i]);
 		m_ui.progLabel[i][0] = 0;
@@ -1536,7 +1803,6 @@ LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 	/* Start ednotify poll only after the window is fully up (not during Create). */
 	VstLiveEditorSetNotifyHwnd(m_hWnd);
 	SetTimer(9122, 250, NULL);
-	/* Palettes after the staff has painted — opening them inline blocked the first show. */
 	SetTimer(9125, 1, NULL);
 	return 0;
 }
@@ -1569,7 +1835,7 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 		ScMidiSetVstLabel(&m_ui, part1to32 - 1, path);
 		m_doc.bind.vstForceCh[part1to32 - 1] = VstLiveSendChannel(part1to32);
 	} else if (!m_doc.bind.vstPath[part1to32 - 1][0]) {
-		m_ui.vstLabel[part1to32 - 1][0] = 0;
+		ScMidiSetVstLabel(&m_ui, part1to32 - 1, NULL);
 	} else {
 		ScMidiSetVstLabel(&m_ui, part1to32 - 1, m_doc.bind.vstPath[part1to32 - 1]);
 	}
@@ -1954,17 +2220,7 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 			return;
 		}
 		if (zone == SC_GAUGE_CLEF) {
-			m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4; /* G -> F -> Grand -> Drum */
-			m_curCh = tr;
-			if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
-			UpdateScrollBars();
-			InvalidateRect(m_bodyRc, FALSE);
-			static const wchar_t* kClefName[] = {
-				L"Treble (G)", L"Bass (F)", L"Grand (G+F)", L"Drum/kit (C1=bottom)"
-			};
-			CString st;
-			st.Format(L"MIDI %d clef: %s (click chip to cycle)", tr + 1, kClefName[m_ui.clef[tr] % 4]);
-			m_status.SetWindowText(st);
+			CycleClefTrack(tr);
 		} else if (zone == SC_GAUGE_TONE) {
 			m_curCh = tr;
 			m_ch.SetCurSel(m_curCh);
@@ -2274,9 +2530,7 @@ void CSasamiMidiScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 		if (tr >= 0) {
 			/* Left list: Tone opens VST; Prog row is summary only (edit chips on score). */
 			if (zone == SC_GAUGE_CLEF) {
-				m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4;
-				UpdateScrollBars();
-				InvalidateRect(m_bodyRc, FALSE);
+				CycleClefTrack(tr);
 			} else if (zone == SC_GAUGE_TONE) OpenVstForPart(tr + 1);
 			else if (zone == SC_GAUGE_PROG) {
 				m_curCh = tr;
@@ -2302,13 +2556,13 @@ BOOL CSasamiMidiScoreDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 		m_ui.staffScale = ns;
 		CString s;
 		s.Format(LL14(
-			L"�g�� %d px/��  �i %d%%  Fit%s", L"Zoom %d px/beat  staff %d%%  Fit%s",
-			L"Zoom %d px/temps  portee %d%%  Fit%s", L"Zoom %d px/batt  pentagramma %d%%  Fit%s",
-			L"Zoom %d px/pulso  pentagrama %d%%  Fit%s", L"?? %d px/?  ?? %d%%  Fit%s",
-			L"?�� %d px/��  ��? %d%%  Fit%s", L"????? %d px/???  staff %d%%  Fit%s",
-			L"�M�p�������p�q %d px/�t���|��  staff %d%%  Fit%s", L"Zoom %d px/Schlag  staff %d%%  Fit%s",
+			L"ズーム %d px/拍  譜表 %d%%  Fit%s", L"Zoom %d px/beat  staff %d%%  Fit%s",
+			L"Zoom %d px/temps  portée %d%%  Fit%s", L"Zoom %d px/batt  pentagramma %d%%  Fit%s",
+			L"Zoom %d px/pulso  pentagrama %d%%  Fit%s", L"줌 %d px/박  보표 %d%%  Fit%s",
+			L"缩放 %d px/拍  谱表 %d%%  Fit%s", L"تكبير %d px/نبضة  staff %d%%  Fit%s",
+			L"Масштаб %d px/доля  staff %d%%  Fit%s", L"Zoom %d px/Schlag  staff %d%%  Fit%s",
 			L"Zoom %d px/tempo  staff %d%%  Fit%s", L"Zoom %d px/maat  staff %d%%  Fit%s",
-			L"Zoom %d px/beat  staff %d%%  Fit%s", L"Yak?nla?t?r %d px/vuru?  staff %d%%  Fit%s"),
+			L"Zoom %d px/beat  staff %d%%  Fit%s", L"Yakınlaştır %d px/vuruş  staff %d%%  Fit%s"),
 			m_ui.pxBeat, m_ui.staffScale, m_ui.snapFit ? L"ON" : L"OFF");
 		PersistUiGeom();
 		m_status.SetWindowText(s);
@@ -2435,6 +2689,267 @@ void CSasamiMidiScoreDlg::OnBnClickedSel()
 	UpdateHelpBar();
 }
 
+void CSasamiMidiScoreDlg::ApplyDurUi()
+{
+	m_placeRest = m_ui.placeRest;
+	m_accidental = m_ui.placeAccidental;
+	UpdateNoteCursor();
+	UpdateHelpBar();
+	wchar_t st[96];
+	ScStaffFormatDurationStatus(st, 96, &m_ui);
+	m_status.SetWindowText(st);
+	InvalidateRect(m_gridRc, FALSE);
+	SyncDurToolbar();
+}
+
+void CSasamiMidiScoreDlg::SyncDurToolbar()
+{
+	const int base = m_ui.baseDur > 0 ? m_ui.baseDur : SC_PPQN;
+	auto mark = [](CCustomStandardButton& b, int on) {
+		if (!b.GetSafeHwnd()) return;
+		b.Invalidate(FALSE);
+		(void)on;
+	};
+	mark(m_dvWhole, base == SC_PPQN * 4);
+	mark(m_dvHalf, base == SC_PPQN * 2);
+	mark(m_dvQuarter, base == SC_PPQN);
+	mark(m_dv8, base == SC_PPQN / 2);
+	mark(m_dv16, base == SC_PPQN / 4);
+	mark(m_dv32, base == SC_PPQN / 8);
+	if (m_snap.GetSafeHwnd())
+		m_snap.SetCurSel(m_ui.snapFit ? 0 : 1);
+	if (m_zoom.GetSafeHwnd()) {
+		const int px = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+		int sel = 2;
+		if (px <= 16) sel = 0;
+		else if (px <= 22) sel = 1;
+		else if (px <= 34) sel = 2;
+		else if (px <= 48) sel = 3;
+		else if (px <= 64) sel = 4;
+		else if (px <= 100) sel = 5;
+		else sel = 6;
+		m_zoom.SetCurSel(sel);
+	}
+}
+
+void CSasamiMidiScoreDlg::OnDurButton(UINT id)
+{
+	const int i = (int)id - IDC_SAE_DV_BASE;
+	static const int kBase[] = {
+		SC_PPQN * 4, SC_PPQN * 2, SC_PPQN, SC_PPQN / 2, SC_PPQN / 4, SC_PPQN / 8
+	};
+	if (i < 0 || i >= 6) return;
+	m_ui.baseDur = kBase[i];
+	ScStaffRecomputePlaceDur(&m_ui);
+	m_ui.helpTopic = m_ui.placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnDvDot()
+{
+	m_ui.dotted = m_ui.dotted ? 0 : 1;
+	ScStaffRecomputePlaceDur(&m_ui);
+	m_ui.helpTopic = m_ui.placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnDvTriplet()
+{
+	m_ui.tuplet = (m_ui.tuplet == 3) ? 0 : 3;
+	m_ui.triplet = (m_ui.tuplet == 3) ? 1 : 0;
+	ScStaffRecomputePlaceDur(&m_ui);
+	m_ui.helpTopic = m_ui.tuplet ? SC_HELP_TUPLET : SC_HELP_PAL_NOTE;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnDvRest()
+{
+	m_ui.placeRest = m_ui.placeRest ? 0 : 1;
+	m_placeRest = m_ui.placeRest;
+	m_ui.helpTopic = m_ui.placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnDvTie()
+{
+	m_ui.tool = SC_TOOL_TIE;
+	m_ui.helpTopic = SC_HELP_TIE;
+	UpdateNoteCursor();
+	UpdateHelpBar();
+}
+
+void CSasamiMidiScoreDlg::OnAccSharp()
+{
+	m_accidental = (m_accidental == 1) ? 0 : 1;
+	m_ui.placeAccidental = m_accidental;
+	m_ui.helpTopic = SC_HELP_ACCIDENTAL;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnAccNatural()
+{
+	m_accidental = 0;
+	m_ui.placeAccidental = 0;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnAccFlat()
+{
+	m_accidental = (m_accidental == -1) ? 0 : -1;
+	m_ui.placeAccidental = m_accidental;
+	m_ui.helpTopic = SC_HELP_ACCIDENTAL;
+	ApplyDurUi();
+}
+
+void CSasamiMidiScoreDlg::OnBnKeySig()
+{
+	CRect r;
+	if (m_btnKeySig.GetSafeHwnd()) m_btnKeySig.GetWindowRect(&r);
+	else GetWindowRect(&r);
+	CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(r.left, r.bottom));
+	if (pal) pal->FocusKeyTab();
+}
+
+void CSasamiMidiScoreDlg::OnCbnSnap()
+{
+	const int s = m_snap.GetCurSel();
+	if (s >= 0) m_ui.snapFit = (s == 0) ? 1 : 0;
+	InvalidateRect(m_gridRc, FALSE);
+	UpdateInfoBar();
+}
+
+void CSasamiMidiScoreDlg::OnCbnZoom()
+{
+	const int s = m_zoom.GetCurSel();
+	static const int kPx[] = { 14, 21, 28, 42, 56, 84, SC_PX_BEAT_MAX };
+	static const int kSc[] = { 70, 85, 100, 130, 160, 200, SC_STAFF_SCALE_MAX };
+	int i = s;
+	if (i < 0) i = 2;
+	if (i > 6) i = 6;
+	m_ui.pxBeat = kPx[i];
+	m_ui.staffScale = kSc[i];
+	PersistUiGeom();
+	UpdateScrollBars();
+	InvalidateRect(m_bodyRc, FALSE);
+	UpdateInfoBar();
+}
+
+void CSasamiMidiScoreDlg::JumpToTick(uint32_t tick)
+{
+	m_ui.markerTick = tick;
+	m_ui.playheadTick = tick;
+	ScStaffScrollTickIntoView(&m_ui, m_doc.ev, m_doc.evCount, tick, m_gridRc.Width());
+	UpdateScrollBars();
+	UpdateInfoBar();
+	InvalidateRect(m_bodyRc, FALSE);
+}
+
+void CSasamiMidiScoreDlg::JumpToBarNumber(int bar1)
+{
+	if (bar1 < 1) bar1 = 1;
+	const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+	const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+	JumpToTick(ScStaffTickFromBar(m_doc.ev, m_doc.evCount, bar1, mn, md));
+}
+
+void CSasamiMidiScoreDlg::JumpBar(int deltaBars)
+{
+	const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+	const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+	int bar = 1, beat = 1, rem = 0;
+	ScStaffBarBeatFromTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, mn, md, &bar, &beat, &rem);
+	bar += deltaBars;
+	if (bar < 1) bar = 1;
+	JumpToBarNumber(bar);
+}
+
+void CSasamiMidiScoreDlg::SwitchPart(int delta)
+{
+	int ch = m_curCh;
+	for (int n = 0; n < m_ui.trackCount; n++) {
+		ch += delta;
+		if (ch < 0) ch = m_ui.trackCount - 1;
+		if (ch >= m_ui.trackCount) ch = 0;
+		if (m_ui.visible[ch]) break;
+	}
+	if (ch == m_curCh) return;
+	m_curCh = ch;
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+	m_ui.markerSolidTrack = m_curCh;
+	ScStaffLoadPartStrip(&m_ui, m_curCh);
+	SyncStripCombos();
+	RefreshStrip();
+	UpdateHelpBar();
+	InvalidateRect(m_bodyRc, FALSE);
+}
+
+void CSasamiMidiScoreDlg::ToggleMuteCur()
+{
+	if (m_curCh < 0 || m_curCh >= 32) return;
+	m_ui.mute[m_curCh] ^= 1;
+	ApplyMuteSoloToLive();
+	InvalidateRect(m_trackRc, FALSE);
+	UpdateInfoBar();
+}
+
+void CSasamiMidiScoreDlg::ToggleSoloCur()
+{
+	if (m_curCh < 0 || m_curCh >= 32) return;
+	m_ui.solo[m_curCh] ^= 1;
+	ApplyMuteSoloToLive();
+	InvalidateRect(m_trackRc, FALSE);
+	UpdateInfoBar();
+}
+
+void CSasamiMidiScoreDlg::OnBnClickedRangePlay() { PreviewRangeInstant(); }
+void CSasamiMidiScoreDlg::OnBnClickedBarPrev() { JumpBar(-1); }
+void CSasamiMidiScoreDlg::OnBnClickedBarNext() { JumpBar(1); }
+void CSasamiMidiScoreDlg::OnBnClickedBarGo()
+{
+	CString s; if (m_edBar.GetSafeHwnd()) m_edBar.GetWindowText(s);
+	int bar = _wtoi(s);
+	if (bar < 1) {
+		const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+		const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+		int cur = 1;
+		ScStaffBarBeatFromTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, mn, md, &cur, NULL, NULL);
+		if (CSasamiSimpleInputDlg::AskNumber(this,
+			LL14(L"小節へ移動", L"Go to bar", L"Aller à la mesure", L"Vai alla battuta", L"Ir al compás",
+				L"마디로 이동", L"跳到小节", L"الانتقال إلى المازورة", L"Перейти к такту", L"Zum Takt", L"Ir ao compasso", L"Ga naar maat", L"Idź do taktu", L"Ölçüye git"),
+			LL14(L"小節番号 (1–)", L"Bar number (1–)", L"Numéro de mesure (1–)", L"Numero battuta (1–)", L"Número de compás (1–)",
+				L"마디 번호 (1–)", L"小节号 (1–)", L"رقم المازورة (1–)", L"Номер такта (1–)", L"Taktnummer (1–)", L"Número do compasso (1–)", L"Maatnummer (1–)", L"Numer taktu (1–)", L"Ölçü numarası (1–)"),
+			cur, 1, 9999, &bar) != IDOK)
+			return;
+	}
+	JumpToBarNumber(bar);
+}
+void CSasamiMidiScoreDlg::OnBnClickedMute() { ToggleMuteCur(); }
+void CSasamiMidiScoreDlg::OnBnClickedSolo() { ToggleSoloCur(); }
+void CSasamiMidiScoreDlg::OnBnClickedMore()
+{
+	m_chromeDetail = m_chromeDetail ? 0 : 1;
+	ApplyLang();
+	LayoutChrome();
+}
+
+void CSasamiMidiScoreDlg::RefreshChComboLabels()
+{
+	if (!m_ch.GetSafeHwnd()) return;
+	const int keep = m_ch.GetCurSel();
+	m_ch.ResetContent();
+	for (int i = 0; i < SC_MIDI_CH; i++) {
+		wchar_t s[48];
+		const int drum = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, i, 0);
+		const int slot = ScMidiPartDrumSlot(m_doc.ev, m_doc.evCount, i, 0);
+		if (drum)
+			_snwprintf_s(s, _TRUNCATE, L"Ch %d  D%d", i + 1, slot ? 2 : 1);
+		else
+			_snwprintf_s(s, _TRUNCATE, L"Ch %d", i + 1);
+		m_ch.AddString(s);
+	}
+	m_ch.SetCurSel(keep >= 0 ? keep : m_curCh);
+}
+
 void CSasamiMidiScoreDlg::OnBnClickedPal()
 {
 	CRect r;
@@ -2448,6 +2963,7 @@ LRESULT CSasamiMidiScoreDlg::OnPalDur(WPARAM w, LPARAM l)
 		const int cmdId = (int)(l & 0xFF);
 		if ((cmdId >= SASAMI_PAL_CMD_METER_24 && cmdId <= SASAMI_PAL_CMD_TR_ALL_MINUS)
 			|| (cmdId >= SASAMI_PAL_CMD_METER_14 && cmdId <= SASAMI_PAL_CMD_METER_74)
+			|| cmdId == SASAMI_PAL_CMD_CLEF_AUTO
 			|| (cmdId >= SASAMI_PAL_CMD_KEY_BASE && cmdId < SASAMI_PAL_CMD_KEY_BASE + 15)) {
 			ApplyLayoutPalCmd(cmdId);
 			return 0;
@@ -2777,7 +3293,7 @@ void CSasamiMidiScoreDlg::OnBnClickedTempo()
 	InvalidateRect(m_gridRc, FALSE);
 }
 
-int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick)
+int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick, uint32_t toTick)
 {
 	SyncVstBindsFromLive();
 	int anySolo = 0;
@@ -2803,6 +3319,17 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t from
 			tmp->evCount = nn;
 			HeapFree(GetProcessHeap(), 0, shifted);
 		}
+	}
+	/* 終端 tick 指定(その場再生の範囲切り出し)。fromTick ぶんシフト済みの相対 tick で
+	   窓長 winLen より後に始まるイベントを落とす。引き継ぎ設定(tick0)と窓内開始の音符は残す
+	   (音符は窓を越えて鳴り切ってよい＝自然)。 */
+	if (toTick > fromTick && tmp->evCount > 0) {
+		const uint32_t winLen = toTick - fromTick;
+		int w2 = 0;
+		for (int i = 0; i < tmp->evCount; i++) {
+			if (tmp->ev[i].tick < winLen) tmp->ev[w2++] = tmp->ev[i];
+		}
+		tmp->evCount = w2;
 	}
 
 	/* Do NOT VstLiveCaptureStates here — pipe GET_STATE while Host32 is busy
@@ -3013,6 +3540,7 @@ void CSasamiMidiScoreDlg::NewDocument()
 	m_doc.tempoT = 13000;
 	m_ui.selEv = -1;
 	SyncMeterFromDoc();
+	ScStaffApplyDocClef(&m_ui, m_doc.ev, m_doc.evCount);
 	RefreshProgLabels();
 	RefreshPartEnabled();
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
@@ -3186,6 +3714,89 @@ void CSasamiMidiScoreDlg::OnBnClickedPlay()
 	InvalidateRect(m_bodyRc, FALSE);
 }
 
+/* その場再生の範囲決定: (1)時間範囲選択 (2)ループA–B (3)選択音符の外接 (4)現在カーソル小節。 */
+int CSasamiMidiScoreDlg::ComputePreviewRange(uint32_t* pT0, uint32_t* pT1)
+{
+	uint32_t t0 = 0, t1 = 0;
+	if (m_ui.selRangeValid && m_ui.selRangeT1 > m_ui.selRangeT0) {
+		t0 = m_ui.selRangeT0; t1 = m_ui.selRangeT1;
+	} else if (m_ui.loopATick >= 0 && m_ui.loopBTick > m_ui.loopATick) {
+		t0 = (uint32_t)m_ui.loopATick; t1 = (uint32_t)m_ui.loopBTick;
+	} else if (m_ui.nSel > 0) {
+		uint32_t lo = 0xFFFFFFFFu, hi = 0; int found = 0;
+		for (int k = 0; k < m_ui.nSel; k++) {
+			const int idx = m_ui.selList[k];
+			if (idx < 0 || idx >= m_doc.evCount) continue;
+			const ScEvent& e = m_doc.ev[idx];
+			if (e.kind != SC_EV_NOTE && e.kind != SC_EV_REST && e.kind != SC_EV_TIE) continue;
+			if (e.tick < lo) lo = e.tick;
+			const uint32_t end = e.tick + (e.dur ? e.dur : 1u);
+			if (end > hi) hi = end;
+			found = 1;
+		}
+		if (found) { t0 = lo; t1 = hi; }
+	}
+	if (t1 <= t0) {
+		/* 現在カーソル小節。 */
+		const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+		const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+		const uint32_t barStart = ScStaffSnapToBarTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, mn, md);
+		int bn = mn, bd = md;
+		ScStaffMeterAtTick(m_doc.ev, m_doc.evCount, barStart, mn, md, &bn, &bd);
+		uint32_t barLen = (uint32_t)ScStaffMeterTicksPerMeasure(bn, bd);
+		if (barLen == 0) barLen = (uint32_t)ScStaffTicksPerMeasure(&m_ui);
+		if (barLen == 0) barLen = (uint32_t)(SC_PPQN * 4);
+		t0 = barStart; t1 = barStart + barLen;
+	}
+	if (pT0) *pT0 = t0;
+	if (pT1) *pT1 = t1;
+	return (t1 > t0) ? 1 : 0;
+}
+
+/* 範囲を全パート(ミュート/ソロは尊重)で切り出して即試聴。Shift+Space / 右クリックから。 */
+void CSasamiMidiScoreDlg::PreviewRangeInstant()
+{
+	uint32_t t0 = 0, t1 = 0;
+	if (!ComputePreviewRange(&t0, &t1)) return;
+	if (m_ui.previewActive) {
+		ScStaffStopHostPreview(&m_ui);
+		KillTimer(kScPreviewTimer);
+	}
+	VstLiveMonitorStop();
+	SyncFxBindsToLive();
+	for (int i = 0; i < m_ui.trackCount; i++)
+		ScStaffApplyStripToDocMidi(&m_doc, i, &m_ui);
+	wchar_t path[MAX_PATH];
+	if (!BuildToTemp(path, MAX_PATH, t0, t1)) {
+		if (VstLivePartIsLoaded(1) || VstLiveAnyRemotePart())
+			VstLiveMonitorEnsure();
+		return;
+	}
+	MmBindVstActiveSlot();
+	VstApplyMpw3Binds(path, 0);
+	/* プレイヘッド原点を範囲先頭に合わせる(赤バー追従の基準)。 */
+	m_ui.markerTick = t0;
+	int ok = ScStaffPreviewViaHost(path, &m_ui, m_doc.tempoT);
+	if (!ok)
+		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
+	if (!ok) {
+		m_ui.previewActive = 0;
+		m_status.SetWindowText(LL14(L"範囲試聴に失敗（ホスト／wavout）", L"Range preview failed (host / wavout)", L"Échec aperçu plage", L"Anteprima intervallo non riuscita", L"Falló vista previa de rango",
+			L"범위 미리듣기 실패", L"范围试听失败", L"فشل معاينة النطاق", L"Превью диапазона не удалось", L"Bereichsvorschau fehlgeschlagen", L"Falha na prévia do intervalo", L"Bereikvoorbeeld mislukt", L"Podgląd zakresu nieudany", L"Aralık önizleme başarısız"));
+		VstLiveMonitorEnsure();
+		return;
+	}
+	VstLiveMonitorStop();
+	PushDocToText();
+	SetTimer(kScPreviewTimer, 33, NULL);
+	CString st;
+	st.Format(LL14(L"範囲試聴 tick %u–%u — Spaceで停止", L"Range preview tick %u–%u — Space to stop", L"Aperçu plage tick %u–%u — Espace = stop", L"Anteprima intervallo tick %u–%u — Spazio = stop", L"Vista previa rango tick %u–%u — Espacio = stop",
+		L"범위 미리듣기 tick %u–%u — Space 정지", L"范围试听 tick %u–%u — Space停止", L"معاينة النطاق tick %u–%u — Space للإيقاف", L"Превью диапазона tick %u–%u — Space = стоп", L"Bereichsvorschau tick %u–%u — Leertaste = Stop", L"Prévia intervalo tick %u–%u — Espaço = parar", L"Bereikvoorbeeld tick %u–%u — Spatie = stop", L"Podgląd zakresu tick %u–%u — Spacja = stop", L"Aralık önizleme tick %u–%u — Space = dur"),
+		(unsigned)t0, (unsigned)t1);
+	m_status.SetWindowText(st);
+	InvalidateRect(m_bodyRc, FALSE);
+}
+
 void CSasamiMidiScoreDlg::OnBnClickedMark()
 {
 	m_ui.transportMode = 1;
@@ -3247,19 +3858,13 @@ void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 			ApplyFollowScroll();
 			ApplyMuteSoloToLive();
 			UpdateScrollBars();
+			UpdateInfoBar();
 			InvalidateRect(m_bodyRc, FALSE);
 			if (m_ui.showRollSplit) InvalidateRect(m_rollRc, FALSE);
 		}
 		/* Preview finished — return SHM drain to editor monitor. */
-		if (m_ui.previewActive) {
-			extern int endflg;
-			extern int gameon;
-			if (endflg || !gameon) {
-				m_ui.previewActive = 0;
-				KillTimer(kScPreviewTimer);
-				VstLiveMonitorEnsure();
-			}
-		}
+		if (ScStaffPreviewFinished(&m_ui))
+			KillTimer(kScPreviewTimer);
 		return;
 	}
 	if (nIDEvent == kScMetroTimer) {
@@ -3295,9 +3900,7 @@ void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 	}
 	if (nIDEvent == 9125) {
 		KillTimer(9125);
-		CRect wr; GetWindowRect(&wr);
-		CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
-		CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
+		CSasamiNotePaletteDlg::OpenComposerPalettes(this);
 		return;
 	}
 	if (nIDEvent == 9121) {
@@ -3357,7 +3960,7 @@ LRESULT CSasamiMidiScoreDlg::OnNoteProps(WPARAM w, LPARAM l)
 			wcsncpy_s(m_doc.bind.vstPath[(int)l - 1], path, _TRUNCATE);
 			ScMidiSetVstLabel(&m_ui, (int)l - 1, path);
 		} else {
-			m_ui.vstLabel[(int)l - 1][0] = 0;
+			ScMidiSetVstLabel(&m_ui, (int)l - 1, NULL);
 			m_doc.bind.vstPath[(int)l - 1][0] = 0;
 		}
 		m_doc.bind.isMpw3 = 1;
@@ -3558,8 +4161,36 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
+	CCustomPopupMenu* play = menu.AddSubMenu(LL14(
+		L"再生", L"Playback", L"Lecture", L"Riproduzione", L"Reproducción",
+		L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Wiedergabe",
+		L"Reprodução", L"Afspelen", L"Odtwarzanie", L"Çalma"));
+	play->AddCommand(IDC_SASAMI_MIDI_PLAY, LL14(
+		L"マーカーから再生\tSpace", L"Play from marker\tSpace", L"Lecture depuis le marqueur\tEspace", L"Play dal marcatore\tSpazio", L"Reproducir desde marcador\tEspacio",
+		L"마커부터 재생\tSpace", L"从标记播放\tSpace", L"تشغيل من العلامة\tSpace", L"Играть с маркера\tSpace", L"Ab Markierung\tLeertaste",
+		L"Tocar do marcador\tEspaço", L"Spelen vanaf markering\tSpatie", L"Odtwórz od znacznika\tSpacja", L"İşaretten çal\tSpace"));
+	play->AddCommand(9089, LL14(
+		L"範囲をその場再生\tShift+Space", L"Preview range here\tShift+Space", L"Aperçu de la plage\tShift+Espace", L"Anteprima intervallo\tShift+Spazio", L"Vista previa del rango\tShift+Espacio",
+		L"범위 즉시 재생\tShift+Space", L"就地试听范围\tShift+Space", L"معاينة النطاق\tShift+Space", L"Прослушать диапазон\tShift+Space", L"Bereich sofort anhören\tUmschalt+Leer",
+		L"Prévia do intervalo\tShift+Espaço", L"Bereik direct beluisteren\tShift+Spatie", L"Odsłuchaj zakres\tShift+Spacja", L"Aralığı burada çal\tShift+Space"));
+	play->AddCommand(9090, LL14(
+		L"小節へジャンプ…\tCtrl+G", L"Go to bar…\tCtrl+G", L"Aller à la mesure…\tCtrl+G", L"Vai alla battuta…\tCtrl+G", L"Ir al compás…\tCtrl+G",
+		L"마디로 이동…\tCtrl+G", L"跳到小节…\tCtrl+G", L"الانتقال إلى المازورة…\tCtrl+G", L"К такту…\tCtrl+G", L"Zum Takt…\tStrg+G",
+		L"Ir ao compasso…\tCtrl+G", L"Ga naar maat…\tCtrl+G", L"Idź do taktu…\tCtrl+G", L"Ölçüye git…\tCtrl+G"));
+	play->AddCommand(9025, LL14(
+		L"再生ループAをここへ", L"Set preview loop A here", L"Boucle A d'aperçu ici", L"Loop A anteprima qui", L"Bucle A de vista aquí",
+		L"미리듣기 루프 A 여기로", L"预览循环A到此处", L"حلقة A هنا", L"Превью A сюда", L"Vorschau-Schleife A hier",
+		L"Loop A de prévia aqui", L"Voorbeeld-lus A hier", L"Podgląd pętli A tutaj", L"Önizleme döngü A buraya"));
+	play->AddCommand(9026, LL14(
+		L"再生ループBをここへ", L"Set preview loop B here", L"Boucle B d'aperçu ici", L"Loop B anteprima qui", L"Bucle B de vista aquí",
+		L"미리듣기 루프 B 여기로", L"预览循环B到此处", L"حلقة B هنا", L"Превью B сюда", L"Vorschau-Schleife B hier",
+		L"Loop B de prévia aqui", L"Voorbeeld-lus B hier", L"Podgląd pętli B tutaj", L"Önizleme döngü B buraya"));
 	if (tr >= 0) {
-		menu.AddCommand(9010, LL14(
+		CCustomPopupMenu* part = menu.AddSubMenu(LL14(
+			L"パート", L"Part", L"Partie", L"Parte", L"Parte",
+			L"파트", L"声部", L"جزء", L"Партия", L"Part",
+			L"Parte", L"Partij", L"Partia", L"Parti"));
+		part->AddCommand(9010, LL14(
 			L"音色設定…", L"Tone settings…", L"Réglage du timbre…", L"Impostazioni timbro…", L"Ajustes de timbre…",
 			L"음색 설정…", L"音色设置…", L"إعدادات الطابع…", L"Настройки тембра…", L"Klang-Einstellungen…",
 			L"Ajustes de timbre…", L"Klankinstellungen…", L"Ustawienia barwy…", L"Tını ayarları…"));
@@ -3571,72 +4202,82 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			const wchar_t* chk = livePath[0] ? livePath : m_doc.bind.vstPath[tr];
 			const size_t n = chk ? wcslen(chk) : 0;
 			if (n >= 5 && _wcsicmp(chk + n - 5, L".vst3") == 0) {
-				menu.AddCommand(9014, LL14(
+				part->AddCommand(9014, LL14(
 					L"VST2に戻す", L"Return to VST2", L"Revenir au VST2", L"Torna al VST2", L"Volver a VST2",
 					L"VST2로 되돌리기", L"回到 VST2", L"العودة إلى VST2", L"Вернуться на VST2", L"Zurück zu VST2",
 					L"Voltar ao VST2", L"Terug naar VST2", L"Wróć do VST2", L"VST2'ye dön"));
 			}
 		}
-		menu.AddCommand(9011, LL14(
+		part->AddCommand(9011, LL14(
 			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
 			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
 			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…"));
-		menu.AddCommand(9012, LL14(
+		part->AddCommand(9012, LL14(
 			L"Insert FX（VSTエフェクト）…", L"Insert FX (VST effect)…", L"Insert FX…", L"Insert FX…", L"Insert FX…",
 			L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…",
 			L"Insert FX…", L"Insert FX…", L"Insert FX…", L"Insert FX…"));
-		menu.AddSeparator();
-		menu.AddCommand(9020, LL14(
+		CCustomPopupMenu* mark = menu.AddSubMenu(LL14(
+			L"マーク", L"Marks", L"Marques", L"Segni", L"Marcas",
+			L"마크", L"标记", L"علامات", L"Знаки", L"Zeichen",
+			L"Marcas", L"Markeringen", L"Znaki", L"İşaretler"));
+		mark->AddCommand(9020, LL14(
 			L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle (|:n)…", L"Inizio loop (|:n)…", L"Inicio de bucle (|:n)…",
 			L"루프 시작 (|:n)…", L"循环开始 (|:n)…", L"بداية الحلقة (|:n)…", L"Начало цикла (|:n)…", L"Schleifenstart (|:n)…",
 			L"Início do loop (|:n)…", L"Lusbegin (|:n)…", L"Początek pętli (|:n)…", L"Döngü başlangıcı (|:n)…"));
-		menu.AddCommand(9021, LL14(
+		mark->AddCommand(9021, LL14(
 			L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle (:|)", L"Fine loop (:|)", L"Fin de bucle (:|)",
 			L"루프 끝 (:|)", L"循环结束 (:|)", L"نهاية الحلقة (:|)", L"Конец цикла (:|)", L"Schleifenende (:|)",
 			L"Fim do loop (:|)", L"Luseinde (:|)", L"Koniec pętli (:|)", L"Döngü sonu (:|)"));
-		menu.AddCommand(9027, LL14(
+		mark->AddCommand(9027, LL14(
 			L"ペダルON (Ped.)", L"Pedal ON (Ped.)", L"Pédale ON", L"Pedale ON", L"Pedal ON",
 			L"페달 ON", L"踏板ON", L"دواسة ON", L"Педаль ON", L"Pedal ON",
 			L"Pedal ON", L"Pedaal ON", L"Pedał ON", L"Pedal ON"));
-		menu.AddCommand(9028, LL14(
+		mark->AddCommand(9028, LL14(
 			L"ペダルOFF (＊)", L"Pedal OFF (＊)", L"Pédale OFF", L"Pedale OFF", L"Pedal OFF",
 			L"페달 OFF", L"踏板OFF", L"دواسة OFF", L"Педаль OFF", L"Pedal OFF",
 			L"Pedal OFF", L"Pedaal OFF", L"Pedał OFF", L"Pedal OFF"));
 		if (markEv >= 0 && markEv < m_doc.evCount && m_doc.ev[markEv].kind == SC_EV_FM_LOOP_START) {
-			menu.AddCommand(9029, LL14(
+			mark->AddCommand(9029, LL14(
 				L"ループ回数を変更…", L"Change loop count…", L"Changer le nombre…", L"Cambia ripetizioni…", L"Cambiar repeticiones…",
 				L"루프 횟수 변경…", L"更改循环次数…", L"تغيير العدد…", L"Изменить число…", L"Wiederholungen ändern…",
 				L"Alterar contagem…", L"Herhalingen wijzigen…", L"Zmień liczbę…", L"Tekrar sayısını değiştir…"));
 		}
-		menu.AddCommand(9022, LL14(
+		mark->AddCommand(9022, LL14(
 			L"Qマーク（ジャンプ着地）", L"Q mark (jump land)", L"Marque Q (atterrissage)", L"Segno Q (atterraggio)", L"Marca Q (aterrizaje)",
 			L"Q 마크 (점프 착지)", L"Q标记（跳转着陆）", L"علامة Q", L"Метка Q", L"Q-Marke (Sprungziel)",
 			L"Marca Q (pouso)", L"Q-markering", L"Znacznik Q", L"Q işareti"));
-		menu.AddCommand(9023, LL14(
+		mark->AddCommand(9023, LL14(
 			L"Jジャンプ", L"J jump", L"Saut J", L"Salto J", L"Salto J",
 			L"J 점프", L"J跳转", L"قفزة J", L"Прыжок J", L"J-Sprung",
 			L"Salto J", L"J-sprong", L"Skok J", L"J atlayışı"));
-		menu.AddCommand(9030, LL14(L"符尾↑", L"Stem up", L"Hampe haut", L"Gambo su", L"Plica arriba", L"부호↑", L"符干上", L"ساق أعلى", L"Штиль ↑", L"Hals oben", L"Haste ↑", L"Stok omhoog", L"Ogon ↑", L"Gövde ↑"));
-		menu.AddCommand(9031, LL14(L"符尾↓", L"Stem down", L"Hampe bas", L"Gambo giù", L"Plica abajo", L"부호↓", L"符干下", L"ساق أسفل", L"Штиль ↓", L"Hals unten", L"Haste ↓", L"Stok omlaag", L"Ogon ↓", L"Gövde ↓"));
-		menu.AddCommand(9032, LL14(L"ビーム切断", L"Break beam", L"Couper ligature", L"Spezza travatura", L"Romper barra", L"빔 끊기", L"断开符杠", L"قطع العارضة", L"Разорвать вязь", L"Balken trennen", L"Quebrar barra", L"Balk breken", L"Przerwij belkę", L"Kirişi kes"));
-		menu.AddCommand(9033, LL14(L"スラー開始", L"Slur start", L"Début liaison", L"Inizio legatura", L"Inicio ligadura", L"슬러 시작", L"连线开始", L"بداية الربط", L"Начало лиги", L"Bogen Anfang", L"Início ligadura", L"Boog start", L"Początek łuku", L"Bağ başlangıç"));
-		menu.AddCommand(9034, LL14(L"スラー終了", L"Slur end", L"Fin liaison", L"Fine legatura", L"Fin ligadura", L"슬러 끝", L"连线结束", L"نهاية الربط", L"Конец лиги", L"Bogen Ende", L"Fim ligadura", L"Boog einde", L"Koniec łuku", L"Bağ sonu"));
-		menu.AddCommand(9035, LL14(L"クレッシェンド", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo", L"크레셴도", L"渐强", L"cresc", L"Крещендо", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo"));
-		menu.AddCommand(9036, LL14(L"デクレッシェンド", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"디미누엔도", L"渐弱", L"dim", L"Диминуэндо", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo"));
-		menu.AddCommand(9037, LL14(L"調号…", L"Key signature…", L"Armature…", L"Armatura…", L"Armadura…", L"조표…", L"调号…", L"دليل…", L"Тональность…", L"Vorzeichen…", L"Armadura…", L"Toonsoort…", L"Tonacja…", L"Armatür…"));
-		menu.AddCommand(9040, LL14(L"拍子・移調…", L"Meter / transpose…", L"Mesure / transposition…", L"Misura / trasposizione…", L"Compás / transposición…",
+		CCustomPopupMenu* notate = menu.AddSubMenu(LL14(
+			L"記譜", L"Notation", L"Notation", L"Notazione", L"Notación",
+			L"기보", L"记谱", L"تدوين", L"Нотация", L"Notation",
+			L"Notação", L"Notatie", L"Notacja", L"Yazım"));
+		notate->AddCommand(9030, LL14(L"符尾↑", L"Stem up", L"Hampe haut", L"Gambo su", L"Plica arriba", L"부호↑", L"符干上", L"ساق أعلى", L"Штиль ↑", L"Hals oben", L"Haste ↑", L"Stok omhoog", L"Ogon ↑", L"Gövde ↑"));
+		notate->AddCommand(9031, LL14(L"符尾↓", L"Stem down", L"Hampe bas", L"Gambo giù", L"Plica abajo", L"부호↓", L"符干下", L"ساق أسفل", L"Штиль ↓", L"Hals unten", L"Haste ↓", L"Stok omlaag", L"Ogon ↓", L"Gövde ↓"));
+		notate->AddCommand(9032, LL14(L"ビーム切断", L"Break beam", L"Couper ligature", L"Spezza travatura", L"Romper barra", L"빔 끊기", L"断开符杠", L"قطع العارضة", L"Разорвать вязь", L"Balken trennen", L"Quebrar barra", L"Balk breken", L"Przerwij belkę", L"Kirişi kes"));
+		notate->AddCommand(9033, LL14(L"スラー開始", L"Slur start", L"Début liaison", L"Inizio legatura", L"Inicio ligadura", L"슬러 시작", L"连线开始", L"بداية الربط", L"Начало лиги", L"Bogen Anfang", L"Início ligadura", L"Boog start", L"Początek łuku", L"Bağ başlangıç"));
+		notate->AddCommand(9034, LL14(L"スラー終了", L"Slur end", L"Fin liaison", L"Fine legatura", L"Fin ligadura", L"슬러 끝", L"连线结束", L"نهاية الربط", L"Конец лиги", L"Bogen Ende", L"Fim ligadura", L"Boog einde", L"Koniec łuku", L"Bağ sonu"));
+		notate->AddCommand(9035, LL14(L"クレッシェンド", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo", L"크레셴도", L"渐强", L"cresc", L"Крещендо", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo", L"Crescendo"));
+		notate->AddCommand(9036, LL14(L"デクレッシェンド", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"디미누엔도", L"渐弱", L"dim", L"Диминуэндо", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo", L"Diminuendo"));
+		notate->AddCommand(9037, LL14(L"調号…", L"Key signature…", L"Armature…", L"Armatura…", L"Armadura…", L"조표…", L"调号…", L"دليل…", L"Тональность…", L"Vorzeichen…", L"Armadura…", L"Toonsoort…", L"Tonacja…", L"Armatür…"));
+		notate->AddCommand(9040, LL14(L"拍子・移調…", L"Meter / transpose…", L"Mesure / transposition…", L"Misura / trasposizione…", L"Compás / transposición…",
 			L"박자·이조…", L"拍号·移调…", L"إيقاع / نقل…", L"Размер / трансп.…", L"Takt / Transponieren…", L"Compasso / transpor…", L"Maat / transp.…", L"Metrum / transp.…", L"Ölçü / transp.…"));
-		menu.AddSeparator();
-		menu.AddCheck(9050, LL14(L"メトロノーム", L"Metronome", L"Métronome", L"Metronomo", L"Metrónomo", L"메트로놈", L"节拍器", L"مترونوم", L"Метроном", L"Metronom", L"Metrônomo", L"Metronoom", L"Metronom", L"Metronom"), m_midiIn.metroOn);
-		menu.AddCheck(9051, LL14(L"オーバーダブ", L"Overdub", L"Overdub", L"Overdub", L"Overdub", L"오버더빙", L"叠加录音", L"تسجيل فوق", L"Овердаб", L"Overdub", L"Overdub", L"Overdub", L"Overdub", L"Overdub"), m_midiIn.overdub);
-		menu.AddCheck(9052, LL14(L"クオンタイズOFF", L"Quant OFF", L"Quant OFF", L"Quant OFF", L"Cuant OFF", L"양자화 OFF", L"量化关", L"كمية OFF", L"Квант OFF", L"Quant AUS", L"Quant OFF", L"Quant UIT", L"Kwant OFF", L"Quant KAPALI"), m_midiIn.quant == SC_QUANT_OFF);
-		menu.AddCheck(9053, LL14(L"クオンタイズ弱", L"Quant Weak", L"Quant faible", L"Quant debole", L"Cuant suave", L"양자화 약", L"量化弱", L"كمية ضعيفة", L"Квант слаб.", L"Quant schwach", L"Quant fraco", L"Quant zwak", L"Kwant słaby", L"Quant zayıf"), m_midiIn.quant == SC_QUANT_WEAK);
-		menu.AddCheck(9054, LL14(L"クオンタイズ強", L"Quant Strong", L"Quant fort", L"Quant forte", L"Cuant fuerte", L"양자화 강", L"量化强", L"كمية قوية", L"Квант сильн.", L"Quant stark", L"Quant forte", L"Quant sterk", L"Kwant silny", L"Quant güçlü"), m_midiIn.quant == SC_QUANT_STRONG);
-		menu.AddCheck(9055, LL14(L"スイング", L"Quant Swing", L"Swing", L"Swing", L"Swing", L"스윙", L"摇摆", L"سوينغ", L"Свинг", L"Swing", L"Swing", L"Swing", L"Swing", L"Swing"), m_midiIn.quant == SC_QUANT_SWING);
-		menu.AddCheck(9056, LL14(L"ベロシティ線形", L"Vel Linear", L"Vel linéaire", L"Vel lineare", L"Vel lineal", L"벨로시티 선형", L"力度线性", L"سرعة خطية", L"Ве. линейн.", L"Vel linear", L"Vel linear", L"Vel lineair", L"Vel liniowa", L"Vel doğrusal"), m_midiIn.velCurve == SC_VEL_LINEAR);
-		menu.AddCheck(9057, LL14(L"ベロシティ軟", L"Vel Soft", L"Vel douce", L"Vel morbida", L"Vel suave", L"벨로시티 소프트", L"力度柔和", L"سرعة ناعمة", L"Vel мягк.", L"Vel weich", L"Vel suave", L"Vel zacht", L"Vel miękka", L"Vel yumuşak"), m_midiIn.velCurve == SC_VEL_SOFT);
-		menu.AddCheck(9058, LL14(L"ベロシティ固定", L"Vel Fixed", L"Vel fixe", L"Vel fissa", L"Vel fija", L"벨로시티 고정", L"力度固定", L"سرعة ثابتة", L"Vel фикс.", L"Vel fest", L"Vel fixa", L"Vel vast", L"Vel stała", L"Vel sabit"), m_midiIn.velCurve == SC_VEL_FIXED);
-		menu.AddCheck(9039, LL14(L"グリッド強調", L"Grid emphasis", L"Grille", L"Griglia", L"Cuadrícula", L"그리드 강조", L"网格强调", L"شبكة", L"Сетка", L"Raster", L"Grade", L"Raster", L"Siatka", L"Izgara"), m_ui.gridEmph);
+		CCustomPopupMenu* rec = menu.AddSubMenu(LL14(
+			L"録音", L"Record", L"Enregistrement", L"Registrazione", L"Grabación",
+			L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme",
+			L"Gravação", L"Opname", L"Nagrywanie", L"Kayıt"));
+		rec->AddCheck(9050, LL14(L"メトロノーム", L"Metronome", L"Métronome", L"Metronomo", L"Metrónomo", L"메트로놈", L"节拍器", L"مترونوم", L"Метроном", L"Metronom", L"Metrônomo", L"Metronoom", L"Metronom", L"Metronom"), m_midiIn.metroOn);
+		rec->AddCheck(9051, LL14(L"オーバーダブ", L"Overdub", L"Overdub", L"Overdub", L"Overdub", L"오버더빙", L"叠加录音", L"تسجيل فوق", L"Овердаб", L"Overdub", L"Overdub", L"Overdub", L"Overdub", L"Overdub"), m_midiIn.overdub);
+		rec->AddCheck(9052, LL14(L"クオンタイズOFF", L"Quant OFF", L"Quant OFF", L"Quant OFF", L"Cuant OFF", L"양자화 OFF", L"量化关", L"كمية OFF", L"Квант OFF", L"Quant AUS", L"Quant OFF", L"Quant UIT", L"Kwant OFF", L"Quant KAPALI"), m_midiIn.quant == SC_QUANT_OFF);
+		rec->AddCheck(9053, LL14(L"クオンタイズ弱", L"Quant Weak", L"Quant faible", L"Quant debole", L"Cuant suave", L"양자화 약", L"量化弱", L"كمية ضعيفة", L"Квант слаб.", L"Quant schwach", L"Quant fraco", L"Quant zwak", L"Kwant słaby", L"Quant zayıf"), m_midiIn.quant == SC_QUANT_WEAK);
+		rec->AddCheck(9054, LL14(L"クオンタイズ強", L"Quant Strong", L"Quant fort", L"Quant forte", L"Cuant fuerte", L"양자화 강", L"量化强", L"كمية قوية", L"Квант сильн.", L"Quant stark", L"Quant forte", L"Quant sterk", L"Kwant silny", L"Quant güçlü"), m_midiIn.quant == SC_QUANT_STRONG);
+		rec->AddCheck(9055, LL14(L"スイング", L"Quant Swing", L"Swing", L"Swing", L"Swing", L"스윙", L"摇摆", L"سوينغ", L"Свинг", L"Swing", L"Swing", L"Swing", L"Swing", L"Swing"), m_midiIn.quant == SC_QUANT_SWING);
+		rec->AddCheck(9056, LL14(L"ベロシティ線形", L"Vel Linear", L"Vel linéaire", L"Vel lineare", L"Vel lineal", L"벨로시티 선형", L"力度线性", L"سرعة خطية", L"Ве. линейн.", L"Vel linear", L"Vel linear", L"Vel lineair", L"Vel liniowa", L"Vel doğrusal"), m_midiIn.velCurve == SC_VEL_LINEAR);
+		rec->AddCheck(9057, LL14(L"ベロシティ軟", L"Vel Soft", L"Vel douce", L"Vel morbida", L"Vel suave", L"벨로시티 소프트", L"力度柔和", L"سرعة ناعمة", L"Vel мягк.", L"Vel weich", L"Vel suave", L"Vel zacht", L"Vel miękka", L"Vel yumuşak"), m_midiIn.velCurve == SC_VEL_SOFT);
+		rec->AddCheck(9058, LL14(L"ベロシティ固定", L"Vel Fixed", L"Vel fixe", L"Vel fissa", L"Vel fija", L"벨로시티 고정", L"力度固定", L"سرعة ثابتة", L"Vel фикс.", L"Vel fest", L"Vel fixa", L"Vel vast", L"Vel stała", L"Vel sabit"), m_midiIn.velCurve == SC_VEL_FIXED);
+		notate->AddCheck(9039, LL14(L"グリッド強調", L"Grid emphasis", L"Grille", L"Griglia", L"Cuadrícula", L"그리드 강조", L"网格强调", L"شبكة", L"Сетка", L"Raster", L"Grade", L"Raster", L"Siatka", L"Izgara"), m_ui.gridEmph);
 		if (delN > 1) {
 			for (int di = 0; di < delN; di++) {
 				const int ei = delMarks[di];
@@ -3674,56 +4315,47 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 				L"이 마크 삭제", L"删除此标记", L"حذف هذه العلامة", L"Удалить метку", L"Marke löschen",
 				L"Excluir esta marca", L"Markering verwijderen", L"Usuń znacznik", L"Bu işareti sil"));
 		}
-		menu.AddSeparator();
-		menu.AddCommand(9025, LL14(
-			L"再生ループAをここへ", L"Set preview loop A here", L"Boucle A d'aperçu ici", L"Loop A anteprima qui", L"Bucle A de vista aquí",
-			L"미리듣기 루프 A 여기로", L"预览循环A到此处", L"حلقة A هنا", L"Превью A сюда", L"Vorschau-Schleife A hier",
-			L"Loop A de prévia aqui", L"Voorbeeld-lus A hier", L"Podgląd pętli A tutaj", L"Önizleme döngü A buraya"));
-		menu.AddCommand(9026, LL14(
-			L"再生ループBをここへ", L"Set preview loop B here", L"Boucle B d'aperçu ici", L"Loop B anteprima qui", L"Bucle B de vista aquí",
-			L"미리듣기 루프 B 여기로", L"预览循环B到此处", L"حلقة B هنا", L"Превью B сюда", L"Vorschau-Schleife B hier",
-			L"Loop B de prévia aqui", L"Voorbeeld-lus B hier", L"Podgląd pętli B tutaj", L"Önizleme döngü B buraya"));
-		menu.AddSeparator();
-		menu.AddCommand(9001, m_ui.mute[tr]
+		part->AddCommand(9001, m_ui.mute[tr]
 			? CString(LL14(L"ミュート解除", L"Unmute", L"Réactiver", L"Riattiva", L"Activar", L"음소거 해제", L"取消静音", L"إلغاء كتم", L"Включить звук", L"Stummschaltung aus", L"Ativar som", L"Dempen uit", L"Włącz dźwięk", L"Sessizi aç"))
 			: CString(LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Silenciar", L"음소거", L"静音", L"كتم", L"Выкл. звук", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz")));
-		menu.AddCommand(9002, m_ui.solo[tr]
+		part->AddCommand(9002, m_ui.solo[tr]
 			? CString(LL14(L"ソロ解除", L"Unsolo", L"Désolo", L"Togli solo", L"Quitar solo", L"솔로 해제", L"取消独奏", L"إلغاء منفرد", L"Снять соло", L"Solo aus", L"Tirar solo", L"Solo uit", L"Wyłącz solo", L"Soloyu kapat"))
 			: CString(LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo")));
 		if (VstLivePartIsLoaded(tr + 1)) {
-			menu.AddCommand(9003, LL14(
+			part->AddCommand(9003, LL14(
 				L"VST詳細…", L"VST details…", L"Détails VST…", L"Dettagli VST…", L"Detalles VST…",
 				L"VST 상세…", L"VST详情…", L"تفاصيل VST…", L"Сведения VST…", L"VST-Details…",
 				L"Detalhes VST…", L"VST-details…", L"Szczegóły VST…", L"VST ayrıntıları…"));
 		}
-		menu.AddCommand(9004, m_ui.visible[tr]
+		part->AddCommand(9004, m_ui.visible[tr]
 			? CString(LL14(L"パートを無効（譜面から外す）", L"Disable part (hide from score)", L"Désactiver la partie", L"Disattiva parte", L"Desactivar parte", L"Disable part", L"禁用声部", L"Disable part", L"Отключить парту", L"Part deaktivieren", L"Desativar parte", L"Part uitschakelen", L"Wyłącz part", L"Parti devre dışı"))
 			: CString(LL14(L"パートを有効（譜面に表示）", L"Enable part (show on score)", L"Activer la partie", L"Attiva parte", L"Activar parte", L"Enable part", L"启用声部", L"Enable part", L"Включить парту", L"Part aktivieren", L"Ativar parte", L"Part inschakelen", L"Włącz part", L"Parti etkinleştir")));
-		menu.AddCommand(9005,
-			m_ui.clef[tr] == 0 ? L"譜表: ト音→ヘ音"
+		part->AddCommand(9005,
+			m_ui.clefAuto[tr] ? L"譜表: 自動→ト音"
+			: (m_ui.clef[tr] == 0 ? L"譜表: ト音→ヘ音"
 			: (m_ui.clef[tr] == 1 ? L"譜表: ヘ音→大譜表"
 			: (m_ui.clef[tr] == 2 ? L"譜表: 大譜表→ドラム"
-			: L"譜表: ドラム→ト音")));
+			: L"譜表: ドラム→自動"))));
 		if (ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, tr, 0)) {
-			menu.AddCommand(9013, LL14(
+			part->AddCommand(9013, LL14(
 				L"メロディパートにする（リズム解除）", L"Make melodic (clear rhythm)", L"Partie mélodique (ôter rythme)", L"Parti melodica (togli ritmo)", L"Parte melódica (quitar ritmo)",
 				L"멜로디 파트로 (리듬 해제)", L"改为旋律（解除节奏）", L"جزء لحني (إلغاء الإيقاع)", L"Мелодическая партия (снять ритм)", L"Melodisch (Rhythmus aus)",
 				L"Parte melódica (tirar ritmo)", L"Melodisch (ritme uit)", L"Partia melodyczna (wyłącz rytm)", L"Melodik parti (ritmi kapat)"));
 		} else {
-			menu.AddCommand(9013, LL14(
+			part->AddCommand(9013, LL14(
 				L"ドラムパートにする（GS/XGリズム）", L"Make drum part (GS/XG rhythm)", L"Partie batterie (rythme GS/XG)", L"Parti batteria (ritmo GS/XG)", L"Parte batería (ritmo GS/XG)",
 				L"드럼 파트로 (GS/XG 리듬)", L"改为鼓组（GS/XG节奏）", L"جزء طبول (إيقاع GS/XG)", L"Ударная партия (ритм GS/XG)", L"Drum-Part (GS/XG-Rhythmus)",
 				L"Parte bateria (ritmo GS/XG)", L"Drum-partij (GS/XG-ritme)", L"Partia perkusji (rytm GS/XG)", L"Davul parti (GS/XG ritim)"));
 		}
-		menu.AddCommand(9007, LL14(
+		part->AddCommand(9007, LL14(
 			L"全トラックを大譜表に", L"All tracks → grand staff", L"Toutes les pistes → grande portée", L"Tutte le tracce → pentagramma grande", L"Todas las pistas → gran pentagrama",
 			L"모든 트랙 → 대보표", L"全部轨道→大谱表", L"كل المسارات → مدرج كبير", L"Все дорожки → большой стан", L"Alle Spuren → Akkolade",
 			L"Todas as faixas → pauta grande", L"Alle tracks → groot notenbalk", L"Wszystkie ścieżki → wielka pięciolinia", L"Tüm parçalar → büyük porte"));
-		menu.AddCommand(9008, LL14(
+		part->AddCommand(9008, LL14(
 			L"全トラックをト音に", L"All tracks → treble", L"Toutes les pistes → clé de sol", L"Tutte le tracce → chiave di violino", L"Todas las pistas → clave de sol",
 			L"모든 트랙 → 높은음자리", L"全部轨道→高音谱号", L"كل المسارات → مفتاح صول", L"Все дорожки → скрипичный ключ", L"Alle Spuren → Violinschlüssel",
 			L"Todas as faixas → clave de sol", L"Alle tracks → vioolsleutel", L"Wszystkie ścieżki → klucz wiolinowy", L"Tüm parçalar → sol anahtarı"));
-		menu.AddCommand(9009, LL14(
+		part->AddCommand(9009, LL14(
 			L"全トラックをドラム(キット)に", L"All tracks → drum/kit", L"Toutes les pistes → batterie", L"Tutte le tracce → batteria", L"Todas las pistas → batería",
 			L"모든 트랙 → 드럼/키트", L"全部轨道→鼓组", L"كل المسارات → طبول", L"Все дорожки → ударные", L"Alle Spuren → Drum/Kit",
 			L"Todas as faixas → bateria", L"Alle tracks → drum/kit", L"Wszystkie ścieżki → perkusja", L"Tüm parçalar → davul/kit"));
@@ -3741,9 +4373,6 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(IDC_SASAMI_MIDI_SHOWALL, LL14(
 		L"MIDI1-32をすべて表示", L"Show all MIDI 1-32", L"Afficher MIDI 1-32", L"Mostra MIDI 1-32", L"Mostrar MIDI 1-32",
 		L"Show MIDI 1-32", L"显示全部MIDI1-32", L"Show MIDI 1-32", L"Show MIDI 1-32", L"Alle MIDI 1-32", L"Mostrar MIDI 1-32", L"Toon MIDI 1-32", L"Pokaz MIDI 1-32", L"MIDI 1-32 tumu"));
-	menu.AddCommand(IDC_SASAMI_MIDI_PLAY, LL14(
-		L"再生確認", L"Preview", L"Apercu", L"Anteprima", L"Vista previa",
-		L"Preview", L"试听", L"Preview", L"Preview", L"Vorschau", L"Previa", L"Voorbeeld", L"Podglad", L"Onizle"));
 	menu.AddCommand(IDC_SASAMI_MIDI_EXPORT, LL14(
 		L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...", L"Exportar audio...",
 		L"Audio export...", L"导出音频...", L"Audio export...", L"Audio export...", L"Audio export...", L"Exportar audio...", L"Audio exporteren...", L"Eksport audio...", L"Ses disa aktar..."));
@@ -3772,6 +4401,16 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	const UINT cmd = menu.Track(point, this);
 	if (cmd == 9088) {
 		ExportStandardMidi();
+		return;
+	}
+	if (cmd == 9089) {
+		PreviewRangeInstant();
+		return;
+	}
+	if (cmd == 9090) {
+		CString empty;
+		if (m_edBar.GetSafeHwnd()) m_edBar.SetWindowText(L"");
+		OnBnClickedBarGo();
 		return;
 	}
 	auto afterMark = [&](uint8_t kind) {
@@ -3807,7 +4446,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			if (path[0])
 				ScMidiSetVstLabel(&m_ui, tr, path);
 			else
-				m_ui.vstLabel[tr][0] = 0;
+				ScMidiSetVstLabel(&m_ui, tr, NULL);
 			m_doc.bind.isMpw3 = 1;
 			RefreshProgLabels();
 			PushDocToText();
@@ -3943,9 +4582,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		InvalidateRect(m_bodyRc, FALSE);
 	}
 	else if (tr >= 0 && cmd == 9005) {
-		m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4;
-		UpdateScrollBars();
-		InvalidateRect(m_bodyRc, FALSE);
+		CycleClefTrack(tr);
 	}
 	else if (tr >= 0 && cmd == 9013) {
 		const int cur = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, tr, 0);
@@ -3953,9 +4590,16 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	}
 	else if (cmd == 9007 || cmd == 9008 || cmd == 9009) {
 		const int c = (cmd == 9009) ? 3 : ((cmd == 9007) ? 2 : 0);
-		for (int i = 0; i < m_ui.trackCount; i++) m_ui.clef[i] = c;
+		HistPush();
+		for (int i = 0; i < m_ui.trackCount; i++) {
+			m_ui.clefAuto[i] = 0;
+			m_ui.clef[i] = c;
+			ScMidiAddClef(&m_doc, 0, i, c);
+		}
+		ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 		UpdateScrollBars();
 		InvalidateRect(m_bodyRc, FALSE);
+		PushDocToText();
 	}
 	else if (cmd == 9030 || cmd == 9031 || cmd == 9032) {
 		HistPush();
@@ -4097,14 +4741,7 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 	if (!ctrl && ScStaffTryDurationKey(&m_ui, nChar)) {
-		m_placeRest = m_ui.placeRest;
-		m_accidental = m_ui.placeAccidental;
-		UpdateNoteCursor();
-		UpdateHelpBar();
-		wchar_t st[96];
-		ScStaffFormatDurationStatus(st, 96, &m_ui);
-		m_status.SetWindowText(st);
-		InvalidateRect(m_gridRc, FALSE);
+		ApplyDurUi();
 		return;
 	}
 	if (!ctrl && (nChar == VK_LEFT || nChar == VK_RIGHT || nChar == VK_UP || nChar == VK_DOWN)) {
@@ -4130,9 +4767,48 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 	if (nChar == VK_HOME && !ctrl) {
-		m_ui.markerTick = 0;
+		JumpToTick(0);
 		m_status.SetWindowText(LL14(L"マーカー→0 (Home)。Spaceで先頭から再生。", L"Marker → 0 (Home). Space plays from start.", L"Marqueur → 0 (Home).", L"Marcatore → 0 (Home).", L"Marcador → 0 (Home).", L"마커→0 (Home).", L"标记→0 (Home)。", L"علامة → 0.", L"Маркер → 0.", L"Markierung → 0.", L"Marcador → 0.", L"Markering → 0.", L"Znacznik → 0.", L"İşaret → 0."));
-		InvalidateRect(m_bodyRc, FALSE);
+		return;
+	}
+	if (nChar == VK_END && !ctrl) {
+		JumpToTick(ScStaffLastContentTick(m_doc.ev, m_doc.evCount));
+		return;
+	}
+	if (!ctrl && (nChar == VK_PRIOR || nChar == VK_OEM_4)) { /* PageUp / [ */
+		JumpBar(-1);
+		return;
+	}
+	if (!ctrl && (nChar == VK_NEXT || nChar == VK_OEM_6)) { /* PageDown / ] */
+		JumpBar(1);
+		return;
+	}
+	if (ctrl && (nChar == 'G' || nChar == 'g')) {
+		OnBnClickedBarGo();
+		return;
+	}
+	if (!ctrl && nChar == VK_TAB) {
+		SwitchPart(shift ? -1 : 1);
+		return;
+	}
+	if (!ctrl && (nChar == 'M' || nChar == 'm')) {
+		ToggleMuteCur();
+		return;
+	}
+	if (!ctrl && (nChar == 'S' || nChar == 's')) {
+		ToggleSoloCur();
+		return;
+	}
+	if (shift && nChar == VK_SPACE) {
+		/* その場再生の特別ルート: 選択範囲(無ければ現在小節)を全パートで即試聴。 */
+		if (m_ui.previewActive) {
+			ScStaffStopHostPreview(&m_ui);
+			KillTimer(kScPreviewTimer);
+			VstLiveMonitorEnsure();
+			InvalidateRect(m_bodyRc, FALSE);
+		} else {
+			PreviewRangeInstant();
+		}
 		return;
 	}
 	if (nChar == VK_SPACE) {
@@ -4293,17 +4969,59 @@ void CSasamiMidiScoreDlg::HistPush()
 	ScScoreHistPush(&m_hist, m_doc.ev, m_doc.evCount);
 }
 
+void CSasamiMidiScoreDlg::CycleClefTrack(int tr)
+{
+	if (tr < 0 || tr >= 32) return;
+	HistPush();
+	m_curCh = tr;
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+	if (ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, tr, 0)) {
+		m_ui.clefAuto[tr] = 0;
+		m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4;
+		ScMidiAddClef(&m_doc, 0, tr, m_ui.clef[tr]);
+	} else {
+		const int nowAuto = ScStaffCycleClefChip(&m_ui, tr);
+		if (nowAuto)
+			ScStaffDropKindOnCh(m_doc.ev, &m_doc.evCount, SC_EV_CLEF, tr);
+		else
+			ScMidiAddClef(&m_doc, 0, tr, m_ui.clef[tr]);
+	}
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	UpdateScrollBars();
+	InvalidateRect(m_bodyRc, FALSE);
+	PushDocToText();
+	static const wchar_t* kClefName[] = {
+		L"Treble (G)", L"Bass (F)", L"Grand (G+F)", L"Drum/kit (C1=bottom)", L"Auto"
+	};
+	const int idx = m_ui.clefAuto[tr] ? 4 : (m_ui.clef[tr] % 4);
+	CString st;
+	st.Format(L"MIDI %d clef: %s (click chip to cycle)", tr + 1, kClefName[idx]);
+	m_status.SetWindowText(st);
+	if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
+		pal->InvalidateBody();
+}
+
 void CSasamiMidiScoreDlg::SetPartDrum(int tr, int drum)
 {
 	if (tr < 0 || tr >= SC_MIDI_CH) return;
 	drum = drum ? 1 : 0;
 	HistPush();
 	ScMidiAddDrum(&m_doc, 0, tr, drum);
-	m_ui.clef[tr] = drum ? 3 : 2;
+	if (drum) {
+		m_ui.clefAuto[tr] = 0;
+		m_ui.clef[tr] = 3;
+		ScMidiAddClef(&m_doc, 0, tr, 3);
+	} else {
+		m_ui.clefAuto[tr] = 1;
+		ScStaffDropKindOnCh(m_doc.ev, &m_doc.evCount, SC_EV_CLEF, tr);
+		m_ui.clef[tr] = 0;
+	}
 	m_ui.visible[tr] = 1;
 	m_curCh = tr;
+	RefreshChComboLabels();
 	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 	RefreshProgLabels();
+	UpdateInfoBar();
 	NotifyEdited();
 	CString st;
 	st.Format(drum
@@ -4316,7 +5034,9 @@ void CSasamiMidiScoreDlg::NotifyEdited()
 {
 	PushDocToText();
 	RefreshBoundRoll();
-	Invalidate(FALSE);
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	UpdateScrollBars();
+	ScStaffInvalidateBelowCaption(this);
 }
 
 void CSasamiMidiScoreDlg::RefreshBoundRoll()
@@ -4443,6 +5163,11 @@ void CSasamiMidiScoreDlg::ApplyMuteSoloToLive()
 		if (muted)
 			VstLiveMidiToPart(i + 1, (DWORD)(0xB0 | (i & 0x0F)) | (7 << 8) | (0 << 16));
 	}
+}
+
+void CSasamiMidiScoreDlg::NotifyMuteSolo()
+{
+	ApplyMuteSoloToLive();
 }
 
 void CSasamiMidiScoreDlg::SetStripCcAtTick(int kind, uint32_t tick, int value0to127)
@@ -4592,7 +5317,7 @@ LRESULT CSasamiMidiScoreDlg::OnPalQueryState(WPARAM, LPARAM lParam)
 	st->meterN = mn;
 	st->meterD = md;
 	st->keySig = ScStaffKeySigAtTick(m_doc.ev, m_doc.evCount, barTick, m_ui.keySig);
-	st->clef = ScStaffClefModeAt(&m_ui, m_curCh, barTick, m_doc.ev, m_doc.evCount);
+	st->clef = m_ui.clefAuto[m_curCh] ? 4 : ScStaffClefModeAt(&m_ui, m_curCh, barTick, m_doc.ev, m_doc.evCount);
 	st->nSel = m_ui.nSel;
 	st->previewNote = -1;
 	st->curCh = m_curCh;
@@ -4612,7 +5337,7 @@ LRESULT CSasamiMidiScoreDlg::OnPalLayout(WPARAM w, LPARAM l)
 		const uint32_t barTick = ScStaffSnapToBarTick(m_doc.ev, m_doc.evCount, m_ui.markerTick, defN, defD);
 		ApplyMeterAtBar(barTick, (int)w, b);
 		if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
-			pal->Invalidate(FALSE);
+			pal->InvalidateBody();
 	}
 	return 0;
 }
@@ -4665,12 +5390,22 @@ void CSasamiMidiScoreDlg::ApplyLayoutPalCmd(int cmdId)
 		}
 		goto refresh_pal;
 	}
+	if (cmdId == SASAMI_PAL_CMD_CLEF_AUTO) {
+		HistPush();
+		m_ui.clefAuto[m_curCh] = 1;
+		ScStaffDropKindOnCh(m_doc.ev, &m_doc.evCount, SC_EV_CLEF, m_curCh);
+		ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+		UpdateScrollBars();
+		InvalidateRect(m_bodyRc, FALSE);
+		PushDocToText();
+		goto refresh_pal;
+	}
 	if (cmdId >= SASAMI_PAL_CMD_CLEF_G && cmdId <= SASAMI_PAL_CMD_CLEF_DR) {
 		const int clef = cmdId - SASAMI_PAL_CMD_CLEF_G;
 		HistPush();
+		m_ui.clefAuto[m_curCh] = 0;
 		ScMidiAddClef(&m_doc, barTick, m_curCh, clef);
-		if (barTick == 0)
-			m_ui.clef[m_curCh] = clef;
+		m_ui.clef[m_curCh] = clef;
 		ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 		UpdateScrollBars();
 		InvalidateRect(m_bodyRc, FALSE);
@@ -4718,7 +5453,7 @@ void CSasamiMidiScoreDlg::ApplyLayoutPalCmd(int cmdId)
 	}
 refresh_pal:
 	if (CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::Instance())
-		pal->Invalidate(FALSE);
+		pal->InvalidateBody();
 }
 
 void CSasamiMidiScoreDlg::ApplyMeterAtBar(uint32_t tick, int numer, int denom)
@@ -4866,7 +5601,7 @@ void CSasamiMidiScoreDlg::AutoArrangeRefresh()
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 }
 
 int CSasamiMidiScoreDlg::AutoArrangePreview()
@@ -5061,6 +5796,6 @@ void CSasamiMidiScoreDlg::OnBnClickedRoll()
 	m_ui.showRollSplit ^= 1;
 	LayoutChrome();
 	CSasamiPianoRollDlg::OpenForMidi(this);
-	Invalidate(FALSE);
+	ScStaffInvalidateBelowCaption(this);
 }
 

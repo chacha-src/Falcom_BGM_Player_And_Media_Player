@@ -335,6 +335,8 @@ CDriverAc::~CDriverAc()
 
 /* 譜面が数秒で終わる System 21。秒数だけ同じコマンドを入れ直す。0 は無効。 */
 static int sAcReplaySec = 0;
+/* winrun: 出だしの無音を飛ばし、曲が終わったら同じスロットを入れ直す。 */
+static int sAcWinrun = 0;
 static int sAcContcirc = 0;
 static int sAcNightStart = 0;
 static int sAcStratgyx = 0;
@@ -364,6 +366,7 @@ static int sAcVindMix = 0;
 int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	sAcReplaySec = 0;
+	sAcWinrun = 0;
 	sAcContcirc = 0;
 	sAcNightStart = 0;
 	sAcStratgyx = 0;
@@ -2054,7 +2057,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		decoNextYmIrq_ = 0;
 		cmdIndex_ = 0;
 		/* BGM コードを優先。0x80+ は SE／音量 — 下位 7bit へ。H6280（kind 0）: カタログが高ファンファーレを出すことがある — 再生可能なステージ BGM があればそちらへ。dec0/drgninja（kind 2）: カタログ先頭は Credit（0x05）。ホスト BGM >=0x1C は残し、Credit／低 SE は最初のステージ BGM へ上げる。Atari JSA（kind 5）: ボイス／チップテストのカタログ先頭を飛ばす。 */
-		if (songCmd_ >= 0x80 && songCmd_ < 0xc0)
+		/* labyrunr の曲番号は 0x80 以上が本番。ここで落とすと別の曲になる。 */
+		if (hw_->DecoCpuKind() != 16 && songCmd_ >= 0x80 && songCmd_ < 0xc0)
 			songCmd_ = (uint8_t)(songCmd_ & 0x7fu);
 		if (ge && ge->titleCount > 0) {
 			const int kind = hw_->DecoCpuKind();
@@ -2192,6 +2196,49 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		booted_ = 1;
 		triggered_ = 1;
 		/* 追加注入をスケジュールしない — 繰り返しは $2310 をクリア */
+		nextCmdAt_ = (uint64_t)~0ull;
+		return 1;
+	}
+
+	/* 銀河任侠伝: MC6809 + Y8950 + YM2149。Over Drive の YM2151 起動には入れない。 */
+	if (hw_->AcGinganin() && hw_->NamcoM6809Active()) {
+		namcoM6809_ = 1;
+		namcoAcc_ = 0;
+		cmdIndex_ = 0;
+		NamcoM6809RunCycles(cpuHz_ / 2);
+		TryInjectCommand();
+		booted_ = 1;
+		triggered_ = 1;
+		nextCmdAt_ = (uint64_t)~0ull;
+		return 1;
+	}
+
+	/* Hot Chase: MC6809E + K007232×3。Over Drive の YM 起動には入れない。 */
+	if (hw_->AcHotchase() && hw_->NamcoM6809Active()) {
+		namcoM6809_ = 1;
+		namcoAcc_ = 0;
+		cmdIndex_ = 0;
+		NamcoM6809RunCycles(cpuHz_ / 2);
+		TryInjectCommand();
+		booted_ = 1;
+		triggered_ = 1;
+		nextCmdAt_ = (uint64_t)~0ull;
+		return 1;
+	}
+
+	/* Over Drive: MC6809E + YM2151 + K053260×2。Namco の曲表書き換えには入れない。 */
+	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->NamcoM6809Active()) {
+		namcoM6809_ = 1;
+		namcoAcc_ = 0;
+		cmdIndex_ = 0;
+		/* ROM チェックサムが約 1.8M サイクル。半周期だと注入が検査の途中になる。 */
+		NamcoM6809RunCycles(cpuHz_ * 2);
+		TryInjectCommand();
+		/* Credit 0x87 と Continue 0x88 は約 6 秒でフレーズが終わる。4 秒ごとに同じラッチを戻す。 */
+		if (songCmd_ == 0x87u || songCmd_ == 0x88u)
+			sAcReplaySec = 4;
+		booted_ = 1;
+		triggered_ = 1;
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
@@ -2346,6 +2393,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					prefer = 0x0eu;
 				else if (_stricmp(ar, "winrun91") == 0 && lo == 0x30u)
 					prefer = 0x05u;
+				else if (_stricmp(ar, "winrun") == 0) {
+					/* 曲表の type-$20 は 0x00/0x01/0x02 の 3 つだけ。カタログは全部別型なので、
+					   この 3 曲へ回す。隣は別スロット。 */
+					static const uint8_t kSlot[] = { 0x00, 0x01, 0x02 };
+					prefer = kSlot[(tidx >= 0 ? (unsigned)tidx : 0u) % 3u];
+					preferSet = 1;
+					sAcWinrun = 1;
+				}
 				else if (_stricmp(ar, "driveyes") == 0 && lo == 0x20u)
 					prefer = 0x04u;
 				else if (_stricmp(ar, "suzuka8h") == 0) {
@@ -2604,6 +2659,25 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2 && ge && ge->archive
 			&& _stricmp(ge->archive, "finalap3") == 0)
 			NamcoM6809RunCycles(cpuHz_);
+		if (sAcWinrun) {
+			/* スロット 0/1 は鳴るまで約 4 秒かかる。録音の前にそこを消化する。 */
+			const int slice = hostRate_ > 0 ? hostRate_ / 10 : 4410;
+			int16_t* tmp = (int16_t*)malloc((size_t)slice * 2 * sizeof(int16_t));
+			if (tmp) {
+				for (int w = 0; w < 70; w++) {
+					NamcoM6809Render(tmp, slice);
+					int peak = 0;
+					for (int i = 0; i < slice * 2; i++) {
+						int v = tmp[i];
+						if (v < 0) v = -v;
+						if (v > peak) peak = v;
+					}
+					if (peak > 180)
+						break;
+				}
+				free(tmp);
+			}
+		}
 		/* gaplus/superpac/liblrabl はハンドシェイクが遅い — 15XX が話すまで温め、分類チャンクが 0,0,0,peak（WEAK）にならないようにする。 */
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()) {
 			const int slice = hostRate_ > 0 ? hostRate_ / 10 : 4410;
@@ -2891,14 +2965,33 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			Ms1RunCycles(cpuHz_);
 			Ms1RunCycles(cpuHz_ / 2);
 			Ms1RunCycles(cpuHz_ / 2);
-			if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
+			const int zr107 = hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
+				&& hw_->Ms1Read8(0) == 0x00u && hw_->Ms1Read8(1) == 0x10u
+				&& hw_->Ms1Read8(2) == 0x3eu && hw_->Ms1Read8(0x6a) == 0x1du;
+			if (zr107) {
+				/* 待ちループに入ってから (曲, 1) を置く。2 バイト目が 0 だと
+				   曲が始まらない。その後 22F bit5 と制御 bit0 でシーケンサを進める。
+				   後段の TryInject は (0, 曲) を足し、曲 7 は停止コマンドになる。 */
+				Ms1RunCycles(cpuHz_ * 2);
+				hw_->Ms1Write8(0x103c00u, (uint8_t)titleCode);
+				hw_->Ms1Write8(0x103c01u, 0x01u);
+				hw_->Ms1Write8(0x103c02u, 0);
+				hw_->Ms1Write8(0x103c03u, 0);
+				Ms1RunCycles(cpuHz_ / 4);
+				if (hw_->SoundChip())
+					hw_->SoundChip()->Write(0x22fu, (uint8_t)(hw_->Ms1Read8(0x20045eu) | 0x21u));
+				if (hw_->PcmChip())
+					hw_->PcmChip()->Write(0x22fu, (uint8_t)(hw_->Ms1Read8(0x20045fu) | 0x21u));
+				hw_->Ms1Write8(0x500001u, (uint8_t)(hw_->GxSoundCtrl() | 0x01u));
+			} else if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
 				&& !(hw_->GxSoundCtrl() & 1)) {
 				hw_->Ms1Write8(0x500001u, 0xff);
 				Ms1RunCycles(cpuHz_ / 4);
 			}
 			booted_ = 1;
 			cmdIndex_ = 0;
-			TryInjectCommand();
+			if (!zr107)
+				TryInjectCommand();
 			Ms1RunCycles(cpuHz_);
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
@@ -4528,6 +4621,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		cmdIndex_ = 0;
 		TryInjectCommand();
+		/* multi32（F3 C3 00 01）: 41F1 は E700 が 0 以外なら 44DB の曲を起こす。 */
+		if (hw_->Sys32MultiPcm() && hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xc3
+			&& hw_->PeekMem(2) == 0x00 && hw_->PeekMem(3) == 0x01) {
+			if (uint8_t* m = hw_->Mem())
+				m[0xe700] = songCmd_;
+		}
 		if (hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xed
 			&& hw_->PeekMem(2) == 0x5e && hw_->PeekMem(7) == 0x1f
 			&& (songCmd_ == 0x0bu || songCmd_ == 0x07u || songCmd_ == 0x08u
@@ -5443,6 +5542,27 @@ void CDriverAc::TryInjectCommand()
 {
 	if (loadOnly) return;
 	if (!hw_) return;
+	if (hw_->AcGinganin()) {
+		if (cmdIndex_ >= 1) return;
+		hw_->SetSoundCommand(songCmd_);
+		/* 出だしの無音だけ飛ばす。音が出た時点で止める（短い効果音を食い潰さない）。最大 4 秒。 */
+		for (int spin = 0; spin < 8; spin++) {
+			NamcoM6809RunCycles((int)(cpuHz_ / 2));
+			CChip* fm = hw_->SoundChip();
+			if (!fm) break;
+			int16_t tmp[128];
+			fm->Render(tmp, 64);
+			int pk = 0;
+			for (int j = 0; j < 128; j++) {
+				int a = tmp[j] < 0 ? -tmp[j] : tmp[j];
+				if (a > pk) pk = a;
+			}
+			if (pk > 180) break;
+		}
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		return;
+	}
 	if ((hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 		&& (hw_->TaitoOpmMap() == 2 || hw_->TaitoOpmMap() == 3
 			|| hw_->TaitoOpmMap() == 4 || hw_->TaitoOpmMap() == 5
@@ -5638,6 +5758,18 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
+		if (uint8_t* rx = hw_->Mem()) {
+			if (rx[0] == 0xc3u && rx[1] == 0x00u && rx[2] == 0x38u && rx[3] == 0x31u
+				&& ((rx[0x2400] == 0x00u && rx[0x2401] == 0xe5u)
+					|| (rx[8] == 0xc3u && rx[9] == 0x80u && rx[0x0a] == 0x25u))) {
+				/* 0x00 も曲。更新毎に植え直すとシーケンスが頭に戻る。 */
+				if (cmdIndex_ >= 1) return;
+				hw_->SetSoundCommand(songCmd_);
+				cmdIndex_ = 1;
+				triggered_ = 1;
+				return;
+			}
+		}
 		if (hw_->PengoWsg()) {
 			/* ワンショット: 更新毎に (IX+0)=1 を植え直すと 1C4B ポインタロードが再開しメロディが切れる */
 			if (cmdIndex_ >= 1) return;
@@ -5831,6 +5963,84 @@ void CDriverAc::DeliverIrqs()
 
 	/* Namco Galaga/Dig Dug/Bosco: 音源 CPU 作業は全て NMI 駆動（RST $0038 は空）。メイン CPU が NMI をパルス。約 240Hz にレート制限。最初のラッチまで周期 NMI を抑止 — 早い NMI は galaga/bosco ブートチェックサムを壊す（AF だけ保存）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
+		if (uint8_t* rx = hw_->Mem()) {
+			if (rx[0] == 0xc3u && rx[1] == 0x00u && rx[2] == 0x38u && rx[3] == 0x31u
+				&& rx[0x2400] == 0x00u && rx[0x2401] == 0xe5u) {
+				/* Rally-X: 映像初期化は回さず、60Hz で音源 $2400 だけ進める。 */
+				const uint64_t now = (uint64_t)cpu->time64();
+				const uint64_t period = cpuHz_ ? (uint64_t)cpuHz_ / 60 : 0;
+				const unsigned pc = (unsigned)cpu->r.pc;
+				if (period > 0 && now >= nextGngIrq_ && (pc < 0x2400u || pc >= 0x2d00u)) {
+					/* ジングルが終わって音量が落ちたら同じビットを入れ直す。鳴っている間は触らない。 */
+					{
+						static uint8_t lastCmd = 0xff;
+						static int heard = 0, quiet = 0;
+						if (lastCmd != songCmd_) {
+							lastCmd = songCmd_;
+							heard = 0;
+							quiet = 0;
+						}
+						const int vol = rx[0xa115] | rx[0xa11a] | rx[0xa11f];
+						if (vol) {
+							heard = 1;
+							quiet = 0;
+						} else if (heard && ++quiet >= 12) {
+							hw_->SetSoundCommand(songCmd_);
+							heard = 0;
+							quiet = 0;
+						}
+					}
+					if (songCmd_ == 0x06u) {
+						/* Motor は 27B3 が $806A/$806B の車速から声 3 を書く。ゲームは回していない。 */
+						static uint8_t step;
+						step = (uint8_t)((step + 1u) & 0x0fu);
+						rx[0x806a] = (step & 8u) ? 0x80u : 0x00u;
+						rx[0x806b] = (uint8_t)(step & 7u);
+					}
+					rx[0x8000] = 0x18;
+					rx[0x8001] = 0xfe;
+					rx[0x8efe] = 0x00;
+					rx[0x8eff] = 0x80;
+					cpu->r.sp = 0x8efe;
+					cpu->r.pc = 0x2400;
+					nextGngIrq_ = now + period;
+				}
+				return;
+			}
+			if (rx[0] == 0xc3u && rx[1] == 0x00u && rx[2] == 0x38u && rx[3] == 0x31u
+				&& rx[8] == 0xc3u && rx[9] == 0x80u && rx[0x0a] == 0x25u) {
+				/* New Rally-X: 音源は $2580。 */
+				const uint64_t now = (uint64_t)cpu->time64();
+				const uint64_t period = cpuHz_ ? (uint64_t)cpuHz_ / 60 : 0;
+				const unsigned pc = (unsigned)cpu->r.pc;
+				if (period > 0 && now >= nextGngIrq_ && (pc < 0x2580u || pc >= 0x2e00u)) {
+					static uint8_t lastCmd = 0xff;
+					static int heard = 0, quiet = 0;
+					if (lastCmd != songCmd_) {
+						lastCmd = songCmd_;
+						heard = 0;
+						quiet = 0;
+					}
+					const int vol = rx[0xa115] | rx[0xa11a] | rx[0xa11f];
+					if (vol) {
+						heard = 1;
+						quiet = 0;
+					} else if (heard && ++quiet >= 12) {
+						hw_->SetSoundCommand(songCmd_);
+						heard = 0;
+						quiet = 0;
+					}
+					rx[0x8000] = 0x18;
+					rx[0x8001] = 0xfe;
+					rx[0x8efe] = 0x00;
+					rx[0x8eff] = 0x80;
+					cpu->r.sp = 0x8efe;
+					cpu->r.pc = 0x2580;
+					nextGngIrq_ = now + period;
+				}
+				return;
+			}
+		}
 		if (hw_->PengoWsg()) {
 			/* MAME pengo: vblank IRQ0 HOLD、IM 1、マスク = LS259 Q0 @9040 */
 			uint8_t* m = hw_->Mem();
@@ -5996,7 +6206,27 @@ void CDriverAc::DeliverIrqs()
 			/* MAME seage: VDP2 n_int → IRQ0 60Hz。NMI 無し。240Hz SYS1 タイマは使わない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			HoldIrq0(cpu, now, period);
+			uint8_t* fz = hw_->Mem();
+			const int fantzn = fz && fz[0] == 0x02 && fz[1] == 0x00 && fz[2] == 0x88 && fz[3] == 0x80
+				&& fz[0x817f] == 0xcd && fz[0x8180] == 0xdc && fz[0x8181] == 0x81;
+			if (fantzn) {
+				/* 曲データが 0038 にあるので IM1 ベクタは使わない。FE20 が 817F を 1 回呼ぶ。 */
+				if (period > 0 && now >= nextGngIrq_) {
+					if (cpu->r.iff1 && !cpu->irqDelay) {
+						if (fz[cpu->r.pc] == 0x76)
+							cpu->r.pc = (uint16_t)(cpu->r.pc + 1);
+						cpu->r.iff1 = 0;
+						cpu->r.iff2 = 0;
+						cpu->r.sp = (uint16_t)(cpu->r.sp - 2);
+						fz[cpu->r.sp] = (uint8_t)(cpu->r.pc & 0xff);
+						fz[(uint16_t)(cpu->r.sp + 1)] = (uint8_t)(cpu->r.pc >> 8);
+						cpu->r.pc = 0xfe20;
+					}
+					nextGngIrq_ = now + period;
+				}
+			} else {
+				HoldIrq0(cpu, now, period);
+			}
 			return;
 		}
 		if (hw_->TrackfldSn()) {
@@ -6454,6 +6684,23 @@ void CDriverAc::DeliverIrqs()
 
 	/* Taito SJ: ラッチ書込が NMI をパルス（AY#4 ポート B bit0 でゲート）。シーケンサは映像ハードの 60Hz IM1 IRQ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_SJ) {
+		if (hw_->PopeyeAy()) {
+			/* MAME tpp2: 垂直帰線が NMI。音はそこの AY 書きで進む。 */
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				/* 起動の 32KB チェックサム中に NMI を入れると、本体が 1 命令しか進まない。 */
+				if (cpu->r.pc < 0x4bf5 || cpu->r.pc > 0x4bfc) {
+					if (uint8_t* m = hw_->Mem()) {
+						if (m[0x8fd3])
+							m[0x8fd3]--;
+					}
+					Ay_CpuNmi(cpu);
+				}
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
 		if (hw_->NbAyIo()) {
 			if (hw_->IrqPulsePending()) {
 				if (Ay_CpuIm1Interrupt(cpu))
@@ -7874,9 +8121,60 @@ int CDriverAc::M92Render(int16_t* stereo, int frames)
 void CDriverAc::DecoRunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
-	if (hw_->DecoBrkthruM6809() || hw_->TechnosDdM6809()) {
+	if (hw_->DecoCpuKind() == 16) {
 		mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
 		if (!cpu) return;
+		CChip* ym1 = hw_->SoundChip();
+		CChip* ym2 = hw_->Chip2();
+		unsigned long start = cpu->cycles;
+		const unsigned long target = start + (unsigned long)cycles;
+		int steps = 0;
+		const int kMaxSteps = cycles * 8 + 1024;
+		while (cpu->cycles < target && steps < kMaxSteps) {
+			hw_->NamcoM6809SyncIrqs();
+			const unsigned long before = cpu->cycles;
+			const int rc = mc6809_step(cpu);
+			steps++;
+			if (rc != 0) break;
+			if (cpu->cycles == before)
+				cpu->cycles++;
+			const unsigned long used = cpu->cycles - before;
+			if (ym1) ym1->AdvanceClocks((uint64_t)used);
+			if (ym2) ym2->AdvanceClocks((uint64_t)used);
+		}
+		const int stepped = (int)(cpu->cycles - start);
+		if (stepped > 0)
+			hw_->AddCpuCycles((uint64_t)stepped);
+		return;
+	}
+	if (hw_->DecoBrkthruM6809() || hw_->TechnosDdM6809()
+		|| hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15) {
+		mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
+		if (!cpu) return;
+		if (hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15) {
+			CChip* sn1 = hw_->SoundChip();
+			CChip* sn2 = hw_->Chip2();
+			unsigned long start = cpu->cycles;
+			const unsigned long target = start + (unsigned long)cycles;
+			int steps = 0;
+			const int kMaxSteps = cycles * 8 + 1024;
+			while (cpu->cycles < target && steps < kMaxSteps) {
+				hw_->NamcoM6809SyncIrqs();
+				const unsigned long before = cpu->cycles;
+				const int rc = mc6809_step(cpu);
+				steps++;
+				if (rc != 0) break;
+				if (cpu->cycles == before)
+					cpu->cycles++;
+				const unsigned long used = cpu->cycles - before;
+				if (sn1) sn1->AdvanceClocks((uint64_t)used);
+				if (sn2) sn2->AdvanceClocks((uint64_t)used * 2u);
+			}
+			const int stepped = (int)(cpu->cycles - start);
+			if (stepped > 0)
+				hw_->AddCpuCycles((uint64_t)stepped);
+			return;
+		}
 		if (hw_->TechnosDdM6809()) {
 			CChip* chip = hw_->SoundChip();
 			unsigned long start = cpu->cycles;
@@ -7958,7 +8256,11 @@ void CDriverAc::DecoRunCycles(int cycles)
 			const int used = M6502Execute(m6502, slice);
 			const int step = used > 0 ? used : slice;
 			hw_->AddCpuCycles((uint64_t)step);
-			if (hw_->DecoCpuKind() == 11 || hw_->DecoCpuKind() == 12) {
+			if (hw_->DecoCpuKind() == 13) {
+				/* tceptor: CPU 2.048 MHz、YM2151 3.579545 MHz。 */
+				if (chip)
+					chip->AdvanceClocks((uint64_t)step * 3579545ull / 2048000ull);
+			} else if (hw_->DecoCpuKind() == 11 || hw_->DecoCpuKind() == 12) {
 				/* disco / btime: CPU 500 kHz、AY 1.5 MHz。matmania の 2 倍には合わせない。 */
 				if (chip) chip->AdvanceClocks((uint64_t)step * 3u);
 				if (ym2203) ym2203->AdvanceClocks((uint64_t)step * 3u);
@@ -8196,6 +8498,11 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
 			AcBoostYamaha(chip, p, n);
+			if (hw_->DecoCpuKind() == 13) {
+				/* tceptor 下位ネームは YM が 32767 に張り付く。この基板だけ半分。 */
+				for (int i = 0; i < n * 2; i++)
+					p[i] = (int16_t)((int)p[i] / 2);
+			}
 			if (sAcVindMix) {
 				for (int i = 0; i < n * 2; i++)
 					p[i] = (int16_t)((int)p[i] / 2);
@@ -8215,6 +8522,46 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 			}
 			if (hw_->PcmChip()) hw_->PcmChip()->MixAdd(p, n, 256);
 			if (hw_->Oki(1)) hw_->Oki(1)->MixAdd(p, n, 192);
+			if (hw_->DecoCpuKind() == 16) {
+				/* 1.5 秒静かなら同じ曲を最初から。曲中の短い休符では入れ直さない。 */
+				extern void CEmuAcLabyRearm(void);
+				static uint8_t last = 0;
+				static int heard = 0, quiet = 0;
+				static uint64_t prevNow = 0;
+				const uint64_t now = hw_->CpuCycles();
+				if (now < prevNow || last != songCmd_) {
+					last = songCmd_;
+					heard = 0;
+					quiet = 0;
+				}
+				prevNow = now;
+				int pk = 0;
+				for (int i = 0; i < n * 2; i++) {
+					int a = p[i] < 0 ? -p[i] : p[i];
+					if (a > pk) pk = a;
+				}
+				if (songCmd_ == 0x85) {
+					/* 6 秒でドローンになる。2 秒ごとに 0 を見せて $45AB から入れ直す。 */
+					if (pk > 180) heard = 1;
+					if (heard) {
+						quiet += n;
+						if (quiet > hostRate_ * 2) {
+							CEmuAcLabyRearm();
+							quiet = 0;
+						}
+					}
+				} else if (pk > 180) {
+					heard = 1;
+					quiet = 0;
+				} else if (heard) {
+					quiet += n;
+					if (quiet > hostRate_ + hostRate_ / 2) {
+						CEmuAcLabyRearm();
+						heard = 0;
+						quiet = 0;
+					}
+				}
+			}
 		}
 		done += n;
 	}
@@ -8291,20 +8638,28 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 		/* タイマ→FIRQ のため YM を十分 tick。末尾一括は BGM を飢えた */
 		if (clocksPending >= 64u) {
 			if (chip) chip->AdvanceClocks((uint64_t)clocksPending);
+			if (hw_->AcGinganin() && hw_->Chip2())
+				hw_->Chip2()->AdvanceClocks((uint64_t)clocksPending);
 			if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)clocksPending);
+			if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->KonamiPcm2())
+				hw_->KonamiPcm2()->AdvanceClocks((uint64_t)clocksPending);
 			clocksPending = 0;
 		}
-		/* S はワーク RAM 内。Sys2 ファームは LDS #$A000（空スタック。最初の push は $9FFF）。毎命令 A000→9FF0 クランプはその番兵と戦った。Mappy 期 WSG: LDS #$0400。 */
+		/* S はワーク RAM 内。Sys2 ファームは LDS #$A000（空スタック。最初の push は $9FFF）。毎命令 A000→9FF0 クランプはその番兵と戦った。Mappy 期 WSG: LDS #$0400。
+		   Over Drive のスタックは 0800-0FFF なのでこのクランプに掛けない。 */
 		if (hw_->WsgMappy()) {
 			if (cpu->S.w < 0x03c0u || cpu->S.w > 0x0400u)
 				cpu->S.w = 0x03f0;
-		} else if (cpu->S.w < 0x8000u || cpu->S.w > 0xa000u) {
+		} else if (hw_->board_ != CEMU_AC_BOARD_KONAMI_PCM
+			&& (cpu->S.w < 0x8000u || cpu->S.w > 0xa000u)) {
 			cpu->S.w = 0x9ff0;
 		}
 	}
 	if (clocksPending) {
 		if (chip) chip->AdvanceClocks((uint64_t)clocksPending);
 		if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)clocksPending);
+		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->KonamiPcm2())
+			hw_->KonamiPcm2()->AdvanceClocks((uint64_t)clocksPending);
 	}
 	const int stepped = (int)(cpu->cycles - start);
 	if (stepped > 0)
@@ -8314,7 +8669,7 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 int CDriverAc::NamcoM6809Render(int16_t* stereo, int frames)
 {
 	CChip* chip = hw_->SoundChip();
-	if (!chip) return 0;
+	if (!chip && !hw_->AcHotchase()) return 0;
 	enum { kChunk = 64 };
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
@@ -8358,10 +8713,113 @@ int CDriverAc::NamcoM6809Render(int16_t* stereo, int frames)
 		}
 		{
 			int16_t* p = stereo + (size_t)done * 2;
+			if (hw_->AcHotchase()) {
+				hw_->AcHotchaseMix(p, n);
+			} else {
 			chip->Render(p, n);
-			AcBoostYamaha(chip, p, n);
-			if (hw_->PcmChip())
-				hw_->PcmChip()->MixAdd(p, n, 256);
+			if (hw_->AcGinganin() && hw_->Chip2()) {
+				int16_t ay[128];
+				hw_->Chip2()->Render(ay, n);
+				for (int i = 0; i < n * 2; i++) {
+					int s = (int)p[i] + (int)ay[i] / 2;
+					if (s > 32767) s = 32767;
+					if (s < -32768) s = -32768;
+					p[i] = (int16_t)s;
+				}
+				/* 曲が終わって 0.5 秒静かなら同じコマンドを入れ直す。鳴っている間は触らない。 */
+				{
+					extern void CEmuAcGingaRearm(void);
+					static uint8_t last = 0xff;
+					static int heard = 0, quiet = 0;
+					if (last != songCmd_) {
+						last = songCmd_;
+						heard = 0;
+						quiet = 0;
+					}
+					int pk = 0;
+					for (int i = 0; i < n * 2; i++) {
+						int a = p[i] < 0 ? -p[i] : p[i];
+						if (a > pk) pk = a;
+					}
+					if (pk > 180) {
+						heard = 1;
+						quiet = 0;
+					} else if (heard) {
+						quiet += n;
+						if (quiet > hostRate_ / 2) {
+							CEmuAcGingaRearm();
+							for (int spin = 0; spin < 8; spin++) {
+								NamcoM6809RunCycles((int)(cpuHz_ / 2));
+								int16_t tmp[128];
+								chip->Render(tmp, 64);
+								int pk = 0;
+								for (int j = 0; j < 128; j++) {
+									int a = tmp[j] < 0 ? -tmp[j] : tmp[j];
+									if (a > pk) pk = a;
+								}
+								if (pk > 180) break;
+							}
+							heard = 0;
+							quiet = 0;
+						}
+					}
+				}
+			}
+			if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM) {
+				/* Over Drive だけ。カタログ pcm_mix 0xAB。YM の 2 倍ブーストはここで飽和する。 */
+				const int g = 0xAB;
+				if (hw_->PcmChip())
+					hw_->PcmChip()->MixAdd(p, n, g);
+				if (hw_->KonamiPcm2())
+					hw_->KonamiPcm2()->MixAdd(p, n, g);
+			} else {
+				AcBoostYamaha(chip, p, n);
+				if (hw_->PcmChip())
+					hw_->PcmChip()->MixAdd(p, n, 256);
+			}
+			if (sAcWinrun) {
+				static uint8_t last = 0xff;
+				static int heard = 0, quiet = 0;
+				static uint64_t prevNow = 0;
+				const uint64_t now = hw_->CpuCycles();
+				if (now < prevNow || last != songCmd_) {
+					last = songCmd_;
+					heard = 0;
+					quiet = 0;
+				}
+				prevNow = now;
+				int pk = 0;
+				for (int i = 0; i < n * 2; i++) {
+					int a = p[i] < 0 ? -p[i] : p[i];
+					if (a > pk) pk = a;
+				}
+				if (pk > 180) {
+					heard = 1;
+					quiet = 0;
+				} else if (heard) {
+					quiet += n;
+					if (quiet > hostRate_ / 2) {
+						hw_->SetSoundCommand(songCmd_);
+						for (int spin = 0; spin < 80; spin++) {
+							NamcoM6809RunCycles((int)(cpuHz_ / 10));
+							int16_t tmp[128];
+							memset(tmp, 0, sizeof(tmp));
+							if (chip) chip->Render(tmp, 64);
+							if (hw_->PcmChip())
+								hw_->PcmChip()->MixAdd(tmp, 64, 256);
+							int pk2 = 0;
+							for (int j = 0; j < 128; j++) {
+								int a = tmp[j] < 0 ? -tmp[j] : tmp[j];
+								if (a > pk2) pk2 = a;
+							}
+							if (pk2 > 180) break;
+						}
+						heard = 0;
+						quiet = 0;
+					}
+				}
+			}
+			}
 		}
 		done += n;
 	}
@@ -9605,9 +10063,48 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 				: ((hw_->board_ == CEMU_AC_BOARD_CPS1) ? 96 : 256))));
 			pcm->MixAdd(stereo + i * 2, 1, pcmGain);
 		}
+		/* multi32: 短いジングルは鳴ったあと無音のまま。1.5 秒の無音で同じ曲を E700 から入れ直す。
+		   ループ BGM は窓がずっと鳴っているのでここを通さない。 */
+		if (hw_->Sys32MultiPcm() && hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xc3
+			&& hw_->PeekMem(2) == 0x00 && hw_->PeekMem(3) == 0x01 && hostRate_ > 0) {
+			static uint8_t prev;
+			static int heard, quiet, last;
+			if (songCmd_ != prev) {
+				prev = songCmd_;
+				heard = 0;
+				quiet = 0;
+				last = 0;
+			}
+			const int s = stereo[i * 2];
+			int d = s - last;
+			if (d < 0) d = -d;
+			last = s;
+			/* 0x05 などは終わったあと小さい揺れが残って窓ピークは 200 以下。絶対値で見る。 */
+			const int shortSong = (songCmd_ == 0x05 || songCmd_ == 0x08
+				|| songCmd_ == 0xf2 || songCmd_ == 0xe4
+				|| songCmd_ == 0xef || songCmd_ == 0xf4);
+			if (shortSong) {
+				/* 数秒でドローンになる。2 秒ごとに同じコマンドを入れ直す。 */
+				if (d > 600) heard = 1;
+				if (heard && ++quiet > hostRate_ * 2) {
+					quiet = 0;
+					if (uint8_t* m = hw_->Mem())
+						m[0xe700] = songCmd_;
+				}
+			} else if (d > 180) {
+				heard = 1;
+				quiet = 0;
+			} else if (heard && ++quiet > hostRate_) {
+				heard = 0;
+				quiet = 0;
+				if (uint8_t* m = hw_->Mem())
+					m[0xe700] = songCmd_;
+			}
+		}
 		if (pcm2)
 			pcm2->MixAdd(stereo + i * 2, 1, mystwarrMix ? 128 : 256);
-		if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2 || hw_->RobokidMitchellMap())
+		if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2 || hw_->RobokidMitchellMap()
+			|| hw_->SystemePsg())
 			hw_->AlphaMixOpll(stereo + i * 2, 1);
 		if (mix2)
 			hw_->Chip2()->Render(mix2 + i * 2, 1);

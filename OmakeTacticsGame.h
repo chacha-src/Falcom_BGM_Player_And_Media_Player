@@ -354,6 +354,7 @@ private:
 	BOOL UnitInArena(int ui) const;
 	BOOL CutFind(int ui, int* side, int* idx) const;
 	V3 CutStand(int side, int idx) const;
+	M4 CutSceneXform() const;
 	void GatherCut();
 
 	// 演出
@@ -483,6 +484,7 @@ private:
 	float m_shake;
 	float m_sceneAcc;
 	float m_wxAcc;
+	float m_wxSplashAcc;
 	float m_wxMeshWait;
 	int m_wxMesh;
 	// 天候イベント（雷・雹・地震）。固定配列のまま、戦闘中だけ動く。
@@ -702,6 +704,7 @@ private:
 	int m_cutAlly[CUT_ALLY_MAX], m_cutFoe[CUT_FOE_MAX];
 	int m_cutAllyN, m_cutFoeN;
 	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
+	int m_cutPat;        // 0斬 1重 2旋 3突 4射 5火 6氷 7雷 8闇 9風 10回復 11範囲回復 12支援 13敵
 	int m_sumOn, m_sumFx, m_sumHit, m_sumHide;
 	float m_sumU, m_sumYaw, m_sumFade;
 	V3 m_sumPos, m_sumFrom, m_sumTo;

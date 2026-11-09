@@ -32,6 +32,7 @@ public:
 	void AutoArrangeStop();
 	int AutoArrangePreview();
 	void SetPartDrum(int tr, int drum); /* GS/XG rhythm part (any MIDI ch) */
+	void CycleClefTrack(int tr); /* Auto→G→F→G+F→Dr→Auto; explicit lock writes CLEF */
 	void LoadFromDoc(const ScMidiDoc& src, int applyFx = 1);
 	void SyncMeterFromDoc();
 	void PushDocToText();
@@ -41,6 +42,8 @@ public:
 	void PersistUiGeom();
 	void RestoreUiGeom();
 	void ExportStandardMidi();
+	void PreviewRangeInstant(); /* その場再生（ロールからも呼ぶ） */
+	void NotifyMuteSolo(); /* ロールのミュート/ソロをライブへ */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -50,6 +53,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
 	afx_msg void OnDestroy();
@@ -93,6 +97,25 @@ protected:
 	afx_msg void OnCbnMidiIn();
 	afx_msg void OnCbnFollow();
 	afx_msg void OnCbnPasteMode();
+	/* 譜面2①: 音価/臨時記号/休符/タイ/調号/スナップ/ズームの常時ツールバー */
+	afx_msg void OnDurButton(UINT id);
+	afx_msg void OnDvDot();
+	afx_msg void OnDvTriplet();
+	afx_msg void OnDvRest();
+	afx_msg void OnDvTie();
+	afx_msg void OnAccSharp();
+	afx_msg void OnAccNatural();
+	afx_msg void OnAccFlat();
+	afx_msg void OnBnKeySig();
+	afx_msg void OnCbnSnap();
+	afx_msg void OnCbnZoom();
+	afx_msg void OnBnClickedRangePlay();
+	afx_msg void OnBnClickedBarPrev();
+	afx_msg void OnBnClickedBarNext();
+	afx_msg void OnBnClickedBarGo();
+	afx_msg void OnBnClickedMute();
+	afx_msg void OnBnClickedSolo();
+	afx_msg void OnBnClickedMore();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalQueryState(WPARAM w, LPARAM l);
@@ -112,9 +135,18 @@ protected:
 	void LayoutChrome();
 	void ApplyLang();
 	void SyncPropFromSel();
+	void UpdateInfoBar();
+	void JumpBar(int deltaBars);
+	void JumpToBarNumber(int bar1);
+	void JumpToTick(uint32_t tick);
+	void SwitchPart(int delta);
+	void ToggleMuteCur();
+	void ToggleSoloCur();
+	void RefreshChComboLabels();
 	void UpdateScrollBars();
 	void SyncStripCombos();
-	int BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick = 0);
+	int BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick = 0, uint32_t toTick = 0);
+	int ComputePreviewRange(uint32_t* pT0, uint32_t* pT1);
 	void OpenVstForPart(int part1to32, int editorOnly = 0);
 	void SyncVstBindsFromLive();
 	void SyncFxBindsToLive();
@@ -125,6 +157,8 @@ protected:
 	void SyncProgPropFromCh(int ch0);
 	void ApplyProgPropToCh();
 	void SetupTooltips();
+	void ApplyDurUi();            /* 音価変更後の status / カーソル / ヘルプ更新 */
+	void SyncDurToolbar();        /* 現在の音価状態をツールバー表示へ反映 */
 	void PlaceOrEditAt(CPoint pt);
 	void RefreshStrip();
 	void UpdateNoteCursor();
@@ -144,6 +178,16 @@ protected:
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
 	CCustomStandardButton m_btnMark, m_btnLoopA, m_btnLoopB, m_btnLoopClr, m_btnShowAll, m_btnText;
 	CCustomStandardButton m_btnFx, m_btnArr, m_btnLayout, m_btnChord, m_btnPatt, m_btnRoll, m_btnKey;
+	/* 譜面UX: その場再生・小節ナビ・ミュート/ソロ・詳細パネル */
+	CCustomStandardButton m_btnRangePlay, m_btnBarPrev, m_btnBarNext, m_btnBarGo;
+	CCustomStandardButton m_btnMute, m_btnSolo, m_btnMore;
+	CCustomEdit m_edBar;
+	CCustomStatic m_infoBar;
+	/* 譜面2①: 音価・臨時記号・スナップ・ズーム ツールバー */
+	CCustomStandardButton m_dvWhole, m_dvHalf, m_dvQuarter, m_dv8, m_dv16, m_dv32;
+	CCustomStandardButton m_dvDot, m_dvTriplet, m_dvRest, m_dvTie;
+	CCustomStandardButton m_accSharp, m_accNatural, m_accFlat, m_btnKeySig;
+	CCustomComboBox m_snap, m_zoom;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
 	CCustomComboBox m_pasteMode;
@@ -178,6 +222,7 @@ protected:
 	int m_pendingEdOpenPart;
 	int m_metroBeat;
 	UINT_PTR m_metroTimer;
+	int m_chromeDetail; /* 1=MIDI In/CC/プロパティ行を表示 */
 	wchar_t m_lastOut[MAX_PATH];
 	wchar_t m_lastHoverSt[256];
 	static CSasamiMidiScoreDlg* s_inst;

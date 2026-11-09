@@ -33,11 +33,13 @@ public:
 	void RefreshBoundRoll();
 	static uint8_t MidiToFmNoteByte(int midiNote);
 	void HistPush();
+	void CycleClefTrack(int tr); /* Auto→G→F→G+F→Dr→Auto; RHY stays drum */
 	void ExportStandardMidi();
 	void OpenAutoArrange();
 	void AutoArrangeRefresh();
 	void AutoArrangeStop();
 	int AutoArrangePreview();
+	void PreviewRangeInstant(); /* その場再生（ロールからも呼ぶ） */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -47,6 +49,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
 	afx_msg void OnDestroy();
@@ -103,7 +106,8 @@ protected:
 	void SyncStripCombos();
 	void RefreshStrip();
 	void PlaceOrEditAt(CPoint pt);
-	int BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick = 0);
+	int BuildToTemp(wchar_t* outPath, int outCch, uint32_t fromTick = 0, uint32_t toTick = 0);
+	int ComputePreviewRange(uint32_t* pT0, uint32_t* pT1);
 	void OpenVoiceEditor();
 	void PickBuiltinNeiro();
 	void RefreshToneLabels();

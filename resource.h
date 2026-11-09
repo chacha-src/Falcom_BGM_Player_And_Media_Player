@@ -2406,6 +2406,8 @@
 #define IDR_CSO_TAC_PSSKY7              4997
 #define IDR_CSO_TAC_PSSKY8              4998
 #define IDR_CSO_TAC_PSSKY9              4999
+#define IDR_CSO_TAC_CSWX                5000
+#define IDR_CSO_TAC_VSPWX               5001
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED

@@ -32,6 +32,14 @@ public:
 	void ApplyLang();
 	void SetupTooltips();
 	void UpdateHelpBar();
+	void UpdateInfoBar();
+	void JumpBar(int deltaBars);
+	void JumpToBarNumber(int bar1);
+	void JumpToTick(uint32_t tick);
+	void SwitchPart(int delta);
+	void ToggleMuteCur();
+	void ToggleSoloCur();
+	void PreviewRangeHere();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -41,6 +49,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -70,6 +79,17 @@ protected:
 	afx_msg void OnBnFx();
 	afx_msg void OnBnVoice();
 	afx_msg void OnBnScore();
+	afx_msg void OnBnRangePlay();
+	afx_msg void OnBnBarPrev();
+	afx_msg void OnBnBarNext();
+	afx_msg void OnBnBarGo();
+	afx_msg void OnBnMute();
+	afx_msg void OnBnSolo();
+	afx_msg void OnBnMore();
+	afx_msg void OnDurButton(UINT id);
+	afx_msg void OnDvDot();
+	afx_msg void OnDvTriplet();
+	afx_msg void OnDvRest();
 	afx_msg void OnCbnCh();
 	afx_msg void OnCbnPaste();
 	afx_msg void OnCbnFollow();
@@ -122,9 +142,14 @@ protected:
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnTempo;
 	CCustomStandardButton m_btnText, m_btnLayout, m_btnArr, m_btnChord, m_btnPatt;
 	CCustomStandardButton m_btnFx, m_btnVoice, m_btnScore;
+	CCustomStandardButton m_btnRangePlay, m_btnBarPrev, m_btnBarNext, m_btnBarGo;
+	CCustomStandardButton m_btnMute, m_btnSolo, m_btnMore;
+	CCustomStandardButton m_dvWhole, m_dvHalf, m_dvQuarter, m_dv8, m_dv16, m_dv32;
+	CCustomStandardButton m_dvDot, m_dvTriplet, m_dvRest;
+	CCustomEdit m_edBar;
 	CCustomComboBox m_ch, m_pasteMode, m_follow;
 	CCustomComboBox m_stripKind0, m_stripLanes, m_stripDraw, m_stripStep;
-	CCustomStatic m_status, m_helpBar;
+	CCustomStatic m_status, m_helpBar, m_infoBar;
 	CToolTipCtrl m_tooltip;
 	int m_dragMode; /* 0 none, 1 move, 2 resize, 3 marquee, 4 pencil-drag erase, 5 strip */
 	int m_dragLastX, m_dragLastY;
@@ -135,6 +160,7 @@ protected:
 	BOOL m_bInLayout;
 	int m_sbDrag; /* 0 none, 1 vert, 2 horz */
 	int m_sbDragScroll0, m_sbDragAnchor;
+	int m_chromeDetail;
 	static CSasamiPianoRollDlg* s_midi;
 	static CSasamiPianoRollDlg* s_fm;
 };

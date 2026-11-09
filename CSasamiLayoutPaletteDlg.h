@@ -34,6 +34,9 @@ public:
 
 	static CSasamiLayoutPaletteDlg* OpenNear(CWnd* owner, CPoint screenPt);
 	static CSasamiLayoutPaletteDlg* Instance();
+	void BindNotify(HWND hwnd) { m_notify = hwnd; }
+	void FocusKeyTab();
+	void InvalidateBody();
 
 protected:
 	virtual BOOL OnInitDialog();

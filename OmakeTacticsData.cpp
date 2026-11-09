@@ -4578,9 +4578,15 @@ static int GearMotion(const GearDef* g)
 	auto has = [&](const char* s) { return strstr(a0, s) || strstr(a1, s); };
 	if (has("Crossbow") || has("Bow")) return has("1H_") ? AS_SHOOT1 : AS_SHOOT;
 	if (has("Knife") || has("Dagger")) return AS_STAB;
-	if (has("2H_Axe") || has("2H_Sword")) return AS_CHOP2;
+	if (has("2H_Axe") || has("2H_Sword") || has("Claymore") || has("Sword_Big") || has("Sword_big")) return AS_CHOP2;
 	if (has("Staff") || has("Wand")) return AS_CAST;
-	if (has("Axe") || has("Sword")) return AS_SLASH;
+	if (has("Axe") || has("Sword") || has("Blade")) {
+		int shield = 0;
+		if (strstr(a1, "Shield")) shield = 1;
+		else if (g->mesh1 >= 0 && !a1[0]) shield = 1;
+		if (!shield && g->mesh1 < 0) return AS_CHOP2;
+		return AS_SLASH;
+	}
 	switch (g->line) {
 	case 0: return AS_SLASH;
 	case 1: return AS_CHOP2;

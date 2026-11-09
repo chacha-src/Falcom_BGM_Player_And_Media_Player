@@ -1060,22 +1060,30 @@ namespace PianoRoll108
                     fl = 0.055f;
                 if (pa0[i] < seriesMax * fl) {
                     // 高音は低音の最大値ではなく、その帯域と短い窓で見る。
-                    const float bandRatio = (b >= 3) ? 0.16f : 0.42f;
-                    const bool bandLead = (b >= 2 && bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * bandRatio);
-                    const bool shortOk = (k >= 72 && relShortKey(k) >= 0.10f && pa0[i] >= seriesMax * 0.025f);
-                    const bool weakFund = (seriesAbove(hz, pa0[i]) >= 2 && pa0[i] >= seriesMax * 0.04f);
-                    if (!bandLead && !shortOk && !weakFund) continue;
+                    // 高域は雑音・倍音が満ちるので、独立した系列か明確な突出だけ残す。
+                    if (k >= O5_HI) {
+                        // C6 以上は実音が稀で雑音・倍音ばかり。強い突出だけ残す。
+                        const bool topStrong = (bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.65f
+                            && pa0[i] >= seriesMax * 0.10f);
+                        const bool topBurst = (relShortKey(k) >= 0.25f && pa0[i] >= seriesMax * 0.08f);
+                        if (!topStrong && !topBurst) continue;
+                    } else {
+                        const bool bandLead = (b >= 2 && bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.42f);
+                        const bool shortOk = (k >= 72 && relShortKey(k) >= 0.10f && pa0[i] >= seriesMax * 0.025f);
+                        const bool weakFund = (seriesAbove(hz, pa0[i]) >= 2 && pa0[i] >= seriesMax * 0.04f);
+                        if (!bandLead && !shortOk && !weakFund) continue;
+                    }
                 }
                 if (k >= 72 && pa0[i] < seriesMax * 0.03f && bandLin[b] > 0.0f
                     && pa0[i] < bandLin[b] * 0.14f && relShortKey(k) < 0.06f)
                     continue;
                 if (b == 4) {
-                    const bool c7ok = (relShortKey(k) >= 0.08f)
-                        || (bandLin[4] > 0.0f && pa0[i] >= bandLin[4] * 0.45f && pa0[i] >= seriesMax * 0.03f);
-                    if (!c7ok && pa0[i] < seriesMax * 0.16f) continue;
+                    const bool c7ok = (relShortKey(k) >= 0.14f)
+                        || (bandLin[4] > 0.0f && pa0[i] >= bandLin[4] * 0.55f && pa0[i] >= seriesMax * 0.05f);
+                    if (!c7ok && pa0[i] < seriesMax * 0.20f) continue;
                 }
-                if (k >= 88 && pa0[i] < seriesMax * 0.05f && relShortKey(k) < 0.08f
-                    && !(bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.40f))
+                if (k >= 88 && pa0[i] < seriesMax * 0.08f && relShortKey(k) < 0.12f
+                    && !(bandLin[b] > 0.0f && pa0[i] >= bandLin[b] * 0.55f))
                     continue;
                 // 部分音の無い弱い低音は、上の和音のオクターブ下にできた影。
                 // 基音より上の倍音が揃っていれば単音・長音の弱い基音なので残す。
@@ -1275,6 +1283,17 @@ namespace PianoRoll108
                         seriesA[bestKey] = a0;
                     }
                 }
+                // 低音の幻: 自分の系列が無く、1 オクターブ上に自分よりはっきり大きい
+                // 部分音がある弱い低音は、上の実音が作った f0/2 の影。先に消す。
+                for (int k = MUSIC_LOW_FLOOR; k < C4_KEY; ++k) {
+                    if (!seriesOn[k]) continue;
+                    if (seriesA[k] >= seriesMax * 0.32f) continue;
+                    const float f0 = hzOf(k);
+                    if (hasFullBassSeries(f0, seriesA[k])) continue;
+                    const float oct = partialAt(f0, 2);
+                    if (oct > seriesA[k] * 1.3f && oct >= seriesMax * 0.12f)
+                        seriesOn[k] = false;
+                }
                 for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k) {
                     if (!seriesOn[k]) continue;
                     const float f0 = hzOf(k);
@@ -1300,54 +1319,53 @@ namespace PianoRoll108
                         if (!seriesOn[h]) continue;
                         const int n = harmN(f0, hzOf(h));
                         if (n < 2) continue;
-                        const float left = partialAt(f0, n - 1);
-                        const float right = (n < 8) ? partialAt(f0, n + 1) : 0.0f;
-                        const float neighbor = (left > right) ? left : right;
-                        // 両隣の倍音が無い高音は、低音の倍音列ではなく独立した音。
-                        if (h >= 72 && neighbor < seriesMax * 0.05f) continue;
-                        if (neighbor > 0.0f && seriesA[h] > neighbor * 2.0f) continue;
-                        float gate = seriesA[k] * 0.62f;
-                        if (c > 0.0f) {
-                            const float pred = c / (float)n * 1.20f;
-                            if (pred > gate) gate = pred;
-                        }
-                        if (seriesA[h] <= gate)
+                        // 1/n 包絡線からの予測振幅。実音なら予測を大きく超える。
+                        const float pred = (c > 0.0f) ? c / (float)n : seriesA[k] * 0.62f;
+                        if (h >= O5_HI) {
+                            // C6 以上の整数倍は原則倍音。包絡線を大きく超える突出だけ実音として残す。
+                            if (seriesA[h] > pred * 2.5f && seriesA[h] > seriesMax * 0.10f) continue;
                             seriesOn[h] = false;
+                        } else {
+                            // 中高音・中音は、両隣に倍音の無い突出か、系列ゲートを超えれば残す。
+                            const float left = partialAt(f0, n - 1);
+                            const float right = (n < 8) ? partialAt(f0, n + 1) : 0.0f;
+                            const float neighbor = (left > right) ? left : right;
+                            if (h >= 72 && neighbor < seriesMax * 0.05f) continue;
+                            if (neighbor > 0.0f && seriesA[h] > neighbor * 2.0f) continue;
+                            float gate = seriesA[k] * 0.62f;
+                            const float p2 = pred * 1.20f;
+                            if (p2 > gate) gate = p2;
+                            if (seriesA[h] <= gate) seriesOn[h] = false;
+                        }
                     }
-                }
-                // 倍音を消したあとの空きに、帯域枠へ入れなかった高音を戻す。
-                // 大きい倍音が先に枠を埋めて、弱い実音が最初から捨てられていた。
-                int usedNow[5] = {};
-                for (int k = MUSIC_LOW_FLOOR; k < COUNT; ++k)
-                    if (seriesOn[k]) ++usedNow[bandOf(k)];
-                for (int oi = 0; oi < nSort; ++oi) {
-                    const int i = ordA[oi];
-                    const int k = KeyFromHzTune(phz[i], p.tuneSemis);
-                    if (k < 72 || k > 100 || seriesOn[k]) continue;
-                    const int b = bandOf(k);
-                    if (usedNow[b] >= cap[b]) continue;
-                    if (pa0[i] < seriesMax * 0.012f) continue;
-                    if (bandLin[b] > 0.0f && pa0[i] < bandLin[b] * 0.12f && relShortKey(k) < 0.05f)
-                        continue;
-                    bool stacked = false;
-                    for (int lo = MUSIC_LOW_FLOOR; lo < k && !stacked; ++lo) {
-                        if (!seriesOn[lo]) continue;
-                        if (harmN(hzOf(lo), phz[i]) >= 2) stacked = true;
-                    }
-                    if (stacked) continue;
-                    seriesOn[k] = true;
-                    seriesHz[k] = phz[i];
-                    seriesA[k] = pa0[i];
-                    ++usedNow[b];
                 }
             }
             for (int key = 72; key <= 100; ++key) {
                 if (!seriesOn[key]) continue;
                 const int b = bandOf(key);
+                // C6 以上で、採用済みの低音の整数倍に乗る音はその倍音。自分がはっきり
+                // 大きい(低音を超える)のでなければ落とす。孤立倍音の雨を止める。
+                if (key >= O5_HI) {
+                    bool harmOfPicked = false;
+                    const float fk = PianoKey::KeyHz(key);
+                    for (int lo = 36; lo < key; ++lo) {
+                        if (!seriesOn[lo]) continue;
+                        const float ratio = fk / PianoKey::KeyHz(lo);
+                        const int n = (int)floorf(ratio + 0.5f);
+                        if (n < 2 || n > 8) continue;
+                        if (centsTo(fk, PianoKey::KeyHz(lo) * (float)n) < 36.0f
+                            && seriesA[key] < seriesA[lo] * 1.0f) { harmOfPicked = true; break; }
+                    }
+                    if (harmOfPicked) { seriesOn[key] = false; continue; }
+                }
+                // 短窓に出ている立ち上がりのある高音は残す。
                 if (relShortKey(key) >= 0.06f && seriesA[key] >= seriesMax * 0.02f) continue;
-                const float keepRatio = (b >= 3) ? 0.16f : 0.35f;
+                // 自分の倍音系列を持つ高音(単音・長音)は残す。
+                if (seriesAbove(PianoKey::KeyHz(key), seriesA[key]) >= 2 && seriesA[key] >= seriesMax * 0.04f) continue;
+                const float keepRatio = (b >= 3) ? 0.45f : 0.35f;
                 if (bandLin[b] > 0.0f && seriesA[key] >= bandLin[b] * keepRatio
                     && seriesA[key] >= seriesMax * 0.02f) continue;
+                if (b >= 3) { seriesOn[key] = false; continue; }
                 if (seriesA[key] < seriesMax * 0.03f && bandLin[b] > 0.0f
                     && seriesA[key] < bandLin[b] * 0.14f)
                     seriesOn[key] = false;

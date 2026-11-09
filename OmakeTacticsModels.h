@@ -109,7 +109,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 M4 ActorWorld(const Actor& a, V3 pos, float face);
 V3 ActorJointWorld(const Actor& a, const M4& world, int which);   // 0=頭 1=右手 2=胸
 
-int AttackClipFor(int style, int variant);
-int CastClipFor(int skillKind);
+int AttackClipFor(int style, int variant, int skill = -1);
+int CastClipFor(int skillKind, int skill = -1);
 
 } // namespace otac

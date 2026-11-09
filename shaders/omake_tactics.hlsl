@@ -27,7 +27,7 @@ cbuffer Obj : register(b1)
 	row_major float4x4 World;
 	float4 Tint;     // rgb=乗算 a=不透明度
 	float4 Params;   // x=輪郭幅 y=モード z=発光 w=色相回転
-	float4 Extra;    // x=ディゾルブ y=白フラッシュ z=リム w=揺れ
+	float4 Extra;    // x=ディゾルブ y=白フラッシュ z=リム w=揺れ（Skin スロットは OutlineColor.a）
 	float4 OutlineColor;
 };
 cbuffer Bones : register(b2)
@@ -120,6 +120,8 @@ Texture2DArray Mat : register(t4);    // 樹皮・葉・岩・木材。各アル
 Texture2D SphereMap : register(t6);   // 反射ベクトルの球体マップ
 TextureCube EnvMap : register(t7);    // ステージの環境キューブ
 Texture2D LiveRef : register(t8);     // キャラ・敵・上位レイヤーを映した反射
+Texture2DArray Skin : register(t9);   // 敵・武具のアルベド。頂点色に乗せる
+Texture2DArray GroundX : register(t10); // テーマごとの二枚目の地表
 SamplerState SL : register(s0);
 SamplerComparisonState SC : register(s1);
 SamplerState CL : register(s2);
@@ -141,7 +143,14 @@ float vnoise(float2 p)
 	float2 u = f * f * (3. - 2. * f);
 	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
-float fbm2(float2 p) { float s = 0, a = .5; [unroll] for (int i = 0; i < 6; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; } return s; }
+// 世界・気候のピクセル模様。最高〜限界突破ともこの4段で止める。上の段はテッセ・変位・被写界へ回す。
+// 振幅和は 6段ぶんに揃える（0.9375 * 1.05）。頂点変位はテッセシェーダ側の別関数なので輪郭はここを変えない。
+float fbm2(float2 p)
+{
+	float s = 0, a = .5;
+	[unroll] for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= .5; }
+	return s * 1.05;
+}
 // 平原・森・遺跡。形は残して細かい3段だけ省く。
 float fbm3(float2 p)
 {
@@ -169,9 +178,10 @@ float2 CurlSky(float2 p)
 float2 Curl2(float2 p)
 {
 	float e = 0.11;
-	float n0 = fbm2(p);
-	float nx = fbm2(p + float2(e, 0));
-	float ny = fbm2(p + float2(0, e));
+	// カールは法線の小さな揺れ。低い形の振幅は fbm2 と同じ。細さは最高で止める。
+	float n0 = fbm3(p);
+	float nx = fbm3(p + float2(e, 0));
+	float ny = fbm3(p + float2(0, e));
 	return float2(n0 - ny, nx - n0);
 }
 
@@ -317,6 +327,9 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 	PSIn o;
 	float3 w = mul(float4(v.p, 1), WM).xyz;
 	float3 n = normalize(mul(v.n, (float3x3)WM));
+	// 移動マス・範囲・カーソルは頂点αが半透明。Sway は (1-α) を草の重みにするので、そのままだとマスが風で倒れる。
+	// DrawOverlayQuads が Extra.x < 0 を入れる。水面の頂点変位（mode 1）もマスには掛けない。
+	if (Extra.x > -0.5) {
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
 	BodyWind(w, v.p.y);
 	// 髪は mode 7 なので上の BodyWind に入らない。頭蓋の頂点だけ倒れると、髪の頭が骨に残って禿げる。
@@ -356,6 +369,7 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 			w.z += cos(w.y * 0.38 - Eye.w * 0.28) * 0.07;
 			w.y -= 0.04 * sin(Eye.w * 0.4 + w.x);
 		}
+	}
 	}
 	w += n * Params.x;
 	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c;
@@ -501,8 +515,8 @@ float SkinMask(float3 c)
 // 標準で薄く、限界突破まで段々。超軽量と軽量は無し。テッセレーションは使わない。
 float DewAmt()
 {
-	// 無印の各段の量は従来どおり。間を連続段で滑らかに渡す。限界突破より上は少しだけ伸ばす。
-	return QLerp(QRank(), 0.0, 0.0, 0.22, 0.42, 0.64, 0.84, 1.0, 1.1);
+	// 無印の各段の量は従来どおり。世界の濡れは限界突破で止める。上の段は地形へ回す。
+	return QLerp(QRank(), 0.0, 0.0, 0.22, 0.42, 0.64, 0.84, 1.0, 1.0);
 }
 
 float3 DewShade(float3 col, float3 albedo, float3 n, float3 v, float sh, float flesh, float hair)
@@ -672,6 +686,28 @@ float SightAmt(float3 w)
 	return smoothstep(r0, r1, best);
 }
 
+// カット中、味方・敵の足元まわりの物を抜く。床は残す。
+float AllyGhost(float3 w)
+{
+	if (CamNear.z < 0.5) return 0;
+	float g = 0;
+	[unroll] for (int i = 0; i < 16; i++) {
+		if (Ally[i].z < 0.5) continue;
+		float d = length(w.xz - Ally[i].xy);
+		g = max(g, saturate(1.85 - d * 0.95));
+	}
+	g *= saturate((w.y - 0.06) * 5.0);
+	return g;
+}
+void CutGhost(float4 spos, float3 w, float ny)
+{
+	float gh = AllyGhost(w);
+	if (ny > 0.62) gh *= saturate((w.y - 0.18) * 6.0);
+	if (gh < 0.02) return;
+	float h = frac(sin(dot(spos.xy, float2(12.9898, 78.233))) * 43758.5453);
+	clip(1.0 - gh * 0.93 - h);
+}
+
 float3 FogAt(float3 col, float3 w)
 {
 	float d = length(Eye.xyz - w);
@@ -730,7 +766,9 @@ float3 DetailN(float3 n, float3 w)
 	float3 t = normalize(cross(abs(n.y) < 0.92 ? float3(0, 1, 0) : float3(1, 0, 0), n));
 	float3 b = cross(n, t);
 	float3 nn = n + (t * (h0 - hx) + b * (h0 - hz)) * s;
-	if (Q.x > 4.5 && !slim) {
+	// 2段目は細かい法線。遠い画素では既にエイリアスするので、近い所だけ回す。段を上げても世界側は増やさない。
+	float distN = distance(w, Eye.xyz);
+	if (Q.x > 4.5 && !slim && distN < 36.0) {
 		float2 q = p * (Q.x > 5.5 ? 2.7 : 1.8);
 		float g0, gx, gz;
 		if (ease) { g0 = fbm3(q); gx = fbm3(q + float2(e, 0)); gz = fbm3(q + float2(0, e)); }
@@ -738,6 +776,70 @@ float3 DetailN(float3 n, float3 w)
 		nn += (t * (g0 - gx) + b * (g0 - gz)) * (Q.x > 5.5 ? 0.55 : 0.32);
 	}
 	return normalize(nn);
+}
+
+float RainAmt()
+{
+	float w = Wx.x;
+	if (w > 0.5 && w < 1.5) return 1.0;
+	if (w > 4.5 && w < 5.5) return 1.28;
+	return 0.0;
+}
+
+float3 FamSkin(float3 painted, float3 n, float3 w, float slice)
+{
+	float scale = slice < 24.0 ? 8.6 : (slice < 52.0 ? 5.8 : 4.6);
+	float3 skin = Tri(Skin, slice, w, n, scale);
+	float sl = max(dot(skin, float3(0.30, 0.50, 0.20)), 0.04);
+	float3 sN = (sl < 0.22) ? saturate(skin * (0.28 / sl)) : skin;
+	float3 p = w * (slice < 24.0 ? 9.2 : 6.1);
+	if (slice < 8.0) {
+		float g = 0.52 + 0.48 * sin(p.y * 16.0 + fbm2(p.xz) * 5.0);
+		sN *= lerp(float3(0.78, 0.62, 0.42), float3(1.12, 0.98, 0.78), saturate(g));
+	} else if (slice < 16.0) {
+		float sc = pow(saturate(sin(p.y * 42.0 + p.x * 3.5)), 9.0);
+		float band = 0.82 + 0.18 * sin(p.y * 24.0);
+		sN = (sN * band + sc * 0.22) * float3(1.05, 1.06, 1.08);
+	} else if (slice < 24.0) {
+		float wr = fbm3(p.xz * 0.85);
+		sN *= lerp(0.78, 1.16, wr);
+	} else if (slice < 40.0) {
+		float st = abs(sin(p.x * 20.0 + p.z * 7.0 + fbm2(p.xz) * 2.5));
+		sN *= lerp(0.62, 1.22, st);
+	} else if (slice < 52.0) {
+		float2 vg = VoronoiGap(p.xz * 3.4 + p.y * 2.2);
+		sN *= lerp(0.55, 1.22, saturate(vg.y * 11.0));
+		sN += 0.05 * step(vg.x, 0.07);
+	} else if (slice < 64.0) {
+		float2 t = p.xz * float2(4.4, 6.8);
+		float sca = abs(sin(t.x) * sin(t.y + 0.5 * sin(t.x)));
+		sN *= lerp(0.64, 1.26, saturate(sca));
+	} else if (slice < 72.0) {
+		float f = abs(sin(p.z * 22.0 + p.x * 5.0));
+		sN *= lerp(0.7, 1.18, f);
+	} else if (slice < 80.0) {
+		sN = lerp(sN, sN.gbr * float3(0.7, 1.1, 1.15), 0.28 + 0.22 * sin(p.y * 9.0 + Eye.w));
+	} else if (slice < 88.0) {
+		sN *= 0.82 + 0.28 * fbm2(p.xz * 5.5);
+	} else if (slice < 96.0) {
+		float2 vg = VoronoiGap(p.xz * 1.55);
+		sN *= lerp(0.78, 1.14, saturate(vg.y * 6.0));
+	} else if (slice < 104.0) {
+		sN *= 0.74 + 0.32 * fbm3(p.xz * 0.55);
+	} else if (slice < 112.0) {
+		sN *= 0.86 + 0.22 * fbm2(p.xz * 3.2);
+	} else if (slice < 120.0) {
+		float c = CausAt(p.xz, Eye.w * 0.28);
+		sN = lerp(sN, sN * float3(0.45, 0.9, 1.15), c * 0.4);
+	} else {
+		sN = lerp(sN, sN * float3(1.45, 0.42, 0.18), 0.32 + 0.22 * sin(Eye.w * 3.2 + p.y));
+	}
+	float3 mat = saturate(sN * 0.48 + skin * 0.52);
+	float pl = dot(painted, float3(0.30, 0.50, 0.20));
+	float useP = smoothstep(0.08, 0.42, pl);
+	float wep = step(slice, 23.5);
+	float3 mixed = lerp(mat, saturate(painted * 0.38 + mat * 0.78), useP);
+	return lerp(mixed, saturate(mat * 0.82 + painted * 0.28), wep);
 }
 
 GOut PSM(PSIn i)
@@ -752,6 +854,15 @@ GOut PSM(PSIn i)
 	if (person < 0.5) n = DetailN(n, i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
 	float3 albedo = tx.rgb * i.c.rgb;
+	float matSlice = -1.0;
+	// OutlineColor.a >= 3 が Skin スロット+3。武具・輸入敵は UV 無しで頂点色がアルベド。
+	if (person > 0.5 && OutlineColor.a > 2.5 && OutlineColor.a < 131.5) {
+		matSlice = OutlineColor.a - 3.0;
+		float3 painted = albedo;
+		float3 fam = FamSkin(painted, n, i.w, matSlice);
+		float uv0 = step(abs(i.uv.x) + abs(i.uv.y), 1e-4);
+		albedo = lerp(lerp(painted, fam, 0.48), fam, uv0);
+	}
 	if (abs(Params.w) > 0.001) {
 		float m = 1. - SkinMask(albedo);
 		albedo = lerp(albedo, saturate(HueRotate(albedo, Params.w)), m);
@@ -760,13 +871,39 @@ GOut PSM(PSIn i)
 	float alpha = Tint.a;
 	float3 emis = albedo * Params.z;
 	float skin = SkinMask(albedo);
+	float hair = (Params.y > 6.5 && Params.y < 7.5) ? 1 : 0;
 	float sh = ShadowAt(i.w, n);
 	float rough = lerp(0.46, 0.66, skin);
 	float3 f0 = lerp(float3(0.04, 0.04, 0.04), float3(0.03, 0.02, 0.015), skin);
+	if (matSlice >= 0.0 && matSlice < 16.0) {
+		rough = lerp(rough, 0.16, 0.72);
+		f0 = lerp(f0, float3(0.68, 0.70, 0.74), 0.58);
+	} else if (matSlice >= 22.0 && matSlice < 24.0) {
+		rough = lerp(rough, 0.14, 0.65);
+		f0 = lerp(f0, float3(0.90, 0.72, 0.22), 0.62);
+	} else if (matSlice >= 40.0 && matSlice < 52.0) {
+		rough = lerp(rough, 0.22, 0.45);
+		f0 = lerp(f0, float3(0.09, 0.08, 0.06), 0.4);
+	} else if (matSlice >= 72.0 && matSlice < 80.0) {
+		rough = lerp(rough, 0.08, 0.7);
+		f0 = lerp(f0, float3(0.06, 0.08, 0.09), 0.5);
+	}
+	{
+		float rain = RainAmt();
+		float coat = saturate(person * 0.88 + hair * 1.05);
+		if (rain > 0.01 && coat > 0.02) {
+			float up = saturate(n.y * 0.65 + 0.35);
+			float drop = fbm2(i.w.xz * 14.0 + i.w.y * 9.0);
+			float k = saturate(rain * coat * saturate(0.55 + drop * 0.45) * up);
+			albedo *= lerp(1.0, float3(0.62, 0.70, 0.78), k * 0.72);
+			rough = lerp(rough, lerp(0.12, 0.06, hair), k * 0.9);
+			f0 = lerp(f0, lerp(float3(0.055, 0.06, 0.07), float3(0.08, 0.085, 0.09), hair), k);
+		}
+	}
 	float3 col = Lit(albedo, n, v, rough, f0, sh, skin * 0.85);
 	float rim = pow(1. - saturate(dot(n, v)), 3.) * Extra.z;
-	// 段ごとの差を連続段で繋ぐ。無印の各段の値は従来どおり、間を滑らかに渡す。限界突破より上は少しだけ伸ばす。
-	float rimK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.12, 1.35, 1.5, 1.7, 1.9);
+	// 段ごとの差を連続段で繋ぐ。無印の各段の値は従来どおり。限界突破より上は世界を上げない。
+	float rimK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.12, 1.35, 1.5, 1.7, 1.7);
 	col += rim * rimK * float3(1, 0.95, 0.85) * (0.35 + 0.65 * sh);
 	{
 		float thc = FogColor.a;
@@ -782,12 +919,33 @@ GOut PSM(PSIn i)
 		else if (thc < 8.5) tr = float3(0.32, 0.78, 1);
 		else tr = float3(0.72, 0.92, 1);
 		float frC = pow(1.0 - saturate(dot(n, v)), 2.4);
-		float rimA = QLerp(QRank(), 0.08, 0.1, 0.14, 0.18, 0.2, 0.24, 0.28, 0.32);
+		float rimA = QLerp(QRank(), 0.08, 0.1, 0.14, 0.18, 0.2, 0.24, 0.28, 0.28);
 		col += tr * frC * rimA * (0.5 + 0.5 * sh) * (1. - person * 0.8);
 	}
 	col += emis;
-	float hair = (Params.y > 6.5 && Params.y < 7.5) ? 1 : 0;
-	col = lerp(col, DewShade(col, albedo, n, v, sh, skin, hair), 1. - person * 0.6);
+	{
+		float rain = RainAmt();
+		float coat = saturate(person * 0.88 + hair * 1.05);
+		if (rain > 0.01 && coat > 0.02) {
+			float3 l = normalize(LightDir.xyz);
+			float3 hh = normalize(l + v);
+			float ndl = saturate(dot(n, l));
+			float ndv = saturate(dot(n, v));
+			float ndh = saturate(dot(n, hh));
+			float k = saturate(rain * coat * saturate(n.y * 0.65 + 0.35));
+			col += float3(0.72, 0.88, 1.0) * pow(ndh, lerp(36.0, 72.0, hair)) * ndl * sh * k * 0.55;
+			col += float3(0.55, 0.72, 0.9) * pow(1.0 - ndv, 2.2) * k * 0.28;
+			if (hair > 0.5) {
+				float3 tng = normalize(cross(abs(n.y) > 0.92 ? float3(1, 0, 0) : float3(0, 1, 0), n));
+				float ah = dot(tng, hh);
+				float spec = pow(saturate(sqrt(saturate(1. - ah * ah)) * ndh), 64.0);
+				col += float3(0.85, 0.95, 1.0) * spec * ndl * k * 0.7;
+				float strk = pow(saturate(sin(i.w.y * 28.0 + i.w.x * 6.0) * 0.5 + 0.5), 4.0);
+				col += float3(0.7, 0.85, 1.0) * strk * k * 0.18 * sh;
+			}
+		}
+	}
+	col = lerp(col, DewShade(col, albedo, n, v, sh, skin, hair), RainAmt() > 0.01 ? 1.0 : (1. - person * 0.6));
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
@@ -1021,7 +1179,7 @@ GOut PSWater(PSIn i)
 	float3 L = normalize(LightDir.xyz);
 	float3 H = normalize(L + v);
 	float sp = pow(saturate(dot(wn, H)), thw > 2.5 && thw < 3.5 ? 140. : 48.) * saturate(dot(wn, L) * 0.85 + 0.15);
-	float specK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.15, 1.4, 1.6, 1.85, 2.0);
+	float specK = QLerp(QRank(), 0.0, 1.0, 1.0, 1.15, 1.4, 1.6, 1.85, 1.85);
 	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9) * specK;
 	ApplyReflect(col, wn, v, i.w, 0.05, 0.96);
 	col = lerp(col, float3(0.9, 0.95, 0.98), crest * (thw > 5.5 && thw < 6.5 ? 0.15 : 0.42));
@@ -1322,6 +1480,7 @@ void GroundSurfaceLayer(float theme, float3 w, float3 n, float cliff, float t, f
 GOut GroundPS(PSIn i, float theme)
 {
 	CamShell(i.pos, i.w);
+	CutGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
@@ -1622,6 +1781,15 @@ GOut GroundPS(PSIn i, float theme)
 		}
 	}
 	{
+		float4 gx = GroundX.Sample(SL, float3(i.w.xz * (cliff > 0.5 ? 0.17 : 0.29), theme));
+		if (gx.a > 0.45) {
+			float mixX = dedicated ? 0.22 : 0.36;
+			albedo = lerp(albedo, gx.rgb * i.c.rgb, mixX);
+			float3 gx2 = GroundX.Sample(SL, float3(i.w.xz * 0.51, theme)).rgb;
+			albedo = lerp(albedo, gx2 * i.c.rgb, mixX * 0.35);
+		}
+	}
+	{
 		float skin = DewAmt();
 		float wet = ThemeWet(theme);
 		if (!(theme > 9.5 && theme < 12.5)) {
@@ -1717,6 +1885,7 @@ GOut PSGX(PSIn i) { return GroundPS(i, FogColor.a); }
 GOut PSProp(PSIn i)
 {
 	CamShell(i.pos, i.w);
+	CutGhost(i.pos, i.w, 0.0);
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
 	float mat = Params.z;
@@ -1726,12 +1895,16 @@ GOut PSProp(PSIn i)
 	float rough = 0.55;
 	float3 f0 = float3(0.04, 0.04, 0.04);
 	if (mat < 0.5) {
-		albedo = lerp(Tri(Mat, 0, i.w, n, 0.85), Tri(Mat, 2, i.w, n, 0.7), leaf);
-		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.8, leaf > 0.5 ? 3 : 1)).rgb);
+		float bAlb = 0, bNrm = 1;
+		if ((FogColor.a > 2.5 && FogColor.a < 3.5) || (FogColor.a > 4.5 && FogColor.a < 5.5)) { bAlb = 8; bNrm = 9; }
+		albedo = lerp(Tri(Mat, bAlb, i.w, n, 0.85), Tri(Mat, 2, i.w, n, 0.7), leaf);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.8, leaf > 0.5 ? 3 : bNrm)).rgb);
 		rough = lerp(0.72, 0.5, leaf);
 	} else if (mat < 1.5) {
-		albedo = Tri(Mat, 4, i.w, n, 0.32);
-		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.32, 5)).rgb);
+		float rAlb = 4, rNrm = 5;
+		if ((FogColor.a > 3.5 && FogColor.a < 5.5) || (FogColor.a > 0.5 && FogColor.a < 1.5)) { rAlb = 10; rNrm = 11; }
+		albedo = Tri(Mat, rAlb, i.w, n, 0.32);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.32, rNrm)).rgb);
 		rough = 0.66;
 		if (FogColor.a > 2.5 && FogColor.a < 3.5)
 			albedo = lerp(albedo, float3(0.86, 0.9, 0.95), saturate(n.y) * 0.6);
@@ -1745,11 +1918,29 @@ GOut PSProp(PSIn i)
 	} else if (mat < 3.5) {
 		albedo = Tex.Sample(SL, i.uv).rgb * i.c.rgb;
 		rough = 0.5;
-	} else {
+	} else if (mat < 4.5) {
 		albedo = Tri(Ground, 7, i.w, n, 0.45);
 		nLit = Bump(n, Ground.Sample(SL, float3(i.w.xz * 0.45, 15)).rgb);
 		rough = 0.46;
 		f0 = float3(0.05, 0.05, 0.055);
+	} else if (mat < 5.5) {
+		albedo = Tri(Mat, 12, i.w, n, 0.9);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.9, 13)).rgb);
+		rough = 0.62;
+	} else if (mat < 6.5) {
+		albedo = Tri(Mat, 14, i.w, n, 1.1);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 1.1, 15)).rgb);
+		rough = 0.28;
+		f0 = float3(0.08, 0.08, 0.09);
+	} else if (mat < 7.5) {
+		albedo = Tri(Mat, 12, i.w, n, 0.7) * float3(1.15, 0.72, 0.28);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.7, 13)).rgb);
+		rough = 0.48;
+	} else {
+		albedo = Tri(Mat, 2, i.w, n, 0.55) * float3(0.65, 0.9, 0.7);
+		nLit = Bump(n, Mat.Sample(SL, float3(i.w.xz * 0.55, 3)).rgb);
+		rough = 0.38;
+		f0 = float3(0.05, 0.06, 0.05);
 	}
 	albedo *= Tint.rgb;
 	nLit = DetailN(nLit, i.w);
@@ -1833,6 +2024,7 @@ PinP VSPT(PinP v) { return v; }
 [maxvertexcount(6)]
 void GSP(point PinP i[1], inout TriangleStream<POut> s)
 {
+	if (i[0].sz.x < 0.0008 || i[0].c.a < 0.012) return;
 	float3 right = float3(World._11, World._12, World._13);
 	float3 up = float3(World._21, World._22, World._23);
 	float3 fwd = float3(World._31, World._32, World._33);
@@ -2628,4 +2820,217 @@ float4 PSUI(HOut i) : SV_Target
 	col = lerp(col, brd, border * 0.85);
 	float a = body * prm.w;
 	return float4(col * a, a);
+}
+
+// 天候・濡れ飛び散り。CPU の m_parts を通さず、CS で進めて既存 GSP で広げる。
+struct WxGpu
+{
+	float4 p;     // xyz
+	float4 vel;   // xyz 速度 w=伸び
+	float4 sz;    // x=大きさ y=形 z=寿命 w=最大寿命
+	float4 c;
+	float4 extra; // x=重力 y=抵抗 z=種別 w=終端サイズ
+};
+StructuredBuffer<WxGpu> WxDraw : register(t11);
+RWStructuredBuffer<WxGpu> WxSim : register(u0);
+StructuredBuffer<float4> WxAct : register(t12);
+StructuredBuffer<float> WxH : register(t13);
+cbuffer WxParm : register(b5)
+{
+	float4 WxFwd;
+	float4 WxSide;
+	float4 WxWind; // xyz 風 w=突風
+	float4 WxCnt;  // x=dt y=人数 z=粒数 w=作り直し
+	float4 WxMix;  // x=飛び散り枠 y=天候
+};
+
+uint WxPcg(uint v)
+{
+	v = v * 747796405u + 2891336453u;
+	uint w = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u;
+	return (w >> 22u) ^ w;
+}
+float WxRnd(inout uint s)
+{
+	s = WxPcg(s);
+	return (s & 0xFFFFFFu) / 16777216.0;
+}
+
+float WxHeight(float x, float z)
+{
+	int ix = (int)floor(x);
+	int iz = (int)floor(z);
+	if (ix < 0 || iz < 0 || ix > 63 || iz > 63) return -99.0;
+	return WxH[iz * 64 + ix];
+}
+
+void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, float3 side, float3 wind, float gust)
+{
+	float along = 3.4 + WxRnd(seed) * 12.6;
+	float lat = (WxRnd(seed) * 2.0 - 1.0) * 9.0;
+	float up = -1.5 + WxRnd(seed) * 8.0;
+	o.p.xyz = eye + fwd * along + side * lat + float3(0, up, 0);
+	o.p.w = 1;
+	o.extra.z = wx;
+	if (wx > 0.5 && wx < 1.5) {
+		float sp = 10.0 + WxRnd(seed) * 5.0;
+		float w = 1.6 * (1.0 + gust * 1.2);
+		o.vel = float4(wind * w + float3(WxRnd(seed) * 0.8 - 0.4, -sp, WxRnd(seed) * 0.8 - 0.4), 0.04);
+		o.sz = float4(0.028, 0, 1.6, 1.6);
+		o.c = float4(0.72, 0.84, 1, 0.9);
+		o.extra.xyw = float3(16.0, 0.15, 0.018);
+	} else if (wx > 4.5 && wx < 5.5) {
+		float sp = 14.0 + WxRnd(seed) * 6.0;
+		float w = 5.2 * (1.0 + gust * 1.2);
+		o.vel = float4(wind * w + float3(WxRnd(seed) * 0.8 - 0.4, -sp, WxRnd(seed) * 0.8 - 0.4), 0.05);
+		o.sz = float4(0.024, 0, 1.5, 1.5);
+		o.c = float4(0.72, 0.84, 1, 0.92);
+		o.extra.xyw = float3(16.0, 0.15, 0.016);
+		o.extra.z = 2;
+	} else if (wx > 1.5 && wx < 2.5) {
+		o.vel = float4(wind * 0.7 + float3(WxRnd(seed) * 0.6 - 0.3, -1.8 + WxRnd(seed) * 1.0, WxRnd(seed) * 0.6 - 0.3), 0);
+		o.sz = float4(0.055, 2, 4.0, 4.0);
+		o.c = float4(0.96, 0.98, 1, 1);
+		o.extra.xyw = float3(0.8, 0.35, 0.04);
+		o.extra.z = 3;
+	} else if (wx > 2.5 && wx < 3.5) {
+		o.vel = float4(wind * 0.5 + float3(WxRnd(seed) * 0.5 - 0.25, -2.6 + WxRnd(seed) * 1.4, WxRnd(seed) * 0.5 - 0.25), 0.02);
+		o.sz = float4(0.04, 0, 3.2, 3.2);
+		o.c = float4(0.85, 0.4, 0.18, 1);
+		o.extra.xyw = float3(1.6, 0.25, 0.025);
+		o.extra.z = 4;
+	} else if (wx > 6.5 && wx < 7.5) {
+		o.vel = float4(wind * 0.8 + float3(WxRnd(seed) * 0.4 - 0.2, -18.0 + WxRnd(seed) * 5.0, WxRnd(seed) * 0.4 - 0.2), 0.02);
+		o.sz = float4(0.048, 7, 1.4, 1.4);
+		o.c = float4(0.9, 0.95, 1, 1);
+		o.extra.xyw = float3(22.0, 0.05, 0.04);
+		o.extra.z = 5;
+	} else if (wx > 5.5 && wx < 6.5) {
+		o.vel = float4(wind * (5.0 + WxRnd(seed) * 3.0) + float3(0, -2.2 + WxRnd(seed) * 1.6, 0), 0.04);
+		o.sz = float4(0.032, 0, 1.8, 1.8);
+		o.c = float4(0.92, 0.74, 0.38, 1);
+		o.extra.xyw = float3(3.0, 0.2, 0.02);
+		o.extra.z = 6;
+	} else if (wx > 7.5 && wx < 8.5) {
+		o.vel = float4(wind * 0.9 + float3(WxRnd(seed) * 0.6 - 0.3, -1.1 + WxRnd(seed) * 0.7, WxRnd(seed) * 0.6 - 0.3), 0.01);
+		o.sz = float4(0.06, 2, 4.5, 4.5);
+		o.c = float4(1, 0.72, 0.8, 1);
+		o.extra.xyw = float3(0.45, 0.3, 0.04);
+		o.extra.z = 7;
+	} else if (wx > 3.5 && wx < 4.5) {
+		o.vel = float4(wind * 0.35 + float3(WxRnd(seed) * 0.4 - 0.2, WxRnd(seed) * 0.35 - 0.15, WxRnd(seed) * 0.4 - 0.2), 0);
+		o.sz = float4(0.14, 0, 3.5, 3.5);
+		o.c = float4(0.78, 0.82, 0.86, 0.22);
+		o.extra.xyw = float3(0, 0.15, 0.22);
+		o.extra.z = 8;
+	} else {
+		float gy = WxHeight(o.p.x, o.p.z);
+		if (gy > -90.0) o.p.y = gy + 0.1 + WxRnd(seed) * 0.5;
+		o.vel = float4(WxRnd(seed) * 0.4 - 0.2, 0.8 + WxRnd(seed) * 1.0, WxRnd(seed) * 0.4 - 0.2, 0.02);
+		o.sz = float4(0.05, 0, 1.6, 1.6);
+		o.c = float4(1, 0.7, 0.35, 0.45);
+		o.extra.xyw = float3(-0.4, 0.2, 0.08);
+		o.extra.z = 9;
+	}
+}
+
+void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm)
+{
+	uint n = (uint)max(WxCnt.y, 1.0);
+	float4 a = WxAct[seed % n];
+	if (a.w < 0.05) {
+		WxBirthSky(o, seed, WxMix.y, Eye.xyz, WxFwd.xyz, WxSide.xyz, wind, gust);
+		return;
+	}
+	float fromHair = WxRnd(seed) < 0.45 ? 1.0 : 0.0;
+	float ht = a.w;
+	float3 pos = a.xyz + float3(WxRnd(seed) * 0.24 - 0.12, ht * (fromHair ? (0.78 + WxRnd(seed) * 0.24) : (0.38 + WxRnd(seed) * 0.34)), WxRnd(seed) * 0.24 - 0.12);
+	float w = lerp(2.4, 6.5, storm) * (0.7 + gust * 1.4);
+	o.p = float4(pos, 1);
+	o.vel = float4(wind * w + float3(WxRnd(seed) * 1.6 - 0.8, 0.4 + WxRnd(seed) * 1.8, WxRnd(seed) * 1.6 - 0.8), 0.03);
+	o.sz = float4(0.016, 0, 0.28 + WxRnd(seed) * 0.27, 0.45);
+	o.sz.w = o.sz.z;
+	o.c = float4(0.78, 0.88, 1, 0.85);
+	o.extra = float4(14.0, 0.45, 10.0, 0.008);
+}
+
+[numthreads(64, 1, 1)]
+void CSWx(uint3 dtid : SV_DispatchThreadID)
+{
+	uint id = dtid.x;
+	uint n = (uint)WxCnt.z;
+	if (id >= n) return;
+	float dt = min(WxCnt.x, 0.05);
+	float wx = WxMix.y;
+	float3 wind = WxWind.xyz;
+	float gust = WxWind.w;
+	uint seed = id * 1973u + (uint)(Eye.w * 4096.0) * 17u + 1u;
+	WxGpu o = WxSim[id];
+	if (wx < 0.5) {
+		o.sz.x = 0; o.c.a = 0; o.sz.z = 0;
+		WxSim[id] = o;
+		return;
+	}
+	uint dripN = (uint)WxMix.x;
+	int reset = WxCnt.w > 0.5;
+	if (reset || o.sz.z <= 0.0 || o.sz.x < 0.0005) {
+		if (id < dripN && ((wx > 0.5 && wx < 1.5) || (wx > 4.5 && wx < 5.5)) && WxCnt.y > 0.5)
+			WxBirthDrip(o, seed, wind, gust, wx > 4.5 ? 1.0 : 0.0);
+		else
+			WxBirthSky(o, seed, wx, Eye.xyz, WxFwd.xyz, WxSide.xyz, wind, gust);
+		WxSim[id] = o;
+		return;
+	}
+	float3 prev = o.p.xyz;
+	float2 air = AirMain() + AirBreeze();
+	o.vel.xz += air * dt * 4.2;
+	o.vel.y += AirLift() * dt * 3.2;
+	o.vel.y -= o.extra.x * dt;
+	o.vel.xyz *= exp(-o.extra.y * dt);
+	o.p.xyz += o.vel.xyz * dt;
+	o.sz.z -= dt;
+	float t = 1.0 - o.sz.z / max(o.sz.w, 1e-4);
+	o.sz.x = lerp(o.sz.x, o.extra.w, saturate(t * 0.35));
+	float a = o.c.a;
+	a = saturate(o.sz.z / max(o.sz.w, 1e-4) * 3.0) * saturate(t * 8.0 + 0.1);
+	if (o.extra.z > 7.5 && o.extra.z < 8.5) a *= 0.22;
+	o.c.a = a;
+	int kind = (int)(o.extra.z + 0.1);
+	if (kind >= 1 && kind <= 7 && o.vel.y < 0.0) {
+		float gy = WxHeight(o.p.x, o.p.z);
+		if (gy > -90.0 && prev.y > gy + 0.02 && o.p.y <= gy + 0.03) {
+			if (kind == 1 || kind == 2 || kind == 10) {
+				o.p.y = gy + 0.04;
+				float ang = WxRnd(seed) * 6.2831853;
+				float sp = 0.8 + WxRnd(seed) * 1.8;
+				o.vel = float4(cos(ang) * sp, 1.2 + WxRnd(seed) * 1.4, sin(ang) * sp, 0.03);
+				o.sz = float4(0.02, 0, 0.22, 0.22);
+				o.c = float4(0.75, 0.86, 1, 0.8);
+				o.extra = float4(18.0, 0.3, 11.0, 0.008);
+			} else if (kind == 3) {
+				o.p.y = gy + 0.03;
+				o.vel = 0; o.extra.x = 0; o.sz.z = min(o.sz.z, 0.35);
+			} else if (kind == 5 && o.sz.y > 6.5) {
+				o.p.y = gy + 0.03;
+				o.vel.y = -o.vel.y * 0.42;
+				o.vel.xz *= 0.7;
+				o.sz.y = 0;
+			} else {
+				o.sz.z = 0; o.sz.x = 0;
+			}
+		}
+	}
+	if (o.sz.z <= 0.0) o.sz.x = 0;
+	WxSim[id] = o;
+}
+
+PinP VSPWX(uint id : SV_VertexID)
+{
+	WxGpu s = WxDraw[id];
+	PinP o;
+	o.p = s.p.xyz;
+	o.vel = s.vel;
+	o.sz = s.sz;
+	o.c = s.c;
+	return o;
 }

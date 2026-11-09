@@ -38,9 +38,7 @@ CSasamiLayoutPaletteDlg* CSasamiLayoutPaletteDlg::OpenNear(CWnd* owner, CPoint s
 			&& !(savedata.sasamiLayPalX == -1 && savedata.sasamiLayPalY == -1));
 		if (havePos)
 			s_inst->SetWindowPos(NULL, savedata.sasamiLayPalX, savedata.sasamiLayPalY, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
-		s_inst->ShowWindow(SW_SHOW);
-		s_inst->Invalidate(FALSE);
-		s_inst->BringWindowToTop();
+		ScStaffPresentNoActivate(s_inst);
 		(void)screenPt;
 		return s_inst;
 	}
@@ -55,13 +53,28 @@ CSasamiLayoutPaletteDlg* CSasamiLayoutPaletteDlg::OpenNear(CWnd* owner, CPoint s
 		const int havePos = (savedata.sasamiLayPalX > -30000 && savedata.sasamiLayPalY > -30000
 			&& !(savedata.sasamiLayPalX == -1 && savedata.sasamiLayPalY == -1));
 		if (!havePos)
-			s_inst->SetWindowPos(NULL, screenPt.x, screenPt.y, pw, ph, SWP_NOZORDER);
+			s_inst->SetWindowPos(NULL, screenPt.x, screenPt.y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
 		else
 			s_inst->SetWindowPos(NULL, savedata.sasamiLayPalX, savedata.sasamiLayPalY, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
 	}
-	s_inst->ShowWindow(SW_SHOW);
-	s_inst->BringWindowToTop();
+	ScStaffPresentNoActivate(s_inst);
 	return s_inst;
+}
+
+void CSasamiLayoutPaletteDlg::InvalidateBody()
+{
+	ScStaffInvalidateBelowCaption(this);
+}
+
+void CSasamiLayoutPaletteDlg::FocusKeyTab()
+{
+	if (m_tab != 0) {
+		m_tab = 0;
+		m_hoverItem = -1;
+		m_hoverSemi = 0;
+		LayoutChrome();
+	}
+	InvalidateBody();
 }
 
 void CSasamiLayoutPaletteDlg::PostCmd(int cmdId)
@@ -149,6 +162,8 @@ void CSasamiLayoutPaletteDlg::BuildTabItems()
 			LL14(L"拍削除", L"Delete", L"Suppr.", L"Rimuovi", L"Quitar", L"삭제", L"删拍号", L"حذف", L"Удал.", L"Löschen", L"Rem.", L"Verw.", L"Usuń", L"Sil"));
 		break;
 	case 2:
+		AddItem(LAY_ITEM_CLEF, 4, SASAMI_PAL_CMD_CLEF_AUTO, LL14(L"自動 (ト音/ヘ音/大譜表)", L"Auto (G / F / grand)", L"Auto (Sol / Fa / grand)", L"Auto (Sol / Fa / grand)", L"Auto (Sol / Fa / grand)",
+			L"자동 (G/F/대보표)", L"自动（高/低/大谱表）", L"تلقائي", L"Авто", L"Auto (G/F/Grand)", L"Auto (G/F/grand)", L"Auto (G/F/grand)", L"Auto (G/F/grand)", L"Oto (G/F/grand)"));
 		AddItem(LAY_ITEM_CLEF, 0, SASAMI_PAL_CMD_CLEF_G, LL14(L"ト音記号 (G)", L"Treble (G)", L"Clé de Sol", L"Chiave di Sol", L"Clave de Sol",
 			L"높은음자리", L"高音谱号", L"Sol", L"Скрипичный", L"Violinschl.", L"Clave de Sol", L"Violinsleutel", L"Klucz wiolinowy", L"Sol"));
 		AddItem(LAY_ITEM_CLEF, 1, SASAMI_PAL_CMD_CLEF_F, LL14(L"ヘ音記号 (F)", L"Bass (F)", L"Clé de Fa", L"Chiave di Fa", L"Clave de Fa",
@@ -320,7 +335,7 @@ void CSasamiLayoutPaletteDlg::DrawPreview(CDC& dc, const CRect& rc) const
 			L"%d/%d  %s  Ch%d=%s", L"Красная: %d/%d  %s  Ch%d=%s", L"%d/%d  %s  Ch%d=%s",
 			L"%d/%d  %s  Ch%d=%s", L"%d/%d  %s  Ch%d=%s", L"%d/%d  %s  Ch%d=%s", L"%d/%d  %s  Ch%d=%s"),
 			m_st.meterN, m_st.meterD, ScStaffKeySigMajorName(m_st.keySig), m_st.curCh + 1,
-			(m_st.clef == 3) ? L"Dr" : (m_st.clef == 2) ? L"G+F" : (m_st.clef == 1 ? L"F" : L"G"));
+			(m_st.clef == 4) ? L"Auto" : (m_st.clef == 3) ? L"Dr" : (m_st.clef == 2) ? L"G+F" : (m_st.clef == 1 ? L"F" : L"G"));
 		line2[0] = 0;
 		if (m_hoverItem >= 0 && m_hoverSemi != 0) {
 			wchar_t n0[16], n1[16];
@@ -411,8 +426,8 @@ END_MESSAGE_MAP()
 
 void CSasamiLayoutPaletteDlg::ApplyLang()
 {
-	SetWindowText(LL14(L"譜表", L"Layout", L"Armature", L"Armatura", L"Armadura",
-		L"보표", L"谱表", L"تخطيط", L"Разметка", L"Layout", L"Layout", L"Layout", L"Układ", L"Düzen"));
+	SetWindowText(LL14(L"調・譜表", L"Key · Layout", L"Armure · Portée", L"Tonalità · Chiave", L"Armadura · Pentagrama",
+		L"조·보표", L"调·谱表", L"مفتاح · تخطيط", L"Тон · Разметка", L"Tonart · Layout", L"Tom · Pauta", L"Toonsoort · Layout", L"Tonacja · Układ", L"Ton · Düzen"));
 }
 
 BOOL CSasamiLayoutPaletteDlg::OnInitDialog()
@@ -467,7 +482,7 @@ void CSasamiLayoutPaletteDlg::OnSize(UINT nType, int cx, int cy)
 			&savedata.sasamiLayPalW, &savedata.sasamiLayPalH);
 		MpPersistSavedataQuick();
 	}
-	Invalidate(FALSE);
+	InvalidateBody();
 }
 
 BOOL CSasamiLayoutPaletteDlg::OnEraseBkgnd(CDC* pDC) { return CCustomBlurDialogExBase::OnEraseBkgnd(pDC); }
@@ -492,7 +507,7 @@ void CSasamiLayoutPaletteDlg::ActivateItem(int i)
 	case LAY_ITEM_METER_N: PostLayout(SASAMI_PAL_LAYOUT_METER, it.value, m_st.meterD); break;
 	case LAY_ITEM_METER_D: PostLayout(SASAMI_PAL_LAYOUT_METER, m_st.meterN, it.value); break;
 	case LAY_ITEM_CLEF: PostCmd(it.cmdId); break;
-	case LAY_ITEM_TR_SCOPE: m_trScope = it.value; Invalidate(FALSE); break;
+	case LAY_ITEM_TR_SCOPE: m_trScope = it.value; InvalidateBody(); break;
 	case LAY_ITEM_TR_ACT: { const int cmd = TrCmdForScope(m_trScope, it.value); if (cmd) PostCmd(cmd); break; }
 	case LAY_ITEM_ACTION: PostCmd(it.cmdId); break;
 	default: break;
@@ -503,6 +518,7 @@ void CSasamiLayoutPaletteDlg::OnPaint()
 {
 	QueryState();
 	CPaintDC dc(this);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	CRect body(rc.left, cap, rc.right, rc.bottom);
@@ -551,7 +567,6 @@ void CSasamiLayoutPaletteDlg::OnPaint()
 	CCC_BlitStretchOpaque(dc.GetSafeHdc(), body.left, body.top, body.Width(), body.Height(),
 		mem.GetSafeHdc(), 0, 0, body.Width(), body.Height());
 	mem.SelectObject(old);
-	CCC_CaptionPaint(dc, m_hWnd);
 }
 
 void CSasamiLayoutPaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -559,7 +574,7 @@ void CSasamiLayoutPaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int tab = HitTab(point);
 	if (tab >= 0 && tab != m_tab) {
 		m_tab = tab; m_hoverItem = -1; m_hoverSemi = 0;
-		LayoutChrome(); Invalidate(FALSE);
+		LayoutChrome(); InvalidateBody();
 		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
 		return;
 	}
@@ -592,10 +607,11 @@ void CSasamiLayoutPaletteDlg::OnMouseLeave()
 
 void CSasamiLayoutPaletteDlg::OnClose()
 {
+	/* Keep floating palette open for the score session (× only saves geom). */
 	ScSaveWndGeom(this, &savedata.sasamiLayPalX, &savedata.sasamiLayPalY,
 		&savedata.sasamiLayPalW, &savedata.sasamiLayPalH);
 	MpPersistSavedataQuick();
-	CCustomBlurDialogExBase::OnClose();
+	ShowWindow(SW_SHOW);
 }
 
 void CSasamiLayoutPaletteDlg::OnDestroy()

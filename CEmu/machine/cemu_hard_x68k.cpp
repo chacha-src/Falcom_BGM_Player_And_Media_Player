@@ -313,14 +313,14 @@ uint8_t CHardX68k::Read8(unsigned addr)
 	if ((addr >= 0xe88000u && addr <= 0xe88fffu) || (addr >= 0xe8a000u && addr <= 0xe8afffu)) {
 		const unsigned off = addr & 0xfffu;
 		uint8_t v = mfp_[off];
-		/* GPIP（$E88001）: オープンバス High、bit7 セットで `tst.b / bmi` がハングしない。Bit4 は VDISP — arcus はクリア待ち（`btst #4 / bne`）、MIDI_DRV.68K はセット後クリア待ち（`btst #4 / beq` 次いで bne）。毎回トグルし両相待ちを終わらせる。 */
+		/* GPIP（$E88001）: オープンバス High。Bit7 は ZMUSIC が High 待ち（bpl）のあと Low 待ち（bmi）するので両方トグルする。Bit4 は VDISP — arcus はクリア待ち（`btst #4 / bne`）、MIDI_DRV.68K はセット後クリア待ち（`btst #4 / beq` 次いで bne）。 */
 		if (off == 0x001u) {
 			if (v == 0) v = 0xff;
 			g_x68GpipPhase++;
 			if (g_x68GpipPhase & 1u)
-				v = (uint8_t)(v | 0x10u);
+				v = (uint8_t)(v | 0x90u);
 			else
-				v = (uint8_t)(v & (uint8_t)~0x10);
+				v = (uint8_t)(v & (uint8_t)~0x90u);
 		}
 		(void)softMfp_;
 		return v;
@@ -344,6 +344,10 @@ uint8_t CHardX68k::Read8(unsigned addr)
 	/* $E00000..$E7FFFF メールボックス／タイムスライス MMIO 後の追加 RAM */
 	if (addr >= (unsigned)kExtBase && addr < (unsigned)kExtBase + (unsigned)kExtBytes)
 		return ext_[addr - (unsigned)kExtBase];
+	/* HD63450 CSR（各チャネル +0）。オープンバス $FF は ACT が立ったままに見え、
+	   アボート後の `btst #3 / bne` が抜けない。再生中のチャネル 3 だけ ACT を返す。 */
+	if (addr == 0xe84000u || addr == 0xe84040u || addr == 0xe84080u || addr == 0xe840c0u)
+		return (addr == 0xe840c0u && adpcmPlaying_) ? 0x08 : 0;
 	if (addr >= 0xe80000u && addr <= 0xefffffu)
 		return 0xff;
 	return 0;

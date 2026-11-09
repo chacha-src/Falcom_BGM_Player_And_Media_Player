@@ -225,6 +225,8 @@ void VstLiveEditorClearClosingQuiet(void);
    Required for HALion MediaBay keyboard / editor notes when score is open. */
 void VstLiveMonitorEnsure(void);
 void VstLiveMonitorStop(void);
+/* After score preview: wait for waveOut to settle, then Ensure (song flag dropped). */
+void VstLiveMonitorEnsureDelayed(void);
 /* Poll Host32 editorClosedSeq without needing the audio mix thread. */
 void VstLivePollRemoteEditorClosed(void);
 /* 1 = part loaded. outPath may be NULL. */

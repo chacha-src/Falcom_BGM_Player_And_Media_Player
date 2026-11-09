@@ -24,7 +24,7 @@ CSasamiPianoRollDlg::CSasamiPianoRollDlg(CWnd* pParent)
 	, m_midiScore(NULL), m_fmScore(NULL)
 	, m_dragMode(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
 	, m_resizeEv(-1), m_marquee(0), m_bInLayout(FALSE)
-	, m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0)
+	, m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_chromeDetail(0)
 {
 	ScPianoRollInit(&m_roll);
 	m_marquee0 = m_marquee1 = CPoint(0, 0);
@@ -129,7 +129,7 @@ void CSasamiPianoRollDlg::BindFm(CSasamiFmScoreDlg* score)
 
 void CSasamiPianoRollDlg::Refresh()
 {
-	if (::IsWindow(m_hWnd)) Invalidate(FALSE);
+	if (::IsWindow(m_hWnd)) ScStaffInvalidateBelowCaption(this);
 }
 
 void CSasamiPianoRollDlg::DoDataExchange(CDataExchange* pDX)
@@ -140,6 +140,7 @@ void CSasamiPianoRollDlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CSasamiPianoRollDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
+	ON_WM_ACTIVATE()
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
 	ON_WM_LBUTTONDOWN()
@@ -171,6 +172,17 @@ BEGIN_MESSAGE_MAP(CSasamiPianoRollDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_ROLL_FX, OnBnFx)
 	ON_BN_CLICKED(IDC_SASAMI_ROLL_VOICE, OnBnVoice)
 	ON_BN_CLICKED(IDC_SASAMI_ROLL_SCORE, OnBnScore)
+	ON_BN_CLICKED(0x5F60, OnBnRangePlay)
+	ON_BN_CLICKED(0x5F61, OnBnBarPrev)
+	ON_BN_CLICKED(0x5F62, OnBnBarNext)
+	ON_BN_CLICKED(0x5F63, OnBnBarGo)
+	ON_BN_CLICKED(0x5F65, OnBnMute)
+	ON_BN_CLICKED(0x5F66, OnBnSolo)
+	ON_BN_CLICKED(0x5F67, OnBnMore)
+	ON_CONTROL_RANGE(BN_CLICKED, 0x5F70, 0x5F75, OnDurButton)
+	ON_BN_CLICKED(0x5F76, OnDvDot)
+	ON_BN_CLICKED(0x5F77, OnDvTriplet)
+	ON_BN_CLICKED(0x5F78, OnDvRest)
 	ON_CBN_SELCHANGE(IDC_SASAMI_ROLL_CH, OnCbnCh)
 	ON_CBN_SELCHANGE(IDC_SASAMI_ROLL_PASTE, OnCbnPaste)
 	ON_CBN_SELCHANGE(IDC_SASAMI_ROLL_FOLLOW, OnCbnFollow)
@@ -214,6 +226,33 @@ void CSasamiPianoRollDlg::CreateChrome()
 	mkBtn(m_btnFx, IDC_SASAMI_ROLL_FX, L"FX");
 	mkBtn(m_btnVoice, IDC_SASAMI_ROLL_VOICE, L"Voice");
 	mkBtn(m_btnScore, IDC_SASAMI_ROLL_SCORE, L"Score");
+	mkBtn(m_btnRangePlay, 0x5F60, L"Range");
+	mkBtn(m_btnBarPrev, 0x5F61, L"<");
+	mkBtn(m_btnBarNext, 0x5F62, L">");
+	mkBtn(m_btnBarGo, 0x5F63, L"Go");
+	mkBtn(m_btnMute, 0x5F65, L"Mute");
+	mkBtn(m_btnSolo, 0x5F66, L"Solo");
+	mkBtn(m_btnMore, 0x5F67, L"More");
+	mkBtn(m_dvWhole, 0x5F70, L"1");
+	mkBtn(m_dvHalf, 0x5F71, L"2");
+	mkBtn(m_dvQuarter, 0x5F72, L"4");
+	mkBtn(m_dv8, 0x5F73, L"8");
+	mkBtn(m_dv16, 0x5F74, L"16");
+	mkBtn(m_dv32, 0x5F75, L"32");
+	mkBtn(m_dvDot, 0x5F76, L".");
+	mkBtn(m_dvTriplet, 0x5F77, L"3");
+	mkBtn(m_dvRest, 0x5F78, L"R");
+	if (!m_edBar.GetSafeHwnd()) {
+		m_edBar.Create(WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
+			CRect(0, 0, 40, 22), this, 0x5F64);
+		m_edBar.SetAeroMode(FALSE);
+		m_edBar.SetLimitText(5);
+	}
+	if (!m_infoBar.GetSafeHwnd()) {
+		m_infoBar.Create(L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
+			CRect(0, 0, 100, 20), this, 0x5F68);
+		m_infoBar.SetAeroMode(FALSE);
+	}
 	auto mkCb = [&](CCustomComboBox& c, UINT id) {
 		if (!c.GetSafeHwnd())
 			c.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
@@ -242,11 +281,33 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int pad = 8, btnH = 28, cbH = 32, gap = 4;
-	if (m_btnChord.GetSafeHwnd()) m_btnChord.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
-	if (m_btnPatt.GetSafeHwnd()) m_btnPatt.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
-	if (m_btnFx.GetSafeHwnd()) m_btnFx.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
-	if (m_btnVoice.GetSafeHwnd()) m_btnVoice.ShowWindow(m_isFm ? SW_SHOW : SW_HIDE);
-	if (m_btnNew.GetSafeHwnd()) m_btnNew.ShowWindow(m_isFm ? SW_HIDE : SW_SHOW);
+	const int detail = m_chromeDetail ? 1 : 0;
+	auto vis = [&](CWnd& w, int show) {
+		if (!w.GetSafeHwnd()) return;
+		w.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	};
+	vis(m_btnChord, (!m_isFm && detail) ? 1 : 0);
+	vis(m_btnPatt, (!m_isFm && detail) ? 1 : 0);
+	vis(m_btnFx, (!m_isFm && detail) ? 1 : 0);
+	vis(m_btnVoice, (m_isFm && detail) ? 1 : 0);
+	vis(m_btnNew, m_isFm ? 0 : 1);
+	vis(m_btnTempo, detail);
+	vis(m_btnText, detail);
+	vis(m_btnLayout, detail);
+	vis(m_btnExport, detail);
+	vis(m_pasteMode, detail);
+	vis(m_follow, 1);
+	vis(m_stripLanes, detail);
+	vis(m_stripKind0, detail);
+	vis(m_stripDraw, detail);
+	vis(m_stripStep, detail);
+	vis(m_btnRangePlay, 1);
+	vis(m_btnBarPrev, 1); vis(m_btnBarNext, 1); vis(m_btnBarGo, 1);
+	vis(m_btnMute, 1); vis(m_btnSolo, 1); vis(m_btnMore, 1);
+	vis(m_dvWhole, 1); vis(m_dvHalf, 1); vis(m_dvQuarter, 1);
+	vis(m_dv8, 1); vis(m_dv16, 1); vis(m_dv32, 1);
+	vis(m_dvDot, 1); vis(m_dvTriplet, 1); vis(m_dvRest, 1);
+	vis(m_edBar, 1); vis(m_infoBar, 1);
 	int x = pad, y = cap + pad;
 	const int maxX = max(pad + 80, rc.right - pad);
 	CDC* pdc = GetDC();
@@ -274,7 +335,7 @@ void CSasamiPianoRollDlg::LayoutChrome()
 		x += ww + gap;
 	};
 	auto layoutCombo = [&](CCustomComboBox& c, int ww, int dropW) {
-		if (!c.GetSafeHwnd()) return;
+		if (!c.GetSafeHwnd() || !(c.GetStyle() & WS_VISIBLE)) return;
 		if (x > pad && x + ww > maxX) { y = rowBottom + 6; x = pad; }
 		const int closedH = (cbH - 4 > 22) ? (cbH - 4) : 22;
 		const int dropH = (closedH > 28) ? closedH : 28;
@@ -288,37 +349,60 @@ void CSasamiPianoRollDlg::LayoutChrome()
 	placeBtn(m_btnOpen, 56);
 	placeBtn(m_btnSave, 56);
 	placeBtn(m_btnNew, 56);
-	placeBtn(m_btnPlay, 88);
-	placeBtn(m_btnExport, 72);
-	endRow();
-	placeBtn(m_btnPencil, 56);
-	placeBtn(m_btnErase, 80);
-	placeBtn(m_btnSel, 56);
-	placeBtn(m_btnPal, 56);
-	placeBtn(m_btnTempo, 64);
-	placeBtn(m_btnText, 72);
-	placeBtn(m_btnLayout, 56);
-	placeBtn(m_btnArr, 72);
-	placeBtn(m_btnChord, 56);
-	placeBtn(m_btnPatt, 80);
-	placeBtn(m_btnFx, 96);
-	placeBtn(m_btnVoice, 56);
+	placeBtn(m_btnPlay, 80);
+	placeBtn(m_btnRangePlay, 72);
+	layoutCombo(m_follow, 108, 140);
+	placeBtn(m_btnArr, 64);
 	placeBtn(m_btnScore, 56);
 	placeBtn(m_btnHelp, 56);
+	placeBtn(m_btnMore, 64);
 	endRow();
-	layoutCombo(m_ch, 104, 140);
-	layoutCombo(m_pasteMode, 108, 140);
-	layoutCombo(m_follow, 108, 140);
+	placeBtn(m_btnPencil, 56);
+	placeBtn(m_btnErase, 64);
+	placeBtn(m_btnSel, 56);
+	placeBtn(m_btnPal, 56);
+	placeBtn(m_dvWhole, 26); placeBtn(m_dvHalf, 26); placeBtn(m_dvQuarter, 26);
+	placeBtn(m_dv8, 26); placeBtn(m_dv16, 30); placeBtn(m_dv32, 30);
+	placeBtn(m_dvDot, 22); placeBtn(m_dvTriplet, 22); placeBtn(m_dvRest, 26);
+	layoutCombo(m_ch, 118, 160);
+	placeBtn(m_btnMute, 56);
+	placeBtn(m_btnSolo, 48);
+	placeBtn(m_btnBarPrev, 26);
+	if (m_edBar.GetSafeHwnd() && (m_edBar.GetStyle() & WS_VISIBLE)) {
+		if (x > pad && x + 44 > maxX) { y = rowBottom + 6; x = pad; }
+		m_edBar.MoveWindow(x, y + 2, 40, 22);
+		rowBottom = max(rowBottom, y + btnH);
+		x += 44 + gap;
+	}
+	placeBtn(m_btnBarNext, 26);
+	placeBtn(m_btnBarGo, 56);
 	endRow();
-	layoutCombo(m_stripLanes, 120, 160);
-	layoutCombo(m_stripKind0, 140, 180);
-	layoutCombo(m_stripDraw, 108, 140);
-	layoutCombo(m_stripStep, 88, 120);
-	endRow();
+	if (m_infoBar.GetSafeHwnd()) {
+		m_infoBar.MoveWindow(pad, y, max(40, rc.Width() - pad * 2), 20);
+		rowBottom = y + 20;
+		endRow();
+	}
+	if (detail) {
+		placeBtn(m_btnTempo, 64);
+		placeBtn(m_btnText, 72);
+		placeBtn(m_btnLayout, 56);
+		placeBtn(m_btnChord, 56);
+		placeBtn(m_btnPatt, 80);
+		placeBtn(m_btnFx, 96);
+		placeBtn(m_btnVoice, 56);
+		placeBtn(m_btnExport, 72);
+		layoutCombo(m_pasteMode, 108, 140);
+		endRow();
+		layoutCombo(m_stripLanes, 120, 160);
+		layoutCombo(m_stripKind0, 140, 180);
+		layoutCombo(m_stripDraw, 108, 140);
+		layoutCombo(m_stripStep, 88, 120);
+		endRow();
+	}
 	if (pdc) ReleaseDC(pdc);
 	int toolBottom = rowBottom;
 	m_toolbarRc = CRect(0, cap, rc.right, toolBottom);
-	const int helpH = 64, statusH = 18;
+	const int helpH = 48, statusH = 18;
 	const int sbW = ScStaffScrollGutterW();
 	const int sbH = ScStaffScrollGutterH();
 	const int stripH = (m_ui && m_ui->stripCount > 0) ? max(48, ScStaffStripTotalH(m_ui)) : 0;
@@ -351,6 +435,7 @@ BOOL CSasamiPianoRollDlg::OnInitDialog()
 	SyncStripCombos();
 	SetupTooltips();
 	UpdateHelpBar();
+	UpdateInfoBar();
 	if (m_ui) {
 		m_ui->tool = SC_TOOL_SELECT;
 		m_ui->helpTopic = SC_HELP_SELECT;
@@ -358,6 +443,7 @@ BOOL CSasamiPianoRollDlg::OnInitDialog()
 	}
 	LayoutChrome();
 	SetTimer(1, 50, NULL);
+	SetTimer(9125, 1, NULL);
 	return TRUE;
 }
 
@@ -379,10 +465,20 @@ void CSasamiPianoRollDlg::OnSize(UINT nType, int cx, int cy)
 	(void)cx; (void)cy;
 }
 
+void CSasamiPianoRollDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CCustomBlurDialogExBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState != WA_INACTIVE && !bMinimized)
+		CSasamiNotePaletteDlg::BindComposerNotify(this);
+}
+
 BOOL CSasamiPianoRollDlg::OnEraseBkgnd(CDC* pDC)
 {
 	if (!pDC) return TRUE;
 	CRect rc; GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && capH < rc.bottom) rc.top = capH;
+	if (rc.Height() <= 0) return TRUE;
 #if CCUSTOM_AERO_SUPPORT
 	CCC_FillRectAlpha(pDC->GetSafeHdc(), rc, RGB(32, 34, 40), 255);
 #else
@@ -421,8 +517,23 @@ void CSasamiPianoRollDlg::ApplyLang()
 	set(m_btnFx, LL14(L"インサートFX", L"Insert FX", L"FX d’insertion", L"FX insert", L"FX de inserción", L"인서트 FX", L"插入FX", L"إدراج FX", L"Вставка FX", L"Insert-FX", L"FX de inserção", L"Insert-FX", L"FX wstawiania", L"Insert FX"));
 	set(m_btnVoice, LL14(L"音色", L"Voice", L"Timbre", L"Voce", L"Voz", L"음색", L"音色", L"صوت", L"Голос", L"Stimme", L"Voz", L"Stem", L"Głos", L"Ses"));
 	set(m_btnScore, LL14(L"譜面", L"Score", L"Partition", L"Partitura", L"Partitura", L"악보", L"乐谱", L"نوتة", L"Партитура", L"Partitur", L"Partitura", L"Partituur", L"Partytura", L"Skor"));
+	set(m_btnRangePlay, LL14(L"範囲再生", L"Range", L"Plage", L"Intervallo", L"Rango",
+		L"범위재생", L"范围播放", L"نطاق", L"Диапазон", L"Bereich", L"Intervalo", L"Bereik", L"Zakres", L"Aralık"));
+	set(m_btnBarPrev, L"<");
+	set(m_btnBarNext, L">");
+	set(m_btnBarGo, LL14(L"移動", L"Go", L"Aller", L"Vai", L"Ir", L"이동", L"跳转", L"انتقال", L"К такту", L"Los", L"Ir", L"Ga", L"Idź", L"Git"));
+	set(m_btnMute, LL14(L"ミュート", L"Mute", L"Muet", L"Mute", L"Mute", L"뮤트", L"静音", L"كتم", L"Мьют", L"Stumm", L"Mudo", L"Mute", L"Wycisz", L"Sessiz"));
+	set(m_btnSolo, LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo"));
+	set(m_btnMore, m_chromeDetail
+		? LL14(L"簡易▲", L"Less ▲", L"Moins ▲", L"Meno ▲", L"Menos ▲", L"간단히 ▲", L"精简▲", L"أقل ▲", L"Кратко ▲", L"Weniger ▲", L"Menos ▲", L"Minder ▲", L"Mniej ▲", L"Az ▲")
+		: LL14(L"詳細▼", L"More ▼", L"Plus ▼", L"Più ▼", L"Más ▼", L"자세히 ▼", L"详细▼", L"المزيد ▼", L"Ещё ▼", L"Mehr ▼", L"Mais ▼", L"Meer ▼", L"Więcej ▼", L"Daha ▼"));
+	set(m_dvWhole, L"1"); set(m_dvHalf, L"2"); set(m_dvQuarter, L"4");
+	set(m_dv8, L"8"); set(m_dv16, L"16"); set(m_dv32, L"32");
+	set(m_dvDot, L"."); set(m_dvTriplet, L"3");
+	set(m_dvRest, LL14(L"休", L"R", L"S", L"P", L"S", L"쉼", L"休", L"س", L"П", L"P", L"P", L"R", L"P", L"S"));
 	SyncPasteFollow();
 	UpdateHelpBar();
+	UpdateInfoBar();
 }
 
 void CSasamiPianoRollDlg::SetupTooltips()
@@ -431,7 +542,27 @@ void CSasamiPianoRollDlg::SetupTooltips()
 	auto tip = [&](CWnd& w, LPCWSTR s) { if (w.GetSafeHwnd()) m_tooltip.AddTool(&w, s); };
 	tip(m_btnOpen, LL14(L"ファイルを開く", L"Open file", L"Ouvrir", L"Apri", L"Abrir", L"파일 열기", L"打开文件", L"فتح ملف", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç"));
 	tip(m_btnSave, LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
-	tip(m_btnPlay, LL14(L"マーカーからプレビュー", L"Preview from marker", L"Aperçu", L"Anteprima", L"Vista previa", L"미리듣기", L"预览", L"معاينة", L"Превью", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+	tip(m_btnPlay, LL14(L"マーカーからプレビュー（Space）", L"Preview from marker (Space)", L"Aperçu (Espace)", L"Anteprima (Spazio)", L"Vista previa (Espacio)", L"미리듣기 (Space)", L"从标记预览（Space）", L"معاينة (Space)", L"Превью (Space)", L"Vorschau (Leertaste)", L"Prévia (Espaço)", L"Voorbeeld (Spatie)", L"Podgląd (Spacja)", L"Önizle (Space)"));
+	tip(m_btnRangePlay, LL14(L"選択範囲（無ければ現在小節）を全パートで即試聴（Shift+Space）", L"Instant range preview — selection or current bar, all parts (Shift+Space)", L"Aperçu plage (Shift+Espace)", L"Anteprima intervallo (Shift+Spazio)", L"Vista previa de rango (Shift+Espacio)",
+		L"범위 즉시 재생 (Shift+Space)", L"就地试听范围（Shift+Space）", L"معاينة النطاق (Shift+Space)", L"Прослушать диапазон (Shift+Space)", L"Bereich sofort (Umschalt+Leer)", L"Prévia do intervalo (Shift+Espaço)", L"Bereik beluisteren (Shift+Spatie)", L"Odsłuchaj zakres (Shift+Spacja)", L"Aralığı çal (Shift+Space)"));
+	tip(m_btnBarPrev, LL14(L"前の小節（PageUp / [）", L"Previous bar (PageUp / [)", L"Mesure précédente", L"Battuta precedente", L"Compás anterior", L"이전 마디", L"上一小节", L"المازورة السابقة", L"Пред. такт", L"Vorheriger Takt", L"Compasso anterior", L"Vorige maat", L"Poprzedni takt", L"Önceki ölçü"));
+	tip(m_btnBarNext, LL14(L"次の小節（PageDown / ]）", L"Next bar (PageDown / ])", L"Mesure suivante", L"Battuta successiva", L"Compás siguiente", L"다음 마디", L"下一小节", L"المازورة التالية", L"След. такт", L"Nächster Takt", L"Compasso seguinte", L"Volgende maat", L"Następny takt", L"Sonraki ölçü"));
+	tip(m_btnBarGo, LL14(L"小節番号へ移動（Ctrl+G）", L"Go to bar number (Ctrl+G)", L"Aller à la mesure (Ctrl+G)", L"Vai alla battuta (Ctrl+G)", L"Ir al compás (Ctrl+G)", L"마디로 이동 (Ctrl+G)", L"跳到小节（Ctrl+G）", L"الانتقال إلى المازورة (Ctrl+G)", L"К такту (Ctrl+G)", L"Zum Takt (Strg+G)", L"Ir ao compasso (Ctrl+G)", L"Ga naar maat (Ctrl+G)", L"Idź do taktu (Ctrl+G)", L"Ölçüye git (Ctrl+G)"));
+	tip(m_edBar, LL14(L"小節番号。Enter で移動", L"Bar number. Enter to jump", L"Numéro de mesure. Entrée", L"Numero battuta. Invio", L"Número de compás. Intro", L"마디 번호. Enter로 이동", L"小节号。Enter 跳转", L"رقم المازورة", L"Номер такта", L"Taktnummer. Eingabe", L"Número do compasso", L"Maatnummer", L"Numer taktu", L"Ölçü numarası"));
+	tip(m_btnMute, LL14(L"現在パートをミュート（M）", L"Mute current part (M)", L"Couper la partie (M)", L"Mute parte (M)", L"Silenciar parte (M)", L"현재 파트 뮤트 (M)", L"静音当前声部（M）", L"كتم الجزء (M)", L"Мьют партии (M)", L"Part stummschalten (M)", L"Mudo da parte (M)", L"Partij muten (M)", L"Wycisz partię (M)", L"Partiyi sessiz (M)"));
+	tip(m_btnSolo, LL14(L"現在パートをソロ（S）", L"Solo current part (S)", L"Solo de la partie (S)", L"Solo parte (S)", L"Solo de parte (S)", L"현재 파트 솔로 (S)", L"独奏当前声部（S）", L"منفرد الجزء (S)", L"Соло партии (S)", L"Part solo (S)", L"Solo da parte (S)", L"Partij solo (S)", L"Solo partii (S)", L"Parti solo (S)"));
+	tip(m_btnMore, LL14(L"詳細ツールバーの表示切替", L"Toggle extra toolbar", L"Barre extra", L"Barra extra", L"Barra extra", L"상세 도구모음", L"切换详细工具栏", L"شريط إضافي", L"Доп. панель", L"Zusatzleiste", L"Barra extra", L"Extra balk", L"Dodatkowy pasek", L"Ekstra çubuk"));
+	tip(m_dvWhole, LL14(L"全音符（1）", L"Whole note (1)", L"Ronde (1)", L"Semibreve (1)", L"Redonda (1)", L"온음표 (1)", L"全音符（1）", L"كاملة (1)", L"Целая (1)", L"Ganze (1)", L"Semibreve (1)", L"Hele noot (1)", L"Cała (1)", L"Birlik (1)"));
+	tip(m_dvHalf, LL14(L"2分音符（2）", L"Half note (2)", L"Blanche (2)", L"Minima (2)", L"Blanca (2)", L"2분음표 (2)", L"二分音符（2）", L"بيضاء (2)", L"Половинная (2)", L"Halbe (2)", L"Mínima (2)", L"Halve (2)", L"Półnuta (2)", L"İkilik (2)"));
+	tip(m_dvQuarter, LL14(L"4分音符（3）", L"Quarter note (3)", L"Noire (3)", L"Semiminima (3)", L"Negra (3)", L"4분음표 (3)", L"四分音符（3）", L"سوداء (3)", L"Четверть (3)", L"Viertel (3)", L"Semínima (3)", L"Kwart (3)", L"Ćwierćnuta (3)", L"Dörtlük (3)"));
+	tip(m_dv8, LL14(L"8分音符（4）", L"8th note (4)", L"Croche (4)", L"Croma (4)", L"Corchea (4)", L"8분음표 (4)", L"八分音符（4）", L"ذات سن (4)", L"Восьмая (4)", L"Achtel (4)", L"Colcheia (4)", L"Achtste (4)", L"Ósemka (4)", L"Sekizlik (4)"));
+	tip(m_dv16, LL14(L"16分音符（5）", L"16th note (5)", L"Double croche (5)", L"Semicroma (5)", L"Semicorchea (5)", L"16분음표 (5)", L"十六分音符（5）", L"ذات سنين (5)", L"Шестнадцатая (5)", L"Sechzehntel (5)", L"Semicolcheia (5)", L"Zestiende (5)", L"Szesnastka (5)", L"Onaltılık (5)"));
+	tip(m_dv32, LL14(L"32分音符（6）", L"32nd note (6)", L"Triple croche (6)", L"Biscroma (6)", L"Fusa (6)", L"32분음표 (6)", L"三十二分音符（6）", L"ذات 3 أسنان (6)", L"Тридцать вторая (6)", L"Zweiunddreißigstel (6)", L"Fusa (6)", L"Tweeëndertigste (6)", L"Trzydziestka druga (6)", L"Otuzikilik (6)"));
+	tip(m_dvDot, LL14(L"付点（.）", L"Dotted (.)", L"Pointée (.)", L"Puntata (.)", L"Puntillo (.)", L"점음표 (.)", L"附点（.）", L"منقطة (.)", L"Точка (.)", L"Punktiert (.)", L"Ponto (.)", L"Punt (.)", L"Kropka (.)", L"Noktalı (.)"));
+	tip(m_dvTriplet, LL14(L"三連符", L"Triplet", L"Triolet", L"Terzina", L"Tresillo", L"셋잇단", L"三连音", L"ثلاثي", L"Триоль", L"Triole", L"Tercina", L"Triool", L"Triola", L"Üçleme"));
+	tip(m_dvRest, LL14(L"休符を置く（R）", L"Place rest (R)", L"Silence (R)", L"Pausa (R)", L"Silencio (R)", L"쉼표 (R)", L"休止符（R）", L"سكتة (R)", L"Пауза (R)", L"Pause (R)", L"Pausa (R)", L"Rust (R)", L"Pauza (R)", L"Sus (R)"));
+	tip(m_ch, LL14(L"編集パート。Tab / Shift+Tab で切替", L"Edit part. Tab / Shift+Tab to switch", L"Partie. Tab", L"Parte. Tab", L"Parte. Tab", L"편집 파트. Tab", L"编辑声部。Tab", L"الجزء. Tab", L"Партия. Tab", L"Part. Tab", L"Parte. Tab", L"Partij. Tab", L"Partia. Tab", L"Parti. Tab"));
+	tip(m_infoBar, LL14(L"位置・拍子・テンポ・調・パート・選択", L"Position, meter, tempo, key, part, selection", L"Position, mesure, tempo", L"Posizione, metro, tempo", L"Posición, compás, tempo", L"위치·박자·템포", L"位置、拍号、速度", L"الموضع والإيقاع", L"Позиция, размер, темп", L"Position, Takt, Tempo", L"Posição, compasso, tempo", L"Positie, maatsoort, tempo", L"Pozycja, metrum, tempo", L"Konum, ölçü, tempo"));
 	tip(m_btnPencil, LL14(L"音符 — グリッドに配置。1〜7で長さ", L"Notes — place on the grid. 1-7 sets length", L"Notes — 1-7 durée", L"Note — 1-7 durata", L"Notas — 1-7 duración", L"음표 — 1-7 음길이", L"音符 — 1-7 时值", L"نغمات — 1-7", L"Ноты — 1-7", L"Noten — 1-7", L"Notas — 1-7", L"Noten — 1-7", L"Nuty — 1-7", L"Nota — 1-7"));
 	tip(m_btnPal, LL14(L"音価パレット。数字キー 1〜7 でも同じ", L"Length palette. Number keys 1-7 do the same", L"Palette de durées. Touches 1-7", L"Tavolozza durate. Tasti 1-7", L"Paleta de duraciones. Teclas 1-7", L"음가 팔레트. 숫자 1-7", L"时值调色板。数字键 1-7", L"لوحة المدة. مفاتيح 1-7", L"Палитра длительности. 1-7", L"Dauerpalette. Tasten 1-7", L"Paleta de durações. Teclas 1-7", L"Duurpalet. Toetsen 1-7", L"Paleta wartości. Klawisze 1-7", L"Süre paleti. 1-7"));
 	tip(m_btnErase, LL14(L"消しゴム", L"Eraser", L"Gomme", L"Gomma", L"Borrar", L"지우개", L"橡皮", L"ممحاة", L"Ластик", L"Radierer", L"Borracha", L"Gum", L"Gumka", L"Silgi"));
@@ -447,21 +578,264 @@ void CSasamiPianoRollDlg::UpdateHelpBar()
 	wchar_t buf[768];
 	ScStaffFormatHelpBar(buf, 512, m_ui, m_isFm, m_curPart ? *m_curPart : 0);
 	wcsncat_s(buf, LL14(
-		L"  ←→赤バー  ↑↓鍵盤  鍵盤クリック=試聴",
-		L"  Left/Right = red bar  Up/Down = keys  click a key = audition",
-		L"  Gauche/Droite = barre  Haut/Bas = clavier  clic = audition",
-		L"  Sinistra/Destra = barra  Su/Giù = tasti  clic = audizione",
-		L"  Izq/Der = barra  Arriba/Abajo = teclas  clic = audición",
-		L"  ←→ 빨간 바  ↑↓ 건반  건반 클릭=시청",
-		L"  ←→红条  ↑↓琴键  点击琴键=试听",
-		L"  يسار/يمين = الشريط  أعلى/أسفل = المفاتيح",
-		L"  Влево/Вправо = метка  Вверх/Вниз = клавиши",
-		L"  Links/Rechts = Markierung  Hoch/Runter = Tasten",
-		L"  Esq/Dir = barra  Cima/Baixo = teclas",
-		L"  Links/Rechts = balk  Omhoog/Omlaag = toetsen",
-		L"  Lewo/Prawo = pasek  Góra/Dół = klawisze",
-		L"  Sol/Sağ = çubuk  Yukarı/Aşağı = tuşlar"), _TRUNCATE);
-	m_helpBar.SetWindowText(buf);
+		L"  ←→バー  ↑↓鍵盤  PgUp/Dn小節  Shift+Space範囲  Mミュート",
+		L"  Left/Right bar  Up/Down keys  PgUp/Dn bars  Shift+Space range  M mute",
+		L"  ←→ barre  ↑↓ clavier  PgUp/Dn  Shift+Espace plage  M muet",
+		L"  ←→ barra  ↑↓ tasti  PgUp/Dn  Shift+Spazio  M mute",
+		L"  ←→ barra  ↑↓ teclas  PgUp/Dn  Shift+Espacio  M mute",
+		L"  ←→바  ↑↓건반  PgUp/Dn마디  Shift+Space범위  M뮤트",
+		L"  ←→红条  ↑↓琴键  PgUp/Dn小节  Shift+Space范围  M静音",
+		L"  ←→ شريط  ↑↓ مفاتيح  PgUp/Dn  Shift+Space  M كتم",
+		L"  ←→ метка  ↑↓ клавиши  PgUp/Dn  Shift+Space  M мьют",
+		L"  ←→ Marke  ↑↓ Tasten  PgUp/Dn  Umschalt+Leer  M Stumm",
+		L"  ←→ barra  ↑↓ teclas  PgUp/Dn  Shift+Espaço  M mudo",
+		L"  ←→ balk  ↑↓ toetsen  PgUp/Dn  Shift+Spatie  M mute",
+		L"  ←→ pasek  ↑↓ klawisze  PgUp/Dn  Shift+Spacja  M wycisz",
+		L"  ←→ çubuk  ↑↓ tuşlar  PgUp/Dn  Shift+Space  M sessiz"), _TRUNCATE);
+	ScStaffSetWndTextIfChanged(&m_helpBar, buf);
+}
+
+void CSasamiPianoRollDlg::UpdateInfoBar()
+{
+	if (!m_infoBar.GetSafeHwnd() || !m_ui) return;
+	const int mn = m_ui->meterNumer > 0 ? m_ui->meterNumer : 4;
+	const int md = m_ui->meterDenom > 0 ? m_ui->meterDenom : 4;
+	const uint32_t tk = m_ui->previewActive ? m_ui->playheadTick : m_ui->markerTick;
+	const ScEvent* ev = m_ev;
+	const int evN = m_evCount ? *m_evCount : 0;
+	int bar = 1, beat = 1, rem = 0;
+	ScStaffBarBeatFromTick(ev, evN, tk, mn, md, &bar, &beat, &rem);
+	int curN = mn, curD = md;
+	ScStaffMeterAtTick(ev, evN, tk, mn, md, &curN, &curD);
+	int bpm = 120;
+	if (m_midiScore && m_midiScore->Doc())
+		bpm = ScStaffBpmFromTempoT(m_midiScore->Doc()->tempoT);
+	else if (m_fmScore && m_fmScore->Doc())
+		bpm = ScStaffBpmFromTempoT(m_fmScore->Doc()->tempoT);
+	{
+		const int col = ScStaffStripTickToCol(m_ui, tk);
+		if (col >= 0 && col < SC_STRIP_COLS_MAX && m_ui->globalTempoStrip[col] >= 40)
+			bpm = (int)m_ui->globalTempoStrip[col];
+	}
+	const int ks = ScStaffKeySigAtTick(ev, evN, tk, m_ui->keySig);
+	const int ch = m_curPart ? *m_curPart : 0;
+	const int drum = (!m_isFm && ev) ? ScMidiPartIsDrum(ev, evN, ch, 0) : 0;
+	const int slot = (!m_isFm && ev) ? ScMidiPartDrumSlot(ev, evN, ch, 0) : 0;
+	const wchar_t* partKind = drum
+		? (slot ? LL14(L"ドラム2", L"Drum2", L"Batt.2", L"Batt.2", L"Bat.2", L"드럼2", L"鼓2", L"طبول2", L"Бар.2", L"Drum2", L"Bat.2", L"Drum2", L"Per.2", L"Davul2")
+			: LL14(L"ドラム1", L"Drum1", L"Batt.1", L"Batt.1", L"Bat.1", L"드럼1", L"鼓1", L"طبول1", L"Бар.1", L"Drum1", L"Bat.1", L"Drum1", L"Per.1", L"Davul1"))
+		: LL14(L"通常", L"Melodic", L"Mélod.", L"Melod.", L"Melód.", L"일반", L"普通", L"عادي", L"Обычн.", L"Melod.", L"Melód.", L"Melod.", L"Melod.", L"Melodik");
+	wchar_t dur[96];
+	ScStaffFormatDurationStatus(dur, 96, m_ui);
+	const wchar_t* muteS = (ch >= 0 && ch < 32 && m_ui->mute[ch])
+		? LL14(L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M", L"M") : L"";
+	const wchar_t* soloS = (ch >= 0 && ch < 32 && m_ui->solo[ch])
+		? LL14(L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S", L"S") : L"";
+	CString s;
+	s.Format(LL14(
+		L"小節 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  選択 %d  |  %s  %s",
+		L"Bar %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sel %d  |  %s  %s",
+		L"Mes. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sél. %d  |  %s  %s",
+		L"Batt. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sel. %d  |  %s  %s",
+		L"Comp. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sel. %d  |  %s  %s",
+		L"마디 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  선택 %d  |  %s  %s",
+		L"小节 %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  选中 %d  |  %s  %s",
+		L"ماز. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  تحديد %d  |  %s  %s",
+		L"Такт %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Выд. %d  |  %s  %s",
+		L"Takt %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Ausw. %d  |  %s  %s",
+		L"Comp. %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sel. %d  |  %s  %s",
+		L"Maat %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Sel. %d  |  %s  %s",
+		L"Takt %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Zazn. %d  |  %s  %s",
+		L"Ölçü %d.%d  |  %d/%d  |  BPM %d  |  %s  |  %s %d %s%s%s  |  Seç. %d  |  %s  %s"),
+		bar, beat, curN, curD, bpm, ScStaffKeySigName(ks),
+		m_isFm ? L"FM" : L"MIDI", ch + 1, partKind, muteS, soloS,
+		m_ui->nSel, ScStaffToolName(m_ui->tool), dur);
+	ScStaffSetWndTextIfChanged(&m_infoBar, s);
+	if (m_edBar.GetSafeHwnd() && GetFocus() != &m_edBar) {
+		CString b; b.Format(L"%d", bar);
+		ScStaffSetWndTextIfChanged(&m_edBar, b);
+	}
+}
+
+void CSasamiPianoRollDlg::JumpToTick(uint32_t tick)
+{
+	if (!m_ui) return;
+	m_ui->markerTick = tick;
+	m_ui->playheadTick = tick;
+	ScStaffScrollTickIntoView(m_ui, m_ev, m_evCount ? *m_evCount : 0, tick, ScPianoRollTimePageW(m_gridRc));
+	UpdateScrollBars();
+	UpdateInfoBar();
+	Refresh();
+	if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+	if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
+}
+
+void CSasamiPianoRollDlg::JumpToBarNumber(int bar1)
+{
+	if (!m_ui) return;
+	if (bar1 < 1) bar1 = 1;
+	const int mn = m_ui->meterNumer > 0 ? m_ui->meterNumer : 4;
+	const int md = m_ui->meterDenom > 0 ? m_ui->meterDenom : 4;
+	JumpToTick(ScStaffTickFromBar(m_ev, m_evCount ? *m_evCount : 0, bar1, mn, md));
+}
+
+void CSasamiPianoRollDlg::JumpBar(int deltaBars)
+{
+	if (!m_ui) return;
+	const int mn = m_ui->meterNumer > 0 ? m_ui->meterNumer : 4;
+	const int md = m_ui->meterDenom > 0 ? m_ui->meterDenom : 4;
+	int bar = 1, beat = 1, rem = 0;
+	ScStaffBarBeatFromTick(m_ev, m_evCount ? *m_evCount : 0, m_ui->markerTick, mn, md, &bar, &beat, &rem);
+	bar += deltaBars;
+	if (bar < 1) bar = 1;
+	JumpToBarNumber(bar);
+}
+
+void CSasamiPianoRollDlg::SwitchPart(int delta)
+{
+	if (!m_ui || !m_curPart) return;
+	const int n = m_isFm ? 16 : (m_ui->trackCount > 0 ? m_ui->trackCount : 32);
+	int ch = *m_curPart;
+	for (int i = 0; i < n; i++) {
+		ch += delta;
+		if (ch < 0) ch = n - 1;
+		if (ch >= n) ch = 0;
+		if (m_ui->visible[ch]) break;
+	}
+	if (ch == *m_curPart) return;
+	*m_curPart = ch;
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(ch);
+	m_ui->markerSolidTrack = ch;
+	ScStaffLoadPartStrip(m_ui, ch);
+	SyncStripCombos();
+	UpdateHelpBar();
+	UpdateInfoBar();
+	Refresh();
+	if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+	if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
+}
+
+void CSasamiPianoRollDlg::ToggleMuteCur()
+{
+	if (!m_ui || !m_curPart) return;
+	const int ch = *m_curPart;
+	if (ch < 0 || ch >= 32) return;
+	m_ui->mute[ch] ^= 1;
+	if (m_midiScore) m_midiScore->NotifyMuteSolo();
+	UpdateInfoBar();
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::ToggleSoloCur()
+{
+	if (!m_ui || !m_curPart) return;
+	const int ch = *m_curPart;
+	if (ch < 0 || ch >= 32) return;
+	m_ui->solo[ch] ^= 1;
+	if (m_midiScore) m_midiScore->NotifyMuteSolo();
+	UpdateInfoBar();
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::PreviewRangeHere()
+{
+	if (m_midiScore) m_midiScore->PreviewRangeInstant();
+	else if (m_fmScore) m_fmScore->PreviewRangeInstant();
+	else OnBnPlay();
+	UpdateInfoBar();
+}
+
+void CSasamiPianoRollDlg::OnBnRangePlay() { PreviewRangeHere(); }
+void CSasamiPianoRollDlg::OnBnBarPrev() { JumpBar(-1); }
+void CSasamiPianoRollDlg::OnBnBarNext() { JumpBar(1); }
+void CSasamiPianoRollDlg::OnBnBarGo()
+{
+	if (!m_ui) return;
+	CString s; if (m_edBar.GetSafeHwnd()) m_edBar.GetWindowText(s);
+	int bar = _wtoi(s);
+	if (bar < 1) {
+		const int mn = m_ui->meterNumer > 0 ? m_ui->meterNumer : 4;
+		const int md = m_ui->meterDenom > 0 ? m_ui->meterDenom : 4;
+		int cur = 1;
+		ScStaffBarBeatFromTick(m_ev, m_evCount ? *m_evCount : 0, m_ui->markerTick, mn, md, &cur, NULL, NULL);
+		if (CSasamiSimpleInputDlg::AskNumber(this,
+			LL14(L"小節へ移動", L"Go to bar", L"Aller à la mesure", L"Vai alla battuta", L"Ir al compás",
+				L"마디로 이동", L"跳到小节", L"الانتقال إلى المازورة", L"Перейти к такту", L"Zum Takt", L"Ir ao compasso", L"Ga naar maat", L"Idź do taktu", L"Ölçüye git"),
+			LL14(L"小節番号 (1–)", L"Bar number (1–)", L"Numéro de mesure (1–)", L"Numero battuta (1–)", L"Número de compás (1–)",
+				L"마디 번호 (1–)", L"小节号 (1–)", L"رقم المازورة (1–)", L"Номер такта (1–)", L"Taktnummer (1–)", L"Número do compasso (1–)", L"Maatnummer (1–)", L"Numer taktu (1–)", L"Ölçü numarası (1–)"),
+			cur, 1, 9999, &bar) != IDOK)
+			return;
+	}
+	JumpToBarNumber(bar);
+}
+void CSasamiPianoRollDlg::OnBnMute() { ToggleMuteCur(); }
+void CSasamiPianoRollDlg::OnBnSolo() { ToggleSoloCur(); }
+void CSasamiPianoRollDlg::OnBnMore()
+{
+	m_chromeDetail = m_chromeDetail ? 0 : 1;
+	ApplyLang();
+	LayoutChrome();
+	ScStaffInvalidateBelowCaption(this);
+}
+
+void CSasamiPianoRollDlg::OnDurButton(UINT id)
+{
+	if (!m_ui) return;
+	const int i = (int)id - 0x5F70;
+	static const int kBase[] = {
+		SC_PPQN * 4, SC_PPQN * 2, SC_PPQN, SC_PPQN / 2, SC_PPQN / 4, SC_PPQN / 8
+	};
+	if (i < 0 || i >= 6) return;
+	m_ui->baseDur = kBase[i];
+	ScStaffRecomputePlaceDur(m_ui);
+	m_ui->helpTopic = m_ui->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	wchar_t st[96];
+	ScStaffFormatDurationStatus(st, 96, m_ui);
+	if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+	UpdateHelpBar();
+	UpdateInfoBar();
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::OnDvDot()
+{
+	if (!m_ui) return;
+	m_ui->dotted = m_ui->dotted ? 0 : 1;
+	ScStaffRecomputePlaceDur(m_ui);
+	wchar_t st[96];
+	ScStaffFormatDurationStatus(st, 96, m_ui);
+	if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+	UpdateHelpBar();
+	UpdateInfoBar();
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::OnDvTriplet()
+{
+	if (!m_ui) return;
+	m_ui->tuplet = (m_ui->tuplet == 3) ? 0 : 3;
+	m_ui->triplet = (m_ui->tuplet == 3) ? 1 : 0;
+	ScStaffRecomputePlaceDur(m_ui);
+	m_ui->helpTopic = m_ui->tuplet ? SC_HELP_TUPLET : SC_HELP_PAL_NOTE;
+	wchar_t st[96];
+	ScStaffFormatDurationStatus(st, 96, m_ui);
+	if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+	UpdateHelpBar();
+	UpdateInfoBar();
+	Refresh();
+}
+
+void CSasamiPianoRollDlg::OnDvRest()
+{
+	if (!m_ui) return;
+	m_ui->placeRest = m_ui->placeRest ? 0 : 1;
+	m_ui->helpTopic = m_ui->placeRest ? SC_HELP_REST : SC_HELP_PAL_NOTE;
+	wchar_t st[96];
+	ScStaffFormatDurationStatus(st, 96, m_ui);
+	if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+	UpdateHelpBar();
+	UpdateInfoBar();
+	Refresh();
 }
 
 void CSasamiPianoRollDlg::SyncPartCombo()
@@ -469,9 +843,19 @@ void CSasamiPianoRollDlg::SyncPartCombo()
 	if (!m_ch.GetSafeHwnd() || !m_curPart) return;
 	m_ch.ResetContent();
 	const int n = m_isFm ? 16 : 32;
+	const int evN = m_evCount ? *m_evCount : 0;
 	for (int i = 0; i < n; i++) {
-		wchar_t s[32];
-		_snwprintf_s(s, _TRUNCATE, m_isFm ? L"Part %d" : L"Ch %d", i + 1);
+		wchar_t s[48];
+		if (!m_isFm && m_ev) {
+			const int drum = ScMidiPartIsDrum(m_ev, evN, i, 0);
+			const int slot = ScMidiPartDrumSlot(m_ev, evN, i, 0);
+			if (drum)
+				_snwprintf_s(s, _TRUNCATE, L"Ch %d  D%d", i + 1, slot ? 2 : 1);
+			else
+				_snwprintf_s(s, _TRUNCATE, L"Ch %d", i + 1);
+		} else {
+			_snwprintf_s(s, _TRUNCATE, m_isFm ? L"Part %d" : L"Ch %d", i + 1);
+		}
 		m_ch.AddString(s);
 	}
 	int cur = *m_curPart;
@@ -558,11 +942,12 @@ void CSasamiPianoRollDlg::AfterEdit()
 	else if (m_fmScore) m_fmScore->NotifyEdited();
 	else Refresh();
 	if (m_midiScore && ::IsWindow(m_midiScore->GetSafeHwnd()))
-		m_midiScore->Invalidate(FALSE);
+		ScStaffInvalidateBelowCaption(m_midiScore);
 	if (m_fmScore && ::IsWindow(m_fmScore->GetSafeHwnd()))
-		m_fmScore->Invalidate(FALSE);
+		ScStaffInvalidateBelowCaption(m_fmScore);
 	Refresh();
 	UpdateHelpBar();
+	UpdateInfoBar();
 	UpdateScrollBars();
 }
 
@@ -695,8 +1080,8 @@ void CSasamiPianoRollDlg::OnCbnCh()
 	*m_curPart = s;
 	if (m_ui) m_ui->markerSolidTrack = s;
 	Refresh();
-	if (m_midiScore) m_midiScore->Invalidate(FALSE);
-	if (m_fmScore) m_fmScore->Invalidate(FALSE);
+	if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+	if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
 }
 void CSasamiPianoRollDlg::OnCbnPaste()
 {
@@ -835,8 +1220,8 @@ void CSasamiPianoRollDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScroll
 	si.fMask = SIF_POS;
 	si.nPos = pos;
 	SetScrollInfo(SB_HORZ, &si, TRUE);
-	if (m_midiScore) m_midiScore->Invalidate(FALSE);
-	if (m_fmScore) m_fmScore->Invalidate(FALSE);
+	if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+	if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
 	Refresh();
 }
 
@@ -1172,6 +1557,7 @@ void CSasamiPianoRollDlg::BeginSelectOrDrag(CPoint pt, UINT nFlags)
 void CSasamiPianoRollDlg::OnPaint()
 {
 	CPaintDC dc(this);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
 	CRect rc; GetClientRect(&rc);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
@@ -1203,7 +1589,6 @@ void CSasamiPianoRollDlg::OnPaint()
 			}
 		}
 	}
-	CCC_CaptionPaintGdi(dc, m_hWnd);
 }
 
 void CSasamiPianoRollDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -1212,8 +1597,8 @@ void CSasamiPianoRollDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	if (!m_ui) return;
 	int sbPos = 0;
 	const int sbHit = ScPianoRollHitBar(ScrollOuter(), &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0, point, &sbPos);
-	if (sbHit == 3) { ScStaffZoomPxBeat(m_ui, -8); UpdateScrollBars(); Refresh(); if (m_midiScore) m_midiScore->Invalidate(FALSE); if (m_fmScore) m_fmScore->Invalidate(FALSE); return; }
-	if (sbHit == 4) { ScStaffZoomPxBeat(m_ui, 8); UpdateScrollBars(); Refresh(); if (m_midiScore) m_midiScore->Invalidate(FALSE); if (m_fmScore) m_fmScore->Invalidate(FALSE); return; }
+	if (sbHit == 3) { ScStaffZoomPxBeat(m_ui, -8); UpdateScrollBars(); Refresh(); if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore); if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore); return; }
+	if (sbHit == 4) { ScStaffZoomPxBeat(m_ui, 8); UpdateScrollBars(); Refresh(); if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore); if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore); return; }
 	if (sbHit == 5) {
 		if (m_roll.zoomH <= 0) m_roll.zoomH = m_roll.rowH;
 		m_roll.zoomH = max(SC_ROLL_ROW_H_MIN, m_roll.zoomH - 2);
@@ -1372,8 +1757,8 @@ BOOL CSasamiPianoRollDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	} else if (nFlags & MK_CONTROL && m_ui) {
 		m_ui->scrollX -= (zDelta / 4);
 		if (m_ui->scrollX < 0) m_ui->scrollX = 0;
-		if (m_midiScore) m_midiScore->Invalidate(FALSE);
-		if (m_fmScore) m_fmScore->Invalidate(FALSE);
+		if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+		if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
 	} else {
 		m_roll.scrollY -= (zDelta / 30) * max(1, m_roll.rowH);
 		FitRollKeys();
@@ -1386,8 +1771,18 @@ BOOL CSasamiPianoRollDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CSasamiPianoRollDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == 1 && m_ui && m_ui->previewActive)
-		Invalidate(FALSE);
+	if (nIDEvent == 9125) {
+		KillTimer(9125);
+		CSasamiNotePaletteDlg::OpenComposerPalettes(this);
+		return;
+	}
+	if (nIDEvent == 1) {
+		if (m_ui && m_ui->previewActive) {
+			ScStaffInvalidateBelowCaption(this);
+			ScStaffPreviewFinished(m_ui);
+		}
+		UpdateInfoBar();
+	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
@@ -1406,7 +1801,7 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		if (!onNote) {
 			ScStaffEnterSelectTool(m_ui);
 			::SetCursor(::LoadCursor(NULL, IDC_ARROW));
-			Invalidate(FALSE);
+			ScStaffInvalidateBelowCaption(this);
 			return;
 		}
 	}
@@ -1418,48 +1813,90 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_ui->markerTick = ScPianoRollXToTick(&m_roll, m_gridRc, m_ui, client.x);
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
-	menu.AddCommand(9001, LL14(L"コピー\tCtrl+C", L"Copy\tCtrl+C", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren", L"Copiar", L"Kopiëren", L"Kopiuj", L"Kopyala"));
-	menu.AddCommand(9002, LL14(L"切り取り\tCtrl+X", L"Cut\tCtrl+X", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
-	menu.AddCommand(9003, LL14(L"貼り付け\tCtrl+V", L"Paste\tCtrl+V", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfügen", L"Colar", L"Plakken", L"Wklej", L"Yapıştır"));
-	menu.AddCommand(9060, LL14(L"範囲に空白を挿入\tCtrl+Shift+I", L"Insert blank in range\tCtrl+Shift+I", L"Insérer vide", L"Inserisci vuoto", L"Insertar vacío", L"빈 구간 삽입", L"插入空白", L"إدراج فراغ", L"Вставить пустоту", L"Leerraum", L"Inserir vazio", L"Leeg invoegen", L"Wstaw pustkę", L"Boş ekle"));
-	menu.AddCommand(9004, LL14(L"削除\tDelete", L"Delete\tDelete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Apagar", L"Verwijderen", L"Usuń", L"Sil"));
-	menu.AddCommand(9005, LL14(L"タイ\tCtrl+T", L"Tie\tCtrl+T", L"Liaison", L"Legatura", L"Ligadura", L"타이", L"连音", L"ربط", L"Лига", L"Bindebogen", L"Ligadura", L"Boog", L"Łuk", L"Bağ"));
-	menu.AddSeparator();
+	CCustomPopupMenu* play = menu.AddSubMenu(LL14(
+		L"再生", L"Playback", L"Lecture", L"Riproduzione", L"Reproducción",
+		L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Wiedergabe",
+		L"Reprodução", L"Afspelen", L"Odtwarzanie", L"Çalma"));
+	if (play)
+	play->AddCommand(IDC_SASAMI_ROLL_PLAY, LL14(
+		L"マーカーから再生\tSpace", L"Play from marker\tSpace", L"Lecture depuis le marqueur\tEspace", L"Play dal marcatore\tSpazio", L"Reproducir desde marcador\tEspacio",
+		L"마커부터 재생\tSpace", L"从标记播放\tSpace", L"تشغيل من العلامة\tSpace", L"Играть с маркера\tSpace", L"Ab Markierung\tLeertaste",
+		L"Tocar do marcador\tEspaço", L"Spelen vanaf markering\tSpatie", L"Odtwórz od znacznika\tSpacja", L"İşaretten çal\tSpace"));
+	if (play)
+	play->AddCommand(9089, LL14(
+		L"範囲をその場再生\tShift+Space", L"Preview range here\tShift+Space", L"Aperçu de la plage\tShift+Espace", L"Anteprima intervallo\tShift+Spazio", L"Vista previa del rango\tShift+Espacio",
+		L"범위 즉시 재생\tShift+Space", L"就地试听范围\tShift+Space", L"معاينة النطاق\tShift+Space", L"Прослушать диапазон\tShift+Space", L"Bereich sofort anhören\tUmschalt+Leer",
+		L"Prévia do intervalo\tShift+Espaço", L"Bereik direct beluisteren\tShift+Spatie", L"Odsłuchaj zakres\tShift+Spacja", L"Aralığı burada çal\tShift+Space"));
+	if (play)
+	play->AddCommand(9090, LL14(
+		L"小節へジャンプ…\tCtrl+G", L"Go to bar…\tCtrl+G", L"Aller à la mesure…\tCtrl+G", L"Vai alla battuta…\tCtrl+G", L"Ir al compás…\tCtrl+G",
+		L"마디로 이동…\tCtrl+G", L"跳到小节…\tCtrl+G", L"الانتقال إلى المازورة…\tCtrl+G", L"К такту…\tCtrl+G", L"Zum Takt…\tStrg+G",
+		L"Ir ao compasso…\tCtrl+G", L"Ga naar maat…\tCtrl+G", L"Idź do taktu…\tCtrl+G", L"Ölçüye git…\tCtrl+G"));
+	CCustomPopupMenu* edit = menu.AddSubMenu(LL14(
+		L"編集", L"Edit", L"Édition", L"Modifica", L"Editar",
+		L"편집", L"编辑", L"تحرير", L"Правка", L"Bearbeiten",
+		L"Editar", L"Bewerken", L"Edycja", L"Düzen"));
+	if (edit) {
+	edit->AddCommand(9001, LL14(L"コピー\tCtrl+C", L"Copy\tCtrl+C", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"نسخ", L"Копировать", L"Kopieren", L"Copiar", L"Kopiëren", L"Kopiuj", L"Kopyala"));
+	edit->AddCommand(9002, LL14(L"切り取り\tCtrl+X", L"Cut\tCtrl+X", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"قص", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
+	edit->AddCommand(9003, LL14(L"貼り付け\tCtrl+V", L"Paste\tCtrl+V", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"لصق", L"Вставить", L"Einfügen", L"Colar", L"Plakken", L"Wklej", L"Yapıştır"));
+	edit->AddCommand(9060, LL14(L"範囲に空白を挿入\tCtrl+Shift+I", L"Insert blank in range\tCtrl+Shift+I", L"Insérer vide", L"Inserisci vuoto", L"Insertar vacío", L"빈 구간 삽입", L"插入空白", L"إدراج فراغ", L"Вставить пустоту", L"Leerraum", L"Inserir vazio", L"Leeg invoegen", L"Wstaw pustkę", L"Boş ekle"));
+	edit->AddCommand(9004, LL14(L"削除\tDelete", L"Delete\tDelete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Apagar", L"Verwijderen", L"Usuń", L"Sil"));
+	edit->AddCommand(9005, LL14(L"タイ\tCtrl+T", L"Tie\tCtrl+T", L"Liaison", L"Legatura", L"Ligadura", L"타이", L"连音", L"ربط", L"Лига", L"Bindebogen", L"Ligadura", L"Boog", L"Łuk", L"Bağ"));
+	}
 	menu.AddCommand(9088, LL14(
 		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
 		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
 		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"));
-	menu.AddCommand(9101, LL14(L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle", L"Inizio loop", L"Inicio de bucle", L"루프 시작", L"循环开始", L"بداية الحلقة", L"Начало цикла", L"Schleifenstart", L"Início do loop", L"Lusbegin", L"Początek pętli", L"Döngü başlangıcı"));
-	menu.AddCommand(9102, LL14(L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle", L"Fine loop", L"Fin de bucle", L"루프 끝", L"循环结束", L"نهاية الحلقة", L"Конец цикла", L"Schleifenende", L"Fim do loop", L"Luseinde", L"Koniec pętli", L"Döngü sonu"));
+	CCustomPopupMenu* mark = menu.AddSubMenu(LL14(
+		L"マーク", L"Marks", L"Marques", L"Segni", L"Marcas",
+		L"마크", L"标记", L"علامات", L"Знаки", L"Zeichen",
+		L"Marcas", L"Markeringen", L"Znaki", L"İşaretler"));
+	if (mark) {
+	mark->AddCommand(9101, LL14(L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle", L"Inizio loop", L"Inicio de bucle", L"루프 시작", L"循环开始", L"بداية الحلقة", L"Начало цикла", L"Schleifenstart", L"Início do loop", L"Lusbegin", L"Początek pętli", L"Döngü başlangıcı"));
+	mark->AddCommand(9102, LL14(L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle", L"Fine loop", L"Fin de bucle", L"루프 끝", L"循环结束", L"نهاية الحلقة", L"Конец цикла", L"Schleifenende", L"Fim do loop", L"Luseinde", L"Koniec pętli", L"Döngü sonu"));
 	if (!m_isFm) {
-		menu.AddCommand(9103, LL14(L"ペダルON (Ped.)", L"Pedal ON", L"Pédale ON", L"Pedale ON", L"Pedal ON", L"페달 ON", L"踏板ON", L"دواسة ON", L"Педаль ON", L"Pedal ON", L"Pedal ON", L"Pedaal ON", L"Pedał ON", L"Pedal ON"));
-		menu.AddCommand(9104, LL14(L"ペダルOFF (＊)", L"Pedal OFF", L"Pédale OFF", L"Pedale OFF", L"Pedal OFF", L"페달 OFF", L"踏板OFF", L"دواسة OFF", L"Педаль OFF", L"Pedal OFF", L"Pedal OFF", L"Pedaal OFF", L"Pedał OFF", L"Pedal OFF"));
+		mark->AddCommand(9103, LL14(L"ペダルON (Ped.)", L"Pedal ON", L"Pédale ON", L"Pedale ON", L"Pedal ON", L"페달 ON", L"踏板ON", L"دواسة ON", L"Педаль ON", L"Pedal ON", L"Pedal ON", L"Pedaal ON", L"Pedał ON", L"Pedal ON"));
+		mark->AddCommand(9104, LL14(L"ペダルOFF (＊)", L"Pedal OFF", L"Pédale OFF", L"Pedale OFF", L"Pedal OFF", L"페달 OFF", L"踏板OFF", L"دواسة OFF", L"Педаль OFF", L"Pedal OFF", L"Pedal OFF", L"Pedaal OFF", L"Pedał OFF", L"Pedal OFF"));
 	}
-	menu.AddCommand(9105, LL14(L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va"));
-	menu.AddCommand(9106, LL14(L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb"));
-	menu.AddCommand(9107, LL14(L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco"));
-	menu.AddSeparator();
-	menu.AddCommand(9110, LL14(L"@SVIB ビブラート…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB 비브라토…", L"@SVIB 颤音…", L"@SVIB", L"@SVIB", L"@SVIB Vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB wibrato…", L"@SVIB vibrato…"));
-	menu.AddCommand(9111, LL14(L"@STREM トレモロ…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM trémolo…", L"@STREM 트레몰로…", L"@STREM 震音…", L"@STREM", L"@STREM", L"@STREM Tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…"));
-	menu.AddCommand(9112, LL14(L"@SPAN パンLFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN 팬 LFO…", L"@SPAN 声像LFO…", L"@SPAN", L"@SPAN", L"@SPAN Pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…"));
-	menu.AddCommand(9113, LL14(L"@SPORTA ポルタメント…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA 포르타멘토…", L"@SPORTA 滑音…", L"@SPORTA", L"@SPORTA", L"@SPORTA Portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…"));
-	menu.AddCommand(9114, LL14(L"ソフトFXオフ", L"Soft FX off", L"FX off", L"FX off", L"FX off", L"소프트 FX 끔", L"软效果关", L"FX off", L"FX выкл", L"FX aus", L"FX off", L"FX uit", L"FX wył", L"FX kapalı"));
+	mark->AddCommand(9105, LL14(L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va", L"8va"));
+	mark->AddCommand(9106, LL14(L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb", L"8vb"));
+	mark->AddCommand(9107, LL14(L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco", L"loco"));
+	}
+	CCustomPopupMenu* sfx = menu.AddSubMenu(LL14(
+		L"ソフトFX", L"Soft FX", L"FX doux", L"FX morbido", L"FX suave",
+		L"소프트 FX", L"软效果", L"FX ناعم", L"Мягкий FX", L"Soft-FX",
+		L"FX suave", L"Zachte FX", L"Miękki FX", L"Yumuşak FX"));
+	if (sfx) {
+	sfx->AddCommand(9110, LL14(L"@SVIB ビブラート…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB 비브라토…", L"@SVIB 颤音…", L"@SVIB", L"@SVIB", L"@SVIB Vibrato…", L"@SVIB vibrato…", L"@SVIB vibrato…", L"@SVIB wibrato…", L"@SVIB vibrato…"));
+	sfx->AddCommand(9111, LL14(L"@STREM トレモロ…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM trémolo…", L"@STREM 트레몰로…", L"@STREM 震音…", L"@STREM", L"@STREM", L"@STREM Tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…", L"@STREM tremolo…"));
+	sfx->AddCommand(9112, LL14(L"@SPAN パンLFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN 팬 LFO…", L"@SPAN 声像LFO…", L"@SPAN", L"@SPAN", L"@SPAN Pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…"));
+	sfx->AddCommand(9113, LL14(L"@SPORTA ポルタメント…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA 포르타멘토…", L"@SPORTA 滑音…", L"@SPORTA", L"@SPORTA", L"@SPORTA Portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…"));
+	sfx->AddCommand(9114, LL14(L"ソフトFXオフ", L"Soft FX off", L"FX off", L"FX off", L"FX off", L"소프트 FX 끔", L"软效果关", L"FX off", L"FX выкл", L"FX aus", L"FX off", L"FX uit", L"FX wył", L"FX kapalı"));
+	}
 	if (!m_isFm && m_midiScore && m_curPart) {
-		menu.AddSeparator();
+		CCustomPopupMenu* part = menu.AddSubMenu(LL14(
+			L"パート", L"Part", L"Partie", L"Parte", L"Parte",
+			L"파트", L"声部", L"جزء", L"Партия", L"Part",
+			L"Parte", L"Partij", L"Partia", L"Parti"));
 		const int tr = *m_curPart;
-		if (ScMidiPartIsDrum(m_ev, m_evCount ? *m_evCount : 0, tr, 0)) {
-			menu.AddCommand(9120, LL14(
+		if (!part) {
+		} else if (ScMidiPartIsDrum(m_ev, m_evCount ? *m_evCount : 0, tr, 0)) {
+			part->AddCommand(9120, LL14(
 				L"メロディパートにする（リズム解除）", L"Make melodic (clear rhythm)", L"Partie mélodique", L"Parti melodica", L"Parte melódica",
 				L"멜로디 파트로", L"改为旋律", L"جزء لحني", L"Мелодическая партия", L"Melodisch",
 				L"Parte melódica", L"Melodisch", L"Partia melodyczna", L"Melodik parti"));
 		} else {
-			menu.AddCommand(9120, LL14(
+			part->AddCommand(9120, LL14(
 				L"ドラムパートにする（GS/XGリズム）", L"Make drum part (GS/XG rhythm)", L"Partie batterie", L"Parti batteria", L"Parte batería",
 				L"드럼 파트로", L"改为鼓组", L"جزء طبول", L"Ударная партия", L"Drum-Part",
 				L"Parte bateria", L"Drum-partij", L"Partia perkusji", L"Davul parti"));
 		}
 	}
 	const UINT cmd = menu.Track(pt, this);
+	if (cmd == IDC_SASAMI_ROLL_PLAY) { OnBnPlay(); return; }
+	if (cmd == 9089) { PreviewRangeHere(); return; }
+	if (cmd == 9090) { OnBnBarGo(); return; }
 	if (cmd == 9088) {
 		if (m_isFm) {
 			if (m_fmScore) m_fmScore->ExportStandardMidi();
@@ -1525,6 +1962,7 @@ void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		ScStaffFormatDurationStatus(st, 96, m_ui);
 		if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
 		UpdateHelpBar();
+		UpdateInfoBar();
 		Refresh();
 		return;
 	}
@@ -1545,8 +1983,8 @@ void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		else if (page > 32 && mx > m_ui->scrollX + page - 24) m_ui->scrollX = mx - page + 24;
 		UpdateScrollBars();
 		Refresh();
-		if (m_midiScore) m_midiScore->Invalidate(FALSE);
-		if (m_fmScore) m_fmScore->Invalidate(FALSE);
+		if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
+		if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
 		return;
 	}
 	if (!ctrl && (nChar == VK_UP || nChar == VK_DOWN)) {
@@ -1565,7 +2003,45 @@ void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		}
 		return;
 	}
+	if (shift && nChar == VK_SPACE) {
+		if (m_ui && m_ui->previewActive) {
+			if (m_midiScore) ScStaffStopHostPreview(m_midiScore->Ui());
+			else if (m_fmScore) ScStaffStopHostPreview(m_fmScore->Ui());
+			else ScStaffStopHostPreview(m_ui);
+		} else {
+			PreviewRangeHere();
+		}
+		return;
+	}
 	if (nChar == VK_SPACE) { OnBnPlay(); return; }
+	if (nChar == VK_END && m_ui) {
+		JumpToTick(ScStaffLastContentTick(m_ev, m_evCount ? *m_evCount : 0));
+		return;
+	}
+	if (!ctrl && (nChar == VK_PRIOR || nChar == VK_OEM_4)) {
+		JumpBar(-1);
+		return;
+	}
+	if (!ctrl && (nChar == VK_NEXT || nChar == VK_OEM_6)) {
+		JumpBar(1);
+		return;
+	}
+	if (ctrl && (nChar == 'G' || nChar == 'g')) {
+		OnBnBarGo();
+		return;
+	}
+	if (!ctrl && nChar == VK_TAB) {
+		SwitchPart(shift ? -1 : 1);
+		return;
+	}
+	if (!ctrl && (nChar == 'M' || nChar == 'm')) {
+		ToggleMuteCur();
+		return;
+	}
+	if (!ctrl && (nChar == 'S' || nChar == 's')) {
+		ToggleSoloCur();
+		return;
+	}
 	if (nChar == VK_HOME && m_ui) {
 		m_ui->markerTick = 0; m_ui->scrollX = 0; Refresh();
 		if (m_status.GetSafeHwnd())
@@ -1646,6 +2122,10 @@ BOOL CSasamiPianoRollDlg::PreTranslateMessage(MSG* pMsg)
 	if (pMsg->message == WM_KEYDOWN) {
 		CWnd* f = GetFocus();
 		const BOOL typing = f && (f->IsKindOf(RUNTIME_CLASS(CEdit)) || f->IsKindOf(RUNTIME_CLASS(CComboBox)));
+		if (typing && f == &m_edBar) {
+			if (pMsg->wParam == VK_RETURN) { OnBnBarGo(); return TRUE; }
+			if (pMsg->wParam == VK_ESCAPE) { SetFocus(); return TRUE; }
+		}
 		if (!typing) {
 			OnKeyDown((UINT)pMsg->wParam, 1, 0);
 			return TRUE;

@@ -519,6 +519,7 @@ extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs,
 #ifndef KPIHOST32_BUILD
 extern volatile LONG g_appExiting;
 extern void COgg_DropPlaybackUiPostedMsg(UINT message);
+extern int playy;
 #endif
 static volatile LONG g_liveSkipProcess = 0;
 static DWORD g_liveUiTid = 0;
@@ -11730,19 +11731,29 @@ extern "C" void VstLiveMonitorEnsure(void)
 	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0)
 		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
-	if (VstSongUseLiveBinds())
-		return;
+	/* 譜面の試し再生中は曲 DS が process() する。終わったあともフラグが残ると
+	   モニターが起きず、VST2/3 の音色クリック／MediaBay 鍵盤が無音になる。 */
+	if (VstSongUseLiveBinds()) {
+		if (playy == 0)
+			return;
+		VstSongUseLiveBindsSet(0);
+	}
 	InterlockedExchange(&g_liveMon.want, 1);
-	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
-		return; /* Host AudioThread already pumps. */
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
+		/* ホスト窓があるときはそちらの AudioThread。曲が Pause したままだと無音。 */
+		VstHostPauseForSong(0);
+		if (g_vstHostDlg->AudioIsRunning())
+			return;
+	}
 	if (InterlockedCompareExchange(&g_liveMon.running, 0, 0))
 		return;
 	if (g_liveMon.thread) {
-		if (WaitForSingleObject(g_liveMon.thread, 0) == WAIT_OBJECT_0) {
+		if (WaitForSingleObject(g_liveMon.thread, 800) == WAIT_OBJECT_0) {
 			CloseHandle(g_liveMon.thread);
 			g_liveMon.thread = NULL;
-		} else
-			return;
+		} else {
+			VstLiveMonitorStop();
+		}
 	}
 	VstLiveMonitorStop(); /* clean handles */
 	InterlockedExchange(&g_liveMon.want, 1);
@@ -11766,6 +11777,7 @@ extern "C" void VstLiveMonitorEnsure(void)
 #else
 extern "C" void VstLiveMonitorEnsure(void) {}
 extern "C" void VstLiveMonitorStop(void) {}
+extern "C" void VstLiveMonitorEnsureDelayed(void) {}
 #endif
 
 
@@ -11836,6 +11848,13 @@ static HWND VstEdPumpEnsure(void)
 	g_vstEdPumpWnd = CreateWindowExW(0, L"OggVstLiveEdPump", L"", 0,
 		0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
 	return g_vstEdPumpWnd;
+}
+
+extern "C" void VstLiveMonitorEnsureDelayed(void)
+{
+	HWND pump = VstEdPumpEnsure();
+	if (pump)
+		PostMessageW(pump, WM_VST_LIVE_MON_ENSURE_DELAYED, 0, 0);
 }
 
 extern "C" void VstLiveEditorOpenCancelPending(void)

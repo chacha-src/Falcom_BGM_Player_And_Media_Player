@@ -344,7 +344,8 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 	for (int i = 0; i < u->trackCount; i++) {
 		/* Default off — ScStaffRefreshPartEnabled enables used parts or saved mask. */
 		u->visible[i] = 0;
-		u->clef[i] = 2; /* default grand; click clef chip to cycle */
+		u->clef[i] = 0; /* auto starts as treble until notes decide G / F / grand */
+		u->clefAuto[i] = 1;
 		if (isFm) {
 			if (i < 3)
 				_snwprintf_s(u->names[i], _TRUNCATE, L"FM%d", i + 1);
@@ -352,18 +353,19 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 				_snwprintf_s(u->names[i], _TRUNCATE, L"SSG%d", i - 2);
 			else if (i == 6) {
 				_snwprintf_s(u->names[i], _TRUNCATE, L"RHY");
-				u->clef[i] = 3; /* YM2608 rhythm pads */
+				u->clef[i] = 3; /* YM2608 rhythm pads — never auto */
+				u->clefAuto[i] = 0;
 			} else if (i < SC_FM_CH)
 				_snwprintf_s(u->names[i], _TRUNCATE, L"FM%d", i - 2);
 			else
 				_snwprintf_s(u->names[i], _TRUNCATE, L"Misao %d", i - SC_FM_CH + 1);
 		} else {
 			_snwprintf_s(u->names[i], _TRUNCATE, L"MIDI %d", i + 1);
-			if (i == 9 || i == 25)
+			if (i == 9 || i == 25) {
 				u->clef[i] = 3; /* GM ch10 (and port2 ch10) drum staff */
+				u->clefAuto[i] = 0;
+			}
 		}
-		/* FM SSG: single staff by default (phase 6). */
-		if (isFm && i >= 3 && i <= 5) u->clef[i] = 0;
 		u->writtenLo[i] = 0;
 		u->writtenHi[i] = 0;
 		u->writtenValid[i] = 0;
@@ -455,6 +457,114 @@ uint32_t ScStaffSnapToBarTick(const ScEvent* ev, int evCount, uint32_t tick,
 	return t;
 }
 
+void ScStaffBarBeatFromTick(const ScEvent* ev, int evCount, uint32_t tick,
+	int defNumer, int defDenom, int* outBar, int* outBeat, int* outRem)
+{
+	int bar = 1;
+	uint32_t t = 0;
+	int numer = defNumer > 0 ? defNumer : 4;
+	int denom = defDenom > 0 ? defDenom : 4;
+	for (int guard = 0; guard < 100000; guard++) {
+		ScStaffMeterAtTick(ev, evCount, t, defNumer, defDenom, &numer, &denom);
+		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
+		if (mTicks < 1) break;
+		const uint32_t next = t + (uint32_t)mTicks;
+		if (tick < next) {
+			const int beatT = ScStaffBeatTicks(denom);
+			const uint32_t into = tick - t;
+			if (outBar) *outBar = bar;
+			if (outBeat) *outBeat = (int)(into / (uint32_t)max(1, beatT)) + 1;
+			if (outRem) *outRem = (int)(into % (uint32_t)max(1, beatT));
+			return;
+		}
+		t = next;
+		bar++;
+	}
+	if (outBar) *outBar = bar;
+	if (outBeat) *outBeat = 1;
+	if (outRem) *outRem = 0;
+}
+
+uint32_t ScStaffTickFromBar(const ScEvent* ev, int evCount, int bar1,
+	int defNumer, int defDenom)
+{
+	if (bar1 < 1) bar1 = 1;
+	uint32_t t = 0;
+	int numer = defNumer > 0 ? defNumer : 4;
+	int denom = defDenom > 0 ? defDenom : 4;
+	for (int b = 1; b < bar1; b++) {
+		ScStaffMeterAtTick(ev, evCount, t, defNumer, defDenom, &numer, &denom);
+		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
+		if (mTicks < 1) break;
+		t += (uint32_t)mTicks;
+	}
+	return t;
+}
+
+uint32_t ScStaffLastContentTick(const ScEvent* ev, int evCount)
+{
+	uint32_t last = 0;
+	if (!ev || evCount <= 0) return 0;
+	for (int i = 0; i < evCount; i++) {
+		uint32_t end = ev[i].tick;
+		if (ev[i].dur) end += ev[i].dur;
+		if (end > last) last = end;
+	}
+	return last;
+}
+
+void ScStaffScrollTickIntoView(ScStaffUi* u, const ScEvent* ev, int evCount,
+	uint32_t tick, int viewW)
+{
+	if (!u) return;
+	const int pxBeat = u->pxBeat > 0 ? u->pxBeat : SC_PX_BEAT_DEFAULT;
+	const int margin = ScStaffClefMarginPx(u, ev, evCount);
+	const int x = (int)((tick * (uint32_t)pxBeat) / SC_PPQN) + margin;
+	if (viewW < 80) viewW = 80;
+	if (x < u->scrollX + 48)
+		u->scrollX = max(0, x - 48);
+	else if (x > u->scrollX + viewW - 80)
+		u->scrollX = max(0, x - viewW + 80);
+}
+
+void ScStaffInvalidateBelowCaption(CWnd* w)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return;
+	CRect rc;
+	w->GetClientRect(&rc);
+	const int cap = CCC_GetCustomCaptionHeight(w->GetSafeHwnd());
+	if (cap > 0 && cap < rc.bottom) rc.top = cap;
+	if (rc.Height() > 0)
+		w->InvalidateRect(&rc, FALSE);
+}
+
+void ScStaffPresentNoActivate(CWnd* w)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return;
+	w->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	ScStaffInvalidateBelowCaption(w);
+}
+
+void ScStaffCaptionPaintThenExclude(CDC& dc, HWND h)
+{
+	CCC_CaptionPaint(dc, h);
+	const int cap = CCC_GetCustomCaptionHeight(h);
+	if (cap <= 0) return;
+	CRect rc;
+	::GetClientRect(h, &rc);
+	dc.ExcludeClipRect(0, 0, rc.right, cap);
+}
+
+void ScStaffSetWndTextIfChanged(CWnd* w, LPCWSTR text)
+{
+	if (!w || !::IsWindow(w->GetSafeHwnd()) || !text) return;
+	CString cur;
+	w->GetWindowText(cur);
+	if (cur.Compare(text) != 0)
+		w->SetWindowText(text);
+}
+
 void ScStaffDrawTimeSignature(CDC& dc, int cx, int staffTop, int gap, int numer, int denom, COLORREF col)
 {
 	const int fontPx = max(14, min(20, gap * 2 + 4));
@@ -494,9 +604,9 @@ void ScStaffSetMeter(ScStaffUi* u, int numer, int denom)
 
 void ScStaffApplyDocClef(ScStaffUi* u, const ScEvent* ev, int n)
 {
-	if (!u || u->isFmScore) return;
+	if (!u) return;
 	for (int i = 0; i < u->trackCount && i < 32; i++) {
-		int found = 0, c = u->clef[i];
+		int found = 0, c = 0;
 		if (ev) {
 			for (int k = 0; k < n; k++) {
 				if (ev[k].kind != SC_EV_CLEF || (int)ev[k].ch != i) continue;
@@ -509,9 +619,104 @@ void ScStaffApplyDocClef(ScStaffUi* u, const ScEvent* ev, int n)
 			if (c < 0) c = 0;
 			if (c > 3) c = 3;
 			u->clef[i] = c;
-		} else if (ScMidiPartIsDrum(ev, n, i, 0))
+			u->clefAuto[i] = 0;
+		} else if (ScStaffIsOpnaRhythmTrack(u->isFmScore, i)
+			|| (!u->isFmScore && ScMidiPartIsDrum(ev, n, i, 0))) {
 			u->clef[i] = 3;
+			u->clefAuto[i] = 0;
+		} else {
+			u->clefAuto[i] = 1;
+			u->clef[i] = 0;
+		}
 	}
+}
+
+static int ScStaffClefFromWrittenRange(const ScStaffUi* u, int tr)
+{
+	if (!u || tr < 0 || tr >= 32) return 0;
+	if (!u->writtenValid[tr]) return 0; /* empty → treble */
+	const int hasLo = u->writtenLo[tr] < 60;
+	const int hasHi = u->writtenHi[tr] >= 60;
+	if (hasLo && hasHi) return 2; /* mixed → grand */
+	if (hasLo) return 1;          /* only below C4 → bass */
+	return 0;
+}
+
+void ScStaffRefreshAutoClefs(ScStaffUi* u, const ScEvent* ev, int n)
+{
+	if (!u) return;
+	for (int i = 0; i < u->trackCount && i < 32; i++) {
+		if (ScStaffIsOpnaRhythmTrack(u->isFmScore, i)) {
+			u->clef[i] = 3;
+			u->clefAuto[i] = 0;
+			continue;
+		}
+		if (!u->isFmScore && ScMidiPartIsDrum(ev, n, i, 0)) {
+			if (u->clefAuto[i]) u->clef[i] = 3;
+			continue;
+		}
+		if (!u->clefAuto[i]) continue;
+		u->clef[i] = ScStaffClefFromWrittenRange(u, i);
+	}
+}
+
+int ScStaffCycleClefChip(ScStaffUi* u, int track)
+{
+	if (!u || track < 0 || track >= 32) return 0;
+	if (ScStaffIsOpnaRhythmTrack(u->isFmScore, track)) {
+		u->clef[track] = 3;
+		u->clefAuto[track] = 0;
+		return 0;
+	}
+	const int includeDrum = !ScStaffIsFmSsgTrack(u->isFmScore, track);
+	if (u->clefAuto[track]) {
+		u->clefAuto[track] = 0;
+		u->clef[track] = 0; /* lock treble */
+		return 0;
+	}
+	int c = u->clef[track];
+	if (c < 0) c = 0;
+	if (c > 3) c = 3;
+	if ((!includeDrum && c >= 2) || c >= 3) {
+		u->clefAuto[track] = 1;
+		u->clef[track] = 0;
+		return 1;
+	}
+	u->clef[track] = c + 1;
+	u->clefAuto[track] = 0;
+	return 0;
+}
+
+int ScStaffDropKindAt(ScEvent* ev, int* n, int kind, int ch, uint32_t tick)
+{
+	if (!ev || !n) return 0;
+	int w = 0, dropped = 0;
+	for (int i = 0; i < *n; i++) {
+		if (ev[i].kind == kind && (int)ev[i].ch == ch && ev[i].tick == tick) {
+			dropped++;
+			continue;
+		}
+		if (w != i) ev[w] = ev[i];
+		w++;
+	}
+	*n = w;
+	return dropped;
+}
+
+int ScStaffDropKindOnCh(ScEvent* ev, int* n, int kind, int ch)
+{
+	if (!ev || !n) return 0;
+	int w = 0, dropped = 0;
+	for (int i = 0; i < *n; i++) {
+		if (ev[i].kind == kind && (int)ev[i].ch == ch) {
+			dropped++;
+			continue;
+		}
+		if (w != i) ev[w] = ev[i];
+		w++;
+	}
+	*n = w;
+	return dropped;
 }
 
 int ScStaffBpmFromTempoT(int tempoT)
@@ -920,6 +1125,7 @@ void ScStaffUpdateContentExtent(ScStaffUi* u, const ScEvent* ev, int evCount)
 		maxT = (uint32_t)(SC_PPQN * SC_MEASURE_BEATS * SC_MEASURES_MAX);
 	u->contentTicks = (int)maxT;
 	u->contentTracks = u->trackCount;
+	ScStaffRefreshAutoClefs(u, ev, evCount);
 }
 
 int ScStaffOttavaOctaves(const ScEvent* ev, int evCount, int ch, uint32_t tick)
@@ -2556,6 +2762,76 @@ static void ScStaffDrawOvalHead(CDC& dc, int x, int y, int hollow, COLORREF col,
 		dc.FillSolidRect(x + 15, y - 1, 3, 3, col);
 }
 
+/* GM percussion noteheads when the part is a known drum channel (GS/XG/GM
+   ch10, VST2 multi). Dedicated VST3 kits stay oval — we cannot map them. */
+enum {
+	SC_DHEAD_OVAL = 0,
+	SC_DHEAD_X = 1,     /* closed/pedal HH, crash, ride, rim, tamb, triangle */
+	SC_DHEAD_XOPEN = 2, /* open HH: × in a circle */
+	SC_DHEAD_DIA = 3    /* clap, cowbell, ride bell */
+};
+
+static int ScStaffGmPercHead(int midi)
+{
+	switch (midi) {
+	case 42: case 44: /* closed / pedal HH */
+	case 37:          /* side stick / rim */
+	case 49: case 51: case 52: case 55: case 57: case 59: /* cymbals */
+	case 54: case 80: case 81: /* tambourine, triangles */
+		return SC_DHEAD_X;
+	case 46: /* open HH */
+		return SC_DHEAD_XOPEN;
+	case 39: case 53: case 56: /* clap, ride bell, cowbell */
+		return SC_DHEAD_DIA;
+	default:
+		return SC_DHEAD_OVAL;
+	}
+}
+
+static int ScStaffMidiUsesDrumHeads(const ScStaffUi* u, const ScEvent* ev, int n, int tr)
+{
+	if (!u || u->isFmScore) return 0;
+	if (tr < 0 || tr >= 32) return 0;
+	if (u->vstIsVst3[tr]) return 0;
+	return ScMidiPartIsDrum(ev, n, tr, 0);
+}
+
+static void ScStaffDrawPercHead(CDC& dc, int x, int y, int kind, COLORREF col, int dotted)
+{
+	const int cx = x + 6;
+	const int cy = y;
+	CPen pen(PS_SOLID, 2, col);
+	CPen* op = dc.SelectObject(&pen);
+	if (kind == SC_DHEAD_DIA) {
+		POINT p[4] = { { cx, cy - 5 }, { cx + 6, cy }, { cx, cy + 5 }, { cx - 6, cy } };
+		CBrush br(col);
+		CBrush* ob = dc.SelectObject(&br);
+		dc.Polygon(p, 4);
+		dc.SelectObject(ob);
+	} else {
+		dc.MoveTo(cx - 5, cy - 5);
+		dc.LineTo(cx + 6, cy + 6);
+		dc.MoveTo(cx + 5, cy - 5);
+		dc.LineTo(cx - 6, cy + 6);
+		if (kind == SC_DHEAD_XOPEN) {
+			CBrush* nb = (CBrush*)dc.SelectStockObject(NULL_BRUSH);
+			dc.Ellipse(cx - 7, cy - 7, cx + 8, cy + 8);
+			dc.SelectObject(nb);
+		}
+	}
+	dc.SelectObject(op);
+	if (dotted)
+		dc.FillSolidRect(x + 15, y - 1, 3, 3, col);
+}
+
+static void ScStaffDrawHeadKind(CDC& dc, int x, int y, int kind, int hollow, COLORREF col, int dotted)
+{
+	if (kind == SC_DHEAD_OVAL)
+		ScStaffDrawOvalHead(dc, x, y, hollow, col, dotted);
+	else
+		ScStaffDrawPercHead(dc, x, y, kind, col, dotted);
+}
+
 static void ScStaffDrawCurvedFlag(CDC& dc, int stemX, int tipY, int stemUp, int flags, COLORREF col)
 {
 	if (flags <= 0) return;
@@ -2593,8 +2869,8 @@ static void ScStaffDrawCurvedFlag(CDC& dc, int stemX, int tipY, int stemUp, int 
 	dc.SelectObject(ob);
 }
 
-/* One complete note: oval head + stem + curved flags (ghost / palette / lone notes). */
-static void ScStaffDrawCompleteNote(CDC& dc, int x, int y, int dur, COLORREF col, int selected, int stemUp)
+/* One complete note: head + stem + curved flags (ghost / palette / lone notes). */
+static void ScStaffDrawCompleteNote(CDC& dc, int x, int y, int dur, COLORREF col, int selected, int stemUp, int headKind = 0)
 {
 	const int base = ScStaffBaseDurUndot(dur);
 	const int hollow = (base >= SC_PPQN * 2) ? 1 : 0;
@@ -2605,7 +2881,7 @@ static void ScStaffDrawCompleteNote(CDC& dc, int x, int y, int dur, COLORREF col
 	if (selected)
 		dc.Draw3dRect(x - 3, y - 22, 22, 34, RGB(220, 140, 40), RGB(220, 140, 40));
 
-	ScStaffDrawOvalHead(dc, x, y, hollow, col, dotted);
+	ScStaffDrawHeadKind(dc, x, y, headKind, hollow, col, dotted);
 
 	if (!whole) {
 		const int stemX = stemUp ? (x + 11) : x;
@@ -2653,7 +2929,7 @@ void ScStaffDrawSymbolEx(CDC& dc, int x, int y, int durTicks, int rest, COLORREF
 	if (rest)
 		ScStaffDrawRestGlyph(dc, x, y, durTicks, col);
 	else
-		ScStaffDrawCompleteNote(dc, x, y, durTicks, col, selected, stemUp);
+		ScStaffDrawCompleteNote(dc, x, y, durTicks, col, selected, stemUp, 0);
 }
 
 static void ScStaffDrawBeamBand(CDC& dc, int x0, int y0, int x1, int y1, int thick, COLORREF col)
@@ -3240,13 +3516,17 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 		dc.SetTextColor(u->visible[i] ? RGB(20, 20, 40) : RGB(130, 130, 145));
 		CRect nameRc(rc.left + SC_PART_ENABLE_W + 4, y + 1, rc.left + 96, y + 19);
 		dc.DrawText(u->names[i], nameRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-		/* Clickable clef chip: G / F / G+F / Dr */
-		const wchar_t* clefTag = (u->clef[i] == 3) ? L"Dr"
-			: (u->clef[i] == 2) ? L"G+F" : (u->clef[i] == 1 ? L"F" : L"G");
+		/* Clickable clef chip: Auto / G / F / G+F / Dr */
+		const int autoClef = u->clefAuto[i];
+		const wchar_t* clefTag = autoClef
+			? LL14(L"自動", L"Auto", L"Auto", L"Auto", L"Auto", L"자동", L"自动", L"Auto", L"Авто", L"Auto", L"Auto", L"Auto", L"Auto", L"Oto")
+			: ((u->clef[i] == 3) ? L"Dr"
+				: (u->clef[i] == 2) ? L"G+F" : (u->clef[i] == 1 ? L"F" : L"G"));
 		CRect clefBox(rc.left + 98, y + 1, rc.left + 136, y + 19);
-		dc.FillSolidRect(clefBox, RGB(255, 250, 230));
-		dc.Draw3dRect(clefBox, RGB(160, 120, 40), RGB(160, 120, 40));
-		dc.SetTextColor(RGB(100, 60, 20));
+		dc.FillSolidRect(clefBox, autoClef ? RGB(220, 245, 228) : RGB(255, 250, 230));
+		dc.Draw3dRect(clefBox, autoClef ? RGB(40, 130, 70) : RGB(160, 120, 40),
+			autoClef ? RGB(40, 130, 70) : RGB(160, 120, 40));
+		dc.SetTextColor(autoClef ? RGB(20, 90, 50) : RGB(100, 60, 20));
 		dc.DrawText(clefTag, clefBox, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		{
 			CRect mRc, sRc;
@@ -3477,8 +3757,14 @@ static void ScStaffPaintLayoutClefGlyph(CDC& dc, int cm, int lx, int cy, int sta
 	}
 }
 
-static void DrawGhostNote(CDC& dc, int x, int y, int dur, int rest, int accidental)
+static void DrawGhostNote(CDC& dc, int x, int y, int dur, int rest, int accidental, int headKind = 0)
 {
+	if (!rest && headKind) {
+		if (accidental)
+			ScStaffDrawAccidentalGlyph(dc, x - 14, y, accidental, RGB(200, 50, 40), 16);
+		ScStaffDrawCompleteNote(dc, x, y, dur, RGB(200, 50, 40), 0, 1, headKind);
+		return;
+	}
 	ScStaffDrawSymbolEx(dc, x, y, dur, rest, RGB(200, 50, 40), 0, 1, accidental);
 }
 
@@ -3558,7 +3844,9 @@ static void DrawGhostPattern(CDC& dc, const ScStaffUi* u, int track, int staffTo
 	const int meterNumer = max(1, u->meterNumer);
 	auto ghostAt = [&](uint32_t t, int dur) {
 		int x = ScStaffTickToX(t, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
-		DrawGhostNote(dc, x, y, dur > 0 ? dur : SC_PPQN / 4, 0, 0);
+		const int hk = ScStaffMidiUsesDrumHeads(u, ev, evCount, track)
+			? ScStaffGmPercHead(noteSounding) : 0;
+		DrawGhostNote(dc, x, y, dur > 0 ? dur : SC_PPQN / 4, 0, 0, hk);
 	};
 	const int useBars = (u->patternId == SC_PAT_2BAR_E) ? 2 :
 		(u->patternId == SC_PAT_4BAR_Q) ? 4 :
@@ -4099,6 +4387,7 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 	/* Draw: lone single notes via ScStaffDrawSymbol(dur); chords/beams share stem.
 	   OPNA RHY: X hits on pad lanes (no stems/beams). */
 	const int rhy = (isFm && tr == 6) ? 1 : 0;
+	const int drumHeads = ScStaffMidiUsesDrumHeads(u, ev, evCount, tr);
 	for (int i = 0; i < nCol; i++) {
 		ScBeamCol& col = cols[i];
 		if (col.nHeads <= 0) continue;
@@ -4111,8 +4400,13 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 		}
 
 		if (col.grp < 0 && col.nHeads == 1 && !col.heads[0].isTie) {
-			ScStaffDrawSymbol(dc, col.x, col.heads[0].y, col.heads[0].dur, 0,
-				col.heads[0].col, col.heads[0].selected, col.stemUp);
+			const int hk = drumHeads ? ScStaffGmPercHead((int)col.heads[0].pitchA) : 0;
+			if (hk)
+				ScStaffDrawCompleteNote(dc, col.x, col.heads[0].y, col.heads[0].dur,
+					col.heads[0].col, col.heads[0].selected, col.stemUp, hk);
+			else
+				ScStaffDrawSymbol(dc, col.x, col.heads[0].y, col.heads[0].dur, 0,
+					col.heads[0].col, col.heads[0].selected, col.stemUp);
 			{
 				int hp = 0, hpan = 0, hvol = 0, hexp = 0;
 				if (ScStaffNoteHasFx(ev, evCount, col.heads[0].evIdx, isFm, &hp, &hpan, &hvol, &hexp)) {
@@ -4136,7 +4430,8 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 			const int hollow = (ScStaffBaseDurUndot(hd.dur) >= SC_PPQN * 2) || hd.isTie;
 			if (hd.selected)
 				dc.Draw3dRect(hx - 3, hd.y - 22, 20, 32, RGB(220, 140, 40), RGB(220, 140, 40));
-			ScStaffDrawOvalHead(dc, hx, hd.y, hollow, hd.col, ScStaffDurIsDotted(hd.dur));
+			const int hk = drumHeads ? ScStaffGmPercHead((int)hd.pitchA) : 0;
+			ScStaffDrawHeadKind(dc, hx, hd.y, hk, hollow, hd.col, ScStaffDurIsDotted(hd.dur));
 			{
 				int hp = 0, hpan = 0, hvol = 0, hexp = 0;
 				if (ScStaffNoteHasFx(ev, evCount, hd.evIdx, isFm, &hp, &hpan, &hvol, &hexp)) {
@@ -5003,7 +5298,9 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 				/* hoverNote is sounding MIDI; draw at written pitch under ottava. */
 				const int written = ScStaffSoundingToWritten(u->hoverNote, oct);
 				const int y = ScStaffMidiNoteYTrack(u, u->hoverTrack, st, written, u->hoverTick, ev, evCount);
-				DrawGhostNote(dc, x, y, u->placeDur, 0, u->placeAccidental);
+				const int hk = ScStaffMidiUsesDrumHeads(u, ev, evCount, u->hoverTrack)
+					? ScStaffGmPercHead(u->hoverNote) : 0;
+				DrawGhostNote(dc, x, y, u->placeDur, 0, u->placeAccidental, hk);
 			}
 			if (oct != 0 && !u->placeRest) {
 				dc.SetBkMode(TRANSPARENT);
@@ -6595,10 +6892,33 @@ int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT)
 	return 1;
 }
 
+void ScStaffRestoreLiveAudioAfterPreview(void)
+{
+	VstLiveMonitorEnsure();
+	VstLiveMonitorEnsureDelayed();
+}
+
+int ScStaffPreviewFinished(ScStaffUi* u)
+{
+	if (!u || !u->previewActive) return 0;
+	extern int playy;
+	extern int endflg;
+	if (playy == 0)
+		u->previewEngineSeen = 1;
+	if (!endflg && !(u->previewEngineSeen && playy != 0))
+		return 0;
+	u->previewActive = 0;
+	u->previewEngineSeen = 0;
+	u->markerSeekArmed = 0;
+	ScStaffRestoreLiveAudioAfterPreview();
+	return 1;
+}
+
 void ScStaffStopHostPreview(ScStaffUi* u)
 {
 	if (u) {
 		u->previewActive = 0;
+		u->previewEngineSeen = 0;
 		u->markerSeekArmed = 0;
 		u->previewOriginTick = 0;
 		u->previewWavMode = 0;
@@ -6608,6 +6928,7 @@ void ScStaffStopHostPreview(ScStaffUi* u)
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->stop1();
 	ScStaffRestorePlaylistGlobals();
+	ScStaffRestoreLiveAudioAfterPreview();
 }
 
 int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
@@ -6629,6 +6950,7 @@ int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
 	int lastTempo = -1, lastFmTempo = -1;
 	int lastProg[kCh], lastBank[kCh], lastVol[kCh], lastPan[kCh], lastVelo[kCh], lastPitch[kCh];
 	int lastFmVoice[kCh], lastFmVol[kCh], lastFmPitch[kCh];
+	int lastDrum[kCh];  /* 最後の SC_EV_DRUM(通常/ドラム1/ドラム2) を引き継ぐ */
 	int pedal[kCh]; /* -1 unknown, 0 off, 1 on */
 	int needQ[kCh];
 	int loopSp[kCh];
@@ -6636,6 +6958,7 @@ int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
 	for (int c = 0; c < kCh; c++) {
 		lastQ[c] = lastProg[c] = lastBank[c] = lastVol[c] = lastPan[c] = lastVelo[c] = lastPitch[c] = -1;
 		lastFmVoice[c] = lastFmVol[c] = lastFmPitch[c] = -1;
+		lastDrum[c] = -1;
 		pedal[c] = -1;
 		needQ[c] = 0;
 		loopSp[c] = 0;
@@ -6662,6 +6985,7 @@ int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
 		case SC_EV_FM_VOICE: lastFmVoice[ch] = i; break;
 		case SC_EV_FM_VOL: lastFmVol[ch] = i; break;
 		case SC_EV_FM_PITCH: lastFmPitch[ch] = i; break;
+		case SC_EV_DRUM: lastDrum[ch] = i; break;
 		case SC_EV_PEDAL_ON: pedal[ch] = 1; break;
 		case SC_EV_PEDAL_OFF: pedal[ch] = 0; break;
 		case SC_EV_FM_LOOP_START:
@@ -6686,7 +7010,14 @@ int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
 
 	if (lastTempo >= 0) pushChase(lastTempo);
 	if (lastFmTempo >= 0) pushChase(lastFmTempo);
+	/* マーカー以前の SysEx(GSリセット/リズムパート等) を先に流す。 */
+	for (int i = 0; i < srcN && *outN < dstMax; i++) {
+		if (src[i].tick < marker && src[i].kind == SC_EV_SYSEX)
+			pushChase(i);
+	}
 	for (int ch = 0; ch < kCh; ch++) {
+		/* 通常/ドラム1/ドラム2 の指定(SC_EV_DRUM) を引き継ぐ。 */
+		if (lastDrum[ch] >= 0) pushChase(lastDrum[ch]);
 		if (lastProg[ch] >= 0) pushChase(lastProg[ch]);
 		if (lastBank[ch] >= 0) pushChase(lastBank[ch]);
 		if (lastVol[ch] >= 0) pushChase(lastVol[ch]);
@@ -6740,6 +7071,7 @@ int ScStaffPreviewViaHost(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 	u->markerSeekArmed = 0;
 	u->playheadTick = u->markerTick;
 	u->previewActive = 1;
+	u->previewEngineSeen = 0;
 	if (!ScStaffStartHostPreview(builtPath, u, tempoT)) {
 		u->previewActive = 0;
 		u->previewOriginTick = 0;
@@ -6798,6 +7130,7 @@ int ScStaffPreviewViaWavout(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 		u->markerSeekArmed = 0;
 		u->playheadTick = u->markerTick;
 		u->previewActive = 1;
+		u->previewEngineSeen = 0;
 	}
 	(void)tempoT;
 	if (!ScStaffStartHostPreview(wav, u, tempoT)) {

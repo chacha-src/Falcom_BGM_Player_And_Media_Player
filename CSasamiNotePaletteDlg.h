@@ -20,7 +20,12 @@ public:
 
 	static CSasamiNotePaletteDlg* OpenNear(CWnd* owner, CPoint screenPt);
 	static CSasamiNotePaletteDlg* Instance();
+	/* 譜面/ロール起動時に音符＋調ウィンドウを別窓で出す（フォーカスは奪わない）。 */
+	static void OpenComposerPalettes(CWnd* owner);
+	static void BindComposerNotify(CWnd* owner);
 	void NotifyParent();
+	void BindNotify(HWND hwnd) { m_notify = hwnd; }
+	void InvalidateBody();
 
 protected:
 	virtual BOOL OnInitDialog();
@@ -118,6 +123,7 @@ enum {
 	SASAMI_PAL_CMD_METER_64 = 63,
 	SASAMI_PAL_CMD_METER_32 = 64,
 	SASAMI_PAL_CMD_METER_74 = 65,
+	SASAMI_PAL_CMD_CLEF_AUTO = 66, /* 譜表自動（ト音/ヘ音/大譜表） */
 	SASAMI_PAL_CMD_KEY_BASE = 70 /* +0..14 → keySig -7..+7 */
 };
 enum { WM_SASAMI_PAL_QUERY_STATE = WM_APP + 7202 };
@@ -130,7 +136,7 @@ struct SasamiPalLayoutState {
 	int meterN;
 	int meterD;
 	int keySig;
-	int clef;
+	int clef; /* 0G 1F 2grand 3drum 4=auto */
 	int nSel;
 	int previewNote; /* midi pitch of primary selection, or -1 */
 	int curCh;

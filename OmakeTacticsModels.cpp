@@ -1658,20 +1658,31 @@ static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
 	// 人体はモーションキャプチャで全部の型を持つので名前どおりに引き、スキルの範囲・効果・威力・属性で別の型に替える。
 	if (strncmp(m.name, "Hum", 3) == 0 && m.name[3] >= 'A' && m.name[3] <= 'Z' && clip >= 0 && clip < CL_COUNT) {
 		const char* alt = NULL;
-		if (skill >= 0 && skill < SKL_COUNT) {
+		if (skill >= 0 && (skill < SKL_COUNT || IsCraftId(skill) || IsSummonId(skill))) {
 			const SkillDef& sd = SkillInfo(skill);
 			BOOL melee = clip == CL_1H_SLICE || clip == CL_1H_STAB || clip == CL_1H_CHOP || clip == CL_2H_CHOP || clip == CL_2H_SPIN || clip == CL_PUNCH;
+			BOOL cast = clip == CL_CAST_SHOOT || clip == CL_CAST_RAISE || clip == CL_CAST_LONG || clip == CL_THROW || clip == CL_TAUNT || clip == CL_USE;
 			if (sd.kind == SK_PHYS && melee) {
 				if (sd.shape == SH_LINE) alt = "Skill_Dash";
 				else if (sd.shape == SH_FAN) alt = "2H_Melee_Attack_Spin";
 				else if (sd.effect == EF_STUN || sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN || sd.effect == EF_IGNDEF) alt = "Skill_Bash";
-				else if (sd.power >= 150) alt = "Skill_Heavy";
-			} else if (sd.kind == SK_MAGIC && clip == CL_CAST_SHOOT) {
+				else if (sd.power >= 150 || sd.hits >= 3) alt = "Skill_Heavy";
+			} else if (sd.kind == SK_MAGIC && cast) {
 				if (sd.element == EL_FIRE) alt = "Cast_Throw";
-				else if (sd.element == EL_EARTH) alt = "Cast_Ground";
+				else if (sd.element == EL_EARTH || sd.element == EL_ICE) alt = "Cast_Ground";
 				else if (sd.element == EL_THUNDER) alt = "Cast_Point";
-				else if (sd.element == EL_DARK) alt = "Cast_Claw";
-			} else if (sd.kind == SK_HEAL && clip == CL_CAST_RAISE) alt = "Cast_Heal";
+				else if (sd.element == EL_DARK || sd.element == EL_POISON) alt = "Cast_Claw";
+				else if (sd.element == EL_HOLY) alt = "Cast_Heal";
+				else if (sd.element == EL_WIND) alt = "Spellcast_Long";
+			} else if (sd.kind == SK_HEAL && cast) {
+				if (sd.effect == EF_RAISE) alt = "Cast_Heal";
+				else if (sd.area >= 3 || sd.shape == SH_FAN) alt = "Spellcast_Long";
+				else alt = "Cast_Heal";
+			} else if (sd.kind == SK_BUFF && cast) {
+				if (sd.effect == EF_CLEANSE) alt = "Use_Item";
+				else if (sd.area >= 2) alt = "Spellcast_Long";
+				else alt = "Spellcast_Raise";
+			}
 		}
 		int c = alt ? g.FindClip(alt) : -1;
 		if (c < 0) c = g.FindClip(kClipNames[clip]);
@@ -2118,24 +2129,72 @@ V3 ActorJointWorld(const Actor& a, const M4& world, int which)
 	return p;
 }
 
-int AttackClipFor(int style, int variant)
+int AttackClipFor(int style, int variant, int skill)
 {
+	int clip = CL_1H_SLICE;
 	switch (style) {
-	case AS_SLASH: return variant ? CL_1H_CHOP : CL_1H_SLICE;
-	case AS_CHOP2: return variant ? CL_2H_SPIN : CL_2H_CHOP;
-	case AS_STAB: return variant ? CL_1H_SLICE : CL_1H_STAB;
-	case AS_SHOOT: return CL_2H_SHOOT;
-	case AS_SHOOT1: return variant ? CL_THROW : CL_1H_SHOOT;
-	case AS_CAST: return CL_CAST_SHOOT;
-	case AS_SPIN: return CL_2H_SPIN;
-	case AS_PUNCH: return CL_PUNCH;
-	case AS_BITE: return CL_1H_STAB;
+	case AS_SLASH: clip = variant ? CL_1H_CHOP : CL_1H_SLICE; break;
+	case AS_CHOP2: clip = variant ? CL_2H_SPIN : CL_2H_CHOP; break;
+	case AS_STAB: clip = variant ? CL_1H_SLICE : CL_1H_STAB; break;
+	case AS_SHOOT: clip = CL_2H_SHOOT; break;
+	case AS_SHOOT1: clip = variant ? CL_THROW : CL_1H_SHOOT; break;
+	case AS_CAST: clip = CL_CAST_SHOOT; break;
+	case AS_SPIN: clip = CL_2H_SPIN; break;
+	case AS_PUNCH: clip = CL_PUNCH; break;
+	case AS_BITE: clip = CL_1H_STAB; break;
+	default: break;
 	}
-	return CL_1H_SLICE;
+	if (skill < 0) return clip;
+	if (style == AS_SHOOT || style == AS_SHOOT1 || style == AS_CAST) return clip;
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.kind != SK_PHYS) return clip;
+	if (sd.shape == SH_LINE) return variant ? CL_1H_STAB : CL_2H_SPIN;
+	if (sd.shape == SH_FAN) return CL_2H_SPIN;
+	if (sd.effect == EF_STUN || sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN || sd.effect == EF_IGNDEF) return CL_2H_CHOP;
+	if (sd.power >= 150) return variant ? CL_2H_CHOP : CL_1H_CHOP;
+	if (sd.hits >= 3) return CL_2H_SPIN;
+	if (sd.area >= 3) return variant ? CL_2H_SPIN : CL_2H_CHOP;
+	int pat = (skill * 7 + variant * 3) & 3;
+	if (style == AS_SLASH) {
+		const int t[4] = { CL_1H_SLICE, CL_1H_CHOP, CL_2H_CHOP, CL_1H_STAB };
+		return t[pat];
+	}
+	if (style == AS_PUNCH || style == AS_BITE) {
+		const int t[4] = { CL_PUNCH, CL_1H_STAB, CL_2H_CHOP, CL_TAUNT };
+		return t[pat];
+	}
+	return clip;
 }
 
-int CastClipFor(int kind)
+int CastClipFor(int kind, int skill)
 {
+	if (skill >= 0) {
+		const SkillDef& sd = SkillInfo(skill);
+		kind = sd.kind;
+		if (kind == SK_HEAL) {
+			if (sd.effect == EF_RAISE) return CL_CAST_RAISE;
+			if (sd.area >= 3 || sd.shape == SH_FAN) return CL_CAST_LONG;
+			if (sd.shape == SH_LINE) return CL_CAST_SHOOT;
+			int pat = (skill * 5) % 3;
+			if (pat == 0) return CL_CAST_RAISE;
+			if (pat == 1) return CL_CAST_LONG;
+			return CL_CAST_SHOOT;
+		}
+		if (kind == SK_BUFF) {
+			if (sd.effect == EF_CLEANSE) return CL_USE;
+			if (sd.area >= 2) return CL_CAST_LONG;
+			return (skill & 1) ? CL_CAST_RAISE : CL_CAST_LONG;
+		}
+		if (kind == SK_MAGIC) {
+			if (sd.element == EL_FIRE) return CL_THROW;
+			if (sd.element == EL_ICE || sd.element == EL_HOLY) return CL_CAST_RAISE;
+			if (sd.element == EL_THUNDER || sd.element == EL_POISON) return CL_CAST_SHOOT;
+			if (sd.element == EL_DARK) return CL_TAUNT;
+			if (sd.element == EL_WIND || sd.element == EL_EARTH) return CL_CAST_LONG;
+			if (sd.shape == SH_LINE) return CL_CAST_SHOOT;
+			if (sd.shape == SH_FAN || sd.power >= 140) return CL_CAST_LONG;
+		}
+	}
 	if (kind == SK_HEAL || kind == SK_BUFF) return CL_CAST_RAISE;
 	return CL_CAST_SHOOT;
 }

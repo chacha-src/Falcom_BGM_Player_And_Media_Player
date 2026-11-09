@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiNotePaletteDlg.h"
+#include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiStaffCore.h"
 #include "SasamiComposerDoc.h"
 
@@ -26,9 +27,7 @@ CSasamiNotePaletteDlg* CSasamiNotePaletteDlg::OpenNear(CWnd* owner, CPoint scree
 		s_inst->m_notify = owner ? owner->GetSafeHwnd() : s_inst->m_notify;
 		s_inst->m_markStack = savedata.sasamiMarkStack ? 1 : 0;
 		/* Already open: keep saved/user position (do not jump to cursor). */
-		s_inst->ShowWindow(SW_SHOW);
-		s_inst->Invalidate(FALSE);
-		s_inst->BringWindowToTop();
+		ScStaffPresentNoActivate(s_inst);
 		(void)screenPt;
 		return s_inst;
 	}
@@ -45,11 +44,36 @@ CSasamiNotePaletteDlg* CSasamiNotePaletteDlg::OpenNear(CWnd* owner, CPoint scree
 			&& !(savedata.sasamiNotePalX == -1 && savedata.sasamiNotePalY == -1));
 		if (!havePos
 			|| !ScRestoreWndGeom(s_inst, savedata.sasamiNotePalX, savedata.sasamiNotePalY, pw, ph, 260, 280))
-			s_inst->SetWindowPos(NULL, screenPt.x, screenPt.y, pw, ph, SWP_NOZORDER);
+			s_inst->SetWindowPos(NULL, screenPt.x, screenPt.y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
 	}
-	s_inst->ShowWindow(SW_SHOW);
-	s_inst->BringWindowToTop();
+	ScStaffPresentNoActivate(s_inst);
 	return s_inst;
+}
+
+void CSasamiNotePaletteDlg::InvalidateBody()
+{
+	ScStaffInvalidateBelowCaption(this);
+}
+
+void CSasamiNotePaletteDlg::OpenComposerPalettes(CWnd* owner)
+{
+	if (!owner || !::IsWindow(owner->GetSafeHwnd())) return;
+	CRect wr;
+	owner->GetWindowRect(&wr);
+	CPoint notePt(wr.left + 40, wr.top + 100);
+	CPoint layPt(wr.left + 420, wr.top + 100);
+	OpenNear(owner, notePt);
+	CSasamiLayoutPaletteDlg::OpenNear(owner, layPt);
+}
+
+void CSasamiNotePaletteDlg::BindComposerNotify(CWnd* owner)
+{
+	HWND h = (owner && ::IsWindow(owner->GetSafeHwnd())) ? owner->GetSafeHwnd() : NULL;
+	if (!h) return;
+	if (s_inst && ::IsWindow(s_inst->GetSafeHwnd()))
+		s_inst->m_notify = h;
+	if (CSasamiLayoutPaletteDlg* lay = CSasamiLayoutPaletteDlg::Instance())
+		lay->BindNotify(h);
 }
 
 void CSasamiNotePaletteDlg::NotifyParent()
@@ -247,7 +271,7 @@ void CSasamiNotePaletteDlg::OnSize(UINT nType, int cx, int cy)
 	if (GetSafeHwnd() && IsWindowVisible())
 		ScSaveWndGeom(this, &savedata.sasamiNotePalX, &savedata.sasamiNotePalY,
 			&savedata.sasamiNotePalW, &savedata.sasamiNotePalH);
-	Invalidate(FALSE);
+	InvalidateBody();
 }
 
 BOOL CSasamiNotePaletteDlg::OnEraseBkgnd(CDC* pDC) { return CCustomBlurDialogExBase::OnEraseBkgnd(pDC); }
@@ -255,6 +279,7 @@ BOOL CSasamiNotePaletteDlg::OnEraseBkgnd(CDC* pDC) { return CCustomBlurDialogExB
 void CSasamiNotePaletteDlg::OnPaint()
 {
 	CPaintDC dc(this);
+	ScStaffCaptionPaintThenExclude(dc, m_hWnd);
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	CRect body(rc.left, cap, rc.right, rc.bottom);
@@ -336,7 +361,6 @@ void CSasamiNotePaletteDlg::OnPaint()
 	CCC_BlitStretchOpaque(dc.GetSafeHdc(), body.left, body.top, body.Width(), body.Height(),
 		mem.GetSafeHdc(), 0, 0, body.Width(), body.Height());
 	mem.SelectObject(old);
-	CCC_CaptionPaint(dc, m_hWnd);
 }
 
 void CSasamiNotePaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -363,7 +387,7 @@ void CSasamiNotePaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		else if (k == -53) { m_accidental = 2; NotifyParent(); }
 		else if (k == -6) {
 			/* Stay open — palette is session-persistent. */
-			Invalidate(FALSE);
+			InvalidateBody();
 			return;
 		}
 		else if (k == -8) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_FIT);
@@ -400,7 +424,7 @@ void CSasamiNotePaletteDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		else if (k == -62) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SPAN);
 		else if (k == -63) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SPORTA);
 		else if (k == -64) ScPalPostCmd(m_notify, SASAMI_PAL_CMD_SVIB_OFF);
-		Invalidate(FALSE);
+		InvalidateBody();
 		break;
 	}
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);

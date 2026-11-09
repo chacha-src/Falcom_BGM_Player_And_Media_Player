@@ -747,8 +747,10 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		/* 成功／キーリーフ */
 		const unsigned t86 = e.mark();
 		e.w16(0x7000); e.w16(0x4e73);
+		/* $69 OPMSNS: YM2151 ステータスを d0 へ。0 固定だとタイマAの btst #0 が sequencer に届かない。 */
 		const unsigned t69 = e.mark();
-		e.w16(0x7000); e.w16(0x4e73);
+		e.w16(0x1039); e.w32(0x00e90001u); /* move.b $E90001,d0 */
+		e.w16(0x4e73);
 		const unsigned t04 = e.mark();
 		e.w16(0x7000); e.w16(0x4e73);
 		const unsigned t00 = e.mark();
@@ -924,6 +926,25 @@ static int bindOpmdrvIsrIfSoft(CHardX68k* hw)
 void CEmuX68kHookFloat2(CHardX68k* hw)
 {
 	if (!hw) return;
+	/* BOOT が IOCS $6B を `move.b #$2F,$E00010; rts` に集めていると TIMERDST が
+	   フックを保存しない。そのスタブのときだけ RTS 版（a1→timerD、d1→周期）へ
+	   付け替える。生きた $6B は触らない。a1=0 の取消はそのままフックを消す。 */
+	{
+		const unsigned iocs6b = hw->Read32(0x400u + 0x6bu * 4u) & 0xffffffu;
+		if (iocs6b >= 0x100u && iocs6b < 0xf00000u
+			&& hw->Read16(iocs6b) == 0x13fcu
+			&& hw->Read32(iocs6b + 2u) == 0x002f00e0u
+			&& hw->Read32(iocs6b + 6u) == 0x00104e75u) {
+			const unsigned leaf = 0x00f08724u;
+			hw->Write16(leaf + 0u, 0x23c9u);
+			hw->Write32(leaf + 2u, CEMU_X68K_DOS_DATA + 0x10u);
+			hw->Write16(leaf + 6u, 0x33c1u);
+			hw->Write32(leaf + 8u, CEMU_X68K_DOS_DATA + 0x14u);
+			hw->Write16(leaf + 12u, 0x7000u);
+			hw->Write16(leaf + 14u, 0x4e75u);
+			hw->Write32(0x400u + 0x6bu * 4u, leaf);
+		}
+	}
 	static const unsigned kLoad[] = { 0x2a000u, 0x2e000u, 0xa0000u, 0xb0000u };
 	unsigned load = 0;
 	for (unsigned i = 0; i < sizeof(kLoad) / sizeof(kLoad[0]); i++) {
@@ -940,9 +961,10 @@ void CEmuX68kHookFloat2(CHardX68k* hw)
 	const unsigned slot = load + 0x86u;
 	if (hw->Read16(handler) != 0x48e7u) return;
 	const unsigned cur = hw->Read32(0x2c) & 0xffffffu;
-	if (cur == (handler & 0xffffffu)) return;
-	hw->Write32(slot, hw->Read32(0x2c));
-	hw->Write32(0x2c, handler);
+	if (cur != (handler & 0xffffffu)) {
+		hw->Write32(slot, hw->Read32(0x2c));
+		hw->Write32(0x2c, handler);
+	}
 }
 
 /* CEmuX68kDosInstall の実装 */

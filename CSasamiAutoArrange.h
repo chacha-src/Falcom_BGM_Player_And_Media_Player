@@ -37,7 +37,56 @@ enum ScAutoStyle : int {
 	SC_AS_PIANO,
 	SC_AS_FANFARE,
 	SC_AS_SLOWROCK,
+	/* --- v2 追加テーマ: コード運びのプロファイル付き（ジャズ/ブルース系ほか） --- */
+	SC_AS_JAZZ,       /* スウィング 4ビート ii-V-I */
+	SC_AS_SWINGJAZZ,  /* ビッグバンド寄りのスウィング */
+	SC_AS_BEBOP,      /* 速いスウィング、細かいライド */
+	SC_AS_BLUES,      /* 12 小節ブルース I7-IV7-V7 */
+	SC_AS_SLOWBLUES,  /* 12/8 のスローブルース */
+	SC_AS_ROCKNROLL,  /* 50s ロックンロール・シャッフル */
+	SC_AS_GOSPEL,     /* ゴスペル/6-2-5-1 */
+	SC_AS_SOUL,       /* モータウン・ソウル */
+	SC_AS_RNB,        /* 現代 R&B */
+	SC_AS_NEOSOUL,    /* ネオソウル、揺れたハット */
+	SC_AS_COUNTRY,    /* カントリー・トレインビート */
+	SC_AS_PUNK,       /* パンク、8 分全開 */
+	SC_AS_GRUNGE,     /* グランジ、重いバックビート */
+	SC_AS_SKA,        /* スカ、裏打ち */
+	SC_AS_KAYOKYOKU,  /* 歌謡曲 */
+	SC_AS_ANISON,     /* アニソン、疾走 16 ビート */
+	SC_AS_CHIPTUNE,   /* チップチューン、アルペジオ */
+	SC_AS_TRAP,       /* トラップ、ハットロール */
+	SC_AS_DRILL,      /* ドリル、スライドベース */
+	SC_AS_AFROBEAT,   /* アフロビート */
+	SC_AS_SWING3,     /* ジャズワルツ 3/4 スウィング */
+	SC_AS_TANGO,      /* タンゴ */
+	SC_AS_FLAMENCO,   /* フラメンコ（ルンバ） */
+	SC_AS_SURF,       /* サーフロック */
+	SC_AS_LOFI,       /* ローファイ・ヒップホップ */
+	SC_AS_DRUMSOLO,   /* ドラム主体、ブレイク連発 */
+	SC_AS_EDM,        /* ビルドアップ付き EDM */
+	SC_AS_DUBSTEP,    /* ダブステップ、ハーフタイム */
+	SC_AS_SYNTHWAVE,  /* シンセウェイブ */
 	SC_AS_COUNT
+};
+
+/* アレンジのかけ方。 */
+enum ScArrangeMode : int {
+	SC_AM_OVERLAY = 0, /* 既存を残し、空いている拍・小節だけ埋める（重ね） */
+	SC_AM_REWRITE = 1  /* 対象パートの既存ノートを一旦消し、進行に沿って作り直す（書き換え） */
+};
+
+/* 対象パートに与える役割。AUTO は中身から自動判定。 */
+enum ScPartRole : int {
+	SC_PR_AUTO = 0,
+	SC_PR_DRUM,
+	SC_PR_BASS,
+	SC_PR_CHORD,
+	SC_PR_MELODY,
+	SC_PR_HARMONY,
+	SC_PR_ARPEGGIO,
+	SC_PR_PAD,
+	SC_PR_ROLE_COUNT
 };
 
 enum ScAutoJob : int {
@@ -71,12 +120,24 @@ struct ScAutoArrangeOpt {
 	int defMeterD;
 	int defKey;
 	ScStaffUi* ui;
+	/* --- v2 --- すべて 0 のとき従来（自動）動作に一致する。 */
+	int mode;             /* ScArrangeMode: 重ね / 書き換え */
+	int useProg;          /* 1=テーマのコード進行を空き・書き換え小節へ適用 */
+	int seed;             /* 変化の種。0=時刻から自動（毎回違う結果） */
+	int variation;        /* 0..N 進行・パターンのバリエーション番号 */
+	uint32_t targetMask;  /* アレンジ対象 ch ビットマスク。0=自動選択（従来） */
+	uint32_t drumMask;    /* ドラム出力に使う ch ビットマスク。0=自動 */
+	uint8_t drumSlot[32]; /* ドラム ch ごとの枠 0=ドラム1 1=ドラム2（VST2 用） */
+	uint8_t partRole[32]; /* 対象 ch ごとの役割 ScPartRole（AUTO=自動判定） */
+	int genBars;          /* 既存ノートが無いときに生成する小節数。0=既定(16) */
 };
 
 struct ScAutoArrangeResult {
 	int err;
 	int added;
+	int removed;      /* 書き換えで消した既存ノート数 */
 	int chDrum, chBass, chChord, chHarm;
+	uint32_t usedMask; /* 実際に書き込んだ ch */
 	wchar_t msg[256];
 };
 
@@ -99,6 +160,12 @@ struct ScAutoArrangeHost {
 
 int ScAutoArrangeCountNotes(const ScEvent* ev, int n);
 const wchar_t* ScAutoStyleName(int style);
+/* ダイアログ用: テーマのジャンル見出し（「ジャズ／ブルース」など）。 */
+const wchar_t* ScAutoStyleGroupName(int style);
+/* テーマのコード進行を「Dm7 - G7 - Cmaj7」のように説明。buf は十分な長さ。 */
+void ScAutoStyleProgDesc(int style, int variation, int keySig, wchar_t* buf, int cch);
+/* そのテーマが持つバリエーション数（コード進行の数）。 */
+int ScAutoStyleVariationCount(int style);
 int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax,
 	const ScAutoArrangeOpt* opt, ScAutoArrangeResult* out);
 /* モーダル。試し聴きは host->preview、決定でヒストリへ積む。 */
