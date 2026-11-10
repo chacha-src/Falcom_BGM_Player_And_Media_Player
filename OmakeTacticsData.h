@@ -199,8 +199,13 @@ const TerrainDef& TerrainInfo(int t);
 enum Theme { TH_PLAINS, TH_CANYON, TH_FOREST, TH_SNOW, TH_DESERT, TH_VOLCANO, TH_SWAMP, TH_RUINS, TH_SEABED, TH_FALLS, TH_ORBIT, TH_STATION, TH_CITADEL, TH_LANTERN, TH_COUNT };
 int ThemeNameTx(int th);
 
-enum { MAPN = 64, MAXH = 12 };
+enum { MAPN = 64, MAXH = 12, MAXH_SPIRAL = 999 };
 const float kHStep = 0.4f;
+inline float TacHToY(int h)
+{
+	if (h <= MAXH) return h * kHStep;
+	return MAXH * kHStep + (float)(h - MAXH) * 0.045f;
+}
 // 経路の1点に「橋の上」を載せる。マス番号は 0..4095 なので 8192 とは重ならない。
 enum { LAY_N = 5, TAC_CELL_MASK = 8191 };
 inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 7) << 13); }
@@ -244,19 +249,21 @@ inline int TacSightTiles(int sky)
 	return s;
 }
 
+#pragma pack(push, 1)
 struct Cell {
 	BYTE t;      // Terrain
-	BYTE h;      // 高さ段
+	WORD h;      // 高さ段 (0..999)
 	BYTE prop;   // PropKind
 	BYTE var;    // 小物のバリエーション／回転
 	BYTE gimm;   // Gimmick
 	BYTE gparam; // ワープ組番号。橋でギミックなしのとき、下を通れる床の高さ（0=床なし）
 	BYTE nLay;   // 1=下だけ。最大 LAY_N（5）
-	BYTE t1, h1;
-	BYTE t2, h2;
-	BYTE t3, h3;
-	BYTE t4, h4;
+	BYTE t1; WORD h1;
+	BYTE t2; WORD h2;
+	BYTE t3; WORD h3;
+	BYTE t4; WORD h4;
 };
+#pragma pack(pop)
 
 // 橋の下の床。0 なら橋板だけ（川に架かる普通の橋）。
 inline int BridgeFloor(const Cell& c)

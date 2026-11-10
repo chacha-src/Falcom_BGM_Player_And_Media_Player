@@ -401,9 +401,11 @@ public:
 		// 脚の形の骨。segJ は [根元の骨, 先の骨]、segG は [0]=根元（xyz と長さ） [1]=骨の向き [2]=前 [3]=横（バインド）。
 		// 0・1 は太もも左右（座ったかどうかもこれで見る）。4・5 は足。
 		int segN; int segJ[CLOTH_SEGS][2]; float segG[CLOTH_SEGS][4][4];
+		int brief; // 1 = 水着とズボン以外。股にパンツを足す
+		int pants; // 1 = 脚ごとの筒。パンツは足さない
 		// 1/2 系の手足の骨は肉の芯から数 cm ずれる。当たりの軸はバインドの関節にこれを足す（0 系は 0）。
 		float jOff[64][3];
-		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), softN(0), softVN(0), segN(0) {
+		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), softN(0), softVN(0), segN(0), brief(0), pants(0) {
 			memset(jOff, 0, sizeof(jOff));
 			for (int i = 0; i < 32; i++) backZ[i] = 0;
 			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
@@ -557,7 +559,7 @@ public:
 	void RestoreHomeLand();
 	void DropHomeLand();
 	ID3D11ShaderResourceView* MinimapSrv(int layer = 0) {
-		if (layer < 0 || layer >= 3) layer = 0;
+		if (layer < 0 || layer >= LAY_N) layer = 0;
 		return m_srvMiniL[layer] ? m_srvMiniL[layer] : m_srvMiniL[0];
 	}
 	int MinimapLayers() const { return m_miniN < 1 ? 1 : m_miniN; }

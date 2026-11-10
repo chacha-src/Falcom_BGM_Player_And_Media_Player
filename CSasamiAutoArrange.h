@@ -124,12 +124,13 @@ struct ScAutoArrangeOpt {
 	int mode;             /* ScArrangeMode: 重ね / 書き換え */
 	int useProg;          /* 1=テーマのコード進行を空き・書き換え小節へ適用 */
 	int seed;             /* 変化の種。0=時刻から自動（毎回違う結果） */
-	int variation;        /* 0..N 進行・パターンのバリエーション番号 */
-	uint32_t targetMask;  /* アレンジ対象 ch ビットマスク。0=自動選択（従来） */
+	int variation;        /* 0..N コード進行の番号 */
+	int patVar;           /* 0=A 1=B 2=C。同じテーマの定番パターン。変な音符は出さない */
+	uint32_t targetMask;  /* 伴奏を書く ch。0=自動（メロディパートは除く） */
 	uint32_t drumMask;    /* ドラム出力に使う ch ビットマスク。0=自動 */
 	uint8_t drumSlot[32]; /* ドラム ch ごとの枠 0=ドラム1 1=ドラム2（VST2 用） */
 	uint8_t partRole[32]; /* 対象 ch ごとの役割 ScPartRole（AUTO=自動判定） */
-	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16）。>0 なら少なくともこの小節数まで書く */
+	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16、音程は C4 として扱う） */
 };
 
 struct ScAutoArrangeResult {

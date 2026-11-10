@@ -24,6 +24,10 @@ enum {
 	IDC_SAA_LGROUP = 4939,
 	IDC_SAA_LGEN = 4940,
 	IDC_SAA_GEN = 4941,
+	IDC_SAA_LPAT = 4942,
+	IDC_SAA_PAT = 4943,
+	IDC_SAA_LACC = 4944,
+	IDC_SAA_LMEL = 4945,
 	IDC_SAA_TGT_BASE = 4960,   /* +ch */
 	IDC_SAA_DRM_BASE = 5000    /* +ch */
 };
@@ -66,7 +70,8 @@ protected:
 	int m_vis[32], m_mute[32], m_solo[32], m_clef[32];
 	CCustomStatic m_styleLbl, m_pitchLbl, m_introLbl, m_breakLbl, m_endLbl, m_hint, m_status;
 	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl;
-	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars;
+	CCustomStatic m_patLbl, m_accLbl, m_melLbl;
+	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_pat;
 	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending, m_vary;
 	CCustomRadioButton m_modeOver, m_modeRw;
 	CCustomCheckBox m_tgt[32], m_drm[32];
@@ -120,18 +125,19 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	if (m_intro.GetCheck() == BST_CHECKED) o->jobs |= SC_AJ_INTRO;
 	if (m_brk.GetCheck() == BST_CHECKED) o->jobs |= SC_AJ_BREAK;
 	if (m_ending.GetCheck() == BST_CHECKED) o->jobs |= SC_AJ_ENDING;
-	static const int kIntro[] = { 0, 2, 4, 8, 16 };
-	static const int kBreak[] = { 0, 2, 4, 8 };
-	static const int kEnd[] = { 0, 1, 2, 4, 8 };
+	static const int kLen[] = { 0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64 };
 	static const int kGen[] = { 0, 4, 8, 12, 16, 24, 32, 48, 64 };
 	int ii = m_introBars.GetCurSel();
 	int bi = m_breakBars.GetCurSel();
 	int ei = m_endBars.GetCurSel();
 	int gi = m_genBars.GetSafeHwnd() ? m_genBars.GetCurSel() : 0;
-	o->introBars = kIntro[(ii >= 0 && ii < 5) ? ii : 2];
-	o->breakBars = kBreak[(bi >= 0 && bi < 4) ? bi : 1];
-	o->endBars = kEnd[(ei >= 0 && ei < 5) ? ei : 2];
+	o->introBars = kLen[(ii >= 0 && ii < 11) ? ii : 4];
+	o->breakBars = kLen[(bi >= 0 && bi < 11) ? bi : 2];
+	o->endBars = kLen[(ei >= 0 && ei < 11) ? ei : 2];
 	o->genBars = kGen[(gi >= 0 && gi < 9) ? gi : 0];
+	int pat = m_pat.GetSafeHwnd() ? m_pat.GetCurSel() : 0;
+	if (pat < 0 || pat > 2) pat = 0;
+	o->patVar = pat;
 	int pm = m_pitch.GetCurSel();
 	if (pm < 0) pm = 1;
 	o->pitchMode = pm + 1;
@@ -231,6 +237,61 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		m_style.AddString(ScAutoStyleName(i));
 	m_style.SetCurSel(0);
 
+	m_patLbl.Create(LL14(
+		L"形（同じテーマの定番。A/B/C以外は出さない）",
+		L"Shape (stock A/B/C of this theme only)",
+		L"Forme (A/B/C de ce thème)",
+		L"Forma (A/B/C di questo tema)",
+		L"Forma (A/B/C de este tema)",
+		L"형태(이 테마의 A/B/C만)",
+		L"型（只出该主题的 A/B/C）",
+		L"الشكل (A/B/C لهذا النمط فقط)",
+		L"Форма (только A/B/C темы)",
+		L"Form (nur A/B/C dieses Themas)",
+		L"Forma (só A/B/C deste tema)",
+		L"Vorm (alleen A/B/C van dit thema)",
+		L"Kształt (tylko A/B/C tego tematu)",
+		L"Biçim (yalnız bu temanın A/B/C)"),
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS, z, this, IDC_SAA_LPAT);
+	m_pat.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_PAT);
+	m_pat.SetAeroMode(FALSE);
+	m_pat.AddString(LL14(L"A 基本", L"A basic", L"A base", L"A base", L"A básica", L"A 기본", L"A 基本", L"A أساسي", L"A основа", L"A Grund", L"A básica", L"A basis", L"A podstawowy", L"A temel"));
+	m_pat.AddString(LL14(L"B もう一つの定番", L"B alternate stock", L"B autre standard", L"B altro standard", L"B otro estándar", L"B 다른 정석", L"B 另一套定式", L"B نمط آخر", L"B другой стандарт", L"B andere Standardform", L"B outro padrão", L"B ander standaard", L"B inny standard", L"B diğer kalıp"));
+	m_pat.AddString(LL14(L"C 三つ目の定番", L"C third stock", L"C troisième", L"C terza", L"C tercera", L"C 세 번째 정석", L"C 第三套定式", L"C ثالث", L"C третий стандарт", L"C dritte Standardform", L"C terceiro padrão", L"C derde standaard", L"C trzeci standard", L"C üçüncü kalıp"));
+	m_pat.SetCurSel(0);
+
+	m_accLbl.Create(LL14(
+		L"伴奏（メロディ以外のパートに書く）",
+		L"Accompaniment (written on parts other than the melody)",
+		L"Accompagnement (hors mélodie)",
+		L"Accompagnamento (non sulla melodia)",
+		L"Acompañamiento (fuera de la melodía)",
+		L"반주(멜로디 이외 파트에 기록)",
+		L"伴奏（写在旋律以外的声部）",
+		L"مرافقة (على غير جزء اللحن)",
+		L"Аккомпанемент (не в партии мелодии)",
+		L"Begleitung (nicht auf der Melodiestimme)",
+		L"Acompanhamento (fora da melodia)",
+		L"Begeleiding (niet op de melodie)",
+		L"Akompaniament (nie na melodii)",
+		L"Eşlik (melodi partisi dışında)"),
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS, z, this, IDC_SAA_LACC);
+	m_melLbl.Create(LL14(
+		L"メロディアレンジ（パートが特定できたときだけ。伴奏とは別）",
+		L"Melody arrange (only when the part is known; separate from accompaniment)",
+		L"Arrangement mélodie (si la partie est connue)",
+		L"Arrange melodia (solo se la parte è nota)",
+		L"Arreglo de melodía (solo si se conoce la parte)",
+		L"멜로디 어레인지(파트를 알 때만. 반주와 별개)",
+		L"旋律编配（仅在能判断声部时。与伴奏分开）",
+		L"توزيع اللحن (فقط إذا عُرف الجزء)",
+		L"Аранжировка мелодии (только если партия известна)",
+		L"Melodie-Arrangement (nur wenn die Stimme bekannt ist)",
+		L"Arranjo da melodia (só se a parte for conhecida)",
+		L"Melodie-arrangement (alleen als de partij bekend is)",
+		L"Aranż melodii (tylko gdy partia jest znana)",
+		L"Melodi düzeni (parti biliniyorsa; eşlikten ayrı)"),
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS, z, this, IDC_SAA_LMEL);
 	m_drum.Create(LL14(L"ドラム", L"Drums", L"Batterie", L"Batteria", L"Batería", L"드럼", L"鼓", L"طبول", L"Ударные", L"Drums", L"Bateria", L"Drums", L"Perkusja", L"Davul"),
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_DRUM);
 	m_bass.Create(LL14(L"ベース", L"Bass", L"Basse", L"Basso", L"Bajo", L"베이스", L"贝斯", L"باص", L"Бас", L"Bass", L"Baixo", L"Bas", L"Bas", L"Bas"),
@@ -290,12 +351,17 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	m_introBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_INTROBARS);
 	m_breakBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_BREAKBARS);
 	m_endBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_ENDBARS);
-	addBarItem(m_introBars, 0); addBarItem(m_introBars, 2); addBarItem(m_introBars, 4); addBarItem(m_introBars, 8); addBarItem(m_introBars, 16);
-	addBarItem(m_breakBars, 0); addBarItem(m_breakBars, 2); addBarItem(m_breakBars, 4); addBarItem(m_breakBars, 8);
-	addBarItem(m_endBars, 0); addBarItem(m_endBars, 1); addBarItem(m_endBars, 2); addBarItem(m_endBars, 4); addBarItem(m_endBars, 8);
-	m_introBars.SetCurSel(2);
-	m_breakBars.SetCurSel(1);
-	m_endBars.SetCurSel(2);
+	{
+		static const int kLen[] = { 0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64 };
+		for (int i = 0; i < 11; i++) {
+			addBarItem(m_introBars, kLen[i]);
+			addBarItem(m_breakBars, kLen[i]);
+			addBarItem(m_endBars, kLen[i]);
+		}
+	}
+	m_introBars.SetCurSel(4); /* 8小節 */
+	m_breakBars.SetCurSel(2); /* 2小節 */
+	m_endBars.SetCurSel(2);   /* 2小節 */
 
 	m_pitchLbl.Create(LL14(L"メロディへの足し方（ハモリ／しゃくり）", L"Melody extras (harmony / scoop)", L"Ajouts mélodie", L"Aggiunte melodia", L"Añadidos de melodía", L"멜로디 추가(하모니/스쿱)", L"旋律加工（和声／滑音）", L"إضافات اللحن", L"Добавки к мелодии", L"Melodie-Zusätze", L"Extras da melodia", L"Melodie-toevoegingen", L"Dodatki melodii", L"Melodi ekleri"),
 		stStyle, z, this, IDC_SAA_LPITCH);
@@ -353,7 +419,21 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTORADIOBUTTON, z, this, IDC_SAA_MODE_RW);
 	m_modeOver.SetCheck(BST_CHECKED);
 
-	m_vary.Create(LL14(L"毎回少し変える", L"Vary each time", L"Varier à chaque fois", L"Varia ogni volta", L"Variar cada vez", L"매번 조금 변화", L"每次略有变化", L"تغيير بسيط كل مرة", L"Менять каждый раз", L"Jedes Mal variieren", L"Variar sempre", L"Elke keer variëren", L"Zmieniaj za każdym razem", L"Her seferinde değiştir"),
+	m_vary.Create(LL14(
+		L"形を毎回変える（A〜Cの範囲だけ）",
+		L"Pick another shape each time (A–C only)",
+		L"Changer de forme (A–C seulement)",
+		L"Cambia forma (solo A–C)",
+		L"Cambiar forma (solo A–C)",
+		L"형태를 매번 변경(A–C만)",
+		L"每次换型（仅 A–C）",
+		L"تغيير الشكل كل مرة (A–C فقط)",
+		L"Менять форму (только A–C)",
+		L"Form jedes Mal wechseln (nur A–C)",
+		L"Trocar a forma (só A–C)",
+		L"Elke keer andere vorm (alleen A–C)",
+		L"Zmieniaj kształt (tylko A–C)",
+		L"Her seferinde biçim (yalnız A–C)"),
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_VARY);
 	m_vary.SetCheck(BST_CHECKED);
 
@@ -407,8 +487,8 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	RefillProg();
 
 	CFont* font = GetFont();
-	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_progLbl, &m_prog, &m_progDesc,
-		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl,
+	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_patLbl, &m_pat, &m_progLbl, &m_prog, &m_progDesc,
+		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl, &m_accLbl, &m_melLbl,
 		&m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
 		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars,
 		&m_introLbl, &m_breakLbl, &m_endLbl, &m_introBars, &m_breakBars, &m_endBars,
@@ -430,6 +510,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	prepLbl(m_styleLbl); prepLbl(m_pitchLbl); prepLbl(m_introLbl); prepLbl(m_breakLbl); prepLbl(m_endLbl);
 	prepLbl(m_hint); prepLbl(m_status); prepLbl(m_progLbl); prepLbl(m_progDesc);
 	prepLbl(m_targetLbl); prepLbl(m_drumLbl); prepLbl(m_groupLbl); prepLbl(m_genLbl);
+	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl);
 	{
 		const int nCh = NumCh();
 		for (int ch = 0; ch < nCh && ch < 32; ch++) {
@@ -443,9 +524,9 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	{
 		const int nCh = NumCh();
 		const int grows = (nCh + 7) / 8;
-		int h = 780 + grows * 48;
-		if (h < 820) h = 820;
-		if (h > 980) h = 980;
+		int h = 900 + grows * 48;
+		if (h < 940) h = 940;
+		if (h > 1120) h = 1120;
 		SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
 	}
 	LayoutChrome();
@@ -540,6 +621,10 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_groupLbl.MoveWindow(x + 124, y, max(40, w - 124), labH);
 	y += labH + 2;
 	placeCombo(m_style, x, y, w);
+	y += comboH + 6;
+	m_patLbl.MoveWindow(x, y, w, labH);
+	y += labH + 2;
+	placeCombo(m_pat, x, y, w);
 	y += comboH + 8;
 
 	/* コード進行 */
@@ -557,14 +642,18 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_reroll.MoveWindow(x + col, y, 110, 24);
 	y += 30;
 
-	/* 生成ジョブ */
+	/* 伴奏はメロディ以外。メロディの音量・ピッチは別枠。 */
+	m_accLbl.MoveWindow(x, y, w, labH);
+	y += labH + 2;
 	m_drum.MoveWindow(x, y, col - 8, 22);
 	m_bass.MoveWindow(x + col, y, col, 22);
 	y += 26;
-	m_chord.MoveWindow(x, y, col - 8, 22);
-	m_melVol.MoveWindow(x + col, y, col, 22);
+	m_chord.MoveWindow(x, y, w, 22);
 	y += 26;
-	m_melPitch.MoveWindow(x, y, w, 22);
+	m_melLbl.MoveWindow(x, y, w, labH);
+	y += labH + 2;
+	m_melVol.MoveWindow(x, y, col - 8, 22);
+	m_melPitch.MoveWindow(x + col, y, col, 22);
 	y += 28;
 	m_intro.MoveWindow(x, y, 120, 22);
 	m_brk.MoveWindow(x + 130, y, 120, 22);
@@ -629,6 +718,7 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_cancel.MoveWindow(bx + (bw + gap) * 2, by, bw, bh);
 
 	raise(m_styleLbl); raise(m_groupLbl); raise(m_progLbl); raise(m_progDesc);
+	raise(m_patLbl); raise(m_accLbl); raise(m_melLbl);
 	raise(m_genLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
 	raise(m_targetLbl); raise(m_drumLbl);
 	ScStaffForceOpaqueKids(this);

@@ -24,6 +24,7 @@ struct StylePat {
 	int power;
 	int progBass;
 	int progChord;
+	int bend; /* 1=小節頭のベースにピッチベンド（しゃくり）。コードトーン以外は出さない */
 };
 
 struct BarInfo {
@@ -175,15 +176,215 @@ static uint16_t Bits(const char* z)
 	return m;
 }
 
+static int SafeDeg(int d)
+{
+	/* 1根 2五 3根+8va 5三 7根-8va 8七/六。半音・増四は出さない。 */
+	switch (d) {
+	case 1: case 2: case 3: case 5: case 7: case 8: return d;
+	default: return 1;
+	}
+}
+
 static void Bass(uint8_t* b, const char* z)
 {
 	memset(b, 0, 16);
 	if (!z) return;
 	for (int i = 0; i < 16 && z[i]; i++)
-		if (z[i] >= '1' && z[i] <= '9') b[i] = (uint8_t)(z[i] - '0');
+		if (z[i] >= '1' && z[i] <= '9') b[i] = (uint8_t)SafeDeg(z[i] - '0');
 }
 
-static void LoadStyle(int id, StylePat* s)
+/* テーマごとの定番 A/B/C。MML のドラム格子（x=打点）とベース度数。
+   16ビートなら 16ビートのまま形だけ変える。ランダムなゴーストは足さない。 */
+enum {
+	FAM_16 = 0, FAM_8, FAM_METAL, FAM_REG, FAM_FLOOR, FAM_DNB, FAM_HOP,
+	FAM_FUNK, FAM_DISCO, FAM_BALLAD, FAM_WALTZ, FAM_BOSSA, FAM_SAMBA,
+	FAM_SHUF, FAM_JAZZ, FAM_BLUES, FAM_LATIN, FAM_SKA, FAM_TRAP,
+	FAM_MARCH, FAM_PAD, FAM_AFRO, FAM_TANGO, FAM_COUNT
+};
+
+struct PatCell {
+	const char *k, *sd, *hh, *oh, *rd, *cp, *rm;
+	const char *bs, *ch;
+	uint8_t div, slots, swing, power, bend, arp;
+};
+
+#define PC(k,sd,hh,oh,rd,cp,rm,bs,ch,div,slots,sw,pw,bd,arp) \
+	{ k,sd,hh,oh,rd,cp,rm,bs,ch, (uint8_t)(div),(uint8_t)(slots),(uint8_t)(sw),(uint8_t)(pw),(uint8_t)(bd),(uint8_t)(arp) }
+
+static const PatCell kCell[FAM_COUNT * 3] = {
+	/* 16ビート A/B/C — 裏キックと16分ハイハット。コードは拍か裏だけ */
+	PC("x.......x..x....","....x.......x...","xxxxxxxxxxxxxxxx","..............x.","","","", "1..2..5.1..2..8.","..x...x...x...x.",16,2,0,0,1,0),
+	PC("x...x...x..x..x.","....x.......x...","x.x.x.x.x.x.x.x.","..x...........x.","","","", "1.5.1.2.1.5.8.2","x...x...x...x...",16,4,0,0,1,0),
+	PC("x..x....x...x..x","....x..x....x...","xxxxxxxxxxxxxxxx","..............x.","","","", "1..1..2.1..5..2.","..x...x...x...x.",16,2,0,0,1,0),
+	/* 8ビート */
+	PC("x.......x.......","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1...2...1...5...","x...x...x...x...",16,4,0,0,0,0),
+	PC("x...x...x...x...","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.1.2.2.1.1.5.5","x...x...x...x...",16,4,0,1,0,0),
+	PC("x.......x..x....","....x.......x...","x...x...x...x...","","x.x.x.x.x.x.x.x.","","", "1.......2.......","x...x...x...x...",16,4,0,1,0,0),
+	/* メタル */
+	PC("x.x.x.x.x.x.x.x.","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.1.1.1.1.1.1.1","x.x.x.x.x.x.x.x.",16,2,0,1,0,0),
+	PC("xxxxxxxxxxxxxxxx","....x.......x...","..x...x...x...x.","","","","", "1.1.1.1.2.2.1.1","x...x...x...x...",16,4,0,1,0,0),
+	PC("x.x.x.x.x.x.x.x.","....x...x...x...","x.x.x.x.x.x.x.x.","","","","", "1.2.1.2.1.2.1.2","x.x.x.x.x.x.x.x.",16,2,0,1,0,0),
+	/* レゲエ ワンドロップ */
+	PC("........x.......","........x.......","..x...x...x...x.","","","","", "1.....2...1...5.","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x...............","....x.......x...","..x...x...x...x.","","","","", "1...1...2...5...","..x...x...x...x.",16,2,0,0,0,0),
+	PC("........x...x...","........x.......","x.x.x.x.x.x.x.x.","","","","", "1.......2.......","..x...x...x...x.",16,2,0,0,0,0),
+	/* 4つ打ち */
+	PC("x...x...x...x...","","..x...x...x...x.","..............x.","","....x.......x...","", "1...1...1...1...","....x.......x...",16,4,0,0,0,0),
+	PC("x...x...x...x...","","x.x.x.x.x.x.x.x.","..x...x...x...x.","","....x.......x...","", "1.5.1.5.1.5.1.8","x...............",16,0,0,0,0,0),
+	PC("x...x...x...x...","","xxxxxxxxxxxxxxxx","","","....x.......x...","", "1.1.1.1.1.1.1.1","..x...x...x...x.",16,2,0,0,0,0),
+	/* ドラムンベース */
+	PC("x.........x.....","....x.......x...","xxxxxxxxxxxxxxxx","","","","", "1..1..5.1..2..8.","x.......x.......",16,4,0,0,0,0),
+	PC("x.......x...x...","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.....5.1...2...","x.......x.......",16,4,0,0,0,0),
+	PC("x...x.......x...","....x.......x...","xxxxxxxxxxxxxxxx","","","","", "1.1.1.5.1.2.1.8","x...............",16,0,0,0,0,0),
+	/* ヒップホップ */
+	PC("x.......x....x..","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.....5.1.....2.","x.......x.......",16,4,1,0,0,0),
+	PC("x..x........x...","....x.......x...","..x...x...x...x.","","","","", "1...1.....5...2.","x.......x.......",16,4,1,0,1,0),
+	PC("x.........x.x...","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.......5...2...","x...............",16,0,1,0,1,0),
+	/* ファンク */
+	PC("x..x....x.....x.","....x.......x...","xxxxxxxxxxxxxxxx","","","","", "1..5..1.2..1..5.","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x...x..x..x.....","....x..x....x...","x.x.x.x.x.x.x.x.","","","","", "1.1.5.1.8.1.2.5","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x.......x..x..x.","....x.......x.x.","xxxxxxxxxxxxxxxx","","","","", "1.....2.1...5...","x...x...x...x...",16,4,0,0,0,0),
+	/* ディスコ */
+	PC("x...x...x...x...","","x...x...x...x...","..x...x...x...x.","","","", "1.5.1.5.1.5.1.8","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x...x...x...x...","....x.......x...","..x...x...x...x.","","","","", "1...5...1...8...","....x.......x...",16,4,0,0,0,0),
+	PC("x...x...x...x...","","x.x.x.x.x.x.x.x.","","","","", "1.1.5.5.1.1.8.8","x...x...x...x...",16,4,0,0,0,0),
+	/* バラード */
+	PC("x...............","....x.......x...","x.......x.......","","","","", "1.......2.......","x...............",16,0,0,0,1,0),
+	PC("x.......x.......","....x.......x...","x...x...x...x...","","","","", "1...5...1...2...","x...x...x...x...",16,4,0,0,1,0),
+	PC("x...............","","x...............","","","","", "1...............","x...............",16,0,0,0,1,0),
+	/* ワルツ 3拍（12分割） */
+	PC("x...........","....x...x...","x...x...x...","","","","", "1...2...5...","....x...x...",12,3,0,0,0,0),
+	PC("x...........","....x...x...","....x...x...","","","","", "1...1...2...","x...x...x...",12,3,0,0,0,0),
+	PC("x.....x.....","....x...x...","x...x...x...","","","","", "1...5...2...","....x...x...",12,3,0,0,0,0),
+	/* ボサ */
+	PC("","","x...x...x...x...","","","","x..x..x...x.x...", "1..2..1.5..2..7.","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x...........x...","","x...x...x...x...","","","","x.x...x.x...x...", "1.....5...1...2.","x...x...x...x...",16,4,0,0,0,0),
+	PC("","","x.x.x.x.x.x.x.x.","","","","..x...x...x...x.", "1..1..2.1..5..2.","..x...x...x...x.",16,2,0,0,0,0),
+	/* サンバ */
+	PC("....x.......x...","","x...x...x...x...","","","","x.x.x.x.x.x.x.x.", "1.2.1.5.1.2.1.8","x...x...x...x...",16,4,0,0,0,0),
+	PC("x.......x.......","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1..5..1..2..1...","..x...x...x...x.",16,2,0,0,0,0),
+	PC("....x...x...x...","","x.x.x.x.x.x.x.x.","","","","x.x...x.x.x...x.", "1.1.2.5.1.1.2.8","x...x...x...x...",16,4,0,0,0,0),
+	/* シャッフル */
+	PC("x.....x.....","...x.....x..","x.xx.xx.xx.x","","","","", "1..1..2..5..","x.....x.....",12,3,1,0,0,0),
+	PC("x.....x..x..","...x.....x..","x.x.x.x.x.x.","","","","", "1.....2.....","x.....x.....",12,3,1,0,0,0),
+	PC("x...........","...x.....x..","x.xx.xx.xx.x","","","","", "1..5..1..2..","...x.....x..",12,3,1,0,0,0),
+	/* ジャズ（ライド） */
+	PC("x.......x.......","","","", "x.x.x.x.x.x.x.x.","","....x.......x...", "1..5..2..1..8...","x...x...x...x...",16,4,1,0,0,0),
+	PC("x.....x...x.....","","","", "xxxxxxxxxxxxxxxx","","....x.......x...", "1.5.1.2.1.8.2.5","x.......x.......",16,4,1,0,0,0),
+	PC("x...x...x...x...","","","", "x.x.x.x.x.x.x.x.","","....x.......x...", "1...2...1...5...","..x...x...x...x.",16,2,1,0,0,0),
+	/* ブルース */
+	PC("x.....x.....","...x.....x..","x.xx.xx.xx.x","","","","", "1..1..1..1..","x.....x.....",12,3,1,0,1,0),
+	PC("x.....x.....","...x.....x..","x.x.x.x.x.x.","","","","", "1.1.1.5.1.1","x...x...x...",12,3,1,0,1,0),
+	PC("x...........","...x.....x..","x.xx.xx.xx.x","","","","", "1.....5.....","x...........",12,0,1,0,1,0),
+	/* ラテン */
+	PC("x.....x.x.......","","x.x.x.x.x.x.x.x.","","","","..x..x...x...x..", "1..1..2.1..5..2.","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x.......x...x...","","x...x...x...x...","","","","..x...x...x..x..", "1...2...1...5...","x...x...x...x...",16,4,0,0,0,0),
+	PC("x..x....x.....x.","","x.x.x.x.x.x.x.x.","","","","..x..x...x...x..", "1.2.1.5.1.2.1.8","..x...x...x...x.",16,2,0,0,0,0),
+	/* スカ */
+	PC("x.......x.......","....x.......x...","x...x...x...x...","","","","", "1...2...1...5...","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x...x...x...x...","....x.......x...","","..x...x...x...x.","","","", "1...1...2...5...","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x.......x.......","....x.......x...","..x...x...x...x.","","","","", "1.......2.......","..x...x...x...x.",16,2,0,0,0,0),
+	/* トラップ（ハーフタイム＋808のしゃくり） */
+	PC("x...........x...","........x.......","x.x.x.x.x.x.x.x.","..............x.","","","", "1...............","x...............",16,0,0,0,1,0),
+	PC("x.......x.......","........x.......","xxxxxxxxxxxxxxxx","","","","", "1.....1.........","x...............",16,0,0,0,1,0),
+	PC("x...x.......x...","........x.......","............xxxx","","","","", "1...........5...","x...............",16,0,0,0,1,0),
+	/* マーチ */
+	PC("x.......x.......","..x.x.x...x.x.x.","","","","","", "1...1...1...5...","x...x...x...x...",16,4,0,0,0,0),
+	PC("x.......x.......","....x.......x...","x...x...x...x...","","","","", "1.......1.......","x...x...x...x...",16,4,0,0,0,0),
+	PC("x...x...x...x...","....x.......x...","","","","","", "1...5...1...5...","x.......x.......",16,4,0,0,0,0),
+	/* アンビエント */
+	PC("","","x.......x.......","","","","", "1...............","x...............",16,0,0,0,1,0),
+	PC("x...............","","x...............","","","","", "1.......5.......","x...............",16,0,0,0,1,0),
+	PC("","","x...............","","","","", "1...............","x...............",16,0,0,0,0,0),
+	/* アフロ */
+	PC("x.....x.x.......","....x.......x...","x.x.x.x.x.x.x.x.","","","","..x..x...x...x..", "1..1..2.1..5..1.","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x.......x...x...","....x.......x...","x.x.x.x.x.x.x.x.","","","","..x...x...x..x..", "1...2...1...5...","..x...x...x...x.",16,2,0,0,0,0),
+	PC("x..x..x...x..x..","....x.......x...","xxxxxxxxxxxxxxxx","","","","", "1.1.2.1.5.1.2.1","x...x...x...x...",16,4,0,0,0,0),
+	/* タンゴ／フラメンコ */
+	PC("x.......x.x.....","....x.......x...","x...x...x...x...","","","","", "1...2...1...5...","x...x...x...x...",16,4,0,0,0,0),
+	PC("x...x...x...x...","....x.......x...","","..x...x...x...x.","","","", "1...1...2...7...","x...x...x...x...",16,4,0,0,0,0),
+	PC("x.......x.......","....x.......x...","x.x.x.x.x.x.x.x.","","","","", "1.......2.......","..x...x...x...x.",16,2,0,0,0,0)
+};
+#undef PC
+
+static int StyleFam(int style)
+{
+	switch (style) {
+	case SC_AS_16BEAT: case SC_AS_CITYPOP: case SC_AS_ANISON: case SC_AS_KAYOKYOKU:
+	case SC_AS_FUSION: case SC_AS_GAME: case SC_AS_CHIPTUNE:
+		return FAM_16;
+	case SC_AS_8BEAT: case SC_AS_ROCK: case SC_AS_PUNK: case SC_AS_GRUNGE:
+	case SC_AS_SURF: case SC_AS_SLOWROCK: case SC_AS_COUNTRY: case SC_AS_ACOUSTIC:
+		return FAM_8;
+	case SC_AS_METAL: case SC_AS_DRUMSOLO:
+		return FAM_METAL;
+	case SC_AS_REGGAE: return FAM_REG;
+	case SC_AS_TECHNO: case SC_AS_HOUSE: case SC_AS_TRANCE: case SC_AS_EDM: case SC_AS_SYNTHWAVE:
+		return FAM_FLOOR;
+	case SC_AS_DNB: return FAM_DNB;
+	case SC_AS_HIPHOP: case SC_AS_LOFI: case SC_AS_BREAKS: case SC_AS_RNB: case SC_AS_NEOSOUL:
+		return FAM_HOP;
+	case SC_AS_FUNK: case SC_AS_SOUL: case SC_AS_GOSPEL: return FAM_FUNK;
+	case SC_AS_DISCO: return FAM_DISCO;
+	case SC_AS_BALLAD: case SC_AS_ENKA: case SC_AS_ORCH: case SC_AS_PIANO: return FAM_BALLAD;
+	case SC_AS_WALTZ: case SC_AS_SWING3: case SC_AS_POLKA: return FAM_WALTZ;
+	case SC_AS_BOSSA: return FAM_BOSSA;
+	case SC_AS_SAMBA: return FAM_SAMBA;
+	case SC_AS_SHUFFLE: case SC_AS_ROCKNROLL: return FAM_SHUF;
+	case SC_AS_JAZZ: case SC_AS_SWINGJAZZ: case SC_AS_BEBOP: return FAM_JAZZ;
+	case SC_AS_BLUES: case SC_AS_SLOWBLUES: return FAM_BLUES;
+	case SC_AS_LATIN: case SC_AS_FLAMENCO: return FAM_LATIN;
+	case SC_AS_SKA: return FAM_SKA;
+	case SC_AS_TRAP: case SC_AS_DRILL: case SC_AS_DUBSTEP: return FAM_TRAP;
+	case SC_AS_MARCH: case SC_AS_FANFARE: return FAM_MARCH;
+	case SC_AS_AMBIENT: return FAM_PAD;
+	case SC_AS_AFROBEAT: return FAM_AFRO;
+	case SC_AS_TANGO: return FAM_TANGO;
+	default: return FAM_16;
+	}
+}
+
+static void PaintCell(const PatCell* c, StylePat* s)
+{
+	if (!c || !s) return;
+	for (int i = 0; i < DV_COUNT; i++) s->drum[i] = 0;
+	s->div = c->div ? c->div : 16;
+	if (s->div > 16) s->div = 16;
+	s->drum[DV_KICK] = Bits(c->k);
+	s->drum[DV_SNARE] = Bits(c->sd);
+	s->drum[DV_HAT] = Bits(c->hh);
+	s->drum[DV_OHAT] = Bits(c->oh);
+	s->drum[DV_RIDE] = Bits(c->rd);
+	s->drum[DV_CLAP] = Bits(c->cp);
+	s->drum[DV_RIM] = Bits(c->rm);
+	Bass(s->bass, c->bs);
+	s->chord = Bits(c->ch);
+	s->chordSlots = c->slots;
+	s->swing = c->swing;
+	s->arp = c->arp;
+	s->bend = c->bend;
+	if (c->power) s->power = 1;
+}
+
+static void ApplyThemePattern(int id, int var, StylePat* s)
+{
+	if (var < 0) var = 0;
+	var %= 3;
+	int fam = StyleFam(id);
+	if (fam < 0 || fam >= FAM_COUNT) fam = FAM_16;
+	PaintCell(&kCell[fam * 3 + var], s);
+	if (id == SC_AS_METAL || id == SC_AS_PUNK || id == SC_AS_ROCK || id == SC_AS_GRUNGE
+		|| id == SC_AS_SURF || id == SC_AS_SLOWROCK || id == SC_AS_DRUMSOLO)
+		s->power = 1;
+	if (id == SC_AS_ENKA || id == SC_AS_BALLAD || id == SC_AS_RNB || id == SC_AS_NEOSOUL
+		|| id == SC_AS_CITYPOP || id == SC_AS_KAYOKYOKU || id == SC_AS_BLUES || id == SC_AS_SLOWBLUES
+		|| id == SC_AS_GOSPEL || id == SC_AS_TRAP || id == SC_AS_DRILL || id == SC_AS_ANISON)
+		s->bend = 1;
+	if (id == SC_AS_GAME || id == SC_AS_CHIPTUNE) s->arp = 1;
+	if (id == SC_AS_FANFARE) s->drum[DV_CRASH] = 1;
+}
+
+static void LoadStyle(int id, int var, StylePat* s)
 {
 	memset(s, 0, sizeof(*s));
 	s->div = 16;
@@ -761,6 +962,7 @@ static void LoadStyle(int id, StylePat* s)
 		s->progChord = 29;
 		break;
 	}
+	ApplyThemePattern(id, var, s);
 }
 
 static int TonicPc(int keySig); /* 下で定義。進行記述用に前方宣言。 */
@@ -1067,6 +1269,31 @@ static int FmPad(int voice)
 	case DV_TOM: return 4;
 	default: return 5;
 	}
+}
+
+static void PlaceScoop(Ctx* c, int ch, uint32_t tick)
+{
+	if (!c || ch < 0) return;
+	uint8_t kind = c->isFm ? SC_EV_FM_PITCH : SC_EV_PITCH;
+	Push(c, tick, ch, kind, 52, 0, 0, 0);
+	uint32_t back = tick + 8;
+	Push(c, back, ch, kind, 64, 0, 0, 0);
+}
+
+static int DrumVel(int voice, int slot, int introSoft)
+{
+	int accent = ((slot % 4) == 0);
+	int vel;
+	if (voice == DV_HAT) vel = accent ? 84 : ((slot & 1) ? 46 : 66);
+	else if (voice == DV_OHAT || voice == DV_CRASH) vel = 108;
+	else if (voice == DV_SNARE || voice == DV_CLAP) vel = accent ? 118 : 98;
+	else if (voice == DV_KICK) vel = (slot == 0) ? 122 : (accent ? 108 : 90);
+	else if (voice == DV_RIM) vel = accent ? 80 : 64;
+	else vel = accent ? 100 : 78;
+	if (introSoft) vel -= 16;
+	if (vel < 34) vel = 34;
+	if (vel > 127) vel = 127;
+	return vel;
 }
 
 static void PlaceDrum(Ctx* c, int ch, uint32_t tick, int voice, int vel, int dur)
@@ -1403,13 +1630,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		out->chDrum = out->chBass = out->chChord = out->chHarm = -1;
 	}
 	if (!ev || !evCount || !opt || evMax <= 0) return SC_AE_NONOTES;
-	const int totalNotes = ScAutoArrangeCountNotes(ev, *evCount);
 	const int explicitTargets = opt->targetMask != 0;
-	/* 0 音でも、対象パート指定か本体小節数があればゼロから生成する。 */
-	if (totalNotes <= 0 && !explicitTargets && opt->genBars <= 0) {
-		if (out) { out->err = SC_AE_NONOTES; FillMsg(out); }
-		return SC_AE_NONOTES;
-	}
+	const int totalNotes = ScAutoArrangeCountNotes(ev, *evCount);
 	Rng rng;
 	{
 		uint32_t seed = (uint32_t)opt->seed;
@@ -1599,10 +1821,31 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		drumChs[0] = chDrum; drumChSlot[0] = 0; nDrum = 1;
 	}
 
+	/* 伴奏はメロディパートには書かない。メロディの強弱・ハモリは別ジョブ。 */
+	if (melodyCh >= 0) {
+		int w = 0;
+		for (int i = 0; i < nDrum; i++) {
+			if (drumChs[i] == melodyCh) continue;
+			drumChs[w] = drumChs[i];
+			drumChSlot[w] = drumChSlot[i];
+			w++;
+		}
+		nDrum = w;
+		chDrum = nDrum > 0 ? drumChs[0] : -1;
+		if (chBass == melodyCh) chBass = -1;
+		if (chChord == melodyCh) chChord = -1;
+		if (chHarm == melodyCh) chHarm = -1;
+		int we = 0;
+		for (int i = 0; i < nExtra; i++)
+			if (extraCh[i] != melodyCh) extraCh[we++] = extraCh[i];
+		nExtra = we;
+		if (melodyCh >= 0 && melodyCh < 32)
+			deleteMask &= ~(1u << melodyCh);
+	}
+
 	int canLayer = (nDrum > 0 || chBass >= 0 || chChord >= 0 || nExtra > 0);
 	int canMel = ((opt->jobs & SC_AJ_MEL_VOL) && melodyCh >= 0)
-		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0 && (chHarm >= 0 || opt->pitchMode >= 2))
-		|| (explicitTargets && melodyCh >= 0);
+		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0);
 	if (!canLayer && !canMel) {
 		if (out) { out->err = SC_AE_EMPTY; FillMsg(out); }
 		return SC_AE_EMPTY;
@@ -1616,24 +1859,46 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 
 	int defN = opt->defMeterN > 0 ? opt->defMeterN : 4;
 	int defD = opt->defMeterD > 0 ? opt->defMeterD : 4;
-	uint32_t introTicks = 0;
+	uint32_t introTicks = 0, introT0 = 0, introT1 = 0;
 	if (doIntro) {
+		/* イントロはメロディの頭の小節の直前。そこから後ろへずらす。 */
+		uint32_t melAt = 0xFFFFFFFFu;
+		for (int i = 0; i < *evCount; i++) {
+			if (!IsNoteKind(ev[i].kind)) continue;
+			if (DrumChannel(ev, *evCount, ev[i].ch, isFm)) continue;
+			if (melodyCh >= 0 && (int)ev[i].ch != melodyCh) continue;
+			if (ev[i].tick < melAt) melAt = ev[i].tick;
+		}
+		if (melAt == 0xFFFFFFFFu) {
+			for (int i = 0; i < *evCount; i++) {
+				if (!IsNoteKind(ev[i].kind)) continue;
+				if (DrumChannel(ev, *evCount, ev[i].ch, isFm)) continue;
+				if (ev[i].tick < melAt) melAt = ev[i].tick;
+			}
+		}
+		uint32_t ins = 0;
+		if (melAt != 0xFFFFFFFFu)
+			ins = ScStaffSnapToBarTick(ev, *evCount, melAt, defN, defD);
 		int nM = defN, dM = defD;
-		ScStaffMeterAtTick(ev, *evCount, 0, defN, defD, &nM, &dM);
+		ScStaffMeterAtTick(ev, *evCount, ins, defN, defD, &nM, &dM);
 		int bl = ScStaffMeterTicksPerMeasure(nM, dM);
 		introTicks = (uint32_t)(opt->introBars * bl);
+		introT0 = ins;
+		introT1 = ins + introTicks;
 		int n0 = *evCount;
-		ShiftFrom(ev, n0, 0, introTicks);
-		Ctx tmp = { ev, evCount, evMax, isFm, 0, 0, opt->jobs };
-		for (int i = 0; i < n0; i++) {
-			if (ev[i].tick == introTicks && IsSetupKind(ev[i].kind)) {
-				ScEvent cpy = ev[i];
-				cpy.tick = 0;
-				if (!Push(&tmp, 0, cpy.ch, cpy.kind, cpy.a, cpy.b, cpy.c, cpy.dur)) {
-					if (out) { out->err = SC_AE_OVERFLOW; FillMsg(out); }
-					return SC_AE_OVERFLOW;
+		ShiftFrom(ev, n0, ins, introTicks);
+		if (ins == 0) {
+			Ctx tmp = { ev, evCount, evMax, isFm, 0, 0, opt->jobs };
+			for (int i = 0; i < n0; i++) {
+				if (ev[i].tick == introTicks && IsSetupKind(ev[i].kind)) {
+					ScEvent cpy = ev[i];
+					cpy.tick = 0;
+					if (!Push(&tmp, 0, cpy.ch, cpy.kind, cpy.a, cpy.b, cpy.c, cpy.dur)) {
+						if (out) { out->err = SC_AE_OVERFLOW; FillMsg(out); }
+						return SC_AE_OVERFLOW;
+					}
+					ev[*evCount - 1].seq = cpy.seq;
 				}
-				ev[*evCount - 1].seq = cpy.seq;
 			}
 		}
 	}
@@ -1651,13 +1916,14 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		if (ev[i].tick < lead0) lead0 = ev[i].tick;
 		if (end > lead1) lead1 = end;
 	}
-	if (lead0 == 0xFFFFFFFFu) { lead0 = introTicks; lead1 = noteEnd; }
+	if (lead0 == 0xFFFFFFFFu) { lead0 = introT1; lead1 = noteEnd; }
 	if (noteEnd == 0) {
+		/* 音符が無いときは C4（主音）が置いてあるものとして、指定小節ぶん書く。 */
 		int gb = opt->genBars > 0 ? opt->genBars : 16;
-		noteEnd = introTicks + (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
-		lead0 = introTicks; lead1 = noteEnd;
+		noteEnd = introT1 + (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
+		lead0 = introT1; lead1 = noteEnd;
 	} else if (opt->genBars > 0) {
-		uint32_t want = introTicks + (uint32_t)(opt->genBars * ScStaffMeterTicksPerMeasure(defN, defD));
+		uint32_t want = introT1 + (uint32_t)(opt->genBars * ScStaffMeterTicksPerMeasure(defN, defD));
 		if (noteEnd < want) noteEnd = want;
 		if (lead1 < want) lead1 = want;
 	}
@@ -1739,7 +2005,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			AnalyzeChord(ev, *evCount, isFm, chordSrc, melodyCh, t, t + (uint32_t)bl, opt->defKey, prevR, prevT, &b.root, &b.type, &voiced);
 			b.voiced = voiced;
 			prevR = b.root; prevT = b.type;
-			if (introTicks && t < introTicks) b.section = SEC_INTRO;
+			if (introT1 > introT0 && t >= introT0 && t < introT1) b.section = SEC_INTRO;
 			else if (breakT0 != 0xFFFFFFFFu && t >= breakT0 && t < breakT1) b.section = SEC_BREAK;
 			else if (t >= endT0) b.section = SEC_END;
 			else if (naturalBreak && doBreak && t >= lead0 && t + (uint32_t)bl <= lead1
@@ -1770,6 +2036,10 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					bars[i].type = tonicType;
 				}
 			}
+		} else {
+			/* 無音。C4（調号の主音）が入力されているものとしてコードを置く。 */
+			tonic = TonicPc(opt->defKey);
+			tonicType = CH_MAJ;
 		}
 		for (int i = nBars - 1; i >= 0; i--) {
 			if (bars[i].root < 0 && i + 1 < nBars) {
@@ -1812,6 +2082,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			}
 		}
 	}
+	if (nBars > 0) {
+		int pc = TonicPc(opt->defKey);
+		for (int i = 0; i < nBars; i++) {
+			if (bars[i].root < 0) { bars[i].root = pc; bars[i].type = CH_MAJ; }
+		}
+	}
 
 	/* 書き換え: 対象 ch（メロディ役以外）の既存ノートを先に消す。 */
 	int removedNotes = 0;
@@ -1835,17 +2111,18 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			if (opt->ui->solo[i]) anySolo = 1;
 	}
 	int ctxJobs = opt->jobs;
-	if (explicitTargets && melodyCh >= 0) ctxJobs |= (SC_AJ_MEL_VOL | SC_AJ_MEL_PITCH);
 	Ctx ctx = { ev, evCount, evMax, isFm, 0, 0, ctxJobs };
 	StylePat st;
-	LoadStyle(opt->style, &st);
+	int patVar = opt->patVar;
+	if (patVar < 0 || patVar > 2) patVar = 0;
+	if (!opt->seed) patVar = (int)(RngNext(&rng) % 3u);
+	LoadStyle(opt->style, patVar, &st);
 	for (int i = 0; i < nDrum; i++) EnsureDrum(&ctx, opt->ui, drumChs[i], drumChSlot[i], anySolo);
 	if (chBass >= 0) EnsureMelodic(&ctx, opt->ui, chBass, 0, st.progBass, anySolo);
 	if (chChord >= 0) EnsureMelodic(&ctx, opt->ui, chChord, 1, st.progChord, anySolo);
 	if (chHarm >= 0) EnsureMelodic(&ctx, opt->ui, chHarm, 2, st.progChord, anySolo);
 	for (int i = 0; i < nExtra; i++) EnsureMelodic(&ctx, opt->ui, extraCh[i], 1, st.progChord, anySolo);
 
-	int bodyIx = 0;
 	int nEmit = *evCount;
 	for (int bi = 0; bi < nBars && !ctx.overflow; bi++) {
 		const BarInfo& b = bars[bi];
@@ -1859,28 +2136,26 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		int chordMask = st.chord;
 		int chordSlots = st.chordSlots;
 		int skipChord = 0;
+		const uint16_t beatMask = (uint16_t)(div >= 16 ? 0x1111 : 0x0111);
 		if (b.section == SEC_INTRO && !last) {
 			drm[DV_SNARE] = 0; drm[DV_TOM] = 0; drm[DV_CRASH] = 0; drm[DV_CLAP] = 0; drm[DV_OHAT] = 0;
-			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x5555);
-			skipChord = 1;
-		} else if (b.section == SEC_INTRO && last) {
-			drm[DV_SNARE] = (uint16_t)(drm[DV_SNARE] | (div >= 16 ? 0xF000 : 0x0E00));
-			drm[DV_CRASH] = (uint16_t)(drm[DV_CRASH] | 1);
-		} else if (b.section == SEC_BREAK) {
-			drm[DV_KICK] = (uint16_t)(div >= 16 ? 0x0101 : 0x0041);
-			drm[DV_SNARE] = (uint16_t)(div >= 16 ? 0x1010 : 0x0208);
-			drm[DV_HAT] = (uint16_t)(div >= 16 ? 0x5555 : 0x0AAA);
-			drm[DV_OHAT] = drm[DV_RIDE] = drm[DV_CRASH] = drm[DV_TOM] = drm[DV_CLAP] = drm[DV_RIM] = 0;
-			Bass(bass, div >= 16 ? "1.4.2.5.1.4.2.5." : "1.4.2.5.1.4.");
+			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & beatMask);
+			drm[DV_RIDE] = (uint16_t)(drm[DV_RIDE] & beatMask);
+			for (int i = 0; i < 16; i++)
+				if (bass[i] && bass[i] != 1 && bass[i] != 7) bass[i] = 0;
 			chordSlots = 0;
 			chordMask = 1;
+		} else if (b.section == SEC_INTRO && last) {
+			drm[DV_CRASH] = (uint16_t)(drm[DV_CRASH] | 1);
+		} else if (b.section == SEC_BREAK) {
+			for (int v = 0; v < DV_COUNT; v++)
+				drm[v] = (uint16_t)(drm[v] & beatMask);
+			drm[DV_OHAT] = drm[DV_CRASH] = drm[DV_TOM] = 0;
+			for (int i = 0; i < 16; i++)
+				if (bass[i] && bass[i] != 1 && bass[i] != 2 && bass[i] != 7) bass[i] = 0;
 		} else if (b.section == SEC_END && !last) {
-			drm[DV_KICK] = 1;
-			drm[DV_SNARE] = (uint16_t)(div >= 16 ? 0xFFFF : 0x0FFF);
-			drm[DV_HAT] = drm[DV_OHAT] = drm[DV_RIDE] = drm[DV_CRASH] = 0;
-			drm[DV_TOM] = (uint16_t)(div >= 16 ? 0x0F00 : 0x00F0);
-			Bass(bass, div >= 16 ? "1..4..2..5....." : "1..4..2..5..");
-			chordSlots = 0;
+			drm[DV_OHAT] = drm[DV_TOM] = drm[DV_CRASH] = 0;
+			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & (div >= 16 ? 0x5555 : 0x0AAA));
 		} else if (b.section == SEC_END && last) {
 			memset(drm, 0, sizeof(drm));
 			drm[DV_KICK] = 1;
@@ -1889,12 +2164,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			bass[0] = 1;
 			chordSlots = 0;
 			chordMask = 1;
-		} else if (b.section == SEC_BODY && (bodyIx % 4) == 3) {
-			drm[DV_SNARE] = (uint16_t)(drm[DV_SNARE] | (div >= 16 ? 0xF000 : 0x0E00));
 		}
-		/* バリエーション: 本体小節にたまにゴーストや追いキックを足し、毎回同じにしない。 */
-		if (b.section == SEC_BODY && RngRange(&rng, 0, 7) == 0)
-			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (1u << (div >= 16 ? 14 : 10)));
 		int occDrum[8];
 		for (int i = 0; i < nDrum; i++)
 			occDrum[i] = (b.section == SEC_BODY) && BarHas(ev, nEmit, drumChs[i], b.t0, b.t0 + (uint32_t)b.len);
@@ -1910,10 +2180,11 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			if (st.swing && (slot & 1)) tick += (uint32_t)(slotDur / 3);
 			if (tick >= b.t0 + (uint32_t)b.len) continue;
 			uint16_t bit = (uint16_t)(1u << slot);
-			int vel = 78 + ((slot % 4) == 0 ? 28 : (slot & 1) ? -8 : 8);
-			vel += RngRange(&rng, -5, 6); /* ヒューマナイズ */
-			if (vel < 1) vel = 1;
-			if (vel > 127) vel = 127;
+			int vel = ((slot % 4) == 0) ? 104 : 86;
+			vel += RngRange(&rng, -2, 2);
+			if (vel < 40) vel = 40;
+			if (vel > 124) vel = 124;
+			const int introSoft = (b.section == SEC_INTRO && !last);
 			/* 複数ドラム ch: 枠0=本体(キック/スネア/タム/クラップ/リム)、枠1=シンバル系。
 			   1 ch のときは全部そのパートに書く。 */
 			int drumDur = isFm ? 2 : (slotDur > 12 ? 12 : slotDur);
@@ -1928,16 +2199,18 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					}
 					if (v == DV_HAT && (drm[DV_OHAT] & bit)) continue;
 					if (drm[v] & bit)
-						PlaceDrum(&ctx, drumChs[di], tick, v, v == DV_HAT ? vel - 18 : vel, drumDur);
+						PlaceDrum(&ctx, drumChs[di], tick, v, DrumVel(v, slot, introSoft), drumDur);
 				}
 			}
-			if (!occupiedBass && chBass >= 0 && slot < 16 && bass[slot]) {
+			if (!occupiedBass && chBass >= 0 && slot < 16 && bass[slot] && b.root >= 0) {
 				int next = slot + 1;
 				while (next < div && next < 16 && !bass[next]) next++;
 				int span = (next - slot) * slotDur;
 				if (span < slotDur) span = slotDur;
 				if (span > b.len) span = b.len;
-				PlaceNote(&ctx, chBass, tick, BassMidi(b.root, bass[slot], b.type), span, vel, 85);
+				if (st.bend && slot == 0)
+					PlaceScoop(&ctx, chBass, tick);
+				PlaceNote(&ctx, chBass, tick, BassMidi(b.root, SafeDeg(bass[slot]), b.type), span, vel, 85);
 			}
 			if (!skipChord && !occupiedCh && chChord >= 0 && (chordSlots == 0 ? slot == 0 : (chordMask & bit))) {
 				int dur = (chordSlots <= 0) ? (b.len - 2) : chordSlots * slotDur;
@@ -1963,7 +2236,6 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				}
 			}
 		}
-		if (b.section == SEC_BODY) bodyIx++;
 	}
 
 	DecorateMelody(&ctx, melodyCh, chHarm, opt->defKey, bars, nBars, opt->pitchMode);
@@ -1986,6 +2258,26 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		out->usedMask = used;
 		out->err = ctx.overflow ? SC_AE_OVERFLOW : ((ctx.added > 0 || removedNotes > 0) ? SC_AE_OK : SC_AE_EMPTY);
 		FillMsg(out);
+		if ((opt->jobs & (SC_AJ_MEL_VOL | SC_AJ_MEL_PITCH)) && melodyCh < 0) {
+			size_t used = wcslen(out->msg);
+			const wchar_t* extra = LL14(
+				L" メロディのパートは特定できないので、メロディは触っていません。",
+				L" Melody part was not identified, so the melody was left alone.",
+				L" Partie mélodie inconnue, mélodie inchangée.",
+				L" Parte melodica non individuata, melodia invariata.",
+				L" Parte de melodía no identificada, melodía intacta.",
+				L" 멜로디 파트를 특정하지 못해 멜로디는 그대로입니다.",
+				L" 未能判断旋律声部，未改旋律。",
+				L" لم يُعرف جزء اللحن، تُرك اللحن.",
+				L" Партия мелодии не найдена, мелодия не тронута.",
+				L" Melodiestimme unbekannt, Melodie unverändert.",
+				L" Parte da melodia não identificada, melodia intacta.",
+				L" Melodiepartij niet gevonden, melodie ongemoeid.",
+				L" Nie rozpoznano partii melodii, melodia bez zmian.",
+				L" Melodi partisi bulunamadı, melodiye dokunulmadı.");
+			if (extra && used + wcslen(extra) < 255)
+				wcscat_s(out->msg, extra);
+		}
 	}
 	return ctx.overflow ? SC_AE_OVERFLOW : ((ctx.added > 0 || removedNotes > 0) ? SC_AE_OK : SC_AE_EMPTY);
 }

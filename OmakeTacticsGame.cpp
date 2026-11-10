@@ -1596,7 +1596,8 @@ void Game::OnMouseUp(int btn, int x, int y)
 		m_mDown = FALSE; m_dragPan = FALSE; m_previewPanDrag = FALSE;
 		BOOL battleMap = m_screen == SC_BATTLE && !m_showHelp
 			&& (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
-		if (tap && battleMap) {
+		BOOL lookMap = m_screen == SC_BASE && m_mapLook && !m_showHelp;
+		if (tap && (battleMap || lookMap)) {
 			BOOL overUi = FALSE;
 			for (auto& b : m_btnsPrev) if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) overUi = TRUE;
 			if (!overUi) CycleLayer(1);
@@ -1988,7 +1989,7 @@ void Game::OnKey(int vk, BOOL down)
 	case VK_PRIOR: case VK_ADD: case VK_OEM_PLUS: ZoomCam(.88f); break;
 	case VK_NEXT: case VK_SUBTRACT: case VK_OEM_MINUS: ZoomCam(1.14f); break;
 	case 'R': m_camPan = v3(0, 0, 0); break;
-	case 'C': if (battleMap) CycleLayer(m_keyShift ? -1 : 1); break;
+	case 'C': if (battleMap || (m_screen == SC_BASE && m_mapLook)) CycleLayer(m_keyShift ? -1 : 1); break;
 	case VK_TAB:
 		if (m_screen == SC_BATTLE && m_b.nUnits > 0) {
 			int start = m_hoverUnit >= 0 ? m_hoverUnit : m_cur;
@@ -2519,6 +2520,99 @@ void Game::DrawPopups(float)
 	}
 }
 
+static float BannerShine(float t, float start, float span)
+{
+	float p = (t - start) / max(0.08f, span);
+	if (p < 0.f || p > 1.f) return -1.f;
+	return p;
+}
+
+static void DrawSpecialMapBanner(Renderer& r, float screenW, const Banner& b, float y, float px, float pad)
+{
+	float fadeIn = Smooth01(b.t / 0.38f);
+	float fadeOut = b.t < b.life - 2.05f ? 1.f : 1.f - Smooth01((b.t - (b.life - 2.05f)) / 2.05f);
+	float vis = fadeIn * fadeOut;
+	if (vis < 0.02f) return;
+
+	float subPx = px * 0.48f;
+	int n = (int)wcslen(b.s);
+	if (n > 96) n = 96;
+	float widths[96], home[96];
+	float total = 0.f;
+	for (int i = 0; i < n; i++) {
+		wchar_t g[2] = { b.s[i], 0 };
+		widths[i] = r.TextWidth(g, px, 1);
+		if (widths[i] < 0.5f) widths[i] = px * 0.35f;
+		total += widths[i];
+	}
+	float cx = screenW * 0.5f;
+	float cursor = cx - total * 0.5f;
+	for (int i = 0; i < n; i++) {
+		home[i] = cursor + widths[i] * 0.5f;
+		cursor += widths[i];
+	}
+	float sw = b.sub[0] ? r.TextWidth(b.sub, subPx, 0) : 0.f;
+	float bw = max(total, sw) + pad * 2.2f;
+	float bh = px * 1.15f + (b.sub[0] ? subPx * 1.7f : px * 0.35f);
+	float bx = cx - bw * 0.5f;
+	float by = y - px * 0.72f;
+	int cr = b.col & 255, cg = (b.col >> 8) & 255, cb = (b.col >> 16) & 255;
+	int pulse = 170 + (int)(50.f * sinf(b.t * 2.6f));
+	r.HudRectGrad(bx, by, bw, bh,
+		RGBA8(16, 20, 36, Clampi((int)(198.f * vis + 0.5f), 0, 255)),
+		RGBA8(6, 8, 16, Clampi((int)(176.f * vis + 0.5f), 0, 255)));
+	r.HudFrame(bx, by, bw, bh, pad * 0.12f, RGBA8(cr, cg, cb, Clampi((int)(pulse * vis + 0.5f), 0, 255)));
+	r.HudFrame(bx + pad * 0.24f, by + pad * 0.24f, bw - pad * 0.48f, bh - pad * 0.48f, pad * 0.05f,
+		RGBA8(255, 236, 214, Clampi((int)(150.f * vis + 0.5f), 0, 255)));
+
+	auto sweepBar = [&](float start) {
+		float p = BannerShine(b.t, start, 0.62f);
+		if (p < 0.f) return;
+		float barW = bw * 0.20f;
+		float barX = bx - barW + p * (bw + barW * 2.f);
+		float x0 = max(barX, bx);
+		float x1 = min(barX + barW, bx + bw);
+		if (x1 <= x0) return;
+		float peak = 1.f - fabsf(p - 0.5f) * 1.1f;
+		if (peak < 0.f) peak = 0.f;
+		int a = Clampi((int)(118.f * vis * peak + 0.5f), 0, 180);
+		r.HudRectGrad(x0, by + 2.f, x1 - x0, bh - 4.f,
+			RGBA8(255, 252, 238, a),
+			RGBA8(255, 210, 140, a / 3));
+	};
+	sweepBar(0.42f);
+	sweepBar(1.85f);
+
+	for (int i = 0; i < n; i++) {
+		float tIn = b.t - i * 0.055f;
+		float slide = Smooth01(tIn / 0.48f);
+		if (slide < 0.02f) continue;
+		float gx = Lerpf(home[i] - screenW * 0.92f, home[i], slide);
+		float a = vis * slide;
+		wchar_t g[2] = { b.s[i], 0 };
+		r.HudText(g, gx, y, px, b.col, 1, 1, 1, a);
+		float gRel = total > 1.f ? (home[i] - (cx - total * 0.5f)) / total : 0.5f;
+		auto glyphShine = [&](float start) {
+			float p = BannerShine(b.t, start, 0.55f);
+			if (p < 0.f) return;
+			float band = 1.f - Clampf(fabsf(gRel - p) / 0.13f, 0.f, 1.f);
+			band *= band;
+			if (band > 0.06f)
+				r.HudText(g, gx, y, px, RGBA8(255, 255, 255), 1, 1, 0, a * band);
+		};
+		glyphShine(0.42f);
+		glyphShine(1.85f);
+	}
+	if (b.sub[0]) {
+		float tSub = b.t - 0.18f;
+		float slide = Smooth01(tSub / 0.52f);
+		if (slide > 0.02f) {
+			float sx = Lerpf(cx + screenW * 0.92f, cx, slide);
+			r.HudText(b.sub, sx, y + px * 0.85f, subPx, RGBA8(235, 235, 240), 1, 0, 1, vis * slide);
+		}
+	}
+}
+
 void Game::DrawBanners(float)
 {
 	float dt = m_renderDt;
@@ -2533,18 +2627,9 @@ void Game::DrawBanners(float)
 		if (b.style == 1) { y = m_h * .4f; px = U(52); }
 		else if (b.style == 2) { y = stackY + U(16); px = U(16); stackY += U(46); }
 		if (b.style == 0 && b.life >= 4.f) {
-			float subPx = px * 0.48f;
-			float tw = m_r.TextWidth(b.s, px, 1);
-			float sw = b.sub[0] ? m_r.TextWidth(b.sub, subPx, 0) : 0.f;
-			float bw = max(tw, sw) + U(64);
-			float bh = px * 1.15f + (b.sub[0] ? subPx * 1.7f : px * 0.35f);
-			float bx = m_w * 0.5f - bw * 0.5f;
-			float by = y - px * 0.72f;
-			int cr = b.col & 255, cg = (b.col >> 8) & 255, cb = (b.col >> 16) & 255;
-			int pulse = 170 + (int)(50.f * sinf(b.t * 2.6f));
-			m_r.HudRect(bx, by, bw, bh, RGBA8(8, 10, 18, 186));
-			m_r.HudFrame(bx, by, bw, bh, U(3.5f), RGBA8(cr, cg, cb, pulse));
-			m_r.HudFrame(bx + U(7), by + U(7), bw - U(14), bh - U(14), U(1.5f), RGBA8(255, 236, 214, 150));
+			DrawSpecialMapBanner(m_r, (float)m_w, b, y, px, U(29));
+			++i;
+			continue;
 		}
 		DrawMsgLine(m_r, b.s, m_w * .5f, y, px, b.col, b.pat, u, b.pat * 1.3f, 1);
 		if (b.sub[0]) DrawMsgLine(m_r, b.sub, m_w * .5f, y + px * 0.85f, px * 0.48f, RGBA8(235, 235, 240), b.pat, u, b.pat * 1.3f + 0.4f, 0);
@@ -4538,6 +4623,25 @@ void Game::DrawShowcase3D()
 		yaw = m_camYaw;
 		target.x = Clampf(target.x + m_camPan.x, 1.f, (float)MAPN - 2.f);
 		target.z = Clampf(target.z + m_camPan.z, 1.f, (float)MAPN - 2.f);
+		int lx = Clampi((int)floorf(target.x), 0, MAPN - 1);
+		int lz = Clampi((int)floorf(target.z), 0, MAPN - 1);
+		const Cell& lc = m_showMap.At(lx, lz);
+		if (lc.t != T_VOID) {
+			float curY = c.y + m_camPan.y;
+			int bestL = 0;
+			float bestDy = 1e9f;
+			int nL = CellLayN(lc);
+			for (int L = 0; L < nL; L++) {
+				int tr = LayerTr(lc, L);
+				if (TerrainInfo(tr).costFoot >= 99 && !TerrainInfo(tr).flyOk) continue;
+				float dy = fabsf(m_showMap.WalkY(lx, lz, L) - curY);
+				if (dy < bestDy) { bestDy = dy; bestL = L; }
+			}
+			m_cLayer = bestL;
+			float wantOffY = m_showMap.WalkY(lx, lz, bestL) - c.y;
+			m_camPan.y = Lerpf(m_camPan.y, wantOffY, Clampf(m_renderDt * 8.f, 0.f, 1.f));
+		}
+		target.y = c.y + m_camPan.y + .8f;
 	}
 	ApplyZoomHold();
 	SetupCamera(target, yaw, m_camPitch, m_camDist, .7f);
@@ -4546,7 +4650,17 @@ void Game::DrawShowcase3D()
 	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, target, 22.f);
-	m_r.SetFadeAbove(-1);
+	if (m_screen == SC_BASE && m_mapLook) {
+		int lx = Clampi((int)floorf(target.x), 0, MAPN - 1);
+		int lz = Clampi((int)floorf(target.z), 0, MAPN - 1);
+		int fadeAbove = -1;
+		for (int dz = -1; dz <= 1 && fadeAbove < 0; dz++) for (int dx = -1; dx <= 1; dx++) {
+			int xx = lx + dx, zz = lz + dz;
+			if (!Map::In(xx, zz)) continue;
+			if ((int)m_showMap.At(xx, zz).nLay > m_cLayer + 1) fadeAbove = m_cLayer;
+		}
+		m_r.SetFadeAbove(fadeAbove, lx, lz);
+	} else m_r.SetFadeAbove(-1);
 	float faceYaw[MAX_PARTY];
 	float fx = 32.f, fz = 32.f;
 	if (m_showMap.nE > 0) { fx = m_showMap.eStartX[0] + .5f; fz = m_showMap.eStartZ[0] + .5f; }
@@ -7411,6 +7525,77 @@ void Game::DrawBaseUi()
 		float hw = (float)m_w - hx - 16.f;
 		if (hw > 80.f)
 			m_r.HudTextBox(TT(TX_MAP_LOOK_HINT), hx, by, hw, bh, min(U(14.f), bh * .36f), RGBA8(236, 236, 240));
+		{
+			float ms = min(U(176.f), min((float)m_w, (float)m_h) * 0.24f);
+			float mx = (float)m_w - ms - max(12.f, U(16.f));
+			float my = max(12.f, U(16.f));
+			DrawShowMinimap(mx, my, ms);
+			int nL = m_r.MinimapLayers();
+			if (nL > 1) {
+				wchar_t ltxt[32];
+				swprintf_s(ltxt, L"L%d / %d", Clampi(m_cLayer + 1, 1, nL), nL);
+				m_r.HudText(ltxt, mx + U(28), my + U(14), U(14), RGBA8(255, 226, 150), 1, 1);
+			}
+		}
+		if (m_click && !m_dragPan) {
+			m_click = FALSE;
+			V3 org, dir;
+			m_r.ScreenRay((float)m_clickX, (float)m_clickY, org, dir);
+			V3 c = v3(32, 0, 32);
+			if (m_showN > 0) {
+				c = v3(0, 0, 0);
+				for (int i = 0; i < m_showN; i++) c = c + m_showPos[i];
+				c = c * (1.f / m_showN);
+			} else if (m_showMap.nP > 0) {
+				int px = m_showMap.pStartX[0], pz = m_showMap.pStartZ[0];
+				c = v3(px + .5f, m_showMap.StandY(px, pz), pz + .5f);
+			}
+			float curX = Clampf(c.x + m_camPan.x, 1.f, (float)MAPN - 2.f);
+			float curZ = Clampf(c.z + m_camPan.z, 1.f, (float)MAPN - 2.f);
+			int curIx = Clampi((int)floorf(curX), 0, MAPN - 1), curIz = Clampi((int)floorf(curZ), 0, MAPN - 1);
+			int curH = LayerHt(m_showMap.At(curIx, curIz), m_cLayer);
+			int bx2 = -1, bz2 = -1, bl2 = 0;
+			float bestT = 1e9f;
+			float hlen = sqrtf(dir.x * dir.x + dir.z * dir.z);
+			float dt = hlen > 0.15f ? min(0.28f, 0.24f / hlen) : 0.24f;
+			int prevX = -9999, prevZ = -9999;
+			for (float t = 0.05f; t < 260.f; t += dt) {
+				V3 p = org + dir * t;
+				if (p.y < -4.f && dir.y <= 0.f) break;
+				int ix = (int)floorf(p.x), iz = (int)floorf(p.z);
+				if (!Map::In(ix, iz)) { prevX = prevZ = -9999; continue; }
+				if (ix == prevX && iz == prevZ) continue;
+				prevX = ix; prevZ = iz;
+				const Cell& mc = m_showMap.At(ix, iz);
+				if (mc.t == T_VOID) continue;
+				int nL = CellLayN(mc);
+				for (int L = 0; L < nL; L++) {
+					float y = m_showMap.WalkY(ix, iz, L);
+					if (p.y <= y + 0.35f && p.y >= y - 0.85f && t < bestT) {
+						bestT = t; bx2 = ix; bz2 = iz; bl2 = L;
+					}
+				}
+			}
+			if (bx2 >= 0) {
+				const Cell& picked = m_showMap.At(bx2, bz2);
+				int nL = CellLayN(picked);
+				int bestL = bl2;
+				if (bx2 == curIx && bz2 == curIz && nL >= 2) {
+					bestL = (m_cLayer + 1) % nL;
+				} else if (nL >= 2) {
+					int bestDh = 99999;
+					for (int L = 0; L < nL; L++) {
+						int dh = abs(LayerHt(picked, L) - curH);
+						if (dh < bestDh) { bestDh = dh; bestL = L; }
+					}
+				}
+				m_cLayer = bestL;
+				m_camPan.x = (bx2 + 0.5f) - c.x;
+				m_camPan.z = (bz2 + 0.5f) - c.z;
+				m_camPan.y = m_showMap.WalkY(bx2, bz2, bestL) - c.y;
+				TacSfx(TS_CURSOR);
+			}
+		}
 		return;
 	}
 	if (!m_homeUi) return;
@@ -7782,6 +7967,9 @@ void Game::DrawBaseUi()
 			m_mapLook = 1;
 			m_camYaw = m_camYawGoal = m_showYaw;
 			m_camPan = v3(0, 0, 0);
+			m_cLayer = 0;
+			if (m_showMap.nP > 0 && Map::In(m_showMap.pStartX[0], m_showMap.pStartZ[0]))
+				m_cLayer = max(0, CellLayN(m_showMap.At(m_showMap.pStartX[0], m_showMap.pStartZ[0])) - 1);
 			if (m_camPitch < .2f || m_camPitch > 1.4f) m_camPitch = .55f;
 			return;
 		}
