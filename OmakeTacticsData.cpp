@@ -18,6 +18,14 @@ static unsigned char g_tacArena[TAC_ARENA];
 static size_t g_tacUsed = 0;
 static int g_tacBad = 0;
 
+// 層付き BFS の作業領域。関数ごとの static [LAY_N][MAPN][MAPN] を重ねない。
+enum { LAY_Q = MAPN * MAPN * LAY_N };
+static BYTE g_laySeen[LAY_N][MAPN][MAPN];
+static short g_layDist[LAY_N][MAPN][MAPN];
+static short g_stepDist[LAY_N][MAPN][MAPN];
+static int g_layQx[LAY_Q], g_layQz[LAY_Q], g_layQL[LAY_Q], g_layQd[LAY_Q], g_layNext[LAY_Q];
+static void ClearDecks(Cell& c);
+
 // 起動後の読み込みスレッドと描画が、同じ arena から同時に切り出す。
 static CRITICAL_SECTION g_arenaCs[3];
 static volatile LONG g_arenaOnce = 0;
@@ -361,43 +369,54 @@ float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int la
 {
 	if (!Map::In(cx, cz)) return 0.f;
 	float ySelf = VisRaw(m, cx, cz, kind, layer);
-	int hSelf = LayerHt(m.At(cx, cz), kind == 2 ? layer : 0);
 	float u = px - 0.5f, v = pz - 0.5f;
 	int i = (int)floorf(u), j = (int)floorf(v);
 	float fu = Curve01(u - (float)i), fv = Curve01(v - (float)j);
 	int sx[4] = { i, i + 1, i, i + 1 };
 	int sz[4] = { j, j, j + 1, j + 1 };
-	float ys[4], acc = 0.f;
+	float ys[4];
 	int ok[4], hold[4], n = 0;
+	const float kBlendY = kHStep + 0.08f;
 	for (int k = 0; k < 4; k++) {
 		ok[k] = VisOk(m, sx[k], sz[k], kind, layer);
 		hold[k] = 0;
 		if ((kind == 0 || kind == 2) && Map::In(sx[k], sz[k]) && m.At(sx[k], sz[k]).t != T_VOID) {
 			const Cell& nb = m.At(sx[k], sz[k]);
-			int nL = CellLayN(nb), bestL = -1, bestDh = 9999;
+			int nL = CellLayN(nb), bestL = -1;
+			float bestDy = 1e8f;
 			for (int NL = 0; NL < nL; NL++) {
-				int dh = abs(LayerHt(nb, NL) - hSelf);
-				if (dh < bestDh) { bestDh = dh; bestL = NL; }
+				if (kind == 0 && NL != 0) continue;
+				float yN = (NL == 0 && kind == 0) ? VisGroundY(m, sx[k], sz[k]) : VisDeckY(m, sx[k], sz[k], NL);
+				float dy = fabsf(yN - ySelf);
+				if (dy < bestDy) { bestDy = dy; bestL = NL; }
 			}
-			if (bestL >= 0 && bestDh <= 3) {
-				ys[k] = bestL == 0 && kind == 0 ? VisGroundY(m, sx[k], sz[k]) : VisDeckY(m, sx[k], sz[k], bestL);
-				acc += ys[k];
-				n++;
-			} else if (kind == 0 && ok[k] && hSelf <= MAXH && nb.h <= MAXH) {
-				ys[k] = VisRaw(m, sx[k], sz[k], kind, layer);
-				acc += ys[k];
+			if (bestL >= 0 && bestDy <= kBlendY) {
+				ys[k] = (bestL == 0 && kind == 0) ? VisGroundY(m, sx[k], sz[k]) : VisDeckY(m, sx[k], sz[k], bestL);
 				n++;
 			} else hold[k] = 1;
 		} else if (ok[k]) {
-			ys[k] = VisRaw(m, sx[k], sz[k], kind, layer);
-			acc += ys[k];
-			n++;
+			float yN = VisRaw(m, sx[k], sz[k], kind, layer);
+			if (fabsf(yN - ySelf) <= kBlendY) {
+				ys[k] = yN;
+				n++;
+			} else hold[k] = 1;
 		} else hold[k] = 1;
 	}
 	if (!n) return ySelf;
-	float fill = acc / (float)n;
-	for (int k = 0; k < 4; k++) if (hold[k]) ys[k] = fill;
-	return Lerpf(Lerpf(ys[0], ys[1], fu), Lerpf(ys[2], ys[3], fu), fv);
+	for (int k = 0; k < 4; k++) if (hold[k]) ys[k] = ySelf;
+	float blended = Lerpf(Lerpf(ys[0], ys[1], fu), Lerpf(ys[2], ys[3], fu), fv);
+	float lx = px - (float)cx - 0.5f;
+	float lz = pz - (float)cz - 0.5f;
+	const float plat = 0.22f;
+	auto edge = [&](float d) -> float {
+		float a = fabsf(d);
+		if (a <= plat) return 0.f;
+		return Curve01(Clampf((a - plat) / (0.5f - plat), 0.f, 1.f));
+	};
+	float w = edge(lx);
+	float wz = edge(lz);
+	if (wz > w) w = wz;
+	return Lerpf(ySelf, blended, w);
 }
 
 // ---- 値ノイズ
@@ -593,39 +612,36 @@ static int CarveRoad(Map& m, int sx, int sz, int tx, int tz, int* px, int* pz, i
 static bool FootReachable(const Map& m, int sx, int sz, int tx, int tz)
 {
 	if (!Map::In(sx, sz) || !Map::In(tx, tz)) return false;
-	static BYTE seen[LAY_N][MAPN][MAPN];
-	memset(seen, 0, sizeof(seen));
-	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N];
+	memset(g_laySeen, 0, sizeof(g_laySeen));
 	int qh = 0, qt = 0;
 	for (int L = 0; L < CellLayN(m.c[sz][sx]); L++) {
 		int tr = LayerTr(m.c[sz][sx], L);
 		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
-		seen[L][sz][sx] = 1;
-		qx[qt] = sx; qz[qt] = sz; qL[qt] = L; qt++;
+		g_laySeen[L][sz][sx] = 1;
+		g_layQx[qt] = sx; g_layQz[qt] = sz; g_layQL[qt] = L; qt++;
 	}
 	if (qt == 0 && FootPassable(m.c[sz][sx].t)) {
-		seen[0][sz][sx] = 1;
-		qx[qt] = sx; qz[qt] = sz; qL[qt] = 0; qt++;
+		g_laySeen[0][sz][sx] = 1;
+		g_layQx[qt] = sx; g_layQz[qt] = sz; g_layQL[qt] = 0; qt++;
 	}
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	while (qh < qt) {
-		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
 		if (x == tx && z == tz) return true;
 		int h = LayerHt(m.c[z][x], L);
-		int fTr = LayerTr(m.c[z][x], L);
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
 			if (!Map::In(nx, nz)) continue;
 			const Cell& t = m.c[nz][nx];
 			int nL = CellLayN(t);
 			for (int NL = 0; NL < nL; NL++) {
-				if (seen[NL][nz][nx]) continue;
+				if (g_laySeen[NL][nz][nx]) continue;
 				int tTr = LayerTr(t, NL);
 				if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
-				bool wet = (fTr == T_LAVA || tTr == T_LAVA || fTr == T_WATER || tTr == T_WATER);
-				if (!wet && abs(LayerHt(t, NL) - h) > 2) continue;
-				seen[NL][nz][nx] = 1;
-				qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qt++;
+				// 水・溶岩でも滝の段差は越えない。川面のさざ波だけ通す。
+				if (abs(LayerHt(t, NL) - h) > 2) continue;
+				g_laySeen[NL][nz][nx] = 1;
+				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 			}
 		}
 	}
@@ -744,23 +760,59 @@ static void OpenStandPads(Map& m)
 	}
 }
 
-	static void PickDeploy(Map& m, int ax, int az, int* outX, int* outZ, int want, int spacing, const BYTE (*taken)[MAPN])
+static int CellStandH(const Map& m, int x, int z, int prefH)
 {
-	static BYTE seen[LAY_N][MAPN][MAPN];
-	memset(seen, 0, sizeof(seen));
-	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N];
+	if (!Map::In(x, z)) return prefH;
+	const Cell& c = m.c[z][x];
+	int n = CellLayN(c), bestH = (int)c.h, bestD = 99999;
+	for (int L = 0; L < n; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+		int h = LayerHt(c, L);
+		int d = (prefH < 0) ? L : abs(h - prefH);
+		if (d < bestD) { bestD = d; bestH = h; }
+	}
+	return bestH;
+}
+
+	static void PickDeploy(Map& m, int ax, int az, int* outX, int* outZ, int want, int spacing, const BYTE (*taken)[MAPN], int prefH = -1)
+{
+	memset(g_laySeen, 0, sizeof(g_laySeen));
 	int qh = 0, qt = 0, got = 0;
 	for (int L = 0; L < CellLayN(m.c[az][ax]); L++) {
 		int tr = LayerTr(m.c[az][ax], L);
 		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
-		qx[qt] = ax; qz[qt] = az; qL[qt] = L; qt++; seen[L][az][ax] = 1;
+		if (prefH >= 0 && abs(LayerHt(m.c[az][ax], L) - prefH) > 3) continue;
+		g_layQx[qt] = ax; g_layQz[qt] = az; g_layQL[qt] = L; qt++; g_laySeen[L][az][ax] = 1;
+	}
+	if (qt == 0 && prefH >= 0) {
+		for (int rad = 1; rad <= 10 && qt == 0; rad++) {
+			for (int dz = -rad; dz <= rad && qt == 0; dz++) for (int dx = -rad; dx <= rad && qt == 0; dx++) {
+				if (max(abs(dx), abs(dz)) != rad) continue;
+				int nx = ax + dx, nz = az + dz;
+				if (!Map::In(nx, nz)) continue;
+				int nL = CellLayN(m.c[nz][nx]);
+				for (int L = 0; L < nL; L++) {
+					int tr = LayerTr(m.c[nz][nx], L);
+					if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+					if (abs(LayerHt(m.c[nz][nx], L) - prefH) > 3) continue;
+					g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = L; qt++;
+					g_laySeen[L][nz][nx] = 1;
+					break;
+				}
+			}
+		}
 	}
 	if (qt == 0 && FootPassable(m.c[az][ax].t)) {
-		qx[qt] = ax; qz[qt] = az; qL[qt] = 0; qt++; seen[0][az][ax] = 1;
+		g_layQx[qt] = ax; g_layQz[qt] = az; g_layQL[qt] = 0; qt++; g_laySeen[0][az][ax] = 1;
+	}
+	if (qt == 0) {
+		for (int i = 0; i < want; i++) { outX[i] = ax; outZ[i] = az; }
+		return;
 	}
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	while (qh < qt && got < want) {
-		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
 		const Cell& c = m.c[z][x];
 		int tr = LayerTr(c, L);
 		bool ok = TerrainInfo(tr).costFoot < 99 && tr != T_VOID && tr != T_CHASM && !(taken && taken[z][x]);
@@ -774,17 +826,21 @@ static void OpenStandPads(Map& m)
 			const Cell& t = m.c[nz][nx];
 			int nL = CellLayN(t);
 			for (int NL = 0; NL < nL; NL++) {
-				if (seen[NL][nz][nx]) continue;
+				if (g_laySeen[NL][nz][nx]) continue;
 				int tTr = LayerTr(t, NL);
 				if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
-				bool wet = (tr == T_LAVA || tTr == T_LAVA || tr == T_WATER || tTr == T_WATER);
-				if (!wet && abs(LayerHt(t, NL) - h) > 3) continue;
-				seen[NL][nz][nx] = 1;
-				qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qt++;
+				if (abs(LayerHt(t, NL) - h) > 3) continue;
+				if (prefH >= 0 && abs(LayerHt(t, NL) - prefH) > 4) continue;
+				g_laySeen[NL][nz][nx] = 1;
+				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 			}
 		}
 	}
-	for (int i = got; i < want; i++) { outX[i] = outX[got ? i % got : 0]; outZ[i] = outZ[got ? i % got : 0]; }
+	if (got <= 0) {
+		for (int i = 0; i < want; i++) { outX[i] = ax; outZ[i] = az; }
+		return;
+	}
+	for (int i = got; i < want; i++) { outX[i] = outX[i % got]; outZ[i] = outZ[i % got]; }
 }
 
 static int MapSpan(int stage)
@@ -983,6 +1039,7 @@ static bool ShapeInside(int kind, float x, float y)
 // 外形。螺旋と固定図は使わない。後段が角を埋め戻しても、最後にここへ戻す。
 static BYTE gShape[MAPN][MAPN];
 static int gShapeOn = 0;
+static int gGenSpiral = 0;
 
 // 小さい欠けは捨て、残った島は消さずに一番大きい島へ3マス幅でつなぐ。
 static void KeepLargestMask(BYTE mask[MAPN][MAPN])
@@ -1100,7 +1157,7 @@ static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 		if (mask[z][x]) continue;
 		Cell& c = m.c[z][x];
 		c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
-		c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0;
+		ClearDecks(c);
 	}
 	memcpy(gShape, mask, sizeof(gShape));
 	gShapeOn = 1;
@@ -1182,14 +1239,20 @@ static void ReapplyShape(Map& m)
 		if (gShape[z][x]) continue;
 		Cell& c = m.c[z][x];
 		c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
-		c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0; c.t3 = 0; c.h3 = 0; c.t4 = 0; c.h4 = 0;
+		ClearDecks(c);
 	}
 }
 
+static void ClearDecks(Cell& c)
+{
+	c.nLay = 0;
+	memset(c.tLay, 0, sizeof(c.tLay));
+	memset(c.hLay, 0, sizeof(c.hLay));
+}
 static void WipeCell(Cell& c)
 {
 	c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
-	c.nLay = 0; c.t1 = 0; c.h1 = 0; c.t2 = 0; c.h2 = 0; c.t3 = 0; c.h3 = 0; c.t4 = 0; c.h4 = 0;
+	ClearDecks(c);
 }
 
 static int GroundWalk(const Cell& c)
@@ -1296,6 +1359,7 @@ static int CellStand(const Cell& c, int L);
 // 同じ (x,z) に重なった部分から MAX5 レイヤー（同時3〜5層）をセルへ載せ、途切れた箇所を補完して連結させる。
 static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& paz, int& endX, int& endZ)
 {
+	gGenSpiral = 1;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		Cell& c = m.c[z][x];
 		WipeCell(c);
@@ -1316,10 +1380,15 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
 			return;
 		}
-		while ((curX != tx || curZ != tz) && ns < MAX_SPINE - 2) {
+		int guard = MAPN * 4;
+		while ((curX != tx || curZ != tz) && ns < MAX_SPINE - 2 && guard-- > 0) {
 			int dx = tx - curX, dz = tz - curZ;
-			if (abs(dx) >= abs(dz) && dx != 0) curX += (dx > 0 ? 1 : -1);
-			else if (dz != 0) curZ += (dz > 0 ? 1 : -1);
+			int nx = curX, nz = curZ;
+			if (dx != 0 && (dz == 0 || abs(dx) >= abs(dz))) nx += (dx > 0 ? 1 : -1);
+			else if (dz != 0) nz += (dz > 0 ? 1 : -1);
+			else break;
+			if (nx == curX && nz == curZ) break;
+			curX = nx; curZ = nz;
 			if (ns > 0 && sx[ns - 1] == curX && sz[ns - 1] == curZ) continue;
 			sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
 		}
@@ -1330,14 +1399,16 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		const int turns = 3 + (int)(r.Next() % 2); // 3〜4周
 		const int pts = turns * 44;
 		const float ph0 = r.F(0.f, 6.2831853f);
-		const float baseR = style == 0 ? 16.5f : 15.0f;
+		const float baseR = style == 0 ? 15.5f + r.F(-1.2f, 1.8f) : 14.2f + r.F(-1.0f, 1.6f);
 		for (int i = 0; i <= pts; i++) {
 			float u = (float)i / (float)pts;
 			float ang = ph0 + (climbUp ? 1.f : -1.f) * u * (float)turns * 6.2831853f;
-			// 周ごとに中心と半径をわずかに揺らし、同じ座標の上空を3〜5層で立体交差させつつ下の道も見えるようにする
-			float ox = 3.2f * cosf(ang * 0.5f + ph0);
-			float oz = 3.2f * sinf(ang * 0.5f + ph0);
-			float rad = baseR + 4.2f * sinf(ang * (style == 0 ? 1.5f : 2.0f)) + (u - 0.5f) * 3.0f;
+			float ox = 2.4f * cosf(ang * 0.47f + ph0) + 1.1f * sinf(ang * 1.7f);
+			float oz = 2.4f * sinf(ang * 0.53f + ph0) + 1.1f * cosf(ang * 1.3f);
+			float rad = baseR
+				+ 3.6f * sinf(ang * (style == 0 ? 1.35f : 1.9f))
+				+ 2.2f * sinf(ang * 2.8f + ph0)
+				+ (u - 0.5f) * 2.4f;
 			int tx = (int)lroundf((float)cx + ox + cosf(ang) * rad);
 			int tz = (int)lroundf((float)cz + oz + sinf(ang) * rad);
 			pushStep(tx, tz);
@@ -1348,8 +1419,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		float ang = r.F(0.f, 6.2831853f);
 		for (int w = 0; w < nWp; w++) {
 			// 対角側へジグザグに飛びつつ中央付近を何度も横切る
-			ang += 2.35f + r.F(-0.35f, 0.35f);
-			float rad = (w % 3 == 1) ? r.F(6.f, 11.f) : r.F(17.f, 23.f);
+			ang += 2.35f + r.F(-0.55f, 0.55f);
+			float rad = (w % 3 == 1) ? r.F(5.f, 12.f) : r.F(15.f, 24.f);
 			int wx = (int)lroundf((float)cx + cosf(ang) * rad);
 			int wz = (int)lroundf((float)cz + sinf(ang) * rad);
 			int mx = (curX + wx) / 2 + r.Range(-4, 4);
@@ -1371,7 +1442,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		for (int i = 0; i < ns; i++) {
 			float u = (float)i / (float)max(1, ns - 1);
 			// ベースは 0〜999 空間を大きく縦断しつつ、途中でジグザグに登ったり降りたりする波を重ねる
-			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * 0.85f;
+			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * 0.85f
+				+ 0.32f * sinf(u * 19.7f + (float)style);
 			float delta = dirSign * 1.45f + wave;
 			delta = Clampf(delta, -1.9f, 1.9f);
 			if (i > 0) hCur = Clampf(hCur + delta, 2.f, (float)MAXH_SPIRAL);
@@ -1401,13 +1473,45 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		}
 	}
 
-	// 0〜999 の仮想レイヤー軌道を幅3のリボンとして展開し、各セル (x,z) に重なった層から MAX 5 レイヤー（同時3〜5層）を載せる
+	// 幅は 1〜3 で途中で変わる。固定の3マス道路にはしない。
 	struct VSlot { short h; short pass; BYTE t; };
 	static VSlot vgrid[MAPN][MAPN][LAY_N];
 	static BYTE vcnt[MAPN][MAPN];
+	static BYTE spineW[MAX_SPINE];
 	memset(vcnt, 0, sizeof(vcnt));
 	const BYTE roadT = (BYTE)(tp.road ? T_ROAD : tp.ground);
 	const BYTE sideT = (BYTE)(tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_RUINS);
+	{
+		int w = 2, plaza = -1, narrow = -1;
+		for (int i = 0; i < ns; i++) {
+			if (i < 7 || i > ns - 8) w = 3;
+			else if (i <= plaza) w = 3;
+			else if (i <= narrow) w = 1;
+			else if (r.Chance(7)) { plaza = i + r.Range(4, 10); w = 3; }
+			else if (r.Chance(9)) { narrow = i + r.Range(3, 8); w = 1; }
+			else if (r.Chance(16)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 1, 3);
+			spineW[i] = (BYTE)w;
+		}
+	}
+	auto walkT = [&](int i) -> BYTE {
+		int v = (int)(r.Next() + (DWORD)i * 17u) % 100;
+		if (v < 38) return (BYTE)tp.ground;
+		if (v < 52 && tp.road) return T_ROAD;
+		if (v < 64) return T_FOREST;
+		if (v < 74) return T_RUINS;
+		if (v < 82) return T_HILL;
+		if (v < 88 && tp.swamp) return T_SWAMP;
+		return roadT;
+	};
+	auto edgeT = [&](int i) -> BYTE {
+		int v = (int)(r.Next() + (DWORD)i * 29u) % 100;
+		if (v < 22) return T_FOREST;
+		if (v < 32) return T_HILL;
+		if (v < 42) return T_RUINS;
+		if (v < 50) return (BYTE)tp.ground;
+		if (v < 56) return T_ROCK;
+		return sideT;
+	};
 
 	auto putVSlot = [&](int x, int z, int h, int pass, BYTE tr, bool isCenter) {
 		if (!Map::In(x, z)) return;
@@ -1444,23 +1548,35 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		int perpx = 0, perpz = 0;
 		if (i + 1 < ns) { perpx = (int)sz[i] - (int)sz[i + 1]; perpz = (int)sx[i + 1] - (int)sx[i]; }
 		else if (i > 0) { perpx = (int)sz[i - 1] - (int)sz[i]; perpz = (int)sx[i] - (int)sx[i - 1]; }
-		putVSlot(gx, gz, h, i, roadT, true);
-		putVSlot(gx + perpx, gz + perpz, h, i, (i % 7 == 0) ? (BYTE)T_HILL : sideT, false);
-		putVSlot(gx - perpx, gz - perpz, h, i, (i % 5 == 0) ? (BYTE)tp.ground : sideT, false);
+		int w = (int)spineW[i];
+		putVSlot(gx, gz, h, i, walkT(i), true);
+		if (w >= 2 && (perpx || perpz)) {
+			int side = (w >= 3) ? 0 : ((i & 1) ? 1 : -1);
+			if (w >= 3 || side >= 0)
+				putVSlot(gx + perpx, gz + perpz, h, i, edgeT(i), false);
+			if (w >= 3 || side <= 0)
+				putVSlot(gx - perpx, gz - perpz, h, i, edgeT(i + 3), false);
+		}
+		if (w >= 3 && r.Chance(20) && (perpx || perpz)) {
+			int s = r.Chance(50) ? 1 : -1;
+			putVSlot(gx + perpx * 2 * s, gz + perpz * 2 * s, h, i, edgeT(i + 9), false);
+		}
 	}
 
-	// スタートとボス地点の周囲に3x3の足場パッドを同じレイヤー高さで添える
+	// スタートとボス地点は足場を少し広げる。穴を残して正方形にはしない。
 	int ends[2] = { 0, ns - 1 };
 	for (int e = 0; e < 2; e++) {
 		int idx = ends[e];
 		int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
-		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++) {
-			if (abs(dx) + abs(dz) > 3) continue;
+		int rad = r.Range(2, 3);
+		for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
+			if (abs(dx) + abs(dz) > rad + 1) continue;
+			if ((dx || dz) && r.Chance(18)) continue;
 			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
 		}
 	}
 
-	// 各セルで高さを昇順に並べ、MAX 5 レイヤー（c.h, c.h1..h4）へ書き込む
+	// 各セルで高さを昇順に並べ、同時デッキへ書き込む
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		int n = (int)vcnt[z][x];
 		if (n <= 0) continue;
@@ -1484,13 +1600,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			if (d < bestD) { bestD = d; bestL = L; }
 		}
 		if (bestL >= 0 && bestD <= 2) {
-			if (TerrainInfo(LayerTr(c, bestL)).costFoot >= 99) {
-				if (bestL == 0) c.t = tr;
-				else if (bestL == 1) c.t1 = tr;
-				else if (bestL == 2) c.t2 = tr;
-				else if (bestL == 3) c.t3 = tr;
-				else c.t4 = tr;
-			}
+			if (TerrainInfo(LayerTr(c, bestL)).costFoot >= 99)
+				LayerSet(c, bestL, tr, LayerHt(c, bestL));
 			return bestL;
 		}
 		// 空きレイヤーがあれば追加して昇順ソート、無ければ一番近い層を補完高さに合わせる
@@ -1517,13 +1628,19 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		int wantH = Clampi((int)sh[i], hPrev - 2, hPrev + 2);
 		wantH = Clampi(wantH, 1, MAXH_SPIRAL);
 		sh[i] = (short)wantH;
-		curL = ensureLayerAt(m.c[sz[i]][sx[i]], wantH, roadT);
+		curL = ensureLayerAt(m.c[sz[i]][sx[i]], wantH, walkT(i));
+		int w = (int)spineW[i];
+		if (w < 2) continue;
 		int perpx = (int)sz[i - 1] - (int)sz[i], perpz = (int)sx[i] - (int)sx[i - 1];
-		for (int side = -1; side <= 1; side += 2) {
+		if (!perpx && !perpz) continue;
+		auto sideAt = [&](int side) {
 			int mx = (int)sx[i] + perpx * side, mz = (int)sz[i] + perpz * side;
-			if (!Map::In(mx, mz) || m.c[mz][mx].t == T_VOID) continue;
-			ensureLayerAt(m.c[mz][mx], wantH, sideT);
-		}
+			if (!Map::In(mx, mz) || m.c[mz][mx].t == T_VOID) return;
+			if (vcnt[mz][mx] <= 0) return;
+			ensureLayerAt(m.c[mz][mx], wantH, edgeT(i));
+		};
+		if (w >= 3) { sideAt(-1); sideAt(1); }
+		else sideAt((i & 1) ? 1 : -1);
 	}
 
 	pax = (int)sx[0]; paz = (int)sz[0];
@@ -1698,10 +1815,8 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 				Cell& c = m.c[cz][cx];
 				int base = (int)c.h;
 				int skyHere = (doSky && i > n / 5 && i < (n * 4) / 5) ? 1 : 0;
-				c.nLay = (BYTE)(skyHere ? 3 : 2);
-				c.t1 = T_HILL; c.h1 = (BYTE)(base + gap);
-				if (skyHere) { c.t2 = T_RUINS; c.h2 = (BYTE)(base + gap * 2); gotSky = 1; }
-				else { c.t2 = 0; c.h2 = 0; }
+				LayerSet(c, 1, T_HILL, base + gap);
+				if (skyHere) { LayerSet(c, 2, T_RUINS, base + gap * 2); gotSky = 1; }
 				c.prop = PK_NONE;
 				ndeck++;
 			}
@@ -1719,13 +1834,14 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 			hold(hx, hz);
 			Cell& w = m.c[hz][hx];
 			w.t = T_HILL; w.h = (BYTE)hh; w.nLay = 1; w.prop = PK_NONE; w.gparam = 0;
-			w.t1 = w.h1 = w.t2 = w.h2 = 0;
+			ClearDecks(w);
+			w.t = T_HILL; w.h = (BYTE)hh; w.nLay = 1;
 			return 1;
 		};
 		auto ramp = [&](int lowI, int highI, int deckI) -> int {
 			if (lowI < 0 || highI < 0 || deckI < 0 || deckI >= n) return 0;
 			if (m.c[zs[deckI]][xs[deckI]].nLay < 2) return 0;
-			int h1 = (int)m.c[zs[deckI]][xs[deckI]].h1;
+			int h1 = LayerHt(m.c[zs[deckI]][xs[deckI]], 1);
 			if (h1 < 6) return 0;
 			int mark = kn;
 			if (!putStair(xs[lowI], zs[lowI], h1 - 4) || !putStair(xs[highI], zs[highI], h1 - 2)) { undo(mark); return 0; }
@@ -1742,7 +1858,7 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 				for (int side = 0; side < 2; side++) {
 					int cx = xs[skyIdx] + ox * side, cz = zs[skyIdx] + oz * side;
 					if (!Map::In(cx, cz) || m.c[cz][cx].nLay < 3) continue;
-					int h2 = (int)m.c[cz][cx].h2;
+					int h2 = LayerHt(m.c[cz][cx], 2);
 					auto at = [&](int idx) -> Cell* {
 						if (idx < i0 || idx >= i1) return 0;
 						int x = xs[idx] + ox * side, z = zs[idx] + oz * side;
@@ -1752,13 +1868,13 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 					Cell* a = at(skyIdx + dir);
 					Cell* b = at(skyIdx + dir * 2);
 					if (a && b) {
-						if ((int)b->h1 < h2 - 4) b->h1 = (BYTE)(h2 - 4);
-						if ((int)a->h1 < h2 - 2) a->h1 = (BYTE)(h2 - 2);
+						if (LayerHt(*b, 1) < h2 - 4) LayerSet(*b, 1, LayerTr(*b, 1), h2 - 4);
+						if (LayerHt(*a, 1) < h2 - 2) LayerSet(*a, 1, LayerTr(*a, 1), h2 - 2);
 					} else if (a) {
-						int step = (int)a->h1 + 2;
+						int step = LayerHt(*a, 1) + 2;
 						if (step < h2 - 2) {
-							a->h1 = (BYTE)step;
-							if ((int)m.c[cz][cx].h2 > step + 2) m.c[cz][cx].h2 = (BYTE)(step + 2);
+							LayerSet(*a, 1, LayerTr(*a, 1), step);
+							if (LayerHt(m.c[cz][cx], 2) > step + 2) LayerSet(m.c[cz][cx], 2, LayerTr(m.c[cz][cx], 2), step + 2);
 						}
 					}
 				}
@@ -1775,13 +1891,7 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 
 static void LayDeck(Cell& c, int L, int t, int h)
 {
-	h = Clampi(h, 1, MAXH_SPIRAL);
-	if (L <= 0) { c.t = (BYTE)t; c.h = (WORD)h; }
-	else if (L == 1) { c.t1 = (BYTE)t; c.h1 = (WORD)h; }
-	else if (L == 2) { c.t2 = (BYTE)t; c.h2 = (WORD)h; }
-	else if (L == 3) { c.t3 = (BYTE)t; c.h3 = (WORD)h; }
-	else { c.t4 = (BYTE)t; c.h4 = (WORD)h; }
-	if ((int)c.nLay < L + 1) c.nLay = (BYTE)(L + 1);
+	LayerSet(c, L, t, h);
 }
 
 static void StampDeckPreset(Map& m, Rng& r, int ground, int preset)
@@ -1831,6 +1941,71 @@ static void StampDeckPreset(Map& m, Rng& r, int ground, int preset)
 		prevL = layer;
 	}
 	(void)r;
+}
+
+static void StampSpiralDecor(Map& m, Rng& r, int th)
+{
+	static const int kDx[4] = { 1, -1, 0, 0 };
+	static const int kDz[4] = { 0, 0, 1, -1 };
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		Cell& c = m.c[z][x];
+		c.prop = PK_NONE;
+		if (c.t == T_VOID || c.t == T_CHASM) continue;
+		int nWalk = 0, nVoid = 0;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + kDx[k], nz = z + kDz[k];
+			if (!Map::In(nx, nz) || m.c[nz][nx].t == T_VOID || m.c[nz][nx].t == T_CHASM) nVoid++;
+			else if (FootPassable(m.c[nz][nx].t)) nWalk++;
+		}
+		int nearStart = NearPartyOrGroup(m, x, z, 1);
+		int roll = (int)((c.var + (x * 13 + z * 29)) & 255);
+		if (!c.gimm && c.nLay <= 1 && !nearStart && FootPassable(c.t) && c.t != T_BRIDGE && c.t != T_DOOR) {
+			if (nWalk >= 4 && nVoid >= 1 && roll < 14) c.t = T_ROCK;
+			else if (roll < 42 && c.t != T_FOREST) c.t = T_FOREST;
+			else if (roll < 54) c.t = T_RUINS;
+			else if (roll < 62) c.t = T_HILL;
+			else if (th == TH_SWAMP && roll < 70) c.t = T_SWAMP;
+			else if ((th == TH_DESERT || th == TH_VOLCANO) && roll < 68) c.t = T_SAND;
+		}
+		if (c.t == T_VOID) continue;
+		if (nearStart) continue;
+		if (th == TH_SEABED) {
+			if (c.t == T_ROCK || c.t == T_MOUNTAIN) c.prop = PK_KIT;
+			else if (FootPassable(c.t) && (roll % 17) == 0) c.prop = PK_KIT;
+			continue;
+		}
+		if (c.t == T_FOREST) {
+			if (th == TH_SNOW) c.prop = PK_PINE;
+			else if (th == TH_DESERT || th == TH_VOLCANO) c.prop = PK_DEAD;
+			else if (th == TH_SWAMP) c.prop = (c.var & 3) ? PK_TREE : PK_DEAD;
+			else if (nVoid) c.prop = (c.var & 1) ? PK_HILLTREES : PK_TREES;
+			else c.prop = (c.var & 3) == 0 ? PK_TREES : PK_TREE;
+		} else if (c.t == T_ROCK || c.t == T_MOUNTAIN) {
+			if (th == TH_RUINS || th == TH_CITADEL) c.prop = PK_PILLAR;
+			else if (th == TH_SWAMP || th == TH_VOLCANO) c.prop = (c.var & 1) ? PK_GRAVE : PK_ROCK;
+			else c.prop = PK_ROCK;
+		} else if (c.t == T_RUINS) {
+			if ((c.var % 5) == 0) c.prop = PK_LANTERN;
+			else if ((c.var % 7) == 0) c.prop = PK_PILLAR;
+			else if ((c.var % 9) == 0) c.prop = PK_CRATE;
+			else if (nVoid && (c.var % 4) == 0) c.prop = PK_FLAG;
+		} else if (c.t == T_WATER) {
+			if ((th == TH_SWAMP || th == TH_PLAINS || th == TH_FOREST || th == TH_FALLS) && (c.var % 5) == 0)
+				c.prop = PK_LILY;
+		} else if (FootPassable(c.t) && !c.gimm) {
+			int p = c.var % 19;
+			if (p == 0) c.prop = PK_CRATE;
+			else if (p == 1) c.prop = PK_BARREL;
+			else if (p == 2) c.prop = PK_LANTERN;
+			else if (p == 3 && th == TH_SWAMP) c.prop = PK_PUMPKIN;
+			else if (p == 4 && (th == TH_VOLCANO || th == TH_SWAMP)) c.prop = PK_GRAVE;
+			else if (p == 5 && nVoid) c.prop = PK_FLAG;
+			else if (p == 6 && nVoid) c.prop = (th == TH_SNOW) ? PK_PINE : PK_TREE;
+			else if (p == 7) c.prop = PK_TENT;
+			else if (p == 8 && nVoid) c.prop = PK_ROCK;
+		}
+		(void)r;
+	}
 }
 
 static void StampLandmarks(Map& m, Rng& r, int th, BYTE taken[MAPN][MAPN])
@@ -1910,10 +2085,15 @@ static void FeetOrigin(const Map& m, int& sx, int& sz, int& sL)
 	sz = (m.nP > 0) ? m.pStartZ[0] : MAPN / 2;
 	if (!Map::In(sx, sz)) { sx = MAPN / 2; sz = MAPN / 2; }
 	sL = -1;
-	for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[sz][sx], L)) { sL = L; break; }
+	{
+		int n = CellLayN(m.c[sz][sx]);
+		for (int L = 0; L < n; L++) if (CellStand(m.c[sz][sx], L)) { sL = L; break; }
+	}
 	if (sL >= 0) return;
-	for (int z = 0; z < MAPN && sL < 0; z++) for (int x = 0; x < MAPN && sL < 0; x++)
-		for (int L = 0; L < LAY_N; L++) if (CellStand(m.c[z][x], L)) { sx = x; sz = z; sL = L; break; }
+	for (int z = 0; z < MAPN && sL < 0; z++) for (int x = 0; x < MAPN && sL < 0; x++) {
+		int n = CellLayN(m.c[z][x]);
+		for (int L = 0; L < n; L++) if (CellStand(m.c[z][x], L)) { sx = x; sz = z; sL = L; break; }
+	}
 }
 
 static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
@@ -1922,24 +2102,24 @@ static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
 	int sx, sz, sL;
 	FeetOrigin(m, sx, sz, sL);
 	if (sL < 0) return 0;
-	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N];
 	int qh = 0, qt = 0, n = 0;
-	qx[qt] = sx; qz[qt] = sz; qL[qt] = sL; qt++;
+	if (qt < LAY_Q) { g_layQx[qt] = sx; g_layQz[qt] = sz; g_layQL[qt] = sL; qt++; }
 	seen[sL][sz][sx] = 1;
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	while (qh < qt) {
-		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
 		n++;
 		int h = LayerHt(m.c[z][x], L);
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
 			if (!Map::In(nx, nz)) continue;
 			const Cell& t = m.c[nz][nx];
-			for (int NL = 0; NL < LAY_N; NL++) {
+			int nL = CellLayN(t);
+			for (int NL = 0; NL < nL; NL++) {
 				if (seen[NL][nz][nx] || !CellStand(t, NL)) continue;
 				if (abs(LayerHt(t, NL) - h) > 2) continue;
 				seen[NL][nz][nx] = 1;
-				qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qt++;
+				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 			}
 		}
 	}
@@ -1967,12 +2147,7 @@ static void PaintStair(Cell& c, int h)
 
 static void SetLayerHt(Cell& c, int L, int h)
 {
-	h = Clampi(h, 1, MAXH_SPIRAL);
-	if (L <= 0) c.h = (WORD)h;
-	else if (L == 1) c.h1 = (WORD)h;
-	else if (L == 2) c.h2 = (WORD)h;
-	else if (L == 3) c.h3 = (WORD)h;
-	else c.h4 = (WORD)h;
+	LayerSet(c, L, LayerTr(c, L), h);
 }
 
 // 届かない足場の縁に、高さ1段ずつの階段を1本足す。移動力は見ない。
@@ -2250,6 +2425,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 {
 	memset(&m, 0, sizeof(m));
 	gShapeOn = 0;
+	gGenSpiral = 0;
 	Rng r(seed);
 	m.seed = seed;
 	m.stage = stage;
@@ -2457,7 +2633,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	static BYTE taken[MAPN][MAPN];
 	memset(taken, 0, sizeof(taken));
 	m.nP = MAX_PARTY;
-	PickDeploy(m, pax, paz, m.pStartX, m.pStartZ, MAX_PARTY, 1, NULL);
+	int homeH = CellStandH(m, pax, paz, -1);
+	PickDeploy(m, pax, paz, m.pStartX, m.pStartZ, MAX_PARTY, 1, NULL, homeH);
 	for (int i = 0; i < MAX_PARTY; i++) taken[m.pStartZ[i]][m.pStartX[i]] = 1;
 	m.nGrp = 0;
 	m.nE = 0;
@@ -2469,42 +2646,39 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			topLayAt[z][x] = (short)max(0, nL - 1);
 		}
 		{
-			static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N], qD[MAPN * MAPN * LAY_N];
-			static BYTE vL[LAY_N][MAPN][MAPN];
-			memset(vL, 0, sizeof(vL));
+			memset(g_laySeen, 0, sizeof(g_laySeen));
 			int qh = 0, qt = 0;
 			if (Map::In(pax, paz)) {
 				int nL = CellLayN(m.c[paz][pax]);
 				for (int L = 0; L < nL; L++) {
 					int tr = LayerTr(m.c[paz][pax], L);
 					if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
-					vL[L][paz][pax] = 1;
-					qx[qt] = pax; qz[qt] = paz; qL[qt] = L; qD[qt] = 0; qt++;
+					if (abs(LayerHt(m.c[paz][pax], L) - homeH) > 3) continue;
+					g_laySeen[L][paz][pax] = 1;
+					g_layQx[qt] = pax; g_layQz[qt] = paz; g_layQL[qt] = L; g_layQd[qt] = 0; qt++;
 				}
 				stepFromP[paz][pax] = 0;
 			}
 			static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 			while (qh < qt) {
-				int x = qx[qh], z = qz[qh], L = qL[qh], d0 = qD[qh]; qh++;
+				int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh], d0 = g_layQd[qh]; qh++;
 				int h = LayerHt(m.c[z][x], L);
-				int fTr = LayerTr(m.c[z][x], L);
 				for (int k = 0; k < 4; k++) {
 					int nx = x + dx[k], nz = z + dz[k];
 					if (!Map::In(nx, nz)) continue;
 					const Cell& t = m.c[nz][nx];
 					int nL = CellLayN(t);
 					for (int NL = 0; NL < nL; NL++) {
-						if (vL[NL][nz][nx]) continue;
+						if (g_laySeen[NL][nz][nx]) continue;
 						int tTr = LayerTr(t, NL);
 						if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
-						bool wet = (fTr == T_LAVA || tTr == T_LAVA || fTr == T_WATER || tTr == T_WATER);
-						if (!wet && abs(LayerHt(t, NL) - h) > 2) continue;
-						vL[NL][nz][nx] = 1;
+						if (abs(LayerHt(t, NL) - h) > 2) continue;
+						g_laySeen[NL][nz][nx] = 1;
 						if (stepFromP[nz][nx] < 0 || d0 + 1 < stepFromP[nz][nx]) {
 							stepFromP[nz][nx] = (short)(d0 + 1);
 							topLayAt[nz][nx] = (short)NL;
 						}
-						qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qD[qt] = d0 + 1; qt++;
+						if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; g_layQd[qt] = d0 + 1; qt++; }
 					}
 				}
 			}
@@ -2528,6 +2702,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			int t = m.c[z][x].t;
 			if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
 			if (pathDistP(x, z) < 5) continue;
+			int ht = CellStandH(m, x, z, homeH);
+			if (max(abs(x - pax), abs(z - paz)) <= 10 && abs(ht - homeH) > 5) continue;
 			order[nc++] = z * MAPN + x;
 		}
 		int budget = MAX_ENEMY;
@@ -2572,7 +2748,9 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 				for (int gi = 0; gi < m.nGrp; gi++)
 					if (pairDist(x, z, m.grp[gi].ax, m.grp[gi].az) < gap) { crowded = true; break; }
 				if (crowded) continue;
+				int ht = CellStandH(m, x, z, homeH);
 				int sc = abs(pathDistP(x, z) - target);
+				if (vertical != 2) sc += abs(ht - homeH) / 2;
 				if (sc < bestS) { bestS = sc; bestI = i; }
 			}
 			if (bestI < 0) break;
@@ -2597,21 +2775,62 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 				}
 			}
 			int xs[GRP_CAP], zs[GRP_CAP];
-			PickDeploy(m, x, z, xs, zs, want, 1, taken);
+			int depH = homeH;
+			if (vertical == 2) depH = LayerHt(m.c[z][x], topLayAt[z][x]);
+			PickDeploy(m, x, z, xs, zs, want, 1, taken, depH);
 			for (int k = 0; k < want; k++) {
-				if (taken[zs[k]][xs[k]]) continue;
+				if (!Map::In(xs[k], zs[k]) || taken[zs[k]][xs[k]]) continue;
 				if (g.n > 0 && xs[k] == g.x[0] && zs[k] == g.z[0] && k > 0) continue;
 				taken[zs[k]][xs[k]] = 1;
 				g.x[g.n] = (short)xs[k];
 				g.z[g.n] = (short)zs[k];
 				g.n++;
 			}
-			if (g.n < 3) {
+			int minN = (vertical == 2) ? 1 : 3;
+			if (g.n < minN) {
 				for (int k = 0; k < g.n; k++) taken[g.z[k]][g.x[k]] = 0;
 				continue;
 			}
 			m.nGrp++;
 			budget -= g.n;
+		}
+		if (m.nGrp <= 0) {
+			int bestI = -1, bestD = -1;
+			for (int i = 0; i < nc; i++) {
+				int x = order[i] % MAPN, z = order[i] / MAPN;
+				int d = pathDistP(x, z);
+				if (d > bestD) { bestD = d; bestI = i; }
+			}
+			if (bestI < 0) {
+				for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
+					if (!FootPassable(m.c[z][x].t) || m.c[z][x].t == T_VOID) continue;
+					if (Dist(x, z, pax, paz) < 4) continue;
+					int ht = CellStandH(m, x, z, homeH);
+					if (max(abs(x - pax), abs(z - paz)) <= 10 && abs(ht - homeH) > 5) continue;
+					int d = Dist(x, z, pax, paz);
+					if (d > bestD) { bestD = d; bestI = -(z * MAPN + x + 1); }
+				}
+			}
+			if (bestI != -1) {
+				int x, z;
+				if (bestI >= 0) { x = order[bestI] % MAPN; z = order[bestI] / MAPN; }
+				else { int cell = -bestI - 1; x = cell % MAPN; z = cell / MAPN; }
+				MapGroup& g = m.grp[0];
+				g.ax = (short)x; g.az = (short)z; g.boss = 1; g.n = 0;
+				int xs[GRP_CAP], zs[GRP_CAP];
+				int depH = (vertical == 2) ? LayerHt(m.c[z][x], topLayAt[z][x]) : homeH;
+				PickDeploy(m, x, z, xs, zs, 3, 1, taken, depH);
+				for (int k = 0; k < 3; k++) {
+					if (!Map::In(xs[k], zs[k]) || taken[zs[k]][xs[k]]) continue;
+					if (g.n > 0 && xs[k] == g.x[0] && zs[k] == g.z[0] && k > 0) continue;
+					taken[zs[k]][xs[k]] = 1;
+					g.x[g.n] = (short)xs[k];
+					g.z[g.n] = (short)zs[k];
+					g.n++;
+				}
+				if (g.n < 1) { g.x[0] = (short)x; g.z[0] = (short)z; g.n = 1; }
+				m.nGrp = 1;
+			}
 		}
 		// 最寄りが遠すぎるときは、味方の近くに 1 拠点を寄せる
 		int nearest = -1, nd = 99999;
@@ -2645,16 +2864,18 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 					int on = g.n;
 					for (int k = 0; k < on && k < GRP_CAP; k++) { ox[k] = g.x[k]; oz[k] = g.z[k]; taken[oz[k]][ox[k]] = 0; }
 					int xs[GRP_CAP], zs[GRP_CAP];
-					PickDeploy(m, bx, bz, xs, zs, on, 1, taken);
+					int depH = (vertical == 2) ? CellStandH(m, bx, bz, -1) : homeH;
+					PickDeploy(m, bx, bz, xs, zs, on, 1, taken, depH);
 					int nn = 0;
 					for (int k = 0; k < on && nn < GRP_CAP; k++) {
-						if (taken[zs[k]][xs[k]]) continue;
+						if (!Map::In(xs[k], zs[k]) || taken[zs[k]][xs[k]]) continue;
 						taken[zs[k]][xs[k]] = 1;
 						g.x[nn] = (short)xs[k];
 						g.z[nn] = (short)zs[k];
 						nn++;
 					}
-					if (nn >= 3) { g.n = nn; g.ax = (short)bx; g.az = (short)bz; }
+					int minN = (vertical == 2) ? 1 : 3;
+					if (nn >= minN) { g.n = nn; g.ax = (short)bx; g.az = (short)bz; }
 					else {
 						for (int k = 0; k < nn; k++) taken[g.z[k]][g.x[k]] = 0;
 						g.n = on;
@@ -2712,7 +2933,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		}
 	}
 
-	if (th == TH_ORBIT || th == TH_STATION || th == TH_CITADEL || th == TH_LANTERN) {
+	if (vertical != 2 && (th == TH_ORBIT || th == TH_STATION || th == TH_CITADEL || th == TH_LANTERN)) {
 		auto disc = [&](int cx, int cz, int rad, int t, int dh) {
 			for (int zz = cz - rad; zz <= cz + rad; zz++) for (int xx = cx - rad; xx <= cx + rad; xx++) {
 				if (!Map::In(xx, zz)) continue;
@@ -2772,7 +2993,10 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		(void)r;
 	}
 	// 8) 小物
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+	if (vertical == 2) {
+		StampSpiralDecor(m, r, th);
+	}
+	for (int z = 0; z < MAPN && vertical != 2; z++) for (int x = 0; x < MAPN; x++) {
 		Cell& c = m.c[z][x];
 		c.prop = PK_NONE;
 		if (th >= TH_SEABED) {
@@ -2813,16 +3037,22 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		int tx = Clampi(pax + 2, 1, MAPN - 2), tz = Clampi(paz - 2, 1, MAPN - 2);
 		bool used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == tx && m.pStartZ[i] == tz) used = true;
-		if (!used && m.c[tz][tx].t != T_VOID) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_TENT); }
+		if (!used && m.c[tz][tx].t != T_VOID) {
+			if (vertical != 2) m.c[tz][tx].t = T_ROCK;
+			m.c[tz][tx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_TENT);
+		}
 		int fx = Clampi(pax - 2, 1, MAPN - 2), fz = Clampi(paz + 2, 1, MAPN - 2);
 		used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == fx && m.pStartZ[i] == fz) used = true;
-		if (!used && m.c[fz][fx].t != T_VOID) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_FLAG); }
+		if (!used && m.c[fz][fx].t != T_VOID) {
+			if (vertical != 2) m.c[fz][fx].t = T_ROCK;
+			m.c[fz][fx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_FLAG);
+		}
 		for (int k = 0; k < 3 && m.nGrp > 0; k++) {
 			const MapGroup& g0 = m.grp[0];
 			int cx = Clampi(g0.ax + r.Range(-4, 4), 1, MAPN - 2), cz = Clampi(g0.az + r.Range(-4, 4), 1, MAPN - 2);
 			if (taken[cz][cx] || !FootPassable(m.c[cz][cx].t)) continue;
-			m.c[cz][cx].t = T_ROCK;
+			if (vertical != 2) m.c[cz][cx].t = T_ROCK;
 			m.c[cz][cx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : (th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL));
 			taken[cz][cx] = 1;
 		}
@@ -2945,7 +3175,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			}
 		}
 	}
-	if (m.nP > 0) {
+	if (m.nP > 0 && vertical != 2) {
 		EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], pax, paz);
 		for (int g = 0; g < m.nGrp; g++)
 			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].ax, m.grp[g].az);
@@ -2990,25 +3220,37 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		c.gparam = shore ? 0 : (BYTE)(1 + ((x * 3 + z * 5 + (int)m.seed) & 3));
 		if (!shore && ((x / 3 + z / 3) & 1) == 0) c.gparam = 3;
 	}
-	CutLooseIslands(m);
+	if (vertical != 2) CutLooseIslands(m);
 	OpenStandPads(m);
-	if (m.nP > 0) {
+	if (m.nP > 0 && vertical != 2) {
 		for (int g = 0; g < m.nGrp; g++) if (m.grp[g].n > 0)
 			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].x[0], m.grp[g].z[0]);
 	}
+}
+
+int MapIsSpiral(const Map& m)
+{
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if ((int)m.c[z][x].h > MAXH) return 1;
+		int n = CellLayN(m.c[z][x]);
+		if (n >= 2 && abs(LayerHt(m.c[z][x], n - 1) - LayerHt(m.c[z][x], 0)) > 8) return 1;
+	}
+	return 0;
 }
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	for (int attempt = 0; attempt < 60; attempt++) {
 		GenerateMapBody(m, stage, seed + (DWORD)attempt * 9973u, theme);
+		// 立体交差の別アームを階段で繋ぐと滝ショートカットになるので、スパイラルはリボンの連続だけ残す。
+		if (gGenSpiral || MapIsSpiral(m)) return;
 		ConnectFeet(m);
 		if (FeetLinked(m)) return;
 	}
 	// 6 回とも全足場が繋がらない配置（例: 3マス幅の通路を 3x3 の障害物が塞ぐ）は、
 	// 障害物を貫く平地回廊を強制的に掘って、スタート→ボス（全ての敵足場）を必ず歩けるようにする。
 	// FeetLinked が通る＝立てる全マスが一繋がり＝クリア不能マップを出さない保証。
-	ForceConnectFeet(m);
+	if (!gGenSpiral && !MapIsSpiral(m)) ForceConnectFeet(m);
 }
 
 // ============================================================ クラス
@@ -5275,6 +5517,92 @@ void MonsterHeldText(int id, wchar_t* out, int cap)
 // ============================================================ 経路
 int Dist(int ax, int az, int bx, int bz) { return abs(ax - bx) + abs(az - bz); }
 
+static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, int moveType);
+
+static void FloodWalk(const Battle& b, int mt, int limit, const int* sx, const int* sz, const int* sL, int nSeed)
+{
+	for (int L = 0; L < LAY_N; L++)
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) g_stepDist[L][z][x] = 30000;
+	memset(g_laySeen, 0, sizeof(g_laySeen));
+	int qh = 0, qt = 0;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int i = 0; i < nSeed; i++) {
+		int x = sx[i], z = sz[i], L = sL[i];
+		if (!Map::In(x, z)) continue;
+		if (L < 0) L = 0;
+		if (L >= LAY_N) L = LAY_N - 1;
+		if (g_laySeen[L][z][x]) continue;
+		g_laySeen[L][z][x] = 1;
+		g_stepDist[L][z][x] = 0;
+		if (qt < LAY_Q) { g_layQx[qt] = x; g_layQz[qt] = z; g_layQL[qt] = L; qt++; }
+	}
+	while (qh < qt) {
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
+		int c0 = g_stepDist[L][z][x];
+		if (limit >= 0 && c0 >= limit) continue;
+		const Cell& f = b.map.At(x, z);
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			const Cell& t = b.map.At(nx, nz);
+			int nL = CellLayN(t);
+			for (int NL = 0; NL < nL; NL++) {
+				if (g_laySeen[NL][nz][nx]) continue;
+				if (!LayerLegal(f, L, t, NL, mt)) continue;
+				g_laySeen[NL][nz][nx] = 1;
+				g_stepDist[NL][nz][nx] = (short)(c0 + 1);
+				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
+			}
+		}
+	}
+}
+
+static void SeedUnitSteps(const Unit& u, const Map& m, int* sx, int* sz, int* sL, int& n, int cap)
+{
+	int s = UnitSpan(u);
+	int L = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		if (n >= cap) return;
+		int x = u.x + dx, z = u.z + dz;
+		if (!Map::In(x, z)) continue;
+		int useL = LayerOn(m.At(x, z), L) ? L : 0;
+		sx[n] = x; sz[n] = z; sL[n] = useL; n++;
+	}
+}
+
+void FillWalkSteps(const Battle& b, int fromUi)
+{
+	int sx[16], sz[16], sL[16], n = 0;
+	if (fromUi < 0 || fromUi >= b.nUnits || !b.u[fromUi].alive) {
+		FloodWalk(b, MV_FOOT, -1, sx, sz, sL, 0);
+		return;
+	}
+	const Unit& u = b.u[fromUi];
+	SeedUnitSteps(u, b.map, sx, sz, sL, n, 16);
+	FloodWalk(b, UnitMoveType(u), -1, sx, sz, sL, n);
+}
+
+void FillWalkStepsFromTeam(const Battle& b, int team)
+{
+	int sx[MAX_UNITS], sz[MAX_UNITS], sL[MAX_UNITS], n = 0;
+	int mt = MV_FOOT;
+	for (int i = 0; i < b.nUnits && n < MAX_UNITS; i++) {
+		const Unit& u = b.u[i];
+		if (!u.alive || u.team != team) continue;
+		if (n == 0) mt = UnitMoveType(u);
+		SeedUnitSteps(u, b.map, sx, sz, sL, n, MAX_UNITS);
+	}
+	FloodWalk(b, mt, -1, sx, sz, sL, n);
+}
+
+int WalkStepsAt(int x, int z, int layer)
+{
+	if (!Map::In(x, z)) return 30000;
+	if (layer < 0) layer = 0;
+	if (layer >= LAY_N) layer = LAY_N - 1;
+	return g_stepDist[layer][z][x];
+}
+
 bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jump)
 {
 	if (!Map::In(tx, tz)) return false;
@@ -5291,7 +5619,6 @@ bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jum
 					return true;
 				continue;
 			}
-			if (trF == T_LAVA || trT == T_LAVA || trF == T_WATER || trT == T_WATER) return true;
 			if (abs(hT - hF) <= jump) return true;
 		}
 	}
@@ -5308,11 +5635,15 @@ static int EnterCost(const Map& m, int x, int z, int moveType)
 	return cost;
 }
 
-// 1回の動きで変われる高さ。歩行は2、飛行は4。
-// 層1は地面から+2を3段、層2はその先でさらに+2を3段。±1あっても、一段で層の上には飛ばない。
+// 1歩で変われる高さ段。歩行は2（約1層）、飛行は4（約2層）。
+// 階段のように連続して登る分には、この幅で何度でも進める。
 static int StepRise(int moveType)
 {
 	return moveType == MV_FLY ? 4 : 2;
+}
+static int LayerHopMax(int moveType)
+{
+	return moveType == MV_FLY ? 2 : 1;
 }
 
 static int LayerOpen(const Cell& to, int L, int moveType)
@@ -5323,20 +5654,34 @@ static int LayerOpen(const Cell& to, int L, int moveType)
 	return TerrainInfo(tr).costFoot < 99;
 }
 
+static int ClosestOpenLayer(const Cell& to, int fromH, int moveType)
+{
+	int n = CellLayN(to), best = -1, bestDh = 99999;
+	for (int L = 0; L < n; L++) {
+		if (!LayerOpen(to, L, moveType)) continue;
+		int dh = abs(LayerHt(to, L) - fromH);
+		if (dh < bestDh) { bestDh = dh; best = L; }
+	}
+	return best;
+}
+
 static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, int moveType)
 {
 	if (!LayerOpen(to, L, moveType)) return 0;
-	int dl = L - fromLayer;
-	if (dl < 0) dl = -dl;
 	int fromL = LayerOn(from, fromLayer) ? fromLayer : 0;
-	int fromTr = LayerTr(from, fromL);
-	int toTr = LayerTr(to, L);
-	int dh = abs(LayerHt(to, L) - LayerHt(from, fromL));
-	// 同じ高さ帯（±StepRise 以内）で繋がるスパイラル橋は、下の通過層数が変わって層番号 L がずれても渡れる。
-	// 逆に立体交差で上下に大きく離れた別ループ（dh > 6）へは、dl == 1 でも直接ワープさせない。
-	if (dh <= StepRise(moveType)) return 1;
-	if (dl == 1 && dh <= 6 && LayerHt(from, fromL) <= MAXH && LayerHt(to, L) <= MAXH + 12) return 1;
-	if (dl == 0 && (fromTr == T_LAVA || toTr == T_LAVA || fromTr == T_WATER || toTr == T_WATER)) return 1;
+	int fromH = LayerHt(from, fromL);
+	int toH = LayerHt(to, L);
+	int dh = abs(toH - fromH);
+	int dl = L - fromL;
+	if (dl < 0) dl = -dl;
+	int hop = LayerHopMax(moveType);
+	int rise = StepRise(moveType);
+	// いちばん近い高さ＝同じリボン／連続した段。1歩の登り降りに収まるなら、層番号がずれても進める。
+	// 水・溶岩も滝の段差は降りられない。川面の連続した歩幅だけ通す。
+	int closest = ClosestOpenLayer(to, fromH, moveType);
+	if (L == closest && dh <= rise) return 1;
+	// 徒歩は隣の層まで、飛行は2層まで。高さが離れすぎる立体交差の別アームへは飛ばない。
+	if (dl <= hop && dh <= rise * hop) return 1;
 	return 0;
 }
 
@@ -5369,9 +5714,12 @@ static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 		const Cell& t = b.map.At(tx, tz);
 		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
 		if (!LayerLegal(f, fromL, t, toLayer, mt)) return false;
-		for (int L = 0; L < LAY_N; L++) {
+		int nT = CellLayN(t);
+		float yTo = b.map.WalkY(tx, tz, toLayer);
+		for (int L = 0; L < nT; L++) {
 			int o = b.UnitAt(tx, tz, L);
 			if (o < 0 || o == ui || !b.u[o].alive) continue;
+			if (L != toLayer && fabsf(b.map.WalkY(tx, tz, L) - yTo) > 0.9f) continue;
 			if (b.u[o].team != u.team) return false;
 			if (s > 1 && L == toLayer) return false;
 		}
@@ -5397,9 +5745,12 @@ static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 		if (lay < 0) return false;
 		if (ix == 0 && iz == 0) layer = lay;
 		else if (lay != layer) return false;
-		for (int L = 0; L < LAY_N; L++) {
+		int nT = CellLayN(t);
+		float yTo = b.map.WalkY(tx, tz, lay);
+		for (int L = 0; L < nT; L++) {
 			int o = b.UnitAt(tx, tz, L);
 			if (o < 0 || o == ui || !b.u[o].alive) continue;
+			if (L != lay && fabsf(b.map.WalkY(tx, tz, L) - yTo) > 0.9f) continue;
 			if (b.u[o].team != u.team) return false;
 			if (s > 1 && L == lay) return false;
 		}
@@ -5456,85 +5807,71 @@ static bool FootTerrain(const Battle& b, int ui, int x, int z, int nx, int nz)
 
 static short& ReachCostRef(Reach& r, int layer, int x, int z)
 {
-	if (layer == 1) return r.costHi[z][x];
-	if (layer == 2) return r.cost2[z][x];
-	if (layer == 3) return r.cost3[z][x];
-	if (layer == 4) return r.cost4[z][x];
-	return r.cost[z][x];
+	if (layer < 0 || layer >= LAY_N) layer = 0;
+	return r.cost[layer][z][x];
 }
 static int& ReachFromRef(Reach& r, int layer, int x, int z)
 {
-	if (layer == 1) return r.fromHi[z][x];
-	if (layer == 2) return r.from2[z][x];
-	if (layer == 3) return r.from3[z][x];
-	if (layer == 4) return r.from4[z][x];
-	return r.from[z][x];
+	if (layer < 0 || layer >= LAY_N) layer = 0;
+	return r.from[layer][z][x];
 }
 static int ReachFromAt(const Reach& r, int layer, int x, int z)
 {
-	if (layer == 1) return r.fromHi[z][x];
-	if (layer == 2) return r.from2[z][x];
-	if (layer == 3) return r.from3[z][x];
-	if (layer == 4) return r.from4[z][x];
-	return r.from[z][x];
+	if (layer < 0 || layer >= LAY_N) return -1;
+	return r.from[layer][z][x];
 }
 
 void ComputeReach(const Battle& b, int ui, Reach& out)
 {
 	const Unit& u = b.u[ui];
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		out.cost[z][x] = -1; out.from[z][x] = -1; out.canStop[z][x] = 0;
-		out.costHi[z][x] = -1; out.fromHi[z][x] = -1; out.canStopHi[z][x] = 0;
-		out.cost2[z][x] = -1; out.from2[z][x] = -1; out.canStop2[z][x] = 0;
-		out.cost3[z][x] = -1; out.from3[z][x] = -1; out.canStop3[z][x] = 0;
-		out.cost4[z][x] = -1; out.from4[z][x] = -1; out.canStop4[z][x] = 0;
-	}
-	const int mv = UnitMove(u) * 2;
-	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qd[MAPN * MAPN * LAY_N];
-	int qn = 0;
+	memset(out.cost, 0xff, sizeof(out.cost));
+	memset(out.from, 0xff, sizeof(out.from));
+	memset(out.canStop, 0, sizeof(out.canStop));
+	int mv = UnitMove(u) * 2;
+	if (mv < 1) mv = 1;
+	if (mv > 250) mv = 250;
 	int startL = u.deck;
 	if (startL < 0 || startL >= LAY_N || !LayerOn(b.map.At(u.x, u.z), startL)) startL = 0;
-	ReachCostRef(out, startL, u.x, u.z) = 0;
-	qx[qn] = u.x; qz[qn] = u.z; qd[qn] = startL; qn++;
+	out.cost[startL][u.z][u.x] = 0;
+	out.from[startL][u.z][u.x] = -1;
+	int bHead[256];
+	for (int i = 0; i <= mv; i++) bHead[i] = -1;
+	int nid = 0;
+	auto push = [&](int x, int z, int L, int c) {
+		if (nid >= LAY_Q) return;
+		int id = nid++;
+		g_layQx[id] = x; g_layQz[id] = z; g_layQL[id] = L; g_layQd[id] = c;
+		g_layNext[id] = bHead[c];
+		bHead[c] = id;
+	};
+	push(u.x, u.z, startL, 0);
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
-	while (qn > 0) {
-		int bi = 0;
-		for (int i = 1; i < qn; i++) {
-			int ci = ReachCostAt(out, qd[i], qx[i], qz[i]);
-			int cb = ReachCostAt(out, qd[bi], qx[bi], qz[bi]);
-			if (ci < cb) bi = i;
-		}
-		int x = qx[bi], z = qz[bi], layer = qd[bi];
-		qx[bi] = qx[qn - 1]; qz[bi] = qz[qn - 1]; qd[bi] = qd[qn - 1]; qn--;
-		int c0 = ReachCostAt(out, layer, x, z);
-		for (int k = 0; k < 4; k++) {
-			int nx = x + dx[k], nz = z + dz[k];
-			if (!Map::In(nx, nz)) continue;
-			for (int toL = 0; toL < LAY_N; toL++) {
-				if (!FootLand(b, ui, x, z, nx, nz, layer, toL, 0)) continue;
-				int nc = c0 + FootCost(b, ui, nx, nz, toL);
-				if (nc > mv) continue;
-				short& cst = ReachCostRef(out, toL, nx, nz);
-				if (cst >= 0 && cst <= nc) continue;
-				int inq = cst >= 0;
-				cst = (short)nc;
-				ReachFromRef(out, toL, nx, nz) = PackCell(x, z, layer);
-				if (qn + 1 >= MAPN * MAPN * LAY_N) continue;
-				if (!inq) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
-				else {
-					int found = 0;
-					for (int i = 0; i < qn; i++) if (qx[i] == nx && qz[i] == nz && qd[i] == toL) found = 1;
-					if (!found) { qx[qn] = nx; qz[qn] = nz; qd[qn] = toL; qn++; }
+	for (int band = 0; band <= mv; band++) {
+		int id = bHead[band];
+		while (id >= 0) {
+			int x = g_layQx[id], z = g_layQz[id], layer = g_layQL[id], c0 = g_layQd[id];
+			id = g_layNext[id];
+			if (ReachCostAt(out, layer, x, z) != c0) continue;
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (!Map::In(nx, nz)) continue;
+				int nL = CellLayN(b.map.At(nx, nz));
+				for (int toL = 0; toL < nL; toL++) {
+					if (!FootLand(b, ui, x, z, nx, nz, layer, toL, 0)) continue;
+					int nc = c0 + FootCost(b, ui, nx, nz, toL);
+					if (nc > mv) continue;
+					if (out.cost[toL][nz][nx] >= 0 && out.cost[toL][nz][nx] <= nc) continue;
+					out.cost[toL][nz][nx] = (short)nc;
+					out.from[toL][nz][nx] = PackCell(x, z, layer);
+					push(nx, nz, toL, nc);
 				}
 			}
 		}
 	}
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		if (out.cost[z][x] >= 0) out.canStop[z][x] = FootCanStop(b, ui, x, z, 0) ? 1 : 0;
-		if (out.costHi[z][x] >= 0) out.canStopHi[z][x] = FootCanStop(b, ui, x, z, 1) ? 1 : 0;
-		if (out.cost2[z][x] >= 0) out.canStop2[z][x] = FootCanStop(b, ui, x, z, 2) ? 1 : 0;
-		if (out.cost3[z][x] >= 0) out.canStop3[z][x] = FootCanStop(b, ui, x, z, 3) ? 1 : 0;
-		if (out.cost4[z][x] >= 0) out.canStop4[z][x] = FootCanStop(b, ui, x, z, 4) ? 1 : 0;
+		int n = CellLayN(b.map.At(x, z));
+		for (int L = 0; L < n; L++)
+			if (out.cost[L][z][x] >= 0) out.canStop[L][z][x] = FootCanStop(b, ui, x, z, L) ? 1 : 0;
 	}
 }
 
@@ -7596,17 +7933,27 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 	int bestLeave = 99999, lx = -1, lz = -1, lDeck = 0;
 	int bestAny = 99999, ax = -1, az = -1, aDeck = 0;
 	BOOL needStep = UnitMove(u) >= 1 && UnitMoveType(u) != MV_FLY;
-	int refH = Map::In(gx, gz) ? LayerHt(b.map.At(gx, gz), max(0, CellLayN(b.map.At(gx, gz)) - 1)) : 2;
+	int refH = Map::In(gx, gz) ? CellStandH(b.map, gx, gz, -1) : 2;
+	int nearPx = -1, nearPz = -1;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (i == ui || !b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
+		if (Map::In(b.u[i].x, b.u[i].z)) {
+			refH = LayerHt(b.map.At(b.u[i].x, b.u[i].z), b.u[i].deck);
+			nearPx = b.u[i].x; nearPz = b.u[i].z;
+			break;
+		}
+	}
 	for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
 		int x = gx + dx, z = gz + dz;
 		if (!Map::In(x, z)) continue;
 		int nL = CellLayN(b.map.At(x, z));
-		for (int L = nL - 1; L >= 0; L--) {
+		for (int L = 0; L < nL; L++) {
 			u.deck = L;
 			if (!FootFits(b, ui, x, z)) continue;
 			int contains = (gx >= x && gx < x + s && gz >= z && gz < z + s) ? 0 : 1000;
 			int dh = abs(LayerHt(b.map.At(x, z), L) - refH);
-			int rank = contains + abs(dx) + abs(dz) + (dh > 6 ? dh : 0);
+			int rank = contains + abs(dx) + abs(dz) + dh * 4;
+			if (nearPx >= 0 && max(abs(x - nearPx), abs(z - nearPz)) <= 10 && dh > 5) rank += 8000;
 			if (s > 1) rank += (FootRoom(b.map, x, z, s) < s + 1) ? 4 : 0;
 			if (rank < bestAny) { bestAny = rank; ax = x; az = z; aDeck = L; }
 			if (!needStep || FootCanLeave(b, ui, x, z)) {
@@ -7804,7 +8151,9 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		if (Map::In(u.x, u.z)) {
 			const Cell& sc = b.map.At(u.x, u.z);
 			int nL = CellLayN(sc);
-			int hRef = Map::In(b.map.pStartX[0], b.map.pStartZ[0]) ? (int)b.map.At(b.map.pStartX[0], b.map.pStartZ[0]).h : (int)sc.h;
+			int hRef = CellStandH(b.map, b.map.pStartX[0], b.map.pStartZ[0], -1);
+			if (i > 0 && b.u[0].alive && Map::In(b.u[0].x, b.u[0].z))
+				hRef = LayerHt(b.map.At(b.u[0].x, b.u[0].z), b.u[0].deck);
 			int bestL = 0, bestDh = 99999;
 			for (int L = 0; L < nL; L++) {
 				if (TerrainInfo(LayerTr(sc, L)).costFoot >= 99) continue;
@@ -7929,7 +8278,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			u.grp = g;
 			u.alert = 0;
 			if (!PlaceFoot(b, n, grp.x[k], grp.z[k])) {
-				if (!boss) continue;
+				if (!boss && k > 0) continue;
 				int s = max(1, UnitSpan(u));
 				int gx = Clampi((int)grp.x[k], 1, MAPN - s - 1);
 				int gz = Clampi((int)grp.z[k], 1, MAPN - s - 1);
@@ -7945,14 +8294,6 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 				b.RebuildOcc();
 				continue;
 			}
-			if (!boss) {
-				const Cell& cell = b.map.At(u.x, u.z);
-				int nl = CellLayN(cell);
-				if (nl >= 2 && cell.h <= MAXH && LayerHt(cell, nl - 1) <= MAXH + 14) {
-					int L = (k + g) % nl;
-					if (TerrainInfo(LayerTr(cell, L)).costFoot < 99 && b.UnitAt(u.x, u.z, L) < 0) u.deck = L;
-				}
-			}
 			n++;
 			b.nUnits = n;
 			b.RebuildOcc();
@@ -7960,6 +8301,59 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.nUnits = n;
 	b.RebuildOcc();
+	if (b.AliveCount(TEAM_ENEMY) <= 0 && n < MAX_UNITS) {
+		int gx = b.map.nP > 0 ? b.map.pStartX[0] : MAPN / 2;
+		int gz = b.map.nP > 0 ? b.map.pStartZ[0] : MAPN / 2;
+		if (b.map.nE > 0) { gx = b.map.eStartX[0]; gz = b.map.eStartZ[0]; }
+		else if (b.map.nGrp > 0) { gx = b.map.grp[0].ax; gz = b.map.grp[0].az; }
+		gx = Clampi(gx, 1, MAPN - 2);
+		gz = Clampi(gz, 1, MAPN - 2);
+		Unit& u = b.u[n];
+		MakeEnemy(u, BossMonster(stage, r), max(1, StageEnemyLevel(stage) + 3), 1, r);
+		u.face = faceToE + 3.14159f;
+		u.ct = r.Range(80, 480);
+		u.hpShow = (float)u.hp;
+		u.grp = 0;
+		u.alert = 0;
+		if (!PlaceFoot(b, n, gx, gz)) { u.x = gx; u.z = gz; u.deck = 0; }
+		n++;
+		b.nUnits = n;
+		b.RebuildOcc();
+	}
+	{
+		int px = -1, pz = -1, hP = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (!b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
+			px = b.u[i].x; pz = b.u[i].z;
+			if (Map::In(px, pz)) hP = LayerHt(b.map.At(px, pz), b.u[i].deck);
+			break;
+		}
+		if (px >= 0 && !MapIsSpiral(b.map)) {
+			for (int i = 0; i < b.nUnits; i++) {
+				Unit& eu = b.u[i];
+				if (!eu.alive || eu.team != TEAM_ENEMY || !Map::In(eu.x, eu.z)) continue;
+				int h = LayerHt(b.map.At(eu.x, eu.z), eu.deck);
+				int xz = max(abs(eu.x - px), abs(eu.z - pz));
+				int nL = CellLayN(b.map.At(eu.x, eu.z));
+				int bestL = -1, bestD = 99999;
+				for (int L = 0; L < nL; L++) {
+					if (TerrainInfo(LayerTr(b.map.At(eu.x, eu.z), L)).costFoot >= 99) continue;
+					int o = b.UnitAt(eu.x, eu.z, L);
+					if (o >= 0 && o != i) continue;
+					int d = abs(LayerHt(b.map.At(eu.x, eu.z), L) - hP);
+					if (d < bestD) { bestD = d; bestL = L; }
+				}
+				if (bestL >= 0 && bestD <= 4) { eu.deck = bestL; continue; }
+				if (xz <= 12 && abs(h - hP) > 5) {
+					int ox = eu.x, oz = eu.z;
+					eu.x = -1; eu.z = -1;
+					b.RebuildOcc();
+					if (!PlaceFoot(b, i, ox, oz)) { eu.x = ox; eu.z = oz; }
+					b.RebuildOcc();
+				}
+			}
+		}
+	}
 	if (b.sweep != TAC_VAR_SWEEP) {
 		int hasBoss = 0, farUi = -1, farD = -1;
 		int px = b.map.nP > 0 ? b.map.pStartX[0] : 0;
@@ -8013,11 +8407,13 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (!u.alive || u.team != TEAM_ENEMY) continue;
 			if (b.sweep == TAC_VAR_AMBUSH) { u.alert = 1; continue; }
 			int closeBy = 0;
-			int uH = Map::In(u.x, u.z) ? LayerHt(b.map.At(u.x, u.z), u.deck) : 0;
+			FillWalkSteps(b, i);
 			for (int p = 0; p < b.nUnits; p++) {
 				if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-				int pH = Map::In(b.u[p].x, b.u[p].z) ? LayerHt(b.map.At(b.u[p].x, b.u[p].z), b.u[p].deck) : 0;
-				if (Dist(u.x, u.z, b.u[p].x, b.u[p].z) + abs(uH - pH) / 2 <= 22) closeBy = 1;
+				int pL = (b.u[p].deck >= 0 && b.u[p].deck < LAY_N) ? b.u[p].deck : 0;
+				if (!Map::In(b.u[p].x, b.u[p].z) || !LayerOn(b.map.At(b.u[p].x, b.u[p].z), pL)) continue;
+				int d = WalkStepsAt(b.u[p].x, b.u[p].z, pL);
+				if (d >= 0 && d < 30000 && d <= 22) closeBy = 1;
 			}
 			if (closeBy) u.alert = 1;
 		}
@@ -8271,39 +8667,19 @@ static void MarkGroup(Battle& b, int grp, int immediate, int& newly)
 	}
 }
 
-// 障害物を避けた歩数。山や段差で通れないマスは数えず、回り込んだ長さを返す。
+// 障害物を避けた歩数。山や段差で通れないマスは数えず、回り込んだ長さを返す。層を畳まない。
 static void ScoutFlood(const Battle& b, int ei, int limit, short dist[MAPN][MAPN])
 {
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) dist[z][x] = -1;
 	const Unit& u = b.u[ei];
 	if (!Map::In(u.x, u.z) || limit < 0) return;
-	static int qx[MAPN * MAPN * LAY_N], qz[MAPN * MAPN * LAY_N], qL[MAPN * MAPN * LAY_N], qD[MAPN * MAPN * LAY_N];
-	static BYTE seen[LAY_N][MAPN][MAPN];
-	memset(seen, 0, sizeof(seen));
-	int qh = 0, qt = 0;
-	int sL = (u.deck >= 0 && u.deck < LAY_N && LayerOn(b.map.At(u.x, u.z), u.deck)) ? u.deck : 0;
-	dist[u.z][u.x] = 0;
-	seen[sL][u.z][u.x] = 1;
-	qx[qt] = u.x; qz[qt] = u.z; qL[qt] = sL; qD[qt] = 0; qt++;
-	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
-	int mt = UnitMoveType(u);
-	while (qh < qt) {
-		int x = qx[qh], z = qz[qh], L = qL[qh], c0 = qD[qh]; qh++;
-		if (c0 >= limit) continue;
-		const Cell& f = b.map.At(x, z);
-		for (int k = 0; k < 4; k++) {
-			int nx = x + dx[k], nz = z + dz[k];
-			if (!Map::In(nx, nz)) continue;
-			const Cell& t = b.map.At(nx, nz);
-			int nL = CellLayN(t);
-			for (int NL = 0; NL < nL; NL++) {
-				if (seen[NL][nz][nx]) continue;
-				if (!LayerLegal(f, L, t, NL, mt)) continue;
-				seen[NL][nz][nx] = 1;
-				if (dist[nz][nx] < 0 || c0 + 1 < dist[nz][nx]) dist[nz][nx] = (short)(c0 + 1);
-				qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qD[qt] = c0 + 1; qt++;
-			}
-		}
+	int sx[16], sz[16], sL[16], n = 0;
+	SeedUnitSteps(u, b.map, sx, sz, sL, n, 16);
+	FloodWalk(b, UnitMoveType(u), limit, sx, sz, sL, n);
+	for (int L = 0; L < LAY_N; L++) for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = g_stepDist[L][z][x];
+		if (d >= 30000) continue;
+		if (dist[z][x] < 0 || d < dist[z][x]) dist[z][x] = (short)d;
 	}
 }
 
@@ -8319,13 +8695,19 @@ static bool ScoutSee(const Map& m, int ex, int ez, int px, int pz, int eLayer, i
 
 static bool UnitCanScout(const Battle& b, int ei, int pi, int limit, const short dist[MAPN][MAPN])
 {
+	(void)dist;
 	const Unit& e = b.u[ei];
 	const Unit& p = b.u[pi];
 	int se = max(1, UnitSpan(e)), spn = max(1, UnitSpan(p));
 	bool reach = false;
+	int pL = (p.deck >= 0 && p.deck < LAY_N) ? p.deck : 0;
 	for (int z = 0; z < spn && !reach; z++) for (int x = 0; x < spn; x++) {
 		int cx = p.x + x, cz = p.z + z;
-		if (Map::In(cx, cz) && dist[cz][cx] >= 0 && dist[cz][cx] <= limit) reach = true;
+		if (!Map::In(cx, cz)) continue;
+		// 同じ xz の下の階に届いても、相手のいる階へ歩けなければ見つかったことにしない。
+		if (!LayerOn(b.map.At(cx, cz), pL)) continue;
+		int d = WalkStepsAt(cx, cz, pL);
+		if (d >= 0 && d < 30000 && d <= limit) reach = true;
 	}
 	if (!reach) return false;
 	for (int ez = 0; ez < se; ez++) for (int ex = 0; ex < se; ex++)
@@ -8600,15 +8982,22 @@ void DoShove(Battle& b, int ui, int ti)
 }
 
 // ============================================================ AI
+static int LayPath(int x, int z, int layer)
+{
+	int L = layer;
+	if (L < 0) L = 0;
+	if (L >= LAY_N) L = LAY_N - 1;
+	if (!Map::In(x, z)) return 30000;
+	return (int)g_layDist[L][z][x];
+}
+
 static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 {
 	const Unit& u = b.u[ui];
-	static short dfL[LAY_N][MAPN][MAPN];
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		df[z][x] = 30000;
-		for (int L = 0; L < LAY_N; L++) dfL[L][z][x] = 30000;
+		for (int L = 0; L < LAY_N; L++) g_layDist[L][z][x] = 30000;
 	}
-	static int qx[MAPN * MAPN * LAY_N * 2], qz[MAPN * MAPN * LAY_N * 2], qL[MAPN * MAPN * LAY_N * 2];
 	int qh = 0, qt = 0;
 	for (int i = 0; i < b.nUnits; i++) {
 		const Unit& t = b.u[i];
@@ -8619,16 +9008,16 @@ static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 			int x = t.x + dx, z = t.z + dz;
 			if (!Map::In(x, z)) continue;
 			int useL = LayerOn(b.map.At(x, z), tL) ? tL : 0;
-			if (dfL[useL][z][x] == 0) continue;
-			dfL[useL][z][x] = 0;
+			if (g_layDist[useL][z][x] == 0) continue;
+			g_layDist[useL][z][x] = 0;
 			df[z][x] = 0;
-			qx[qt] = x; qz[qt] = z; qL[qt] = useL; qt++;
+			if (qt < LAY_Q) { g_layQx[qt] = x; g_layQz[qt] = z; g_layQL[qt] = useL; qt++; }
 		}
 	}
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	int mt = UnitMoveType(u);
 	while (qh < qt) {
-		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
 		const Cell& toC = b.map.At(x, z);
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
@@ -8637,11 +9026,11 @@ static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 			int nL = CellLayN(fromC);
 			for (int NL = 0; NL < nL; NL++) {
 				if (!LayerLegal(fromC, NL, toC, L, mt)) continue;
-				int c = dfL[L][z][x] + FootCost(b, ui, x, z, L);
-				if (c < dfL[NL][nz][nx]) {
-					dfL[NL][nz][nx] = (short)c;
+				int c = g_layDist[L][z][x] + 1;
+				if (c < g_layDist[NL][nz][nx]) {
+					g_layDist[NL][nz][nx] = (short)c;
 					if (c < df[nz][nx]) df[nz][nx] = (short)c;
-					if (qt < (int)_countof(qx)) { qx[qt] = nx; qz[qt] = nz; qL[qt] = NL; qt++; }
+					if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 				}
 			}
 		}
@@ -8651,7 +9040,7 @@ static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 {
 	const Unit& u = b.u[ui];
-	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 1;
+	p.moveX = u.x; p.moveZ = u.z; p.moveL = u.deck; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 1;
 	static Reach rc;
 	ComputeReach(b, ui, rc);
 	int roll = (int)(r.Next() % 100);
@@ -8674,6 +9063,7 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 	if (want == 3) p.wild = 2;
 	int best = -999999, bx = u.x, bz = u.z;
 	int any = 0;
+	if (pick >= 0) FillWalkSteps(b, pick);
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (!ReachCanStop(rc, x, z)) continue;
 		any = 1;
@@ -8681,11 +9071,29 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 		if (pick >= 0) {
 			const Unit& t = b.u[pick];
 			if (InRangeOfUnit(b, u, x, z, UnitRangeMin(u), UnitRangeMax(u), t, true)) sc += 1000;
-			else sc -= FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 4;
+			else {
+				int d = 30000;
+				for (int L = 0; L < LAY_N; L++) {
+					if (!ReachCanStopLayer(rc, x, z, L)) continue;
+					int dL = WalkStepsAt(x, z, L);
+					if (dL < d) d = dL;
+				}
+				if (d >= 30000) d = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+				sc -= d * 4;
+			}
 		}
 		if (sc > best) { best = sc; bx = x; bz = z; }
 	}
-	if (any) { p.moveX = bx; p.moveZ = bz; }
+	if (any) {
+		p.moveX = bx; p.moveZ = bz;
+		int bL = u.deck, bC = 99999;
+		for (int L = 0; L < LAY_N; L++) {
+			if (!ReachCanStopLayer(rc, bx, bz, L)) continue;
+			int cL = ReachCostAt(rc, L, bx, bz);
+			if (cL >= 0 && cL < bC) { bC = cL; bL = L; }
+		}
+		p.moveL = bL;
+	}
 	if (pick >= 0) {
 		p.target = pick;
 		p.castX = b.u[pick].x;
@@ -8697,7 +9105,7 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 {
 	const Unit& u = b.u[ui];
-	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 0;
+	p.moveX = u.x; p.moveZ = u.z; p.moveL = u.deck; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 0;
 	if (u.sleep > 0 || u.stun > 0) return;
 	if (u.confuse > 0) { ConfusePlan(b, ui, p, r); return; }
 	if (level < 0) level = 0;
@@ -8714,6 +9122,13 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			int pick = bag[r.Range(0, nc - 1)];
 			p.moveX = pick % MAPN;
 			p.moveZ = pick / MAPN;
+			int bL = u.deck, bC = 99999;
+			for (int L = 0; L < LAY_N; L++) {
+				if (!ReachCanStopLayer(rc, p.moveX, p.moveZ, L)) continue;
+				int cL = ReachCostAt(rc, L, p.moveX, p.moveZ);
+				if (cL >= 0 && cL < bC) { bC = cL; bL = L; }
+			}
+			p.moveL = bL;
 		}
 		Battle& bb = const_cast<Battle&>(b);
 		Unit& um = bb.u[ui];
@@ -8741,6 +9156,9 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 		um.x = ox; um.z = oz;
 		return;
 	}
+	static short df[MAPN][MAPN];
+	DistanceField(b, ui, df);
+	FillWalkSteps(b, ui);
 	float best = -1e9f;
 	BOOL tryArt = level >= 4 || (r.Next() % 100) < (level <= 1 ? 12 : (level == 3 ? 68 : 36));
 	BOOL tryOugi = level >= 4 || (r.Next() % 100) < (level <= 1 ? 4 : (level == 3 ? 34 : 14));
@@ -8750,7 +9168,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 	float noise = level <= 1 ? 2.8f : (level == 2 ? 1.f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
-	const int ox = u.x, oz = u.z;
+	const int ox = u.x, oz = u.z, oDeck = u.deck;
 	int focus = -1;
 	if (level >= 5) {
 		float bf = -1e9f;
@@ -8776,10 +9194,17 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			nearD[z][x] = 999;
 			if (!ReachCanStop(rc, x, z)) continue;
 			int nd = 999;
-			for (int i = 0; i < b.nUnits; i++) {
-				const Unit& t = b.u[i];
-				if (!t.alive || t.team == u.team) continue;
-				nd = min(nd, FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)));
+			for (int L = 0; L < LAY_N; L++) {
+				if (!ReachCanStopLayer(rc, x, z, L)) continue;
+				int dL = LayPath(x, z, L);
+				if (dL < nd) nd = dL;
+			}
+			if (nd >= 30000) {
+				for (int i = 0; i < b.nUnits; i++) {
+					const Unit& t = b.u[i];
+					if (!t.alive || t.team == u.team) continue;
+					nd = min(nd, FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)));
+				}
 			}
 			nearD[z][x] = (short)nd;
 			if (nd < 999 && nd > farReach) farReach = nd;
@@ -8802,10 +9227,14 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 		else if (standT == T_WATER) place -= 2.f;
 		if (level >= 4) {
 			int threat = 0;
-			for (int i = 0; i < b.nUnits; i++) {
-				const Unit& t = b.u[i];
-				if (!t.alive || t.team == u.team) continue;
-				if (FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)) <= 2) threat++;
+			int pd = LayPath(x, z, bestStopL);
+			if (pd <= 2) threat = 1;
+			else {
+				for (int i = 0; i < b.nUnits; i++) {
+					const Unit& t = b.u[i];
+					if (!t.alive || t.team == u.team) continue;
+					if (FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)) <= 2) threat++;
+				}
 			}
 			place -= threat * (level >= 5 ? 7.f : 3.f);
 		}
@@ -8820,7 +9249,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			}
 			if (room && tileNear <= 1) flee -= 36.f;
 			flee += r.F(0, 3.f * noise);
-			if (flee > best) { best = flee; p.moveX = x; p.moveZ = z; p.target = -1; p.skill = -1; p.castX = x; p.castZ = z; }
+			if (flee > best) { best = flee; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = -1; p.skill = -1; p.castX = x; p.castZ = z; }
 		}
 		// 通常攻撃
 		for (int i = 0; i < b.nUnits; i++) {
@@ -8836,8 +9265,13 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			sc += t.ch.lv * .35f;
 			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 4.f;
 			sc -= (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .35f : 0.f);
-			int gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
-			if (!cornered) sc -= FootDist(ox, oz, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 2.5f;
+			int gap = LayPath(x, z, bestStopL);
+			if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+			if (!cornered) {
+				int fromMe = WalkStepsAt(t.x, t.z, t.deck);
+				if (fromMe >= 30000) fromMe = FootDist(ox, oz, UnitSpan(u), t.x, t.z, UnitSpan(t));
+				sc -= fromMe * 2.5f;
+			}
 			else {
 				sc += tileNear * 4.f;
 				if (room && gap <= 1) sc -= 80.f;
@@ -8849,7 +9283,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			}
 			if (level >= 5 && focus >= 0) sc += (i == focus) ? 48.f : -10.f;
 			sc += place + r.F(0, 14.f * noise);
-			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
+			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
 		// スキル
 		for (int s = 0; s < SKL_COUNT; s++) {
@@ -8903,13 +9337,18 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						const Unit& q = b.u[targets[k]];
 						tot += f.dmg * f.hits * f.hit / 100.f * .55f + (f.dmg * f.hits >= q.hp ? 12.f : 0.f);
 						if (f.dmg * f.hits >= q.hp) kill = 1;
-						if (!cornered) tot += q.ch.lv * .2f - Dist(ox, oz, q.x, q.z) * 1.6f;
+						if (!cornered) {
+							int fromMe = WalkStepsAt(q.x, q.z, q.deck);
+							if (fromMe >= 30000) fromMe = Dist(ox, oz, q.x, q.z);
+							tot += q.ch.lv * .2f - fromMe * 1.6f;
+						}
 						else tot += q.ch.lv * .2f;
 					}
 					if (tot <= 0) continue;
 					sc += tot - sd.mp * .4f;
 					if (cornered) {
-						int gap = FootDist(x, z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i]));
+						int gap = LayPath(x, z, bestStopL);
+						if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i]));
 						sc += tileNear * 4.f;
 						if (room && gap <= 1) sc -= 80.f;
 						else if (gap >= 2) sc += 36.f;
@@ -8918,7 +9357,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 				}
 				if (level >= 5 && focus >= 0 && sd.kind != SK_HEAL && sd.kind != SK_BUFF) sc += (i == focus) ? 36.f : -8.f;
 				sc += r.F(0, 10.f * noise);
-				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
 			}
 		}
 		for (int ck = 0; ck < CRAFT_SLOT_N; ck++) {
@@ -8962,9 +9401,13 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 					CalcForecast(b, ui, i, cs, f);
 					if (f.dmg <= 0) continue;
 					sc += f.dmg * f.hit / 100.f * (ougi ? .25f : .35f);
-					if (!cornered) sc += t.ch.lv * .25f - Dist(ox, oz, t.x, t.z) * 1.8f;
-					else {
-						int gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+					if (!cornered) {
+						int fromMe = WalkStepsAt(t.x, t.z, t.deck);
+						if (fromMe >= 30000) fromMe = Dist(ox, oz, t.x, t.z);
+						sc += t.ch.lv * .25f - fromMe * 1.8f;
+					} else {
+						int gap = LayPath(x, z, bestStopL);
+						if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
 						sc += tileNear * 4.f + t.ch.lv * .25f;
 						if (room && gap <= 1) sc -= 80.f;
 						else if (gap >= 2) sc += 36.f;
@@ -8973,11 +9416,11 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 					if (level >= 5 && focus >= 0) sc += (i == focus) ? 28.f : -6.f;
 					sc += r.F(0, 10.f * noise);
 				}
-				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
 		}
 	}
-	um.x = ox; um.z = oz; um.deck = u.deck;
+	um.x = ox; um.z = oz; um.deck = oDeck;
 	if (p.target >= 0) return;
 	// 半減以下は上で距離を取っている。ここで近づくと逃げが消える。
 	if (cornered) return;
@@ -8987,27 +9430,71 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 		int uH = Map::In(u.x, u.z) ? LayerHt(b.map.At(u.x, u.z), u.deck) : 0;
 		for (int i = 0; i < b.nUnits; i++) if (b.u[i].alive && b.u[i].team != u.team) {
 			int tH = Map::In(b.u[i].x, b.u[i].z) ? LayerHt(b.map.At(b.u[i].x, b.u[i].z), b.u[i].deck) : 0;
-			nearest = min(nearest, FootDist(u.x, u.z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i])) + abs(uH - tH) / 2);
+			int d = WalkStepsAt(b.u[i].x, b.u[i].z, b.u[i].deck);
+			if (d >= 30000) d = FootDist(u.x, u.z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i]));
+			nearest = min(nearest, d + abs(uH - tH) / 2);
 		}
 		if (nearest > 10) return;
 	}
-	static short df[MAPN][MAPN];
-	DistanceField(b, ui, df);
-	int bd = df[u.z][u.x];
+	int startL = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+	int bd = g_layDist[startL][u.z][u.x];
+	if (bd >= 30000) bd = df[u.z][u.x];
+	float nearTy = Map::In(u.x, u.z) ? b.map.WalkY(u.x, u.z, u.deck) : 0.f;
+	int nearTx = u.x, nearTz = u.z, nearTs = 1;
+	{
+		int nd = 99999;
+		for (int i = 0; i < b.nUnits; i++) {
+			const Unit& t = b.u[i];
+			if (!t.alive || t.team == u.team) continue;
+			int d = WalkStepsAt(t.x, t.z, t.deck);
+			if (d >= 30000) d = FootDist(u.x, u.z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+			if (d >= nd) continue;
+			nd = d; nearTx = t.x; nearTz = t.z; nearTs = UnitSpan(t);
+			nearTy = Map::In(t.x, t.z) ? b.map.WalkY(t.x, t.z, t.deck) : nearTy;
+		}
+	}
+	if (level >= 5 && focus >= 0) FillWalkSteps(b, focus);
 	float bs = -1e9f;
+	int bestX = u.x, bestZ = u.z, bestL = u.deck, bestD = bd;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (!ReachCanStop(rc, x, z)) continue;
-		int d = df[z][x];
-		if (d >= 30000) continue;
-		float sc = -d * 10.f + TerrainInfo(b.map.At(x, z).t).defPct * .2f + r.F(0, .5f * noise);
+		int preferL = u.deck, d = 30000, stopC = 99999;
+		for (int L = 0; L < LAY_N; L++) {
+			if (!ReachCanStopLayer(rc, x, z, L)) continue;
+			int dL = g_layDist[L][z][x];
+			int cL = ReachCostAt(rc, L, x, z);
+			if (dL < d) { d = dL; preferL = L; }
+			if (cL >= 0 && cL < stopC) stopC = cL;
+		}
+		if (d > bd && bd < 30000) continue;
+		if (d == bd && bd < 30000 && (x != u.x || z != u.z)) continue;
+		float sc;
+		if (d < 30000) {
+			int standT = LayerTr(b.map.At(x, z), preferL);
+			sc = -d * 10.f + TerrainInfo(standT).defPct * .2f;
+		} else {
+			float y = b.map.WalkY(x, z, preferL);
+			int xz = LayPath(x, z, preferL);
+			if (xz >= 30000) xz = FootDist(x, z, UnitSpan(u), nearTx, nearTz, nearTs);
+			sc = -fabsf(y - nearTy) * 22.f - xz * 4.f - (float)stopC * .05f;
+			if (x == u.x && z == u.z) sc -= 8.f;
+		}
 		if (level >= 5 && focus >= 0) {
-			const Unit& ft = b.u[focus];
-			sc -= FootDist(x, z, UnitSpan(u), ft.x, ft.z, UnitSpan(ft)) * 4.f;
+			int fd = WalkStepsAt(x, z, preferL);
+			if (fd >= 30000) {
+				const Unit& ft = b.u[focus];
+				fd = FootDist(x, z, UnitSpan(u), ft.x, ft.z, UnitSpan(ft));
+			}
+			sc -= fd * 4.f;
 		}
 		if (UnitRangeMax(u) >= 2 && d <= 1) sc -= 15.f;
-		if (sc > bs) { bs = sc; p.moveX = x; p.moveZ = z; }
+		if (sc > bs) { bs = sc; bestX = x; bestZ = z; bestL = preferL; bestD = d; }
 	}
-	if (bs < -1e8f || df[p.moveZ][p.moveX] > bd) { p.moveX = u.x; p.moveZ = u.z; }
+	if (bs < -1e8f || (bestD > bd && bd < 30000)) {
+		p.moveX = u.x; p.moveZ = u.z; p.moveL = u.deck;
+	} else {
+		p.moveX = bestX; p.moveZ = bestZ; p.moveL = bestL;
+	}
 }
 
 // ============================================================ 武具（生成表: tactics_src/gear_catalog.inc）
@@ -9739,7 +10226,7 @@ static BYTE* TacReadLeafBytes(const TCHAR* leaf, unsigned* sz)
 	fseek(in, 0, SEEK_END);
 	long n = ftell(in);
 	fseek(in, 0, SEEK_SET);
-	if (n < 0 || n > 16 * 1024 * 1024) { fclose(in); return NULL; }
+	if (n < 0 || n > 48 * 1024 * 1024) { fclose(in); return NULL; }
 	BYTE* b = new BYTE[n ? (size_t)n : 1];
 	bool ok = !n || (fread(b, 1, (size_t)n, in) == (size_t)n);
 	fclose(in);
@@ -9775,7 +10262,7 @@ bool SlotExportTo(int slot, const wchar_t* path)
 			return false;
 		}
 		if (part[k]) {
-			if (plainCap > 32u * 1024u * 1024u || psz[k] > 32u * 1024u * 1024u - 8u - plainCap) {
+			if (plainCap > 64u * 1024u * 1024u || psz[k] > 64u * 1024u * 1024u - 8u - plainCap) {
 				for (int i = 0; i < SLF_N; i++) delete[] part[i];
 				return false;
 			}
@@ -9864,7 +10351,7 @@ bool SlotImportFrom(int slot, const wchar_t* path)
 	delete[] file;
 	if (!dec) { delete[] comp; return false; }
 	unsigned long long need = ZSTD_getFrameContentSize(comp, csz);
-	if (need < 12ull + (unsigned long long)TAC_SLOT_NAME * sizeof(wchar_t) || need > 32ull * 1024ull * 1024ull) { delete[] comp; return false; }
+	if (need < 12ull + (unsigned long long)TAC_SLOT_NAME * sizeof(wchar_t) || need > 64ull * 1024ull * 1024ull) { delete[] comp; return false; }
 	BYTE* plain = new BYTE[(size_t)need];
 	size_t got = ZSTD_decompress(plain, (size_t)need, comp, csz);
 	delete[] comp;
@@ -9883,7 +10370,7 @@ bool SlotImportFrom(int slot, const wchar_t* path)
 		if (o + 8 > got) { bad = true; break; }
 		unsigned kind = TacGet32(plain + o); o += 4;
 		unsigned sz = TacGet32(plain + o); o += 4;
-		if (kind >= SLF_N || o + sz > got || sz > 16u * 1024u * 1024u) { bad = true; break; }
+		if (kind >= SLF_N || o + sz > got || sz > 48u * 1024u * 1024u) { bad = true; break; }
 		delete[] part[kind];
 		part[kind] = new BYTE[sz ? sz : 1];
 		if (sz) memcpy(part[kind], plain + o, sz);
@@ -10196,7 +10683,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 7;
+	s.version = 8;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -10363,14 +10850,35 @@ struct SaveV6 {
 };
 #pragma pack(pop)
 static_assert(sizeof(CharData) == sizeof(CharV5) + (JOB_PATH_N + 1) * sizeof(int) + (24 + 16) * sizeof(int), "version 7 は技ビットと余り");
-static_assert(sizeof(SaveData) == sizeof(SaveV5) + MAX_ROSTER * ((JOB_PATH_N + 1) + 24 + 16) * sizeof(int) + 32 * sizeof(int), "version 7");
 static_assert(sizeof(CharV6) + (24 + 16) * sizeof(int) == sizeof(CharData), "v6 キャラに技欄を足す");
+#pragma pack(push, 4)
+struct SaveV7 {
+	DWORD magic;
+	int version;
+	CharData roster[MAX_ROSTER];
+	int party[MAX_PARTY];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+	int partyCap, rosterCap;
+	int spare[32];
+};
+#pragma pack(pop)
+static_assert(sizeof(SaveV7) == sizeof(SaveV5) + MAX_ROSTER * ((JOB_PATH_N + 1) + 24 + 16) * sizeof(int) + 32 * sizeof(int), "version 7");
+static_assert(sizeof(SaveData) == sizeof(SaveV7) + 256 * sizeof(int), "version 8 は extra[256]");
 
 static int TacPeekClearBytes(FILE* fp, long sz)
 {
 	if (!fp) return 0;
 	if (sz == (long)sizeof(SaveData)) {
 		SaveData peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV7)) {
+		SaveV7 peek;
 		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
 			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
 	} else if (sz == (long)sizeof(SaveV6)) {
@@ -10789,16 +11297,23 @@ bool SaveLoad(SaveData& s)
 				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
 			got = TRUE;
 		}
+	} else if (sz == (long)sizeof(SaveV7)) {
+		SaveV7 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 7) {
+			memcpy(&s, &o, sizeof(o));
+			memset(s.extra, 0, sizeof(s.extra));
+			got = TRUE;
+		}
 	} else if (sz == (long)sizeof(SaveData)) {
 		SaveData t;
-		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 7) {
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 8) {
 			s = t;
 			got = TRUE;
 		}
 	}
 	fclose(fp);
 	if (!got) return false;
-	s.version = 7;
+	s.version = 8;
 	bool rail = false;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];

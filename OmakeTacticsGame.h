@@ -645,7 +645,7 @@ private:
 	int m_target;
 	BYTE m_ovMove[MAPN][MAPN];
 	BYTE m_ovAtk[MAPN][MAPN];
-	BYTE m_ovAtkLay[MAPN][MAPN];
+	unsigned long long m_ovAtkLay[MAPN][MAPN];
 	BYTE m_ovThreat[MAPN][MAPN];
 	Fix<VtxS, 65536> m_ovQuads;
 	BOOL m_ovDirty;

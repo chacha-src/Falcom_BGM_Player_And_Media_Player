@@ -15,12 +15,15 @@ cbuffer Frame : register(b0)
 	float4 Q;        // x=段(0軽 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破) y=テッセ係数 z=変位 w=被写界
 	float4 Sight;    // x=明瞭な半径 y=ステージ番号 z=人数 w=有効
 	float4 Ally[16]; // xy=味方のワールドxz z=有効
-	float4 CamNear;  // x=視線方向で消す深さ y=ここから残す。0 なら無効
+	float4 CamNear;  // x=視線方向で消す深さ y=ここから残す。0 なら無効 w=不透明帯の上端
 	float4 CamFwd;   // xyz=今のカメラ前方
 	float4 Wx;       // x=天候 y=時刻。地面の反射に使う。z=画質の連続段(rank)
 	row_major float4x4 ReflectVP;
 	float4 ReflectInfo; // x=映す y=床の高さ z=反射パス(1=上面を捨てる 2=上面も残す) w=ぼかし幅
 	row_major float4x4 InvVP;
+	float4 Hole0; // xyz=キャラ w=半径（0なら部分くり抜きなし）
+	float4 Hole1; // xyz=カーソル w=有効
+	float4 Hole2; // x=不透明帯の下端 y=他レイヤー透かし z=ゴーストパス w=周辺半径
 };
 cbuffer Obj : register(b1)
 {
@@ -686,7 +689,7 @@ float SightAmt(float3 w)
 	return smoothstep(r0, r1, best);
 }
 
-// カット中、味方・敵の足元まわりの物を抜く。床は残す。
+// カット中、味方・敵の足元まわりの物を透かす。床は残す。
 float AllyGhost(float3 w)
 {
 	if (CamNear.z < 0.5) return 0;
@@ -699,14 +702,180 @@ float AllyGhost(float3 w)
 	g *= saturate((w.y - 0.06) * 5.0);
 	return g;
 }
+
+float HoleCover(float3 w, float ny, float3 focus, float r)
+{
+	if (w.y < focus.y + 0.32) return 0;
+	float dist = length(w.xz - focus.xz);
+	float fall = 1.0 - saturate(dist / max(r, 0.2));
+	fall = fall * fall * (3.0 - 2.0 * fall);
+	if (fall < 0.01) return 0;
+	float dFrag = dot(w - Eye.xyz, CamFwd.xyz);
+	float dFocus = dot(focus - Eye.xyz, CamFwd.xyz);
+	float inFront = dFocus - dFrag;
+	if (inFront < 0.10) return 0;
+	float above = saturate((w.y - focus.y - 0.28) * 2.4);
+	if (above < 0.2 && ny < 0.55) return 0;
+	float v = fall * max(above, saturate(inFront * 1.2) * above);
+	if (v > 0.28) return 1;
+	return v;
+}
+
+float OpaqueLo() { return Hole2.x; }
+float OpaqueHi()
+{
+	float hi = CamNear.w;
+	float lo = Hole2.x;
+	return hi >= lo ? hi : (lo + 0.55);
+}
+
+// カーソル／キャラの層＋移動帯は残す。別高さの床は層ごと透かす。部分くり抜きはしない。
+float OtherLayer(float3 w, float ny)
+{
+	if (max(Hole2.y, Wx.w) < 0.5) return 0;
+	float yLo = OpaqueLo();
+	float yHi = OpaqueHi();
+	float rad = Hole2.w > 1.0 ? Hole2.w : 18.0;
+	float xz = length(w.xz - Hole0.xz);
+	if (Hole1.w > 0.5) xz = min(xz, length(w.xz - Hole1.xz));
+	if (xz >= rad) return 0;
+	if (w.y > yHi + 0.04) return 1;
+	if (ny > 0.55 && w.y < yLo - 0.04) return 1;
+	return 0;
+}
+
+// 同一帯の床は残す。別層が画面上で焦点を隠すときだけ層として透かす。
+float ViewOccludeAt(float3 w, float ny, float4 spos, float3 focus)
+{
+	float yLo = OpaqueLo();
+	float yHi = OpaqueHi();
+	if (w.y >= yLo - 0.06 && w.y <= yHi + 0.06) return 0;
+	float dFrag = dot(w - Eye.xyz, CamFwd.xyz);
+	float dFocus = dot(focus - Eye.xyz, CamFwd.xyz);
+	if (dFocus - dFrag < 0.06) return 0;
+	float4 cf = mul(float4(focus, 1), VP);
+	if (cf.w < 0.05) return 0;
+	float2 nf = cf.xy / cf.w;
+	float2 nw;
+	if (abs(spos.w) > 0.05) nw = spos.xy / spos.w;
+	else {
+		float4 cw = mul(float4(w, 1), VP);
+		if (cw.w < 0.05) return 0;
+		nw = cw.xy / cw.w;
+	}
+	float2 dlt = nw - nf;
+	dlt.x *= Screen.x / max(Screen.y, 1);
+	if (length(dlt) > 0.72) return 0;
+	return 1;
+}
+
+float ViewOcclude(float3 w, float ny, float4 spos)
+{
+	if (max(Hole2.y, Wx.w) < 0.5) return 0;
+	float g = ViewOccludeAt(w, ny, spos, Hole0.xyz);
+	if (Hole1.w > 0.5) g = max(g, ViewOccludeAt(w, ny, spos, Hole1.xyz));
+	return g;
+}
+
+static float sGhost = 0;
+
+float TerrainGhost(float3 w, float ny, float4 spos)
+{
+	// ReflectInfo.x は本描画で「反射をサンプルする」フラグ。ここを見ると水面マップで透かしが死ぬ。
+	if (ReflectInfo.z > 0.5) return 0;
+	float g = 0;
+	float r = Hole0.w;
+	float yLo = OpaqueLo();
+	float yHi = OpaqueHi();
+	bool sameBand = (w.y >= yLo - 0.06 && w.y <= yHi + 0.06);
+	if (r > 0.2 && !sameBand) {
+		g = max(g, HoleCover(w, ny, Hole0.xyz, r));
+		if (Hole1.w > 0.5) g = max(g, HoleCover(w, ny, Hole1.xyz, r));
+	}
+	g = max(g, OtherLayer(w, ny));
+	g = max(g, ViewOcclude(w, ny, spos));
+	if (CamNear.y > CamNear.x + 0.001) {
+		float d = dot(w - Eye.xyz, CamFwd.xyz);
+		if (d < CamNear.y)
+			g = max(g, saturate((CamNear.y - d) / max(0.22, CamNear.y - CamNear.x)));
+	}
+	float ag = AllyGhost(w);
+	if (ny > 0.62) ag *= saturate((w.y - 0.18) * 6.0);
+	if (ag > 0.4) g = max(g, saturate((ag - 0.22) * 1.5));
+	return saturate(g);
+}
+
+// 水面も同一帯は残す。別高さの水だけ層ごと透かす（足元だけの残しはしない）。
+float LiquidAway(float3 w)
+{
+	if (ReflectInfo.z > 0.5) return 0;
+	if (max(Hole2.y, Wx.w) < 0.5) return 0;
+	float yLo = OpaqueLo();
+	float yHi = OpaqueHi();
+	float rad = Hole2.w > 1.0 ? Hole2.w : 18.0;
+	float xz = length(w.xz - Hole0.xz);
+	if (Hole1.w > 0.5) xz = min(xz, length(w.xz - Hole1.xz));
+	if (xz >= rad) return 0;
+	if (w.y > yHi + 0.04) return 1;
+	if (w.y < yLo - 0.04) return 1;
+	return 0;
+}
+
+float LiquidGhost(float3 w, float ny, float4 spos)
+{
+	return saturate(max(TerrainGhost(w, ny, spos), LiquidAway(w)));
+}
+
+void ClipGhost(float4 spos)
+{
+	if (Hole2.z < 0.5) {
+		if (sGhost > 0.35) clip(-1 - abs(spos.x) * 0);
+	} else {
+		if (sGhost < 0.05) clip(-1 - abs(spos.x) * 0);
+	}
+}
+
+void BeginGhost(float4 spos, float3 w, float ny)
+{
+	sGhost = TerrainGhost(w, ny, spos);
+	ClipGhost(spos);
+}
+
+void BeginLiquidGhost(float4 spos, float3 w, float ny)
+{
+	sGhost = LiquidGhost(w, ny, spos);
+	ClipGhost(spos);
+}
+
+float GhostA(float a)
+{
+	if (Hole2.z < 0.5) return a;
+	return a * lerp(0.38, 0.22, saturate(sGhost));
+}
+
+void SoftGhost(float4 spos, float3 w, float ny)
+{
+	sGhost = TerrainGhost(w, ny, spos);
+}
+
+float FadeA(float a)
+{
+	return a * lerp(1.0, 0.22, saturate(sGhost));
+}
+
+// きらめき・反射・コースティクスは α だけ落とすと白く残る。色も落とす。
+float3 GhostCol(float3 col)
+{
+	float g = saturate(sGhost);
+	if (g < 0.02) return col;
+	if (Hole2.z > 0.5)
+		return col * lerp(0.50, 0.16, g);
+	return col * lerp(1.0, 0.28, g);
+}
+
 void CutGhost(float4 spos, float3 w, float ny)
 {
-	float gh = AllyGhost(w);
-	if (ny > 0.62) gh *= saturate((w.y - 0.18) * 6.0);
-	// 点を残すと、残った床が深度を書いてスカートや裾の一部だけ隠す。帯は全部捨てる。
-	// 人・モンスターはこの関数を通さない。
-	if (gh < 0.40) return;
-	clip(-1 - abs(spos.x) * 0);
+	BeginGhost(spos, w, ny);
 }
 
 float3 FogAt(float3 col, float3 w)
@@ -731,16 +900,10 @@ GOut Emit(float4 c, float3 w)
 }
 GOut EmitZ(float4 c, float z) { GOut o; o.c = c; o.z = z; return o; }
 
-// カメラ前方で、体より手前の地形・水面・小物だけ抜く。奥はそのまま。
-// ディザで点を残すと深度がスカートに被さる。人・モンスターはこの関数を通さない。
+// カメラ前方の地形は消さず、BeginGhost で半透明に残す。
 void CamShell(float4 spos, float3 w)
 {
-	float a0 = CamNear.x;
-	float a1 = CamNear.y;
-	if (a1 <= a0 + 0.001) return;
-	float d = dot(w - Eye.xyz, CamFwd.xyz);
-	if (d >= a1) return;
-	clip(-1 - abs(spos.x) * 0);
+	BeginGhost(spos, w, 0.0);
 }
 
 float3 DetailN(float3 n, float3 w)
@@ -957,7 +1120,7 @@ GOut PSM(PSIn i)
 
 GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
 {
-	CamShell(i.pos, i.w);
+	alpha = FadeA(alpha);
 	float t = Eye.w;
 	float g = GustAmt();
 	float fromSky = step(i.c.a, 0.82);
@@ -994,7 +1157,7 @@ GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
 	}
 	float cut = fromSky ? saturate((0.98 - i.uv.y) * 16.0) : 1.0;
 	float a = saturate(alpha * (0.58 + streak * 0.28 + braid * 0.08 + mist * 0.08 + (splash + lip + land) * 0.18) * cut);
-	return Emit(float4(FogAt(body, i.w), a), i.w);
+	return Emit(float4(GhostCol(FogAt(body, i.w)), a), i.w);
 }
 
 float StageTier()
@@ -1141,9 +1304,7 @@ void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, f
 
 GOut PSWater(PSIn i)
 {
-	CamShell(i.pos, i.w);
-	// カットインは寄りなので、滝や淵の縦幕が体を横切ると胸や裾が抜けて見える。水面だけ残す。
-	if (i.n.y < 0.45 && CamNear.y > CamNear.x + 0.001) discard;
+	BeginLiquidGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.45) discard;
 	float3 v = normalize(Eye.xyz - i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
@@ -1224,7 +1385,7 @@ GOut PSWater(PSIn i)
 		col += float3(1, 1, 1) * foam * rush * 0.35;
 		see = lerp(see, 0.16, rush * 0.55);
 	}
-	return Emit(float4(FogAt(col, i.w), lerp(see, 0.78, fr) * alpha), i.w);
+	return Emit(float4(GhostCol(FogAt(col, i.w)), FadeA(lerp(see, 0.78, fr) * alpha)), i.w);
 }
 
 float3 LavaColor(float2 xz, float t, float3 v)
@@ -1268,13 +1429,12 @@ GOut LavaFall(PSIn i)
 	float fr = pow(1.0 - saturate(dot(vn, normalize(Eye.xyz - i.w))), 2.2);
 	hot += float3(1, 0.55, 0.12) * fr * 0.22;
 	float a = saturate((0.88 + rope * 0.18) * (0.62 + sag * 0.38) * (1.0 - edge * 0.22));
-	return Emit(float4(FogAt(hot, i.w), a), i.w);
+	return Emit(float4(GhostCol(FogAt(hot, i.w)), GhostA(a)), i.w);
 }
 
 GOut PSLava(PSIn i)
 {
-	CamShell(i.pos, i.w);
-	if (i.n.y < 0.45 && CamNear.y > CamNear.x + 0.001) discard;
+	BeginLiquidGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
 	float3 v = normalize(Eye.xyz - i.w);
 	float t = Eye.w;
@@ -1311,7 +1471,7 @@ GOut PSLava(PSIn i)
 		float heat = pow(0.5 + 0.5 * sin(i.w.x * 3.2 + t * 1.6) * sin(i.w.z * 2.7 - t * 1.1), 2);
 		col += float3(1, 0.25, 0.02) * heat * 0.08;
 	}
-	return Emit(float4(col, 1), i.w);
+	return Emit(float4(GhostCol(col), GhostA(1)), i.w);
 }
 
 // 14マップそれぞれの地表エフェクト。キャラと移動マスは別で描くので、地面の上はある程度重なってもよい。
@@ -1477,9 +1637,13 @@ void GroundSurfaceLayer(float theme, float3 w, float3 n, float cliff, float t, f
 
 GOut GroundPS(PSIn i, float theme)
 {
-	CamShell(i.pos, i.w);
-	CutGhost(i.pos, i.w, i.n.y);
+	BeginGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
+	// 水底のコースティクスは氷と同じ高さでも、足元以外は水面と同様に透かす。
+	if (i.c.a < 0.999) {
+		float gBed = LiquidAway(i.w);
+		if (gBed > sGhost) { sGhost = gBed; ClipGhost(i.pos); }
+	}
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
 	float cliff = n.y > 0.72 ? 0 : 1;
@@ -1858,6 +2022,7 @@ GOut GroundPS(PSIn i, float theme)
 	}
 	if (StageTier() > 1.5) {
 		float gloss = FloorGloss(theme, nLit.y, i.w.xz);
+		gloss *= lerp(1.0, 0.10, saturate(sGhost));
 		ApplyReflect(col, nLit, v, i.w, rough, gloss);
 		if (cliff < 0.5 && gloss > 0.18) {
 			float2 ge = abs(frac(i.w.xz) - 0.5);
@@ -1865,7 +2030,7 @@ GOut GroundPS(PSIn i, float theme)
 			col *= 1.0 - edge2 * 0.3;
 		}
 	}
-	return Emit(float4(FogAt(col, i.w), 1), i.w);
+	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(1)), i.w);
 }
 
 GOut PSG0(PSIn i) { return GroundPS(i, 0); }
@@ -1882,8 +2047,7 @@ GOut PSGX(PSIn i) { return GroundPS(i, FogColor.a); }
 
 GOut PSProp(PSIn i)
 {
-	CamShell(i.pos, i.w);
-	CutGhost(i.pos, i.w, 0.0);
+	BeginGhost(i.pos, i.w, i.n.y);
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
 	float mat = Params.z;
@@ -1958,7 +2122,7 @@ GOut PSProp(PSIn i)
 		col *= 0.94 + pore * 0.1;
 		col += SkyAmb.rgb * pow(1.0 - saturate(dot(nLit, v)), 3.0) * ThemeWet(FogColor.a) * 0.08;
 	}
-	return Emit(float4(FogAt(col, i.w), Tint.a), i.w);
+	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(Tint.a)), i.w);
 }
 
 GOut PSO(PSIn i)

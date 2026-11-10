@@ -209,7 +209,9 @@ Renderer::Renderer()
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_qDisjoint = m_qTs0 = m_qTs1 = NULL; m_gpuMs = 0; m_gpuArmed = FALSE;
 	m_fadeAbove = -1;
+	m_fadeY = -999.f;
 	m_cutDeck = -1;
+	m_coverGhost = 0;
 	m_cutActors = FALSE;
 	m_stageWind = TRUE;
 	m_previewPost = FALSE;
@@ -11666,7 +11668,11 @@ void Renderer::BeginFrame()
 	m_fcb.wxPack[2] = TacQRank(m_quality, m_qPlus);
 	m_fcb.wxPack[3] = 0;
 	m_fcb.reflectInfo[0] = m_fcb.reflectInfo[1] = m_fcb.reflectInfo[2] = m_fcb.reflectInfo[3] = 0;
+	memset(m_fcb.hole0, 0, sizeof(m_fcb.hole0));
+	memset(m_fcb.hole1, 0, sizeof(m_fcb.hole1));
+	memset(m_fcb.hole2, 0, sizeof(m_fcb.hole2));
 	m_cutDeck = -1;
+	m_coverGhost = 0;
 	ID3D11Buffer* frame = TacCbCur(g_frameR, m_cbFrame);
 	m_ctx->VSSetConstantBuffers(0, 1, &frame);
 	m_ctx->PSSetConstantBuffers(0, 1, &frame);
@@ -11739,6 +11745,34 @@ void Renderer::SetFog(float start, float end, float hf, DWORD c)
 {
 	m_fcb.fog[0] = start; m_fcb.fog[1] = end; m_fcb.fog[2] = hf;
 	m_fcb.fogColor[0] = (c & 255) / 255.f; m_fcb.fogColor[1] = ((c >> 8) & 255) / 255.f; m_fcb.fogColor[2] = ((c >> 16) & 255) / 255.f; m_fcb.fogColor[3] = (float)m_theme;
+}
+
+void Renderer::SetCoverGhost(float ax, float ay, float az, float cx, float cy, float cz, int haveCursor, float radius, float focusY, int layerFade, float yLo, float yHi)
+{
+	m_fcb.hole0[0] = ax; m_fcb.hole0[1] = ay; m_fcb.hole0[2] = az;
+	m_fcb.hole0[3] = radius > 0.f ? radius : 0.f;
+	m_fcb.hole1[0] = cx; m_fcb.hole1[1] = cy; m_fcb.hole1[2] = cz;
+	m_fcb.hole1[3] = haveCursor ? 1.f : 0.f;
+	const float pad = 0.55f;
+	if (yLo < -1e7f) yLo = focusY - pad;
+	if (yHi < -1e7f) yHi = focusY + pad;
+	if (yHi < yLo) yHi = yLo;
+	m_fcb.hole2[0] = yLo;
+	m_fcb.hole2[1] = layerFade ? 1.f : 0.f;
+	m_fcb.hole2[2] = 0.f;
+	m_fcb.hole2[3] = 18.f;
+	m_fcb.camNear[3] = yHi;
+	m_fcb.wxPack[3] = layerFade ? 1.f : 0.f;
+}
+
+void Renderer::ClearCoverGhost()
+{
+	memset(m_fcb.hole0, 0, sizeof(m_fcb.hole0));
+	memset(m_fcb.hole1, 0, sizeof(m_fcb.hole1));
+	memset(m_fcb.hole2, 0, sizeof(m_fcb.hole2));
+	m_fcb.camNear[3] = 0.f;
+	m_fcb.wxPack[3] = 0.f;
+	m_coverGhost = 0;
 }
 
 void Renderer::SetSight(const float* xz, int n, float radius)
@@ -12158,6 +12192,7 @@ void Renderer::FlushQueuedDraws()
 		ID3D11DepthStencilState* want = m_dsWant ? m_dsWant : m_dsWrite;
 		if (want != depth) m_ctx->OMSetDepthStencilState(want, 0);
 	}
+	if (m_pass != PASS_SHADOW) m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 	if (m_tessOn) {
 		m_ctx->HSSetShader(NULL, NULL, 0);
 		m_ctx->DSSetShader(NULL, NULL, 0);
@@ -12579,6 +12614,10 @@ void Renderer::DrawTerrain()
 {
 	DrawParams dp;
 	dp.rim = 0;
+	if (m_coverGhost) {
+		// A<255 で α ブレンドになる。不透明のままだと GhostA が色を薄くするだけで裏が透けない。
+		dp.tint = 0x4CFFFFFF;
+	}
 	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : m_psTheme;
 	for (int ch = 0; ch < 16; ch++) {
 		GpuMesh& chunk = m_terrainChunk[ch];
@@ -12592,8 +12631,6 @@ void Renderer::DrawTerrain()
 		else if (!InView(mid, rad)) continue;
 		DrawStatic(chunk, m_sceneShift, dp);
 	}
-	int gx = -99, gz = -99;
-	if (m_fadeAbove >= 0 && m_fadeX >= 0 && m_fadeZ >= 0) { gx = m_fadeX >> 4; gz = m_fadeZ >> 4; }
 	BOOL hasCover = FALSE;
 	GpuMesh* coverSet[4] = { m_cover1, m_cover2, m_cover3, m_cover4 };
 	for (int ci = 0; ci < 4 && !hasCover; ci++)
@@ -12610,26 +12647,24 @@ void Renderer::DrawTerrain()
 				GpuMesh& cover = coverSet[ci][ch];
 				if (!cover.vb) continue;
 				int layer = ci + 1;
-				if (m_cutDeck >= 0 && layer != m_cutDeck) continue;
 				int cx = ch & 3, cz = ch >> 2;
 				float cy = g_covRad[ci][ch] > 0.f ? g_covCy[ci][ch] : 3.f;
 				float rad = g_covRad[ci][ch] > 0.f ? g_covRad[ci][ch] : 14.f;
+				if (m_cutDeck >= 0) {
+					if (m_fadeY > -900.f) {
+						if (fabsf(cy - m_fadeY) > 2.6f) continue;
+					} else if (layer != m_cutDeck) continue;
+				}
 				V3 cMid = v3(cx * 16.f + 8.f, cy, cz * 16.f + 8.f);
 				if (m_pass == PASS_SHADOW ? !InLight(cMid, rad) : !InView(cMid, rad)) continue;
-				int above = !m_reflecting && m_cutDeck < 0 && gx >= 0 && abs(cx - gx) <= 1 && abs(cz - gz) <= 1 && layer > m_fadeAbove;
+				// チャンク単位の透かしは、重なっていない上階まで消すので使わない。
 				if (m_pass == PASS_SHADOW) {
-					if (!above) DrawStatic(cover, m_sceneShift, dp);
+					DrawStatic(cover, m_sceneShift, dp);
 					continue;
 				}
 				DrawParams cd = dp;
 				cd.twoSided = 1;
-				if (above) {
-					cd.tint = 0x78FFFFFF;
-					m_ctx->OMSetDepthStencilState(m_dsRead, 0);
-					m_dsWant = m_dsRead;
-				}
 				DrawStatic(cover, m_sceneShift, cd);
-				if (above) { m_ctx->OMSetDepthStencilState(m_dsWrite, 0); m_dsWant = m_dsWrite; }
 			}
 		}
 		if (m_reflecting) {
@@ -12660,6 +12695,7 @@ void Renderer::DrawTerrain()
 			lp.mode = 2.f;
 			lp.twoSided = 1;
 			lp.noTess = 1;
+			lp.tint = dp.tint;
 			DrawStatic(c.mesh, m_sceneShift, lp);
 		}
 		if (m_lava.vb) {
@@ -12667,10 +12703,35 @@ void Renderer::DrawTerrain()
 			lp.mode = 2.f;
 			lp.twoSided = 1;
 			lp.noTess = 1;
+			lp.tint = dp.tint;
 			DrawStatic(m_lava, m_sceneShift, lp);
 		}
 	}
 	m_psOverride = NULL;
+}
+
+void Renderer::DrawTerrainGhost()
+{
+	if (m_coverGhost || m_pass != PASS_MAIN || m_reflecting || m_inPortrait) return;
+	int want = (m_fcb.hole0[3] > 0.2f || m_fcb.hole2[1] > 0.5f || m_fcb.camNear[1] > m_fcb.camNear[0] + 0.001f) ? 1 : 0;
+	if (!want) return;
+	FlushQueuedDraws();
+	m_coverGhost = 1;
+	m_fcb.hole2[2] = 1.f;
+	UpdateFrameCB();
+	ID3D11DepthStencilState* prev = m_dsWant;
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+	m_dsWant = m_dsRead;
+	DrawTerrain();
+	DrawWater();
+	FlushQueuedDraws();
+	m_coverGhost = 0;
+	m_fcb.hole2[2] = 0.f;
+	UpdateFrameCB();
+	m_dsWant = prev ? prev : m_dsWrite;
+	m_ctx->OMSetDepthStencilState(m_dsWant, 0);
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+	if (!m_reflecting) m_ctx->RSSetState(m_rsBack);
 }
 
 BOOL Renderer::GroundChunkVisible() const
@@ -12725,7 +12786,9 @@ void Renderer::DrawWater()
 	dp.mode = 1.f;
 	dp.twoSided = 1;
 	dp.noTess = 1;
-	dp.tint = (m_waterColor & 0xFFFFFF) | 0xFA000000;
+	// ゴーストパスは地形と同じく A<255。本描画もほぼ不透明だとコースティクスが裏を隠す。
+	dp.tint = m_coverGhost ? 0x4CFFFFFF : ((m_waterColor & 0xFFFFFF) | 0xFA000000);
+	ID3D11DepthStencilState* prev = m_dsWant;
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_dsWant = m_dsRead;
 	m_psOverride = m_psWater;
@@ -12739,8 +12802,10 @@ void Renderer::DrawWater()
 	}
 	if (!anyW && m_water.vb) DrawStatic(m_water, m_sceneShift, dp);
 	m_psOverride = NULL;
-	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
-	m_dsWant = m_dsWrite;
+	if (!m_coverGhost) {
+		m_dsWant = prev ? prev : m_dsWrite;
+		m_ctx->OMSetDepthStencilState(m_dsWant, 0);
+	}
 }
 
 void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
@@ -13989,13 +14054,39 @@ BOOL Renderer::BuildTerrain(Map& m)
 		}
 	}
 	const float bottom = -3.2f;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		const Cell& c = m.At(x, z);
-		if (c.t == T_VOID) continue;
+		int nCov = CellLayN(c);
+		if (c.t == T_VOID && nCov < 2) continue;
 		int tchI = ((z >> 4) << 2) + (x >> 4);
 		if (tchI < 0) tchI = 0;
 		if (tchI > 15) tchI = 15;
 		MeshBuild& geo = tch[tchI];
+		if (c.t == T_VOID) {
+			for (int L = 1; L < nCov; L++) {
+				int tr = LayerTr(c, L);
+				if (tr == T_VOID || tr == T_CHASM) continue;
+				int ch = tchI;
+				float y = TacHToY(LayerHt(c, L));
+				int bkt = y > 12.f ? 3 : (y > 6.f ? 2 : (y > 2.5f ? 1 : 0));
+				MeshBuild& dk = bkt == 0 ? cov1[ch] : bkt == 1 ? cov2[ch] : bkt == 2 ? cov3[ch] : cov4[ch];
+				EmitCurved(dk, m, x, z, 2, L, 0xFFFFFFFF);
+				int hL = LayerHt(c, L);
+				for (int k = 0; k < 4; k++) {
+					int nx = x + dx[k], nz = z + dz[k];
+					int hasMatch = 0;
+					if (Map::In(nx, nz)) {
+						const Cell& nb = m.At(nx, nz);
+						int nL = CellLayN(nb);
+						for (int NL = 0; NL < nL; NL++) if (abs(LayerHt(nb, NL) - hL) <= 3) hasMatch = 1;
+					}
+					if (hasMatch) continue;
+					EmitEdgeWall(dk, m, x, z, k, 2, L, 0.72f, 0.f, 0, 0xFFFFFFFF);
+				}
+			}
+			continue;
+		}
 		DWORD col = (c.t == T_CHASM) ? RGBAf(.35f, .32f, .33f) : 0xFFFFFFFF;
 		if (c.t == T_WATER) col = 0xFEFFFFFF;
 		if (c.t != T_BRIDGE) {
@@ -14033,18 +14124,22 @@ BOOL Renderer::BuildTerrain(Map& m)
 				AddBox(wood, v3((float)x + .92f, y + .18f, cz), v3(.07f, .16f, .46f), 0xFFFFFFFF, -1);
 			}
 		}
-		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 		if (c.t != T_BRIDGE) {
 			for (int k = 0; k < 4; k++) {
 				int nx = x + dx[k], nz = z + dz[k];
 				int nbIn = Map::In(nx, nz);
 				int nbT = nbIn ? m.At(nx, nz).t : T_VOID;
 				int blends = nbIn && nbT != T_VOID && nbT != T_BRIDGE;
-				if (blends && (c.h > MAXH || m.At(nx, nz).h > MAXH)) {
+				if (blends) {
 					const Cell& nb = m.At(nx, nz);
-					int nL = CellLayN(nb), nearH = 0;
-					for (int NL = 0; NL < nL; NL++) if (abs(LayerHt(nb, NL) - (int)c.h) <= 3) nearH = 1;
-					if (!nearH) blends = 0;
+					if (c.h > MAXH || nb.h > MAXH) {
+						int nL = CellLayN(nb), nearH = 0;
+						for (int NL = 0; NL < nL; NL++)
+							if (fabsf(TacHToY(LayerHt(nb, NL)) - TacHToY((int)c.h)) <= kHStep + 0.08f) nearH = 1;
+						if (!nearH) blends = 0;
+					} else if (fabsf(TacHToY((int)c.h) - TacHToY((int)nb.h)) > kHStep + 0.08f) {
+						blends = 0;
+					}
 				}
 				if (!blends) {
 					float floorY = bottom;
@@ -14104,10 +14199,11 @@ BOOL Renderer::BuildTerrain(Map& m)
 			EmitCurved(lb, m, x, z, 1, T_LAVA, LiquidFlow(m, x, z, T_LAVA));
 		if (m.theme != TH_SEABED && c.t == T_WATER && InteriorPool(m, x, z) && (CellHash(x, z, 91) % 10) == 0)
 			EmitCeilingFall(wb, m_puff, m_puffN, m, x, z);
-		for (int L = 1; L <= 4; L++) {
-			if ((int)c.nLay < L + 1) continue;
+		for (int L = 1; L < nCov; L++) {
 			int ch = ((z >> 4) << 2) + (x >> 4);
-			MeshBuild& dk = L == 1 ? cov1[ch] : L == 2 ? cov2[ch] : L == 3 ? cov3[ch] : cov4[ch];
+			float y = TacHToY(LayerHt(c, L));
+			int bkt = y > 12.f ? 3 : (y > 6.f ? 2 : (y > 2.5f ? 1 : 0));
+			MeshBuild& dk = bkt == 0 ? cov1[ch] : bkt == 1 ? cov2[ch] : bkt == 2 ? cov3[ch] : cov4[ch];
 			EmitCurved(dk, m, x, z, 2, L, 0xFFFFFFFF);
 			int hL = LayerHt(c, L);
 			for (int k = 0; k < 4; k++) {
@@ -14117,7 +14213,6 @@ BOOL Renderer::BuildTerrain(Map& m)
 					const Cell& nb = m.At(nx, nz);
 					int nL = CellLayN(nb);
 					for (int NL = 0; NL < nL; NL++) if (abs(LayerHt(nb, NL) - hL) <= 3) hasMatch = 1;
-					if (hL <= MAXH && nb.h <= MAXH && (int)nb.nLay >= L + 1) hasMatch = 1;
 				}
 				if (hasMatch) continue;
 				EmitEdgeWall(dk, m, x, z, k, 2, L, 0.72f, 0.f, 0, 0xFFFFFFFF);

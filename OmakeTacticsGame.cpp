@@ -3823,8 +3823,7 @@ void Game::UpdateParticles(float dt)
 			if (Map::In(ix, iz)) {
 				const Cell& c = m_b.map.At(ix, iz);
 				if (c.t != T_VOID && c.t != T_CHASM) {
-					int lay = c.nLay >= 2 ? (int)c.nLay - 1 : 0;
-					if (lay > 2) lay = 2;
+					int lay = CellLayN(c) > 1 ? CellLayN(c) - 1 : 0;
 					float gy = m_b.map.WalkY(ix, iz, lay);
 					if (prev.y > gy + 0.02f && p.p.y <= gy + 0.02f) {
 						p.p.y = gy + 0.03f;
@@ -4646,6 +4645,13 @@ void Game::DrawShowcase3D()
 	ApplyZoomHold();
 	SetupCamera(target, yaw, m_camPitch, m_camDist, .7f);
 	{
+		V3 camDir = v3(sinf(yaw) * cosf(m_camPitch), sinf(m_camPitch), cosf(yaw) * cosf(m_camPitch));
+		m_r.SetCamFwd(-camDir.x, -camDir.y, -camDir.z);
+		float fy = target.y;
+		int lx = Clampi((int)floorf(target.x), 0, MAPN - 1);
+		int lz = Clampi((int)floorf(target.z), 0, MAPN - 1);
+		if (Map::In(lx, lz)) fy = m_showMap.WalkY(lx, lz, m_cLayer);
+		m_r.SetCoverGhost(target.x, fy, target.z, target.x, fy, target.z, 1, 3.35f, fy, 1);
 		m_r.SetFog(m_camDist * 1.6f, m_camDist * 5.5f, .3f, e.fog);
 	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
@@ -4654,12 +4660,17 @@ void Game::DrawShowcase3D()
 		int lx = Clampi((int)floorf(target.x), 0, MAPN - 1);
 		int lz = Clampi((int)floorf(target.z), 0, MAPN - 1);
 		int fadeAbove = -1;
-		for (int dz = -1; dz <= 1 && fadeAbove < 0; dz++) for (int dx = -1; dx <= 1; dx++) {
-			int xx = lx + dx, zz = lz + dz;
-			if (!Map::In(xx, zz)) continue;
-			if ((int)m_showMap.At(xx, zz).nLay > m_cLayer + 1) fadeAbove = m_cLayer;
+		{
+			const Cell& cc = m_showMap.At(lx, lz);
+			int n = CellLayN(cc);
+			float y0 = m_showMap.WalkY(lx, lz, m_cLayer);
+			for (int L = 0; L < n; L++) {
+				if (L <= m_cLayer || !LayerOn(cc, L)) continue;
+				if (m_showMap.WalkY(lx, lz, L) > y0 + 0.7f) { fadeAbove = m_cLayer; break; }
+			}
 		}
-		m_r.SetFadeAbove(fadeAbove, lx, lz);
+		float lookY = m_showMap.WalkY(lx, lz, m_cLayer);
+		m_r.SetFadeAbove(fadeAbove, lx, lz, lookY);
 	} else m_r.SetFadeAbove(-1);
 	float faceYaw[MAX_PARTY];
 	float fx = 32.f, fz = 32.f;
@@ -4697,6 +4708,7 @@ void Game::DrawShowcase3D()
 	m_r.DrawTerrain();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
+	m_r.DrawTerrainGhost();
 	m_r.BeginInstBatch();
 	for (int i = 0; i < showN; i++) {
 		if (!m_r.InView(m_showPos[i], 3.5f)) continue;
@@ -5148,6 +5160,7 @@ void Game::DrawMonStage()
 	m_r.DrawTerrain();
 	m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 	m_r.DrawWater();
+	m_r.DrawTerrainGhost();
 	m_r.BeginInstBatch();
 	if (m_monShown >= 0) {
 		DrawParams d = dp;

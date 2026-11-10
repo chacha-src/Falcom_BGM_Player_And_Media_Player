@@ -206,12 +206,13 @@ inline float TacHToY(int h)
 	if (h <= MAXH) return h * kHStep;
 	return MAXH * kHStep + (float)(h - MAXH) * 0.045f;
 }
-// 経路の1点に「橋の上」を載せる。マス番号は 0..4095 なので 8192 とは重ならない。
-enum { LAY_N = 5, TAC_CELL_MASK = 8191 };
-inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 7) << 13); }
+// 経路の1点に「橋の上」を載せる。マス番号は 0..4095（12bit）。層は bit12 から。
+// 同時デッキは 64。スパイラルの立体交差は高さ 0..999 をこの枠へ昇順に載せる。
+enum { LAY_N = 64, LAY_OLD = 5, TAC_CELL_MASK = 4095 };
+inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 63) << 12); }
 inline int PackX(int c) { int i = c & TAC_CELL_MASK; return i % MAPN; }
 inline int PackZ(int c) { int i = c & TAC_CELL_MASK; return i / MAPN; }
-inline int PackDeck(int c) { return (c >> 13) & 7; }
+inline int PackDeck(int c) { return (c >> 12) & 63; }
 
 enum PropKind {
 	PK_NONE, PK_TREE, PK_TREES, PK_PINE, PK_DEAD, PK_ROCK, PK_MOUNT, PK_LILY, PK_PILLAR,
@@ -257,13 +258,12 @@ struct Cell {
 	BYTE var;    // 小物のバリエーション／回転
 	BYTE gimm;   // Gimmick
 	BYTE gparam; // ワープ組番号。橋でギミックなしのとき、下を通れる床の高さ（0=床なし）
-	BYTE nLay;   // 1=下だけ。最大 LAY_N（5）
-	BYTE t1; WORD h1;
-	BYTE t2; WORD h2;
-	BYTE t3; WORD h3;
-	BYTE t4; WORD h4;
+	BYTE nLay;   // 1=下だけ。最大 LAY_N
+	BYTE tLay[LAY_N - 1];
+	WORD hLay[LAY_N - 1];
 };
 #pragma pack(pop)
+static_assert(sizeof(Cell) == 8 + (LAY_N - 1) * 3, "cell packs base + extra decks");
 
 // 橋の下の床。0 なら橋板だけ（川に架かる普通の橋）。
 inline int BridgeFloor(const Cell& c)
@@ -289,19 +289,25 @@ inline int LayerHt(const Cell& c, int L)
 {
 	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? (int)c.gparam : (int)c.h;
 	if (L <= 0) return (int)c.h;
-	if (L == 1) return (int)c.h1;
-	if (L == 2) return (int)c.h2;
-	if (L == 3) return (int)c.h3;
-	return (int)c.h4;
+	if (L >= LAY_N) L = LAY_N - 1;
+	return (int)c.hLay[L - 1];
 }
 inline int LayerTr(const Cell& c, int L)
 {
 	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? T_ROAD : T_BRIDGE;
 	if (L <= 0) return (int)c.t;
-	if (L == 1) return (int)c.t1;
-	if (L == 2) return (int)c.t2;
-	if (L == 3) return (int)c.t3;
-	return (int)c.t4;
+	if (L >= LAY_N) L = LAY_N - 1;
+	return (int)c.tLay[L - 1];
+}
+inline void LayerSet(Cell& c, int L, int t, int h)
+{
+	if (L < 0) L = 0;
+	if (L >= LAY_N) L = LAY_N - 1;
+	if (h < 1) h = 1;
+	if (h > MAXH_SPIRAL) h = MAXH_SPIRAL;
+	if (L <= 0) { c.t = (BYTE)t; c.h = (WORD)h; }
+	else { c.tLay[L - 1] = (BYTE)t; c.hLay[L - 1] = (WORD)h; }
+	if ((int)c.nLay < L + 1) c.nLay = (BYTE)(L + 1);
 }
 
 enum { MAX_GROUPS = 200, GRP_CAP = 15 };
@@ -336,6 +342,7 @@ struct Map {
 float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int layer);
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
+int  MapIsSpiral(const Map& m);
 
 // ---------------- 能力値・クラス・スキル ----------------
 enum Stat {
@@ -717,35 +724,20 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r);
 
 // ---------------- 経路 ----------------
 struct Reach {
-	short cost[MAPN][MAPN];   // -1=到達不可。層0
-	int   from[MAPN][MAPN];   // PackCell。層はビット13から
-	BYTE  canStop[MAPN][MAPN];
-	short costHi[MAPN][MAPN]; // 層1
-	int   fromHi[MAPN][MAPN];
-	BYTE  canStopHi[MAPN][MAPN];
-	short cost2[MAPN][MAPN];  // 層2
-	int   from2[MAPN][MAPN];
-	BYTE  canStop2[MAPN][MAPN];
-	short cost3[MAPN][MAPN];
-	int   from3[MAPN][MAPN];
-	BYTE  canStop3[MAPN][MAPN];
-	short cost4[MAPN][MAPN];
-	int   from4[MAPN][MAPN];
-	BYTE  canStop4[MAPN][MAPN];
+	short cost[LAY_N][MAPN][MAPN];   // -1=到達不可
+	int   from[LAY_N][MAPN][MAPN];   // PackCell。層はビット12から
+	BYTE  canStop[LAY_N][MAPN][MAPN];
 };
 inline int ReachCostAt(const Reach& r, int layer, int x, int z)
 {
-	if (layer == 1) return r.costHi[z][x];
-	if (layer == 2) return r.cost2[z][x];
-	if (layer == 3) return r.cost3[z][x];
-	if (layer == 4) return r.cost4[z][x];
-	return r.cost[z][x];
+	if (layer < 0 || layer >= LAY_N) return -1;
+	return r.cost[layer][z][x];
 }
 inline int ReachBestCost(const Reach& r, int x, int z)
 {
 	int b = -1;
 	for (int L = 0; L < LAY_N; L++) {
-		int c = ReachCostAt(r, L, x, z);
+		int c = r.cost[L][z][x];
 		if (c < 0) continue;
 		if (b < 0 || c < b) b = c;
 	}
@@ -753,20 +745,14 @@ inline int ReachBestCost(const Reach& r, int x, int z)
 }
 inline int ReachCanStop(const Reach& r, int x, int z)
 {
-	if (r.cost[z][x] >= 0 && r.canStop[z][x]) return 1;
-	if (r.costHi[z][x] >= 0 && r.canStopHi[z][x]) return 1;
-	if (r.cost2[z][x] >= 0 && r.canStop2[z][x]) return 1;
-	if (r.cost3[z][x] >= 0 && r.canStop3[z][x]) return 1;
-	if (r.cost4[z][x] >= 0 && r.canStop4[z][x]) return 1;
+	for (int L = 0; L < LAY_N; L++)
+		if (r.cost[L][z][x] >= 0 && r.canStop[L][z][x]) return 1;
 	return 0;
 }
 inline int ReachCanStopLayer(const Reach& r, int x, int z, int layer)
 {
-	if (layer == 1) return r.costHi[z][x] >= 0 && r.canStopHi[z][x];
-	if (layer == 2) return r.cost2[z][x] >= 0 && r.canStop2[z][x];
-	if (layer == 3) return r.cost3[z][x] >= 0 && r.canStop3[z][x];
-	if (layer == 4) return r.cost4[z][x] >= 0 && r.canStop4[z][x];
-	return r.cost[z][x] >= 0 && r.canStop[z][x];
+	if (layer < 0 || layer >= LAY_N) return 0;
+	return r.cost[layer][z][x] >= 0 && r.canStop[layer][z][x];
 }
 struct Battle;
 void ComputeReach(const Battle& b, int ui, Reach& out);
@@ -777,6 +763,9 @@ bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, 
 bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, int rMax, int tx, int tz, int toLayer, bool needLos);
 bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos);
 int  Dist(int ax, int az, int bx, int bz);
+void FillWalkSteps(const Battle& b, int fromUi);
+void FillWalkStepsFromTeam(const Battle& b, int team);
+int  WalkStepsAt(int x, int z, int layer);
 // 層差の距離。2層以上は届かない。1層差は範囲技が隣接なら届く。届かないとき -1。
 inline int LayerRangeCost(int fromL, int toL)
 {
@@ -867,7 +856,8 @@ struct Battle {
 	int UnitAt(int x, int z, int layer) const { return (Map::In(x, z) && layer >= 0 && layer < LAY_N) ? occ[layer][z][x] - 1 : -1; }
 	int UnitAt(int x, int z) const {
 		if (!Map::In(x, z)) return -1;
-		for (int L = 0; L < LAY_N; L++) if (occ[L][z][x]) return occ[L][z][x] - 1;
+		int n = CellLayN(map.At(x, z));
+		for (int L = 0; L < n; L++) if (occ[L][z][x]) return occ[L][z][x] - 1;
 		return -1;
 	}
 	int AliveCount(int team) const;
@@ -918,6 +908,7 @@ void DoShove(Battle& b, int ui, int ti);
 // ---------------- AI ----------------
 struct AiPlan {
 	int moveX, moveZ;
+	int moveL;        // 到着層。-1なら経路が決める
 	int target;       // -1=攻撃しない
 	int skill;        // -1=通常
 	int castX, castZ;
@@ -1042,11 +1033,12 @@ struct SaveData {
 	int partyCap;              // 5..15。店の編成拡張券。11体目以降はステージ制限
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 	int spare[32];             // version 7。[0]=1自動 0固定 [1]=GPU名ハッシュ [2]=自動の現在段 [3]=自動の上限 [4]=進行速度+1 [5]=カットシーン速度+1
+	int extra[256];            // version 8。今後の拡張。版を上げずに足す
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
 // version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。
 // version 6 は職の履歴（jobPath, jobDone）。version 7 は skillBits（技 768 まで）と spare。
-// 読込は 1..7 を受け、書き出しは 7。
+// version 8 は extra[256]（レイヤー拡張と予約）。読込は 1..8 を受け、書き出しは 8。
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }

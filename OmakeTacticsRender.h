@@ -533,9 +533,12 @@ public:
 	void SetSceneShift(const M4& m) { m_sceneShift = m; }
 	void SetCamNear(float hide, float solid, float ghost = 0.f) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; m_fcb.camNear[2] = ghost; }
 	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; m_fcb.camFwd[3] = 1.f; }
+	void SetCoverGhost(float ax, float ay, float az, float cx, float cy, float cz, int haveCursor, float radius, float focusY, int layerFade, float yLo = -1e8f, float yHi = -1e8f);
+	void ClearCoverGhost();
 	void DrawTerrain();
+	void DrawTerrainGhost();
 	BOOL GroundChunkVisible() const;
-	void SetFadeAbove(int layer, int x = -1, int z = -1) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; }
+	void SetFadeAbove(int layer, int x = -1, int z = -1, float y = -999.f) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; m_fadeY = y; }
 	void SetCutDeck(int deck) { m_cutDeck = deck; }
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
 	void SetDepthTest(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsOff, 0); }
@@ -953,7 +956,9 @@ private:
 	GpuMesh m_cover3[16];
 	GpuMesh m_cover4[16];
 	int m_fadeAbove, m_fadeX, m_fadeZ;
+	float m_fadeY;
 	int m_cutDeck;
+	int m_coverGhost;
 	GpuMesh m_water;
 	struct BoundMesh { GpuMesh mesh; float cx, cy, cz, rad; };
 	BoundMesh m_waterChunk[16];
@@ -1009,6 +1014,9 @@ private:
 		M4 reflectVP;
 		float reflectInfo[4];
 		M4 invVP;
+		float hole0[4]; // xyz=キャラ世界座標 w=半径（0でオフ）
+		float hole1[4]; // xyz=カーソル世界座標 w=1なら有効
+		float hole2[4]; // x=不透明帯の下端 y=他レイヤー透かし z=ゴーストパス w=周辺半径
 	} m_fcb;
 	M4 m_lightVP;
 	M4 m_refSavedInv;
