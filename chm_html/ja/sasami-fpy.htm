@@ -11,7 +11,7 @@
 
 <h1>SASAMI .fpy コマンド（全部）</h1>
 
-<p class="lead">kbsasami が読むクラシック .fpy（YM2608 OPNA / YM2203 OPN / BEEP）の使えるコマンドを全部載せます。テキストや譜面からどう命令に化けるかは<a href="sasami-composer.htm">SASAMI Composer</a> の対応表を見てください。入れ子ループや Misao PCM などは <a href="sasami-fpy2.htm">.fpy2 の差分</a> です。</p>
+<p class="lead">kbsasami が読むクラシック .fpy（YM2608 OPNA / YM2203 OPN / BEEP）の使えるコマンドを全部載せます。ふだんの作り方は <a href="sasami-composer.htm">作曲「ささみ☆ミ」</a>、どのファイルになるかは <a href="sasami-files.htm">どのファイルになるか</a> にまとめています。入れ子ループや Misao PCM などは <a href="sasami-fpy2.htm">.fpy2 の差分</a> です。</p>
 <h2>ファイルの形</h2>
 <p>先頭 10 本のワードがチャンネルポインタ（絶対アドレス 0x1xxx。未使用は 0x10F0）。0x1C の versionWord はクラシックなら 0。0x1E が 0xFFFF なら OPNA 10ch。曲名・作者・コメントは Shift-JIS で 0x50 から 64 バイトずつ。ストリーム本体はファイルオフセット 0x100 付近から、命令は基本 3 バイトです。</p>
 <ul>
@@ -95,7 +95,7 @@
 <div class="note"><span class="label">注意</span>
 <p>cmd10 / 16 / 18 / 21 / 22 はクラシック FPY にもあります。ただし Composer は <code>@FSLR</code> <code>@FLR</code> <code>@DETUNE</code> <code>@LFO</code> を見つけると安全側で <a href="sasami-fpy2.htm">.fpy2</a> にします。</p>
 </div>
-<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">作曲「ささみ☆ミ」</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; 前へ: <a href="sasami-mml-ext.htm">SASAMI MML 拡張命令</a></span>

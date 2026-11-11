@@ -14,7 +14,7 @@
 <p class="lead">メディアプレイヤー「らいら」（oggYSEDbgm）のヘルプへようこそ。このソフトは、日本ファルコム作品のBGMをゲーム中と同じようにループ再生できるプレイヤーと、ふだんの音楽・動画をたっぷりの機能で楽しめるメディアプレイヤーが、ひとつになったものです。</p>
 <h2>はじめて使う方へ</h2>
 <p>まずは <a href="first-start.htm">はじめて起動したとき</a> を読んでみてください。起動したときに出てくる「どちらの画面で起動しますか？」の意味と、最初にやっておくとよい設定がまとめてあります。</p>
-<p>ゲームのBGMを聴きたい方は <a href="folder-setup.htm">ゲームフォルダの設定</a> へ、手持ちの音楽ファイルを聴きたい方は <a href="mp-overview.htm">メディアプレイヤー画面を見てみる</a> へ進むのが近道です。</p>
+<p>ゲームのBGMを聴きたい方は <a href="folder-setup.htm">ゲームフォルダの設定</a> へ、手持ちの音楽ファイルを聴きたい方は <a href="mp-overview.htm">メディアプレイヤー画面を見てみる</a> へ進むのが近道です。曲を書くときは <a href="sasami-composer.htm">作曲「ささみ☆ミ」</a>、ターン制で遊ぶときは <a href="tactics.htm">本格派タクティクス「らいらX」</a> です。</p>
 <h2>このヘルプの読み方</h2>
 <ul>
 <li>ページの下には「前へ」「次へ」があります。上から順に読むと、やさしい内容から順に進みます。</li>
@@ -104,7 +104,22 @@
 <h2>附属ツール</h2>
 <table class="toc">
 <tr><td class="slug"><a href="tools.htm">附属ツールいろいろ</a></td><td class="desc">ツールの右クリックから開ける、便利機能の早見表。</td></tr>
-<tr><td class="slug"><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></td><td class="desc">テキスト／MIDI五線スコア／FM五線スコアから FPY・MPY・MPW2・MPW3 を作ります。</td></tr>
+<tr><td class="slug"><a href="voice.htm">ボイスチェンジャー</a></td><td class="desc">マイクの声をリアルタイムで変えます。男女や年齢のプリセット付き。</td></tr>
+<tr><td class="slug"><a href="tuner.htm">チューナー道場</a></td><td class="desc">単音のチューナーとメトロノーム。フレーズA-Bもここから。</td></tr>
+<tr><td class="slug"><a href="soundmeter.htm">騒音計</a></td><td class="desc">マイクの入りの大きさを数字で表示します。目安として使う道具です。</td></tr>
+<tr><td class="slug"><a href="photoframe.htm">フォトフレーム</a></td><td class="desc">フォルダの画像を順に表示するスライドショー。BGMも一緒に。</td></tr>
+<tr><td class="slug"><a href="cd.htm">CDプレイヤー</a></td><td class="desc">オーディオCDの再生、曲目検索、取り込み、書き込みを一つの窓で。</td></tr>
+</table>
+<h2>作曲「ささみ☆ミ」</h2>
+<table class="toc">
+<tr><td class="slug"><a href="sasami-composer.htm">作曲「ささみ☆ミ」</a></td><td class="desc">文字、五線、ピアノロールで曲を書き、らいらで鳴らせます。</td></tr>
+<tr><td class="slug"><a href="sasami-text.htm">文字で書く</a></td><td class="desc">音の名前を文字で並べます。昔の曲も同じ窓で開けます。</td></tr>
+<tr><td class="slug"><a href="sasami-staff.htm">五線</a></td><td class="desc">MIDI と FM で共通の、音符の置き方です。</td></tr>
+<tr><td class="slug"><a href="sasami-arrange.htm">自動伴奏</a></td><td class="desc">メロディを残したまま、ドラム・ベース・コードを足します。</td></tr>
+<tr><td class="slug"><a href="sasami-midi-score.htm">MIDIスコア</a></td><td class="desc">五線に、手持ちの音源や効果を載せる譜面です。</td></tr>
+<tr><td class="slug"><a href="sasami-fm.htm">FMスコア</a></td><td class="desc">FM のパートと、波形を鳴らすパートを同じ五線で編集します。</td></tr>
+<tr><td class="slug"><a href="sasami-roll.htm">ピアノロール</a></td><td class="desc">五線と同じ音符を、鍵盤と時間のマス目で直します。</td></tr>
+<tr><td class="slug"><a href="sasami-files.htm">どのファイルになるか</a></td><td class="desc">曲の中身に合わせて、保存する種類が決まります。</td></tr>
 <tr><td class="slug"><a href="sasami-mml.htm">SASAMI MML（MICP 標準）</a></td><td class="desc">旧 SASAMIM.HLP の音階、標準命令、ドラム、サンプル。</td></tr>
 <tr><td class="slug"><a href="sasami-mml-ext.htm">SASAMI MML 拡張命令</a></td><td class="desc">旧ヘルプの @ 命令、$ 命令、GS/XG、ピッチ数値。</td></tr>
 <tr><td class="slug"><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></td><td class="desc">クラシック FPY のバイナリ命令と、Composer がどう書き出すか。</td></tr>
@@ -112,19 +127,21 @@
 <tr><td class="slug"><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></td><td class="desc">クラシック MICP / MPY の MIDI 命令と Composer 対応。</td></tr>
 <tr><td class="slug"><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></td><td class="desc">Ver2.2 ヘッダ、64 トラック、二重ポート、入れ子ループ。</td></tr>
 <tr><td class="slug"><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></td><td class="desc">MPW3 トレイラ（VST）、マクロ、ネイティブ CC / ソフトFX / 拍子。</td></tr>
-<tr><td class="slug"><a href="voice.htm">ボイスチェンジャー</a></td><td class="desc">マイクの声をリアルタイムで変えます。男女や年齢のプリセット付き。</td></tr>
-<tr><td class="slug"><a href="tuner.htm">チューナー道場</a></td><td class="desc">単音のチューナーとメトロノーム。フレーズA-Bもここから。</td></tr>
-<tr><td class="slug"><a href="soundmeter.htm">騒音計</a></td><td class="desc">マイクの入りの大きさを数字で表示します。目安として使う道具です。</td></tr>
-<tr><td class="slug"><a href="photoframe.htm">フォトフレーム</a></td><td class="desc">フォルダの画像を順に表示するスライドショー。BGMも一緒に。</td></tr>
-<tr><td class="slug"><a href="cd.htm">CDプレイヤー</a></td><td class="desc">オーディオCDの再生、曲目検索、取り込み、書き込みを一つの窓で。</td></tr>
 </table>
 <h2>おまけ</h2>
 <table class="toc">
 <tr><td class="slug"><a href="games.htm">おまけのお遊び</a></td><td class="desc">BGMを聴きながらの息抜きと、昔マシンのサウンド再生。</td></tr>
 <tr><td class="slug"><a href="maze.htm">おまけ：迷路</a></td><td class="desc">一人称視点の迷路。地下階層と、曲に効くアイテムがあります。</td></tr>
 <tr><td class="slug"><a href="race.htm">おまけ：空中レース</a></td><td class="desc">光の帯の上を飛ぶレース。テーマごとに本物の地形と景色が変わります。</td></tr>
-<tr><td class="slug"><a href="tactics.htm">おまけ：タクティクス</a></td><td class="desc">ファンタジー風のターン制シミュレーション。キャラを育てて戦場へ出ます。</td></tr>
 <tr><td class="slug"><a href="cemu.htm">おまけ：昔マシンのサウンド</a></td><td class="desc">昔のパソコンやゲーム基板の音楽を、音だけ鳴らして楽しめます。</td></tr>
+</table>
+<h2>本格派タクティクス「らいらX」</h2>
+<table class="toc">
+<tr><td class="slug"><a href="tactics.htm">本格派タクティクス「らいらX」</a></td><td class="desc">拠点で仲間を整え、マス目の戦場へ出て、結果を持って戻ります。</td></tr>
+<tr><td class="slug"><a href="tactics-base.htm">拠点</a></td><td class="desc">キャラを作り、編成し、進化させ、出撃します。</td></tr>
+<tr><td class="slug"><a href="tactics-battle.htm">戦場</a></td><td class="desc">高低差のあるマス目で、順番に動いて戦います。</td></tr>
+<tr><td class="slug"><a href="tactics-shop.htm">商店</a></td><td class="desc">ゴールドで武具、道具、戦技、召喚を売買します。</td></tr>
+<tr><td class="slug"><a href="tactics-sound.htm">音と見た目</a></td><td class="desc">効果音はらいらの曲に混ざりません。場面で戦闘曲が替わります。</td></tr>
 </table>
 <h2>CEmu（CPUエミュレーション）</h2>
 <table class="toc">
