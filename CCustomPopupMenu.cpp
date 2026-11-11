@@ -1354,7 +1354,7 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_tipHot(-1), m_memW(0), m_memH(0), m_font(NULL), m_fontOwned(NULL)
 	, m_menuW(0), m_menuH(0), m_contentH(0), m_scrollY(0), m_scrollMax(0)
 	, m_stickyCount(0), m_stickyH(0)
-	, m_asSubmenu(FALSE), m_animTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
+	, m_asSubmenu(FALSE), m_animTick(0), m_idleBlitTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
 	, m_lineAnimOrigin(0), m_lineAnimOriginY(0), m_flightPad(0), m_chipPresentedAnimTick(-1)
 	, m_chipPresentedHot(-99)
 	, m_bridgePanel(FALSE)
@@ -3838,11 +3838,11 @@ void CCustomPopupMenu::PulseVsyncFrame()
 			InvalidateBgOnly();
 	}
 	else {
-		/* 定着後のストライプは 48ms で足りる。毎フレ全面は FM/MIDI の描画と奪い合う。 */
-		static ULONGLONG s_idleBlit = 0;
+		/* 定着後のストライプは 48ms で足りる。毎フレ全面は FM/MIDI の描画と奪い合う。
+		   時刻はメニュー毎。共有だとルートが消費してサブ／サブサブが止まって見える。 */
 		const ULONGLONG now = ::GetTickCount64();
-		if (s_idleBlit == 0 || now - s_idleBlit >= 48) {
-			s_idleBlit = now;
+		if (m_idleBlitTick == 0 || now - m_idleBlitTick >= 48) {
+			m_idleBlitTick = now;
 			InvalidateBgOnly();
 		}
 	}

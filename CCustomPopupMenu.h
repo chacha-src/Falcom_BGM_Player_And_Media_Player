@@ -303,6 +303,7 @@ protected:
 	int m_stickyH;     // 固定ヘッダの高さ
 	BOOL m_asSubmenu;   // 親付きで CreatePopupAt した子
 	int m_animTick;     // 背景ストライプ／Soft 周期
+	ULONGLONG m_idleBlitTick; // 定着後ストライプの再描画時刻（メニュー毎。共有するとサブが止まる）
 	int m_lineAnimPhase; // 0=idle 1=enter 2=exit
 	ULONGLONG m_lineAnimStart;
 	int m_lineAnimOrigin; // クリック位置に近い行（上下に広がる起点）
