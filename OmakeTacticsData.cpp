@@ -2703,7 +2703,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
 			if (pathDistP(x, z) < 5) continue;
 			int ht = CellStandH(m, x, z, homeH);
-			if (max(abs(x - pax), abs(z - paz)) <= 10 && abs(ht - homeH) > 5) continue;
+			int nearXZ = (vertical == 2) ? 14 : 10;
+			if (max(abs(x - pax), abs(z - paz)) <= nearXZ && abs(ht - homeH) > 5) continue;
 			order[nc++] = z * MAPN + x;
 		}
 		int budget = MAX_ENEMY;
@@ -2806,7 +2807,8 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 					if (!FootPassable(m.c[z][x].t) || m.c[z][x].t == T_VOID) continue;
 					if (Dist(x, z, pax, paz) < 4) continue;
 					int ht = CellStandH(m, x, z, homeH);
-					if (max(abs(x - pax), abs(z - paz)) <= 10 && abs(ht - homeH) > 5) continue;
+					int nearXZ = (vertical == 2) ? 14 : 10;
+					if (max(abs(x - pax), abs(z - paz)) <= nearXZ && abs(ht - homeH) > 5) continue;
 					int d = Dist(x, z, pax, paz);
 					if (d > bestD) { bestD = d; bestI = -(z * MAPN + x + 1); }
 				}
@@ -2855,6 +2857,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 				for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
 					int t = m.c[z][x].t;
 					if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
+					if (vertical == 2 && max(abs(x - pax), abs(z - paz)) <= 14) continue;
 					int d = pathDistP(x, z);
 					if (d > best) { best = d; bx = x; bz = z; }
 				}
@@ -2884,7 +2887,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 				}
 			}
 			m.grp[farI].boss = 1;
-			if (vertical) {
+			if (vertical == 1) {
 				for (int gi = 0; gi < m.nGrp; gi++) m.grp[gi].boss = 0;
 				int bestG = 0, bd = 99999;
 				for (int gi = 0; gi < m.nGrp; gi++) {
@@ -7933,13 +7936,16 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 	int bestLeave = 99999, lx = -1, lz = -1, lDeck = 0;
 	int bestAny = 99999, ax = -1, az = -1, aDeck = 0;
 	BOOL needStep = UnitMove(u) >= 1 && UnitMoveType(u) != MV_FLY;
-	int refH = Map::In(gx, gz) ? CellStandH(b.map, gx, gz, -1) : 2;
-	int nearPx = -1, nearPz = -1;
+	int goalH = Map::In(gx, gz) ? CellStandH(b.map, gx, gz, -1) : 2;
+	int refH = goalH;
+	int nearPx = -1, nearPz = -1, playerH = -1;
+	int spiral = MapIsSpiral(b.map);
 	for (int i = 0; i < b.nUnits; i++) {
 		if (i == ui || !b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
 		if (Map::In(b.u[i].x, b.u[i].z)) {
-			refH = LayerHt(b.map.At(b.u[i].x, b.u[i].z), b.u[i].deck);
+			playerH = LayerHt(b.map.At(b.u[i].x, b.u[i].z), b.u[i].deck);
 			nearPx = b.u[i].x; nearPz = b.u[i].z;
+			if (!spiral) refH = playerH;
 			break;
 		}
 	}
@@ -7951,9 +7957,15 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 			u.deck = L;
 			if (!FootFits(b, ui, x, z)) continue;
 			int contains = (gx >= x && gx < x + s && gz >= z && gz < z + s) ? 0 : 1000;
-			int dh = abs(LayerHt(b.map.At(x, z), L) - refH);
+			int hHere = LayerHt(b.map.At(x, z), L);
+			int dh = abs(hHere - refH);
 			int rank = contains + abs(dx) + abs(dz) + dh * 4;
-			if (nearPx >= 0 && max(abs(x - nearPx), abs(z - nearPz)) <= 10 && dh > 5) rank += 8000;
+			if (spiral && nearPx >= 0) {
+				int hereNear = max(abs(x - nearPx), abs(z - nearPz)) <= 10;
+				int goalNear = max(abs(gx - nearPx), abs(gz - nearPz)) <= 10;
+				if (hereNear && !goalNear) rank += 12000;
+				if (hereNear && playerH >= 0 && abs(hHere - playerH) > 5) rank += 12000;
+			} else if (nearPx >= 0 && max(abs(x - nearPx), abs(z - nearPz)) <= 10 && dh > 5) rank += 8000;
 			if (s > 1) rank += (FootRoom(b.map, x, z, s) < s + 1) ? 4 : 0;
 			if (rank < bestAny) { bestAny = rank; ax = x; az = z; aDeck = L; }
 			if (!needStep || FootCanLeave(b, ui, x, z)) {
@@ -8302,10 +8314,12 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.nUnits = n;
 	b.RebuildOcc();
 	if (b.AliveCount(TEAM_ENEMY) <= 0 && n < MAX_UNITS) {
-		int gx = b.map.nP > 0 ? b.map.pStartX[0] : MAPN / 2;
-		int gz = b.map.nP > 0 ? b.map.pStartZ[0] : MAPN / 2;
-		if (b.map.nE > 0) { gx = b.map.eStartX[0]; gz = b.map.eStartZ[0]; }
-		else if (b.map.nGrp > 0) { gx = b.map.grp[0].ax; gz = b.map.grp[0].az; }
+		int gx = MAPN / 2, gz = MAPN / 2;
+		int gi = -1;
+		for (int g = 0; g < b.map.nGrp; g++) if (b.map.grp[g].boss && b.map.grp[g].n > 0) gi = g;
+		if (gi < 0 && b.map.nGrp > 0) gi = b.map.nGrp - 1;
+		if (gi >= 0) { gx = b.map.grp[gi].ax; gz = b.map.grp[gi].az; }
+		else if (b.map.nP > 0) { gx = b.map.pStartX[0]; gz = b.map.pStartZ[0]; }
 		gx = Clampi(gx, 1, MAPN - 2);
 		gz = Clampi(gz, 1, MAPN - 2);
 		Unit& u = b.u[n];
@@ -8358,11 +8372,21 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		int hasBoss = 0, farUi = -1, farD = -1;
 		int px = b.map.nP > 0 ? b.map.pStartX[0] : 0;
 		int pz = b.map.nP > 0 ? b.map.pStartZ[0] : 0;
+		int pUi = -1;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (b.u[i].alive && b.u[i].team == TEAM_PLAYER) { pUi = i; break; }
+		}
+		int spiral = MapIsSpiral(b.map);
+		if (spiral && pUi >= 0) FillWalkSteps(b, pUi);
 		for (int i = 0; i < b.nUnits; i++) {
 			Unit& eu = b.u[i];
 			if (!eu.alive || eu.team != TEAM_ENEMY) continue;
 			if (eu.boss) hasBoss = 1;
-			int d = abs(eu.x - px) + abs(eu.z - pz);
+			int d;
+			if (spiral && pUi >= 0) {
+				d = WalkStepsAt(eu.x, eu.z, eu.deck);
+				if (d < 0 || d >= 30000) d = -1;
+			} else d = abs(eu.x - px) + abs(eu.z - pz);
 			if (d > farD) { farD = d; farUi = i; }
 		}
 		if (!hasBoss && farUi >= 0) {
@@ -8393,6 +8417,58 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		}
 	}
 	RescueStuckFeet(b);
+	if (MapIsSpiral(b.map)) {
+		int px = -1, pz = -1, hP = 0, pUi = -1;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (!b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
+			px = b.u[i].x; pz = b.u[i].z; pUi = i;
+			if (Map::In(px, pz)) hP = LayerHt(b.map.At(px, pz), b.u[i].deck);
+			break;
+		}
+		if (px >= 0) {
+			if (pUi >= 0) FillWalkSteps(b, pUi);
+			for (int i = 0; i < b.nUnits; i++) {
+				Unit& eu = b.u[i];
+				if (!eu.alive || eu.team != TEAM_ENEMY || !Map::In(eu.x, eu.z)) continue;
+				int xz = max(abs(eu.x - px), abs(eu.z - pz));
+				int h = LayerHt(b.map.At(eu.x, eu.z), eu.deck);
+				int overlap = (xz <= 10 && abs(h - hP) > 5);
+				int bossFace = (eu.boss && xz <= 10);
+				if (!overlap && !bossFace) continue;
+				int gx = eu.x, gz = eu.z;
+				if (eu.grp >= 0 && eu.grp < b.map.nGrp && b.map.grp[eu.grp].n > 0) {
+					gx = b.map.grp[eu.grp].ax;
+					gz = b.map.grp[eu.grp].az;
+				}
+				int goalNear = max(abs(gx - px), abs(gz - pz)) <= 10;
+				if (goalNear) {
+					int best = -1, bx = gx, bz = gz, bL = 0;
+					for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
+						if (max(abs(x - px), abs(z - pz)) <= 10) continue;
+						int nL = CellLayN(b.map.At(x, z));
+						for (int L = 0; L < nL; L++) {
+							if (TerrainInfo(LayerTr(b.map.At(x, z), L)).costFoot >= 99) continue;
+							int d = WalkStepsAt(x, z, L);
+							if (d < 0 || d >= 30000) continue;
+							if (d > best) { best = d; bx = x; bz = z; bL = L; }
+						}
+					}
+					gx = bx; gz = bz;
+					eu.deck = bL;
+				}
+				int ox = eu.x, oz = eu.z, oL = eu.deck;
+				eu.x = -1; eu.z = -1;
+				b.RebuildOcc();
+				if (!PlaceFoot(b, i, gx, gz)) {
+					eu.x = gx; eu.z = gz; eu.deck = oL;
+					if (!Map::In(eu.x, eu.z) || (max(abs(eu.x - px), abs(eu.z - pz)) <= 10)) {
+						eu.x = ox; eu.z = oz; eu.deck = oL;
+					}
+				}
+				b.RebuildOcc();
+			}
+		}
+	}
 	if (b.sweep == TAC_VAR_SCAR) {
 		for (int i = 0; i < b.nUnits; i++) {
 			Unit& u = b.u[i];

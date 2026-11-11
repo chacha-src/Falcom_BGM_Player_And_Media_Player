@@ -10025,7 +10025,8 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	cb.sim[1] = dt * 60.f;
 	cb.sim[2] = reset ? 1.f : 0.f;
 	cb.sim[3] = hs;
-	cb.mode[3] = m_time;
+	// カットは時刻を負にする。シェーダは絶対値を位相に使い、短いスカートを衣装の骨へ残す。
+	cb.mode[3] = m_cutActors ? (-m_time - 0.001f) : m_time;
 	float head[3] = {};
 	TacWind(m_time, world, velUse, 0.48f, dp.gait, dp.fly, cb.wind, cb.air, head);
 	// 地上の歩き・走りは移動で前から風が当たる。飛行と静止はマップの風だけ。

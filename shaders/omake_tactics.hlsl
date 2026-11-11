@@ -356,8 +356,18 @@ PSIn ShadeStatic(VSIn v, row_major float4x4 WM)
 			w.y += RippleH(w.xz, t, rdh);
 			w += float3(-dh.x, 0, -dh.y) * 0.04;
 		} else {
-			w = FallLean(w, n, 0.74);
-			w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmt() * 0.08);
+			// 長い滝は上端だけ風でずらすと、下へ続く柱が途中から折れて見える。
+			// 風は柱ごと、さざめきは面の向きだけ。高さでは横に動かさない。
+			float2 dir = AirMain() + AirBreeze();
+			float dl = length(dir);
+			if (dl > 1e-4) dir /= dl;
+			float g = saturate(length(AirMain()) / 2.70);
+			float br = saturate(length(AirBreeze()) / 0.40);
+			float sway = g * 0.16 + br * 0.05;
+			w.x += dir.x * sway;
+			w.z += dir.y * sway;
+			float ripple = sin(w.y * 1.65 - Eye.w * 3.4);
+			w += n * ripple * (0.018 + g * 0.04);
 		}
 	} else if (OutlineColor.a < 1.5 && Params.y > 1.5 && Params.y < 2.5) {
 		if (n.y > 0.45) {
@@ -946,6 +956,45 @@ float RainAmt()
 	return 0.0;
 }
 
+// 雨のとき、服・肌・髪に水膜と、重力に沿って滑る滴。上面は膜、縦の面は筋になって落ちる。
+float3 RainSlide(float3 col, float3 albedo, float3 n, float3 v, float3 w, float sh, float hairAmt, float flesh)
+{
+	float rain = RainAmt();
+	if (rain < 0.01) return col;
+	float3 up = float3(0, 1, 0);
+	float3 slopeV = up - n * dot(n, up);
+	float sl = length(slopeV);
+	slopeV = sl > 1e-3 ? slopeV / sl : float3(0, 0, 1);
+	float3 across = cross(n, slopeV);
+	float al = length(across);
+	across = al > 1e-3 ? across / al : float3(1, 0, 0);
+	float side = dot(w, across);
+	float down = dot(w, slopeV);
+	float sky = saturate(n.y);
+	float wall = saturate(sl);
+	float shelter = saturate(n.y * 0.85 + 0.35);
+	float laneN = lerp(7.5, 16.0, saturate(hairAmt + flesh * 0.25));
+	float lane = abs(frac(side * laneN + fbm2(w.xz * 2.4 + w.y * 0.15) * 0.3) - 0.5);
+	float path = smoothstep(0.42, 0.5, 0.5 - lane);
+	float spd = lerp(1.15, 2.35, hairAmt) * lerp(0.55, 1.0, wall);
+	float flow = down * lerp(10.0, 22.0, hairAmt) - Eye.w * spd * rain;
+	float bead = pow(saturate(sin(flow) * 0.5 + 0.5), lerp(5.5, 9.0, hairAmt));
+	float run = pow(saturate(sin(flow * 0.62 + side * 28.0) * 0.5 + 0.5), 4.5) * path;
+	float drip = path * bead * wall;
+	float film = sky * (0.35 + 0.65 * fbm2(w.xz * 5.5 + float2(0.0, -Eye.w * 0.12)));
+	float wet = saturate((film * 0.9 + drip * 1.35 + run * 0.55 + wall * 0.22) * shelter) * saturate(rain);
+	col *= lerp(1.0, lerp(float3(0.62, 0.70, 0.78), float3(0.72, 0.78, 0.84), flesh), saturate(wet * 0.8));
+	float3 l = normalize(LightDir.xyz);
+	float3 h = normalize(l + v);
+	float ndl = saturate(dot(n, l));
+	float ndh = saturate(dot(n, h));
+	float gloss = pow(ndh, lerp(40.0, 88.0, max(hairAmt, flesh)));
+	col += float3(0.72, 0.86, 1.0) * gloss * ndl * sh * wet * 0.7;
+	col += float3(0.84, 0.93, 1.0) * (drip * 0.62 + run * 0.38) * rain * shelter;
+	col += albedo * pow(1.0 - saturate(dot(n, v)), 2.4) * wet * 0.16;
+	return col;
+}
+
 float3 FamSkin(float3 painted, float3 n, float3 w, float slice)
 {
 	float scale = slice < 24.0 ? 8.6 : (slice < 52.0 ? 5.8 : 4.6);
@@ -1107,6 +1156,8 @@ GOut PSM(PSIn i)
 		}
 	}
 	col = lerp(col, DewShade(col, albedo, n, v, sh, skin, hair), RainAmt() > 0.01 ? 1.0 : (1. - person * 0.6));
+	if (person > 0.5 || hair > 0.5)
+		col = RainSlide(col, albedo, n, v, i.w, sh, hair, skin);
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);

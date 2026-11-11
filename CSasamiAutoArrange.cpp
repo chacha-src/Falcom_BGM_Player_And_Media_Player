@@ -34,6 +34,8 @@ struct BarInfo {
 	int len;
 	int root;
 	int type;
+	int root2; /* 0 以上なら後半はこの和音。2分音符で小節内が変わる */
+	int type2;
 	int section;
 	int voiced;
 };
@@ -1881,6 +1883,256 @@ static int StyleQuiet(int style)
 	}
 }
 
+static int SlotN(int div)
+{
+	int n = div < 16 ? div : 16;
+	if (n < 1) n = 1;
+	return n;
+}
+
+static uint16_t SlotMask(int div)
+{
+	int n = SlotN(div);
+	return (n >= 16) ? 0xFFFFu : (uint16_t)((1u << n) - 1);
+}
+
+static uint16_t RotBits(uint16_t m, int div, int sh)
+{
+	int n = SlotN(div);
+	uint16_t low = SlotMask(div);
+	m = (uint16_t)(m & low);
+	if (n <= 1) return m;
+	sh %= n;
+	if (sh < 0) sh += n;
+	if (sh == 0) return m;
+	return (uint16_t)(((m << sh) | (m >> (n - sh))) & low);
+}
+
+static uint16_t DropNth(uint16_t m, int div, int mod, int eq)
+{
+	int n = SlotN(div);
+	if (mod < 1) return m;
+	uint16_t o = 0;
+	int k = 0;
+	for (int i = 0; i < n; i++) {
+		if (!(m & (uint16_t)(1u << i))) continue;
+		if ((k % mod) != eq) o = (uint16_t)(o | (uint16_t)(1u << i));
+		k++;
+	}
+	return o ? o : m;
+}
+
+/* スタイルの打点は崩さない。8小節の中で、その打点の上だけ度数と入りを進める。
+   4小節めと8小節めは最後の拍だけフィル。別スタイルの格子には載せ替えない。 */
+static void DevelopBar(int style, int pat, int bar, int div, int section,
+	uint16_t* drm, uint8_t* bass, uint16_t* comp, uint16_t* pad,
+	uint16_t* arp, uint16_t* harm, uint16_t* cnt, uint16_t* stab, uint16_t* color)
+{
+	if (!drm || !bass) return;
+	int n = SlotN(div);
+	uint16_t low = SlotMask(div);
+	int p = (bar + pat * 3 + style) & 7;
+	const int quiet = StyleQuiet(style);
+
+	if (drm[DV_HAT] && p != 0 && p != 3 && p != 7) {
+		int sh = quiet ? 1 : ((p & 3) + (style & 1));
+		drm[DV_HAT] = RotBits(drm[DV_HAT], div, sh);
+	}
+	if (comp && *comp && (p & 1)) {
+		int first = -1;
+		for (int i = 0; i < n; i++) if (*comp & (uint16_t)(1u << i)) { first = i; break; }
+		if (first > 0)
+			*comp = (uint16_t)((*comp | (uint16_t)(1u << (first - 1))) & low);
+		else if (first == 0 && n > 1 && !(*comp & 2))
+			*comp = (uint16_t)((*comp & (uint16_t)~1u) | 2u);
+	}
+	if (comp && *comp && (p % 4) == 2)
+		*comp = DropNth(*comp, div, 2, 1);
+
+	static const uint8_t turn[8] = { 0, 8, 3, 2, 1, 5, 8, 2 };
+	int nth = 0;
+	for (int i = 0; i < n; i++) {
+		if (!bass[i]) continue;
+		int t = turn[(nth + p) & 7];
+		if (t) bass[i] = (uint8_t)t;
+		nth++;
+	}
+	if ((p == 2 || p == 5) && !quiet) {
+		for (int i = n - 1; i > 0; i--) {
+			if (bass[i] && !bass[i - 1]) {
+				bass[i - 1] = 2;
+				break;
+			}
+		}
+	}
+	if ((p == 3 || p == 7) && section == SEC_BODY) {
+		int from = (quiet || n < 8) ? (n - 1) : (n - (n >= 16 ? 4 : 2));
+		if (from < 0) from = 0;
+		for (int i = from; i < n; i++) {
+			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & (uint16_t)~(1u << i));
+			drm[DV_OHAT] = (uint16_t)(drm[DV_OHAT] & (uint16_t)~(1u << i));
+			drm[DV_RIDE] = (uint16_t)(drm[DV_RIDE] & (uint16_t)~(1u << i));
+			if (!quiet)
+				drm[DV_SNARE] = (uint16_t)(drm[DV_SNARE] | (uint16_t)(1u << i));
+		}
+		if (n > 1)
+			drm[DV_TOM] = (uint16_t)(drm[DV_TOM] | (uint16_t)(1u << (n - 1)));
+		drm[DV_CRASH] = (uint16_t)(drm[DV_CRASH] | 1);
+		if (bass[0]) bass[0] = 1;
+	}
+	if (pad && *pad && (p & 2))
+		*pad = RotBits(*pad, div, 1);
+	if (arp && *arp && (p == 1 || p == 4 || p == 6))
+		*arp = RotBits(*arp, div, 1 + (style & 1));
+	if (harm && *harm && (p & 1) == 0) {
+		int f = -1;
+		for (int i = 0; i < n; i++) if (*harm & (uint16_t)(1u << i)) { f = i; break; }
+		if (f >= 0) *harm = (uint16_t)(1u << f);
+	}
+	if (cnt && *cnt && p)
+		*cnt = RotBits(*cnt, div, p % n);
+	if (stab && *stab && (p == 1 || p == 5)) {
+		int f = -1;
+		for (int i = 0; i < n; i++) if (*stab & (uint16_t)(1u << i)) { f = i; break; }
+		if (f >= 0) *stab = (uint16_t)(1u << f);
+	}
+	if (color && *color && (p == 4 || p == 6))
+		*color = RotBits(*color, div, 2);
+}
+
+/* 0=小節に一つ  1=ところどころ後半が変わる  2=奇数小節は2分で二つ */
+static int HalfHarmRate(int style)
+{
+	switch (style) {
+	case SC_AS_JAZZ: case SC_AS_BEBOP: case SC_AS_SWINGJAZZ:
+	case SC_AS_FUNK: case SC_AS_GOSPEL: case SC_AS_FUSION:
+	case SC_AS_BLUES: case SC_AS_SOUL: case SC_AS_CITYPOP:
+	case SC_AS_KAYOKYOKU: case SC_AS_GAME: case SC_AS_ANISON:
+	case SC_AS_DISCO: case SC_AS_RNB: case SC_AS_ROCKNROLL:
+	case SC_AS_LATIN: case SC_AS_SAMBA:
+		return 2;
+	case SC_AS_16BEAT: case SC_AS_8BEAT: case SC_AS_BOSSA:
+	case SC_AS_NEOSOUL: case SC_AS_SKA: case SC_AS_REGGAE:
+	case SC_AS_HIPHOP: case SC_AS_ACOUSTIC: case SC_AS_PIANO:
+	case SC_AS_BALLAD: case SC_AS_ENKA: case SC_AS_SLOWROCK:
+	case SC_AS_COUNTRY: case SC_AS_FLAMENCO: case SC_AS_TANGO:
+	case SC_AS_AFROBEAT: case SC_AS_SLOWBLUES: case SC_AS_SHUFFLE:
+	case SC_AS_MARCH: case SC_AS_POLKA: case SC_AS_SURF: case SC_AS_ORCH:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static void SecondChord(int root, int type, int bar, int style, int pat, int* r2, int* t2)
+{
+	int off = 7;
+	int ty = CH_7;
+	switch ((bar + style * 3 + pat) & 3) {
+	case 0: off = 5; ty = (type == CH_MIN || type == CH_M7) ? CH_MIN : CH_MAJ; break;
+	case 1: off = 7; ty = CH_7; break;
+	case 2: off = 2; ty = CH_MIN; break;
+	default: off = 9; ty = CH_MIN; break;
+	}
+	*r2 = (root + off) % 12;
+	*t2 = ty;
+	if (*r2 == root && *t2 == type) {
+		*r2 = (root + 7) % 12;
+		*t2 = CH_7;
+	}
+}
+
+static void ApplyHalfBars(BarInfo* bars, int nBars, int style, int pat)
+{
+	if (!bars || nBars < 1) return;
+	if (pat < 0) pat = 0;
+	const int rate = HalfHarmRate(style);
+	int body = 0;
+	for (int i = 0; i < nBars; i++) {
+		bars[i].root2 = -1;
+		bars[i].type2 = 0;
+		int barAt = i;
+		if (bars[i].section == SEC_BODY) barAt = body++;
+		if (!rate || bars[i].len < 168) continue;
+		if (bars[i].section == SEC_END) continue;
+		if (bars[i].section == SEC_INTRO && StyleQuiet(style)) continue;
+		if (bars[i].root < 0) continue;
+		int want = (rate == 2) ? ((barAt + pat) & 1) : (((barAt + style + pat) & 3) == 2);
+		if (!want) continue;
+		SecondChord(bars[i].root, bars[i].type, barAt, style, pat, &bars[i].root2, &bars[i].type2);
+	}
+}
+
+/* 伴奏の中に、小節単位の歌い回しを置く。毎小節ではない。 */
+static int HookLine(int style, int bar, int pat)
+{
+	if (style == SC_AS_DRUMSOLO) return 0;
+	switch (style) {
+	case SC_AS_BALLAD: case SC_AS_CITYPOP: case SC_AS_KAYOKYOKU:
+	case SC_AS_ENKA: case SC_AS_PIANO: case SC_AS_BOSSA:
+	case SC_AS_JAZZ: case SC_AS_SWINGJAZZ: case SC_AS_BEBOP:
+	case SC_AS_SOUL: case SC_AS_GOSPEL: case SC_AS_GAME:
+	case SC_AS_ANISON: case SC_AS_FUSION: case SC_AS_ACOUSTIC:
+	case SC_AS_SLOWROCK: case SC_AS_RNB: case SC_AS_NEOSOUL:
+		return ((bar + pat) & 3) == 0;
+	default:
+		return ((bar + pat + style) & 7) == 4;
+	}
+}
+
+/* 後半2拍だけ 32 分のアルペジオが続く小節。 */
+static int ArpRun32(int style, int bar, int pat)
+{
+	switch (style) {
+	case SC_AS_TECHNO: case SC_AS_HOUSE: case SC_AS_TRANCE:
+	case SC_AS_DNB: case SC_AS_EDM: case SC_AS_CHIPTUNE:
+	case SC_AS_GAME: case SC_AS_ANISON: case SC_AS_FUSION:
+	case SC_AS_PIANO: case SC_AS_SYNTHWAVE: case SC_AS_CITYPOP:
+	case SC_AS_DISCO: case SC_AS_RNB: case SC_AS_NEOSOUL:
+	case SC_AS_BREAKS:
+		break;
+	default:
+		return 0;
+	}
+	int m = (bar + pat + style) & 7;
+	return (m == 1 || m == 5) ? 1 : 0;
+}
+
+/* 64 分が4つ続くじゃらん。返すのはその 16 分スロット。無ければ -1。 */
+static int JaranAt(int style, int bar, int pat, int div, int section)
+{
+	if (section == SEC_END || div < 8) return -1;
+	if (section == SEC_INTRO && StyleQuiet(style)) return -1;
+	switch (style) {
+	case SC_AS_DRUMSOLO: case SC_AS_TRAP: case SC_AS_DRILL:
+	case SC_AS_TECHNO: case SC_AS_HOUSE: case SC_AS_DNB:
+	case SC_AS_DUBSTEP:
+		return -1;
+	default:
+		break;
+	}
+	int love = 0;
+	switch (style) {
+	case SC_AS_FLAMENCO: case SC_AS_ENKA: case SC_AS_KAYOKYOKU:
+	case SC_AS_GAME: case SC_AS_ANISON: case SC_AS_JAZZ:
+	case SC_AS_BEBOP: case SC_AS_PIANO: case SC_AS_ACOUSTIC:
+	case SC_AS_LATIN: case SC_AS_BOSSA: case SC_AS_TANGO:
+	case SC_AS_SURF: case SC_AS_CITYPOP: case SC_AS_FUSION:
+		love = 1;
+		break;
+	default:
+		break;
+	}
+	int period = love ? 4 : 8;
+	if (((bar + pat + style) % period) != period - 1) return -1;
+	int s = ((bar + style) & 1) ? (div / 2 - 2) : (div - 2);
+	if (s < 0) s = 0;
+	if (s & 1) s--;
+	if (s >= div) s = div - 2;
+	if (s < 0) return -1;
+	return s;
+}
+
 static void ApplyForm(int section, int last, int phase, int div,
 	int introI, int introN, int endFromEnd,
 	uint16_t* drm, uint8_t* bass, int* chordMask, int* chordSlots, int* skipChord,
@@ -2946,6 +3198,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	int patVar = opt->patVar;
 	if (patVar < 0 || patVar >= SC_ARRANGE_COUNT) patVar = 0;
 	LoadStyle(opt->style, patVar, &st);
+	ApplyHalfBars(bars, nBars, opt->style, patVar);
 	SetHeadTempo(&ctx, StyleBpm(opt->style), haveAcc, opt->docTempoT);
 	for (int i = 0; i < nDrum; i++) EnsureDrum(&ctx, opt->ui, drumChs[i], drumChSlot[i], anySolo, st.progKit, haveAcc);
 	for (int i = 0; i < nBass; i++) EnsureMelodic(&ctx, opt->ui, bassCh[i], 0, st.progAll[0], anySolo, haveAcc);
@@ -3039,7 +3292,35 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			compM = padM = arpM = innM = colM = stabM = cntM = 0;
 		} else if (skipChord) {
 			compM = padM = arpM = innM = colM = stabM = cntM = 0;
+		} else if (!(b.section == SEC_END && endFromEnd <= 0)) {
+			DevelopBar(opt->style, patVar, barAt, div, b.section,
+				drm, bass, &compM, &padM, &arpM, &innM, &cntM, &stabM, &colM);
+			bassSlots = 0;
+			for (int bs = 0; bs < nSlot; bs++)
+				if (bass[bs]) bassSlots = (uint16_t)(bassSlots | (1u << bs));
 		}
+		const int midSlot = nSlot / 2;
+		if (allowBar && !skipChord && b.root2 >= 0 && midSlot > 0 && midSlot < 16
+			&& !(b.section == SEC_END && endFromEnd <= 0)) {
+			compM = (uint16_t)(compM | (uint16_t)(1u << midSlot));
+			padM = (uint16_t)(padM | (uint16_t)(1u << midSlot));
+			if (!bass[midSlot]) {
+				bass[midSlot] = 1;
+				bassSlots = (uint16_t)(bassSlots | (uint16_t)(1u << midSlot));
+			}
+		}
+		const int hook = (allowBar && !skipChord && b.section != SEC_END
+			&& HookLine(opt->style, barAt, patVar)) ? 1 : 0;
+		uint16_t innBlock = innM;
+		if (hook) {
+			int step = (nSlot >= 16) ? 2 : 1;
+			for (int s = 0; s < nSlot; s += step)
+				innM = (uint16_t)(innM | (uint16_t)(1u << s));
+		}
+		const int run32 = (allowBar && !skipChord && b.section != SEC_END
+			&& ArpRun32(opt->style, barAt, patVar)) ? 1 : 0;
+		const int jaranSlot = (allowBar && !skipChord)
+			? JaranAt(opt->style, barAt, patVar, div, b.section) : -1;
 		for (int slot = 0; slot < div && !ctx.overflow; slot++) {
 			const uint32_t slot0 = b.t0 + (uint32_t)((uint64_t)slot * (uint64_t)b.len / (uint64_t)div);
 			const uint32_t slot1 = (slot + 1 >= div) ? (b.t0 + (uint32_t)b.len)
@@ -3049,6 +3330,15 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			if (slotDur < 2) slotDur = 2;
 			if (st.swing && (slot & 1)) tick += (uint32_t)(slotDur / 3);
 			if (tick >= b.t0 + (uint32_t)b.len) continue;
+			int hr = b.root;
+			int ht = b.type;
+			const int half = (b.root2 >= 0 && midSlot > 0 && slot >= midSlot);
+			if (half) { hr = b.root2; ht = b.type2; }
+			auto cutNext = [&](uint16_t m) -> int {
+				int n = NextBitN(m, slot, div);
+				if (b.root2 >= 0 && midSlot > 0 && slot < midSlot && n > midSlot) return midSlot;
+				return n;
+			};
 			uint16_t bit = (uint16_t)(1u << slot);
 			const int introSoft = (b.section == SEC_INTRO && !last);
 			const int merge = haveAcc ? 1 : 0;
@@ -3119,24 +3409,25 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = bHit0;
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(bassSlots, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur);
 				if (i == 0) {
 					if (hit) {
 						int deg = (phrase == 7) ? 1 : (int)bass[slot];
+						if (half && slot == midSlot) deg = 1;
 						if (deg < 1) deg = 1;
-						int midi = BassMidi(b.root, SafeDeg(deg), b.type);
+						int midi = BassMidi(hr, SafeDeg(deg), ht);
 						pit[np++] = midi;
-						/* ゴースト以外はルート＋5度の2ピック。1音に絞らない。 */
-						if (!bassSoft[slot]) {
-							int fifth = BassMidi(b.root, 2, b.type);
+						/* 拍の頭だけルート＋5度。それ以外は一本の線。 */
+						if (!bassSoft[slot] && (slot % 4) == 0) {
+							int fifth = BassMidi(hr, 2, ht);
 							if (fifth == midi) fifth = midi + 12;
 							while (fifth > 64) fifth -= 12;
 							if (fifth != midi && fifth >= 28) pit[np++] = fifth;
 						}
 					}
 				} else if (hit) {
-					np = FillVoicing(b.root, b.type, st.power, 2, barAt + i, 40, 67, pit);
-					span = SpanTicks(slot, NextBitN(bassSlots, slot, div), div, b.t0, tick, b.len, slotDur);
+					np = FillVoicing(hr, ht, st.power, 2, barAt + i, 40, 67, pit);
+					span = SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur);
 				} else hit = 0;
 				int bend = (i == 0 && hit && slot == 0 && st.bend && (phrase % 2) == 0);
 				int bv = (i == 0 && bassSoft[slot]) ? 72 : (gvol - i * 4);
@@ -3148,65 +3439,108 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				if (i > 0 && slot == cFirst) hit = 0;
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(compM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(compM), div, b.t0, tick, b.len, slotDur);
 				if (hit) {
 					int nVoice = (i == 0) ? 5 : 4;
-					np = FillVoicing(b.root, b.type, st.power, nVoice, phrase + i, 48 + (i % 2) * 7, 78, pit);
+					int inv = barAt * 5 + opt->style + i * 3 + slot + (half ? 4 : 0);
+					int lo = 48 + ((barAt & 3) == 2 ? 5 : 0) + (i % 2) * 7;
+					int hi = 80 - ((barAt & 3) == 1 ? 4 : 0);
+					np = FillVoicing(hr, ht, st.power, nVoice, inv, lo, hi, pit);
 				}
-				lay(chordCh[i], hit, pit, np, span, gvol - 4 - i * 3, 90, 0);
+				lay(chordCh[i], hit, pit, np, span, gvol - 4 - i * 3, ((slot % 4) == 0) ? 96 : 68, 0);
 			}
 			for (int i = 0; i < nPad; i++) {
 				int hit = BitOn(padM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(padM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(padM), div, b.t0, tick, b.len, slotDur);
 				if (hit)
-					np = FillVoicing(b.root, b.type, 0, 4, phrase + 2 + i, 55, 86, pit);
+					np = FillVoicing(hr, ht, 0, 4, phrase + 2 + i + (half ? 3 : 0), 55, 86, pit);
 				lay(padCh[i], hit, pit, np, span, gvol - 16 - i * 2, 96, 0);
 			}
 			for (int i = 0; i < nArp; i++) {
 				int hit = BitOn(arpM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(arpM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(arpM), div, b.t0, tick, b.len, slotDur);
+				/* 後半だけ 32 分が続く。同時和音にせず、コードトーンを一本で歩く。 */
+				if (run32 && slot >= midSlot && i == 0 && arpCh[i] >= 0) {
+					if (merge)
+						MergeSlot(ev, evCount, &nEmit, arpCh[i], slot0, slot1, -1, 1, &removedNotes);
+					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
+					int each = room / 2;
+					if (each < 2) each = 2;
+					int shape = (opt->style + barAt + patVar) % 5;
+					int step = (slot - midSlot) * 2 + barAt * 8;
+					int a0 = ArpPitch(hr, ht, st.power, step, shape, 0);
+					int a1 = ArpPitch(hr, ht, st.power, step + 1, shape, 0);
+					int v0 = ((slot % 4) == 0) ? gvol : (gvol - 14);
+					if (v0 < 52) v0 = 52;
+					if (v0 > 120) v0 = 120;
+					PlaceNote(&ctx, arpCh[i], tick, a0, each, v0, 58);
+					int v1 = v0 - 12;
+					if (v1 < 46) v1 = 46;
+					PlaceNote(&ctx, arpCh[i], tick + (uint32_t)each, a1, each, v1, 48);
+					continue;
+				}
+				if (run32 && slot >= midSlot) hit = 0;
 				if (hit) {
-					int shape = (patVar + phrase / 2) % 5;
+					int shape = (opt->style + barAt + patVar) % 5;
 					int step = barAt * 4 + NthBit(arpM, slot);
+					if (barAt & 1) step = 48 - (step & 15);
 					if (i == 0) {
-						int a0 = ArpPitch(b.root, b.type, st.power, step, shape, 0);
-						int a1 = ArpPitch(b.root, b.type, st.power, step + 1, shape, 0);
+						int a0 = ArpPitch(hr, ht, st.power, step, shape, 0);
+						int a1 = ArpPitch(hr, ht, st.power, step + 1, shape, 0);
 						pit[np++] = a0;
 						if (a1 == a0) a1 = a0 + 7;
 						while (a1 > 96) a1 -= 12;
 						if (a1 != a0 && a1 >= 48) pit[np++] = a1;
 					} else
-						np = FillVoicing(b.root, b.type, st.power, 3, phrase + i, 64, 96, pit);
+						np = FillVoicing(hr, ht, st.power, 3, phrase + i, 64, 96, pit);
 				}
 				lay(arpCh[i], hit, pit, np, span, gvol - 6, 70, 0);
 			}
 			for (int i = 0; i < nHarm; i++) {
 				if (i == 0 && (opt->jobs & SC_AJ_MEL_PITCH)) continue;
-				int hit = BitOn(innM, slot);
+				int hit = BitOn((i == 0) ? innM : innBlock, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(innM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext((i == 0) ? innM : innBlock), div, b.t0, tick, b.len, slotDur);
+				/* じゃらんの拍はブロックを置かず、あとで 64 分を書く。 */
+				if (i == 0 && slot == jaranSlot) {
+					lay(harmCh[i], 0, pit, 0, span, 0, 0, 0);
+					continue;
+				}
+				if (hook && i == 0) {
+					if (hit) {
+						static const uint8_t singA[8] = { 1, 5, 8, 5, 3, 5, 2, 1 };
+						static const uint8_t singB[8] = { 5, 8, 3, 5, 1, 3, 8, 5 };
+						const uint8_t* sing = ((opt->style + patVar) & 1) ? singB : singA;
+						int idx = (nSlot >= 16) ? (slot / 2) : slot;
+						int deg = sing[(idx + barAt) & 7];
+						pit[np++] = ShiftOct(BassMidi(hr, deg, ht), 2, 64, 88);
+					}
+					lay(harmCh[i], hit, pit, np, span, gvol - 6, 74, 0);
+					continue;
+				}
 				if (hit)
-					np = FillVoicing(b.root, b.type, st.power, 4, phrase + 5 + i, 60, 91, pit);
+					np = FillVoicing(hr, ht, st.power, 4, phrase + 5 + i, 60, 91, pit);
 				lay(harmCh[i], hit, pit, np, span, gvol - 10, 88, 0);
 			}
 			for (int i = 0; i < nCnt; i++) {
 				int hit = BitOn(cntM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(cntM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(cntM), div, b.t0, tick, b.len, slotDur);
 				if (hit) {
+					static const uint8_t motif[16] = {
+						1, 5, 3, 8, 2, 5, 1, 3, 8, 3, 5, 2, 1, 8, 5, 1
+					};
 					int nth = NthBit(cntM, slot);
-					int deg = (nth & 1) ? 2 : 5;
-					if ((phrase & 1) && deg == 5) deg = 8;
-					if (phrase == 7) deg = 5;
-					int midi = ShiftOct(BassMidi(b.root, deg, b.type), 2, 60, 84);
+					int deg = motif[(nth + barAt * 3 + opt->style + patVar) & 15];
+					int midi = ShiftOct(BassMidi(hr, deg, ht), 2, 60, 84);
 					pit[np++] = midi;
-					int under = ShiftOct(BassMidi(b.root, (deg == 5) ? 2 : 5, b.type), 2, 55, 84);
+					int under = ShiftOct(BassMidi(hr, (deg == 5) ? 2 : 5, ht), 2, 55, 84);
 					if (under != midi) pit[np++] = under;
 				}
 				lay(cntCh[i], hit, pit, np, span, gvol - 8, 78, 0);
@@ -3217,18 +3551,37 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int np = 0;
 				int span = slotDur > 2 ? slotDur : 2;
 				if (hit)
-					np = FillVoicing(b.root, b.type, st.power, 4, phrase + i, 67, 96, pit);
+					np = FillVoicing(hr, ht, st.power, 4, phrase + i, 67, 96, pit);
 				lay(stabCh[i], hit, pit, np, span, gvol - i * 3, 42, 0);
 			}
 			for (int i = 0; i < nColor; i++) {
 				int hit = BitOn(colM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, NextBitN(colM, slot, div), div, b.t0, tick, b.len, slotDur);
+				int span = SpanTicks(slot, cutNext(colM), div, b.t0, tick, b.len, slotDur);
 				if (hit) {
-					np = FillVoicing(b.root, b.type, 0, 2, phrase, 72, 96, pit);
+					np = FillVoicing(hr, ht, 0, 2, phrase, 72, 96, pit);
 				}
 				lay(colorCh[i], hit, pit, np, span, gvol - 18, 84, 0);
+			}
+			/* その拍だけ、コードトーンを 64 分で4つ。じゃらん。 */
+			if (slot == jaranSlot && slotDur >= 8 && !(run32 && slot >= midSlot)) {
+				int ch = (nHarm > 0) ? harmCh[0] : ((nArp > 0) ? arpCh[0] : -1);
+				if (ch >= 0) {
+					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
+					int each = room / 4;
+					if (each >= 2) {
+						int up = (barAt + opt->style) & 1;
+						int step0 = (barAt * 3 + slot) & 7;
+						for (int k = 0; k < 4 && !ctx.overflow; k++) {
+							int step = up ? (step0 + k) : (step0 + 3 - k);
+							int midi = ArpPitch(hr, ht, 0, step, 2, 0);
+							int v = 64 + k * 12;
+							if (v > 116) v = 116;
+							PlaceNote(&ctx, ch, tick + (uint32_t)(k * each), midi, each, v, 40);
+						}
+					}
+				}
 			}
 
 		}

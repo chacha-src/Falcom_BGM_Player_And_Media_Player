@@ -597,6 +597,9 @@ private:
 	int m_previewMot;  // 0待機 1歩き 2走り 3構え 4攻撃 5別技
 	BOOL m_previewWing;   // 見本だけ。0で翼を描かない
 	BOOL m_previewGround; // 見本だけ。1で翼のない地上の動き
+	BOOL m_previewNight;  // 見本だけ。1で夜の空と光
+	BOOL m_previewWind;   // 見本だけ。1でマップと同じ風
+	BOOL m_previewRain;   // 見本だけ。1で雨
 
 	// 編成
 	int m_partySel;

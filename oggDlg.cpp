@@ -27029,13 +27029,20 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 		|| (mode > 0 && mode <= 21);
 }
 
+static int g_stopKeepSasami = 0;
+
 void COggDlg::stop()
 {
+	const int sasamiStop = PlIsSasamiTempPreviewPath(filen) ? 1 : 0;
+	if (sasamiStop)
+		g_stopKeepSasami = 1;
 	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
 		playf = 0;
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
 		AbortPianoRollCaptureNow();
+		if (sasamiStop)
+			SetTimer(4923, 30, NULL);
 		return;
 	}
 	// play/stop1 実行中の再入: 停止要求だけ出して本体は触らない
@@ -27044,6 +27051,8 @@ void COggDlg::stop()
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
 		AbortPianoRollCaptureNow();
+		if (sasamiStop)
+			SetTimer(4923, 30, NULL);
 		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 			m_PianoRollDlg->OnPlayerFeedStopping(false);
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -27248,6 +27257,8 @@ void COggDlg::stop()
 	wav = NULL;
 	mode = modesub;
 	stflg = FALSE;
+	if (PlIsSasamiTempPreviewPath(filen))
+		g_stopKeepSasami = 1;
 	SetTimer(4923, 30, NULL);
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
@@ -27477,6 +27488,11 @@ BOOL COggDlg::stop1()
 	m_lrc5.SetWindowText(L"");
 	ResetPauseButtonUi();
 	eqflg = TRUE;
+	/* stop() を通らない視聴停止でも、終わったあとに譜面を裏へ回さない。 */
+	if (PlIsSasamiTempPreviewPath(filen)) {
+		g_stopKeepSasami = 1;
+		SetTimer(4923, 30, NULL);
+	}
 	return TRUE;
 }
 
@@ -30818,6 +30834,70 @@ int aaaa = 0, aaaa1 = 0;
 void timerog(UINT nIDEvent);
 void timerog1(UINT nIDEvent);
 static void OggPresentStartupSubUi();
+
+struct SasamiZOrder {
+	HWND w[32];
+	int n;
+};
+
+static BOOL CALLBACK CollectSasamiZOrder(HWND h, LPARAM lp)
+{
+	SasamiZOrder* z = (SasamiZOrder*)lp;
+	if (!z || z->n >= 32) return TRUE;
+	DWORD pid = 0;
+	::GetWindowThreadProcessId(h, &pid);
+	if (pid != ::GetCurrentProcessId() || !::IsWindowVisible(h) || ::IsIconic(h))
+		return TRUE;
+	CWnd* wnd = CWnd::FromHandlePermanent(h);
+	if (!wnd) return TRUE;
+	CRuntimeClass* rc = wnd->GetRuntimeClass();
+	const char* cn = (rc) ? rc->m_lpszClassName : NULL;
+	if (!cn || strncmp(cn, "CSasami", 7) != 0) return TRUE;
+	z->w[z->n++] = h;
+	return TRUE;
+}
+
+/* EnumWindows は手前から。戻り値は一番手前のささみ窓。無ければ NULL。 */
+static HWND SasamiComposerWindows(SasamiZOrder* z)
+{
+	if (!z) return NULL;
+	z->n = 0;
+	::EnumWindows(CollectSasamiZOrder, (LPARAM)z);
+	return (z->n > 0) ? z->w[0] : NULL;
+}
+
+static int ForegroundIsSasami()
+{
+	HWND fg = ::GetForegroundWindow();
+	if (!fg) return 0;
+	HWND root = ::GetAncestor(fg, GA_ROOT);
+	if (!root) root = fg;
+	for (HWND w = fg; w; w = ::GetParent(w)) {
+		CWnd* wnd = CWnd::FromHandlePermanent(w);
+		if (!wnd) continue;
+		CRuntimeClass* rc = wnd->GetRuntimeClass();
+		const char* cn = (rc) ? rc->m_lpszClassName : NULL;
+		if (cn && strncmp(cn, "CSasami", 7) == 0) return 1;
+	}
+	CWnd* wnd = CWnd::FromHandlePermanent(root);
+	if (!wnd) return 0;
+	CRuntimeClass* rc = wnd->GetRuntimeClass();
+	const char* cn = (rc) ? rc->m_lpszClassName : NULL;
+	return (cn && strncmp(cn, "CSasami", 7) == 0) ? 1 : 0;
+}
+
+static void RaiseSasamiFamily(const SasamiZOrder* z)
+{
+	if (!z || z->n <= 0) return;
+	for (int i = z->n - 1; i >= 0; --i) {
+		if (::IsWindow(z->w[i]))
+			::SetWindowPos(z->w[i], HWND_TOP, 0, 0, 0, 0,
+				SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+	if (::IsWindow(z->w[0]))
+		::SetForegroundWindow(z->w[0]);
+}
+
 void timerog1(UINT nIDEvent)
 {
 	if (nIDEvent == 59878) {
@@ -30844,6 +30924,8 @@ void timerog1(UINT nIDEvent)
 
 	if (nIDEvent == 4923) {
 		og->KillTimer(4923);
+		const int sasamiPreviewStopped = g_stopKeepSasami;
+		g_stopKeepSasami = 0;
 		// このタイマーは遅延発火するため、保留中に他ウィンドウへフォーカスが
 		// 移ると、解除処理の後から発火してホットキーを再登録してしまう。
 		// 自プロセスが前面でない場合は登録せず、確実に解除しておく。
@@ -30871,13 +30953,25 @@ void timerog1(UINT nIDEvent)
 		}
 		/* MP モードでは og は非表示のオーナー。HWND_TOP で前面化すると
 		   見えない窓がフォアグラウンドになり、MP の次のクリック（終了など）が
-		   活性化に消費されて 2 回押すまで届かない。 */
+		   活性化に消費されて 2 回押すまで届かない。
+		   ただし譜面・アレンジを操作中、またはささみの視聴が終わった直後は
+		   MP を被せず、開いているささみの窓を手前に残す。 */
 		extern CMediaPlayerDlg* mp;
 		HWND hMp = NULL;
 		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd())
 			&& ::IsWindowVisible(mp->GetSafeHwnd()) && !::IsIconic(mp->GetSafeHwnd()))
 			hMp = mp->GetSafeHwnd();
-		if (hMp) {
+		SasamiZOrder sasamiZ;
+		HWND hSas = SasamiComposerWindows(&sasamiZ);
+		const int keepSasami = (hSas && (sasamiPreviewStopped || ForegroundIsSasami())) ? 1 : 0;
+		if (keepSasami) {
+			RaiseSasamiFamily(&sasamiZ);
+			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0);
+			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1);
+			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2);
+			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY3);
+			og->KillTimer(4924);
+		} else if (hMp) {
 			::SetWindowPos(hMp, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 			::SetForegroundWindow(hMp);
 			/* 非表示の og が非アクティブになると 4924 がホットキーを外す。
@@ -30888,12 +30982,14 @@ void timerog1(UINT nIDEvent)
 				::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 			::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		}
-		og->SetTimer(4930, 10, NULL);
-		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
-		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
-		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
-		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
-		ip = 3;
+		if (!keepSasami) {
+			og->SetTimer(4930, 10, NULL);
+			RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
+			RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
+			RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
+			RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
+			ip = 3;
+		}
 	}
 	if (nIDEvent == 4924) {
 		og->KillTimer(4924);

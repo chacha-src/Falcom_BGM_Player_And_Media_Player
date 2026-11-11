@@ -160,6 +160,25 @@ void LoadClothBatch(uint gid, uint slot)
 #define Grav gPrm.Grav
 #define Hand gPrm.Hand
 
+// カットは時刻を負にして渡す。複数人の同時拘束は骨パレットを持たないので、位相だけ絶対値を使う。
+float ClothTime()
+{
+	return abs(Mode.w);
+}
+
+float InCut()
+{
+	return Mode.w < 0.0 ? 1.0 : 0.0;
+}
+
+// しゃがみ、またはカットの短い布。ロングの裾（腰から約 50cm より下）は垂らしたまま。
+float WearSkirt(float y)
+{
+	float sit = saturate(Mode.x);
+	float mini = (1.0 - smoothstep(0.40, 0.62, max(Grav.w - y, 0.0))) * InCut();
+	return saturate(max(sit, mini));
+}
+
 float3 GravDown()
 {
 	float gl = length(Grav.xyz);
@@ -629,6 +648,24 @@ float3 Approach(float3 p, float3 goal)
 	return p + d;
 }
 
+// カットで骨に着せた短いスカート。スキニング位置は肌の内側に残ることがあるので、外向きへ 8mm だけ離す。
+// すでに外へ出ている布をさらに膨らませない。立ちの長い裾は wear が 0 なのでここを通らない。
+float3 WearClear(float3 p, float3 nrm, float wear)
+{
+	if (wear < 0.05) return p;
+	float sc = max(Sim.w, 1e-4);
+	float3 radial = p / sc - gWaist;
+	radial -= gDown * dot(radial, gDown);
+	float rl = length(radial);
+	float3 outD = rl > 1e-4 ? radial / rl : float3(0, 0, 1);
+	float3 n = nrm;
+	float nl = length(n);
+	n = nl > 1e-4 ? n / nl : outD;
+	if (dot(n, outD) < 0.25) n = outD;
+	else n = normalize(lerp(outD, n, 0.65));
+	return p + n * (0.008 * wear * sc);
+}
+
 // 腰の帯まわり。水平の向きで測った断面の中にいる布だけ、滑らかに減衰させて外へ出す。段差は作らない。
 float3 HipOut(float3 p)
 {
@@ -723,7 +760,7 @@ float3 AirPush(float fall)
 		if (amp > 1.55) reach += min(amp - 1.55, 2.2) * ((0.64 - 0.275) / 2.2);
 		r = (w / amp) * reach * fall;
 	}
-	r *= 0.94 + 0.06 * sin(Mode.w * 2.4);
+	r *= 0.94 + 0.06 * sin(ClothTime() * 2.4);
 	float ly = abs(Air.w);
 	float yReach = min(ly, 0.55) * (0.09 / 0.55);
 	if (ly > 0.62) yReach += min(ly - 0.62, 1.1) * 0.18;
@@ -738,7 +775,7 @@ float3 GustRipple(ClothN c, float3 dir, float3 side, float3 up, float reach, flo
 	float drop = max(Grav.w - c.x.y, 0);
 	float az = atan2(c.x.x - Mode.y, c.x.z - Mode.z);
 	float seed = az * 1.7 + drop * 8.0;
-	float t = Mode.w;
+	float t = ClothTime();
 	float across = sin(t * 0.95 + seed) * 0.50 + sin(t * 2.15 + seed * 1.3) * 0.32 + sin(t * 0.41 + seed * 0.35) * 0.18;
 	float along = sin(t * 0.72 + seed * 0.8 + 1.4) * 0.62 + sin(t * 1.65 + az * 2.0 + drop * 6.0) * 0.38;
 	float lift = sin(t * 1.35 + seed * 1.1);
@@ -975,7 +1012,7 @@ float3 FlightGust(ClothN c, float flow)
 	float backMid = (1.0 - smoothstep(0.0, 1.05, abs(az))) * (1.0 - smoothstep(0.02, 0.14, abs(c.x.x - Mode.y)));
 	float drop = max(Grav.w - c.x.y, 0);
 	float ph = lerp(1.35, 0.05, front) + sin(az) * 0.45 - drop * 6.5;
-	float t = Mode.w;
+	float t = ClothTime();
 	float flyMove = saturate(Wind.w - 1.0);
 	float boost = 1.0 + 1.15 * flyMove;
 	float gZ = sin(t * 3.8 + ph) * 0.65 + sin(t * 7.6 + ph * 1.3 + 1.1) * 0.35;
@@ -1043,7 +1080,7 @@ void CSClothStep(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	float3 bindOut = gEhx * (c.x.x - Mode.y) + gEhz * (c.x.z - Mode.z);
 	float bol = length(bindOut);
 	bindOut = bol > 1e-4 ? bindOut / bol : side;
-	float flareWave = 0.65 + 0.35 * sin(Mode.w * 1.85 + atan2(c.x.x - Mode.y, c.x.z - Mode.z) * 2.0 + drop * 5.0);
+	float flareWave = 0.65 + 0.35 * sin(ClothTime() * 1.85 + atan2(c.x.x - Mode.y, c.x.z - Mode.z) * 2.0 + drop * 5.0);
 	float flareAmp = (reach * (isSlit ? 0.36 : 0.20) + (Wind.w > 0.5 ? (isSlit ? 0.038 : 0.018) * Sim.w : 0.0)) * hemOpen * flareWave;
 	target += bindOut * flareAmp;
 	target += GravDown() * (sag * 0.02 * flow * Sim.w);
@@ -1073,6 +1110,13 @@ void CSClothStep(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	float hold = GroinHold(c.x.x, c.x.y, c.x.z) * 0.88;
 	off *= (1.0 - hold);
 	vel *= (1.0 - hold);
+	// 両膝を曲げたときと、カットの短いスカート。垂らしたずれを足すと腰から離れて消える。
+	// ずれは捨て、描画は衣装の骨へ戻す。立ちに戻るときは 0 から風と重力を溜め直す。
+	float wear = WearSkirt(c.x.y);
+	if (wear > 0.001) {
+		off *= (1.0 - wear);
+		vel *= (1.0 - wear);
+	}
 	float3 pushed = c.p.w > 0.5 ? rest : LegPush(rest + off, c.x.x, c.x.y, c.x.z, c.q.z, 0.016, 0.0);
 	off = pushed - rest;
 	St[gSt0 + id] = float4(pushed, 0);
@@ -1108,34 +1152,41 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 	float3 off = float3(0, 0, 0);
 	if (on) {
 		c = Cn[gCn0 + id];
-		rest = NodeTarget(c);
+		// 目標は直前の積分が自分の骨で入れた値。ここで NodeTarget を呼ぶと、複数人の同時拘束は
+		// 最後の一人の骨パレットしか無く、他の人のスカートが他人の姿勢へ飛んで消える。
+		rest = St[gSt0 + NMAX + id].xyz;
 		off = c.p.w > 0.5 ? float3(0, 0, 0) : St[gSt0 + 3 * NMAX + id].xyz;
 	}
 	float flow = on ? Flow(c.x.y) : 0;
 	// 腰とミニは軽く、ロングの裾だけ 0.55m まで。舞台の風で上段が腕まで残らない。
 	float lim = lerp(0.05, 0.55, saturate(flow)) * max(Sim.w, 0.2);
 	[loop] for (int it = 0; it < 4; it++) {
-		gP[id] = on ? off : float3(0, 0, 0);
-		GroupMemoryBarrierWithGroupSync();
+		// 上下を強く、左右も混ぜる。段差は上下の差なので、横の隣が同じ段だと平均が段を残す。
+		// 直線の靡きは上下が打ち消し合うので残る。腰の固定点は平均に入れない。スリットは隣が無く縫わない。
+		[unroll] for (int sub = 0; sub < 2; sub++) {
+			gP[id] = on ? off : float3(0, 0, 0);
+			GroupMemoryBarrierWithGroupSync();
+			if (on && c.p.w <= 0.5) {
+				float3 sum = 0;
+				float wsum = 0;
+				float nPin = 0;
+				[unroll] for (int e = 0; e < 4; e++) {
+					uint j = c.nb[e];
+					if (j >= n) continue;
+					if (Cn[gCn0 + j].p.w > 0.5) { nPin += 1.0; continue; }
+					float w = e < 2 ? 3.0 : 1.0;
+					sum += gP[j] * w;
+					wsum += w;
+				}
+				if (wsum > 0.0) {
+					float k = lerp(0.86, 0.74, saturate(flow));
+					off = lerp(off, sum / wsum, k);
+				}
+				if (sub == 1 && nPin > 0.0) off *= 0.94;
+			}
+			GroupMemoryBarrierWithGroupSync();
+		}
 		if (on && c.p.w <= 0.5) {
-			// 横だけでなく縦も隣接。隣のずれの平均が、惰性・慣性・重力・風の形。
-			// その平均は残し、隣との差（ギザギザ）だけを消す。なだらかな靡きは平均に入るので残る。
-			// 腰に固定した点は平均に入れない。固定の 0 を裾まで吸わせず、継ぎ目だけ軽く揃える。
-			// スリットの切れ目はもともと隣が無いので、ここで縫い合わせない。
-			float3 sum = 0;
-			float nFree = 0;
-			float nPin = 0;
-			[unroll] for (int e = 0; e < 4; e++) {
-				uint j = c.nb[e];
-				if (j >= n) continue;
-				if (Cn[gCn0 + j].p.w > 0.5) nPin += 1.0;
-				else { sum += gP[j]; nFree += 1.0; }
-			}
-			if (nFree > 0.0) {
-				float k = lerp(0.60, 0.50, saturate(flow));
-				off = lerp(off, sum / nFree, k);
-			}
-			if (nPin > 0.0) off *= 0.92;
 			float ol = length(off);
 			if (ol > lim && ol > 1e-5) off *= lim / ol;
 			off *= (1.0 - GroinHold(c.x.x, c.x.y, c.x.z) * 0.35);
@@ -1160,14 +1211,15 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 	GroupMemoryBarrierWithGroupSync();
 	if (on && c.p.w <= 0.5) {
 		float3 sum = 0;
-		float nFree = 0;
+		float wsum = 0;
 		[unroll] for (int e = 0; e < 4; e++) {
 			uint j = c.nb[e];
 			if (j >= n || Cn[gCn0 + j].p.w > 0.5) continue;
-			sum += gP[j];
-			nFree += 1.0;
+			float w = e < 2 ? 3.0 : 1.0;
+			sum += gP[j] * w;
+			wsum += w;
 		}
-		if (nFree > 0.0) off = lerp(off, sum / nFree, lerp(0.60, 0.50, saturate(flow)));
+		if (wsum > 0.0) off = lerp(off, sum / wsum, lerp(0.86, 0.74, saturate(flow)));
 		float ol = length(off);
 		if (ol > lim && ol > 1e-5) off *= lim / ol;
 		off *= (1.0 - GroinHold(c.x.x, c.x.y, c.x.z) * 0.35);
@@ -1210,19 +1262,24 @@ void CSClothWrite(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	}
 	if (wsum > 1e-5) disp /= wsum;
 	float coverV = PelvisCover(c.p.y);
-	float hangV = (Cnt.x > 1u ? 1.0 : 0.0) * HangIn(c.p.y) * (1.0 - saturate(Mode.x)) * (1.0 - coverV) * saturate(c.p.w);
+	float wear = WearSkirt(c.p.y);
+	float hangV = (Cnt.x > 1u ? 1.0 : 0.0) * HangIn(c.p.y) * (1.0 - wear) * (1.0 - coverV) * saturate(c.p.w);
 	float3 ehx, ehz, down;
 	FlatAxes(ehx, ehz, down);
 	float3 nHang = ehx * c.n.x - down * c.n.y + ehz * c.n.z;
 	float3 hungV = LevelHang(c.p.xyz) + down * (saturate(max(Grav.w - c.p.y, 0) / 0.45) * 0.02 * Sim.w);
-	float3 p = lerp(s, hungV, hangV) + disp * saturate(c.p.w);
+	// しゃがみとカットの短いスカートは、スキニングした衣装の位置に着せる。
+	// 垂らした位置へ戻すとミニスカートが腰から離れて描かれない。ロングの裾は wear が 0 なので今まで通り。
+	float3 p = lerp(s, hungV, hangV) + disp * saturate(c.p.w) * (1.0 - wear);
 	// 股は完全に固定せず動きを少なく抑えてから、足の外だけ出す。押したあとに戻すと足の中へ入る。
-	p = lerp(p, hungV, GroinHold(c.p.x, c.p.y, c.p.z) * 0.85);
+	p = lerp(p, hungV, GroinHold(c.p.x, c.p.y, c.p.z) * 0.85 * (1.0 - wear));
+	p = lerp(p, s, wear);
 	p = HipOut(p);
 	uint span = c.a.w & 3u;
 	float slitCode = span == 1u ? 1.0 : (span == 2u ? 2.0 : 0.0);
 	float skin = c.n.w < 0.0 ? -c.n.w : 0.016;
 	p = LegPush(p, c.p.x, c.p.y, c.p.z, slitCode, skin, 0.0);
+	p = WearClear(p, sn, wear);
 	float3 def = (p - hungV) / max(Sim.w, 1e-4);
 	float dropV = max(Grav.w - c.p.y, 0.12);
 	nHang -= down * clamp(dot(nHang, def) / dropV * 0.35, -0.35, 0.35);

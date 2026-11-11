@@ -43,6 +43,7 @@ enum {
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_EV_PART_PREV = 1510, ID_EV_PART_NEXT, ID_EV_MAIN_PREV, ID_EV_MAIN_NEXT,
 	ID_CR_MOT0 = 1550, ID_MON_MOT0 = 1560,
+	ID_CR_NIGHT = 1570, ID_CR_WIND, ID_CR_RAIN,
 	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE, ID_RS_LOOP,
 	ID_HELP_CLOSE = 900,
 	ID_BASE_REROLL = 940, ID_BASE_THEME, ID_BASE_LOOK = 942, ID_BASE_LOOK_BACK,
@@ -297,6 +298,9 @@ Game::Game()
 	m_previewMot = 0;
 	m_previewWing = TRUE;
 	m_previewGround = FALSE;
+	m_previewNight = FALSE;
+	m_previewWind = FALSE;
+	m_previewRain = FALSE;
 	m_partySel = -1;
 	m_eqPick = 0;
 	m_eqPage = 0;
@@ -1320,7 +1324,15 @@ void Game::RenderFrame()
 	m_renderDt = Clampf(m_time - m_lastRenderTime, 0, .1f);
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
-	m_r.SetSky(m_screen == SC_BATTLE ? TacWx(m_b.weather) : WX_CLEAR, m_screen == SC_BATTLE ? TacHour(m_b.weather) : HR_NOON);
+	int skyWx = WX_CLEAR, skyHr = HR_NOON;
+	if (m_screen == SC_BATTLE) {
+		skyWx = TacWx(m_b.weather);
+		skyHr = TacHour(m_b.weather);
+	} else if (m_screen == SC_CREATE) {
+		if (m_previewRain) skyWx = WX_RAIN;
+		if (m_previewNight) skyHr = HR_NIGHT;
+	}
+	m_r.SetSky(skyWx, skyHr);
 	m_r.SetAvaLoadFull(m_screen != SC_CREATE && m_screen != SC_BATTLE);
 	LARGE_INTEGER rf0, rf1, rfq;
 	m_msSh = m_msRef = 0;
@@ -3880,11 +3892,16 @@ void Game::UpdateParticles(float dt)
 		++i;
 	}
 	if (m_r.WxGpuReady()) {
-		int wxG = (m_screen == SC_BATTLE) ? TacWx(m_b.weather) : WX_CLEAR;
+		int wxG = WX_CLEAR;
+		if (m_screen == SC_BATTLE) wxG = TacWx(m_b.weather);
+		else if (m_screen == SC_CREATE && m_previewRain) wxG = WX_RAIN;
 		static float hgt[MAPN * MAPN];
 		if (m_screen == SC_BATTLE) {
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
 				hgt[z * MAPN + x] = m_b.map.StandY(x, z);
+		} else if (m_screen == SC_CREATE && m_previewRain) {
+			float gy = -50.f + m_preview.hover;
+			for (int i = 0; i < MAPN * MAPN; i++) hgt[i] = gy;
 		} else memset(hgt, 0, sizeof(hgt));
 		float act[Renderer::WX_GPU_ACT * 4];
 		int nAct = 0;
@@ -3900,9 +3917,31 @@ void Game::UpdateParticles(float dt)
 				act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
 				nAct++;
 			}
+		} else if (m_screen == SC_CREATE && m_previewRain && nAct < Renderer::WX_GPU_ACT) {
+			float ht = m_preview.height;
+			if (ht < 0.3f) ht = 0.8f;
+			if (ht > 1.6f) ht = 1.6f;
+			V3 ap = v3(0.f, -50.f + m_preview.hover, 0.f);
+			int b = nAct * 4;
+			act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
+			nAct++;
 		}
 		V3 eye = m_eye;
-		V3 fwd = m_camTarget - eye;
+		V3 look = m_camTarget;
+		if (m_screen == SC_CREATE && m_previewRain) {
+			float htS = m_preview.htScale > 0.05f ? m_preview.htScale : 1.f;
+			float h = m_preview.height / htS + m_preview.hover;
+			look = v3(0.f, -50.f + h * .52f, 0.f) + m_previewPan;
+			float dist = h * 2.9f * m_previewZoom;
+			float pitch = Clampf(m_previewPitch, -1.05f, 1.15f);
+			V3 dir = v3(sinf(PI) * cosf(pitch), sinf(pitch), cosf(PI) * cosf(pitch));
+			eye = look + dir * dist;
+			V3 right = Norm(Cross(v3(0, 1, 0), dir * -1.f));
+			V3 shift = right * (-dist * .14f);
+			eye = eye + shift;
+			look = look + shift;
+		}
+		V3 fwd = look - eye;
 		float fl = Len(fwd);
 		fwd = fl > 0.2f ? fwd * (1.f / fl) : v3(0, 0, 1);
 		V3 side = Cross(v3(0, 1, 0), fwd);
@@ -8066,6 +8105,9 @@ void Game::EnterCreate(int editIdx)
 	m_previewMot = 0;
 	m_previewWing = TRUE;
 	m_previewGround = FALSE;
+	m_previewNight = FALSE;
+	m_previewWind = FALSE;
+	m_previewRain = FALSE;
 	m_focusId = ID_CR_NAME;
 	RefreshPreview();
 }
@@ -8172,11 +8214,16 @@ void Game::DrawCreate3D()
 	M4 view = MLookAtLH(eye + shift, look + shift, v3(0, 1, 0));
 	M4 proj = MPerspLH(.55f, (float)m_w / max(1, m_h), .05f, 60.f);
 	m_r.SetCamera(view, proj, eye, m_time);
-	m_r.SetStageWind(FALSE);
+	m_r.SetStageWind(m_previewWind ? TRUE : FALSE);
 	m_r.SetTheme(-1);
 	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
-	m_r.SetAmbient(RGBA8(210, 196, 182), RGBA8(150, 118, 96), .60f, .55f);
-	m_r.SetLight(Norm(v3(.42f, .86f, -.42f)), look, 4.5f);
+	if (m_previewNight) {
+		m_r.SetAmbient(RGBA8(86, 108, 158), RGBA8(36, 42, 68), .32f, .34f);
+		m_r.SetLight(Norm(v3(.22f, .74f, -.36f)), look, 4.5f);
+	} else {
+		m_r.SetAmbient(RGBA8(210, 196, 182), RGBA8(150, 118, 96), .60f, .55f);
+		m_r.SetLight(Norm(v3(.42f, .86f, -.42f)), look, 4.5f);
+	}
 	m_r.SetShadowEnabled(TRUE);
 	ActorPose(a, m_lib, m_r);
 	M4 aw = ActorWorld(a, pos + v3(0, a.hover, 0), PI + m_previewYaw);
@@ -8188,10 +8235,12 @@ void Game::DrawCreate3D()
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
 	m_r.EndInstBatch();
 	m_r.BeginMainPass();
-	m_r.DrawSky(RGBA8(22, 28, 48), RGBA8(58, 64, 88), 0, 0);
+	if (m_previewNight) m_r.DrawSky(RGBA8(6, 10, 28), RGBA8(16, 24, 52), 0, 0);
+	else m_r.DrawSky(RGBA8(22, 28, 48), RGBA8(58, 64, 88), 0, 0);
 	m_r.BeginInstBatch();
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
 	m_r.EndInstBatch();
+	if (m_previewRain) m_r.DrawWxGpu();
 	m_r.SetStageWind(TRUE);
 	m_r.SetPreviewPost(TRUE);
 }
@@ -8493,6 +8542,25 @@ void Game::DrawCreateUi()
 			}
 			BOOL onGround = (m_mouseSeen && !m_navMode && Hit(gx, wy, ww, wh)) || (m_navMode && m_focusId == ID_CR_GROUND);
 			if (onGround) { tipTx = TX_CRH_GROUND; tipAx = gx; tipAy = wy; tipAw = ww; tipAh = wh; }
+		}
+		{
+			struct Tog { int id, tx, tip; BOOL* flag; };
+			Tog tog[3] = {
+				{ ID_CR_NIGHT, TX_HR_NIGHT, TX_CRH_NIGHT, &m_previewNight },
+				{ ID_CR_WIND, TX_CR_WIND, TX_CRH_WIND, &m_previewWind },
+				{ ID_CR_RAIN, TX_WX_RAIN, TX_CRH_RAIN, &m_previewRain },
+			};
+			float bw = U(112), bh = U(32), bg = U(8);
+			float span = bw * 3.f + bg * 2.f;
+			float x0 = cx - span * .5f;
+			float by = m_h - (PreviewHasWings(m_edit) ? U(148) : U(108));
+			for (int i = 0; i < 3; i++) {
+				float x = x0 + (bw + bg) * (float)i;
+				if (Btn(tog[i].id, x, by, bw, bh, TT(tog[i].tx), TRUE, *tog[i].flag != 0, U(15)))
+					*tog[i].flag = !*tog[i].flag;
+				BOOL on = (m_mouseSeen && !m_navMode && Hit(x, by, bw, bh)) || (m_navMode && m_focusId == tog[i].id);
+				if (on) { tipTx = tog[i].tip; tipAx = x; tipAy = by; tipAw = bw; tipAh = bh; }
+			}
 		}
 		m_r.HudText(TT(TX_CR_PREVIEW_HINT), cx, m_h - U(28), U(13), RGBA8(220, 220, 230), 1, 0);
 	}
