@@ -38,6 +38,7 @@ int flacmode = 0;
 #include "CWrdViewDlg.h"
 #include "ScreenCaptureDlg.h"
 #include "MidiPack.h"
+extern "C" int ScStaffScorePreviewForcesFm(void);
 #include "ComposerConvert.h"
 #include "kb_sasami/source/sasami_file.h"
 #include "CSasamiMidiScoreDlg.h"
@@ -5526,8 +5527,12 @@ public:
 			sec && key && _wcsicmp(sec, L"kbsasami") == 0) {
 			if (_wcsicmp(key, L"raira") == 0)
 				return 1;
-			if (_wcsicmp(key, L"vst") == 0)
+			if (_wcsicmp(key, L"vst") == 0) {
+				/* 譜面が fm midi のときだけ、raira 入れ替え後に fmmidi になる値。 */
+				if (ScStaffScorePreviewForcesFm())
+					return 1;
 				return (savedata.midPlayPrefer != 0) ? 0 : 1;
+			}
 		}
 		/* CRender G.I.M.I.C オンなら KPI 側 gimic チェックが落ちていても実チップ。 */
 		if (KpiV5KeyIsGimic(key) && (savedata.cemuGimic || KpiV5CrenderGimicMaster()))

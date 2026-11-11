@@ -55,6 +55,11 @@ struct MidiTrackState {
 	int portaDelay;
 	int portaGlide;
 	int portaLeft;
+	/* 同一トラックの和音。待ち 0 のノートは重ね、待ち付きの 1 音で閉じる。 */
+	enum { CHORD_MAX = 8 };
+	int chordN;
+	int chordOpen;
+	uint8_t chordNt[CHORD_MAX];
 };
 
 enum { SASAMI_MAX_EV = 49152, SASAMI_MAX_FIRST = 16384 };
@@ -175,6 +180,19 @@ static void PushGs(uint32_t tick, int port, uint8_t a, uint8_t b, uint8_t c, uin
 	int s = (int)a + (int)b + (int)c + (int)v;
 	sx[9] = (uint8_t)((128 - (s % 128)) & 0x7F);
 	PushEv(tick, port, sx, 11);
+}
+
+/* 0小節（2分音符）の途中。ch10 をリズムへ。GS Reset と同じ拍に置くと無視される。 */
+static void PushGsRhythmLead(uint32_t tick, int port)
+{
+	PushGs(tick, port, 0x40, 0x10, 0x15, 0x01);
+}
+
+/* XG part 10 (addr 09) = drum. チェックサム無し。 */
+static void PushXgDrumLead(uint32_t tick, int port)
+{
+	const uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x08, 0x09, 0x07, 0x02, 0xF7 };
+	PushEv(tick, port, sx, 9);
 }
 
 static void PushExclBody(uint32_t tick, int port, int xg, uint8_t devId, const uint8_t* body, int bodyLen)
@@ -1728,17 +1746,35 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	static const uint8_t kGsReset[11] = { 0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7 };
 	static const uint8_t kXgOn[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7 };
 	static const uint8_t kGmOn[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 };
+	/* PC-98 MIDI部 MMODE7JA: GS Reset のあと WAIT_RS と SMPUL を挟み、
+	   次の排他を出してから演奏に入る。同じ拍に BANK/PC を置くと SC-VA が捨てる。
+	   0小節 = 今のテンポでの2分音符。曲本体（1小節）は leadTicks から。 */
+	const uint32_t leadTicks = (uint32_t)SASAMI_PPQN * 2;
+	const uint32_t syxB = leadTicks / 3;
+	const uint32_t syxC = (leadTicks * 2) / 3;
 	for (int p = 0; p < nports; p++) {
 		if (map == SASAMI_MAP_XG) PushEv(0, p, kXgOn, 9);
 		else if (map == SASAMI_MAP_GM) PushEv(0, p, kGmOn, 6);
 		else PushEv(0, p, kGsReset, 11);
+		if (map == SASAMI_MAP_XG)
+			PushXgDrumLead(syxB, p);
+		else
+			/* GM On のあとも出す。未接続でここを省くと ch10 が通常パートになる。 */
+			PushGsRhythmLead(syxB, p);
+		/* 曲本体と同じ拍に CC0=0 を置くと、その直後の音色 PC がピアノに戻る。
+		   リセットとリズムのあと、1拍目より前にチャンネル初期化だけ済ませる。 */
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(0, p, ch, map, gsBankLsb, flg88, laBankMsb);
+			PushMmodeChannelInit(syxC, p, ch, map, gsBankLsb, flg88, laBankMsb);
 	}
-	/* _1 のモニターレターとパネルドット。GS（SC-88）と XG の両方へ出す。 */
-	PushSongLcd(0, 0, song);
+	/* モニターレターはリセットの拍を避ける。 */
+	PushSongLcd(syxC, 0, song);
 
-	uint32_t tick = 0;
+	uint32_t tick = leadTicks;
+	/* 1拍目の和音と PC が同じ拍だと SC-VA は PC を捨て、そのチャンネルは
+	   最後までピアノのままになる。8ビートやトランスのように頭にコードがある
+	   スタイルだけ落ちる。バンクと PC はノートより前の拍に出す。 */
+	const uint32_t toneLead = (syxC + leadTicks) / 2;
+	int leadTempoSent = 0;
 	/* 同じ MIDI ch の複数トラックが同じ音高を持つ。先に終わった方の
 	   NoteOff で残っている方まで切ると、その ch が途中で無音になる。
 	   最後の 1 本が離すときだけ NoteOff を出す。 */
@@ -1756,14 +1792,22 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	uint32_t gLoopEnd = 0;
 	int smfReps = 1;
 
+	auto releaseChordNotes = [&](int ti) {
+		const int pch = tr[ti].part;
+		const int pport = tr[ti].port;
+		const int nchd = tr[ti].chordN;
+		for (int k = 0; k < nchd && k < MidiTrackState::CHORD_MAX; k++)
+			releasePitch(pport, pch, tr[ti].chordNt[k]);
+		tr[ti].chordN = 0;
+		tr[ti].note = 0;
+		tr[ti].chordOpen = 0;
+	};
 	auto releaseTrack = [&](int i) {
-		const int ch = tr[i].part;
-		const int port = tr[i].port;
-		if (tr[i].note)
-			releasePitch(port, ch, tr[i].note);
-		tr[i].note = 0;
+		const int pch = tr[i].part;
+		const int pport = tr[i].port;
+		releaseChordNotes(i);
 		if (tr[i].pedal) {
-			PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x40, 0);
+			PushShort(tick, pport, (uint8_t)(0xB0 | pch), 0x40, 0);
 			tr[i].pedal = 0;
 		}
 	};
@@ -1779,11 +1823,15 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		if (port1Ready) return;
 		port1Ready = 1;
 		nports = 2;
-		if (map == SASAMI_MAP_XG) PushEv(tick, 1, kXgOn, 9);
-		else if (map == SASAMI_MAP_GM) PushEv(tick, 1, kGmOn, 6);
-		else PushEv(tick, 1, kGsReset, 11);
+		if (map == SASAMI_MAP_XG) PushEv(0, 1, kXgOn, 9);
+		else if (map == SASAMI_MAP_GM) PushEv(0, 1, kGmOn, 6);
+		else PushEv(0, 1, kGsReset, 11);
+		if (map == SASAMI_MAP_XG)
+			PushXgDrumLead(syxB, 1);
+		else
+			PushGsRhythmLead(syxB, 1);
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(tick, 1, ch, map, gsBankLsb, flg88, laBankMsb);
+			PushMmodeChannelInit(syxC, 1, ch, map, gsBankLsb, flg88, laBankMsb);
 	};
 
 	while (tick < SASAMI_MAX_TICKS) {
@@ -1821,27 +1869,42 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				int again = 1;
 
 				switch (cmd) {
-				case 1: { // note: original always note-off previous then note-on
+				case 1: { // 待ち 0 は和音の追加音。待ち付きでその和音を閉じる。
 					const int note = (int)(b1 & 0x7F);
-					if (tr[i].note)
-						releasePitch(port, ch, tr[i].note);
-					PushShort(tick, port, (uint8_t)(0x90 | ch), (uint8_t)note, (uint8_t)tr[i].vel);
-					if (note > 0 && note < 128 && ch >= 0 && ch <= 15) {
-						uint8_t& c = chOn[port ? 1 : 0][ch][note];
-						if (c < 255) c++;
+					if (!tr[i].chordOpen)
+						releaseChordNotes(i);
+					if (note > 0 && note < 128) {
+						PushShort(tick, port, (uint8_t)(0x90 | ch), (uint8_t)note, (uint8_t)tr[i].vel);
+						if (ch >= 0 && ch <= 15) {
+							uint8_t& c = chOn[port ? 1 : 0][ch][note];
+							if (c < 255) c++;
+						}
+						if (tr[i].chordN >= MidiTrackState::CHORD_MAX) {
+							releasePitch(port, ch, tr[i].chordNt[0]);
+							for (int k = 1; k < tr[i].chordN; k++)
+								tr[i].chordNt[k - 1] = tr[i].chordNt[k];
+							tr[i].chordN--;
+						}
+						tr[i].chordNt[tr[i].chordN++] = (uint8_t)note;
+						tr[i].note = note;
 					}
-					tr[i].note = note;
-					tr[i].count = b2;
 					tr[i].addr = addr + 3;
-					if (tr[i].count != 0) again = 0;
+					if (b2 == 0) {
+						tr[i].chordOpen = 1;
+					} else {
+						tr[i].chordOpen = 0;
+						tr[i].count = b2;
+						again = 0;
+					}
 					break;
 				}
 				case 2: { // program 88 / 55
 					if (!(flg88 == 2 && song.versionWord >= 36000)) {
+						const uint32_t at = (tick == leadTicks) ? toneLead : tick;
 						if (flg88 == 1)
-							PushShort(tick, port, (uint8_t)(0xC0 | ch), b1, 0);
+							PushShort(at, port, (uint8_t)(0xC0 | ch), b1, 0);
 						else if (!isGm || song.versionWord < 50000)
-							PushShort(tick, port, (uint8_t)(0xC0 | ch), b2, 0);
+							PushShort(at, port, (uint8_t)(0xC0 | ch), b2, 0);
 					}
 					tr[i].addr = addr + 3;
 					break;
@@ -1880,21 +1943,20 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					break;
 				case 7: // bank
 					if (!(flg88 == 2 && song.versionWord >= 36000)) {
+						const uint32_t at = (tick == leadTicks) ? toneLead : tick;
 						if (laBankMsb == 127 && ch != 9)
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, 127);
+							PushShort(at, port, (uint8_t)(0xB0 | ch), 0, 127);
 						else if (flg88 == 0 && (!isGm || song.versionWord < 50000))
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b2);
+							PushShort(at, port, (uint8_t)(0xB0 | ch), 0, b2);
 						else if (flg88 == 1)
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b1);
+							PushShort(at, port, (uint8_t)(0xB0 | ch), 0, b1);
 						if (flg88 == 2)
-							PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, b1);
+							PushShort(at, port, (uint8_t)(0xB0 | ch), 32, b1);
 					}
 					tr[i].addr = addr + 3;
 					break;
 				case 8: // rest
-					if (tr[i].note)
-						releasePitch(port, ch, tr[i].note);
-					tr[i].note = 0;
+					releaseChordNotes(i);
 					tr[i].count = b2;
 					tr[i].addr = addr + 3;
 					if (tr[i].count != 0) again = 0;
@@ -1907,6 +1969,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						const uint32_t mpqn = (uint32_t)((500ull * T) / 13ull);
 						uint8_t d[6] = { 0xFF, 0x51, 0x03, (uint8_t)(mpqn >> 16), (uint8_t)(mpqn >> 8), (uint8_t)mpqn };
 						PushEv(tick, 0, d, 6);
+						/* 0小節もこのテンポ。先頭の既定 120 を同じ拍の後勝ちで置き換える。 */
+						if (!leadTempoSent) {
+							PushEv(0, 0, d, 6);
+							leadTempoSent = 1;
+						}
 					}
 					tr[i].addr = addr + 3;
 					break;
@@ -2154,7 +2221,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						else
 							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 						tr[i].drum = 0;
-					} else if (!isGm) {
+					} else {
+						/* GM マップでもリズム指定は出す。省くと SC-VA が通常パートのまま。 */
 						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x15, b1);
 					}
 					tr[i].addr = addr + 3;
@@ -2295,10 +2363,12 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = p + 1;
 					break;
 				}
-				case 41:
-					PushShort(tick, port, (uint8_t)(0xB0 | ch), b1, b2);
+				case 41: {
+					const uint32_t at = (tick == leadTicks && (b1 == 0 || b1 == 32)) ? toneLead : tick;
+					PushShort(at, port, (uint8_t)(0xB0 | ch), b1, b2);
 					tr[i].addr = addr + 3;
 					break;
+				}
 				case 42:
 					if (flg88 == 2)
 						PushShort(tick, port, (uint8_t)(0xC0 | ch), b1, 0);

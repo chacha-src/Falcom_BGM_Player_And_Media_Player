@@ -1370,6 +1370,75 @@ namespace PianoRoll108
                     && seriesA[key] < bandLin[b] * 0.14f)
                     seriesOn[key] = false;
             }
+            // 低音の倍音を畳む。ベースより上の 2〜4 倍で、ベースより大きくなく、
+            // 自分の立ち上がりもない音はベースの倍音。上の音の方が大きい、または
+            // ベースと別にアタックしている音はメロディなので残す。
+            {
+                bool fold[COUNT];
+                memset(fold, 0, sizeof(fold));
+                auto ownAttack = [&](int hi, int lo) -> bool {
+                    if (!p.onset || !p.prevOnset) return false;
+                    if (hi < 0 || lo < 0 || hi >= COUNT || lo >= COUNT) return false;
+                    const float dHi = p.onset[hi] - p.prevOnset[hi];
+                    const float dLo = p.onset[lo] - p.prevOnset[lo];
+                    return dHi > 0.003f && dHi > dLo * 1.35f
+                        && p.onset[hi] > p.onset[lo] * 0.75f;
+                };
+                for (int lo = MUSIC_LOW_FLOOR; lo < BASS_END; ++lo) {
+                    if (!seriesOn[lo]) continue;
+                    const float flo = PianoKey::KeyHz(lo);
+                    for (int n = 2; n <= 4; ++n) {
+                        const float th = flo * (float)n;
+                        if (th > PianoKey::KeyHz(COUNT - 1) * 1.03f) break;
+                        const int hi = KeyFromHzTune(th, p.tuneSemis);
+                        if (hi <= lo || hi >= COUNT || !seriesOn[hi] || fold[hi]) continue;
+                        if (centsTo(PianoKey::KeyHz(hi), th) >= 40.0f) continue;
+                        if (seriesA[hi] >= seriesA[lo] * 1.15f) continue;
+                        if (ownAttack(hi, lo)) continue;
+                        if (relShortKey(hi) >= 0.28f && seriesA[hi] >= seriesA[lo] * 0.70f) continue;
+                        fold[hi] = true;
+                    }
+                }
+                for (int lo = 36; lo < COUNT; ++lo) {
+                    if (!seriesOn[lo]) continue;
+                    const float flo = PianoKey::KeyHz(lo);
+                    for (int n = 2; n <= 6; ++n) {
+                        const float th = flo * (float)n;
+                        if (th > PianoKey::KeyHz(COUNT - 1) * 1.03f) break;
+                        const int hi = KeyFromHzTune(th, p.tuneSemis);
+                        if (hi < 72 || hi >= COUNT || hi <= lo || !seriesOn[hi] || fold[hi]) continue;
+                        if (centsTo(PianoKey::KeyHz(hi), th) >= 40.0f) continue;
+                        if (seriesA[hi] >= seriesA[lo]) continue;
+                        if (relShortKey(hi) >= 0.15f) continue;
+                        fold[hi] = true;
+                    }
+                }
+                for (int k = 0; k < COUNT; ++k)
+                    if (fold[k]) seriesOn[k] = false;
+                // 中高音の安定: 前フレームから鳴っていて、まだ山がある音は欠測で消さない。
+                // 今フレームで低音の倍音と判定したものは戻さない。
+                if (prevActive) {
+                    for (int k = C4_KEY; k <= 100; ++k) {
+                        if (seriesOn[k] || fold[k] || !prevActive[k]) continue;
+                        const float fk = PianoKey::KeyHz(k);
+                        bool stacked = false;
+                        for (int lo = MUSIC_LOW_FLOOR; lo < k && !stacked; ++lo) {
+                            if (!seriesOn[lo]) continue;
+                            const float ratio = fk / PianoKey::KeyHz(lo);
+                            const int n = (int)floorf(ratio + 0.5f);
+                            if (n < 2 || n > 6) continue;
+                            if (centsTo(fk, PianoKey::KeyHz(lo) * (float)n) < 40.0f)
+                                stacked = true;
+                        }
+                        if (stacked) continue;
+                        const float a = partialAt(fk, 1);
+                        if (a < seriesMax * 0.04f) continue;
+                        seriesOn[k] = true;
+                        if (seriesHz[k] <= 1.0f) seriesHz[k] = fk;
+                        if (seriesA[k] < a) seriesA[k] = a;
+                    }
+                }
+            }
         }
         nPicked = 0;
         for (int i = 0; i < COUNT; ++i) {

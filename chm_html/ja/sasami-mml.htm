@@ -53,7 +53,7 @@
 <tr><td><code>T n</code></td><td>40～3000</td><td>—</td><td>テンポ。大きいほど速い。相対変化は無いので、変えるときは書き直す。</td><td>出す（<code>t</code> も可）</td></tr>
 <tr><td><code>O n</code></td><td>1～8</td><td>4</td><td>オクターブ。端の音は鳴らないことがある。</td><td>出す（<code>o</code> も可。0 も通る）</td></tr>
 <tr><td><code>L n</code></td><td>1～192</td><td>4</td><td>音長。192 で割れる値。4分の3連は 4×3 で <code>L12</code>。</td><td>出す</td></tr>
-<tr><td><code>! n</code></td><td>1～255</td><td>—</td><td>音長の数値版。4分音符が 48。</td><td>文字だけ捨てる</td></tr>
+<tr><td><code>! n</code></td><td>1～255</td><td>—</td><td>音長の数値版。4分音符が 48 ティック。<code>c!2</code> や <code>r!2</code> はそのティック数。</td><td>出す</td></tr>
 <tr><td><code>R n</code></td><td>1～192</td><td>L</td><td>休符。省略時は L。3連も L と同じ。</td><td>大文字 R は休符。小文字 r は待ち</td></tr>
 <tr><td><code>^ n</code></td><td>1～192</td><td>L</td><td>タイ。n のあいだ前の状態を保つ。</td><td>直前の音符を伸ばす</td></tr>
 <tr><td><code>Q</code> / <code>J</code></td><td>—</td><td>—</td><td>Q から J までを永久ループ。</td><td>出す</td></tr>

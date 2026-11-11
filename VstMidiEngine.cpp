@@ -520,6 +520,7 @@ extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs,
 extern volatile LONG g_appExiting;
 extern void COgg_DropPlaybackUiPostedMsg(UINT message);
 extern int playy;
+extern int endflg;
 #endif
 static volatile LONG g_liveSkipProcess = 0;
 static DWORD g_liveUiTid = 0;
@@ -2244,10 +2245,23 @@ extern "C" int VstMidiPeekListMarks(const wchar_t* path, VstMidiListPeek* out)
 	return ok;
 }
 
+extern "C" int ScStaffScorePreviewOut(void);
+
 static int PickGsXgDll(const wchar_t* midPath, wchar_t* out, int outN)
 {
 	if (!out || outN <= 0) return 0;
 	out[0] = 0;
+	/* 譜面の音源コンボ。曲ファイルの自動判定より優先。未接続は下の通常選択。 */
+	if (midPath && wcsstr(midPath, L"ogg_sasami_score")) {
+		const int route = ScStaffScorePreviewOut();
+		if (route == 4) return 0; /* MIDI Mapper */
+		if (route == 1 || route == 2) {
+			const wchar_t* forced = (route == 1) ? savedata.vstMultiDll : savedata.vstExtraPath;
+			if (!PathLooksLikePlugin(forced)) return 0;
+			SafeCopy(out, outN, forced);
+			return 1;
+		}
+	}
 	const int wantXg = (midPath && midPath[0] && SmfFileHasXgReset(midPath)) ? 1 : 0;
 	const wchar_t* gs = savedata.vstMultiDll;
 	const wchar_t* xg = savedata.vstExtraPath;
@@ -8733,8 +8747,15 @@ static void LiveSongResetPart(LivePart& p)
 	}
 	p.pend.count = 0;
 	p.pend.sysexUsed = 0;
+	/* CC121 はバンクセレクトも 0 に戻す。SC-VA はそこで全パートが Piano 1 になり、
+	   続く曲の PC が同じ処理に飲み込まれると、2回目以降はずっとピアノになる。
+	   マルチはノートの残りだけ切る。 */
+	const int keepTone = (p.isMulti || DetectMultiTimbralName(p.path) || PathLooksLikeScVa(p.path)) ? 1 : 0;
 	for (int ch = 0; ch < 16; ++ch) {
-		LivePendPush(p, (DWORD)((0xb0 | ch) | (121 << 8)));
+		if (!keepTone)
+			LivePendPush(p, (DWORD)((0xb0 | ch) | (121 << 8)));
+		else
+			LivePendPush(p, (DWORD)((0xb0 | ch) | (123 << 8)));
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (7 << 8) | (127 << 16)));
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (11 << 8) | (127 << 16)));
 	}
@@ -8745,9 +8766,16 @@ static void LiveSongResetPart(LivePart& p)
 static void LiveSongResetRemote()
 {
 	if (!LiveRemoteActive()) return;
+	int keepTone = 0;
+	for (int i = 0; i < 32; ++i) {
+		const LivePart& p = LiveEng().live[i];
+		if (!p.remote) continue;
+		if (p.isMulti || DetectMultiTimbralName(p.path) || PathLooksLikeScVa(p.path))
+			keepTone = 1;
+	}
 	for (int port = 0; port < 3; ++port)
 		for (int ch = 0; ch < 16; ++ch) {
-			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (121 << 8)));
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | ((keepTone ? 123 : 121) << 8)));
 			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (7 << 8) | (127 << 16)));
 			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (11 << 8) | (127 << 16)));
 		}
@@ -10617,7 +10645,8 @@ extern "C" void VstLiveMidiToPart(int part1to32, DWORD shortMsg)
 		/* VST2 multi keeps SMF channels. Overlay VST3 always hits part 1. */
 		if (!lp.isMulti && (lp.effect || lp.vst3))
 			shortMsg = LiveOverlayMsg(lp, shortMsg);
-		skipTone = (!lp.isMulti && (lp.vst3 || lp.remote) && LiveVst3SkipSongTone(shortMsg)) ? 1 : 0;
+		skipTone = (!lp.isMulti && (lp.vst3 || lp.remote)
+			&& NeedsUserPatch(lp.path, lp.path) && LiveVst3SkipSongTone(shortMsg)) ? 1 : 0;
 		if (!skipTone && !remote && (lp.effect || lp.vst3)) {
 			LivePendPush(lp, shortMsg);
 			if (lp.vst3) {
@@ -10653,7 +10682,8 @@ extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 		/* Overlay replaces this channel. Do not also feed SC-VA. */
 		LivePart& ov = LiveEng().live[chPart];
 		DWORD msg = LiveOverlayMsg(ov, shortMsg);
-		const int skipTone = (ov.vst3 || ov.remote) && !ov.isMulti && LiveVst3SkipSongTone(msg);
+		const int skipTone = (ov.vst3 || ov.remote) && !ov.isMulti
+			&& NeedsUserPatch(ov.path, ov.path) && LiveVst3SkipSongTone(msg);
 		if (ov.remote)
 			remote = 1;
 		else if (!skipTone && (ov.effect || ov.vst3)) {
@@ -10902,6 +10932,14 @@ extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, 
 	bankMsb &= 127;
 	bankLsb &= 127;
 	prog0to127 &= 127;
+	if (!VstLivePartIsLoaded(part1to32)) {
+		/* ポート先頭のマルチへ、このパートのチャンネルで渡す。 */
+		const int ch = (part1to32 - 1) & 15;
+		VstLiveMidiToPart(part1to32, (DWORD)(0xb0 | ch) | (0u << 8) | ((DWORD)bankMsb << 16));
+		VstLiveMidiToPart(part1to32, (DWORD)(0xb0 | ch) | (32u << 8) | ((DWORD)bankLsb << 16));
+		VstLiveMidiToPart(part1to32, (DWORD)(0xc0 | ch) | ((DWORD)prog0to127 << 8));
+		return;
+	}
 	LivePart& p = LiveEng().live[part1to32 - 1];
 	const int ch = LivePartSendCh(p, part1to32) & 15;
 	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (0u << 8) | ((DWORD)bankMsb << 16));
@@ -10920,6 +10958,7 @@ extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, 
    Never waveOut/Render — that deadlocks SC-VA with monitor/preview. */
 static int g_auditionPart = 0;
 static int g_auditionCh = 0;
+static int g_auditionViaPort = 0;
 static DWORD g_auditionOff = 0;
 static HWND g_auditionWnd = NULL;
 static UINT_PTR g_auditionTimer = 0;
@@ -10941,13 +10980,19 @@ extern "C" void VstLiveAuditionStop(void)
 	g_auditionPart = 0;
 	g_auditionOff = 0;
 	g_auditionCh = 0;
+	const int via = g_auditionViaPort;
+	g_auditionViaPort = 0;
 	if (part < 1 || part > 32) return;
+	auto push = [&](DWORD msg) {
+		if (via) VstLiveMidiToPart(part, msg);
+		else LivePartPushShort(part, msg);
+	};
 	if (off)
-		LivePartPushShort(part, off);
+		push(off);
 	/* Soft panic on the audition channel (remote-safe MIDI, no local PumpSilent). */
-	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (64u << 8));
-	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (120u << 8));
-	LivePartPushShort(part, (DWORD)(0xb0 | ch) | (123u << 8));
+	push((DWORD)(0xb0 | ch) | (64u << 8));
+	push((DWORD)(0xb0 | ch) | (120u << 8));
+	push((DWORD)(0xb0 | ch) | (123u << 8));
 }
 
 static LRESULT CALLBACK AuditionWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
@@ -10978,22 +11023,34 @@ static HWND AuditionEnsureWnd(void)
 extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
-	if (!VstLivePartIsLoaded(part1to32)) return;
+	int portCover = VstLivePartIsLoaded(part1to32);
+	if (!portCover) {
+		const int b0 = ((part1to32 - 1) / 16) * 16 + 1;
+		for (int p = b0; p < b0 + 16 && p <= 32; ++p) {
+			if (VstLivePartIsLoaded(p)) { portCover = 1; break; }
+		}
+	}
+	if (!portCover) return;
 	if (noteMidi < 0) noteMidi = 60;
 	if (noteMidi > 127) noteMidi = 127;
 	if (velocity < 1) velocity = 100;
 	if (velocity > 127) velocity = 127;
 	if (durMs < 40) durMs = 40;
 	if (durMs > 2000) durMs = 2000;
+	const int self = VstLivePartIsLoaded(part1to32);
 	LivePart& p = LiveEng().live[part1to32 - 1];
-	const int ch = LivePartSendCh(p, part1to32) & 15;
+	const int ch = self ? (LivePartSendCh(p, part1to32) & 15) : ((part1to32 - 1) & 15);
 	const DWORD noteOn = (DWORD)(0x90 | ch) | ((DWORD)noteMidi << 8) | ((DWORD)velocity << 16);
 	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)noteMidi << 8);
 	/* Cut previous audition first. */
 	VstLiveAuditionStop();
-	LivePartPushShort(part1to32, noteOn);
+	if (self)
+		LivePartPushShort(part1to32, noteOn);
+	else
+		VstLiveMidiToPart(part1to32, noteOn);
 	g_auditionPart = part1to32;
 	g_auditionCh = ch;
+	g_auditionViaPort = self ? 0 : 1;
 	g_auditionOff = noteOff;
 	HWND wnd = AuditionEnsureWnd();
 	if (wnd) {
@@ -11559,6 +11616,19 @@ extern "C" int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor)
 			if (VstLivePartGetPath(i + 1, cur, 520) && cur[0] && _wcsicmp(cur, pp) == 0)
 				already = 1;
 		}
+		/* 同じポートに同じマルチが載っていれば 32 回ロードしない。ch はそのまま渡る。 */
+		if (!already) {
+			const int b0 = (i / 16) * 16;
+			for (int j = b0; j < b0 + 16 && j < 32; ++j) {
+				if (j == i || !VstLivePartIsLoaded(j + 1)) continue;
+				wchar_t cur[520];
+				cur[0] = 0;
+				if (VstLivePartGetPath(j + 1, cur, 520) && cur[0] && _wcsicmp(cur, pp) == 0) {
+					already = 1;
+					break;
+				}
+			}
+		}
 		int loadedOk = already;
 		if (!already) {
 			const wchar_t* waitName = pp;
@@ -11732,9 +11802,12 @@ extern "C" void VstLiveMonitorEnsure(void)
 		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 	/* 譜面の試し再生中は曲 DS が process() する。終わったあともフラグが残ると
-	   モニターが起きず、VST2/3 の音色クリック／MediaBay 鍵盤が無音になる。 */
+	   モニターが起きず、VST2/3 の音色クリック／MediaBay 鍵盤が無音になる。
+	   playy==0 は Plays() の準備中。endflg==0 は曲がまだ鳴っている。
+	   ここで waveOut を開くと、停止時に積んだ 1.5 秒タイマーが再生を奪い、
+	   1小節だけ鳴ってから無音のまま終端まで進む。 */
 	if (VstSongUseLiveBinds()) {
-		if (playy == 0)
+		if (playy == 0 || endflg == 0)
 			return;
 		VstSongUseLiveBindsSet(0);
 	}
@@ -11778,6 +11851,7 @@ extern "C" void VstLiveMonitorEnsure(void)
 extern "C" void VstLiveMonitorEnsure(void) {}
 extern "C" void VstLiveMonitorStop(void) {}
 extern "C" void VstLiveMonitorEnsureDelayed(void) {}
+extern "C" void VstLiveMonitorCancelDelayed(void) {}
 #endif
 
 
@@ -11850,12 +11924,20 @@ static HWND VstEdPumpEnsure(void)
 	return g_vstEdPumpWnd;
 }
 
+#ifndef KPIHOST32_BUILD
 extern "C" void VstLiveMonitorEnsureDelayed(void)
 {
 	HWND pump = VstEdPumpEnsure();
 	if (pump)
 		PostMessageW(pump, WM_VST_LIVE_MON_ENSURE_DELAYED, 0, 0);
 }
+
+extern "C" void VstLiveMonitorCancelDelayed(void)
+{
+	if (g_vstEdPumpWnd && IsWindow(g_vstEdPumpWnd))
+		KillTimer(g_vstEdPumpWnd, 1);
+}
+#endif
 
 extern "C" void VstLiveEditorOpenCancelPending(void)
 {

@@ -1094,7 +1094,7 @@ void HoldCloth(uint id, ClothN c, float3 p)
 	St[gSt0 + 3 * NMAX + id] = float4(p - BonePos(c) * Sim.w, 0);
 }
 
-// 1 グループで全部の点。となりの点とずれをならしてストレッチを伝え、脚の形の外へ出す。6 回反復。
+// 1 グループで全部の点。上下左右の隣接でギザギザだけを消し、脚の形の外へ出す。4 回反復。
 [numthreads(NMAX, 1, 1)]
 void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 {
@@ -1118,18 +1118,24 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 		gP[id] = on ? off : float3(0, 0, 0);
 		GroupMemoryBarrierWithGroupSync();
 		if (on && c.p.w <= 0.5) {
-			float3 acc = off;
-			float cnt = 1.0;
+			// 横だけでなく縦も隣接。隣のずれの平均が、惰性・慣性・重力・風の形。
+			// その平均は残し、隣との差（ギザギザ）だけを消す。なだらかな靡きは平均に入るので残る。
+			// 腰に固定した点は平均に入れない。固定の 0 を裾まで吸わせず、継ぎ目だけ軽く揃える。
+			// スリットの切れ目はもともと隣が無いので、ここで縫い合わせない。
+			float3 sum = 0;
+			float nFree = 0;
+			float nPin = 0;
 			[unroll] for (int e = 0; e < 4; e++) {
 				uint j = c.nb[e];
 				if (j >= n) continue;
-				// 横のとなり（e=2,3）は上段ほど強く混ぜて円周のコブを消し、裾ほど緩めて風での広がりを残す。
-				float wHorz = lerp(0.45, c.q.z > 0.5 ? 0.20 : 0.28, saturate(flow));
-				float wNb = (e >= 2) ? wHorz : 0.12;
-				acc += gP[j] * wNb;
-				cnt += wNb;
+				if (Cn[gCn0 + j].p.w > 0.5) nPin += 1.0;
+				else { sum += gP[j]; nFree += 1.0; }
 			}
-			off = acc / cnt;
+			if (nFree > 0.0) {
+				float k = lerp(0.60, 0.50, saturate(flow));
+				off = lerp(off, sum / nFree, k);
+			}
+			if (nPin > 0.0) off *= 0.92;
 			float ol = length(off);
 			if (ol > lim && ol > 1e-5) off *= lim / ol;
 			off *= (1.0 - GroinHold(c.x.x, c.x.y, c.x.z) * 0.35);
@@ -1148,6 +1154,25 @@ void CSClothRelax(uint id : SV_GroupIndex, uint3 grp : SV_GroupID)
 			off = pushed - rest;
 		}
 		GroupMemoryBarrierWithGroupSync();
+	}
+	// 足で出したあとの段差を、もう一度隣接で揃えてから外へ戻す。ここは速度に足さない。
+	gP[id] = on ? off : float3(0, 0, 0);
+	GroupMemoryBarrierWithGroupSync();
+	if (on && c.p.w <= 0.5) {
+		float3 sum = 0;
+		float nFree = 0;
+		[unroll] for (int e = 0; e < 4; e++) {
+			uint j = c.nb[e];
+			if (j >= n || Cn[gCn0 + j].p.w > 0.5) continue;
+			sum += gP[j];
+			nFree += 1.0;
+		}
+		if (nFree > 0.0) off = lerp(off, sum / nFree, lerp(0.60, 0.50, saturate(flow)));
+		float ol = length(off);
+		if (ol > lim && ol > 1e-5) off *= lim / ol;
+		off *= (1.0 - GroinHold(c.x.x, c.x.y, c.x.z) * 0.35);
+		float3 before = rest + off;
+		off = LegPush(before, c.x.x, c.x.y, c.x.z, c.q.z, 0.016, 0.0) - rest;
 	}
 	if (!on) return;
 	if (c.p.w > 0.5) {

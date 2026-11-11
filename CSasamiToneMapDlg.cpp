@@ -322,6 +322,16 @@ void CSasamiToneMapDlg::RebuildGrid()
 	InvalidateRect(m_gridRc, FALSE);
 }
 
+static int TonePortLive(int part)
+{
+	if (part < 1 || part > 32) return 0;
+	if (VstLivePartIsLoaded(part)) return 1;
+	const int b0 = ((part - 1) / 16) * 16 + 1;
+	for (int p = b0; p < b0 + 16 && p <= 32; ++p)
+		if (VstLivePartIsLoaded(p)) return 1;
+	return 0;
+}
+
 int CSasamiToneMapDlg::ToneIsEmpty(int pc) const
 {
 	if (pc < 0 || pc > 127) return 1;
@@ -339,10 +349,13 @@ void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 	h.Format(L"PC#%d  %s  (Bank %d/%d)", m_prog + 1, m_names[m_prog], m_bankMsb, m_bankLsb);
 	m_hint.SetWindowText(h);
 	InvalidateRect(m_gridRc, FALSE);
-	if (audition && VstLivePartIsLoaded(m_part)) {
+	const int hear = TonePortLive(m_part);
+	if (audition && hear) {
 		/* Still send bank+PC once for audition hearing, then note — SHM only. */
 		VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
 		VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 280);
+	} else if (audition && (ScStaffScorePreviewOut() == SC_OUT_FMMIDI || ScStaffScorePreviewOut() == SC_OUT_MAPPER)) {
+		ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
 	}
 }
 
@@ -406,10 +419,12 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int pc = HitTone(point);
 	if (pc >= 0) {
 		ApplyTone(pc, 0);
-		if (VstLivePartIsLoaded(m_part)) {
+		if (TonePortLive(m_part)) {
 			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
 			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 60000);
 			m_auditionHold = 1;
+		} else if (ScStaffScorePreviewOut() == SC_OUT_FMMIDI || ScStaffScorePreviewOut() == SC_OUT_MAPPER) {
+			ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
 		}
 	}
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);

@@ -220,7 +220,7 @@ struct ScStaffUi {
 	int loopBTick;         /* -1 = unset */
 	uint32_t playheadTick; /* live playhead while previewing */
 	int previewActive;
-	int previewEngineSeen; /* 1 after playy went 0 during this preview */
+	int previewEngineSeen; /* 0 idle, 1 Plays() entered, 2 heard running */
 	int transportMode;     /* 0=none 1=set marker 2=set A 3=set B */
 	int markerSeekArmed;   /* seek to marker once after preview starts */
 	uint32_t previewOriginTick; /* wav-from-marker: playhead = origin + heard */
@@ -461,10 +461,29 @@ int ScStaffTempoTFromBpm(int bpm);
 int ScStaffStripKindEmitMml(const ScEvent& e, wchar_t* out, int outCch);
 double ScStaffSecFromTick(uint32_t tick, int tempoT);
 uint32_t ScStaffTickFromSec(double sec, int tempoT);
+/* 譜面の試し再生先。未接続が初期。GS/XG は CRender に DLL があるとき全パートへ。 */
+enum ScScoreOut : int {
+	SC_OUT_NONE = 0,
+	SC_OUT_GS = 1,
+	SC_OUT_XG = 2,
+	SC_OUT_FMMIDI = 3,
+	SC_OUT_MAPPER = 4
+};
+extern "C" void ScStaffSetScoreOut(int route);
+extern "C" int ScStaffScorePreviewOut(void);
+/* 譜面プレビュー中だけ 1。kbsasami を FM MIDI（fmmidi）にする。 */
+extern "C" int ScStaffScorePreviewForcesFm(void);
+/* 1音だけ。FM MIDI / MIDI Mapper の音色確認。path は ogg_sasami_score_tone.mid。 */
+int ScStaffAuditionRouteNote(int part1to32, int bankMsb, int bankLsb, int prog, int note, int velocity);
+
 /* Bake already written: play as ephemeral temp (not added to playlist, selection unchanged). */
 int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT);
-/* Stop host preview (Space toggle / dialog close). */
+/* Stop host preview (button / Space while the score owns it / dialog close). */
 void ScStaffStopHostPreview(ScStaffUi* u);
+/* 譜面の試し再生中だけ 1。MP の Space はここを止めて、本体の再生には流さない。 */
+extern "C" void ScStaffPreviewBindStop(void (*fn)(void*), void* ctx);
+extern "C" int ScStaffPreviewIsRunning(void);
+extern "C" int ScStaffPreviewStopFromHost(void);
 /* 試し再生が終わっていたら previewActive を下ろし、VST クリック試聴用の process() を再開。 */
 int ScStaffPreviewFinished(ScStaffUi* u);
 void ScStaffRestoreLiveAudioAfterPreview(void);

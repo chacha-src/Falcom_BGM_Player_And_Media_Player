@@ -72,7 +72,7 @@ enum ScAutoStyle : int {
 
 /* アレンジのかけ方。 */
 enum ScArrangeMode : int {
-	SC_AM_OVERLAY = 0, /* 既存を残し、空いている拍・小節だけ埋める（重ね） */
+	SC_AM_OVERLAY = 0, /* 前のスタイルを土台に、ぶつかる音は外し、足りない音は足す（重ね） */
 	SC_AM_REWRITE = 1  /* 対象パートの既存ノートを一旦消し、進行に沿って作り直す（書き換え） */
 };
 
@@ -86,8 +86,14 @@ enum ScPartRole : int {
 	SC_PR_HARMONY,
 	SC_PR_ARPEGGIO,
 	SC_PR_PAD,
+	SC_PR_COUNTER,
+	SC_PR_STAB,
+	SC_PR_COLOR,
 	SC_PR_ROLE_COUNT
 };
+
+/* アレンジA〜H。同じ番号はいつも同じ伴奏。乱数では変えない。 */
+enum { SC_ARRANGE_COUNT = 8 };
 
 enum ScAutoJob : int {
 	SC_AJ_DRUM = 1,
@@ -125,12 +131,13 @@ struct ScAutoArrangeOpt {
 	int useProg;          /* 1=テーマのコード進行を空き・書き換え小節へ適用 */
 	int seed;             /* 変化の種。0=時刻から自動（毎回違う結果） */
 	int variation;        /* 0..N コード進行の番号 */
-	int patVar;           /* 0=A 1=B 2=C。同じテーマの定番パターン。変な音符は出さない */
+	int patVar;           /* 0=アレンジA … SC_ARRANGE_COUNT-1。同じ番号はいつも同じ */
 	uint32_t targetMask;  /* 伴奏を書く ch。0=自動（メロディパートは除く） */
 	uint32_t drumMask;    /* ドラム出力に使う ch ビットマスク。0=自動 */
 	uint8_t drumSlot[32]; /* ドラム ch ごとの枠 0=ドラム1 1=ドラム2（VST2 用） */
 	uint8_t partRole[32]; /* 対象 ch ごとの役割 ScPartRole（AUTO=自動判定） */
 	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16、音程は C4 として扱う） */
+	int* docTempoT;       /* 非NULLならスタイル BPM を譜面の tempoT へ */
 };
 
 struct ScAutoArrangeResult {
@@ -153,6 +160,7 @@ struct ScAutoArrangeHost {
 	int defMeterN;
 	int defMeterD;
 	int defKey;
+	int* tempoT; /* 非NULLならスタイルのテンポを譜面へ書く */
 	void* ctx;
 	void (*refresh)(void* ctx);
 	int (*preview)(void* ctx);

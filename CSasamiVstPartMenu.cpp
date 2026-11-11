@@ -5,6 +5,7 @@
 #include "CSasamiToneMapDlg.h"
 #include "CCustomPopupMenu.h"
 #include "VstMidiEngine.h"
+#include "CSasamiStaffCore.h"
 
 /* Local command ids — must not collide with VstHostDlg (0xe7xx). */
 enum {
@@ -355,6 +356,31 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int 
 	const int bindDedicated = ScVstPathIsDedicated(bindPath);
 
 	if (!VstLivePartIsLoaded(part1to32)) {
+		const int route = ScStaffScorePreviewOut();
+		int portMulti = 0;
+		const int b0 = ((part1to32 - 1) / 16) * 16 + 1;
+		for (int p = b0; p < b0 + 16 && p <= 32; ++p) {
+			if (!VstLivePartIsLoaded(p)) continue;
+			if (VstLivePartIsMulti(p) || route == SC_OUT_GS || route == SC_OUT_XG) {
+				portMulti = 1;
+				break;
+			}
+			/* 未接続に戻したあとでも、同じ DLL がポートに載っていれば音色画面だけ開く。 */
+			if (bindPath[0]) {
+				wchar_t cur[520];
+				cur[0] = 0;
+				if (VstLivePartGetPath(p, cur, 520) && cur[0] && _wcsicmp(cur, bindPath) == 0) {
+					portMulti = 1;
+					break;
+				}
+			}
+		}
+		/* FM MIDI / Mapper / 既に載っている GS・XG は、空パートに別 VST を足さない。 */
+		if (route == SC_OUT_FMMIDI || route == SC_OUT_MAPPER || portMulti) {
+			const int drum = (isDrum >= 0) ? (isDrum ? 1 : 0)
+				: ((part1to32 == 10 || part1to32 == 26) ? 1 : 0);
+			return CSasamiToneMapDlg::PickForPart(owner, part1to32, bind, drum) == IDOK ? 1 : 0;
+		}
 		/* Song data with dedicated VST3 on this part wins over GS/XG default. */
 		int loaded = 0;
 		if (bindDedicated)
@@ -415,17 +441,25 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int 
 int ScMidiPartAllowMidScoreTone(const ScMidiVstBind* bind, int ch0)
 {
 	if (ch0 < 0 || ch0 >= 32) return 0;
+	/* GS / XG / Mapper は赤バーの位置に PC を置く。VST3 だからという理由で
+	   先頭へ戻すと、途中の音色変更が常に 1 拍目の上書きになる。 */
+	const int route = ScStaffScorePreviewOut();
+	if (route == SC_OUT_GS || route == SC_OUT_XG || route == SC_OUT_MAPPER)
+		return 1;
 	wchar_t path[520];
 	path[0] = 0;
 	if (bind && bind->vstPath[ch0][0])
 		wcsncpy_s(path, bind->vstPath[ch0], _TRUNCATE);
 	else if (VstLivePartIsLoaded(ch0 + 1))
 		VstLivePartGetPath(ch0 + 1, path, 520);
-	if (!path[0]) return 0;
+	if (!path[0]) return 1;
+	if (VstLivePartIsLoaded(ch0 + 1) && VstLivePartIsMulti(ch0 + 1))
+		return 1;
+	if (VstDetectMultiTimbral(path)) return 1;
+	/* 単体の VST3（HALion 等）はプリセットが 1 つ。途中 PC は置かない。 */
+	if (ScVstPathIsDedicated(path)) return 0;
 	const size_t n = wcslen(path);
 	if (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0)
 		return 0;
-	if (VstLivePartIsLoaded(ch0 + 1) && VstLivePartIsMulti(ch0 + 1))
-		return 1;
-	return VstDetectMultiTimbral(path) ? 1 : 0;
+	return 1;
 }

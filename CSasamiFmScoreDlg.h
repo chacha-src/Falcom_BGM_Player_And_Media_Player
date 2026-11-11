@@ -38,6 +38,7 @@ public:
 	void OpenAutoArrange();
 	void AutoArrangeRefresh();
 	void AutoArrangeStop();
+	void SetPreviewBtn(int playing);
 	int AutoArrangePreview();
 	void PreviewRangeInstant(); /* その場再生（ロールからも呼ぶ） */
 

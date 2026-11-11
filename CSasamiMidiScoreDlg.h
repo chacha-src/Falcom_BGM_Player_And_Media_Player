@@ -30,6 +30,7 @@ public:
 	void OpenAutoArrange();
 	void AutoArrangeRefresh();
 	void AutoArrangeStop();
+	void SetPreviewBtn(int playing);
 	int AutoArrangePreview();
 	void SetPartDrum(int tr, int drum); /* GS/XG rhythm part (any MIDI ch) */
 	void CycleClefTrack(int tr); /* Auto→G→F→G+F→Dr→Auto; explicit lock writes CLEF */
@@ -109,6 +110,7 @@ protected:
 	afx_msg void OnBnKeySig();
 	afx_msg void OnCbnSnap();
 	afx_msg void OnCbnZoom();
+	afx_msg void OnCbnScoreOut();
 	afx_msg void OnBnClickedRangePlay();
 	afx_msg void OnBnClickedBarPrev();
 	afx_msg void OnBnClickedBarNext();
@@ -133,6 +135,13 @@ protected:
 	afx_msg LRESULT OnScoreMidi(WPARAM w, LPARAM l);
 
 	void LayoutChrome();
+	void DropAutoPlugParts();
+	void ClearScorePlugAssign();
+	void PaintRouteLabels(const wchar_t* text);
+	int ScoreOutHasAssign() const;
+	int ApplyScoreOut(int route);
+	/* xg=0 は SC-8820（CC32=4）。forceBank=1 は先頭バンクをその音源へ付け替える。再生はしない。 */
+	int StampMapTones(int xg, int forceBank);
 	void ApplyLang();
 	void SyncPropFromSel();
 	void UpdateInfoBar();
@@ -188,6 +197,8 @@ protected:
 	CCustomStandardButton m_dvDot, m_dvTriplet, m_dvRest, m_dvTie;
 	CCustomStandardButton m_accSharp, m_accNatural, m_accFlat, m_btnKeySig;
 	CCustomComboBox m_snap, m_zoom;
+	CCustomStatic m_outLbl;
+	CCustomComboBox m_out;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
 	CCustomComboBox m_pasteMode;
@@ -223,6 +234,9 @@ protected:
 	int m_metroBeat;
 	UINT_PTR m_metroTimer;
 	int m_chromeDetail; /* 1=MIDI In/CC/プロパティ行を表示 */
+	int m_outBusy;
+	int m_outSel;
+	wchar_t m_autoPlug[520];
 	wchar_t m_lastOut[MAX_PATH];
 	wchar_t m_lastHoverSt[256];
 	static CSasamiMidiScoreDlg* s_inst;

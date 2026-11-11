@@ -330,8 +330,19 @@ void SasamiToneLookupAuto(int bankMsb, int bankLsb, int pc, int isDrum, wchar_t*
 		return;
 	}
 
+	/* CC32=1..4 かつ CC0=0 は 55/88/88Pro/8820 の基本音色。127/0 は LA。 */
+	if (bankMsb == 0 && bankLsb >= 1 && bankLsb <= 4) {
+		if (LookupGs(bankLsb, 0, pc, out, outN) && out[0]) return;
+	}
+	/* MSB 127/126 は LA。XG の 127 はドラムキット名なので先に GS を見る。 */
+	if (bankMsb == 126 || bankMsb == 127) {
+		if (LookupGs(1, bankMsb, pc, out, outN) && out[0]) return;
+	}
+
 	/* XG-ish MSB (0 + LSB variation, or 127 drum already handled) */
-	if (LookupXgOk(bankMsb, bankLsb, pc, out, outN) && out[0]) return;
+	if (!(bankMsb == 127 && bankLsb == 0)) {
+		if (LookupXgOk(bankMsb, bankLsb, pc, out, outN) && out[0]) return;
+	}
 
 	/* GS Capital / SC maps — SASAMI @n:m uses bank as GS bank byte */
 	if (LookupGs(4, bankMsb, pc, out, outN) && out[0]) return;

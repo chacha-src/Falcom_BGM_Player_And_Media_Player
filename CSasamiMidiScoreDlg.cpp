@@ -54,6 +54,8 @@ enum {
 	IDC_SAE_SOLO     = 0x5F56,
 	IDC_SAE_MORE     = 0x5F57,
 	IDC_SAE_INFO     = 0x5F58,
+	IDC_SAE_OUTLBL   = 0x5F59,
+	IDC_SAE_OUT      = 0x5F5A,
 };
 
 static void ScMidiSetVstLabel(ScStaffUi* u, int part0, const wchar_t* path)
@@ -93,12 +95,13 @@ CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
 	, m_curCh(0), m_placeRest(0), m_accidental(0), m_blankCur(NULL), m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_bInLayout(FALSE), m_propMode(0)
 	, m_pendingEdClosePart(0), m_pendingEdCloseProg(-1), m_pendingEdOpenPart(0)
 	, m_clipN(0), m_clipBase(0), m_clipSpan(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
-	, m_metroBeat(0), m_metroTimer(0), m_chromeDetail(0)
+	, m_metroBeat(0), m_metroTimer(0), m_chromeDetail(0), m_outBusy(0), m_outSel(0)
 {
 	m_drawCursors.pencil = NULL;
 	m_drawCursors.line = NULL;
 	m_drawCursors.curve = NULL;
 	m_lastOut[0] = 0;
+	m_autoPlug[0] = 0;
 	m_lastHoverSt[0] = 0;
 	ScMidiDocClear(&m_doc);
 	m_doc.tempoT = 13000;
@@ -253,6 +256,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SAE_KEYSIG, OnBnKeySig)
 	ON_CBN_SELCHANGE(IDC_SAE_SNAP, OnCbnSnap)
 	ON_CBN_SELCHANGE(IDC_SAE_ZOOM, OnCbnZoom)
+	ON_CBN_SELCHANGE(IDC_SAE_OUT, OnCbnScoreOut)
 	ON_BN_CLICKED(IDC_SAE_RANGEPLAY, OnBnClickedRangePlay)
 	ON_BN_CLICKED(IDC_SAE_BARPREV, OnBnClickedBarPrev)
 	ON_BN_CLICKED(IDC_SAE_BARNEXT, OnBnClickedBarNext)
@@ -479,6 +483,28 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 		m_zoom.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
 			CRect(0, 0, 96, 28), this, IDC_SAE_ZOOM);
 	m_zoom.SetAeroMode(FALSE);
+	if (!m_outLbl.GetSafeHwnd())
+		m_outLbl.Create(LL14(L"音源", L"Output", L"Sortie", L"Uscita", L"Salida",
+			L"음원", L"音源", L"الخرج", L"Выход", L"Ausgang", L"Saída", L"Uitgang", L"Wyjście", L"Çıkış"),
+			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS,
+			CRect(0, 0, 48, 20), this, IDC_SAE_OUTLBL);
+	m_outLbl.SetAeroMode(FALSE);
+	m_outLbl.SetKeepFontHeight(TRUE);
+	m_outLbl.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	if (!m_out.GetSafeHwnd())
+		m_out.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 140, 24), this, IDC_SAE_OUT);
+	m_out.SetAeroMode(FALSE);
+	m_out.ResetContent();
+	m_out.AddString(LL14(L"未接続", L"Not connected", L"Non connecté", L"Non collegato", L"Sin conexión",
+		L"미연결", L"未连接", L"غير متصل", L"Не подключено", L"Nicht verbunden", L"Desligado", L"Niet verbonden", L"Niepołączone", L"Bağlı değil"));
+	m_out.AddString(L"GS VST");
+	m_out.AddString(L"XG VST");
+	m_out.AddString(L"fm midi");
+	m_out.AddString(L"MIDI Mapper");
+	m_out.SetCurSel(0);
+	m_outSel = 0;
+	ScStaffSetScoreOut(SC_OUT_NONE);
 
 	/* 譜面UX: 範囲再生・小節ジャンプ・Mute/Solo・詳細パネル・情報バー */
 	auto mkNav = [&](CCustomStandardButton& b, int id, const wchar_t* txt) {
@@ -616,6 +642,10 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 		L".mpw2 / .mpsmv로 저장", L"另存为 .mpw2 / .mpsmv", L"حفظ .mpw2 / .mpsmv", L"Сохранить .mpw2 / .mpsmv", L"Speichern als .mpw2 / .mpsmv", L"Salvar .mpw2 / .mpsmv", L"Opslaan als .mpw2 / .mpsmv", L"Zapisz jako .mpw2 / .mpsmv", L".mpw2 / .mpsmv kaydet"));
 	tip(m_btnNew, LL14(L"新規 — 譜面とテキストセッションをクリア", L"New — clear score and text session", L"Nouveau — effacer", L"Nuovo — svuota", L"Nuevo — limpiar",
 		L"새로 — 악보/텍스트 지우기", L"新建 — 清空谱面与文本", L"جديد — مسح", L"Новый — очистить", L"Neu — leeren", L"Novo — limpar", L"Nieuw — wissen", L"Nowy — wyczyść", L"Yeni — temizle"));
+	tip(m_outLbl, LL14(L"試し再生の音源。最初は未接続。GS/XG は設定の VST を全32chへ", L"Preview output. Starts disconnected. GS/XG copies the VST from Settings onto all 32 parts", L"Sortie d'aperçu. Déconnecté au départ. GS/XG copie le VST des réglages sur 32 parties", L"Uscita anteprima. Parte scollegata. GS/XG copia il VST delle impostazioni su 32 parti", L"Salida de vista previa. Empieza sin conexión. GS/XG copia el VST de los ajustes a 32 partes",
+		L"미리듣기 음원. 처음은 미연결. GS/XG는 설정의 VST를 32파트에", L"试听音源。最初未连接。GS/XG 把设置里的 VST 套到全部 32 声部", L"خرج المعاينة. يبدأ غير متصل. GS/XG ينسخ VST من الإعدادات إلى 32 جزءًا", L"Выход превью. Сначала не подключено. GS/XG копирует VST из настроек на все 32 партии", L"Vorschau-Ausgang. Startet unverbunden. GS/XG setzt das VST aus den Einstellungen auf alle 32 Parts", L"Saída da prévia. Começa desligada. GS/XG copia o VST das definições para 32 partes", L"Uitgang van het voorbeeld. Begint niet verbonden. GS/XG zet de VST uit de instellingen op alle 32 partijen", L"Wyjście podglądu. Start bez połączenia. GS/XG kopiuje VST z ustawień na 32 partie", L"Önizleme çıkışı. Başta bağlı değil. GS/XG, ayarlardaki VST'yi 32 partiye yazar"));
+	tip(m_out, LL14(L"未接続 / GS VST / XG VST / fm midi / MIDI Mapper", L"Not connected / GS VST / XG VST / fm midi / MIDI Mapper", L"Non connecté / GS VST / XG VST / fm midi / MIDI Mapper", L"Non collegato / GS VST / XG VST / fm midi / MIDI Mapper", L"Sin conexión / GS VST / XG VST / fm midi / MIDI Mapper",
+		L"미연결 / GS VST / XG VST / fm midi / MIDI Mapper", L"未连接 / GS VST / XG VST / fm midi / MIDI Mapper", L"غير متصل / GS VST / XG VST / fm midi / MIDI Mapper", L"Не подключено / GS VST / XG VST / fm midi / MIDI Mapper", L"Nicht verbunden / GS VST / XG VST / fm midi / MIDI Mapper", L"Desligado / GS VST / XG VST / fm midi / MIDI Mapper", L"Niet verbonden / GS VST / XG VST / fm midi / MIDI Mapper", L"Niepołączone / GS VST / XG VST / fm midi / MIDI Mapper", L"Bağlı değil / GS VST / XG VST / fm midi / MIDI Mapper"));
 	tip(m_btnPlay, LL14(L"マーカーからプレビュー（Space=再生/停止）", L"Preview from marker (Space = play/stop)", L"Aperçu depuis le marqueur (Espace)", L"Anteprima dal marcatore (Spazio)", L"Vista previa desde marcador (Espacio)",
 		L"마커부터 미리듣기 (Space)", L"从标记预览（Space）", L"معاينة من العلامة (Space)", L"Превью с маркера (Space)", L"Vorschau ab Markierung (Leertaste)", L"Prévia do marcador (Espaço)", L"Voorbeeld vanaf markering (Spatie)", L"Podgląd od znacznika (Spacja)", L"İşaretten önizle (Space)"));
 	tip(m_btnRangePlay, LL14(L"選択範囲（無ければ現在小節）を全パートで即試聴（Shift+Space）", L"Instant range preview — selection or current bar, all parts (Shift+Space)", L"Aperçu plage immédiat (Shift+Espace)", L"Anteprima intervallo (Shift+Spazio)", L"Vista previa de rango (Shift+Espacio)",
@@ -759,7 +789,18 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	y += btnH + 6;
 	x = pad;
 
-	/* 2行目: 入力ツール / 音価 / 臨時記号 / スナップ・ズーム / パート / 小節ナビ */
+	/* 2行目: 音源（全32ch） / 入力ツール / 音価 / 臨時記号 / スナップ・ズーム / パート / 小節ナビ */
+	if (m_outLbl.GetSafeHwnd()) {
+		if (x > pad && x + 64 > right) { y += btnH + 4; x = pad; }
+		m_outLbl.MoveWindow(x, y + 4, 60, 20);
+		x += 64;
+	}
+	if (m_out.GetSafeHwnd()) {
+		if (x > pad && x + 168 > right) { y += btnH + 4; x = pad; }
+		layoutCombo(m_out, x, y, 168, btnH + 4, 200);
+		x += 174;
+		groupGap();
+	}
 	vis(m_btnPencil, 1); vis(m_btnErase, 1); vis(m_btnSel, 1);
 	vis(m_btnPal, 1); vis(m_btnTempo, 1); vis(m_btnKey, 1);
 	place(m_btnPencil, 56); place(m_btnErase, 64); place(m_btnSel, 56);
@@ -1691,6 +1732,7 @@ void CSasamiMidiScoreDlg::ApplyBindProgToScore(int ch0, uint32_t atTick)
 	m_doc.bind.vstBankLsb[ch0] = lsb;
 
 	uint32_t tick = atTick;
+	const int askedMid = (atTick != 0) ? 1 : 0;
 	if (!ScMidiPartAllowMidScoreTone(&m_doc.bind, ch0))
 		tick = 0;
 
@@ -1699,7 +1741,8 @@ void CSasamiMidiScoreDlg::ApplyBindProgToScore(int ch0, uint32_t atTick)
 
 	wchar_t name[48];
 	name[0] = 0;
-	SasamiToneLookupAuto(msb, lsb, prog, (ch0 == 9 || ch0 == 25) ? 1 : 0, name, 48);
+	SasamiToneLookupAuto(msb, lsb, prog,
+		ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, ch0, tick) ? 1 : 0, name, 48);
 	if (name[0])
 		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"%s", name);
 	else
@@ -1708,13 +1751,62 @@ void CSasamiMidiScoreDlg::ApplyBindProgToScore(int ch0, uint32_t atTick)
 	InvalidateRect(m_trackRc, FALSE);
 	if (m_bodyRc.Width() > 0)
 		InvalidateRect(m_bodyRc, FALSE);
+	int bar = 1, beat = 1, rem = 0;
+	const int mn = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+	const int md = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+	ScStaffBarBeatFromTick(m_doc.ev, m_doc.evCount, tick, mn, md, &bar, &beat, &rem);
 	CString st;
-	if (tick == 0)
-		st.Format(L"MIDI %d  Prog %d (PC#%d)  Bank %d/%d @ start",
+	if (tick == 0 && askedMid)
+		st.Format(LL14(
+			L"MIDI %d  この音源は先頭の音色だけです（Prog %d / Bank %d/%d）",
+			L"MIDI %d  this instrument keeps one tone at the start (Prog %d / Bank %d/%d)",
+			L"MIDI %d  cet instrument ne garde qu’un timbre au début (Prog %d / Bank %d/%d)",
+			L"MIDI %d  questo strumento ha un solo timbro all’inizio (Prog %d / Bank %d/%d)",
+			L"MIDI %d  este instrumento solo tiene timbre al inicio (Prog %d / Bank %d/%d)",
+			L"MIDI %d  이 음원은 맨 앞 음색만 가집니다 (Prog %d / Bank %d/%d)",
+			L"MIDI %d  此音源只保留开头音色（Prog %d / Bank %d/%d）",
+			L"MIDI %d  هذه الآلة تحتفظ بطابع البداية فقط (Prog %d / Bank %d/%d)",
+			L"MIDI %d  у этого инструмента только начальный тембр (Prog %d / Bank %d/%d)",
+			L"MIDI %d  dieses Instrument behält nur den Anfangsklang (Prog %d / Bank %d/%d)",
+			L"MIDI %d  este instrumento só tem o timbre do início (Prog %d / Bank %d/%d)",
+			L"MIDI %d  dit instrument houdt alleen de beginklank (Prog %d / Bank %d/%d)",
+			L"MIDI %d  ten instrument ma tylko barwę na początku (Prog %d / Bank %d/%d)",
+			L"MIDI %d  bu çalgı yalnız başlangıç tınısını tutar (Prog %d / Bank %d/%d)"),
+			ch0 + 1, prog, msb, lsb);
+	else if (tick == 0)
+		st.Format(LL14(
+			L"MIDI %d  音色 %d（PC#%d）Bank %d/%d を先頭に置きました。途中は赤バーを動かして左の音色行か、右クリックの「音色設定」",
+			L"MIDI %d  tone %d (PC#%d) Bank %d/%d at the start. To change later, move the red bar and click the Tone row, or right-click Tone settings",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d au début. Plus loin : barre rouge puis ligne Timbre, ou clic droit Réglage du timbre",
+			L"MIDI %d  timbro %d (PC#%d) Bank %d/%d all’inizio. Più avanti: barra rossa e riga Timbro, o clic destro Impostazioni timbro",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d al inicio. Más adelante: barra roja y fila Timbre, o clic derecho Ajustes de timbre",
+			L"MIDI %d  음색 %d(PC#%d) Bank %d/%d 을 맨 앞에 두었습니다. 중간은 빨간 막대를 옮긴 뒤 왼쪽 음색 행, 또는 우클릭 음색 설정",
+			L"MIDI %d  音色 %d（PC#%d）Bank %d/%d 已放在开头。中途请移动红条后点左侧音色行，或右键“音色设置”",
+			L"MIDI %d  الطابع %d (PC#%d) Bank %d/%d في البداية. لاحقًا حرّك الشريط الأحمر ثم صف الطابع، أو انقر يمينًا إعدادات الطابع",
+			L"MIDI %d  тембр %d (PC#%d) Bank %d/%d в начале. Дальше: сдвиньте красную черту и строку тембра, или ПКМ «Настройки тембра»",
+			L"MIDI %d  Klang %d (PC#%d) Bank %d/%d am Anfang. Später: rote Linie verschieben und Klangzeile, oder Rechtsklick Klang-Einstellungen",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d no início. Depois: mova a barra vermelha e a linha Timbre, ou clique direito Ajustes de timbre",
+			L"MIDI %d  klank %d (PC#%d) Bank %d/%d aan het begin. Later: rode balk verplaatsen en klankrij, of rechtsklik Klankinstellingen",
+			L"MIDI %d  barwa %d (PC#%d) Bank %d/%d na początku. Dalej: przesuń czerwoną kreskę i wiersz barwy, albo PPM Ustawienia barwy",
+			L"MIDI %d  tını %d (PC#%d) Bank %d/%d başa kondu. Sonra: kırmızı çizgiyi kaydırıp tını satırı, veya sağ tık Tını ayarları"),
 			ch0 + 1, prog, prog + 1, msb, lsb);
 	else
-		st.Format(L"MIDI %d  Prog %d  Bank %d/%d @ tick %u (VST2 multi)",
-			ch0 + 1, prog, msb, lsb, (unsigned)tick);
+		st.Format(LL14(
+			L"MIDI %d  音色 %d（PC#%d）Bank %d/%d を %d小節 %d拍 に置きました",
+			L"MIDI %d  tone %d (PC#%d) Bank %d/%d at bar %d beat %d",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d à la mesure %d temps %d",
+			L"MIDI %d  timbro %d (PC#%d) Bank %d/%d a battuta %d tempo %d",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d en compás %d pulso %d",
+			L"MIDI %d  음색 %d(PC#%d) Bank %d/%d 을 %d마디 %d박에 두었습니다",
+			L"MIDI %d  音色 %d（PC#%d）Bank %d/%d 已放到第 %d 小节第 %d 拍",
+			L"MIDI %d  الطابع %d (PC#%d) Bank %d/%d عند مازورة %d نبضة %d",
+			L"MIDI %d  тембр %d (PC#%d) Bank %d/%d на такте %d доле %d",
+			L"MIDI %d  Klang %d (PC#%d) Bank %d/%d bei Takt %d Schlag %d",
+			L"MIDI %d  timbre %d (PC#%d) Bank %d/%d no compasso %d tempo %d",
+			L"MIDI %d  klank %d (PC#%d) Bank %d/%d bij maat %d tel %d",
+			L"MIDI %d  barwa %d (PC#%d) Bank %d/%d w takcie %d na %d",
+			L"MIDI %d  tını %d (PC#%d) Bank %d/%d ölçü %d vuruş %d"),
+			ch0 + 1, prog, prog + 1, msb, lsb, bar, beat);
 	m_status.SetWindowText(st);
 }
 
@@ -1852,15 +1944,14 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 		if (m_bodyRc.Width() > 0)
 			InvalidateRect(m_bodyRc, FALSE);
 	}
-	CString st;
-	if (ok) {
-		st.Format(L"MIDI %d tone applied (Prog/Bank → score)", part1to32);
-	} else if (VstLivePartIsLoaded(part1to32)) {
-		st.Format(L"MIDI %d tone cancelled", part1to32);
-	} else {
-		st.Format(L"MIDI %d tone cleared / cancelled", part1to32);
+	if (!ok) {
+		CString st;
+		if (VstLivePartIsLoaded(part1to32))
+			st.Format(L"MIDI %d tone cancelled", part1to32);
+		else
+			st.Format(L"MIDI %d tone cleared / cancelled", part1to32);
+		m_status.SetWindowText(st);
 	}
-	m_status.SetWindowText(st);
 	InvalidateRect(m_trackRc, FALSE);
 	/* Auto-open editor ONLY for dedicated VST3 (return 2). Tone-map / SC-VA VST2
 	   (return 1) must never open editor — effEditOpen / Host32 freezes on 入力. */
@@ -2512,13 +2603,31 @@ void CSasamiMidiScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 		const ScEvent& e = m_doc.ev[ctrl];
 		if (e.kind == SC_EV_PROG || e.kind == SC_EV_BANK) {
-			/* Double-click = edit PC/Bank numbers; single-click opens tone/VST. */
-			m_propMode = 1;
-			EditProgForPart(m_curCh);
-			m_status.SetWindowText(LL14(L"Prog/Bank 数値編集。音色/VSTはシングルクリックまたは左Tone行。", L"Edit Prog/Bank numbers. Tone/VST: single-click or left Tone row.", L"Éditer Prog/Bank. Tone/VST : simple clic ou ligne Tone gauche.", L"Modifica Prog/Bank. Tone/VST: clic singolo o riga Tone a sinistra.", L"Editar números Prog/Bank. Tone/VST: un clic o fila Tone izquierda.", L"Prog/Bank 숫자 편집. 음색/VST: 한 번 클릭 또는 왼쪽 Tone 행.", L"编辑 Prog/Bank 数值。音色/VST：单击或左侧 Tone 行。", L"تحرير أرقام Prog/Bank. Tone/VST: نقرة واحدة أو صف Tone الأيسر.", L"Правка чисел Prog/Bank. Tone/VST: одиночный клик или строка Tone слева.", L"Prog/Bank-Zahlen bearbeiten. Tone/VST: Einfachklick oder linke Tone-Zeile.", L"Editar números Prog/Bank. Tone/VST: clique único ou linha Tone à esquerda.", L"Prog/Bank-cijfers bewerken. Tone/VST: enkele klik of linker Tone-rij.", L"Edycja liczb Prog/Bank. Tone/VST: pojedyncze kliknięcie lub lewy wiersz Tone.", L"Prog/Bank sayı düzenle. Tone/VST: tek tık veya sol Tone satırı."));
-			InvalidateRect(m_gridRc, FALSE);
+			/* 詳細パネルが開いているときだけ数値。普段は音色画面を、そのチップの位置で開く。 */
+			m_ui.markerTick = e.tick;
+			if (m_chromeDetail) {
+				m_propMode = 1;
+				EditProgForPart(m_curCh);
+				m_status.SetWindowText(LL14(L"Prog/Bank 数値編集。適用でこの位置の音色が変わります。", L"Edit Prog/Bank numbers. Apply changes the tone at this spot.", L"Éditer Prog/Bank. Appliquer change le timbre ici.", L"Modifica Prog/Bank. Applica cambia il timbro qui.", L"Editar Prog/Bank. Aplicar cambia el timbre aquí.", L"Prog/Bank 숫자 편집. 적용하면 이 위치의 음색이 바뀝니다.", L"编辑 Prog/Bank。应用后此处音色会变。", L"تحرير Prog/Bank. التطبيق يغيّر الطابع هنا.", L"Правка Prog/Bank. Применить меняет тембр здесь.", L"Prog/Bank-Zahlen. Anwenden ändert den Klang hier.", L"Editar Prog/Bank. Aplicar muda o timbre aqui.", L"Prog/Bank-cijfers. Toepassen wijzigt de klank hier.", L"Edycja Prog/Bank. Zastosuj zmienia barwę tutaj.", L"Prog/Bank sayıları. Uygula buradaki tınıyı değiştirir."));
+				InvalidateRect(m_gridRc, FALSE);
+			} else {
+				OpenVstForPart(m_curCh + 1);
+			}
 			return;
 		}
+	}
+	int stripTr = -1;
+	if (ScStaffPtInScoreCtrlStrip(m_gridRc, &m_ui, point, &stripTr) && stripTr >= 0) {
+		const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+		const int quant = ScStaffPlaceQuant(&m_ui);
+		m_ui.markerTick = ScStaffXToTick(point.x, m_ui.scrollX,
+			ScStaffGridLeftPx(m_gridRc.left, &m_ui, m_doc.ev, m_doc.evCount),
+			pxBeat, quant, &m_ui, m_doc.ev, m_doc.evCount);
+		m_curCh = stripTr;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_ui.visible[stripTr] = 1;
+		OpenVstForPart(stripTr + 1);
+		return;
 	}
 	int hitTr = -1;
 	int hit = ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, point, &hitTr);
@@ -2812,6 +2921,317 @@ void CSasamiMidiScoreDlg::OnBnKeySig()
 	else GetWindowRect(&r);
 	CSasamiLayoutPaletteDlg* pal = CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(r.left, r.bottom));
 	if (pal) pal->FocusKeyTab();
+}
+
+static int ScorePlugFileOk(const wchar_t* dll)
+{
+	if (!dll || !dll[0]) return 0;
+	const DWORD a = GetFileAttributesW(dll);
+	if (a == INVALID_FILE_ATTRIBUTES) return 0;
+	if (a & FILE_ATTRIBUTE_DIRECTORY) return 0;
+	return 1;
+}
+
+void CSasamiMidiScoreDlg::DropAutoPlugParts()
+{
+	if (m_autoPlug[0]) {
+		VstLiveMonitorStop();
+		for (int i = 0; i < 32; ++i) {
+			if (_wcsicmp(m_doc.bind.vstPath[i], m_autoPlug) != 0) continue;
+			if (VstLivePartIsLoaded(i + 1))
+				VstLiveUnloadPart(i + 1);
+			m_doc.bind.vstPath[i][0] = 0;
+			m_doc.bind.vstProg[i] = -1;
+			m_doc.bind.vstBankMsb[i] = -1;
+			m_doc.bind.vstBankLsb[i] = -1;
+			m_doc.bind.vstForceCh[i] = -1;
+			ScMidiVstBindSetState(&m_doc.bind, i, NULL, 0, NULL, 0);
+			ScMidiSetVstLabel(&m_ui, i, NULL);
+		}
+		m_autoPlug[0] = 0;
+		VstLiveMonitorEnsure();
+	}
+	int any = 0;
+	for (int i = 0; i < 32; ++i)
+		if (m_doc.bind.vstPath[i][0]) any = 1;
+	m_doc.bind.isMpw3 = any;
+}
+
+void CSasamiMidiScoreDlg::ClearScorePlugAssign()
+{
+	VstLiveMonitorStop();
+	for (int p = 1; p <= 32; ++p) {
+		if (VstLivePartIsLoaded(p))
+			VstLiveUnloadPart(p);
+	}
+	for (int i = 0; i < 32; ++i) {
+		m_doc.bind.vstPath[i][0] = 0;
+		m_doc.bind.vstProg[i] = -1;
+		m_doc.bind.vstBankMsb[i] = -1;
+		m_doc.bind.vstBankLsb[i] = -1;
+		m_doc.bind.vstForceCh[i] = -1;
+		ScMidiVstBindSetState(&m_doc.bind, i, NULL, 0, NULL, 0);
+		m_ui.vstLabel[i][0] = 0;
+		m_ui.vstIsVst3[i] = 0;
+	}
+	m_autoPlug[0] = 0;
+	m_doc.bind.isMpw3 = 0;
+	m_doc.bind.dualPort = 0;
+	VstLiveMonitorEnsure();
+}
+
+int CSasamiMidiScoreDlg::ScoreOutHasAssign() const
+{
+	for (int i = 0; i < 32; ++i) {
+		if (m_doc.bind.vstPath[i][0]) return 1;
+		if (m_ui.vstLabel[i][0]) return 1;
+	}
+	for (int p = 1; p <= 32; ++p) {
+		if (VstLivePartIsLoaded(p)) return 1;
+	}
+	return 0;
+}
+
+void CSasamiMidiScoreDlg::PaintRouteLabels(const wchar_t* text)
+{
+	for (int i = 0; i < 32; ++i) {
+		if (m_doc.bind.vstPath[i][0]) continue;
+		if (!text || !text[0]) {
+			if (wcscmp(m_ui.vstLabel[i], L"FM MIDI") == 0 || wcscmp(m_ui.vstLabel[i], L"MIDI Mapper") == 0)
+				m_ui.vstLabel[i][0] = 0;
+			continue;
+		}
+		wcsncpy_s(m_ui.vstLabel[i], text, _TRUNCATE);
+		m_ui.vstIsVst3[i] = 0;
+	}
+}
+
+static int ChHasMusic(const ScMidiDoc& d, int ch)
+{
+	for (int i = 0; i < d.evCount; i++) {
+		if ((int)d.ev[i].ch != ch) continue;
+		const uint8_t k = d.ev[i].kind;
+		if (k == SC_EV_NOTE || k == SC_EV_PROG || k == SC_EV_BANK || k == SC_EV_DRUM)
+			return 1;
+	}
+	return 0;
+}
+
+static void WantMapBank(int xg, int drum, int* msb, int* lsb)
+{
+	if (drum) {
+		*msb = xg ? 127 : 0;
+		*lsb = 0;
+	} else if (xg) {
+		*msb = 0;
+		*lsb = 0;
+	} else {
+		*msb = 0;
+		*lsb = 4;
+	}
+}
+
+int CSasamiMidiScoreDlg::StampMapTones(int xg, int forceBank)
+{
+	struct Want {
+		int ch, prog, msb, lsb, write;
+	};
+	Want w[32];
+	int n = 0;
+	int writes = 0;
+	for (int ch = 0; ch < 32; ch++) {
+		if (!ChHasMusic(m_doc, ch)) continue;
+		const int drum = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, ch, 0);
+		int headProg = -1, anyProg = -1, hasBank = 0, hm = 0, hl = 0;
+		uint32_t anyTick = 0xFFFFFFFFu;
+		for (int i = 0; i < m_doc.evCount; i++) {
+			if ((int)m_doc.ev[i].ch != ch) continue;
+			if (m_doc.ev[i].kind == SC_EV_PROG) {
+				if (m_doc.ev[i].tick < anyTick) {
+					anyTick = m_doc.ev[i].tick;
+					anyProg = (int)m_doc.ev[i].a;
+				}
+				if (m_doc.ev[i].tick == 0)
+					headProg = (int)m_doc.ev[i].a;
+			} else if (m_doc.ev[i].kind == SC_EV_BANK && m_doc.ev[i].tick == 0) {
+				hasBank = 1;
+				hm = (int)m_doc.ev[i].a;
+				hl = (int)m_doc.ev[i].b;
+			}
+		}
+		int prog = (headProg >= 0) ? headProg : anyProg;
+		if (prog < 0)
+			prog = drum ? 0 : ((m_ui.clef[ch] == 1) ? 33 : 0);
+		if (prog < 0) prog = 0;
+		if (prog > 127) prog = 127;
+		int msb = 0, lsb = 0;
+		WantMapBank(xg ? 1 : 0, drum, &msb, &lsb);
+		int write = 0;
+		if (headProg < 0 || headProg != prog) write = 1;
+		if (!hasBank) write = 1;
+		else if (forceBank && (hm != msb || hl != lsb)) write = 1;
+		if (!forceBank && headProg >= 0 && hasBank) {
+			/* 既にある先頭音色は残す。足りないパートだけ足す。 */
+			write = (headProg < 0 || !hasBank) ? 1 : 0;
+			prog = headProg;
+			msb = hm;
+			lsb = hl;
+		}
+		w[n].ch = ch;
+		w[n].prog = prog;
+		w[n].msb = msb;
+		w[n].lsb = lsb;
+		w[n].write = write;
+		if (write) writes = 1;
+		n++;
+	}
+	if (n <= 0) return 0;
+	if (writes) HistPush();
+	for (int i = 0; i < n; i++) {
+		if (!w[i].write) continue;
+		ScMidiApplyProgBankAt(&m_doc, w[i].ch, 0, w[i].prog, w[i].msb, w[i].lsb);
+	}
+	RefreshProgLabels();
+	InvalidateRect(m_trackRc, FALSE);
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
+	PushDocToText();
+	RefreshBoundRoll();
+	return n;
+}
+
+int CSasamiMidiScoreDlg::ApplyScoreOut(int sel)
+{
+	if (sel < 0 || sel > 4) sel = 0;
+	if (sel == 0) {
+		/* 未接続へ戻しても、パートに入っている音源はそのまま残す。 */
+		ScStaffSetScoreOut(SC_OUT_NONE);
+		if (ScoreOutHasAssign())
+			m_status.SetWindowText(LL14(L"未接続に戻しました。パートの音源設定はそのままです。", L"Disconnected. Part output settings stay as they are.", L"Déconnecté. Les sorties des parties restent.", L"Scollegato. Le uscite delle parti restano.", L"Desconectado. Las salidas de las partes se quedan.",
+				L"미연결로 돌렸습니다. 파트 음원 설정은 그대로입니다.", L"已回到未连接。各声部的音源设置保持原样。", L"عاد غير متصل. إعدادات خرج الأجزاء تبقى.", L"Снова не подключено. Настройки партий сохранены.", L"Wieder unverbunden. Part-Ausgänge bleiben.", L"Desligado. As saídas das partes ficam.", L"Weer niet verbonden. Partij-uitgangen blijven.", L"Znowu niepołączone. Ustawienia partii zostają.", L"Yine bağlı değil. Parti çıkışları duruyor."));
+		else
+			m_status.SetWindowText(LL14(L"音源は未接続です。", L"Output is not connected.", L"Sortie non connectée.", L"Uscita non collegata.", L"Salida sin conexión.",
+				L"음원이 연결되지 않았습니다.", L"音源未连接。", L"الخرج غير متصل.", L"Выход не подключен.", L"Ausgang nicht verbunden.", L"Saída desligada.", L"Uitgang niet verbonden.", L"Wyjście niepołączone.", L"Çıkış bağlı değil."));
+		Invalidate(FALSE);
+		return 1;
+	}
+	if (sel == 3 || sel == 4) {
+		ClearScorePlugAssign();
+		if (sel == 3) PaintRouteLabels(L"FM MIDI");
+		else PaintRouteLabels(L"MIDI Mapper");
+		ScStaffSetScoreOut(sel == 3 ? SC_OUT_FMMIDI : SC_OUT_MAPPER);
+		if (sel == 3)
+			m_status.SetWindowText(LL14(L"FM MIDI（kbsasami）で試し再生します。音色は VST2 の音色画面で選べます。", L"Preview uses FM MIDI (kbsasami). Pick tones in the VST2 tone UI.", L"Aperçu via FM MIDI (kbsasami). Timbres dans l'UI VST2.", L"Anteprima con FM MIDI (kbsasami). Toni nell'UI VST2.", L"Vista previa con FM MIDI (kbsasami). Tonos en la UI VST2.",
+				L"FM MIDI(kbsasami)로 미리듣기. 음색은 VST2 음색 화면.", L"用 FM MIDI（kbsasami）试听。音色在 VST2 音色界面里选。", L"المعاينة عبر FM MIDI (kbsasami). اختر النغمة من واجهة VST2.", L"Превью через FM MIDI (kbsasami). Тембр — в окне VST2.", L"Vorschau über FM MIDI (kbsasami). Klang in der VST2-Ansicht.", L"Prévia com FM MIDI (kbsasami). Timbre na UI VST2.", L"Voorbeeld via FM MIDI (kbsasami). Klank in de VST2-weergave.", L"Podgląd przez FM MIDI (kbsasami). Barwa w oknie VST2.", L"FM MIDI (kbsasami) ile önizleme. Ses VST2 ekranından."));
+		else
+			m_status.SetWindowText(LL14(L"MIDI Mapper で試し再生します。音色は VST2 の音色画面で選べます。", L"Preview uses MIDI Mapper. Pick tones in the VST2 tone UI.", L"Aperçu via MIDI Mapper. Timbres dans l'UI VST2.", L"Anteprima con MIDI Mapper. Toni nell'UI VST2.", L"Vista previa con MIDI Mapper. Tonos en la UI VST2.",
+				L"MIDI Mapper로 미리듣기. 음색은 VST2 음색 화면.", L"用 MIDI Mapper 试听。音色在 VST2 音色界面里选。", L"المعاينة عبر MIDI Mapper. اختر النغمة من واجهة VST2.", L"Превью через MIDI Mapper. Тембр — в окне VST2.", L"Vorschau über MIDI Mapper. Klang in der VST2-Ansicht.", L"Prévia com MIDI Mapper. Timbre na UI VST2.", L"Voorbeeld via MIDI Mapper. Klank in de VST2-weergave.", L"Podgląd przez MIDI Mapper. Barwa w oknie VST2.", L"MIDI Mapper ile önizleme. Ses VST2 ekranından."));
+		Invalidate(FALSE);
+		return 1;
+	}
+	const wchar_t* dll = (sel == 1) ? savedata.vstMultiDll : savedata.vstExtraPath;
+	if (!ScorePlugFileOk(dll)) {
+		m_status.SetWindowText(sel == 1
+			? LL14(L"設定の GS VST が空なので、未接続のままです。", L"The GS VST in Settings is empty, so output stays disconnected.", L"Le VST GS des réglages est vide : sortie non connectée.", L"Il VST GS delle impostazioni è vuoto: uscita non collegata.", L"El VST GS de los ajustes está vacío: sigue sin conexión.",
+				L"설정의 GS VST가 비어 미연결입니다.", L"设置里的 GS VST 为空，保持未连接。", L"VST GS في الإعدادات فارغ، الخرج غير متصل.", L"GS VST в настройках пуст, выход не подключен.", L"Das GS-VST in den Einstellungen ist leer, der Ausgang bleibt unverbunden.", L"O VST GS das definições está vazio: continua desligado.", L"De GS-VST in de instellingen is leeg, de uitgang blijft los.", L"GS VST w ustawieniach jest puste, wyjście zostaje niepołączone.", L"Ayarlardaki GS VST boş, çıkış bağlı değil.")
+			: LL14(L"設定の XG VST が空なので、未接続のままです。", L"The XG VST in Settings is empty, so output stays disconnected.", L"Le VST XG des réglages est vide : sortie non connectée.", L"Il VST XG delle impostazioni è vuoto: uscita non collegata.", L"El VST XG de los ajustes está vacío: sigue sin conexión.",
+				L"설정의 XG VST가 비어 미연결입니다.", L"设置里的 XG VST 为空，保持未连接。", L"VST XG في الإعدادات فارغ، الخرج غير متصل.", L"XG VST в настройках пуст, выход не подключен.", L"Das XG-VST in den Einstellungen ist leer, der Ausgang bleibt unverbunden.", L"O VST XG das definições está vazio: continua desligado.", L"De XG-VST in de instellingen is leeg, de uitgang blijft los.", L"XG VST w ustawieniach jest puste, wyjście zostaje niepołączone.", L"Ayarlardaki XG VST boş, çıkış bağlı değil."));
+		return 0;
+	}
+	DropAutoPlugParts();
+	VstLiveMonitorStop();
+	for (int p = 1; p <= 32; ++p)
+		if (VstLivePartIsLoaded(p)) VstLiveUnloadPart(p);
+	const wchar_t* base = wcsrchr(dll, L'\\');
+	base = base ? base + 1 : dll;
+	const size_t n = wcslen(dll);
+	const int is3 = (n >= 5 && _wcsicmp(dll + n - 5, L".vst3") == 0) ? 1 : 0;
+	VstWaitShowLoad(m_hWnd, base);
+	const int ok1 = (VstLiveLoadPart(1, dll, is3) == 0);
+	VstWaitHide();
+	if (!ok1) {
+		VstLiveMonitorEnsure();
+		m_status.SetWindowText(LL14(L"VST の読み込みに失敗したので、未接続に戻しました。", L"VST failed to load, so output is disconnected again.", L"Échec du VST : sortie déconnectée.", L"Caricamento VST fallito: uscita scollegata.", L"El VST no cargó: salida desconectada.",
+			L"VST를 읽지 못해 미연결로 돌렸습니다.", L"VST 加载失败，已回到未连接。", L"فشل تحميل VST، الخرج غير متصل.", L"VST не загрузился, выход снова не подключен.", L"VST-Laden fehlgeschlagen, Ausgang wieder unverbunden.", L"Falha ao carregar o VST: saída desligada.", L"VST laden mislukt, uitgang weer los.", L"Nie udało się wczytać VST, wyjście znowu niepołączone.", L"VST yüklenemedi, çıkış yine bağlı değil."));
+		return 0;
+	}
+	for (int i = 0; i < 32; ++i) {
+		wcsncpy_s(m_doc.bind.vstPath[i], dll, _TRUNCATE);
+		m_doc.bind.vstProg[i] = -1;
+		m_doc.bind.vstBankMsb[i] = -1;
+		m_doc.bind.vstBankLsb[i] = -1;
+		m_doc.bind.vstForceCh[i] = -1;
+		ScMidiVstBindSetState(&m_doc.bind, i, NULL, 0, NULL, 0);
+		ScMidiSetVstLabel(&m_ui, i, dll);
+	}
+	m_doc.bind.isMpw3 = 1;
+	wcsncpy_s(m_autoPlug, dll, _TRUNCATE);
+	VstWaitShowLoad(m_hWnd, base);
+	const int ok17 = (VstLiveLoadPart(17, dll, is3) == 0);
+	VstWaitHide();
+	if (!ok17) m_doc.bind.dualPort = 0;
+	else m_doc.bind.dualPort = 1;
+	VstLiveMonitorEnsure();
+	ScStaffSetScoreOut(sel == 1 ? SC_OUT_GS : SC_OUT_XG);
+	const int stamped = StampMapTones(sel == 2 ? 1 : 0, 1);
+	if (ok17 && stamped > 0) {
+		m_status.SetWindowText(sel == 1
+			? LL14(L"設定の GS VST を全32チャンネルに合わせ、各パート先頭の音色を SC-8820 にしました。", L"The GS VST from Settings is on all 32 channels. Each part starts with an SC-8820 tone.", L"Le VST GS des réglages est sur les 32 canaux. Chaque partie commence en SC-8820.", L"Il VST GS delle impostazioni è sui 32 canali. Ogni parte inizia con un tono SC-8820.", L"El VST GS de los ajustes está en los 32 canales. Cada parte empieza con un tono SC-8820.",
+				L"설정의 GS VST를 32채널에 맞추고, 각 파트 앞에 SC-8820 음색을 넣었습니다.", L"已把设置里的 GS VST 套到全部 32 通道，各声部开头是 SC-8820 音色。", L"VST GS من الإعدادات على 32 قناة. بداية كل جزء بنغمة SC-8820.", L"GS VST из настроек на всех 32 каналах. В начале каждой партии тембр SC-8820.", L"Das GS-VST aus den Einstellungen liegt auf allen 32 Kanälen. Jeder Part beginnt mit einem SC-8820-Klang.", L"O VST GS das definições está nos 32 canais. Cada parte começa com um timbre SC-8820.", L"De GS-VST uit de instellingen staat op alle 32 kanalen. Elke partij begint met een SC-8820-klank.", L"GS VST z ustawień jest na wszystkich 32 kanałach. Każda partia zaczyna się barwą SC-8820.", L"Ayarlardaki GS VST 32 kanala yazıldı. Her parti SC-8820 sesiyle başlar.")
+			: LL14(L"設定の XG VST を全32チャンネルに合わせ、各パート先頭の音色を XG にしました。", L"The XG VST from Settings is on all 32 channels. Each part starts with an XG tone.", L"Le VST XG des réglages est sur les 32 canaux. Chaque partie commence en XG.", L"Il VST XG delle impostazioni è sui 32 canali. Ogni parte inizia con un tono XG.", L"El VST XG de los ajustes está en los 32 canales. Cada parte empieza con un tono XG.",
+				L"설정의 XG VST를 32채널에 맞추고, 각 파트 앞에 XG 음색을 넣었습니다.", L"已把设置里的 XG VST 套到全部 32 通道，各声部开头是 XG 音色。", L"VST XG من الإعدادات على 32 قناة. بداية كل جزء بنغمة XG.", L"XG VST из настроек на всех 32 каналах. В начале каждой партии тембр XG.", L"Das XG-VST aus den Einstellungen liegt auf allen 32 Kanälen. Jeder Part beginnt mit einem XG-Klang.", L"O VST XG das definições está nos 32 canais. Cada parte começa com um timbre XG.", L"De XG-VST uit de instellingen staat op alle 32 kanalen. Elke partij begint met een XG-klank.", L"XG VST z ustawień jest na wszystkich 32 kanałach. Każda partia zaczyna się barwą XG.", L"Ayarlardaki XG VST 32 kanala yazıldı. Her parti XG sesiyle başlar."));
+	} else if (ok17) {
+		m_status.SetWindowText(sel == 1
+			? LL14(L"設定の GS VST を全32チャンネルに合わせました。", L"The GS VST from Settings is on all 32 channels.", L"Le VST GS des réglages est sur les 32 canaux.", L"Il VST GS delle impostazioni è sui 32 canali.", L"El VST GS de los ajustes está en los 32 canales.",
+				L"설정의 GS VST를 32채널에 맞췄습니다.", L"已把设置里的 GS VST 套到全部 32 通道。", L"VST GS من الإعدادات على كل القنوات الـ32.", L"GS VST из настроек на всех 32 каналах.", L"Das GS-VST aus den Einstellungen liegt auf allen 32 Kanälen.", L"O VST GS das definições está nos 32 canais.", L"De GS-VST uit de instellingen staat op alle 32 kanalen.", L"GS VST z ustawień jest na wszystkich 32 kanałach.", L"Ayarlardaki GS VST 32 kanala yazıldı.")
+			: LL14(L"設定の XG VST を全32チャンネルに合わせました。", L"The XG VST from Settings is on all 32 channels.", L"Le VST XG des réglages est sur les 32 canaux.", L"Il VST XG delle impostazioni è sui 32 canali.", L"El VST XG de los ajustes está en los 32 canales.",
+				L"설정의 XG VST를 32채널에 맞췄습니다.", L"已把设置里的 XG VST 套到全部 32 通道。", L"VST XG من الإعدادات على كل القنوات الـ32.", L"XG VST из настроек на всех 32 каналах.", L"Das XG-VST aus den Einstellungen liegt auf allen 32 Kanälen.", L"O VST XG das definições está nos 32 canais.", L"De XG-VST uit de instellingen staat op alle 32 kanalen.", L"XG VST z ustawień jest na wszystkich 32 kanałach.", L"Ayarlardaki XG VST 32 kanala yazıldı."));
+	} else {
+		m_status.SetWindowText(LL14(L"1–16 は合わせました。17–32 の読み込みに失敗しました。", L"Channels 1–16 are set. 17–32 failed to load.", L"Canaux 1–16 prêts. 17–32 en échec.", L"Canali 1–16 ok. 17–32 non caricati.", L"Canales 1–16 listos. 17–32 no cargaron.",
+			L"1–16은 맞췄습니다. 17–32 읽기 실패.", L"1–16 已套上。17–32 加载失败。", L"1–16 جاهزة. فشل 17–32.", L"1–16 готовы. 17–32 не загрузились.", L"1–16 gesetzt. 17–32 fehlgeschlagen.", L"1–16 prontos. 17–32 falhou.", L"1–16 gezet. 17–32 mislukt.", L"1–16 ustawione. 17–32 nie wczytane.", L"1–16 yazıldı. 17–32 yüklenemedi."));
+	}
+	Invalidate(FALSE);
+	return 1;
+}
+
+void CSasamiMidiScoreDlg::OnCbnScoreOut()
+{
+	if (m_outBusy) return;
+	int sel = m_out.GetCurSel();
+	if (sel < 0) sel = 0;
+	if (sel == m_outSel) return;
+	/* 未接続から別の音源へ。既にパートへ入っていれば、リセットしてよいか先に聞く。 */
+	if (m_outSel == 0 && sel != 0 && ScoreOutHasAssign()) {
+		const int yes = AfxMessageBox(LL14(
+			L"既に音源が設定されています。切り替えるとリセットされます。よろしいですか？",
+			L"An output is already set. Switching will reset it. Continue?",
+			L"Une sortie est déjà réglée. Changer la réinitialise. Continuer ?",
+			L"Un'uscita è già impostata. Il cambio la azzera. Continuare?",
+			L"Ya hay una salida. Cambiar la reinicia. ¿Continuar?",
+			L"이미 음원이 설정되어 있습니다. 바꾸면 초기화됩니다. 계속할까요?",
+			L"已经设置了音源。切换会重置。要继续吗？",
+			L"الخرج مضبوط بالفعل. التبديل يعيد ضبطه. هل تتابع؟",
+			L"Выход уже задан. Смена сбросит его. Продолжить?",
+			L"Ein Ausgang ist schon gesetzt. Wechsel setzt ihn zurück. Fortfahren?",
+			L"Já há uma saída. Trocar redefine. Continuar?",
+			L"Er is al een uitgang. Wisselen reset die. Doorgaan?",
+			L"Wyjście jest już ustawione. Zmiana je zresetuje. Kontynuować?",
+			L"Zaten bir çıkış var. Değiştirmek sıfırlar. Devam edilsin mi?"),
+			MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+		if (yes != IDYES) {
+			m_outBusy = 1;
+			m_out.SetCurSel(m_outSel);
+			m_outBusy = 0;
+			return;
+		}
+	}
+	if (!ApplyScoreOut(sel)) {
+		m_outBusy = 1;
+		m_out.SetCurSel(m_outSel);
+		m_outBusy = 0;
+		return;
+	}
+	m_outSel = sel;
 }
 
 void CSasamiMidiScoreDlg::OnCbnSnap()
@@ -3680,8 +4100,74 @@ void CSasamiMidiScoreDlg::OnBnClickedOpen()
 	m_status.SetWindowText(st);
 }
 
+static void MidiPreviewStopThunk(void* ctx);
+
+static int ScorePartNeedsTone(const ScMidiDoc& d, int ch)
+{
+	int notes = 0, prog = 0;
+	for (int i = 0; i < d.evCount; i++) {
+		if ((int)d.ev[i].ch != ch) continue;
+		if (d.ev[i].kind == SC_EV_NOTE) notes = 1;
+		if (d.ev[i].kind == SC_EV_PROG && d.ev[i].tick == 0 && d.ev[i].a != 0) prog = 1;
+	}
+	return (notes && !prog) ? 1 : 0;
+}
+
 void CSasamiMidiScoreDlg::OnBnClickedPlay()
 {
+	/* 再生中にもう一度押すと止める。Space は MP に渡さない。 */
+	if (m_ui.previewActive || ScStaffPreviewIsRunning()) {
+		AutoArrangeStop();
+		m_status.SetWindowText(LL14(L"停止。再生確認でもう一度。", L"Stopped. Preview again to play.", L"Arrêté. Aperçu pour relancer.", L"Fermato. Anteprima per ripartire.", L"Detenido. Vista previa para seguir.",
+			L"정지. 미리듣기로 다시.", L"已停止。再按试听。", L"توقف. المعاينة للإعادة.", L"Стоп. Превью — снова.", L"Gestoppt. Vorschau startet erneut.", L"Parado. Prévia de novo.", L"Gestopt. Voorbeeld opnieuw.", L"Zatrzymano. Podgląd ponownie.", L"Durdu. Önizleme yeniden."));
+		return;
+	}
+	/* 未接続かつ 1ch も VST2/VST3 が無いときだけ、設定から経路を選んでコンボも切り替える。
+	   KPI 優先なら fm midi。そうでなければ設定の GS、無ければ XG、両方空なら MIDI Mapper。
+	   全体の再生優先（midPlayPrefer）は書き換えない。 */
+	if (ScStaffScorePreviewOut() == SC_OUT_NONE && !ScoreOutHasAssign()) {
+		int sel = 4;
+		if (savedata.midPlayPrefer == 0)
+			sel = 3;
+		else if (ScorePlugFileOk(savedata.vstMultiDll))
+			sel = 1;
+		else if (ScorePlugFileOk(savedata.vstExtraPath))
+			sel = 2;
+		m_outBusy = 1;
+		if (m_out.GetSafeHwnd()) m_out.SetCurSel(sel);
+		m_outBusy = 0;
+		if (ApplyScoreOut(sel))
+			m_outSel = sel;
+		else {
+			m_outBusy = 1;
+			if (m_out.GetSafeHwnd()) m_out.SetCurSel(0);
+			m_outBusy = 0;
+		}
+	}
+	if (ScStaffScorePreviewOut() == SC_OUT_NONE) {
+		int bare = 0;
+		for (int ch = 0; ch < 32; ch++)
+			if (ScorePartNeedsTone(m_doc, ch)) { bare = 1; break; }
+		if (bare) {
+			AfxMessageBox(LL14(
+				L"音源が未接続で、音符のあるパートの音色がまだありません。先に音色を決めてください。このままだとドラムが通常パートとして鳴ります。",
+				L"Output is not connected, and a part with notes has no tone yet. Set the tone first. Otherwise the drum part plays as a normal part.",
+				L"Sortie non connectée, et une partie avec des notes n'a pas de timbre. Choisissez le timbre d'abord. Sinon la batterie devient une partie normale.",
+				L"Uscita non collegata e una parte con note non ha un timbro. Imposta prima il timbro. Altrimenti la batteria diventa una parte normale.",
+				L"Sin conexión, y una parte con notas no tiene timbre. Elige el timbre primero. Si no, la batería suena como parte normal.",
+				L"음원이 미연결이고, 노트가 있는 파트의 음색이 없습니다. 먼저 음색을 정하세요. 그대로면 드럼이 일반 파트로 납니다.",
+				L"音源未连接，且有音符的声部还没有音色。请先选定音色。否则鼓会按普通声部响。",
+				L"الخرج غير متصل، وجزء فيه نغمات بلا طابع. حدّد الطابع أولًا. وإلا تُعزف الطبول كجزء عادي.",
+				L"Выход не подключён, а у партии с нотами нет тембра. Сначала задайте тембр. Иначе барабаны звучат как обычная партия.",
+				L"Ausgang nicht verbunden, und eine Part mit Noten hat noch keinen Klang. Zuerst den Klang wählen. Sonst spielt die Drum-Part normal.",
+				L"Saída sem ligação e uma parte com notas ainda sem timbre. Defina o timbre primeiro. Senão a bateria toca como parte normal.",
+				L"Uitgang niet verbonden, en een partij met noten heeft nog geen klank. Kies eerst de klank. Anders speelt de drum als normale partij.",
+				L"Wyjście niepodłączone, a partia z nutami nie ma barwy. Najpierw ustaw barwę. Inaczej perkusja gra jak zwykła partia.",
+				L"Çıkış bağlı değil ve notası olan partinin tınısı yok. Önce tınıyı seçin. Yoksa davul normal parti gibi çalar."),
+				MB_OK | MB_ICONINFORMATION);
+		}
+	}
+	ScStaffPreviewBindStop(MidiPreviewStopThunk, this);
 	/* Score-local preview from red bar: prefer live host (VST OK), wavout fallback. */
 	VstLiveMonitorStop();
 	SyncFxBindsToLive();
@@ -3702,17 +4188,19 @@ void CSasamiMidiScoreDlg::OnBnClickedPlay()
 		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
 	if (!ok) {
 		m_ui.previewActive = 0;
+		SetPreviewBtn(0);
 		m_status.SetWindowText(LL14(L"プレビュー失敗（ホスト／wavout）", L"Preview failed (host / wavout)", L"Échec aperçu", L"Anteprima non riuscita", L"Falló la vista previa",
 			L"미리듣기 실패", L"预览失败", L"فشل المعاينة", L"Превью не удалось", L"Vorschau fehlgeschlagen", L"Falha na prévia", L"Voorbeeld mislukt", L"Podgląd nieudany", L"Önizleme başarısız"));
 		VstLiveMonitorEnsure();
 		return;
 	}
+	SetPreviewBtn(1);
 	VstLiveMonitorStop();
 	PushDocToText();
 	SetTimer(kScPreviewTimer, 33, NULL);
 	CString st;
-	st.Format(LL14(L"プレビュー tick %u — Spaceで停止", L"Preview tick %u — Space to stop", L"Aperçu tick %u — Espace = stop", L"Anteprima tick %u — Spazio = stop", L"Vista previa tick %u — Espacio = stop",
-		L"미리듣기 tick %u — Space 정지", L"预览 tick %u — Space停止", L"معاينة tick %u — Space للإيقاف", L"Превью tick %u — Space = стоп", L"Vorschau tick %u — Leertaste = Stop", L"Prévia tick %u — Espaço = parar", L"Voorbeeld tick %u — Spatie = stop", L"Podgląd tick %u — Spacja = stop", L"Önizleme tick %u — Space = dur"),
+	st.Format(LL14(L"プレビュー tick %u — 停止ボタンか Space（譜面が止める）", L"Preview tick %u — Stop button or Space (score stops it)", L"Aperçu tick %u — Stop ou Espace", L"Anteprima tick %u — Stop o Spazio", L"Vista previa tick %u — Detener o Espacio",
+		L"미리듣기 tick %u — 정지 또는 Space", L"预览 tick %u — 停止或 Space", L"معاينة tick %u — إيقاف أو Space", L"Превью tick %u — Стоп или Space", L"Vorschau tick %u — Stopp oder Leertaste", L"Prévia tick %u — Parar ou Espaço", L"Voorbeeld tick %u — Stop of Spatie", L"Podgląd tick %u — Stop lub Spacja", L"Önizleme tick %u — Dur veya Space"),
 		(unsigned)m_ui.markerTick);
 	m_status.SetWindowText(st);
 	InvalidateRect(m_bodyRc, FALSE);
@@ -3763,9 +4251,9 @@ void CSasamiMidiScoreDlg::PreviewRangeInstant()
 	uint32_t t0 = 0, t1 = 0;
 	if (!ComputePreviewRange(&t0, &t1)) return;
 	if (m_ui.previewActive) {
-		ScStaffStopHostPreview(&m_ui);
-		KillTimer(kScPreviewTimer);
+		AutoArrangeStop();
 	}
+	ScStaffPreviewBindStop(MidiPreviewStopThunk, this);
 	VstLiveMonitorStop();
 	SyncFxBindsToLive();
 	for (int i = 0; i < m_ui.trackCount; i++)
@@ -3785,11 +4273,13 @@ void CSasamiMidiScoreDlg::PreviewRangeInstant()
 		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
 	if (!ok) {
 		m_ui.previewActive = 0;
+		SetPreviewBtn(0);
 		m_status.SetWindowText(LL14(L"範囲試聴に失敗（ホスト／wavout）", L"Range preview failed (host / wavout)", L"Échec aperçu plage", L"Anteprima intervallo non riuscita", L"Falló vista previa de rango",
 			L"범위 미리듣기 실패", L"范围试听失败", L"فشل معاينة النطاق", L"Превью диапазона не удалось", L"Bereichsvorschau fehlgeschlagen", L"Falha na prévia do intervalo", L"Bereikvoorbeeld mislukt", L"Podgląd zakresu nieudany", L"Aralık önizleme başarısız"));
 		VstLiveMonitorEnsure();
 		return;
 	}
+	SetPreviewBtn(1);
 	VstLiveMonitorStop();
 	PushDocToText();
 	SetTimer(kScPreviewTimer, 33, NULL);
@@ -3867,8 +4357,10 @@ void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 			if (m_ui.showRollSplit) InvalidateRect(m_rollRc, FALSE);
 		}
 		/* Preview finished — return SHM drain to editor monitor. */
-		if (ScStaffPreviewFinished(&m_ui))
+		if (ScStaffPreviewFinished(&m_ui)) {
 			KillTimer(kScPreviewTimer);
+			SetPreviewBtn(0);
+		}
 		return;
 	}
 	if (nIDEvent == kScMetroTimer) {
@@ -4436,6 +4928,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_curCh = tr;
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 		m_ui.visible[tr] = 1;
+		m_ui.markerTick = atTick;
 		OpenVstForPart(tr + 1);
 	}
 	else if (tr >= 0 && cmd == 9014) {
@@ -4806,22 +5299,16 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (shift && nChar == VK_SPACE) {
 		/* その場再生の特別ルート: 選択範囲(無ければ現在小節)を全パートで即試聴。 */
 		if (m_ui.previewActive) {
-			ScStaffStopHostPreview(&m_ui);
-			KillTimer(kScPreviewTimer);
-			VstLiveMonitorEnsure();
-			InvalidateRect(m_bodyRc, FALSE);
+			AutoArrangeStop();
 		} else {
 			PreviewRangeInstant();
 		}
 		return;
 	}
 	if (nChar == VK_SPACE) {
-		if (m_ui.previewActive) {
-			ScStaffStopHostPreview(&m_ui);
-			KillTimer(kScPreviewTimer);
-			VstLiveMonitorEnsure();
-			m_status.SetWindowText(LL14(L"停止 (Space)。マーカー位置は維持 — Space で再開。", L"Stopped (Space). Marker stays — Space again to resume from marker.", L"Arrêté (Espace). Le marqueur reste — Espace pour reprendre.", L"Fermato (Spazio). Il marcatore resta — Spazio per riprendere.", L"Detenido (Espacio). El marcador permanece — Espacio para reanudar.", L"정지 (Space). 마커 유지 — Space로 재개.", L"已停止 (Space)。标记保留 — 再按 Space 从标记继续。", L"توقف (Space). العلامة تبقى — Space للاستئناف.", L"Стоп (Space). Маркер сохранён — Space для продолжения.", L"Gestoppt (Leertaste). Markierung bleibt — Leertaste zum Fortsetzen.", L"Parado (Espaço). Marcador permanece — Espaço para retomar.", L"Gestopt (Spatie). Markering blijft — Spatie om te hervatten.", L"Zatrzymano (Spacja). Znacznik zostaje — Spacja wznawia.", L"Durdu (Space). İşaret kalır — Space ile devam."));
-			InvalidateRect(m_bodyRc, FALSE);
+		if (m_ui.previewActive || ScStaffPreviewIsRunning()) {
+			AutoArrangeStop();
+			m_status.SetWindowText(LL14(L"停止。マーカー位置は維持 — 再生確認か Space で再開。", L"Stopped. Marker stays — Preview or Space to resume.", L"Arrêté. Le marqueur reste.", L"Fermato. Il marcatore resta.", L"Detenido. El marcador permanece.", L"정지. 마커 유지.", L"已停止。标记保留。", L"توقف. العلامة تبقى.", L"Стоп. Маркер сохранён.", L"Gestoppt. Markierung bleibt.", L"Parado. Marcador permanece.", L"Gestopt. Markering blijft.", L"Zatrzymano. Znacznik zostaje.", L"Durdu. İşaret kalır."));
 		} else {
 			OnBnClickedPlay();
 		}
@@ -5596,14 +6083,33 @@ void CSasamiMidiScoreDlg::OnBnClickedLayout()
 	CSasamiLayoutPaletteDlg::OpenNear(this, pt);
 }
 
+void CSasamiMidiScoreDlg::SetPreviewBtn(int playing)
+{
+	if (!m_btnPlay.GetSafeHwnd()) return;
+	if (playing)
+		m_btnPlay.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Detener",
+			L"정지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	else
+		m_btnPlay.SetWindowText(LL14(L"再生確認", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa",
+			L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+}
+
+static void MidiPreviewStopThunk(void* ctx)
+{
+	((CSasamiMidiScoreDlg*)ctx)->AutoArrangeStop();
+}
+
 void CSasamiMidiScoreDlg::AutoArrangeStop()
 {
 	ScStaffStopHostPreview(&m_ui);
 	KillTimer(kScPreviewTimer);
+	SetPreviewBtn(0);
+	InvalidateRect(m_bodyRc, FALSE);
 }
 
 void CSasamiMidiScoreDlg::AutoArrangeRefresh()
 {
+	RefreshProgLabels();
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
@@ -5636,6 +6142,7 @@ void CSasamiMidiScoreDlg::OpenAutoArrange()
 	host.defMeterN = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
 	host.defMeterD = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
 	host.defKey = m_ui.keySig;
+	host.tempoT = &m_doc.tempoT;
 	host.ctx = this;
 	host.refresh = MidiAaRefresh;
 	host.preview = MidiAaPreview;
@@ -5643,6 +6150,8 @@ void CSasamiMidiScoreDlg::OpenAutoArrange()
 	const int aaOk = (ScAutoArrangeDlgRun(&host) == IDOK) ? 1 : 0;
 	ScStaffRepaintChrome(this, m_bodyRc.top);
 	if (aaOk) {
+		/* 足りないパートの先頭だけ音色を足す。試し再生はここでは始めない。 */
+		StampMapTones(ScStaffScorePreviewOut() == SC_OUT_XG ? 1 : 0, 0);
 		m_status.SetWindowText(LL14(
 			L"自動伴奏を入れました。元に戻すで消せます。",
 			L"Accompaniment added. Undo removes it.",

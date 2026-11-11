@@ -1983,6 +1983,9 @@ void CPianoRoll::UpdateNoteStates()
             // 一度しっかり鳴った音は、減衰中の欠測で長音が途切れないように少し長く繋ぐ。
             if (m_consecActive[i] >= 8)
                 gapLimit += 6;
+            // 中高音は拾いがフレームごとに欠ける。立ち始めたあとは少し長く繋いで点線にしない。
+            if (i >= PianoRoll108::BASS_END && m_consecActive[i] >= 4)
+                gapLimit += 4;
             const int releaseLimit = TemporalFrames(i, RELEASE_FRAMES);
             const bool gapDetected =
                 m_unpickedFrames[i] >= gapLimit ||
@@ -2003,8 +2006,11 @@ void CPianoRoll::UpdateNoteStates()
         if (!m_activeKeys[i] || picked[i]) continue;
         // 長く鳴っている音は欠測のあいだ倍音扱いでも切らない。長音が途中で消える。
         if (m_consecActive[i] >= 8) continue;
+        // 中高音は、ベースの倍音だけ欠測中に切る。別の中音の倍音扱いでは消さない。
+        const int harmHi = (i >= PianoRoll108::BASS_END && m_consecActive[i] >= 4)
+            ? PianoRoll108::BASS_END : i;
         if (!PianoKey::IsHarmonicOfAnyActive(blend, i, picked,
-            PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.80f))
+            PianoRoll108::MUSIC_LOW_FLOOR, harmHi, KEY_COUNT, 0.80f))
             continue;
         m_activeKeys[i] = false;
         m_consecActive[i] = 0;

@@ -8338,11 +8338,28 @@ void CCustomStatic::SetFont(CFont* pF, BOOL bR)
     }
 }
 
+/* WM_GETTEXT は OnGetText が空の m_strText を返すので、Create 時の
+   キャプションは既定プロシージャから取る。そうしないと SetWindowText した
+   ラベルだけが描画され、Create に渡した見出しは真っ白のままになる。 */
+static void PullStaticCaption(HWND hwnd, CString& dst)
+{
+    if (!hwnd) return;
+    const int n = (int)::DefWindowProc(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    if (n <= 0) return;
+    const int cap = (n > 8192) ? 8192 : n;
+    CString tmp;
+    LPTSTR buf = tmp.GetBuffer(cap + 1);
+    if (!buf) return;
+    ::DefWindowProc(hwnd, WM_GETTEXT, (WPARAM)(cap + 1), (LPARAM)buf);
+    tmp.ReleaseBuffer();
+    if (!tmp.IsEmpty()) dst = tmp;
+}
+
 // 初期キャプションを内部バッファへ。親フォントを継承。
 void CCustomStatic::PreSubclassWindow()
 {
     CStatic::PreSubclassWindow();
-    CWnd::GetWindowText(m_strText);
+    PullStaticCaption(m_hWnd, m_strText);
     CWnd* pP = GetParent();
     if (pP)
     {
@@ -8374,7 +8391,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     const int rw = rect.Width();
     const int rh = rect.Height();
     if (rw <= 0 || rh <= 0) return;
-    if (m_strText.IsEmpty()) CWnd::GetWindowText(m_strText);
+    if (m_strText.IsEmpty()) PullStaticCaption(m_hWnd, m_strText);
 
     auto blitTrans = [&](HDC hdcSrc) {
 #if CCUSTOM_AERO_SUPPORT

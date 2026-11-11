@@ -1181,6 +1181,12 @@ static int NoteIndex(wchar_t c)
 
 static int LenToTicks(int len, int defLen, int dots)
 {
+	/* 負の len は !n の生ティック（4分 = SC_PPQN）。切り捨てると再コンパイルでずれる。 */
+	if (len < 0) {
+		int t = -len;
+		if (t < 1) t = 1;
+		return t;
+	}
 	if (len <= 0) len = defLen;
 	if (len <= 0) len = 4;
 	int ticks = (SC_PPQN * 4) / len;
@@ -1619,6 +1625,14 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 		return 0;
 	};
 	auto parseLenDots = [&](int* outLen, int* outDots) {
+		if (*p == L'!') {
+			p++;
+			int n = ParseInt(&p);
+			if (n < 1) n = 1;
+			*outLen = -n;
+			*outDots = 0;
+			return;
+		}
 		*outLen = ParseInt(&p);
 		*outDots = 0;
 		while (*p == L'.') { (*outDots)++; p++; }
@@ -2355,7 +2369,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			   Heuristic: if ch==9 (MIDI10) and next is letter not digit/dot, treat as drum later. */
 			const wchar_t rc = *p;
 			p++;
-			if (rc == L'r' && drumPart[ch] && *p && !IsDigit(*p) && *p != L'.' && NoteIndex(*p) < 0 && *p != L'^') {
+			if (rc == L'r' && drumPart[ch] && *p && !IsDigit(*p) && *p != L'.' && *p != L'!' && NoteIndex(*p) < 0 && *p != L'^') {
 				/* fall through — actually already consumed; treat as ride drum note 51 */
 				int len, dots;
 				parseLenDots(&len, &dots);
@@ -2710,8 +2724,8 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		if (*p == L'|' || *p == L'~' || *p == L'$' || *p == L'&') { p++; continue; }
 		if (*p == L'^') {
 			p++;
-			(void)ParseInt(&p);
-			while (*p == L'.') p++;
+			if (*p == L'!') { p++; (void)ParseInt(&p); }
+			else { (void)ParseInt(&p); while (*p == L'.') p++; }
 			continue;
 		}
 		/* {n ... } / {:n ... }: classic expand; fpy2 native soft */
@@ -3022,10 +3036,17 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 		}
 		if (*p == L'r' || *p == L'R') {
 			p++;
-			int len = ParseInt(&p);
-			int dots = 0;
-			while (*p == L'.') { dots++; p++; }
-			int dur = LenToTicks(len, defLen, dots);
+			int dur;
+			if (*p == L'!') {
+				p++;
+				dur = ParseInt(&p);
+				if (dur < 1) dur = 1;
+			} else {
+				int len = ParseInt(&p);
+				int dots = 0;
+				while (*p == L'.') { dots++; p++; }
+				dur = LenToTicks(len, defLen, dots);
+			}
 			int wait = dur;
 			if (wait > 255) wait = 255;
 			if (!ScFmAddRest(out, tick[ch], ch, wait)) return fail(L"overflow");
@@ -3056,10 +3077,17 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 				}
 			}
 			if (pad >= 0) {
-				int len = ParseInt(&p);
-				int dots = 0;
-				while (*p == L'.') { dots++; p++; }
-				int dur = LenToTicks(len, defLen, dots);
+				int dur;
+				if (*p == L'!') {
+					p++;
+					dur = ParseInt(&p);
+					if (dur < 1) dur = 1;
+				} else {
+					int len = ParseInt(&p);
+					int dots = 0;
+					while (*p == L'.') { dots++; p++; }
+					dur = LenToTicks(len, defLen, dots);
+				}
 				if (!tempoWritten) {
 					ScPush(out->ev, &out->evCount, 0, 0, SC_EV_FM_TEMPO,
 						(uint8_t)(out->tempoT & 0xFF), (uint8_t)((out->tempoT >> 8) & 0xFF), 0, 0);
@@ -3079,10 +3107,17 @@ int ScCompileFmText(const wchar_t* text, ScFmDoc* out, int* errLine, wchar_t* er
 			else if (*p == L'-') { ni--; p++; }
 			if (ni < 0) ni = 0;
 			if (ni > 11) ni = 11;
-			int len = ParseInt(&p);
-			int dots = 0;
-			while (*p == L'.') { dots++; p++; }
-			int dur = LenToTicks(len, defLen, dots);
+			int dur;
+			if (*p == L'!') {
+				p++;
+				dur = ParseInt(&p);
+				if (dur < 1) dur = 1;
+			} else {
+				int len = ParseInt(&p);
+				int dots = 0;
+				while (*p == L'.') { dots++; p++; }
+				dur = LenToTicks(len, defLen, dots);
+			}
 			/* gate % shortens sounding wait; full dur stored for score/MML round-trip */
 			int wait = (dur * gatePct) / 100;
 			if (wait < 2) wait = 2;
@@ -3231,6 +3266,19 @@ static int CmpEv(const void* a, const void* b)
 	const int rb = softRank(eb->kind);
 	if (ra >= 0 && rb >= 0 && ra != rb)
 		return ra - rb;
+	/* 同じ拍のセットアップはドラム指定 → バンク → プログラム。
+	   逆だと SC-VA が PC をピアノのまま捨てる。 */
+	if (ra == 3 && rb == 3) {
+		auto toneRank = [](uint8_t k) -> int {
+			if (k == SC_EV_DRUM) return 0;
+			if (k == SC_EV_BANK) return 1;
+			if (k == SC_EV_PROG) return 2;
+			return 3;
+		};
+		const int ta = toneRank(ea->kind);
+		const int tb = toneRank(eb->kind);
+		if (ta != tb) return ta - tb;
+	}
 	if (ea->seq < eb->seq) return -1;
 	if (ea->seq > eb->seq) return 1;
 	return 0;
@@ -3255,14 +3303,14 @@ static ScEvent* ScExportEvBuf(void)
 }
 
 /*
- * SASAMI MIDI streams are monophonic. Score chords share one visual track;
- * for MPW/MML they must become [midiCh:1] [midiCh:2] … with rests padding.
- * Remaps overlapping NOTE events onto free dataArea slots sharing MIDI part.
+ * 1 トラックは和音 8 音まで同時に出せる。空き dataArea があればそちらへも分け、
+ * パートの音色を共有する。空きが無いときも同じトラックの和音として鳴る。
  * Mutates ev[].ch and trackPart[] (working copies only).
  */
-static void ScMidiExpandChordVoices(ScEvent* ev, int n, uint8_t trackPart[SC_MIDI_CH])
+static void ScMidiExpandChordVoices(ScEvent* ev, int* nio, int nMax, uint8_t trackPart[SC_MIDI_CH])
 {
-	if (!ev || n <= 0 || !trackPart) return;
+	if (!ev || !nio || *nio <= 0 || !trackPart) return;
+	int n = *nio;
 
 	uint8_t occupied[SC_MIDI_CH];
 	memset(occupied, 0, sizeof(occupied));
@@ -3330,7 +3378,7 @@ static void ScMidiExpandChordVoices(ScEvent* ev, int n, uint8_t trackPart[SC_MID
 			const uint32_t t1 = t0 + (e.dur ? e.dur : 1u);
 			int v = -1;
 			for (int i = 0; i < nVoice; i++) {
-				if (voiceEnd[i] <= t0) { v = i; break; }
+				if (voiceEnd[i] <= t0 + 2u) { v = i; break; }
 			}
 			if (v < 0) {
 				if (nVoice >= kMaxVoice) continue; /* leave on home — sequential fallback */
@@ -3340,6 +3388,25 @@ static void ScMidiExpandChordVoices(ScEvent* ev, int n, uint8_t trackPart[SC_MID
 				voiceSlot[v] = slot;
 				voiceEnd[v] = 0;
 				trackPart[slot] = (uint8_t)part;
+				/* 分けたレーンはノートしか無いと、その MIDI チャンネルは
+				   先頭 PC が無くピアノのまま鳴る。ホームの音色をコピーする。 */
+				for (int ei = 0; ei < n && *nio < nMax; ei++) {
+					if ((int)ev[ei].ch != home || ev[ei].tick != 0) continue;
+					const uint8_t k = ev[ei].kind;
+					if (k != SC_EV_DRUM && k != SC_EV_BANK && k != SC_EV_PROG && k != SC_EV_CLEF)
+						continue;
+					int has = 0;
+					for (int ej = 0; ej < *nio; ej++) {
+						if ((int)ev[ej].ch == slot && ev[ej].tick == 0 && ev[ej].kind == k) {
+							has = 1;
+							break;
+						}
+					}
+					if (has) continue;
+					ev[*nio] = ev[ei];
+					ev[*nio].ch = (uint8_t)slot;
+					(*nio)++;
+				}
 			}
 			e.ch = (uint8_t)voiceSlot[v];
 			voiceEnd[v] = t1;
@@ -3903,7 +3970,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	uint8_t xPart[SC_MIDI_CH];
 	memcpy(xPart, d->trackPart, sizeof(xPart));
 	/* Chord tones on one score lane → extra [midiCh:dataArea] streams. */
-	ScMidiExpandChordVoices(sorted, n, xPart);
+	ScMidiExpandChordVoices(sorted, &n, SC_EV_MAX, xPart);
 	qsort(sorted, (size_t)n, sizeof(ScEvent), CmpEv);
 
 	uint32_t lastTick[SC_MIDI_CH];
@@ -3920,6 +3987,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	memset(loopWrSp, 0, sizeof(loopWrSp));
 	memset(chStreamJump, 0, sizeof(chStreamJump));
 	memset(chJumpSet, 0, sizeof(chJumpSet));
+	int chordLeft = 0;
+	int chordCh = -1;
+	uint32_t chordTick = 0;
 
 	/* DO--.MPY track header for VST SC-VA / GS:
 	   - MVOL80 + VOL117 + VELO105 (MVOL = GS master; without it SC-VA sits ~full → ~2x)
@@ -3938,8 +4008,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		};
 		if (!SasamiStreamPut3(s, 4, 80, 0)) return 0;           /* MVOL */
 		if (!putRest(0)) return 0;
-		if (!SasamiStreamPut3(s, 7, 0, 0)) return 0;            /* BANK 0 */
-		if (!putRest(0)) return 0;
+		/* cmd 7 は再生側が CC0=0 にする。和音を分けた後続トラックが
+		   これを同じ MIDI チャンネルへ出すと、直前の PC が Piano 1 に戻る。
+		   バンクは譜面の SC_EV_BANK（CC0/CC32）だけにする。 */
 		if (!SasamiStreamPut3(s, 16, 1, 0)) return 0;           /* H1 */
 		if (!putRest(0)) return 0;
 		if (!SasamiStreamPut3(s, 17, 60, 0)) return 0;          /* I60 */
@@ -4029,8 +4100,10 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			if (!SasamiStreamPut3(s, 2, e->a, e->b)) return 0;
 			break;
 		case SC_EV_BANK:
-			/* Paired @n:m already encoded in PROG (c==1); skip stray bank. */
-			if (!SasamiStreamPut3(s, 7, e->a, e->b)) return 0;
+			/* cmd 7 は再生側が 2 バイト目を CC0 にする。LSB を渡すとバンク MSB がずれ、
+			   その後のプログラムがピアノのままになる。CC0=MSB、CC32=LSB をそのまま出す。 */
+			if (!SasamiStreamPut3(s, 41, 0, e->a)) return 0;
+			if (!SasamiStreamPut3(s, 41, 32, e->b)) return 0;
 			break;
 		case SC_EV_COMMENT: {
 			/* dur holds MPY cmd id: 13/14 (@L/@R 4-byte), 16 (H), 17 (I). */
@@ -4087,10 +4160,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_DRUM:
-			/* Tick 0 already emitted after preamble. Mid-score KAKU still writes. */
-			if (e->tick > 0) {
-				if (!SasamiStreamPut3(s, 29, e->a ? 1 : 0, 0)) return 0;
-			}
+			/* 先頭も途中も、バンクと PC より前の seq でリズム指定を出す。
+			   ここで落とすと ch10 以外が通常パートのまま、キット PC がピアノになる。 */
+			if (!SasamiStreamPut3(s, 29, e->a ? 1 : 0, 0)) return 0;
 			break;
 		case SC_EV_JUMP_MARK: {
 			/* Q always wins as soft-J land (overrides an earlier |:). */
@@ -4158,20 +4230,68 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			ScSoftApplyEv(&softM[ch], e);
 			break;
 		case SC_EV_NOTE: {
-			int gate = (e->c >= 1 && e->c <= 100) ? e->c : 100;
-			uint32_t sounding = ((uint32_t)(e->dur ? e->dur : 1) * (uint32_t)gate) / 100u;
+			/* 同じ拍に重なった音は待ち 0 で同時に鳴らし、一番長い 1 音だけ時間を進める。
+			   ベロシティはノートごとに cmd 19。ドラムの強弱もここで乗る。 */
+			if (chordLeft > 0 && ch == chordCh && e->tick == chordTick) {
+				chordLeft--;
+				break;
+			}
+			const ScEvent* noteEv = e;
+			if (!ScSoftActive(&softM[ch])) {
+				int grp[8];
+				int ng = 0;
+				grp[ng++] = i;
+				for (int j = i + 1; j < n && ng < 8; j++) {
+					if ((int)sorted[j].ch != ch || sorted[j].tick != e->tick) break;
+					if (sorted[j].kind != SC_EV_NOTE) continue;
+					grp[ng++] = j;
+				}
+				if (ng > 1) {
+					int keeper = 0;
+					uint32_t best = 0;
+					for (int g = 0; g < ng; g++) {
+						uint32_t d = sorted[grp[g]].dur ? sorted[grp[g]].dur : 1u;
+						if (d >= best) { best = d; keeper = g; }
+					}
+					for (int g = 0; g < ng; g++) {
+						if (g == keeper) continue;
+						const ScEvent* z = &sorted[grp[g]];
+						if (z->b >= 1 && z->b <= 127 && (int)z->b != vel[ch]) {
+							if (!SasamiStreamPut3(s, 0x13, z->b, 0)) return 0;
+							vel[ch] = (int)z->b;
+						}
+						if (!SasamiStreamPut3(s, 1, z->a, 0)) return 0;
+					}
+					noteEv = &sorted[grp[keeper]];
+					chordLeft = ng - 1;
+					chordCh = ch;
+					chordTick = e->tick;
+				}
+			}
+			if (noteEv->b >= 1 && noteEv->b <= 127 && (int)noteEv->b != vel[ch]) {
+				if (!SasamiStreamPut3(s, 0x13, noteEv->b, 0)) return 0;
+				vel[ch] = (int)noteEv->b;
+			}
+			/* コマンドの待ちは鳴っている時間だけ。譜面の dur との差を休符で埋めないと、
+			   ゲートの分だけその ch だけ先へずれ、小節が進むほど他 ch と離れる。 */
+			int gate = (noteEv->c >= 1 && noteEv->c <= 100) ? noteEv->c : 100;
+			uint32_t dur = noteEv->dur ? noteEv->dur : 1;
+			uint32_t sounding = (dur * (uint32_t)gate) / 100u;
 			if (sounding < 1) sounding = 1;
+			if (sounding > dur) sounding = dur;
 			if (ScSoftActive(&softM[ch])) {
 				if (softM[ch].noteOn && !ScSoftPutMidiRestore(s, &softM[ch])) return 0;
 				softM[ch].tCur = 0;
-				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)e->a, (int)sounding, 1)) return 0;
+				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)noteEv->a, (int)sounding, 1)) return 0;
 			} else {
 				if (softM[ch].noteOn && !ScSoftPutMidiRestore(s, &softM[ch])) return 0;
 				softM[ch].noteOn = 0;
-				uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
-				if (!SasamiStreamPut3(s, 1, e->a, wait)) return 0;
+				uint32_t head = sounding > 255u ? 255u : sounding;
+				if (!SasamiStreamPut3(s, 1, noteEv->a, (uint8_t)head)) return 0;
+				if (sounding > head && !ScPutWait8(s, 3, 0, (int)(sounding - head))) return 0;
 			}
-			lastTick[ch] += e->dur ? e->dur : sounding;
+			if (dur > sounding && !ScPutWait8(s, 8, 0, (int)(dur - sounding))) return 0;
+			lastTick[ch] += dur;
 			break;
 		}
 		case SC_EV_REST: {
@@ -4180,20 +4300,19 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 				softM[ch].noteOn = 0;
 				softM[ch].tCur = 0;
 			}
-			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur ? e->dur : 1);
-			if (!SasamiStreamPut3(s, 8, 0, wait)) return 0;
-			lastTick[ch] += e->dur ? e->dur : wait;
+			uint32_t dur = e->dur ? e->dur : 1;
+			if (!ScPutWait8(s, 8, 0, (int)dur)) return 0;
+			lastTick[ch] += dur;
 			break;
 		}
 		case SC_EV_TIE: {
-			uint32_t sounding = e->dur ? e->dur : 1;
+			uint32_t dur = e->dur ? e->dur : 1;
 			if (ScSoftActive(&softM[ch]) && softM[ch].noteOn) {
-				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)e->a, (int)sounding, 0)) return 0;
+				if (!ScSoftEmitMidiNote(s, &softM[ch], (int)e->a, (int)dur, 0)) return 0;
 			} else {
-				uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
-				if (!SasamiStreamPut3(s, 3, 0, wait)) return 0;
+				if (!ScPutWait8(s, 3, 0, (int)dur)) return 0;
 			}
-			lastTick[ch] += e->dur ? e->dur : sounding;
+			lastTick[ch] += dur;
 			break;
 		}
 		default: break;
@@ -5049,7 +5168,7 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 		memcpy(work, d->ev, sizeof(ScEvent) * (size_t)nWork);
 	uint8_t xPart[SC_MIDI_CH];
 	memcpy(xPart, d->trackPart, sizeof(xPart));
-	ScMidiExpandChordVoices(work, nWork, xPart);
+	ScMidiExpandChordVoices(work, &nWork, SC_EV_MAX, xPart);
 
 	int used[SC_MIDI_CH];
 	memset(used, 0, sizeof(used));
@@ -5122,7 +5241,10 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				}
 			}
 			if (bestGot <= 0) {
-				bestGot = 1; bestLn = 64; bestDots = 0;
+				/* 64分（3ティック）未満を r64 と書くと、再コンパイルで 3 ティック進んでずれる。 */
+				bestGot = gap < 1 ? 1 : gap;
+				bestLn = 0;
+				bestDots = 0;
 			}
 			if (lnOut) *lnOut = bestLn;
 			if (dotsOut) *dotsOut = bestDots;
@@ -5136,10 +5258,14 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				int ln = 4, dots = 0;
 				int got = fitPiece((int)gap, &ln, &dots);
 				if (got > (int)gap) got = (int)gap;
-				/* lowercase r = time skip on recompile (no SC_EV_REST) */
-				ScAppendF(out, outCch, &len, L"r%d", ln);
-				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-				ScAppend(out, outCch, &len, L" ");
+				/* lowercase r = time skip on recompile (no SC_EV_REST). ln==0 は !ティック。 */
+				if (ln == 0)
+					ScAppendF(out, outCch, &len, L"r!%d ", got);
+				else {
+					ScAppendF(out, outCch, &len, L"r%d", ln);
+					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+					ScAppend(out, outCch, &len, L" ");
+				}
 				expect += (uint32_t)got;
 				gap -= (uint32_t)got;
 				if (len >= cap - 64) return;
@@ -5188,9 +5314,14 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				int ln = 4, dots = 0;
 				int got = fitPiece(left, &ln, &dots);
 				if (got > left) got = left;
-				if (asTie || !first) ScAppendF(out, outCch, &len, L"^%d", ln);
-				else ScAppendF(out, outCch, &len, L"%d", ln);
-				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				if (ln == 0) {
+					if (asTie || !first) ScAppendF(out, outCch, &len, L"^!%d", got);
+					else ScAppendF(out, outCch, &len, L"!%d", got);
+				} else {
+					if (asTie || !first) ScAppendF(out, outCch, &len, L"^%d", ln);
+					else ScAppendF(out, outCch, &len, L"%d", ln);
+					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+				}
 				left -= got;
 				first = 0;
 				asTie = 1;
@@ -5505,7 +5636,7 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 				bestGot = dotted; bestLn = lens[i]; bestDots = 1;
 			}
 		}
-		if (bestGot <= 0) { bestGot = 1; bestLn = 64; bestDots = 0; }
+		if (bestGot <= 0) { bestGot = gap < 1 ? 1 : gap; bestLn = 0; bestDots = 0; }
 		if (lnOut) *lnOut = bestLn;
 		if (dotsOut) *dotsOut = bestDots;
 		return bestGot;
@@ -5533,9 +5664,13 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 				int ln = 4, dots = 0;
 				int got = fitPiece((int)gap, &ln, &dots);
 				if (got > (int)gap) got = (int)gap;
-				ScAppendF(out, outCch, &len, L"r%d", ln);
-				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-				ScAppend(out, outCch, &len, L" ");
+				if (ln == 0)
+					ScAppendF(out, outCch, &len, L"r!%d ", got);
+				else {
+					ScAppendF(out, outCch, &len, L"r%d", ln);
+					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+					ScAppend(out, outCch, &len, L" ");
+				}
 				expect += (uint32_t)got;
 				gap -= (uint32_t)got;
 				if (len >= cap - 64) return;
@@ -5667,11 +5802,20 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 					continue;
 				}
 				const int dur = e.dur ? (int)e.dur : 2;
-				int dots = 0;
-				int ln = ScDurToLen(dur, &dots);
-				ScAppendF(out, outCch, &len, L"r%d", ln);
-				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
-				ScAppend(out, outCch, &len, L" ");
+				int left = dur;
+				while (left > 0) {
+					int ln = 4, dots = 0;
+					int got = fitPiece(left, &ln, &dots);
+					if (got > left) got = left;
+					if (ln == 0)
+						ScAppendF(out, outCch, &len, L"r!%d ", got);
+					else {
+						ScAppendF(out, outCch, &len, L"r%d", ln);
+						for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
+						ScAppend(out, outCch, &len, L" ");
+					}
+					left -= got;
+				}
 				expect = e.tick + (uint32_t)dur;
 				continue;
 			}
@@ -5704,7 +5848,10 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 					if (got > left) got = left;
 					if (!first)
 						ScAppend(out, outCch, &len, L"^");
-					ScAppendF(out, outCch, &len, L"%s%d", kPadLet[pad], ln);
+					if (ln == 0)
+						ScAppendF(out, outCch, &len, L"%s!%d", kPadLet[pad], got);
+					else
+						ScAppendF(out, outCch, &len, L"%s%d", kPadLet[pad], ln);
 					for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
 					left -= got;
 					first = 0;
@@ -5730,7 +5877,10 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 				if (got > left) got = left;
 				if (!first)
 					ScAppend(out, outCch, &len, L"^");
-				ScAppendF(out, outCch, &len, L"%s%d", nm, ln);
+				if (ln == 0)
+					ScAppendF(out, outCch, &len, L"%s!%d", nm, got);
+				else
+					ScAppendF(out, outCch, &len, L"%s%d", nm, ln);
 				for (int dti = 0; dti < dots; dti++) ScAppend(out, outCch, &len, L".");
 				left -= got;
 				first = 0;

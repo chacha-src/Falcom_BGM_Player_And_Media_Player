@@ -5,6 +5,8 @@
 //
 #include "stdafx.h"
 #include "ogg.h"
+extern "C" int ScStaffPreviewIsRunning(void);
+extern "C" int ScStaffPreviewStopFromHost(void);
 #include "oggDlg.h"
 #include "PlayList.h"
 #include "CEqualizer.h"
@@ -2692,6 +2694,11 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
 	// 迷路／空中レースが開いている間は SPACE を再生に使わない
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
+		/* 譜面の再生確認中は本体の再生／一時停止にしない。 */
+		if (ScStaffPreviewIsRunning()) {
+			ScStaffPreviewStopFromHost();
+			return TRUE;
+		}
 		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive() || IsSoft3DRaceOpen() || IsSoft3DRaceActive()
 			|| IsOmakeTacticsOpen())
 			return TRUE;

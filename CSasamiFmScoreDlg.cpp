@@ -585,22 +585,16 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if ((GetKeyState(VK_SHIFT) & 0x8000) && nChar == VK_SPACE) {
 		/* その場再生の特別ルート: 選択範囲(無ければ現在小節)を全パートで即試聴。 */
 		if (m_ui.previewActive) {
-			ScStaffStopHostPreview(&m_ui);
-			KillTimer(1);
-			KillTimer(kScFmPreviewTimer);
-			InvalidateRect(m_bodyRc, FALSE);
+			AutoArrangeStop();
 		} else {
 			PreviewRangeInstant();
 		}
 		return;
 	}
 	if (nChar == VK_SPACE) {
-		if (m_ui.previewActive) {
-			ScStaffStopHostPreview(&m_ui);
-			KillTimer(1);
-			KillTimer(kScFmPreviewTimer);
-			m_status.SetWindowText(LL14(L"停止 (Space)。マーカー位置は維持 — Space で再開。", L"Stopped (Space). Marker stays — Space again from marker.", L"Arrêté (Espace). Le marqueur reste — Espace pour reprendre.", L"Fermato (Spazio). Il marcatore resta — Spazio per riprendere.", L"Detenido (Espacio). El marcador permanece — Espacio para reanudar.", L"정지 (Space). 마커 유지 — Space로 재개.", L"已停止 (Space)。标记保留 — 再按 Space 从标记继续。", L"توقف (Space). العلامة تبقى — Space للاستئناف.", L"Стоп (Space). Маркер сохранён — Space для продолжения.", L"Gestoppt (Leertaste). Markierung bleibt — Leertaste zum Fortsetzen.", L"Parado (Espaço). Marcador permanece — Espaço para retomar.", L"Gestopt (Spatie). Markering blijft — Spatie om te hervatten.", L"Zatrzymano (Spacja). Znacznik zostaje — Spacja wznawia.", L"Durdu (Space). İşaret kalır — Space ile devam."));
-			InvalidateRect(m_bodyRc, FALSE);
+		if (m_ui.previewActive || ScStaffPreviewIsRunning()) {
+			AutoArrangeStop();
+			m_status.SetWindowText(LL14(L"停止。マーカー位置は維持 — 再生確認か Space で再開。", L"Stopped. Marker stays — Preview or Space to resume.", L"Arrêté. Le marqueur reste.", L"Fermato. Il marcatore resta.", L"Detenido. El marcador permanece.", L"정지. 마커 유지.", L"已停止。标记保留。", L"توقف. العلامة تبقى.", L"Стоп. Маркер сохранён.", L"Gestoppt. Markierung bleibt.", L"Parado. Marcador permanece.", L"Gestopt. Markering blijft.", L"Zatrzymano. Znacznik zostaje.", L"Durdu. İşaret kalır."));
 		} else {
 			OnBnClickedPlay();
 		}
@@ -2706,8 +2700,17 @@ void CSasamiFmScoreDlg::OnBnClickedOpen()
 	m_status.SetWindowText(st);
 }
 
+static void FmPreviewStopThunk(void* ctx);
+
 void CSasamiFmScoreDlg::OnBnClickedPlay()
 {
+	if (m_ui.previewActive || ScStaffPreviewIsRunning()) {
+		AutoArrangeStop();
+		m_status.SetWindowText(LL14(L"停止。再生確認でもう一度。", L"Stopped. Preview again to play.", L"Arrêté. Aperçu pour relancer.", L"Fermato. Anteprima per ripartire.", L"Detenido. Vista previa para seguir.",
+			L"정지. 미리듣기로 다시.", L"已停止。再按试听。", L"توقف. المعاينة للإعادة.", L"Стоп. Превью — снова.", L"Gestoppt. Vorschau startet erneut.", L"Parado. Prévia de novo.", L"Gestopt. Voorbeeld opnieuw.", L"Zatrzymano. Podgląd ponownie.", L"Durdu. Önizleme yeniden."));
+		return;
+	}
+	ScStaffPreviewBindStop(FmPreviewStopThunk, this);
 	wchar_t path[MAX_PATH];
 	if (!BuildToTemp(path, MAX_PATH, m_ui.markerTick)) return;
 	m_status.SetWindowText(LL14(L"譜面プレビュー…", L"Score preview…", L"Aperçu partition…", L"Anteprima partitura…", L"Vista previa…",
@@ -2717,10 +2720,12 @@ void CSasamiFmScoreDlg::OnBnClickedPlay()
 		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
 	if (!ok) {
 		m_ui.previewActive = 0;
+		SetPreviewBtn(0);
 		m_status.SetWindowText(LL14(L"プレビュー失敗（ホスト／wavout）", L"Preview failed (host / wavout)", L"Échec aperçu", L"Anteprima non riuscita", L"Falló la vista previa",
 			L"미리듣기 실패", L"预览失败", L"فشل المعاينة", L"Превью не удалось", L"Vorschau fehlgeschlagen", L"Falha na prévia", L"Voorbeeld mislukt", L"Podgląd nieudany", L"Önizleme başarısız"));
 		return;
 	}
+	SetPreviewBtn(1);
 	SetTimer(1, 33, NULL);
 	CString st;
 	st.Format(LL14(L"FMプレビュー tick %u — Spaceで停止", L"FM preview tick %u — Space to stop", L"Aperçu FM tick %u", L"Anteprima FM tick %u", L"Vista previa FM tick %u",
@@ -2775,10 +2780,9 @@ void CSasamiFmScoreDlg::PreviewRangeInstant()
 	uint32_t t0 = 0, t1 = 0;
 	if (!ComputePreviewRange(&t0, &t1)) return;
 	if (m_ui.previewActive) {
-		ScStaffStopHostPreview(&m_ui);
-		KillTimer(1);
-		KillTimer(kScFmPreviewTimer);
+		AutoArrangeStop();
 	}
+	ScStaffPreviewBindStop(FmPreviewStopThunk, this);
 	wchar_t path[MAX_PATH];
 	if (!BuildToTemp(path, MAX_PATH, t0, t1)) return;
 	m_ui.markerTick = t0;
@@ -2787,10 +2791,12 @@ void CSasamiFmScoreDlg::PreviewRangeInstant()
 		ok = ScStaffPreviewViaWavout(path, &m_ui, m_doc.tempoT);
 	if (!ok) {
 		m_ui.previewActive = 0;
+		SetPreviewBtn(0);
 		m_status.SetWindowText(LL14(L"範囲試聴に失敗（ホスト／wavout）", L"Range preview failed (host / wavout)", L"Échec aperçu plage", L"Anteprima intervallo non riuscita", L"Falló vista previa de rango",
 			L"범위 미리듣기 실패", L"范围试听失败", L"فشل معاينة النطاق", L"Превью диапазона не удалось", L"Bereichsvorschau fehlgeschlagen", L"Falha na prévia do intervalo", L"Bereikvoorbeeld mislukt", L"Podgląd zakresu nieudany", L"Aralık önizleme başarısız"));
 		return;
 	}
+	SetPreviewBtn(1);
 	SetTimer(1, 33, NULL);
 	CString st;
 	st.Format(LL14(L"範囲試聴 tick %u–%u — Spaceで停止", L"Range preview tick %u–%u — Space to stop", L"Aperçu plage tick %u–%u — Espace = stop", L"Anteprima intervallo tick %u–%u — Spazio = stop", L"Vista previa rango tick %u–%u — Espacio = stop",
@@ -2833,6 +2839,7 @@ void CSasamiFmScoreDlg::OnTimer(UINT_PTR nIDEvent)
 		if (ScStaffPreviewFinished(&m_ui)) {
 			KillTimer(1);
 			KillTimer(kScFmPreviewTimer);
+			SetPreviewBtn(0);
 		}
 		return;
 	}
@@ -3561,11 +3568,29 @@ void CSasamiFmScoreDlg::OnBnClickedText()
 	CSasamiTextDlg::OpenOwned(this);
 }
 
+void CSasamiFmScoreDlg::SetPreviewBtn(int playing)
+{
+	if (!m_btnPlay.GetSafeHwnd()) return;
+	if (playing)
+		m_btnPlay.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Detener",
+			L"정지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	else
+		m_btnPlay.SetWindowText(LL14(L"再生確認", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa",
+			L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+}
+
+static void FmPreviewStopThunk(void* ctx)
+{
+	((CSasamiFmScoreDlg*)ctx)->AutoArrangeStop();
+}
+
 void CSasamiFmScoreDlg::AutoArrangeStop()
 {
 	ScStaffStopHostPreview(&m_ui);
 	KillTimer(1);
 	KillTimer(kScFmPreviewTimer);
+	SetPreviewBtn(0);
+	InvalidateRect(m_bodyRc, FALSE);
 }
 
 void CSasamiFmScoreDlg::AutoArrangeRefresh()

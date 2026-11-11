@@ -3516,10 +3516,39 @@ static int ScStaffToneLaneConfigured(const ScStaffUi* u, int tr, int isFm)
 {
 	if (!u || tr < 0 || tr >= 32) return 0;
 	const wchar_t* s = u->vstLabel[tr];
-	if (!s[0]) return 0;
-	if (wcsncmp(s, L"(no ", 4) == 0) return 0;
+	if (s[0] && wcsncmp(s, L"(no ", 4) != 0) {
+		(void)isFm;
+		return 1;
+	}
+	/* 未接続でも譜面先頭のプログラムがあれば音色は入っている。 */
+	const wchar_t* p = u->progLabel[tr];
+	if (p[0] && wcsncmp(p, L"Prog  —", 7) != 0 && wcsncmp(p, L"Prog  -", 7) != 0)
+		return 1;
 	(void)isFm;
-	return 1;
+	return 0;
+}
+
+/* 同じ拍の Tone / Exc チップを横にずらす。Bank が Prog の上に重なると音色名が見えない。 */
+static int ScStaffCtrlChipLane(uint8_t kind, int isFm)
+{
+	if (!isFm) {
+		if (kind == SC_EV_PROG || kind == SC_EV_BANK || kind == SC_EV_JUMP_MARK
+			|| kind == SC_EV_PEDAL_ON || kind == SC_EV_PEDAL_OFF
+			|| kind == SC_EV_OTTAVA || kind == SC_EV_OTTAVA_END
+			|| kind == SC_EV_SOFT_VIB || kind == SC_EV_SOFT_PORTA)
+			return 0;
+		if (kind == SC_EV_RPN || kind == SC_EV_NRPN || kind == SC_EV_SYSEX || kind == SC_EV_VELO)
+			return 1;
+		return -1;
+	}
+	if (kind == SC_EV_FM_VOICE || kind == SC_EV_FM_JUMP
+		|| kind == SC_EV_FM_LOOP_START || kind == SC_EV_FM_LOOP_END
+		|| kind == SC_EV_OTTAVA || kind == SC_EV_OTTAVA_END
+		|| kind == SC_EV_SOFT_VIB || kind == SC_EV_SOFT_PORTA)
+		return 0;
+	if (kind == SC_EV_FM_EX || kind == SC_EV_FM_LFO || kind == SC_EV_FM_DETUNE || kind == SC_EV_FM_FLR)
+		return 1;
+	return -1;
 }
 
 static int ScStaffExcLaneUsed(const ScEvent* ev, int evCount, int tr, int isFm)
@@ -3637,6 +3666,22 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			wchar_t tone[96];
 			if (u->vstLabel[i][0])
 				_snwprintf_s(tone, _TRUNCATE, LL14(L"音色  %s", L"Tone  %s", L"Timbre  %s", L"Timbro  %s", L"Timbre  %s", L"음색  %s", L"音色  %s", L"طابع  %s", L"Тембр  %s", L"Klang  %s", L"Timbre  %s", L"Klank  %s", L"Barwa  %s", L"Tını  %s"), u->vstLabel[i]);
+			else if (u->progLabel[i][0] && wcsncmp(u->progLabel[i], L"Prog  —", 7) != 0)
+				_snwprintf_s(tone, _TRUNCATE, LL14(
+					L"音色 %s（クリックで赤バー位置へ）",
+					L"Tone %s (click: at red bar)",
+					L"Timbre %s (clic : barre rouge)",
+					L"Timbro %s (clic: barra rossa)",
+					L"Timbre %s (clic: barra roja)",
+					L"음색 %s (클릭: 빨간 막대)",
+					L"音色 %s（点击放到红条）",
+					L"طابع %s (نقرة: الشريط الأحمر)",
+					L"Тембр %s (щелчок: красная черта)",
+					L"Klang %s (Klick: rote Linie)",
+					L"Timbre %s (clique: barra vermelha)",
+					L"Klank %s (klik: rode balk)",
+					L"Barwa %s (klik: czerwona kreska)",
+					L"Tını %s (tık: kırmızı çizgi)"), u->progLabel[i]);
 			else
 				_snwprintf_s(tone, _TRUNCATE, L"%s", LL14(L"音色  —  クリックで設定", L"Tone  —  click to set", L"Timbre  —  cliquer pour régler", L"Timbro  —  clic per impostare", L"Timbre  —  clic para ajustar", L"음색  —  클릭하여 설정", L"音色  —  点击设置", L"طابع  —  انقر للضبط", L"Тембр  —  щелкните, чтобы задать", L"Klang  —  klicken zum Setzen", L"Timbre  —  clique para definir", L"Klank  —  klik om in te stellen", L"Barwa  —  kliknij, aby ustawić", L"Tını  —  ayarlamak için tıkla"));
 			dc.DrawText(tone, toneBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -5088,6 +5133,15 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 				int x = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 				if (ScStaffIsStaffMarkKind(e.kind, isFm))
 					x += ScStaffMarkStackIndex(ev, evCount, i) * 12;
+				{
+					int prior = 0;
+					for (int j = 0; j < i; j++) {
+						if ((int)ev[j].ch != tr || ev[j].tick != e.tick) continue;
+						if (ScStaffCtrlChipLane(ev[j].kind, isFm) != lane) continue;
+						prior++;
+					}
+					x += prior * 132;
+				}
 				if (x < lineX0 - 40 || x > grid.right) continue;
 				CSize sz = dc.GetTextExtent(label);
 				const int chipH = SC_CTRL_LANE_H - 4;
@@ -6931,9 +6985,110 @@ int ScStaffTrackRowTop(const CRect& trackRc, const ScStaffUi* u, int track)
 	return -1;
 }
 
+static int g_scoreOut = SC_OUT_NONE;
+static int g_scoreFmPreview = 0;
+static int g_scPreviewOn = 0;
+static void (*g_scPreviewStopFn)(void*) = NULL;
+static void* g_scPreviewStopCtx = NULL;
+
+extern "C" void ScStaffPreviewBindStop(void (*fn)(void*), void* ctx)
+{
+	g_scPreviewStopFn = fn;
+	g_scPreviewStopCtx = ctx;
+}
+
+extern "C" int ScStaffPreviewIsRunning(void)
+{
+	return g_scPreviewOn ? 1 : 0;
+}
+
+extern "C" int ScStaffPreviewStopFromHost(void)
+{
+	if (!g_scPreviewOn || !g_scPreviewStopFn) return 0;
+	void (*fn)(void*) = g_scPreviewStopFn;
+	void* ctx = g_scPreviewStopCtx;
+	g_scPreviewStopFn = NULL;
+	g_scPreviewOn = 0;
+	fn(ctx);
+	return 1;
+}
+
+extern "C" void ScStaffSetScoreOut(int route)
+{
+	if (route < SC_OUT_NONE || route > SC_OUT_MAPPER) route = SC_OUT_NONE;
+	g_scoreOut = route;
+	if (route != SC_OUT_FMMIDI) g_scoreFmPreview = 0;
+}
+
+extern "C" int ScStaffScorePreviewOut(void)
+{
+	return g_scoreOut;
+}
+
+extern "C" int ScStaffScorePreviewForcesFm(void)
+{
+	return g_scoreFmPreview ? 1 : 0;
+}
+
+static void ScPutBe32(BYTE* p, DWORD v)
+{
+	p[0] = (BYTE)(v >> 24);
+	p[1] = (BYTE)(v >> 16);
+	p[2] = (BYTE)(v >> 8);
+	p[3] = (BYTE)v;
+}
+
+int ScStaffAuditionRouteNote(int part1to32, int bankMsb, int bankLsb, int prog, int note, int velocity)
+{
+	if (g_scoreOut != SC_OUT_FMMIDI && g_scoreOut != SC_OUT_MAPPER) return 0;
+	if (part1to32 < 1) part1to32 = 1;
+	if (part1to32 > 32) part1to32 = 32;
+	if (bankMsb < 0) bankMsb = 0;
+	if (bankLsb < 0) bankLsb = 0;
+	if (prog < 0) prog = 0;
+	if (note < 0) note = 60;
+	if (note > 127) note = 127;
+	if (velocity < 1) velocity = 100;
+	if (velocity > 127) velocity = 127;
+	const int ch = (part1to32 - 1) & 15;
+	/* 120BPM, 四分。チャンネルはパート番号の下位。ポートは変換側が 17 以降を分ける。 */
+	BYTE trk[64];
+	int n = 0;
+	trk[n++] = 0x00; trk[n++] = 0xFF; trk[n++] = 0x51; trk[n++] = 0x03;
+	trk[n++] = 0x07; trk[n++] = 0xA1; trk[n++] = 0x20;
+	trk[n++] = 0x00; trk[n++] = (BYTE)(0xB0 | ch); trk[n++] = 0x00; trk[n++] = (BYTE)(bankMsb & 127);
+	trk[n++] = 0x00; trk[n++] = (BYTE)(0xB0 | ch); trk[n++] = 32; trk[n++] = (BYTE)(bankLsb & 127);
+	trk[n++] = 0x00; trk[n++] = (BYTE)(0xC0 | ch); trk[n++] = (BYTE)(prog & 127);
+	trk[n++] = 0x00; trk[n++] = (BYTE)(0x90 | ch); trk[n++] = (BYTE)note; trk[n++] = (BYTE)velocity;
+	trk[n++] = 0x83; trk[n++] = 0x60;
+	trk[n++] = (BYTE)(0x80 | ch); trk[n++] = (BYTE)note; trk[n++] = 0x00;
+	trk[n++] = 0x00; trk[n++] = 0xFF; trk[n++] = 0x2F; trk[n++] = 0x00;
+	BYTE smf[32 + 64];
+	int o = 0;
+	memcpy(smf + o, "MThd", 4); o += 4;
+	ScPutBe32(smf + o, 6); o += 4;
+	smf[o++] = 0; smf[o++] = 0;
+	smf[o++] = 0; smf[o++] = 1;
+	smf[o++] = 0x01; smf[o++] = 0xE0;
+	memcpy(smf + o, "MTrk", 4); o += 4;
+	ScPutBe32(smf + o, (DWORD)n); o += 4;
+	memcpy(smf + o, trk, (size_t)n); o += n;
+	wchar_t dir[MAX_PATH], path[MAX_PATH];
+	GetTempPathW(MAX_PATH, dir);
+	_snwprintf_s(path, _TRUNCATE, L"%sogg_sasami_score_tone.mid", dir);
+	HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	DWORD w = 0;
+	const BOOL ok = WriteFile(h, smf, (DWORD)o, &w, NULL);
+	CloseHandle(h);
+	if (!ok || (int)w != o) return 0;
+	return ScStaffStartHostPreview(path, NULL, 0);
+}
+
 int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT)
 {
 	if (!path || !path[0] || !pl) return 0;
+	VstLiveMonitorCancelDelayed();
 	playlistdata tmp;
 	memset(&tmp, 0, sizeof(tmp));
 	_tcsncpy_s(tmp.fol, path, _TRUNCATE);
@@ -6951,6 +7106,18 @@ int ScStaffStartHostPreview(LPCTSTR path, const ScStaffUi* u, int tempoT)
 	filen = tmp.fol;
 	fnn = tmp.name;
 	modesub = tmp.sub;
+	/* 譜面の音源コンボ。未接続はプレイリストと同じ選び方のまま。 */
+	g_scoreFmPreview = 0;
+	if (path && wcsstr(path, L"ogg_sasami_score")) {
+		if (g_scoreOut == SC_OUT_FMMIDI) {
+			modesub = -3; /* KPI。中で fmmidi */
+			g_scoreFmPreview = 1;
+		} else if (g_scoreOut == SC_OUT_GS || g_scoreOut == SC_OUT_XG || g_scoreOut == SC_OUT_MAPPER) {
+			modesub = -30; /* VST 経路。GS/XG/マッパーは VstMidiOpen が分ける */
+		} else if (wcsstr(path, L".mpsmv")) {
+			modesub = -30; /* 未接続でも、残しているパート VST で鳴らす */
+		}
+	}
 	mode = modesub;
 	loop1 = tmp.loop1;
 	loop2 = tmp.loop2;
@@ -6984,13 +7151,25 @@ int ScStaffPreviewFinished(ScStaffUi* u)
 	if (!u || !u->previewActive) return 0;
 	extern int playy;
 	extern int endflg;
-	if (playy == 0)
+	/* playy==1 は待機中も再生中も同じ。Plays() の準備中だけ 0 になる。
+	   準備に入ったあと playy が 1 に戻ってから、曲終了の endflg だけで閉じる。
+	   開始前の playy==1 で「鳴った」とみなすと、準備中の 0 で視聴を切り、
+	   1小節ぶん鳴ってから無音になる。 */
+	if (playy == 0 && u->previewEngineSeen < 1)
 		u->previewEngineSeen = 1;
-	if (!endflg && !(u->previewEngineSeen && playy != 0))
+	if (u->previewEngineSeen == 1 && playy != 0) {
+		u->previewEngineSeen = 2;
+		endflg = 0;
+	}
+	if (u->previewEngineSeen < 2)
+		return 0;
+	if (!endflg)
 		return 0;
 	u->previewActive = 0;
 	u->previewEngineSeen = 0;
 	u->markerSeekArmed = 0;
+	g_scoreFmPreview = 0;
+	g_scPreviewOn = 0;
 	ScStaffRestoreLiveAudioAfterPreview();
 	return 1;
 }
@@ -7004,6 +7183,8 @@ void ScStaffStopHostPreview(ScStaffUi* u)
 		u->previewOriginTick = 0;
 		u->previewWavMode = 0;
 	}
+	g_scoreFmPreview = 0;
+	g_scPreviewOn = 0;
 	extern int endflg;
 	endflg = 1;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
@@ -7097,10 +7278,11 @@ int ScStaffCopyEventsFromMarker(const ScEvent* src, int srcN, uint32_t marker,
 			pushChase(i);
 	}
 	for (int ch = 0; ch < kCh; ch++) {
-		/* 通常/ドラム1/ドラム2 の指定(SC_EV_DRUM) を引き継ぐ。 */
+		/* 通常/ドラム1/ドラム2 の指定(SC_EV_DRUM) を引き継ぐ。
+		   バンクを PC より前にしないと、途中再生で音色がピアノに戻る。 */
 		if (lastDrum[ch] >= 0) pushChase(lastDrum[ch]);
-		if (lastProg[ch] >= 0) pushChase(lastProg[ch]);
 		if (lastBank[ch] >= 0) pushChase(lastBank[ch]);
+		if (lastProg[ch] >= 0) pushChase(lastProg[ch]);
 		if (lastVol[ch] >= 0) pushChase(lastVol[ch]);
 		if (lastPan[ch] >= 0) pushChase(lastPan[ch]);
 		if (lastVelo[ch] >= 0) pushChase(lastVelo[ch]);
@@ -7153,9 +7335,15 @@ int ScStaffPreviewViaHost(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 	u->playheadTick = u->markerTick;
 	u->previewActive = 1;
 	u->previewEngineSeen = 0;
+	g_scPreviewOn = 1;
+	{
+		extern int endflg;
+		endflg = 0;
+	}
 	if (!ScStaffStartHostPreview(builtPath, u, tempoT)) {
 		u->previewActive = 0;
 		u->previewOriginTick = 0;
+		g_scPreviewOn = 0;
 		return 0;
 	}
 	(void)tempoT;
@@ -7212,6 +7400,9 @@ int ScStaffPreviewViaWavout(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 		u->playheadTick = u->markerTick;
 		u->previewActive = 1;
 		u->previewEngineSeen = 0;
+		g_scPreviewOn = 1;
+		extern int endflg;
+		endflg = 0;
 	}
 	(void)tempoT;
 	if (!ScStaffStartHostPreview(wav, u, tempoT)) {
@@ -7220,6 +7411,7 @@ int ScStaffPreviewViaWavout(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 			u->previewWavMode = 0;
 			u->previewOriginTick = 0;
 		}
+		g_scPreviewOn = 0;
 		return 0;
 	}
 	return 1;
@@ -7233,17 +7425,22 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 	int haveTick = 0;
 	unsigned vt = 0;
 	const double sec = OggGetGdiPlaybackTimeSec();
+	/* SMF の先頭 2分音符は 0小節（SysEx）。譜面の 1拍目はそこから。 */
+	const uint32_t lead = (uint32_t)SC_PPQN * 2;
+	auto scoreTick = [&](uint32_t smfTick) -> uint32_t {
+		return (smfTick > lead) ? (smfTick - lead) : 0;
+	};
 
 	/* Wavout score preview: map elapsed seconds onto marker origin. */
 	if (u->previewWavMode) {
-		tick = u->previewOriginTick + ScStaffTickFromSec(sec > 0 ? sec : 0, tempoT);
+		tick = u->previewOriginTick + scoreTick(ScStaffTickFromSec(sec > 0 ? sec : 0, tempoT));
 		haveTick = 1;
 	} else {
 		/* Prefer audible PCM (DS heard) so the cursor matches what you hear.
 		   Fall back to engine playSample minus plugin latency only — no extra pad. */
 		const __int64 heard = OggGetHeardPcmFrames();
 		if (heard >= 0 && VstMidiTickAtSample(heard, &vt)) {
-			tick = vt;
+			tick = scoreTick(vt);
 			haveTick = 1;
 		}
 		if (!haveTick) {
@@ -7252,13 +7449,13 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 				playSmpl -= (__int64)VstMidiGetLatencySamples();
 				if (playSmpl < 0) playSmpl = 0;
 				if (VstMidiTickAtSample(playSmpl, &vt)) {
-					tick = vt;
+					tick = scoreTick(vt);
 					haveTick = 1;
 				}
 			}
 		}
 		if (!haveTick)
-			tick = ScStaffTickFromSec(sec, tempoT);
+			tick = scoreTick(ScStaffTickFromSec(sec, tempoT));
 
 		/* Baked-from-marker files start at tick 0; map back onto staff time. */
 		tick = u->previewOriginTick + tick;
