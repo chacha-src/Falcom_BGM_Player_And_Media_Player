@@ -833,6 +833,23 @@ float LiquidAway(float3 w)
 
 float LiquidGhost(float3 w, float ny, float4 spos)
 {
+	// 下へ落ちる滝は、層が違うだけでは消さない。
+	// キャラの周囲か、カメラの直前か、画面上で焦点を隠すときだけ透かす。
+	if (ny < 0.45) {
+		if (ReflectInfo.z > 0.5) return 0;
+		float g = ViewOcclude(w, ny, spos);
+		float dxz = length(w.xz - Hole0.xz);
+		if (Hole1.w > 0.5) dxz = min(dxz, length(w.xz - Hole1.xz));
+		float y0 = min(Hole0.y, OpaqueLo());
+		float y1 = max(Hole0.y + 2.2, OpaqueHi());
+		if (dxz < 3.4 && w.y > y0 - 0.35 && w.y < y1 + 0.35) g = max(g, 1);
+		if (CamNear.y > CamNear.x + 0.001) {
+			float d = dot(w - Eye.xyz, CamFwd.xyz);
+			if (d > 0.02 && d < CamNear.y)
+				g = max(g, saturate((CamNear.y - d) / max(0.22, CamNear.y - CamNear.x)));
+		}
+		return saturate(g);
+	}
 	return saturate(max(TerrainGhost(w, ny, spos), LiquidAway(w)));
 }
 

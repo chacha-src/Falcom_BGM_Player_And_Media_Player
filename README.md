@@ -2,6 +2,7 @@
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
+作曲「ささみ☆ミ」
 本格派タクティクスRPG「らいらX」
 
 **対応OS:** Windows 11 以降
@@ -9,6 +10,7 @@
 ## 概要
 このソフトは、イースシリーズや軌跡シリーズなどの日本ファルコム作品のBGMファイル（Ogg, WAV, mp3等）を、**ゲーム中と同様にループ付きで再生**できるプレイヤーです。
 また、DirectShowを使用した動画再生や、ハイレゾ音源（DSD/FLAC）の再生にも対応しています。
+同じウィンドウから、曲を作る「ささみ☆ミ」と、ターン制の「らいらX」も開けます。それぞれの流れは、この説明のうしろにまとめてあります。
 
 少し画面がグラフィカルになりました。
 多言語化しました。
@@ -197,8 +199,8 @@ LA を Windows の MIDI マッパーや MIDI 出力へ出すときだけ、**SC 
 ### WRD画面
 PC-98 の MIMPI / TMIDI 用 .wrd を、テキストと16色グラフィックで再生する画面です。ウィンドウメニューやコマンドパレットから開けます。
 
-### SASAMI Composer
-ツールから開ける作曲画面です。テキスト（MML）、MIDIスコア、FMスコアと、それぞれのピアノロールを使えます。
+### 作曲「ささみ☆ミ」
+ツールの「ささみ関連コンポーザ」から開く作曲机です。文字、五線、ピアノロールで曲を書き、らいらで鳴らせます。画面の流れは、うしろの「作曲「ささみ☆ミ」」にまとめてあります。
 
 ### CDプレイヤー
 下段の **CD** から、CDの再生・取り込み・曲目検索・書き込みができます。
@@ -428,10 +430,10 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - 拡張音量（主音量／EQマスターとは別系統）
 - Soft3D迷路（おまけ・下段ボタンから。地下階層・曲連動アイテムあり）
 - Soft3D空中レース（おまけ・下段の「レース」。光帯コース・AI対戦・テーマ地形）
-- おまけタクティクス（下段「おまけ」またはツール。ターン制・全100ステージ。キャラ作成・育成・店・調合）
+- 本格派タクティクス「らいらX」（下段「おまけ」またはツール。ターン制。キャラ作成・育成・店・錬金。流れはうしろの節）
 - VSTホスト（下段「VST」。パート配線・鍵盤演奏）と、.mid の再生（KPI優先／VST優先／VSTホストのプリセット。GS/XG は VST または SoundFont）
 - MIDIモニタ（SMF 32パート／GS・XG、FM側は OPNA。簡易3D）
-- WRD画面（PC-98 MIMPI の .wrd）、SASAMI Composer（テキスト／MIDI・FMスコア／ピアノロール）、CDプレイヤー（再生・取り込み・曲目検索・書き込み）
+- WRD画面（PC-98 MIMPI の .wrd）、作曲「ささみ☆ミ」（テキスト／MIDI・FMスコア／ピアノロール。詳細はうしろの節）、CDプレイヤー（再生・取り込み・曲目検索・書き込み）
 - アナログ起こし台（ライン入力＋HPF/Gate）
 - ボイスチェンジャー、チューナー道場、騒音計、フォトフレーム
 - コマンドパレット、オフラインヘルプ（CHM／F1）
@@ -454,15 +456,192 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - **設定:** AI（超簡単〜強烈）、相手台数、距離、周回、テーマ（森／遺跡／石油工場／夜の街／水中／草原／メサ／雲 など）
 - **連動:** アイテム球は再生中のテンポやピッチも変えます。ゴール後は表彰台（1〜3位）
 
-## おまけ：タクティクス
-メディアプレイヤー下段の **おまけ**、またはツールの「おまけ」から開ける、DirectX 11 のターン制シミュレーションです。迷路・レースと同じく本編の再生とは別枠で、ファンタジーの戦場を100ステージ進めます。
+## 作曲「ささみ☆ミ」
+らいらのツールにある **ささみ関連コンポーザ** から開く、曲を書く机です。昔の Windows 版「ささみ☆ミ」でやっていた、文字で曲を書く仕事と、譜面で曲を書く仕事をここに集めています。できた曲はらいらのプレイリストでそのまま再生でき、WAV / mp3 / FLAC にも書き出せます。
 
-- **拠点:** キャラを作ってパーティを組み、出撃します。性別・血統（戦士／魔法）・クラス・体格・髪・服・帽子・マント・アバターを選べます。クラスはソルジャー、ファイター、アーチャー、シーフ、メイジ、クレリックから始まり、パラディン、ルーンナイト、バーサーカー、スナイパー、アサシン、ウィザード、ビショップ、スカイナイト、勇者、アークメイジ、聖者、ファントム、ドラゴンロード、グラディエーター、シャドウなどへ育ちます。図鑑で技と成長を確認できます
-- **戦闘:** 移動、攻撃、スキル、アイテム、待機、押し出し、扉、坂の登り。予測でダメージ・命中・会心・反撃が出ます。向き（正面／側面／背面）、地形、天候（雨／雪／灰）が入ります。Undo で直前の手順を戻せます。C で重なった道の階層、坂から上の道へ進みます
-- **成長と店:** 経験値でレベルアップし、技を覚えます。進化（クラスチェンジ）とジョブの試しがあります。ゴールドで武器・防具・アクセサリ・ビーズを売買し、素材で調合します。宝箱、扉、レバー、柵、援軍もあります
-- **マップ:** 平原、峡谷、森、雪、砂漠、火山、沼、遺跡、海底、滝、軌道、ステーション、城塞、灯台。敵はスライム、スケルトン、コウモリ、リッチ、ゴーレム、ワイバーン、闇騎士、ドラゴンなど
-- **操作:** 左クリックで決定、右クリックで戻る。左ドラッグで見渡し、右ドラッグで回転、中ドラッグで移動、ホイールでズーム、ホイールクリックで階層。矢印／WASD でカーソル、Enter／Space／Z で決定、Esc／X で戻る、Q／E で回転、Tab でユニット切替、R で視点を戻す、Shift で早送り、F1／H で操作説明。パッドは左スティック／十字キー、A 決定、B 戻る、LB／RB 回転、右スティックで視点
-- **セーブと音:** スロットのほか、途中セーブとオートセーブがあります。効果音は FM／SSG の短い音です。BGM は実行ファイルの隣の `tacticsbgm` に置きます。拠点は `tactics.ogg`、戦闘は地形ごとの `tacticsgame*.ogg`（無ければ `tacticsgame.ogg`）、店・作成・勝利・危機もそれぞれのファイルです。プレイリストには載りません。画質は軽量から上限まで、アニメはフル／短縮を選べます
+三つの窓は別々に開けます。同じ曲を同時に二つで直すときは、保存先がぶつからないようにしてください。文字と五線は行き来でき、片方で直すともう片方へ反映されます。
+
+```text
+  文字で書く  ←→  五線に置く  ←→  ピアノロール
+                    │
+                    ▼
+         再生確認（その場で鳴らす。リストには載せない）
+                    │
+                    ▼
+      曲ファイルを保存  ／  WAV・mp3・FLAC へ書き出し
+```
+
+### 開き方
+メディアプレイヤーの **ツール** を右クリックし、**ささみ関連コンポーザ** から選びます。
+
+- **テキスト作曲** …… 文字で音を書く
+- **MIDIスコア** …… 五線。手持ちの音源をパートに載せられる
+- **FMスコア** …… 同じ五線。FM音源と、波形を鳴らすパート
+- **MIDIピアノロール** / **FMピアノロール** …… 同じ曲を、鍵盤のマス目で直す
+
+### 文字で書く
+音の名前を文字で並べます。昔の「ささみ☆ミ」で作った曲も、同じ窓で開けます。文字には色が付き、検索と行ジャンプができます。
+
+**反映** で五線へ渡し、うまくいかないときは問題の行を示します。**再生確認** はその場で鳴らすだけで、プレイリストには載せません。**書き出し** から WAV / mp3 / FLAC の画面を開けます。
+
+手持ちの音源（VST）を曲に紐づけることもできます。FM の曲にするときは、先頭に音源の種類を書きます。細かい命令の一覧は、タイトルバーの本ボタンか **F1** のヘルプに入っています。
+
+揺らし、トレモロ、左右の移動、音のつなぎは、古い再生環境でも鳴る形に展開されます。これだけでは、ファイルの種類は変わりません。
+
+### 五線（MIDI と FM で共通）
+鉛筆、消しゴム、範囲選択で符を置きます。全音符から三十二分音符、付点、連符、休符、タイ、シャープ／ナチュラル／フラットをツールバーから選べます。調、拍子、音部記号（ト音、ヘ音、大譜表、ドラム）もその場で替えられます。
+
+五線の下には、音量などの変化を描く帯が三つあります。種類と高さと、点で置くか線でつなぐかを選べます。ループの始点と終点、印も置けます。直前の編集は戻せます。
+
+音符のパレットと、調・拍子・音部記号のパレットは、譜面のそばに浮かせておけます。
+
+**その場再生** は、今見ている範囲だけを鳴らします。MIDI 鍵盤をつなげば、そのパートへ打ち込めます。
+
+### 自動伴奏
+五線の **自動伴奏** は、すでにあるメロディを消さずに、ドラム・ベース・コードを足します。ロック、バラード、ジャズ、ブルース、歌謡、ゲーム音楽など、たくさんの雰囲気から選べます。
+
+- **重ね** は、今の音を残して足りない音を足します。**書き換え** は、対象のパートをいったん消して作り直します
+- イントロ、間奏、エンディングの小節数を指定できます。イントロと間奏は、うしろの音をずらして空いたところへ書きます
+- 音符がまだ無い曲でも、本体の長さを指定すればゼロから作れます
+- **アレンジ A〜H** は、同じ名前ならいつも同じ伴奏になります
+- **試し聴き** してから **決定** します。決定したあとも、一つ前には戻せます
+- メロディ側は別で、音量の起伏や、ハモリ、しゃくりを足せます。パートがメロディだと分かったときだけです
+
+### MIDIスコア
+パートごとに、手持ちの音源を割り当てます。トラック見出しや五線をダブルクリックすると、その音源の画面が開きます。音源を使わない曲はシンプルなファイル、音源や効果を載せた曲は、その情報ごと保存します。
+
+小節番号へ飛び、パートのミュートとソロもできます。鍵盤が無くても、画面の鍵盤で音を出せます。コードは、選んだ音から和音を置くか、記号から置けます。決まったリズムの型を、小節の数だけ置くこともできます。
+
+パートには効果を差し込めます。音色の対応表から、どの音を使うかを選べます。普通の MIDI ファイルへ書き出すこともできます。ドラム専用のパートにもできます。
+
+### FMスコア
+FM のパート（最大10）と、波形を鳴らすパート（最大16）を、同じ五線で編集します。見出しをダブルクリックすると音色の画面が開き、つまみを回して鳴らし、よければ確定します。はじめから入っている音色も選べます。音色の番号は曲の中で自動的に付きます。
+
+FM 側も、自動伴奏、ピアノロール、文字の窓へ戻せます。普通の MIDI ファイルへの書き出しもあります。
+
+### ピアノロール
+五線と同じ音符を、鍵盤の縦軸と時間の横軸で見せます。音を置き、端をドラッグして長さを変え、範囲で選べます。その場再生はこちらからも使えます。
+
+### どのファイルになるか
+中身に合わせて、保存する種類が決まります。シンプルな曲は、昔の再生環境でも鳴る形になります。
+
+| 曲の中身 | ファイル |
+| :--- | :--- |
+| FM。繰り返しは一段まで。追加の機能なし | .fpy |
+| FM。繰り返しが深い、波形パート、細かい揺らしやつなぎ | .fpy2 |
+| MIDI。音源なし。繰り返しは一段まで | .mpy |
+| MIDI。繰り返しが深い。音源はまだ無い | .mpw2 |
+| 手持ちの音源、効果、曲の途中での拍子変更など | .mpsmv |
+
+らいらの MIDI モニタでは、再生中の FM 曲を、鍵盤と音源の状態として見られます。
+
+## 本格派タクティクス「らいらX」
+メディアプレイヤー下段の **おまけ**、またはツールの「おまけ」から開ける、ターン制の戦場です。迷路や空中レースと同じ枠なので、同時には開けません。どちらかを開くと、もう片方は閉じます。窓を出したまま、らいらで曲を流し続けられます。曲のテンポを変える球は出ません。
+
+やることの流れは、拠点で仲間を整え、ステージへ出て、マス目の上で戦い、結果を持って拠点へ戻る、です。途中経過は自動で残り、進行は10本まで別々に持てます。
+
+```text
+  拠点（作る・編成・店・進化・図鑑）
+        │ 出撃
+        ▼
+  マス目の戦闘（移動 → 攻撃や技 → 次の手番）
+        │ 勝利 / 敗北
+        ▼
+  結果（経験・成長・持ち物） → 拠点へ
+```
+
+### 拠点
+キャラが一人もいないときは、まず作成を促されます。名簿は最大100人、一度に出せるのは最大15人です。名簿がいっぱいになったら、商店で頁を足せます。出撃の人数も、最初は少なく、商店とステージ進行で広がります。
+
+- **キャラクタ作成:** 名前、性別、系統（戦士／魔法）、初期クラス、体格、髪型、髪色、服、帽子、マント、身長や体型、顔、アバターとその色。**おまかせ** で名前を引き、あとから **容姿を変更** もできます。右側の見本は、ドラッグで向き、ホイールで大きさ、ホイールを押したままドラッグで位置です。翼のある職は、見本の下で羽根の表示と、地面に下ろした姿を切り替えられます。保存される姿そのものは変わりません
+- **編成:** 出撃する仲間、装備、技を決めます。ここを通らないと戦場へ行けません。スキルの確認、削除、順番の入れ替えができます
+- **進化:** Lv15、35、55、78、105、140、180、230、290 で職を変えられます。素材は要りません。戦闘でレベルが上がった直後にも選べ、あと回しにもできます。一部の上位職は、同じ系統の仲間をパートナーにします。進化したあとは、レベルが 3 上がるまで職を選び直せます。気に入った職なら、その職のままにできます
+- **商店:** 武器、防具、道具、装飾、技珠、パッシブ、召喚を、戦闘でもらったゴールドで売買します。所持の武具は12個まで。装着中より弱いか、誰も就いていない職の武具は、**不要を売却** でまとめて売れます
+- **技能と成長:** 成長、錬金、スキル一覧、敵の四つの頁です。スキルは職と陣形で絞り、名前・覚えるレベル・消費で並べ替えられます。敵は出現するステージ順で、まだ届いていない相手は？？？のままです。出会った相手には倒した回数が付き、出現範囲、能力、弱点、討伐数、熟練が出ます。右側の立体はドラッグで回せます
+- **出撃:** いまのステージへ進みます。先へ行くほど敵が強く、経験も増えます。上限は最初 999 で、1000 まで進むと 3000、3000 をクリアすると 6000、6000 をクリアすると 9999、その先は 1 つずつ増えます。10000 を超えるとステージ EX です。クリア済みには印が付きます。◀▶ で 1 つ、Ctrl で 10、Shift で 100 ずつ動け、クリアした次のステージまで選べます
+- **セーブスロット:** 進行を 10 本まで持てます。切り替え、名前、コピーができます。戦闘の途中、自動保存、ステージの最初から、の再開を選べます。コピーや削除は、クリア状況・キャラ・所持品ごと入れ替わるので、確認が出ます
+
+### クラス
+初期職はソルジャー、ファイター、アーチャー、シーフ、メイジ、クレリックです。戦士系と魔法系で、伸び方と覚える技が分かれます。
+
+| 段階 | 戦士系 | 魔法系 |
+| :--- | :--- | :--- |
+| 初期 | ソルジャー／ファイター／アーチャー／シーフ | メイジ／クレリック |
+| 上位 | パラディン／ルーンナイト／バーサーカー／スナイパー／アサシン／スカイナイト | ウィザード／ビショップ／錬金術師 |
+| 最上位 | 勇者／ファントム／ドラゴンロード／グラディエーター／暗影 | アークメイジ／聖者／大錬金術師 |
+
+通常攻撃の届く距離、歩くか飛ぶか、段差を越えられるか、物理か魔法かはクラスで決まります。数値と、技を覚えるレベルは「技能と成長」と、キャラのステータスで見られます。レベルの上限は 9999 です。敵はそれより上まで伸びます。
+
+### 能力
+画面では次の20種が並びます。
+
+- **体力 / 技の残量** …… どれだけ耐えるかと、技を使うための残量。レベルアップで伸びます
+- **腕力 / 物理防御 / 魔力 / 魔法防御** …… 物理と魔法の、出す側と受ける側
+- **素早さ / 器用さ / 運** …… 行動の順番、当たりやすさ、会心
+- **移動 / 段差 / 射程** …… 一歩で進めるマス、越えられる高低差、通常攻撃の届く距離
+- **命中 / 回避 / 必殺 / ガード** …… 当たる、避ける、大きく入る、受ける
+- **回復効率 / 残量の戻り / 連携 / 貫通** …… 癒しの伸び、技の残量が戻る量、追撃、防御を抜く度合い
+
+伸び方はクラスごとに違います。転職すると土台と伸び方が組み直され、すでに覚えた技は残ります。
+
+### 戦場
+高低差のあるマス目です。行動の順番は素早さで決まり、右上の **行動順** に並びます。素早いキャラは割り込んで、何度も動きます。青いマスが移動、赤いマスが攻撃です。敵の手番では、敵の移動範囲も出ます。
+
+- 移動したあと、攻撃、スキル、待機、道具、押し、を選びます。まだ行動する前なら、移動は戻せます。手順そのものも、一つ前へ戻せます
+- 扉のあるマスは開けて通路にできます。レバー、壊せる柵、宝箱、回復の床、力の床、ワープもあります。重なった道は **C** で階層を切り替え、坂から上の道へ進めます
+- 地形は平地、森、丘、山、水、裂け目、溶岩、砂、雪、沼、道、橋、遺跡、岩などです。見た目のテーマは草原、峡谷、森、雪原、砂漠、火山、沼、遺跡、海底、滝、軌道、ステーション、城塞、灯台です。テーマで歩きにくさと景色が変わります。水面は揺れ、高い段差から落ちる川は滝になります。海底と滝は地図が決まっていて、振り直しで変わるのは敵の配置です。飛べるユニットは、歩けないマスも越えやすいです
+- 天候は雨、雪、降灰に加え、霧、雷雨、砂嵐、雹、花吹雪、陽炎が入ることがあります
+- ボスを倒すか、敵を全滅させると勝利です。味方が全滅すると敗北です。メニューから撤退したときも、敗北として扱われます
+- 必殺やスキルでは、短い演出が入ります。設定の戦闘演出を短縮にすると、ふつうの技と必殺の演出は省けます。戦技、陣形、召喚は短縮でも、それぞれの演出が残ります
+
+### 戦いの中身
+攻撃、回復、補助で経験を得てレベルが上がり、決まったレベルで技を覚えます。上がったとき、技を覚えたとき、職が変わったときに、それぞれ音が鳴ります。
+
+- スキルは攻撃、回復、補助、常時効果に分かれます。範囲は円、直線、扇です。陣形の技は、味方が決まった形に並んでいるときだけ使え、人数で強くなります
+- 属性は炎、氷、雷、聖、闇、風、地、毒です。物理か魔法か、近いか遠いかも弱点に入ります。弱点が重なると、予測の倍率が上がります
+- 状態は毒、鈍足、防御低下、睡眠、混乱、スタンなどです。解く技や道具で外せます。混乱した敵は、味方を殴ることがあります
+- 倒れた味方は、起こす技や道具で戻せます。与えた量が体力を大きく超えると、その旨が出ます
+- 高低差と、正面・側面・背面が、命中とダメージに効きます。予測には、与ダメージ、命中、必殺、反撃、武器の相性、弓と飛行の関係、追撃の人数が出ます
+- レベル差が大きいと、根性で体力 1 だけ残ることがあります
+- 敵はスライム、スケルトン、コウモリ、リッチ、ゴーレム、ワイバーン、闇騎士、ドラゴンに加え、ステージが進むと姿の違う獣や鳥、魚、竜も出てきます。拠点にいる敵は、近づくまで起きません
+- どのステージでも、まれに☆のラッキーモンスターが出ます。ボスではなく雑魚と同じ強さで、経験が3倍です。体力の帯は水色です。特殊な乱戦とは別の抽選なので、1体とは限りません
+- 同じ種類を倒すほど、その敵への熟練が上がり、味方からその敵へのダメージが増えます。おおよそ、1体で +2%、12体で +15%、24体で +20% あたりまで伸び、+30% に近づきます。回復や、敵から味方への反撃には乗りません。予測の数字にも入っています。討伐数はその進行ごとに残り、その進行を消すと 0 に戻ります。コピーした進行には、その時点の数が付きます
+- まれに、敵が押し寄せる特別なステージになることがあります
+
+### 商店で買うもの
+ゴールドは戦闘の報酬と、戦利品の売却です。武具の系統は剣、斧、弓、短剣、杖、聖で、職の段階が足りないと装備できません。
+
+- **武具** …… 武器と防具。同じ系統で今より強いものがあれば、編成からすぐ装着できます
+- **道具** …… 鉱石、薬草、結晶、欠片、回復、強化、遅延、蘇生など。戦闘中の「道具」から使います。素材は「技能と成長」の錬金で組み合わせます
+- **戦技（技珠）** …… 戦闘ポイントで撃つ技です。ポイントは最大 200 で、ステージをまたいで残ります。通常 3 枠と奥義 1 枠。奥義は職が十分に進んでから開きます
+- **装飾** …… 2 枠。能力を足します
+- **パッシブ** …… 2 枠。飛行、状態異常の無効、能力アップ、属性の強化、経験アップなど。**飛翔の羽** を付けると常に飛び、背中から羽根が生えます。天を駆ける騎士は同じ羽根、竜の王は竜の翼のままです。飛んで移動するときは足の歩きが止まり、翼を大きく羽ばたかせます。止まっているあいだは、ゆっくり羽ばたきます
+- **召喚** …… 36 体。ゴールドで買い、編成の召喚枠に 2 体まで付けます。戦闘の「召喚」から、広い範囲へ放ちます。技の残量に加え、最大体力の一部を使います。その消費だけでは体力は 0 になりません。足りなければ出せません。売り戻しは半額で、装着中の分は外せません
+- **名簿の頁 / 編成の拡張** …… 名簿は 20 人から頁を買って 100 人まで。出撃枠は 5 人から買って 10 人まで、その先はステージ 50、100、200、400、800 をクリアすると 1 人ずつ、最大 15 人まで広がります
+
+敵を倒すと、その時点の段の武具や消耗品、装飾、技珠、パッシブ、召喚が落ちることがあります。トロフィーは商店でまとめて売れます。
+
+### 操作
+左クリックで決定、右クリックで戻る。左ドラッグで見渡し、右ドラッグで回転、中ドラッグで移動、ホイールでズーム、ホイールクリックで階層です。
+
+矢印か WASD でカーソル、Enter／Space／Z で決定、Esc／X で戻る、Q／E で回転、Tab でユニット切替、R で視点を戻す、Shift で早送り、F1／H でその場の操作説明です。
+
+パッドは、左スティックか十字キーでカーソル、A で決定、B で戻る、LB／RB で回転、右スティックで視点、トリガーでズームです。
+
+### 音と見た目
+効果音は、その場で鳴る短い電子音です。らいらで流している曲には混ざりません。音量は拠点の設定で、曲と効果音を別々に変えられます。決定やキャンセル、歩行、扉、宝箱、攻撃の振りと当たり外れ、レベルアップ、転職、蘇生、勝利と敗北で音が違います。勝利と敗北は、少し長めのファンファーレです。
+
+場面の曲は、実行ファイルの隣の `tacticsbgm` フォルダから読みます。プレイリストには載せません。ファイルが無い場面は、拠点の曲に戻ります。おまけから開いて画像を取るときに、足りない曲も一緒に取得します。
+
+- 拠点と開始前、商店、作成・編成・進化は、それぞれの曲です
+- 戦闘は地形ごとの曲です。その地形の曲が無いときは、共通の戦闘曲になります
+- 出している味方の残り体力が三分の一を切ったとき、または死者が半数以上のときは、危機の曲に替わります。回復か蘇生で外れると、地形の曲か、勝ちが見えた曲へ戻ります
+- 敵の残りが少なく、決着まであまり手がかからなそうなときは、勝ちが見えた曲に替わります。ボスを狙っているときは、ボスのそばで体力が減っていると、ほかの敵が残っていても替わります。一度替わったあとは、そのボスがその状態であるあいだ続きます
+- 勝利が決まったあとと、結果の画面は、クリアの曲です
+
+設定では、画質（軽量／標準／高画質）、戦闘演出（フル／短縮）、マス目の表示、カメラの速さ（遅い／標準／速い）、曲と効果音の音量を覚えます。次に開いたときも、同じ名簿とステージから続けられます。
+
+はじめてのときは、キャラを 1 人作って編成に入れ、すぐ出撃すると操作が分かりやすいです。行き詰まったら、商店で装備を足すか、レベルを上げて進化してください。戦闘中の F1 は、この説明より短い、その場の操作一覧です。
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -482,6 +661,7 @@ Copyright (C) PrePrayerPower Soft
 
 # oggYSEDbgm Media Player "Raira"
 Nihon Falcom BGM Player / High-Performance Media Player
+Composer "Sasami☆Mi"
 Authentic tactics RPG "Raira X"
 
 
@@ -490,6 +670,7 @@ Authentic tactics RPG "Raira X"
 ## Overview
 This software is a specialized media player designed to play background music (Ogg, WAV, mp3, etc.) from **Nihon Falcom** titles—such as the *Ys* and *Trails* series—with the **exact loop points used in-game**.
 Additionally, it supports high-resolution audio (DSD/FLAC) and video playback via DirectShow.
+The same window also opens the composer **Sasami☆Mi** and the turn-based tactics game **Raira X**. How each one flows is written after the player section.
 
 The interface is now more graphical and supports multiple languages.
 **Supported Languages:**
@@ -677,8 +858,8 @@ Playlist **.mid / .midi / .kar / .rmi** play from Rendering → **MIDI play**. *
 ### WRD Screen
 Plays PC-98 MIMPI / TMIDI `.wrd` scripts as text plus 16-color graphics. Open it from the Window menu or the command palette.
 
-### SASAMI Composer
-A composing desk opened from Tools. It has a text view (MML), a MIDI score, an FM score, and a piano roll for each.
+### Composer "Sasami☆Mi"
+A composing desk opened from Tools → **Sasami-related composer**. Write in text, on a staff, or on a piano roll, then play the result in Raira. The flow is written later, under **Composer "Sasami☆Mi"**.
 
 ### CD Player
 From the bottom-bar **CD** button: play a CD, rip tracks, look up the disc, and burn.
@@ -908,10 +1089,10 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 - Extended volume (separate from main volume / EQ master)
 - Soft3D maze (bonus; bottom-bar button; basements and track-linked items)
 - Soft3D aerial race (bonus; bottom-bar **Race**; light-band course, AI, themed terrain)
-- Bonus tactics (bottom-bar **Extras** or Tools; turn-based, 100 stages; create, train, shop, craft)
+- Authentic tactics **Raira X** (bottom-bar **Extras** or Tools; turn-based; create, train, shop, alchemy. The flow is in the later section)
 - VST host (bottom-bar **VST**; part routing and keyboard play) and .mid playback (Prefer KPI / Prefer VST / VST Host preset; GS/XG via VST or SoundFont)
 - MIDI monitor (SMF 32 parts / GS·XG; FM side is OPNA; simple 3D)
-- WRD screen (PC-98 MIMPI `.wrd`), SASAMI Composer (text / MIDI·FM score / piano roll), CD player (play / rip / lookup / burn)
+- WRD screen (PC-98 MIMPI `.wrd`), composer **Sasami☆Mi** (text / MIDI·FM score / piano roll; details in the later section), CD player (play / rip / lookup / burn)
 - Analog digitize deck (line-in + HPF/Gate)
 - Voice changer, tuner dojo, sound meter, photo frame
 - Command palette, offline help (CHM / F1)
@@ -934,15 +1115,192 @@ An aerial race opened from the media player’s bottom-bar **Race** button. You 
 - **Settings:** AI (super easy–intense), opponent count, length, laps, theme (forest / ruins / oil factory / night city / underwater / grassland / mesa / clouds, etc.)
 - **Track links:** Item orbs also change the playing track’s tempo or pitch. After the finish, a podium shows 1st–3rd
 
-## Extra: Tactics
-A DirectX 11 turn-based tactics game opened from the media player’s bottom-bar **Extras**, or from Tools → Extras. Same “bonus, not core playback” slot as the maze and the race: a fantasy campaign of 100 stages.
+## Composer "Sasami☆Mi"
+A desk for writing songs, opened from Raira’s Tools menu under **Sasami-related composer**. It gathers what the old Windows Sasami☆Mi did: writing a song as text, and writing it on a staff. Finished songs play from Raira’s playlist, and can be written out as WAV / mp3 / FLAC.
 
-- **Base:** Create characters, form a party, and sortie. Gender, lineage (warrior / magic), class, build, hair, outfit, hat, cape, and avatar are all choices. Classes start at Soldier, Fighter, Archer, Thief, Mage, and Cleric, and grow into Paladin, Rune Knight, Berserker, Sniper, Assassin, Wizard, Bishop, Sky Knight, Hero, Archmage, Saint, Phantom, Dragon Lord, Gladiator, Shadow, and others. A codex lists skills and growth
-- **Battle:** Move, attack, skill, item, wait, shove, doors, and climb ramps. The forecast shows damage, hit, crit, and counter. Facing (front / side / back), terrain, and weather (rain / snow / ash) all apply. Undo steps back one action. C switches stacked paths; a ramp climbs to the upper path
-- **Growth and shops:** Experience levels units and teaches skills. There is class evolution and a job trial. Gold buys and sells weapons, armor, accessories, and beads; materials craft items. Chests, doors, levers, fences, and reinforcements show up on maps
-- **Maps:** Plains, canyon, forest, snow, desert, volcano, swamp, ruins, seabed, falls, orbit, station, citadel, and lantern. Enemies include slimes, skeletons, bats, liches, golems, wyverns, dark knights, and dragons
-- **Controls:** Left click confirms, right click goes back. Left-drag looks around, right-drag rotates, middle-drag pans, the wheel zooms, and a wheel click changes layer. Arrows / WASD move the cursor, Enter / Space / Z confirm, Esc / X go back, Q / E rotate, Tab cycles units, R recenters the view, Shift fast-forwards, F1 / H opens this help. On a pad: left stick / d-pad, A confirm, B back, LB / RB rotate, right stick looks
-- **Saves and sound:** Besides named slots there is a suspend save and an autosave. Sound effects are short FM / SSG tones. BGM lives in `tacticsbgm` next to the executable: `tactics.ogg` at the base, a per-terrain `tacticsgame*.ogg` in battle (or `tacticsgame.ogg` if that file is missing), plus shop, create, victory, and danger tracks. These files are not added to the playlist. Picture quality runs from light to the top end, and battle animation can be full or short
+The three windows open separately. If you edit the same song in two of them at once, watch the save path so they do not overwrite each other. Text and the staff go back and forth; a change on one side shows up on the other.
+
+```text
+  Write as text  ←→  Place notes on a staff  ←→  Piano roll
+                              │
+                              ▼
+           Preview (plays in place; not added to the list)
+                              │
+                              ▼
+        Save the song file   /   Export WAV, mp3, or FLAC
+```
+
+### How to open it
+Right-click **Tools** on the media player and open **Sasami-related composer**.
+
+- **Text compose** — write the notes as letters
+- **MIDI score** — a staff. Each part can use an instrument you already have
+- **FM score** — the same staff, for FM voices and for parts that play a waveform
+- **MIDI piano roll** / **FM piano roll** — the same song, edited as blocks on a keyboard
+
+### Writing in text
+You line up note names as letters. Songs made in the older Sasami☆Mi open in the same window. The letters are colored, and you can search and jump to a line.
+
+**Apply** sends the text to the staff and, when something is wrong, points at the line. **Preview** plays it in place and does not add it to the playlist. **Export** opens the WAV / mp3 / FLAC window.
+
+You can also tie an instrument you own (a VST) to the song. An FM song starts by naming which kind of FM voice it uses. The full list of text commands is in the offline help, from the book button on the title bar or **F1**.
+
+Vibrato, tremolo, left-right movement, and a slide between notes are written out in a form older players can still sound. That alone does not change the kind of file.
+
+### The staff (shared by MIDI and FM)
+Pencil, eraser, and a selection place notes. From the toolbar: whole notes down to thirty-second notes, dots, tuplets, rests, ties, and sharp / natural / flat. Key, time signature, and clef (treble, bass, grand staff, drums) can be changed where you are.
+
+Under the staff are three strips for changes such as volume. You pick what each strip shows, how tall it is, and whether it is dots or a line. Loop start, loop end, and marks can be placed too. The last edit can be undone.
+
+A note palette, and a palette for key, time, and clef, can float beside the score.
+
+**Play range** sounds only the stretch you are looking at. A MIDI keyboard records into the current part.
+
+### Auto accompaniment
+**Auto accompaniment** on the staff adds drums, bass, and chords without erasing the melody you already wrote. Moods include rock, ballad, jazz, blues, kayōkyoku, game music, and many others.
+
+- **Overlay** keeps the notes that are there and fills in what is missing. **Rewrite** clears the chosen parts and builds them again
+- You set how many bars the intro, the break, and the ending take. Intro and break shift the later music back and write into the gap
+- A song with no notes yet can still be built from scratch once you set a body length
+- **Arrange A–H**: the same letter always gives the same accompaniment
+- **Preview**, then **Apply**. After you apply, you can still step back one edit
+- The melody side is separate: volume shape, harmony, and a small scoop into the note. That only runs when the part is recognized as the melody
+
+### MIDI score
+Each part can be given an instrument you already have. Double-click a track heading or a staff to open that instrument’s own window. A song with no instrument of your own saves as a simple file. A song that carries instruments or effects saves those along with the notes.
+
+You can jump to a bar number, and mute or solo a part. Without a MIDI keyboard, the on-screen keyboard can play the notes. A chord can be placed from the note you chose, or from a chord symbol. A fixed rhythm pattern can be laid down for a chosen number of bars.
+
+Effects can be inserted on a part. A tone map picks which sound each part uses. You can also write a normal MIDI file. A part can be drums only.
+
+### FM score
+Up to ten FM parts, and up to sixteen parts that play a waveform, share the same staff. Double-click a heading to open the voice window, turn the knobs, listen, and keep the sound if you like it. Built-in voices are there to start from. Voice numbers are assigned inside the song on their own.
+
+The FM side can use auto accompaniment and the piano roll, and can be sent back to the text window. It can also be written out as a normal MIDI file.
+
+### Piano roll
+The same notes as the staff, with the keyboard running down the side and time running across. Place a note, drag its edge to change the length, and select a range. Play-range works from here too.
+
+### Which file you get
+The save type follows what the song actually uses. A simple song stays in a form older players can still sound.
+
+| What is in the song | File |
+| :--- | :--- |
+| FM. Repeats only one level deep. No extra features | .fpy |
+| FM. Deeper repeats, waveform parts, finer wobble or slides | .fpy2 |
+| MIDI. No instrument of your own. Repeats only one level deep | .mpy |
+| MIDI. Deeper repeats. Still no instrument of your own | .mpw2 |
+| Your own instruments, effects, or a time change partway through | .mpsmv |
+
+Raira’s MIDI monitor can watch a playing FM song as keys and voice state.
+
+## Authentic tactics "Raira X"
+A turn-based battlefield opened from **Extras** on the media player’s bottom row, or from Tools → Extras. It shares a slot with the maze and the aerial race, so only one of them can be open. Opening one closes the other. The window can stay up while Raira keeps playing. It does not drop orbs that change the track’s tempo.
+
+The loop is: ready your party at the base, take a stage, fight on a grid, and bring the result back. Progress is kept automatically, and you can hold up to ten separate runs.
+
+```text
+  Base (create, party, shop, evolve, codex)
+        │ sortie
+        ▼
+  Grid battle (move → attack or skill → next turn)
+        │ victory / defeat
+        ▼
+  Result (experience, growth, items) → back to base
+```
+
+### At the base
+With no characters, you are asked to create one. The roster holds up to 100 people, and a sortie takes up to 15. When the roster is full, buy extra pages at the shop. The number you can send out starts small and grows with the shop and with stages cleared.
+
+- **Create character:** Name, gender, path (warrior or magic), starting class, build, hair, hair color, outfit, hat, cape, height and figure, face, and an avatar with its color. **Random** draws a name. **Change appearance** edits the look later. On the preview, drag to turn, use the wheel to zoom, and hold the wheel button while dragging to move the figure. Classes with wings get two buttons under the preview: one shows or hides the feathers, and one sets them down on the ground. Neither changes the saved look
+- **Party:** Choose who goes, and their gear and skills. You cannot take the field until someone is in the party. You can check skills, delete a character, and reorder
+- **Evolve:** Class change at Lv 15, 35, 55, 78, 105, 140, 180, 230, and 290. No materials. You can choose right after a level-up in battle, or later. Some advanced classes want a partner from the same path. After you evolve, you can pick the class again until you gain 3 levels. If you like it, you can stay with that class
+- **Shop:** Buy and sell weapons, armor, goods, trinkets, art beads, passives, and summons with gold from battle. The stash holds 12 pieces of gear. **Sell surplus** dumps gear no stronger than what is worn, and gear for classes nobody has
+- **Skills and Growth:** Four pages — growth, alchemy, the skill list, and foes. Skills filter by job or formation and sort by name, the level they are learned, or the cost. Foes are ordered by the stage where they appear; anyone whose stage band you have not reached stays as ???. A foe you have met shows how many times you have defeated them, plus the stage band, stats, weaknesses, slain count, and mastery. Drag the model on the right to turn it
+- **Sortie:** Enter the current stage. Further on, enemies are stronger and grant more experience. The cap starts at 999, grows to 3000 once you reach 1000, to 6000 after clearing 3000, to 9999 after clearing 6000, then one at a time. Past 10000 they are Stage EX. Cleared stages are marked. ◀▶ steps by 1, Ctrl by 10, Shift by 100, up to one stage past the last clear
+- **Save slots:** Keep up to ten runs. Switch, rename, and copy. Resume from mid-battle, from the automatic save, or from the start of the stage. Copy and delete replace cleared stages, characters, and items, so a confirmation appears
+
+### Classes
+Starting jobs are Soldier, Fighter, Archer, Thief, Mage, and Cleric. The warrior path and the magic path grow differently and learn different skills.
+
+| Tier | Warrior path | Magic path |
+| :--- | :--- | :--- |
+| Start | Soldier / Fighter / Archer / Thief | Mage / Cleric |
+| Advanced | Paladin / Rune Knight / Berserker / Sniper / Assassin / Sky Knight | Wizard / Bishop / Alchemist |
+| Top | Hero / Phantom / Dragon Lord / Gladiator / Shade | Archmage / Saint / Grand Alchemist |
+
+Attack range, walking or flying, how much height you can cross, and physical versus magic damage come from the class. The numbers and the levels where skills are learned are in Skills and Growth, and on each character’s status. The level cap is 9999. Enemies can go higher.
+
+### Stats
+The status screen lines up these twenty.
+
+- **HP / MP** — how much you can take, and the pool skills spend. Both grow with level
+- **Strength / defense / magic / magic defense** — physical and magical, on the way out and on the way in
+- **Agility / dexterity / luck** — turn order, how often you connect, criticals
+- **Move / jump / range** — cells you can step, height you can cross, how far a normal attack reaches
+- **Hit / avoid / critical / guard** — connect, dodge, land hard, take the hit
+- **Recovery / MP return / follow-up / pierce** — how well healing lands, how fast the skill pool comes back, extra hits, and how far an attack cuts through defense
+
+Growth differs by class. A class change rebuilds the base and the curve. Skills already learned stay.
+
+### On the field
+The map is a grid with height. Turn order follows agility and is listed as **Turn Order** at the top right. A fast character can cut in and act more than once. Blue cells are movement, red cells are attack range. During an enemy turn, their movement range is shown too.
+
+- After moving, choose attack, skill, wait, item, or shove. You can take the move back before you act. The last step itself can also be undone
+- A door tile opens into a path. There are levers, fences you can break, chests, healing tiles, might tiles, and warps. **C** switches the layer of stacked paths, and a ramp climbs to the upper path
+- Terrain includes plains, forest, hill, mountain, water, chasm, lava, sand, snow, swamp, road, bridge, ruins, and rock. Themes are grassland, canyon, forest, snowfield, desert, volcano, swamp, ruins, seabed, waterfall, orbit, station, citadel, and lantern. Theme changes how hard it is to walk and how the place looks. Water moves, and a river that drops off a ledge becomes a waterfall. Seabed and waterfall use a fixed map, so a reroll only moves the enemy camps. Flying units cross tiles that walkers cannot
+- Weather can be rain, snow, or ashfall, and also fog, storm, sandstorm, hail, petals, or heat haze
+- You win by defeating the boss or by clearing every enemy. You lose if every ally falls. Retreating from the menu counts as a defeat
+- Critical hits and skills play a short scene. Setting battle scenes to short skips the scene for ordinary skills and criticals. Crafts, formation skills, and summons still play their own scene
+
+### Inside a fight
+Attacks, healing, and support grant experience and levels. Skills are learned at set levels. A sound plays when you level up, when a new skill is learned, and when the class changes.
+
+- Skills split into attack, heal, support, and always-on effects. Areas can be a circle, a line, or a fan. A formation skill works only when allies stand in a set shape, and it grows stronger with more of them
+- Elements are fire, ice, thunder, holy, dark, wind, earth, and poison. Physical or magical, and near or far, also count as weaknesses. Matching weaknesses raise the forecast multiplier
+- Status includes poison, slow, defense down, sleep, confuse, and stun. A cleansing skill or item clears them. A confused enemy may strike an ally
+- A fallen ally can be brought back with a raise skill or item. When the damage far exceeds remaining health, that is shown
+- Height and facing (front, side, back) change hit and damage. The forecast shows damage dealt, hit, critical, counter, the weapon matchup, bow against flying, and how many follow-ups
+- A large level gap can trigger guts and leave the unit at 1 HP
+- Enemies include slimes, skeletons, bats, liches, golems, wyverns, dark knights, and dragons. As stages advance, beasts, birds, fish, and dragons with their own shapes join the list. Groups at a camp stay asleep until you approach
+- Any stage can spawn a lucky monster marked ☆. It is a normal foe, not a boss, and grants three times the experience. Its health bar is cyan. The roll is separate from a special rush, so more than one can appear
+- The more of one kind you defeat, the higher your mastery against that kind, and the more damage your side deals to it. About +2% for one, +15% for twelve, +20% around twenty-four, approaching +30%. Healing does not gain it, and an enemy’s counterattack does not either. The forecast number includes it. Slain counts stay with that run and return to 0 when the run is erased. Copying a run copies the counts as they were
+- Now and then a stage becomes a special rush of enemies
+
+### What the shop sells
+Gold comes from battle and from selling trophies. Gear lines are sword, axe, bow, dagger, staff, and holy. A class that is not far enough along cannot wear the piece.
+
+- **Gear** — weapons and armor. If the stash has a stronger piece of the same line, you can equip it from the party screen
+- **Goods** — ore, herbs, crystals, shards, recovery, a might boost, delay, and a raise, among others. Use them from Item in battle. Materials are combined on the alchemy page of Skills and Growth
+- **Crafts (art beads)** — skills fired with battle points. The pool goes up to 200 and is kept across stages. Three normal slots and one ultimate. The ultimate opens after the class has advanced far enough
+- **Accessories** — two slots that add stats
+- **Passives** — two slots. Flight, immunity to status, stat boosts, element boosts, extra experience, and so on. **Wing of Flight** makes you fly all the time and grows feathers from the back. A Sky Knight keeps those feathers. A Dragon Lord keeps the dragon wings. While a flyer moves, the walking feet stop and the wings beat hard. Standing still, the wings beat slowly
+- **Summons** — 36 beasts. Buy them with gold and set up to two on the party screen. In battle, Summon fires one over a wide area. It spends MP and a share of maximum HP. That cost alone will not drop you to 0 HP. If you cannot pay it, the summon stays unused. Selling returns half the price, and a copy that is equipped cannot be sold
+- **Roster pages / party tickets** — the roster starts at 20 and grows to 100 by pages. The sortie cap starts at 5 and grows to 10, then one more each after clearing stages 50, 100, 200, 400, and 800, up to 15
+
+Defeated enemies can drop gear of the tier you have reached, plus consumables, accessories, art beads, passives, and summons. Trophies sell in bulk at the shop.
+
+### Controls
+Left click confirms, right click goes back. Left-drag looks around, right-drag rotates, middle-drag pans, the wheel zooms, and a wheel click changes layer.
+
+Arrows or WASD move the cursor, Enter / Space / Z confirm, Esc / X go back, Q / E rotate, Tab cycles units, R recenters the view, Shift fast-forwards, and F1 / H opens the short control sheet for that moment.
+
+On a pad: left stick or D-pad for the cursor, A to confirm, B to go back, LB / RB to rotate, the right stick to look, and the triggers to zoom.
+
+### Sound and picture
+Sound effects are short electronic tones made on the spot. They are not mixed into whatever Raira is playing. In the base settings, music and effects have their own volumes. Confirm and cancel, footsteps, doors, chests, the swing of an attack and whether it lands, level-up, class change, a raise, victory, and defeat each have their own tone. Victory and defeat use a slightly longer fanfare.
+
+Scene music is read from a `tacticsbgm` folder next to the executable. It is not added to the playlist. A scene with no file falls back to the base track. When you open the game from Extras and it fetches its pictures, missing tracks are fetched with them.
+
+- The base and the moment before battle, the shop, and create / party / evolve each have their own track
+- Battle uses a track for that terrain. If that file is missing, a shared battle track plays instead
+- When the deployed party’s remaining health drops under a third of its total, or at least half the party is down, the danger track takes over. Healing or reviving out of that returns the terrain track, or the near-victory track if that is on
+- When little of the enemy side is left and the finish looks close, the near-victory track takes over. If you are hunting a boss, it can switch while you are near the boss and its health is down, even if other enemies remain. Once it has switched, it stays while that boss is still in that state
+- After victory is decided, and on the result screen, the clear track plays
+
+Settings remember picture quality (light / standard / high), battle scenes (full / short), whether the grid is shown, camera speed (slow / standard / fast), and the volumes for music and effects. The next time you open the game, you continue from the same roster and stage.
+
+The first time, make one character, put them in the party, and sortie. That is the fastest way to learn the controls. If you stall, buy gear, or level up and evolve. F1 in battle is a shorter sheet than this section.
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).

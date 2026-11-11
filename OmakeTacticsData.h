@@ -893,6 +893,9 @@ void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnOut, int* bleedOut);
 void WakeGroup(Battle& b, int grp);
 void JoinTurnClock(Battle& b, int ui);
+// 敵が気づく歩数。10 は二手分で近く、以前の 16 は螺旋の別階まで届いて遠い。
+// 直線や層番号ではなく、その敵が実際に歩けるマスだけを数える。
+enum { TAC_NOTICE_STEPS = 13 };
 int WakeNearPlayers(Battle& b, int rad, int immediate = 0);
 int LavaHurt(Battle& b, int ui);
 int UnitFacing(const Unit& attacker, const Unit& defender);

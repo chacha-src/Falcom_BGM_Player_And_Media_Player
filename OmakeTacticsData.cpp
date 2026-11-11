@@ -1445,35 +1445,44 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * 0.85f
 				+ 0.32f * sinf(u * 19.7f + (float)style);
 			float delta = dirSign * 1.45f + wave;
-			delta = Clampf(delta, -1.9f, 1.9f);
+			// 1歩は最大1段。2段を超える上書きが、選択できない切れ目になる。
+			delta = Clampf(delta, -1.f, 1.f);
 			if (i > 0) hCur = Clampf(hCur + delta, 2.f, (float)MAXH_SPIRAL);
 			int hi = Clampi((int)lroundf(hCur), 2, MAXH_SPIRAL);
 			if (i > 0) {
 				int prev = (int)sh[i - 1];
-				hi = Clampi(hi, prev - 2, prev + 2);
+				hi = Clampi(hi, prev - 1, prev + 1);
 				hi = Clampi(hi, 2, MAXH_SPIRAL);
 			}
 			sh[i] = (short)hi;
 		}
-		// 交差箇所で下層と上層の高さが近すぎるときは、後から通る側を押し上げて確実な立体交差にする
-		for (int i = 20; i < ns; i++) {
-			for (int j = 0; j < i - 18; j++) {
-				if (abs((int)sx[i] - (int)sx[j]) <= 2 && abs((int)sz[i] - (int)sz[j]) <= 2) {
-					if (abs((int)sh[i] - (int)sh[j]) < 18) {
-						int bump = (sh[i] >= sh[j]) ? 1 : -1;
-						for (int k = max(1, i - 12); k < ns; k++) {
-							int target = (int)sh[k] + bump * 2;
-							sh[k] = (short)Clampi(target, (int)sh[k - 1] - 2, (int)sh[k - 1] + 2);
-							sh[k] = (short)Clampi((int)sh[k], 2, MAXH_SPIRAL);
-						}
-					}
-					break;
+		// 立体交差は坂のまま 8 段以上離す。段差の上限は 1 のままなので、道は切れない。
+		for (int pass = 0; pass < 3; pass++) {
+			for (int i = 24; i < ns; i++) {
+				int clash = 0;
+				for (int j = 0; j < i - 16; j++) {
+					if (abs((int)sx[i] - (int)sx[j]) <= 2 && abs((int)sz[i] - (int)sz[j]) <= 2
+						&& abs((int)sh[i] - (int)sh[j]) < 8) { clash = 1; break; }
+				}
+				if (!clash) continue;
+				int dir = climbUp ? 1 : -1;
+				int k0 = i - 12;
+				if (k0 < 1) k0 = 1;
+				for (int k = k0; k <= i; k++) {
+					int prev = (int)sh[k - 1];
+					sh[k] = (short)Clampi((int)sh[k] + dir, prev - 1, prev + 1);
+					sh[k] = (short)Clampi((int)sh[k], 2, MAXH_SPIRAL);
+				}
+				for (int k = i + 1; k < ns; k++) {
+					int prev = (int)sh[k - 1];
+					sh[k] = (short)Clampi((int)sh[k], prev - 1, prev + 1);
+					sh[k] = (short)Clampi((int)sh[k], 2, MAXH_SPIRAL);
 				}
 			}
 		}
 	}
 
-	// 幅は 1〜3 で途中で変わる。固定の3マス道路にはしない。
+	// 幅は 2〜4。1マス道は置かない。途中で太さが変わる。
 	struct VSlot { short h; short pass; BYTE t; };
 	static VSlot vgrid[MAPN][MAPN][LAY_N];
 	static BYTE vcnt[MAPN][MAPN];
@@ -1482,14 +1491,14 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 	const BYTE roadT = (BYTE)(tp.road ? T_ROAD : tp.ground);
 	const BYTE sideT = (BYTE)(tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_RUINS);
 	{
-		int w = 2, plaza = -1, narrow = -1;
+		int w = 3, plaza = -1, lane = -1;
 		for (int i = 0; i < ns; i++) {
-			if (i < 7 || i > ns - 8) w = 3;
-			else if (i <= plaza) w = 3;
-			else if (i <= narrow) w = 1;
-			else if (r.Chance(7)) { plaza = i + r.Range(4, 10); w = 3; }
-			else if (r.Chance(9)) { narrow = i + r.Range(3, 8); w = 1; }
-			else if (r.Chance(16)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 1, 3);
+			if (i < 8 || i > ns - 9) w = 3;
+			else if (i <= plaza) w = 4;
+			else if (i <= lane) w = 2;
+			else if (r.Chance(8)) { plaza = i + r.Range(6, 14); w = 4; }
+			else if (r.Chance(14)) { lane = i + r.Range(8, 16); w = 2; }
+			else if (r.Chance(18)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 2, 4);
 			spineW[i] = (BYTE)w;
 		}
 	}
@@ -1515,14 +1524,12 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 
 	auto putVSlot = [&](int x, int z, int h, int pass, BYTE tr, bool isCenter) {
 		if (!Map::In(x, z)) return;
+		if (!FootPassable(tr)) tr = T_PLAIN;
 		int n = (int)vcnt[z][x];
 		for (int e = 0; e < n; e++) {
-			if (abs(pass - (int)vgrid[z][x][e].pass) <= 12 || abs(h - (int)vgrid[z][x][e].h) <= 6) {
-				if (isCenter) {
-					vgrid[z][x][e].h = (short)h;
-					vgrid[z][x][e].pass = (short)pass;
-					vgrid[z][x][e].t = tr;
-				}
+			// 同じ床（1段以内）だけ共有する。離れた交差の高さを書き換えると、前後が段差になって通れなくなる。
+			if (abs(h - (int)vgrid[z][x][e].h) <= 1) {
+				if (isCenter && !FootPassable(vgrid[z][x][e].t)) vgrid[z][x][e].t = tr;
 				return;
 			}
 		}
@@ -1548,19 +1555,18 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		int perpx = 0, perpz = 0;
 		if (i + 1 < ns) { perpx = (int)sz[i] - (int)sz[i + 1]; perpz = (int)sx[i + 1] - (int)sx[i]; }
 		else if (i > 0) { perpx = (int)sz[i - 1] - (int)sz[i]; perpz = (int)sx[i] - (int)sx[i - 1]; }
+		if (perpx) perpx = perpx > 0 ? 1 : -1;
+		if (perpz) perpz = perpz > 0 ? 1 : -1;
 		int w = (int)spineW[i];
+		if (w < 2) w = 2;
+		if (w > 4) w = 4;
 		putVSlot(gx, gz, h, i, walkT(i), true);
-		if (w >= 2 && (perpx || perpz)) {
-			int side = (w >= 3) ? 0 : ((i & 1) ? 1 : -1);
-			if (w >= 3 || side >= 0)
-				putVSlot(gx + perpx, gz + perpz, h, i, edgeT(i), false);
-			if (w >= 3 || side <= 0)
-				putVSlot(gx - perpx, gz - perpz, h, i, edgeT(i + 3), false);
-		}
-		if (w >= 3 && r.Chance(20) && (perpx || perpz)) {
-			int s = r.Chance(50) ? 1 : -1;
-			putVSlot(gx + perpx * 2 * s, gz + perpz * 2 * s, h, i, edgeT(i + 9), false);
-		}
+		if (w >= 2 && (perpx || perpz))
+			putVSlot(gx + perpx, gz + perpz, h, i, edgeT(i), false);
+		if (w >= 3 && (perpx || perpz))
+			putVSlot(gx - perpx, gz - perpz, h, i, edgeT(i + 3), false);
+		if (w >= 4 && (perpx || perpz))
+			putVSlot(gx + perpx * 2, gz + perpz * 2, h, i, edgeT(i + 9), false);
 	}
 
 	// スタートとボス地点は足場を少し広げる。穴を残して正方形にはしない。
@@ -1574,6 +1580,119 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			if ((dx || dz) && r.Chance(18)) continue;
 			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
 		}
+	}
+
+	// 本線とは別に、半径をずらした螺旋を 2 本足す。交差は段を離し、坂で届くところだけ幅 2 で結ぶ。
+	{
+		enum { MAXP = 1400 };
+		static short bx[2][MAXP], bz[2][MAXP], bh[2][MAXP];
+		int bn[2] = { 0, 0 };
+		float phase = r.F(0.f, 6.2831853f);
+		int turnsUse = 3 + (int)(r.Next() % 2);
+		const float radBase[2] = { 17.2f, 23.6f };
+		for (int ri = 0; ri < 2; ri++) {
+			int curX = cx, curZ = cz, n = 0;
+			auto push = [&](int tx, int tz) {
+				tx = Clampi(tx, 4, MAPN - 5);
+				tz = Clampi(tz, 4, MAPN - 5);
+				if (n == 0) {
+					curX = tx; curZ = tz;
+					bx[ri][n] = (short)curX; bz[ri][n] = (short)curZ; n++;
+					return;
+				}
+				int guard = MAPN * 4;
+				while ((curX != tx || curZ != tz) && n < MAXP - 2 && guard-- > 0) {
+					int dx = tx - curX, dz = tz - curZ;
+					int nx = curX, nz = curZ;
+					if (dx != 0 && (dz == 0 || abs(dx) >= abs(dz))) nx += (dx > 0 ? 1 : -1);
+					else if (dz != 0) nz += (dz > 0 ? 1 : -1);
+					else break;
+					if (nx == curX && nz == curZ) break;
+					curX = nx; curZ = nz;
+					if (n > 0 && bx[ri][n - 1] == curX && bz[ri][n - 1] == curZ) continue;
+					bx[ri][n] = (short)curX; bz[ri][n] = (short)curZ; n++;
+				}
+			};
+			push(cx, cz);
+			int samples = turnsUse * 34;
+			for (int i = 0; i <= samples; i++) {
+				float u = (float)i / (float)samples;
+				float ang = phase + ri * 2.2f + (climbUp ? 1.f : -1.f) * u * (float)turnsUse * 6.2831853f;
+				float rad = radBase[ri] + 1.3f * sinf(ang * 1.5f + phase);
+				int tx = (int)lroundf((float)cx + cosf(ang) * rad);
+				int tz = (int)lroundf((float)cz + sinf(ang) * rad);
+				push(tx, tz);
+			}
+			bn[ri] = n;
+			int h = (int)sh[0];
+			for (int i = 0; i < n; i++) {
+				if (i > 0) {
+					float u = (float)i / (float)max(1, n - 1);
+					int j = Clampi((int)(u * (float)(ns - 1)), 0, ns - 1);
+					int lift = 0;
+					if (ri == 1) {
+						if (u > 0.14f && u < 0.8f) lift = 14;
+						else if (u > 0.08f && u <= 0.14f) lift = (int)((u - 0.08f) / 0.06f * 14.f);
+						else if (u >= 0.8f && u < 0.9f) lift = (int)((0.9f - u) / 0.1f * 14.f);
+					}
+					int want = (int)sh[j] + (climbUp ? lift : -lift);
+					if (want > h + 1) want = h + 1;
+					if (want < h - 1) want = h - 1;
+					h = Clampi(want, 2, MAXH_SPIRAL);
+				}
+				bh[ri][i] = (short)h;
+			}
+		}
+		auto stampWide = [&](const short* xs, const short* zs, const short* hs, int n, int pass0) {
+			int w = 3, left = 0;
+			for (int i = 0; i < n; i++) {
+				if (left <= 0) { w = 2 + (int)(r.Next() % 3); left = 8 + (int)(r.Next() % 10); }
+				left--;
+				if (i < 6 || i > n - 7) w = 3;
+				int gx = (int)xs[i], gz = (int)zs[i], hh = (int)hs[i];
+				int perpx = 0, perpz = 0;
+				if (i + 1 < n) { perpx = (int)zs[i] - (int)zs[i + 1]; perpz = (int)xs[i + 1] - (int)xs[i]; }
+				else if (i > 0) { perpx = (int)zs[i - 1] - (int)zs[i]; perpz = (int)xs[i] - (int)xs[i - 1]; }
+				if (perpx) perpx = perpx > 0 ? 1 : -1;
+				if (perpz) perpz = perpz > 0 ? 1 : -1;
+				int pass = pass0 + i;
+				putVSlot(gx, gz, hh, pass, roadT, true);
+				if ((perpx || perpz)) {
+					putVSlot(gx + perpx, gz + perpz, hh, pass, roadT, false);
+					if (w >= 3) putVSlot(gx - perpx, gz - perpz, hh, pass, roadT, false);
+					if (w >= 4) putVSlot(gx + perpx * 2, gz + perpz * 2, hh, pass, roadT, false);
+				}
+			}
+		};
+		if (bn[0] >= 16) stampWide(bx[0], bz[0], bh[0], bn[0], 40000);
+		if (bn[1] >= 16) stampWide(bx[1], bz[1], bh[1], bn[1], 80000);
+		auto bridge = [&](const short* x0, const short* z0, const short* h0, int n0,
+			const short* x1, const short* z1, const short* h1, int n1) {
+			for (int i = 20; i < n0 - 20; i += 36) {
+				int best = -1, bestD = 99;
+				for (int j = 0; j < n1; j++) {
+					int d = abs((int)x0[i] - (int)x1[j]) + abs((int)z0[i] - (int)z1[j]);
+					int dh = abs((int)h0[i] - (int)h1[j]);
+					if (d < 4 || d > 14 || dh > d) continue;
+					if (d < bestD) { bestD = d; best = j; }
+				}
+				if (best < 0) continue;
+				int x = (int)x0[i], z = (int)z0[i], h = (int)h0[i];
+				int tx = (int)x1[best], tz = (int)z1[best], th = (int)h1[best];
+				int guard = 24;
+				while ((x != tx || z != tz) && guard-- > 0) {
+					if (x != tx) x += (tx > x) ? 1 : -1;
+					else if (z != tz) z += (tz > z) ? 1 : -1;
+					if (h < th) h++;
+					else if (h > th) h--;
+					h = Clampi(h, 2, MAXH_SPIRAL);
+					putVSlot(x, z, h, 120000 + i, roadT, true);
+					if (Map::In(x, z + 1)) putVSlot(x, z + 1, h, 120000 + i, roadT, false);
+				}
+			}
+		};
+		if (bn[0] >= 16) bridge(sx, sz, sh, ns, bx[0], bz[0], bh[0], bn[0]);
+		if (bn[0] >= 16 && bn[1] >= 16) bridge(bx[0], bz[0], bh[0], bn[0], bx[1], bz[1], bh[1], bn[1]);
 	}
 
 	// 各セルで高さを昇順に並べ、同時デッキへ書き込む
@@ -1591,56 +1710,19 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		}
 	}
 
-	// 補完パス：MAX 5 レイヤーを載せた後、軌道の前後で段差が 2 を超えて途切れた箇所や層落ちした箇所を補完して繋ぐ
-	auto ensureLayerAt = [&](Cell& c, int wantH, BYTE tr) -> int {
-		int nL = CellLayN(c);
-		int bestL = -1, bestD = 99999;
+	// 本線の中心は、前後が 2 段以内で歩ける床を必ず持つ。無いときだけ層を足す。既存の高さは動かさない。
+	for (int i = 0; i < ns; i++) {
+		int x = (int)sx[i], z = (int)sz[i], h = (int)sh[i];
+		if (!Map::In(x, z)) continue;
+		Cell& c = m.c[z][x];
+		int nL = (c.t == T_VOID) ? 0 : CellLayN(c);
+		int ok = 0;
 		for (int L = 0; L < nL; L++) {
-			int d = abs(LayerHt(c, L) - wantH);
-			if (d < bestD) { bestD = d; bestL = L; }
+			if (abs(LayerHt(c, L) - h) <= 2 && TerrainInfo(LayerTr(c, L)).costFoot < 99) { ok = 1; break; }
 		}
-		if (bestL >= 0 && bestD <= 2) {
-			if (TerrainInfo(LayerTr(c, bestL)).costFoot >= 99)
-				LayerSet(c, bestL, tr, LayerHt(c, bestL));
-			return bestL;
-		}
-		// 空きレイヤーがあれば追加して昇順ソート、無ければ一番近い層を補完高さに合わせる
-		int slot = (nL < LAY_N && c.t != T_VOID) ? nL : (bestL >= 0 ? bestL : 0);
-		LayDeck(c, slot, tr, wantH);
-		int newN = CellLayN(c);
-		int ht[LAY_N], tt[LAY_N];
-		for (int L = 0; L < newN; L++) { ht[L] = LayerHt(c, L); tt[L] = LayerTr(c, L); }
-		for (int a = 0; a < newN; a++) for (int b = a + 1; b < newN; b++) {
-			if (ht[b] < ht[a]) {
-				int th = ht[a]; ht[a] = ht[b]; ht[b] = th;
-				int ttr = tt[a]; tt[a] = tt[b]; tt[b] = ttr;
-			}
-		}
-		c.nLay = 0;
-		for (int L = 0; L < newN; L++) LayDeck(c, L, tt[L], ht[L]);
-		for (int L = 0; L < newN; L++) if (abs(LayerHt(c, L) - wantH) <= 2) return L;
-		return 0;
-	};
-
-	int curL = ensureLayerAt(m.c[sz[0]][sx[0]], sh[0], roadT);
-	for (int i = 1; i < ns; i++) {
-		int hPrev = LayerHt(m.c[sz[i - 1]][sx[i - 1]], curL);
-		int wantH = Clampi((int)sh[i], hPrev - 2, hPrev + 2);
-		wantH = Clampi(wantH, 1, MAXH_SPIRAL);
-		sh[i] = (short)wantH;
-		curL = ensureLayerAt(m.c[sz[i]][sx[i]], wantH, walkT(i));
-		int w = (int)spineW[i];
-		if (w < 2) continue;
-		int perpx = (int)sz[i - 1] - (int)sz[i], perpz = (int)sx[i] - (int)sx[i - 1];
-		if (!perpx && !perpz) continue;
-		auto sideAt = [&](int side) {
-			int mx = (int)sx[i] + perpx * side, mz = (int)sz[i] + perpz * side;
-			if (!Map::In(mx, mz) || m.c[mz][mx].t == T_VOID) return;
-			if (vcnt[mz][mx] <= 0) return;
-			ensureLayerAt(m.c[mz][mx], wantH, edgeT(i));
-		};
-		if (w >= 3) { sideAt(-1); sideAt(1); }
-		else sideAt((i & 1) ? 1 : -1);
+		if (ok) continue;
+		if (c.t == T_VOID) LayDeck(c, 0, roadT, h);
+		else if (nL < LAY_N) LayDeck(c, nL, roadT, h);
 	}
 
 	pax = (int)sx[0]; paz = (int)sz[0];
@@ -2440,13 +2522,17 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	int pax = MAPN / 2, paz = MAPN / 2, span = 28;
 	int eax = pax, eaz = paz;
 	int vertical = 0, spiralEndX = pax, spiralEndZ = paz;
-	// 新規マップ生成・作り直し時に約 30% の確率で 0〜999 レイヤーの立体スパイラル／時間の迷宮マップを生成する
-	if (((seed / 3u) % 10u) < 3u) {
+	// 1〜11 は通常の地図だけ。立体は 18 から少なめ、21 から今までどおり。
+	// スパイラルは 20 から本抽選の約三分の一、24 から約 30%。
+	int spiralOn = ((seed / 3u) % 10u) < 3u && stage >= 20;
+	if (spiralOn && stage < 24 && (seed % 3u) != 0u) spiralOn = 0;
+	int layerOn = stage >= 18 && (seed % 8u) <= (stage >= 21 ? 1u : 0u);
+	if (spiralOn) {
 		vertical = 2;
 		span = StampSpiralMap(m, r, tp, pax, paz, spiralEndX, spiralEndZ);
 		eax = spiralEndX;
 		eaz = spiralEndZ;
-	} else if ((seed % 8u) <= 1u) {
+	} else if (layerOn) {
 		vertical = 1;
 		span = StampVertical(m, r, tp, (seed % 8u) == 0u, pax, paz, spiralEndX, spiralEndZ);
 		eax = spiralEndX;
@@ -2627,7 +2713,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	}
 
 	}
-	if (!vertical && (seed % 5u) == 0u)
+	if (!vertical && stage >= 18 && (seed % 5u) == 0u)
 		StampDeckPreset(m, r, tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_PLAIN, (int)((seed / 5u) % 12u));
 	// 7) 味方配置と、地図全体の敵拠点（最大 200。1 拠点 3〜15）
 	static BYTE taken[MAPN][MAPN];
@@ -2701,6 +2787,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
 			int t = m.c[z][x].t;
 			if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
+			if (vertical == 2 && stepFromP[z][x] < 0) continue;
 			if (pathDistP(x, z) < 5) continue;
 			int ht = CellStandH(m, x, z, homeH);
 			int nearXZ = (vertical == 2) ? 14 : 10;
@@ -2805,6 +2892,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			if (bestI < 0) {
 				for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
 					if (!FootPassable(m.c[z][x].t) || m.c[z][x].t == T_VOID) continue;
+					if (vertical == 2 && stepFromP[z][x] < 0) continue;
 					if (Dist(x, z, pax, paz) < 4) continue;
 					int ht = CellStandH(m, x, z, homeH);
 					int nearXZ = (vertical == 2) ? 14 : 10;
@@ -2857,6 +2945,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 				for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
 					int t = m.c[z][x].t;
 					if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
+					if (vertical == 2 && stepFromP[z][x] < 0) continue;
 					if (vertical == 2 && max(abs(x - pax), abs(z - paz)) <= 14) continue;
 					int d = pathDistP(x, z);
 					if (d > best) { best = d; bx = x; bz = z; }
@@ -8199,6 +8288,16 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		else if (r64 == 57u) kind = TAC_VAR_VAULT;
 		else if (r64 == 61u) kind = TAC_VAR_BLESS;
 	}
+	// 1〜11 は通常戦。12 掃討・祝福・宝庫・残党、15 霧・夜襲、18 奇襲・傷、21 双璧・ボス戦。
+	if (kind == TAC_VAR_SWEEP || kind == TAC_VAR_BLESS || kind == TAC_VAR_VAULT || kind == TAC_VAR_REMNANT) {
+		if (stage < 12) kind = TAC_VAR_NONE;
+	} else if (kind == TAC_VAR_MIST || kind == TAC_VAR_RAID) {
+		if (stage < 15) kind = TAC_VAR_NONE;
+	} else if (kind == TAC_VAR_AMBUSH || kind == TAC_VAR_SCAR) {
+		if (stage < 18) kind = TAC_VAR_NONE;
+	} else if (kind == TAC_VAR_TWIN || kind == TAC_VAR_BOSS) {
+		if (stage < 21) kind = TAC_VAR_NONE;
+	}
 	if (b.map.nGrp <= 0) kind = TAC_VAR_NONE;
 	if (kind == TAC_VAR_BOSS) {
 		int has = 0;
@@ -8489,7 +8588,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 				int pL = (b.u[p].deck >= 0 && b.u[p].deck < LAY_N) ? b.u[p].deck : 0;
 				if (!Map::In(b.u[p].x, b.u[p].z) || !LayerOn(b.map.At(b.u[p].x, b.u[p].z), pL)) continue;
 				int d = WalkStepsAt(b.u[p].x, b.u[p].z, pL);
-				if (d >= 0 && d < 30000 && d <= 22) closeBy = 1;
+				if (d >= 0 && d < 30000 && d <= TAC_NOTICE_STEPS) closeBy = 1;
 			}
 			if (closeBy) u.alert = 1;
 		}
@@ -8512,8 +8611,8 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.stampedeLine = 0;
 	b.stampedeShow = 0;
 	int foes = b.AliveCount(TEAM_ENEMY);
-	// 以前は 8 回に 1 で、波が 1 か 2。続くと重いので 16 回に 1、波は 1。
-	if (b.sweep == TAC_VAR_NONE && foes >= 8 && (seed % 16u) == 3u) {
+	// 以前は 8 回に 1 で、波が 1 か 2。続くと重いので 16 回に 1、波は 1。18 から。
+	if (stage >= 18 && b.sweep == TAC_VAR_NONE && foes >= 8 && (seed % 16u) == 3u) {
 		int line = foes / 4;
 		if (line < 2) line = 2;
 		if (line < foes) {
@@ -8772,45 +8871,48 @@ static bool ScoutSee(const Map& m, int ex, int ez, int px, int pz, int eLayer, i
 static bool UnitCanScout(const Battle& b, int ei, int pi, int limit, const short dist[MAPN][MAPN])
 {
 	(void)dist;
-	const Unit& e = b.u[ei];
+	(void)ei;
 	const Unit& p = b.u[pi];
-	int se = max(1, UnitSpan(e)), spn = max(1, UnitSpan(p));
-	bool reach = false;
+	int spn = max(1, UnitSpan(p));
 	int pL = (p.deck >= 0 && p.deck < LAY_N) ? p.deck : 0;
-	for (int z = 0; z < spn && !reach; z++) for (int x = 0; x < spn; x++) {
+	for (int z = 0; z < spn; z++) for (int x = 0; x < spn; x++) {
 		int cx = p.x + x, cz = p.z + z;
 		if (!Map::In(cx, cz)) continue;
-		// 同じ xz の下の階に届いても、相手のいる階へ歩けなければ見つかったことにしない。
+		// 層番号ではなく、この敵が歩いて届くマスだけ。届かない別階は気づかない。
 		if (!LayerOn(b.map.At(cx, cz), pL)) continue;
 		int d = WalkStepsAt(cx, cz, pL);
-		if (d >= 0 && d < 30000 && d <= limit) reach = true;
+		if (d >= 0 && d < 30000 && d <= limit) return true;
 	}
-	if (!reach) return false;
-	for (int ez = 0; ez < se; ez++) for (int ex = 0; ex < se; ex++)
-		for (int pz = 0; pz < spn; pz++) for (int px = 0; px < spn; px++)
-			if (ScoutSee(b.map, e.x + ex, e.z + ez, p.x + px, p.z + pz, e.deck, p.deck)) return true;
 	return false;
 }
 
 int WakeNearPlayers(Battle& b, int rad, int immediate)
 {
-	BYTE wake[MAX_GROUPS];
-	memset(wake, 0, sizeof(wake));
 	int newly = 0;
+	int lim = rad > 0 ? rad : TAC_NOTICE_STEPS;
 	static short dist[MAPN][MAPN];
 	for (int e = 0; e < b.nUnits; e++) {
-		const Unit& u = b.u[e];
-		if (!u.alive || u.team != TEAM_ENEMY || u.alert || u.grp < 0 || u.grp >= MAX_GROUPS) continue;
-		if (wake[u.grp]) continue;
-		ScoutFlood(b, e, rad, dist);
+		Unit& u = b.u[e];
+		if (!u.alive || u.team != TEAM_ENEMY || u.alert) continue;
+		ScoutFlood(b, e, lim, dist);
+		int hit = 0;
 		for (int p = 0; p < b.nUnits; p++) {
 			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-			if (!UnitCanScout(b, e, p, rad, dist)) continue;
-			wake[u.grp] = 1;
+			if (!UnitCanScout(b, e, p, lim, dist)) continue;
+			hit = 1;
 			break;
 		}
+		if (!hit) continue;
+		// 同じ拠点でも、自分では歩いて届かない別階の敵は起こさない。
+		if (immediate) {
+			u.alert = 1;
+			JoinTurnClock(b, e);
+			newly++;
+		} else if (u.alert == 0) {
+			u.alert = 2;
+			newly++;
+		}
 	}
-	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) MarkGroup(b, g, immediate, newly);
 	return newly;
 }
 

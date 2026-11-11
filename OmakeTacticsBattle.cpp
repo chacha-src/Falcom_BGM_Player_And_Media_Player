@@ -1432,7 +1432,7 @@ void Game::BeginTurn()
 	AddBanner(b, NULL, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130), 2, 1.3f, MSG_FACE);
 	m_lastTeam = u.team;
 	if (u.team == TEAM_PLAYER) {
-		int warned = WakeNearPlayers(m_b, 16);
+		int warned = WakeNearPlayers(m_b, TAC_NOTICE_STEPS);
 		if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
 	}
 	TacSfx(u.team == TEAM_PLAYER ? TS_TURN_P : TS_TURN_E);
@@ -3011,7 +3011,7 @@ void Game::BattleConfirmCursor()
 			V3 p = UnitGroundPos(d);
 			d.px = p.x; d.py = p.y; d.pz = p.z;
 			AddPopup(p + v3(0, m_act[t].height, 0), TT(TX_BT_SHOVE), RGBA8(255, 220, 140), 1, MSG_SLAB);
-			if (WakeNearPlayers(m_b, 16)) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
+			if (WakeNearPlayers(m_b, TAC_NOTICE_STEPS)) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
 			if (d.hp >= hp0) {
 				TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
 				FinishUnitTurn(1);
@@ -3412,7 +3412,7 @@ void Game::UpdateMove(float dt)
 				return;
 			}
 		}
-		if (u.team == TEAM_PLAYER && WakeNearPlayers(m_b, 16))
+		if (u.team == TEAM_PLAYER && WakeNearPlayers(m_b, TAC_NOTICE_STEPS))
 			AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
 		m_act[ui].animSpeed = 1.f;
 		m_act[ui].flap = 0.f;
