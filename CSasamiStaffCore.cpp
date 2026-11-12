@@ -416,6 +416,290 @@ int ScStaffMeterTicksPerMeasure(int numer, int denom)
 	return t < SC_PPQN ? SC_PPQN : t;
 }
 
+/* イベント列は tick 順ではない。途中挿入は末尾に足すか、後ろの tick をずらす。
+   拍の位置は拍子・音部・調号・オクターブだけを tick 順に組み、音符のたびに全走査しない。
+   音符そのものは毎回 e.tick を見るので、ドラッグや途中挿入の直後も位置がずれない。 */
+enum { SC_LAY_CAP = 4096, SC_LAY_BAR = 8192 };
+
+struct ScLayEv {
+	uint32_t tick;
+	uint32_t seq;
+	int idx;
+	uint8_t a, b, ch, kind;
+};
+
+static ScLayEv s_layMeter[SC_LAY_CAP];
+static ScLayEv s_layKey[SC_LAY_CAP];
+static ScLayEv s_layClef[SC_LAY_CAP];
+static ScLayEv s_layOtt[SC_LAY_CAP];
+static int s_layNM, s_layNK, s_layNC, s_layNO;
+static uint32_t s_layZone[SC_LAY_CAP];
+static int s_layNZ;
+
+struct ScLayBar {
+	uint32_t tick;
+	int prefix;
+	int mTicks;
+	uint8_t numer, denom;
+};
+static ScLayBar s_layBar[SC_LAY_BAR];
+static int s_layNB;
+static uint32_t s_layCover;
+
+static const ScEvent* s_layEv;
+static int s_layN;
+static uint32_t s_laySig;
+static uint32_t s_layEpoch;
+static uint32_t s_layEpochAt;
+static int s_layDefN, s_layDefD;
+static int s_laySimple;
+static int s_layNumer, s_layDenom, s_layMTicks;
+static int s_layReady;
+
+void ScStaffLayoutTouch(void)
+{
+	s_layEpoch++;
+}
+
+static int LayLessIdx(const ScLayEv* a, const ScLayEv* b)
+{
+	if (a->tick != b->tick) return a->tick < b->tick;
+	return a->idx < b->idx;
+}
+
+static int LayLessSeq(const ScLayEv* a, const ScLayEv* b)
+{
+	if (a->tick != b->tick) return a->tick < b->tick;
+	if (a->seq != b->seq) return a->seq < b->seq;
+	return a->idx < b->idx;
+}
+
+static void LaySort(ScLayEv* a, int n, int bySeq)
+{
+	for (int gap = n / 2; gap > 0; gap /= 2) {
+		for (int i = gap; i < n; i++) {
+			ScLayEv v = a[i];
+			int j = i;
+			while (j >= gap && (bySeq ? LayLessSeq(&v, &a[j - gap]) : LayLessIdx(&v, &a[j - gap]))) {
+				a[j] = a[j - gap];
+				j -= gap;
+			}
+			a[j] = v;
+		}
+	}
+}
+
+static void LaySortU32(uint32_t* a, int n)
+{
+	for (int gap = n / 2; gap > 0; gap /= 2) {
+		for (int i = gap; i < n; i++) {
+			uint32_t v = a[i];
+			int j = i;
+			while (j >= gap && v < a[j - gap]) {
+				a[j] = a[j - gap];
+				j -= gap;
+			}
+			a[j] = v;
+		}
+	}
+}
+
+static uint32_t LayHash(const ScEvent* ev, int n)
+{
+	uint32_t h = 2166136261u;
+	for (int i = 0; i < n; i++) {
+		const uint8_t k = ev[i].kind;
+		if (k != SC_EV_METER && k != SC_EV_CLEF && k != SC_EV_KEY
+			&& k != SC_EV_OTTAVA && k != SC_EV_OTTAVA_END)
+			continue;
+		h ^= ev[i].tick; h *= 16777619u;
+		h ^= ev[i].seq; h *= 16777619u;
+		h ^= (uint32_t)i; h *= 16777619u;
+		h ^= ev[i].ch; h *= 16777619u;
+		h ^= k; h *= 16777619u;
+		h ^= ev[i].a; h *= 16777619u;
+		h ^= ev[i].b; h *= 16777619u;
+	}
+	h ^= (uint32_t)n;
+	return h;
+}
+
+static int LayLast(const ScLayEv* a, int n, uint32_t tick, int ch)
+{
+	int lo = 0, hi = n - 1, ans = -1;
+	while (lo <= hi) {
+		const int mid = (lo + hi) / 2;
+		if (a[mid].tick <= tick) { ans = mid; lo = mid + 1; }
+		else hi = mid - 1;
+	}
+	if (ch < 0) return ans;
+	for (int i = ans; i >= 0; i--)
+		if ((int)a[i].ch == ch) return i;
+	return -1;
+}
+
+static int LayZoneHas(uint32_t tick)
+{
+	int lo = 0, hi = s_layNZ - 1;
+	while (lo <= hi) {
+		const int mid = (lo + hi) / 2;
+		if (s_layZone[mid] == tick) return 1;
+		if (s_layZone[mid] < tick) lo = mid + 1;
+		else hi = mid - 1;
+	}
+	return 0;
+}
+
+static void LayMeterRaw(uint32_t tick, int defN, int defD, int* outN, int* outD)
+{
+	int numer = defN > 0 ? defN : 4;
+	int denom = defD > 0 ? defD : 4;
+	const int i = LayLast(s_layMeter, s_layNM, tick, -1);
+	if (i >= 0) {
+		numer = s_layMeter[i].a > 0 ? (int)s_layMeter[i].a : 4;
+		denom = s_layMeter[i].b > 0 ? (int)s_layMeter[i].b : 4;
+	}
+	if (outN) *outN = numer;
+	if (outD) *outD = denom;
+}
+
+static void LayResetBars(void)
+{
+	s_layNB = 0;
+	s_layCover = 0;
+	if (s_laySimple) return;
+	int numer = s_layNumer, denom = s_layDenom;
+	int m = ScStaffMeterTicksPerMeasure(numer, denom);
+	if (m < 1) m = SC_PPQN;
+	s_layBar[0].tick = 0;
+	s_layBar[0].prefix = 0;
+	s_layBar[0].mTicks = m;
+	s_layBar[0].numer = (uint8_t)numer;
+	s_layBar[0].denom = (uint8_t)denom;
+	s_layNB = 1;
+	s_layCover = (uint32_t)m;
+}
+
+static void LayExtend(uint32_t until)
+{
+	if (s_laySimple || s_layNB < 1) return;
+	int guard = 0;
+	while (s_layCover <= until && s_layNB < SC_LAY_BAR && guard < SC_LAY_BAR) {
+		const uint32_t next = s_layCover;
+		int numer = 4, denom = 4;
+		LayMeterRaw(next, s_layDefN, s_layDefD, &numer, &denom);
+		int m = ScStaffMeterTicksPerMeasure(numer, denom);
+		if (m < 1) break;
+		int prefix = s_layBar[s_layNB - 1].prefix;
+		if (next > 0 && LayZoneHas(next)) prefix += SC_LAYOUT_ZONE_W;
+		s_layBar[s_layNB].tick = next;
+		s_layBar[s_layNB].prefix = prefix;
+		s_layBar[s_layNB].mTicks = m;
+		s_layBar[s_layNB].numer = (uint8_t)numer;
+		s_layBar[s_layNB].denom = (uint8_t)denom;
+		s_layNB++;
+		s_layCover = next + (uint32_t)m;
+		guard++;
+	}
+}
+
+static int LayBarAt(uint32_t tick)
+{
+	if (s_laySimple || s_layNB < 1) return -1;
+	LayExtend(tick);
+	int lo = 0, hi = s_layNB - 1, ans = 0;
+	while (lo <= hi) {
+		const int mid = (lo + hi) / 2;
+		if (s_layBar[mid].tick <= tick) { ans = mid; lo = mid + 1; }
+		else hi = mid - 1;
+	}
+	return ans;
+}
+
+static void LayRebuild(const ScEvent* ev, int n, int defN, int defD, uint32_t sig)
+{
+	s_layEv = ev;
+	s_layN = n;
+	s_laySig = sig;
+	s_layDefN = defN > 0 ? defN : 4;
+	s_layDefD = defD > 0 ? defD : 4;
+	s_layNM = s_layNK = s_layNC = s_layNO = s_layNZ = 0;
+	s_laySimple = 1;
+	if (ev && n > 0) {
+		for (int i = 0; i < n; i++) {
+			const uint8_t k = ev[i].kind;
+			const int ch = (int)ev[i].ch;
+			ScLayEv* dst = NULL;
+			int* cnt = NULL;
+			if (k == SC_EV_METER) { dst = s_layMeter; cnt = &s_layNM; }
+			else if (k == SC_EV_KEY) { dst = s_layKey; cnt = &s_layNK; }
+			else if (k == SC_EV_CLEF && ch >= 0 && ch < 32) { dst = s_layClef; cnt = &s_layNC; }
+			else if ((k == SC_EV_OTTAVA || k == SC_EV_OTTAVA_END) && ch >= 0 && ch < 32) {
+				dst = s_layOtt; cnt = &s_layNO;
+			}
+			if (dst && cnt && *cnt < SC_LAY_CAP) {
+				ScLayEv& e = dst[(*cnt)++];
+				e.tick = ev[i].tick;
+				e.seq = ev[i].seq;
+				e.idx = i;
+				e.a = ev[i].a;
+				e.b = ev[i].b;
+				e.ch = ev[i].ch;
+				e.kind = k;
+			}
+			if ((k == SC_EV_METER || k == SC_EV_CLEF || k == SC_EV_KEY) && ev[i].tick > 0)
+				s_laySimple = 0;
+			if ((k == SC_EV_METER || k == SC_EV_CLEF || k == SC_EV_KEY) && ev[i].tick > 0
+				&& s_layNZ < SC_LAY_CAP)
+				s_layZone[s_layNZ++] = ev[i].tick;
+		}
+	}
+	LaySort(s_layMeter, s_layNM, 0);
+	LaySort(s_layKey, s_layNK, 0);
+	LaySort(s_layClef, s_layNC, 0);
+	LaySort(s_layOtt, s_layNO, 1);
+	LaySortU32(s_layZone, s_layNZ);
+	int zW = 0;
+	for (int i = 0; i < s_layNZ; i++) {
+		if (zW == 0 || s_layZone[i] != s_layZone[zW - 1])
+			s_layZone[zW++] = s_layZone[i];
+	}
+	s_layNZ = zW;
+	LayMeterRaw(0, s_layDefN, s_layDefD, &s_layNumer, &s_layDenom);
+	s_layMTicks = ScStaffMeterTicksPerMeasure(s_layNumer, s_layDenom);
+	if (s_layMTicks < 1) s_layMTicks = SC_PPQN;
+	s_layReady = 1;
+	LayResetBars();
+}
+
+static void LaySync(const ScEvent* ev, int n, int defN, int defD)
+{
+	if (defN < 1) defN = 4;
+	if (defD < 1) defD = 4;
+	if (n < 0) n = 0;
+	if (s_layReady && s_layEpochAt == s_layEpoch && s_layEv == ev && s_layN == n
+		&& s_layDefN == defN && s_layDefD == defD)
+		return;
+	const uint32_t sig = (ev && n > 0) ? LayHash(ev, n) : 0;
+	if (s_layReady && s_layEv == ev && s_layN == n && s_layDefN == defN && s_layDefD == defD
+		&& s_laySig == sig) {
+		s_layEpochAt = s_layEpoch;
+		return;
+	}
+	LayRebuild(ev, n, defN, defD, sig);
+	s_layEpochAt = s_layEpoch;
+}
+
+static void LaySyncKeep(const ScEvent* ev, int n)
+{
+	int defN = 4, defD = 4;
+	if (s_layReady && s_layEv == ev && s_layN == n) {
+		defN = s_layDefN;
+		defD = s_layDefD;
+	}
+	LaySync(ev, n, defN, defD);
+}
+
 void ScStaffMeterAtTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom, int* outNumer, int* outDenom)
 {
@@ -423,83 +707,78 @@ void ScStaffMeterAtTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int denom = defDenom > 0 ? defDenom : 4;
 	if (outNumer) *outNumer = numer;
 	if (outDenom) *outDenom = denom;
-	if (!ev || evCount <= 0 || !outNumer || !outDenom) return;
-	uint32_t best = 0;
-	int found = 0;
-	for (int i = 0; i < evCount; i++) {
-		if (ev[i].kind != SC_EV_METER) continue;
-		if (ev[i].tick > tick) continue;
-		if (!found || ev[i].tick >= best) {
-			best = ev[i].tick;
-			numer = ev[i].a > 0 ? (int)ev[i].a : 4;
-			denom = ev[i].b > 0 ? (int)ev[i].b : 4;
-			found = 1;
-		}
+	if (!outNumer || !outDenom) return;
+	LaySync(ev, evCount, numer, denom);
+	if (s_laySimple) {
+		*outNumer = s_layNumer;
+		*outDenom = s_layDenom;
+		return;
 	}
-	*outNumer = numer;
-	*outDenom = denom;
+	LayMeterRaw(tick, numer, denom, outNumer, outDenom);
 }
 
 uint32_t ScStaffSnapToBarTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom)
 {
 	if (tick == 0) return 0;
-	uint32_t t = 0;
-	int numer = defNumer > 0 ? defNumer : 4;
-	int denom = defDenom > 0 ? defDenom : 4;
-	while (t <= tick) {
-		ScStaffMeterAtTick(ev, evCount, t, defNumer, defDenom, &numer, &denom);
-		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
-		if (mTicks < 1) return tick;
-		const uint32_t next = t + (uint32_t)mTicks;
-		if (next > tick) return t;
-		t = next;
+	const int defN = defNumer > 0 ? defNumer : 4;
+	const int defD = defDenom > 0 ? defDenom : 4;
+	LaySync(ev, evCount, defN, defD);
+	if (s_laySimple) {
+		const uint32_t m = (uint32_t)(s_layMTicks > 0 ? s_layMTicks : SC_PPQN);
+		return tick - (tick % m);
 	}
-	return t;
+	const int bi = LayBarAt(tick);
+	if (bi < 0) return 0;
+	return s_layBar[bi].tick;
 }
 
 void ScStaffBarBeatFromTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom, int* outBar, int* outBeat, int* outRem)
 {
-	int bar = 1;
-	uint32_t t = 0;
-	int numer = defNumer > 0 ? defNumer : 4;
-	int denom = defDenom > 0 ? defDenom : 4;
-	for (int guard = 0; guard < 100000; guard++) {
-		ScStaffMeterAtTick(ev, evCount, t, defNumer, defDenom, &numer, &denom);
-		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
-		if (mTicks < 1) break;
-		const uint32_t next = t + (uint32_t)mTicks;
-		if (tick < next) {
-			const int beatT = ScStaffBeatTicks(denom);
-			const uint32_t into = tick - t;
-			if (outBar) *outBar = bar;
-			if (outBeat) *outBeat = (int)(into / (uint32_t)max(1, beatT)) + 1;
-			if (outRem) *outRem = (int)(into % (uint32_t)max(1, beatT));
-			return;
-		}
-		t = next;
-		bar++;
+	const int defN = defNumer > 0 ? defNumer : 4;
+	const int defD = defDenom > 0 ? defDenom : 4;
+	LaySync(ev, evCount, defN, defD);
+	if (s_laySimple) {
+		const uint32_t m = (uint32_t)(s_layMTicks > 0 ? s_layMTicks : SC_PPQN);
+		const int beatT = ScStaffBeatTicks(s_layDenom);
+		const uint32_t into = tick % m;
+		if (outBar) *outBar = (int)(tick / m) + 1;
+		if (outBeat) *outBeat = (int)(into / (uint32_t)max(1, beatT)) + 1;
+		if (outRem) *outRem = (int)(into % (uint32_t)max(1, beatT));
+		return;
 	}
-	if (outBar) *outBar = bar;
-	if (outBeat) *outBeat = 1;
-	if (outRem) *outRem = 0;
+	const int bi = LayBarAt(tick);
+	if (bi < 0) {
+		if (outBar) *outBar = 1;
+		if (outBeat) *outBeat = 1;
+		if (outRem) *outRem = 0;
+		return;
+	}
+	const int beatT = ScStaffBeatTicks(s_layBar[bi].denom);
+	const uint32_t into = tick - s_layBar[bi].tick;
+	if (outBar) *outBar = bi + 1;
+	if (outBeat) *outBeat = (int)(into / (uint32_t)max(1, beatT)) + 1;
+	if (outRem) *outRem = (int)(into % (uint32_t)max(1, beatT));
 }
 
 uint32_t ScStaffTickFromBar(const ScEvent* ev, int evCount, int bar1,
 	int defNumer, int defDenom)
 {
 	if (bar1 < 1) bar1 = 1;
-	uint32_t t = 0;
-	int numer = defNumer > 0 ? defNumer : 4;
-	int denom = defDenom > 0 ? defDenom : 4;
-	for (int b = 1; b < bar1; b++) {
-		ScStaffMeterAtTick(ev, evCount, t, defNumer, defDenom, &numer, &denom);
-		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
-		if (mTicks < 1) break;
-		t += (uint32_t)mTicks;
+	const int defN = defNumer > 0 ? defNumer : 4;
+	const int defD = defDenom > 0 ? defDenom : 4;
+	LaySync(ev, evCount, defN, defD);
+	if (s_laySimple) {
+		const uint32_t m = (uint32_t)(s_layMTicks > 0 ? s_layMTicks : SC_PPQN);
+		return (uint32_t)(bar1 - 1) * m;
 	}
-	return t;
+	const int want = bar1 - 1;
+	if (want >= SC_LAY_BAR) return 0;
+	while (s_layNB <= want && s_layNB < SC_LAY_BAR)
+		LayExtend(s_layCover);
+	if (want < s_layNB) return s_layBar[want].tick;
+	return s_layNB > 0 ? s_layBar[s_layNB - 1].tick : 0;
 }
 
 uint32_t ScStaffLastContentTick(const ScEvent* ev, int evCount)
@@ -1174,6 +1453,7 @@ int ScStaffEvWrittenMidi(const ScEvent* ev, int evCount, const ScEvent& e, int i
 void ScStaffUpdateContentExtent(ScStaffUi* u, const ScEvent* ev, int evCount)
 {
 	if (!u) return;
+	ScStaffLayoutTouch();
 	uint32_t maxT = (uint32_t)(SC_PPQN * SC_MEASURE_BEATS * SC_MEASURES_DEFAULT);
 	for (int i = 0; i < 32; i++) {
 		u->writtenValid[i] = 0;
@@ -1211,24 +1491,13 @@ void ScStaffUpdateContentExtent(ScStaffUi* u, const ScEvent* ev, int evCount)
 
 int ScStaffOttavaOctaves(const ScEvent* ev, int evCount, int ch, uint32_t tick)
 {
-	if (!ev || evCount <= 0 || ch < 0) return 0;
-	int best = -1;
-	uint32_t bestTick = 0;
-	uint32_t bestSeq = 0;
-	for (int i = 0; i < evCount; i++) {
-		const ScEvent& e = ev[i];
-		if ((int)e.ch != ch) continue;
-		if (e.kind != SC_EV_OTTAVA && e.kind != SC_EV_OTTAVA_END) continue;
-		if (e.tick > tick) continue;
-		if (best < 0 || e.tick > bestTick || (e.tick == bestTick && e.seq >= bestSeq)) {
-			best = i;
-			bestTick = e.tick;
-			bestSeq = e.seq;
-		}
-	}
-	if (best < 0) return 0;
-	if (ev[best].kind == SC_EV_OTTAVA_END) return 0;
-	int o = (int)(int8_t)ev[best].a;
+	if (!ev || evCount <= 0 || ch < 0 || ch >= 32) return 0;
+	LaySyncKeep(ev, evCount);
+	if (s_layNO < 1) return 0;
+	const int i = LayLast(s_layOtt, s_layNO, tick, ch);
+	if (i < 0) return 0;
+	if (s_layOtt[i].kind == SC_EV_OTTAVA_END) return 0;
+	int o = (int)(int8_t)s_layOtt[i].a;
 	if (o < -3) o = -3;
 	if (o > 3) o = 3;
 	return o;
@@ -1443,21 +1712,16 @@ int ScStaffYToMidiNoteTrack(const ScStaffUi* u, int track, int staffTop, int y,
 int ScStaffClefModeAt(const ScStaffUi* u, int track, uint32_t tick, const ScEvent* ev, int evCount)
 {
 	int c = ScClefMode(u, track);
-	if (!ev || evCount <= 0) return c;
-	uint32_t best = 0;
-	int found = 0;
-	for (int i = 0; i < evCount; i++) {
-		if (ev[i].kind != SC_EV_CLEF) continue;
-		if ((int)ev[i].ch != track) continue;
-		if (ev[i].tick > tick) continue;
-		if (!found || ev[i].tick >= best) {
-			best = ev[i].tick;
-			c = (int)ev[i].a;
-			if (c < 0) c = 0;
-			if (c > 3) c = 3;
-			found = 1;
-		}
-	}
+	if (!ev || evCount <= 0 || track < 0 || track >= 32) return c;
+	const int defN = (u && u->meterNumer > 0) ? u->meterNumer : 4;
+	const int defD = (u && u->meterDenom > 0) ? u->meterDenom : 4;
+	LaySync(ev, evCount, defN, defD);
+	if (s_layNC < 1) return c;
+	const int i = LayLast(s_layClef, s_layNC, tick, track);
+	if (i < 0) return c;
+	c = (int)s_layClef[i].a;
+	if (c < 0) c = 0;
+	if (c > 3) c = 3;
 	return c;
 }
 
@@ -1465,29 +1729,19 @@ int ScStaffKeySigAtTick(const ScEvent* ev, int evCount, uint32_t tick, int defKe
 {
 	int ks = defKey;
 	if (!ev || evCount <= 0) return ks;
-	uint32_t best = 0;
-	int found = 0;
-	for (int i = 0; i < evCount; i++) {
-		if (ev[i].kind != SC_EV_KEY) continue;
-		if (ev[i].tick > tick) continue;
-		if (!found || ev[i].tick >= best) {
-			best = ev[i].tick;
-			ks = (int)(int8_t)ev[i].a;
-			found = 1;
-		}
-	}
-	return ks;
+	LaySyncKeep(ev, evCount);
+	if (s_layNK < 1) return ks;
+	const int i = LayLast(s_layKey, s_layNK, tick, -1);
+	if (i < 0) return ks;
+	return (int)(int8_t)s_layKey[i].a;
 }
 
 int ScStaffBarHasLayoutZone(const ScEvent* ev, int evCount, uint32_t barTick)
 {
 	if (!ev || barTick == 0) return 0;
-	for (int i = 0; i < evCount; i++) {
-		if (ev[i].tick != barTick) continue;
-		if (ev[i].kind == SC_EV_METER || ev[i].kind == SC_EV_CLEF || ev[i].kind == SC_EV_KEY)
-			return 1;
-	}
-	return 0;
+	LaySyncKeep(ev, evCount);
+	if (s_laySimple || s_layNZ < 1) return 0;
+	return LayZoneHas(barTick);
 }
 
 int ScStaffLayoutPrefixPx(const ScEvent* ev, int evCount, uint32_t tick, const ScStaffUi* u)
@@ -1495,20 +1749,11 @@ int ScStaffLayoutPrefixPx(const ScEvent* ev, int evCount, uint32_t tick, const S
 	if (!ev || !u || tick == 0) return 0;
 	const int defN = u->meterNumer > 0 ? u->meterNumer : 4;
 	const int defD = u->meterDenom > 0 ? u->meterDenom : 4;
-	int prefix = 0;
-	uint32_t barTick = 0;
-	int numer = defN, denom = defD;
-	while (barTick < tick) {
-		ScStaffMeterAtTick(ev, evCount, barTick, defN, defD, &numer, &denom);
-		const int mTicks = ScStaffMeterTicksPerMeasure(numer, denom);
-		if (mTicks < 1) break;
-		const uint32_t nextBar = barTick + (uint32_t)mTicks;
-		if (nextBar > tick) break;
-		if (ScStaffBarHasLayoutZone(ev, evCount, nextBar))
-			prefix += SC_LAYOUT_ZONE_W;
-		barTick = nextBar;
-	}
-	return prefix;
+	LaySync(ev, evCount, defN, defD);
+	if (s_laySimple) return 0;
+	const int bi = LayBarAt(tick);
+	if (bi < 0) return 0;
+	return s_layBar[bi].prefix;
 }
 
 int ScStaffScoreContentWidthPx(const ScStaffUi* u, const ScEvent* ev, int evCount, uint32_t contentTicks)
@@ -1554,7 +1799,13 @@ uint32_t ScStaffXToTick(int x, int scrollX, int gridLeft, int pxBeat, int quantT
 	const int px = x - gridLeft + scrollX;
 	if (px < 0) return 0;
 	uint32_t tick = 0;
-	if (u && ev && evCount > 0) {
+	const int defN = (u && u->meterNumer > 0) ? u->meterNumer : 4;
+	const int defD = (u && u->meterDenom > 0) ? u->meterDenom : 4;
+	if (u && ev && evCount > 0)
+		LaySync(ev, evCount, defN, defD);
+	if (!u || !ev || evCount <= 0 || s_laySimple) {
+		tick = (uint32_t)((px * SC_PPQN) / pxBeat);
+	} else {
 		uint32_t maxTick = u->contentTicks > 0 ? u->contentTicks : (uint32_t)(SC_PPQN * SC_MEASURES_DEFAULT * 4);
 		uint32_t lo = 0, hi = maxTick;
 		while (lo < hi) {
@@ -1565,8 +1816,6 @@ uint32_t ScStaffXToTick(int x, int scrollX, int gridLeft, int pxBeat, int quantT
 				hi = mid - 1;
 		}
 		tick = lo;
-	} else {
-		tick = (uint32_t)((px * SC_PPQN) / pxBeat);
 	}
 	const int q = quantTicks > 0 ? quantTicks : (SC_PPQN / 4);
 	tick = (tick / (uint32_t)q) * (uint32_t)q;
@@ -3848,21 +4097,40 @@ static void ScStaffPaintClefSegments(CDC& dc, int lineX0, int gridRight, int sta
 	const ScStaffUi* u, int tr, int scrollX, int gridLeft, int pxBeat,
 	const ScEvent* ev, int evCount, uint32_t tVis0)
 {
+	/* 音部は配列順ではなく tick 順。途中挿入で後ろに足されても区切りが飛ばない。 */
+	struct Seg { uint32_t tick; int cm; };
+	Seg seg[64];
+	int ns = 0;
+	if (ev) {
+		for (int ci = 0; ci < evCount; ci++) {
+			if (ev[ci].kind != SC_EV_CLEF || (int)ev[ci].ch != tr || ev[ci].tick == 0) continue;
+			if (ns >= 64) break;
+			seg[ns].tick = ev[ci].tick;
+			seg[ns].cm = (int)ev[ci].a % 4;
+			if (seg[ns].cm < 0) seg[ns].cm = 0;
+			ns++;
+		}
+	}
+	for (int a = 1; a < ns; a++) {
+		Seg v = seg[a];
+		int b = a;
+		while (b > 0 && seg[b - 1].tick > v.tick) { seg[b] = seg[b - 1]; b--; }
+		seg[b] = v;
+	}
 	int segCm = ScStaffClefModeAt(u, tr, tVis0, ev, evCount);
 	int segX0 = lineX0;
-	for (int ci = 0; ci < evCount; ci++) {
-		if (ev[ci].kind != SC_EV_CLEF || (int)ev[ci].ch != tr || ev[ci].tick == 0) continue;
-		const uint32_t bt = ev[ci].tick;
+	for (int si = 0; si < ns; si++) {
+		const uint32_t bt = seg[si].tick;
 		const int xC = ScStaffTickToX(bt, scrollX, gridLeft, pxBeat, u, ev, evCount);
 		const int hasZ = bt > 0 && ScStaffBarHasLayoutZone(ev, evCount, bt);
 		const int xSplit = hasZ ? xC - SC_LAYOUT_ZONE_W : xC;
 		if (xSplit <= segX0) {
-			segCm = (int)ev[ci].a % 4;
+			segCm = seg[si].cm;
 			continue;
 		}
-		if (xSplit > gridRight) break;
+		if (xSplit > gridRight) continue;
 		ScStaffPaintStaffLinesRange(dc, segCm, segX0, xSplit, staffTop, staffH, gap, u, tr);
-		segCm = (int)ev[ci].a % 4;
+		segCm = seg[si].cm;
 		segX0 = xC;
 	}
 	if (segX0 < gridRight)
@@ -4350,12 +4618,18 @@ static int ScStaffEvMidiPitch(const ScEvent& e, int isFm, int tr)
 static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* ev, int evCount,
 	int isFm, int tr, int staffTop, int gridLeft, int gridRight, int pxBeat, int beatTicks)
 {
-	/* Heap — stack array of 768 cols was ~320KB and corrupted paint (no notes / no ghost). */
-	ScBeamCol* cols = (ScBeamCol*)malloc(sizeof(ScBeamCol) * (size_t)SC_BEAM_COL_MAX);
-	if (!cols) return;
+	/* 使い回す。スクロールのたびに確保しない。画面外の音符は tick で落とす（配列は時刻順ではない）。 */
+	static ScBeamCol* s_beamCols;
+	if (!s_beamCols) {
+		s_beamCols = (ScBeamCol*)malloc(sizeof(ScBeamCol) * (size_t)SC_BEAM_COL_MAX);
+		if (!s_beamCols) return;
+	}
+	ScBeamCol* cols = s_beamCols;
 	int nCol = 0;
 	const int gap = ScStaffLineGap(u);
 	const int midY = staffTop + 8 + gap * 2;
+	const uint32_t vis0 = ScStaffXToTick(gridLeft - pxBeat * 4, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
+	const uint32_t vis1 = ScStaffXToTick(gridRight + pxBeat * 4, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
 
 	for (int i = 0; i < evCount; i++) {
 		const ScEvent& e = ev[i];
@@ -4363,6 +4637,10 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 		const int isNote = isFm ? (e.kind == SC_EV_FM_NOTE) : (e.kind == SC_EV_NOTE);
 		const int isTie = (e.kind == SC_EV_TIE);
 		const int isRest = isFm ? (e.kind == SC_EV_FM_REST) : (e.kind == SC_EV_REST);
+		if (!isNote && !isTie && !isRest) continue;
+		const uint32_t durT = e.dur ? e.dur : (uint32_t)SC_PPQN;
+		if (e.tick > vis1) continue;
+		if (e.tick + durT < vis0) continue;
 		if (isRest) {
 			int x0 = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 			if (x0 >= gridLeft - 20 && x0 <= gridRight + 20) {
@@ -4730,7 +5008,6 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 				cols[i].heads[h].col);
 		}
 	}
-	free(cols);
 }
 
 static void ScStaffPaintLayoutZone(CDC& dc, int xStart, int xEnd, int yTop, int yBot,
@@ -4799,8 +5076,9 @@ static void ScStaffPaintRowMeasureGrid(CDC& dc, const CRect& grid, const ScStaff
 	const int barW = 3;
 	const COLORREF beatC = emph ? RGB(155, 155, 178) : RGB(205, 205, 218);
 
+	uint32_t tVis0 = ScStaffXToTick(grid.left - pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
 	uint32_t tVis1 = ScStaffXToTick(gridRight + pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
-	uint32_t barTick = 0;
+	uint32_t barTick = ScStaffSnapToBarTick(ev, evCount, tVis0, defNumer, defDenom);
 	int barNumer = defNumer, barDenom = defDenom;
 	while (barTick <= tVis1 + (uint32_t)ScStaffMeterTicksPerMeasure(barNumer, barDenom)) {
 		ScStaffMeterAtTick(ev, evCount, barTick, defNumer, defDenom, &barNumer, &barDenom);
@@ -4825,8 +5103,12 @@ static void ScStaffPaintRowMeasureGrid(CDC& dc, const CRect& grid, const ScStaff
 		if (mTicks < 1) break;
 		barTick += (uint32_t)mTicks;
 	}
-	for (int b = 0; b <= beatsVisible * 4; b++) {
-		const uint32_t tick = (uint32_t)((b * SC_PPQN) / 4);
+	(void)beatsVisible;
+	{
+		const uint32_t step = (uint32_t)(SC_PPQN / 4);
+		uint32_t tick = (step > 0) ? (tVis0 - (tVis0 % step)) : tVis0;
+		const uint32_t tickEnd = tVis1 + step;
+		for (; tick <= tickEnd; tick += (step > 0 ? step : 1)) {
 		if (tick % (uint32_t)ScStaffBeatTicks(defDenom) == 0) continue;
 		const int x = ScStaffTickToX(tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 		if (x < grid.left || x > gridRight) continue;
@@ -4838,6 +5120,7 @@ static void ScStaffPaintRowMeasureGrid(CDC& dc, const CRect& grid, const ScStaff
 		if (mTicks > 0 && (int)(tick % (uint32_t)mTicks) == 0) continue;
 		if (staffY1 > staffY0)
 			dc.FillSolidRect(x, staffY0, 1, staffY1 - staffY0, RGB(238, 240, 246));
+		}
 	}
 }
 
@@ -4874,9 +5157,11 @@ static void ScStaffPaintStickyHeader(CDC& dc, const CRect& grid, const ScStaffUi
 	dc.SetTextColor(RGB(90, 90, 110));
 	const int defNumer = u->meterNumer > 0 ? u->meterNumer : 4;
 	const int defDenom = u->meterDenom > 0 ? u->meterDenom : 4;
+	uint32_t tVis0 = ScStaffXToTick(gridLeft - pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
 	uint32_t tVis1 = ScStaffXToTick(grid.right + pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
-	uint32_t mt = 0;
+	uint32_t mt = ScStaffSnapToBarTick(ev, evCount, tVis0, defNumer, defDenom);
 	int measNum = 1;
+	ScStaffBarBeatFromTick(ev, evCount, mt, defNumer, defDenom, &measNum, NULL, NULL);
 	int numer = defNumer, denom = defDenom;
 	while (mt <= tVis1 + (uint32_t)ScStaffMeterTicksPerMeasure(numer, denom)) {
 		ScStaffMeterAtTick(ev, evCount, mt, defNumer, defDenom, &numer, &denom);
@@ -4942,6 +5227,7 @@ static void ScStaffPaintStickyHeader(CDC& dc, const CRect& grid, const ScStaffUi
 void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 	const ScEvent* ev, int evCount, int isFm, int curTrack, int docTempoT)
 {
+	ScStaffLayoutTouch();
 	dc.FillSolidRect(grid, RGB(248, 248, 252));
 	const int pxBeat = u->pxBeat > 0 ? u->pxBeat : SC_PX_BEAT_DEFAULT;
 	const int gap = ScStaffLineGap(u);
@@ -5202,7 +5488,7 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 		const int beatH = (cm == 2) ? (staffH * 2 + SC_GRAND_STAFF_GAP - 8) : (gap * 4);
 		{
 			uint32_t tVis1 = ScStaffXToTick(grid.right + pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
-			uint32_t barTick = 0;
+			uint32_t barTick = ScStaffSnapToBarTick(ev, evCount, tVis0, defNumer, defDenom);
 			int barNumer = defNumer, barDenom = defDenom;
 			while (barTick <= tVis1 + (uint32_t)ScStaffMeterTicksPerMeasure(barNumer, barDenom)) {
 				ScStaffMeterAtTick(ev, evCount, barTick, defNumer, defDenom, &barNumer, &barDenom);
@@ -5231,9 +5517,11 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 			for (int i = 0; i < evCount; i++) {
 				const ScEvent& e = ev[i];
 				if ((int)e.ch != tr) continue;
-				const int stack = ScStaffMarkStackIndex(ev, evCount, i);
-				int x = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount) + stack * 12;
-				if (x < lineX0 - 8 || x > grid.right + 8) continue;
+				if (!ScStaffIsStaffMarkKind(e.kind, isFm)) continue;
+				if (e.tick > tVis0 + (uint32_t)((grid.right - lineX0 + pxBeat * 8) * SC_PPQN / max(1, pxBeat))) continue;
+				int x = ScStaffTickToX(e.tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+				if (x < lineX0 - 40 || x > grid.right + 40) continue;
+				x += ScStaffMarkStackIndex(ev, evCount, i) * 12;
 				const int y0 = staffTop + 6;
 				const int y1 = y0 + beatH + 4;
 
@@ -5360,7 +5648,9 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 			dc.SelectObject(om);
 		}
 		if (isCur && u->snapFit && quant > 0) {
-			for (uint32_t t = 0; t < (uint32_t)(beatsVisible * SC_PPQN); t += (uint32_t)quant) {
+			uint32_t tSnap1 = ScStaffXToTick(grid.right + pxBeat, u->scrollX, gridLeft, pxBeat, 0, u, ev, evCount);
+			uint32_t t = tVis0 - (tVis0 % (uint32_t)quant);
+			for (; t <= tSnap1 + (uint32_t)quant; t += (uint32_t)quant) {
 				int x = ScStaffTickToX(t, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 				if (x < lineX0 || x > grid.right) continue;
 				dc.FillSolidRect(x, staffTop + 8 + beatH + 1, 1, 3, RGB(120, 160, 220));
@@ -5506,7 +5796,7 @@ void ScStaffPaintStrip(CDC& dc, const CRect& rc, const ScStaffUi* u)
 			dc.TextOut(lane.left + 4, top + h - 12, L"0");
 		}
 		if (oldF) dc.SelectObject(oldF);
-		const int beatsVisible = max(16, (lane.Width() + u->scrollX) / pxBeat + 4);
+		const int beatsVisible = max(16, lane.Width() / pxBeat + 4);
 		uint32_t tVis0 = ScStaffXToTick(gridLeft, u->scrollX, gridLeft, pxBeat, step);
 		uint32_t tVis1 = ScStaffXToTick(lane.right + pxBeat, u->scrollX, gridLeft, pxBeat, step);
 		int c0 = ScStaffStripTickToCol(u, tVis0);
@@ -5544,7 +5834,14 @@ void ScStaffPaintStrip(CDC& dc, const CRect& rc, const ScStaffUi* u)
 		{
 			const int mTicks = ScStaffTicksPerMeasure(u);
 			const int measVis = max(4, (beatsVisible * SC_PPQN) / max(1, mTicks) + 2);
-			for (int m = 0; m < measVis; m++) {
+			int m0 = 0;
+			if (pxBeat > 0 && mTicks > 0) {
+				int rel = u->scrollX - pxBeat;
+				if (rel < 0) rel = 0;
+				m0 = (rel / pxBeat) * SC_PPQN / mTicks;
+				if (m0 > 0) m0--;
+			}
+			for (int m = m0; m < m0 + measVis; m++) {
 				uint32_t mt = (uint32_t)(m * mTicks);
 				int x = ScStaffTickToX(mt, u->scrollX, gridLeft, pxBeat, NULL, NULL, 0);
 				if (x < gridLeft || x > lane.right) continue;
@@ -8213,6 +8510,8 @@ int ScStaffSelPasteEx(ScEvent* ev, int* evCount, int evMax, ScStaffUi* u, int is
 			if (ev[i].tick >= baseTick)
 				ev[i].tick += span;
 		}
+		if (u) u->contentTicks += (int)span;
+		ScStaffLayoutTouch();
 	} else if (!insertMode && span > 0) {
 		/* overwrite: delete overlapping notes/ctrls on target channels */
 		char drop[SC_EV_MAX];
@@ -8312,6 +8611,7 @@ int ScStaffInsertBlankRange(ScEvent* ev, int evCount, ScStaffUi* u)
 			ev[i].tick += span;
 	}
 	u->contentTicks += (int)span;
+	ScStaffLayoutTouch();
 	/* Keep the blank hole as the active range (same t0..t1). */
 	u->selRangeValid = 1;
 	u->selRangeT0 = t0;

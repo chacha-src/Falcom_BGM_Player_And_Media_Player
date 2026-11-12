@@ -227,7 +227,15 @@ static void ScPianoRollPaintInner(CDC& dc, const CRect& rc, ScPianoRollView* v,
 	}
 	dc.SelectObject(oldF);
 	const int scrollX = u->scrollX;
-	for (int t = 0; ; t += SC_PPQN / 4) {
+	const int step16 = SC_PPQN / 4;
+	int tStart = 0;
+	if (pxBeat > 0 && step16 > 0) {
+		int rel = scrollX - (gridLeft - grid.left) - pxBeat;
+		if (rel < 0) rel = 0;
+		tStart = (rel * SC_PPQN) / pxBeat;
+		tStart -= tStart % step16;
+	}
+	for (int t = tStart; ; t += step16) {
 		const int x = gridLeft + (t * pxBeat) / SC_PPQN - scrollX;
 		if (x > grid.right) break;
 		if (x < grid.left) continue;

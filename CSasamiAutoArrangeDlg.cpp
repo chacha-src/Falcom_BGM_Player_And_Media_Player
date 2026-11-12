@@ -30,6 +30,8 @@ enum {
 	IDC_SAA_PAT = 4943,
 	IDC_SAA_LACC = 4944,
 	IDC_SAA_LMEL = 4945,
+	IDC_SAA_LLOOP = 4946,
+	IDC_SAA_LOOP = 4947,
 	IDC_SAA_TGT_BASE = 4960,   /* +ch */
 	IDC_SAA_DRM_BASE = 5000    /* +ch */
 };
@@ -63,6 +65,7 @@ protected:
 	afx_msg void OnProgChanged();
 	afx_msg void OnReroll();
 	void RefillProg();
+	void RefillPat();
 	void UpdateProgDesc();
 	int NumCh() const;
 
@@ -75,9 +78,9 @@ protected:
 	int m_heard;
 	int m_vis[32], m_mute[32], m_solo[32], m_clef[32];
 	CCustomStatic m_styleLbl, m_pitchLbl, m_introLbl, m_breakLbl, m_endLbl, m_hint, m_status;
-	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl;
+	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl, m_loopLbl;
 	CCustomStatic m_patLbl, m_accLbl, m_melLbl;
-	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_pat;
+	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_loopBars, m_pat;
 	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending, m_vary;
 	CCustomRadioButton m_modeOver, m_modeRw;
 	CCustomCheckBox m_tgt[32], m_drm[32];
@@ -141,6 +144,9 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	o->breakBars = kLen[(bi >= 0 && bi < 11) ? bi : 2];
 	o->endBars = kLen[(ei >= 0 && ei < 11) ? ei : 2];
 	o->genBars = kGen[(gi >= 0 && gi < 9) ? gi : 0];
+	static const int kLoop[] = { 0, 16, 24, 32, 48, 64 };
+	int li = m_loopBars.GetSafeHwnd() ? m_loopBars.GetCurSel() : 0;
+	o->loopBars = kLoop[(li >= 0 && li < 6) ? li : 0];
 	int pat = m_pat.GetSafeHwnd() ? m_pat.GetCurSel() : 0;
 	if (pat < 0 || pat >= SC_ARRANGE_COUNT) pat = 0;
 	o->patVar = pat;
@@ -154,6 +160,7 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	o->defKey = m_host->defKey;
 	o->ui = m_host->ui;
 	o->docTempoT = m_host->tempoT;
+	o->gsMap = m_host->gsMap;
 
 	/* --- v2 --- */
 	o->mode = (m_modeRw.GetSafeHwnd() && m_modeRw.GetCheck() == BST_CHECKED) ? SC_AM_REWRITE : SC_AM_OVERLAY;
@@ -257,42 +264,23 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	m_style.SetCurSel(0);
 
 	m_patLbl.Create(LL14(
-		L"アレンジ（同じ名前はいつも同じ結果）",
-		L"Arrangement (the same name is always the same)",
-		L"Arrangement (le même nom donne toujours le même)",
-		L"Arrangiamento (lo stesso nome è sempre uguale)",
-		L"Arreglo (el mismo nombre es siempre igual)",
-		L"어레인지(같은 이름은 항상 같음)",
-		L"编曲（同名结果始终相同）",
-		L"توزيع (الاسم نفسه يعطي النتيجة نفسها)",
-		L"Аранжировка (одно имя — один результат)",
-		L"Arrangement (gleicher Name, gleiches Ergebnis)",
-		L"Arranjo (o mesmo nome é sempre igual)",
-		L"Arrangement (dezelfde naam is altijd hetzelfde)",
-		L"Aranżacja (ta sama nazwa, ten sam wynik)",
-		L"Düzenleme (aynı ad her zaman aynı)"),
+		L"アレンジ（スタイルごとに注釈。同じ名前はいつも同じ）",
+		L"Arrangement (note follows the style; the same name stays the same)",
+		L"Arrangement (la note suit le style ; le même nom reste le même)",
+		L"Arrangiamento (la nota segue lo stile; lo stesso nome resta uguale)",
+		L"Arreglo (la nota sigue el estilo; el mismo nombre no cambia)",
+		L"어레인지(주석은 스타일마다. 같은 이름은 항상 같음)",
+		L"编曲（注释随风格变化。同名结果始终相同）",
+		L"توزيع (الشرح يتبع الأسلوب. الاسم نفسه يبقى نفسه)",
+		L"Аранжировка (подпись зависит от стиля; одно имя — один результат)",
+		L"Arrangement (Hinweis folgt dem Stil; gleicher Name, gleiches Ergebnis)",
+		L"Arranjo (a nota segue o estilo; o mesmo nome não muda)",
+		L"Arrangement (de noot volgt de stijl; dezelfde naam blijft gelijk)",
+		L"Aranżacja (opis zależy od stylu; ta sama nazwa, ten sam wynik)",
+		L"Düzenleme (not stile göre değişir; aynı ad hep aynıdır)"),
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS, z, this, IDC_SAA_LPAT);
 	m_pat.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_PAT);
 	m_pat.SetAeroMode(FALSE);
-	for (int i = 0; i < SC_ARRANGE_COUNT; i++) {
-		wchar_t ja[24], en[24], fr[32], it[32], es[24], ko[32], zh[24], ar[48], ru[40], de[32], pt[24], nl[32], pl[32], tr[32];
-		wchar_t ch = (wchar_t)(L'A' + i);
-		_snwprintf_s(ja, _TRUNCATE, L"アレンジ%c", ch);
-		_snwprintf_s(en, _TRUNCATE, L"Arrange %c", ch);
-		_snwprintf_s(fr, _TRUNCATE, L"Arrangement %c", ch);
-		_snwprintf_s(it, _TRUNCATE, L"Arrangiamento %c", ch);
-		_snwprintf_s(es, _TRUNCATE, L"Arreglo %c", ch);
-		_snwprintf_s(ko, _TRUNCATE, L"어레인지 %c", ch);
-		_snwprintf_s(zh, _TRUNCATE, L"编曲%c", ch);
-		_snwprintf_s(ar, _TRUNCATE, L"توزيع %c", ch);
-		_snwprintf_s(ru, _TRUNCATE, L"Аранжировка %c", ch);
-		_snwprintf_s(de, _TRUNCATE, L"Arrangement %c", ch);
-		_snwprintf_s(pt, _TRUNCATE, L"Arranjo %c", ch);
-		_snwprintf_s(nl, _TRUNCATE, L"Arrangement %c", ch);
-		_snwprintf_s(pl, _TRUNCATE, L"Aranżacja %c", ch);
-		_snwprintf_s(tr, _TRUNCATE, L"Düzenleme %c", ch);
-		m_pat.AddString(LL14(ja, en, fr, it, es, ko, zh, ar, ru, de, pt, nl, pl, tr));
-	}
 	m_pat.SetCurSel(0);
 
 	m_accLbl.Create(LL14(
@@ -375,6 +363,17 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	{
 		m_genBars.SetCurSel(4); /* 伴奏の本体は最初から 16小節 */
 	}
+	m_loopLbl.Create(LL14(L"ループの長さ（同じ形に戻るまで）", L"Loop length (bars before the phrase returns)", L"Longueur de boucle", L"Lunghezza del ciclo", L"Longitud del ciclo", L"루프 길이", L"循环长度", L"طول الحلقة", L"Длина петли", L"Schleifenlänge", L"Comprimento do ciclo", L"Looplengte", L"Długość pętli", L"Döngü uzunluğu"),
+		stStyle, z, this, IDC_SAA_LLOOP);
+	m_loopBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_LOOP);
+	m_loopBars.SetAeroMode(FALSE);
+	m_loopBars.AddString(LL14(L"スタイルに合わせる（16〜64）", L"Follow the style (16–64)", L"Selon le style (16–64)", L"Secondo lo stile (16–64)", L"Según el estilo (16–64)", L"스타일에 맞춤(16–64)", L"按风格（16–64）", L"حسب الأسلوب (16–64)", L"По стилю (16–64)", L"Nach Stil (16–64)", L"Conforme o estilo (16–64)", L"Volgens de stijl (16–64)", L"Według stylu (16–64)", L"Stile göre (16–64)"));
+	addBarItem(m_loopBars, 16);
+	addBarItem(m_loopBars, 24);
+	addBarItem(m_loopBars, 32);
+	addBarItem(m_loopBars, 48);
+	addBarItem(m_loopBars, 64);
+	m_loopBars.SetCurSel(0);
 
 	m_introLbl.Create(LL14(L"イントロの小節数", L"Intro bars", L"Mesures d'intro", L"Battute intro", L"Compases de intro", L"인트로 마디", L"前奏小节数", L"موازير المقدمة", L"Такты вступления", L"Intro-Takte", L"Compassos de intro", L"Intromaten", L"Takty intra", L"Giriş ölçüleri"),
 		stStyle, z, this, IDC_SAA_LINTRO);
@@ -521,12 +520,13 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	m_reroll.SetFlat(TRUE);
 
 	RefillProg();
+	RefillPat();
 
 	CFont* font = GetFont();
 	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_patLbl, &m_pat, &m_progLbl, &m_prog, &m_progDesc,
 		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl, &m_accLbl, &m_melLbl,
 		&m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
-		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars,
+		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars, &m_loopLbl, &m_loopBars,
 		&m_introLbl, &m_breakLbl, &m_endLbl, &m_introBars, &m_breakBars, &m_endBars,
 		&m_pitchLbl, &m_pitch, &m_hint, &m_status, &m_preview, &m_reroll, &m_ok, &m_cancel };
 	for (int i = 0; i < (int)(sizeof(kids) / sizeof(kids[0])); i++)
@@ -546,7 +546,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	prepLbl(m_styleLbl); prepLbl(m_pitchLbl); prepLbl(m_introLbl); prepLbl(m_breakLbl); prepLbl(m_endLbl);
 	prepLbl(m_hint); prepLbl(m_status); prepLbl(m_progLbl); prepLbl(m_progDesc);
 	prepLbl(m_targetLbl); prepLbl(m_drumLbl); prepLbl(m_groupLbl); prepLbl(m_genLbl);
-	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl);
+	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl); prepLbl(m_loopLbl);
 	{
 		const int nCh = NumCh();
 		for (int ch = 0; ch < nCh && ch < 32; ch++) {
@@ -560,8 +560,8 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	{
 		const int nCh = NumCh();
 		const int grows = (nCh + 7) / 8;
-		int h = 900 + grows * 48;
-		if (h < 940) h = 940;
+		int h = 960 + grows * 48;
+		if (h < 1000) h = 1000;
 		if (h > 1120) h = 1120;
 		SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
 	}
@@ -602,9 +602,27 @@ void CSasamiAutoArrangeDlg::UpdateProgDesc()
 	m_progDesc.SetWindowText(d);
 }
 
+void CSasamiAutoArrangeDlg::RefillPat()
+{
+	if (!m_pat.GetSafeHwnd()) return;
+	int style = m_style.GetSafeHwnd() ? m_style.GetCurSel() : 0;
+	if (style < 0 || style >= SC_AS_COUNT) style = SC_AS_16BEAT;
+	int keep = m_pat.GetCurSel();
+	m_pat.ResetContent();
+	for (int i = 0; i < SC_ARRANGE_COUNT; i++) {
+		wchar_t line[128];
+		ScAutoArrangeCaption(style, i, line, 128);
+		m_pat.AddString(line);
+	}
+	if (keep < 0 || keep >= m_pat.GetCount()) keep = 0;
+	m_pat.SetCurSel(keep);
+	m_pat.SetDroppedWidth(560);
+}
+
 void CSasamiAutoArrangeDlg::OnStyleChanged()
 {
 	RefillProg();
+	RefillPat();
 }
 
 void CSasamiAutoArrangeDlg::OnProgChanged()
@@ -700,6 +718,10 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_genLbl.MoveWindow(x, y, w, labH);
 	y += labH + 2;
 	placeCombo(m_genBars, x, y, w);
+	y += comboH + 8;
+	m_loopLbl.MoveWindow(x, y, w, labH);
+	y += labH + 2;
+	placeCombo(m_loopBars, x, y, w);
 	y += comboH + 10;
 	const int lw = (w - 16) / 3;
 	m_introLbl.MoveWindow(x, y, lw, labH);
@@ -757,7 +779,7 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 
 	raise(m_styleLbl); raise(m_groupLbl); raise(m_progLbl); raise(m_progDesc);
 	raise(m_patLbl); raise(m_accLbl); raise(m_melLbl);
-	raise(m_genLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
+	raise(m_genLbl); raise(m_loopLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
 	raise(m_targetLbl); raise(m_drumLbl);
 	ScStaffForceOpaqueKids(this);
 }

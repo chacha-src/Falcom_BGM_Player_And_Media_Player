@@ -669,6 +669,9 @@
     <ClCompile Include="SasamiComposerDoc.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ScSmfImport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="kb_sasami\source\sasami_write.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

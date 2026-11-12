@@ -43,6 +43,7 @@ public:
 	void PersistUiGeom();
 	void RestoreUiGeom();
 	void ExportStandardMidi();
+	void ImportStandardMidi(const wchar_t* pathOpt = NULL);
 	void PreviewRangeInstant(); /* その場再生（ロールからも呼ぶ） */
 	void NotifyMuteSolo(); /* ロールのミュート/ソロをライブへ */
 
@@ -111,6 +112,7 @@ protected:
 	afx_msg void OnCbnSnap();
 	afx_msg void OnCbnZoom();
 	afx_msg void OnCbnScoreOut();
+	afx_msg void OnCbnGsMap();
 	afx_msg void OnBnClickedRangePlay();
 	afx_msg void OnBnClickedBarPrev();
 	afx_msg void OnBnClickedBarNext();
@@ -199,6 +201,8 @@ protected:
 	CCustomComboBox m_snap, m_zoom;
 	CCustomStatic m_outLbl;
 	CCustomComboBox m_out;
+	CCustomStatic m_gsMapLbl;
+	CCustomComboBox m_gsMap;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
 	CCustomComboBox m_pasteMode;

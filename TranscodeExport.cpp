@@ -10,6 +10,8 @@
 #include "ExportTagUi.h"
 #include "FileTagInfo.h"
 #include "CPromptEngine.h"
+#include "sasami_file.h"
+#include "sasami_midi.h"
 #include <ShlObj.h>
 #include <vector>
 #include <algorithm>
@@ -32,8 +34,8 @@ extern void DoEvent();
 
 namespace {
 
-enum { TC_FMT_MP3 = 0, TC_FMT_FLAC = 1, TC_FMT_WAV = -1 };
-enum { TC_TAB_WAV = 0, TC_TAB_MP3 = 1, TC_TAB_FLAC = 2 };
+enum { TC_FMT_MP3 = 0, TC_FMT_FLAC = 1, TC_FMT_MID = 2, TC_FMT_WAV = -1 };
+enum { TC_TAB_WAV = 0, TC_TAB_MP3 = 1, TC_TAB_FLAC = 2, TC_TAB_MID = 3 };
 enum { TC_WAV_HDR = 80 };
 
 struct TcWavInfo {
@@ -268,6 +270,324 @@ void TcPcmFrameToInt16(const BYTE* frame, int ch, int bits, short* out)
 		for (int c = 0; c < ch; ++c)
 			out[c] = 0;
 	}
+}
+
+/* FM の戻る J は 3 周で切る。永久ループを SMF に展開しない。 */
+enum { kFmLoopPass = 3, kFmEvMax = 200000 };
+
+struct FmOutEv {
+	uint32_t tick;
+	uint8_t kind; /* 0 tempo, 1 note on, 2 note off */
+	uint8_t ch, note, vel;
+};
+
+int FmOutEvCmp(const void* a, const void* b)
+{
+	const FmOutEv* x = (const FmOutEv*)a;
+	const FmOutEv* y = (const FmOutEv*)b;
+	if (x->tick != y->tick) return (x->tick < y->tick) ? -1 : 1;
+	return (int)x->kind - (int)y->kind;
+}
+
+int FmPutVlq(uint8_t* d, int cap, int* n, uint32_t v)
+{
+	uint8_t tmp[5];
+	int k = 0;
+	tmp[k++] = (uint8_t)(v & 0x7F);
+	v >>= 7;
+	while (v) {
+		tmp[k++] = (uint8_t)((v & 0x7F) | 0x80);
+		v >>= 7;
+	}
+	if (*n + k > cap) return 0;
+	for (int i = k - 1; i >= 0; i--) d[(*n)++] = tmp[i];
+	return 1;
+}
+
+int FmWriteSmf(const wchar_t* dest, FmOutEv* ev, int nEv)
+{
+	if (!dest || !ev || nEv < 1) return 0;
+	qsort(ev, (size_t)nEv, sizeof(FmOutEv), FmOutEvCmp);
+	const int cap = nEv * 8 + 64;
+	uint8_t* body = (uint8_t*)malloc((size_t)cap);
+	if (!body) return 0;
+	int bn = 0;
+	uint32_t last = 0;
+	int ok = 1;
+	uint8_t run = 0;
+	for (int i = 0; ok && i < nEv; i++) {
+		uint32_t dt = (ev[i].tick >= last) ? (ev[i].tick - last) : 0;
+		last = ev[i].tick;
+		if (!FmPutVlq(body, cap, &bn, dt)) { ok = 0; break; }
+		uint8_t st = (ev[i].kind == 0) ? 0xFF : (uint8_t)((ev[i].kind == 1 ? 0x90 : 0x80) | (ev[i].ch & 15));
+		if (ev[i].kind == 0) {
+			if (bn + 6 > cap) { ok = 0; break; }
+			body[bn++] = 0xFF; body[bn++] = 0x51; body[bn++] = 0x03;
+			int bpm = ev[i].vel ? ev[i].vel : 120;
+			if (bpm < 20) bpm = 20;
+			uint32_t us = 60000000u / (uint32_t)bpm;
+			body[bn++] = (uint8_t)(us >> 16);
+			body[bn++] = (uint8_t)(us >> 8);
+			body[bn++] = (uint8_t)us;
+			run = 0;
+		} else {
+			if (st != run) {
+				if (bn + 1 > cap) { ok = 0; break; }
+				body[bn++] = st;
+				run = st;
+			}
+			if (bn + 2 > cap) { ok = 0; break; }
+			body[bn++] = ev[i].note;
+			body[bn++] = ev[i].kind == 1 ? (ev[i].vel ? ev[i].vel : 100) : 0;
+		}
+	}
+	if (ok) {
+		if (!FmPutVlq(body, cap, &bn, 0)) ok = 0;
+		if (ok) {
+			if (bn + 3 > cap) ok = 0;
+			else { body[bn++] = 0xFF; body[bn++] = 0x2F; body[bn++] = 0x00; }
+		}
+	}
+	if (!ok) { free(body); return 0; }
+	uint8_t hdr[22];
+	memcpy(hdr, "MThd", 4);
+	hdr[4] = 0; hdr[5] = 0; hdr[6] = 0; hdr[7] = 6;
+	hdr[8] = 0; hdr[9] = 0;
+	hdr[10] = 0; hdr[11] = 1;
+	hdr[12] = (uint8_t)((SASAMI_PPQN >> 8) & 0xFF);
+	hdr[13] = (uint8_t)(SASAMI_PPQN & 0xFF);
+	memcpy(hdr + 14, "MTrk", 4);
+	hdr[18] = (uint8_t)(bn >> 24);
+	hdr[19] = (uint8_t)(bn >> 16);
+	hdr[20] = (uint8_t)(bn >> 8);
+	hdr[21] = (uint8_t)bn;
+	HANDLE h = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) { free(body); return 0; }
+	DWORD wr = 0;
+	int wok = WriteFile(h, hdr, 22, &wr, NULL) && wr == 22;
+	if (wok) { wr = 0; wok = WriteFile(h, body, (DWORD)bn, &wr, NULL) && wr == (DWORD)bn; }
+	CloseHandle(h);
+	free(body);
+	if (!wok) DeleteFileW(dest);
+	return wok ? 1 : 0;
+}
+
+int FmPush(FmOutEv* ev, int* n, uint32_t tick, int kind, int ch, int note, int vel)
+{
+	if (*n >= kFmEvMax) return 0;
+	ev[*n].tick = tick;
+	ev[*n].kind = (uint8_t)kind;
+	ev[*n].ch = (uint8_t)(ch & 15);
+	ev[*n].note = (uint8_t)(note & 127);
+	ev[*n].vel = (uint8_t)(vel & 127);
+	(*n)++;
+	return 1;
+}
+
+int TcFmFileToSmf(const wchar_t* src, const wchar_t* dest)
+{
+	SasamiSong song;
+	SasamiSongInit(&song);
+	if (!SasamiLoadFileW(src, &song)) return 0;
+	if (song.kind != SASAMI_KIND_FPY && song.kind != SASAMI_KIND_FPY2) {
+		SasamiSongFree(&song);
+		return 0;
+	}
+	const int fm10 = song.fmOpna10ch ? 1 : 0;
+	const int chCount = fm10 ? 10 : 6;
+	FmOutEv* ev = (FmOutEv*)malloc(sizeof(FmOutEv) * kFmEvMax);
+	if (!ev) { SasamiSongFree(&song); return 0; }
+	int nEv = 0;
+	uint32_t pc[12], tick = 0;
+	int alive[12], waitb[12], backJ[12], loopSp[12], curNote[12], vel[12];
+	uint8_t loopCnt[12][8];
+	memset(alive, 0, sizeof(alive));
+	memset(waitb, 0, sizeof(waitb));
+	memset(backJ, 0, sizeof(backJ));
+	memset(loopSp, 0, sizeof(loopSp));
+	memset(loopCnt, 0, sizeof(loopCnt));
+	for (int ch = 0; ch < 12; ch++) curNote[ch] = -1;
+	for (int ch = 0; ch < 12; ch++) vel[ch] = 100;
+	for (int ch = 0; ch < chCount && ch < 10; ch++) {
+		pc[ch] = song.tracks[ch].fileOff;
+		alive[ch] = song.tracks[ch].unused ? 0 : 1;
+	}
+	FmPush(ev, &nEv, 0, 0, 0, 0, 120);
+	const uint32_t tickCap = (uint32_t)SASAMI_PPQN * 4u * 1024u;
+	int guardAll = 0;
+	while (tick < tickCap && guardAll++ < 4000000) {
+		int any = 0;
+		for (int ch = 0; ch < chCount; ch++) if (alive[ch]) any = 1;
+		if (!any) break;
+		for (int ch = 0; ch < chCount; ch++) {
+			if (!alive[ch]) continue;
+			if (waitb[ch] >= 2) { waitb[ch]--; continue; }
+			int guard = 0;
+			while (alive[ch] && waitb[ch] < 2 && guard++ < 4096) {
+				const uint32_t addr = pc[ch];
+				if (!SasamiOffOk(song, addr, 3)) { alive[ch] = 0; break; }
+				const int cmd = song.data[addr];
+				const uint8_t b1 = SasamiGet(song, addr + 1);
+				const uint8_t b2 = SasamiGet(song, addr + 2);
+				const uint16_t w1 = SasamiGet16(song, addr + 1);
+				const int ssg = (ch >= 3 && ch <= 5);
+				const int rhy = (ch == 6);
+				const int midCh = (ch >= 7) ? (ch - 1) : ch;
+				auto noteOff = [&]() {
+					if (curNote[ch] >= 0) {
+						FmPush(ev, &nEv, tick, 2, midCh, curNote[ch], 0);
+						curNote[ch] = -1;
+					}
+				};
+				auto noteOn = [&](int midi) {
+					noteOff();
+					if (midi < 0) midi = 0;
+					if (midi > 127) midi = 127;
+					int oct = midi / 12 - 1;
+					int sc = midi % 12;
+					if (oct < 0) oct = 0;
+					if (oct > 8) oct = 8;
+					int m2 = (oct + 1) * 12 + sc;
+					if (m2 > 127) m2 = 127;
+					FmPush(ev, &nEv, tick, 1, midCh, m2, vel[ch]);
+					curNote[ch] = m2;
+				};
+				if (cmd == 0 || cmd == 24) {
+					waitb[ch] = b2;
+					if (!rhy) {
+						int oct = (b1 >> 4) & 15;
+						int sc = b1 & 15;
+						if (sc <= 11)
+							noteOn((oct + 1) * 12 + sc);
+					} else if ((b2 & 0x3F) == 0) {
+						/* リズムのノート本体は cmd 8 の 0x10。ここは待ちだけ。 */
+					}
+					pc[ch] = addr + 3;
+					break;
+				}
+				if (cmd == 1 || cmd == 10) {
+					if (cmd == 1) noteOff();
+					waitb[ch] = b2;
+					pc[ch] = addr + 3;
+					break;
+				}
+				if (cmd == 3 || cmd == 17) {
+					uint32_t dest = 0;
+					if (!SasamiMapAbs(song, w1, &dest) || dest == 0xF0 || dest == addr) {
+						noteOff();
+						alive[ch] = 0;
+						break;
+					}
+					if (dest < addr) {
+						backJ[ch]++;
+						if (backJ[ch] >= kFmLoopPass) {
+							noteOff();
+							alive[ch] = 0;
+							break;
+						}
+						loopSp[ch] = 0;
+					}
+					pc[ch] = dest;
+					continue;
+				}
+				if (cmd == 4) {
+					int v = (int)b1 * 8;
+					if (v < 1) v = 1;
+					if (v > 127) v = 127;
+					if (ssg) vel[ch] = v;
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 8 && b1 == 0x10 && rhy && (b2 & 0x80) == 0 && (b2 & 0x3F)) {
+					static const int kGm[6] = { 36, 38, 49, 42, 45, 37 };
+					for (int bit = 0; bit < 6; bit++) {
+						if (b2 & (1 << bit)) {
+							FmPush(ev, &nEv, tick, 1, 9, kGm[bit], vel[ch]);
+							FmPush(ev, &nEv, tick + 6, 2, 9, kGm[bit], 0);
+						}
+					}
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 8 && b1 == 0x10 && rhy && (b2 & 0x80)) {
+					static const int kGm[6] = { 36, 38, 49, 42, 45, 37 };
+					for (int bit = 0; bit < 6; bit++) {
+						if (b2 & (1 << bit))
+							FmPush(ev, &nEv, tick, 2, 9, kGm[bit], 0);
+					}
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 9) {
+					unsigned t = w1 ? w1 : 13000;
+					int bpm = (int)((13000.0 * 120.0) / (double)t + 0.5);
+					if (bpm < 20) bpm = 20;
+					if (bpm > 250) bpm = 250;
+					FmPush(ev, &nEv, tick, 0, 0, 0, bpm);
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 11) {
+					int v = 127 - (int)b1;
+					if (v < 1) v = 1;
+					if (v > 127) v = 127;
+					vel[ch] = v;
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 13) {
+					if (loopSp[ch] < 8) loopCnt[ch][loopSp[ch]++] = b1;
+					pc[ch] = addr + 3;
+					continue;
+				}
+				if (cmd == 14) {
+					noteOff();
+					if (loopSp[ch] == 0) { pc[ch] = addr + 3; continue; }
+					uint8_t* cp = &loopCnt[ch][loopSp[ch] - 1];
+					if (*cp) (*cp)--;
+					if (*cp == 0) {
+						loopSp[ch]--;
+						pc[ch] = addr + 3;
+					} else {
+						uint32_t dest = 0;
+						if (!SasamiMapAbs(song, w1, &dest)) {
+							loopSp[ch]--;
+							pc[ch] = addr + 3;
+						} else pc[ch] = dest;
+					}
+					continue;
+				}
+				if (cmd == 0) { alive[ch] = 0; break; }
+				pc[ch] = addr + 3;
+			}
+		}
+		tick++;
+	}
+	for (int ch = 0; ch < chCount; ch++) {
+		if (curNote[ch] >= 0)
+			FmPush(ev, &nEv, tick, 2, ch, curNote[ch], 0);
+	}
+	const int wrote = FmWriteSmf(dest, ev, nEv);
+	free(ev);
+	SasamiSongFree(&song);
+	return wrote;
+}
+
+int TcExportSasamiMid(const wchar_t* src, const wchar_t* dest, int loops)
+{
+	if (!src || !dest || !src[0]) return 0;
+	if (SasamiExtIsMidi(src)) {
+		if (loops < 1) loops = 1;
+		if (loops > 32) loops = 32;
+		wchar_t tmp[MAX_PATH];
+		tmp[0] = 0;
+		if (!SasamiConvertPathToMidiFile(src, tmp, MAX_PATH, loops) || !tmp[0]) return 0;
+		if (_wcsicmp(tmp, dest) == 0) return 1;
+		return CopyFileW(tmp, dest, FALSE) ? 1 : 0;
+	}
+	if (SasamiExtIsFm(src))
+		return TcFmFileToSmf(src, dest);
+	return 0;
 }
 
 } // namespace
@@ -1410,6 +1730,7 @@ CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	, multiFile(false)
 	, m_initialTab(-1)
 	, m_preferXfade(false)
+	, m_sasamiSrc(0)
 	, m_coverBmp(NULL)
 	, m_persistReady(FALSE)
 	, m_exporting(FALSE)
@@ -1833,6 +2154,18 @@ void CTranscodeExport::OnCbnSelchangeMixN()
 	PersistOptionsFromUi(FALSE);
 }
 
+int CTranscodeExport::SourcesAreSasami() const
+{
+	if (multiFile) {
+		if (pcs.empty()) return 0;
+		for (size_t i = 0; i < pcs.size(); ++i) {
+			if (!SasamiExtIsAny(pcs[i].fol)) return 0;
+		}
+		return 1;
+	}
+	return SasamiExtIsAny(pc.fol) ? 1 : 0;
+}
+
 int CTranscodeExport::CurrentFormat() const
 {
 	if (!m_tabs.GetSafeHwnd()) {
@@ -1842,13 +2175,15 @@ int CTranscodeExport::CurrentFormat() const
 	const int t = m_tabs.GetCurSel();
 	if (t == TC_TAB_WAV) return TC_FMT_WAV;
 	if (t == TC_TAB_FLAC) return TC_FMT_FLAC;
+	if (t == TC_TAB_MID) return TC_FMT_MID;
 	return TC_FMT_MP3;
 }
 
 void CTranscodeExport::ApplyTabUi()
 {
 	const int fmt = CurrentFormat();
-	const BOOL showQ = (fmt != TC_FMT_WAV);
+	const BOOL midi = (fmt == TC_FMT_MID);
+	const BOOL showQ = (fmt == TC_FMT_MP3 || fmt == TC_FMT_FLAC);
 	if (m_quality.GetSafeHwnd()) {
 		m_quality.ShowWindow(showQ ? SW_SHOW : SW_HIDE);
 		m_quality.EnableWindow(showQ);
@@ -1864,7 +2199,40 @@ void CTranscodeExport::ApplyTabUi()
 		m_format.SetCurSel(fmt == TC_FMT_FLAC ? TC_FMT_FLAC : TC_FMT_MP3);
 	if (showQ)
 		RefreshQualityLabels();
-	if (!multiFile || IsXfadeMode() || IsMixMode()) {
+	auto showCtl = [](CWnd& w, BOOL on) {
+		if (w.GetSafeHwnd()) w.ShowWindow(on ? SW_SHOW : SW_HIDE);
+	};
+	const BOOL audio = midi ? FALSE : TRUE;
+	showCtl(m_fadeCheck, audio); showCtl(m_fadeSec, audio); showCtl(m_fadeLabel, audio);
+	showCtl(m_trimCheck, audio); showCtl(m_trimSec, audio); showCtl(m_trimLabel, audio);
+	showCtl(m_copyTags, audio); showCtl(m_promptCheck, audio);
+	showCtl(m_titleL, audio); showCtl(m_title, audio);
+	showCtl(m_artistL, audio); showCtl(m_artist, audio);
+	showCtl(m_albumL, audio); showCtl(m_album, audio);
+	showCtl(m_coverL, audio); showCtl(m_cover, audio); showCtl(m_coverPic, audio); showCtl(m_coverClear, audio);
+	showCtl(m_srateLabel, audio); showCtl(m_srate, audio);
+	if (midi) {
+		showCtl(m_xfadeCheck, FALSE); showCtl(m_xfadeSec, FALSE); showCtl(m_xfadeLabel, FALSE);
+		showCtl(m_mixCheck, FALSE); showCtl(m_mixNLabel, FALSE); showCtl(m_mixN, FALSE); showCtl(m_mixVol, FALSE);
+		showCtl(m_kpiSec, FALSE); showCtl(m_kpiSecLabel, FALSE);
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(LL14(
+				L"標準MIDI。FMの曲ループは3回で切ります",
+				L"Standard MIDI. FM song loops are cut after 3 passes",
+				L"MIDI standard. Les boucles FM s'arrêtent après 3 tours",
+				L"MIDI standard. I loop FM si fermano dopo 3 giri",
+				L"MIDI estándar. Los bucles FM se cortan a los 3 pasos",
+				L"표준 MIDI. FM 곡 루프는 3회에서 자릅니다",
+				L"标准MIDI。FM 的曲循环在 3 次后截断",
+				L"MIDI قياسي. حلقات FM تُقطع بعد 3 مرات",
+				L"Стандартный MIDI. Цикл FM обрывается после 3 проходов",
+				L"Standard-MIDI. FM-Schleifen enden nach 3 Durchläufen",
+				L"MIDI padrão. Loops de FM param após 3 voltas",
+				L"Standaard-MIDI. FM-lussen stoppen na 3 rondes",
+				L"Standardowe MIDI. Pętle FM urywane po 3 przejściach",
+				L"Standart MIDI. FM döngüsü 3 turda kesilir"));
+	}
+	if (!multiFile || (!midi && (IsXfadeMode() || IsMixMode()))) {
 		CString path;
 		m_path.GetWindowText(path);
 		const int dot = path.ReverseFind(L'.');
@@ -1873,7 +2241,14 @@ void CTranscodeExport::ApplyTabUi()
 	}
 	if (m_tabs.GetSafeHwnd())
 		m_tabs.Invalidate(FALSE);
-	ApplyKpiDurationUi();
+	if (!midi) {
+		const BOOL showXfade = multiFile && pcs.size() >= 2;
+		if (m_xfadeCheck.GetSafeHwnd()) m_xfadeCheck.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+		if (m_xfadeSec.GetSafeHwnd()) m_xfadeSec.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+		if (m_xfadeLabel.GetSafeHwnd()) m_xfadeLabel.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+		ApplyMixUi();
+		ApplyKpiDurationUi();
+	}
 	PersistOptionsFromUi(FALSE);
 }
 
@@ -2126,11 +2501,28 @@ void CTranscodeExport::OnExportSecKillFocus()
 CString CTranscodeExport::ExtForFormat(int fmt) const
 {
 	if (fmt == TC_FMT_WAV) return L".wav";
+	if (fmt == TC_FMT_MID) return L".mid";
 	return (fmt == TC_FMT_FLAC) ? L".flac" : L".mp3";
 }
 
 CString CTranscodeExport::FilterForFormat(int fmt) const
 {
+	if (fmt == TC_FMT_MID) {
+		return LL14(L"MIDIファイル (*.mid)|*.mid|すべてのファイル (*.*)|*.*||",
+			L"MIDI files (*.mid)|*.mid|All files (*.*)|*.*||",
+			L"Fichiers MIDI (*.mid)|*.mid|Tous les fichiers (*.*)|*.*||",
+			L"File MIDI (*.mid)|*.mid|Tutti i file (*.*)|*.*||",
+			L"Archivos MIDI (*.mid)|*.mid|Todos los archivos (*.*)|*.*||",
+			L"MIDI 파일 (*.mid)|*.mid|모든 파일 (*.*)|*.*||",
+			L"MIDI文件 (*.mid)|*.mid|所有文件 (*.*)|*.*||",
+			L"ملفات MIDI (*.mid)|*.mid|جميع الملفات (*.*)|*.*||",
+			L"Файлы MIDI (*.mid)|*.mid|Все файлы (*.*)|*.*||",
+			L"MIDI-Dateien (*.mid)|*.mid|Alle Dateien (*.*)|*.*||",
+			L"Arquivos MIDI (*.mid)|*.mid|Todos os arquivos (*.*)|*.*||",
+			L"MIDI-bestanden (*.mid)|*.mid|Alle bestanden (*.*)|*.*||",
+			L"Pliki MIDI (*.mid)|*.mid|Wszystkie pliki (*.*)|*.*||",
+			L"MIDI dosyalari (*.mid)|*.mid|Tum dosyalar (*.*)|*.*||");
+	}
 	if (fmt == TC_FMT_WAV) {
 		return LL14(L"WAVファイル (*.wav)|*.wav|すべてのファイル (*.*)|*.*||",
 			L"WAV files (*.wav)|*.wav|All files (*.*)|*.*||",
@@ -2276,7 +2668,12 @@ BOOL CTranscodeExport::OnInitDialog()
 		ti.pszText = sWav.GetBuffer(); m_tabs.InsertItem(TC_TAB_WAV, &ti); sWav.ReleaseBuffer();
 		ti.pszText = sMp3.GetBuffer(); m_tabs.InsertItem(TC_TAB_MP3, &ti); sMp3.ReleaseBuffer();
 		ti.pszText = sFlac.GetBuffer(); m_tabs.InsertItem(TC_TAB_FLAC, &ti); sFlac.ReleaseBuffer();
-		m_tabs.LayoutEqualTabs(3);
+		m_sasamiSrc = SourcesAreSasami();
+		if (m_sasamiSrc) {
+			CString sMid = L"MIDI";
+			ti.pszText = sMid.GetBuffer(); m_tabs.InsertItem(TC_TAB_MID, &ti); sMid.ReleaseBuffer();
+		}
+		m_tabs.LayoutEqualTabs(m_sasamiSrc ? 4 : 3);
 		{
 			CRect rcItem;
 			if (m_tabs.GetItemRect(0, &rcItem)) {
@@ -3359,7 +3756,43 @@ void CTranscodeExport::OnBnClickedExec()
 	extern void WavExportSuspendMonitors();
 	extern void WavExportResumeMonitors();
 	WavExportSuspendMonitors();
-	if (mix) {
+	if (fmt == TC_FMT_MID) {
+		if (multiFile) {
+			CString folder = pathStr;
+			CString lower = folder;
+			lower.MakeLower();
+			if (lower.Right(4) == L".mp3" || lower.Right(5) == L".flac" || lower.Right(4) == L".wav" || lower.Right(4) == L".mid") {
+				int pos = folder.ReverseFind(L'\\');
+				if (pos >= 0) folder = folder.Left(pos + 1);
+			}
+			if (!folder.IsEmpty() && folder[folder.GetLength() - 1] != L'\\')
+				folder += L'\\';
+			const size_t total = pcs.size();
+			for (size_t i = 0; i < total; ++i) {
+				CString outPath = OutputPathForItem(folder, pcs[i], fmt);
+				CString rowTitle = pcs[i].name;
+				rowTitle.Trim();
+				if (rowTitle.IsEmpty()) rowTitle = TcBaseNameFromItem(pcs[i]);
+				TcSetExportFileLabel((int)(i + 1), (int)total, rowTitle);
+				CString st;
+				st.Format(LL14(L"MIDI出力中... (%d/%d) %s", L"Writing MIDI... (%d/%d) %s", L"Ecriture MIDI... (%d/%d) %s", L"Scrittura MIDI... (%d/%d) %s",
+					L"Escribiendo MIDI... (%d/%d) %s", L"MIDI 쓰는 중... (%d/%d) %s", L"写出MIDI... (%d/%d) %s", L"كتابة MIDI... (%d/%d) %s",
+					L"Запись MIDI... (%d/%d) %s", L"MIDI schreiben... (%d/%d) %s", L"Gravando MIDI... (%d/%d) %s", L"MIDI schrijven... (%d/%d) %s",
+					L"Zapis MIDI... (%d/%d) %s", L"MIDI yazılıyor... (%d/%d) %s"),
+					(int)(i + 1), (int)total, (LPCTSTR)rowTitle);
+				m_status.SetWindowText(st);
+				UpdateWindow();
+				DoEvent();
+				if (g_wavExportCancel) { ok = FALSE; break; }
+				ok = TcExportSasamiMid(pcs[i].fol, outPath, loopCount) && ok;
+			}
+		} else {
+			CString path = NormalizeOutPath(pathStr, fmt);
+			m_path.SetWindowText(path);
+			ok = TcExportSasamiMid(pc.fol, path, loopCount);
+		}
+	}
+	else if (mix) {
 		CString finalPath = NormalizeOutPath(pathStr, fmt);
 		m_path.SetWindowText(finalPath);
 		const int total = (int)pcs.size();
@@ -3573,7 +4006,7 @@ void CTranscodeExport::OnBnClickedExec()
 		CString folder = pathStr;
 		CString lower = folder;
 		lower.MakeLower();
-		if (lower.Right(4) == L".mp3" || lower.Right(5) == L".flac" || lower.Right(4) == L".wav") {
+		if (lower.Right(4) == L".mp3" || lower.Right(5) == L".flac" || lower.Right(4) == L".wav" || lower.Right(4) == L".mid") {
 			int pos = folder.ReverseFind(L'\\');
 			if (pos >= 0) folder = folder.Left(pos + 1);
 		}

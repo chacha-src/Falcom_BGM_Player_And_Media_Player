@@ -56,6 +56,8 @@ enum {
 	IDC_SAE_INFO     = 0x5F58,
 	IDC_SAE_OUTLBL   = 0x5F59,
 	IDC_SAE_OUT      = 0x5F5A,
+	IDC_SAE_GSMAPLBL = 0x5F5B,
+	IDC_SAE_GSMAP    = 0x5F5C,
 };
 
 static void ScMidiSetVstLabel(ScStaffUi* u, int part0, const wchar_t* path)
@@ -257,6 +259,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_SAE_SNAP, OnCbnSnap)
 	ON_CBN_SELCHANGE(IDC_SAE_ZOOM, OnCbnZoom)
 	ON_CBN_SELCHANGE(IDC_SAE_OUT, OnCbnScoreOut)
+	ON_CBN_SELCHANGE(IDC_SAE_GSMAP, OnCbnGsMap)
 	ON_BN_CLICKED(IDC_SAE_RANGEPLAY, OnBnClickedRangePlay)
 	ON_BN_CLICKED(IDC_SAE_BARPREV, OnBnClickedBarPrev)
 	ON_BN_CLICKED(IDC_SAE_BARNEXT, OnBnClickedBarNext)
@@ -505,6 +508,27 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	m_out.SetCurSel(0);
 	m_outSel = 0;
 	ScStaffSetScoreOut(SC_OUT_NONE);
+	if (!m_gsMapLbl.GetSafeHwnd())
+		m_gsMapLbl.Create(LL14(L"モード", L"Mode", L"Mode", L"Modo", L"Modo",
+			L"모드", L"模式", L"الوضع", L"Режим", L"Modus", L"Modo", L"Modus", L"Tryb", L"Mod"),
+			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS,
+			CRect(0, 0, 48, 20), this, IDC_SAE_GSMAPLBL);
+	m_gsMapLbl.SetAeroMode(FALSE);
+	m_gsMapLbl.SetKeepFontHeight(TRUE);
+	m_gsMapLbl.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	if (!m_gsMap.GetSafeHwnd())
+		m_gsMap.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+			CRect(0, 0, 140, 24), this, IDC_SAE_GSMAP);
+	m_gsMap.SetAeroMode(FALSE);
+	m_gsMap.ResetContent();
+	m_gsMap.AddString(LL14(L"自動", L"Auto", L"Auto", L"Auto", L"Auto",
+		L"자동", L"自动", L"تلقائي", L"Авто", L"Auto", L"Auto", L"Auto", L"Auto", L"Otomatik"));
+	m_gsMap.AddString(L"SC-55");
+	m_gsMap.AddString(L"SC-88");
+	m_gsMap.AddString(L"SC-88Pro");
+	m_gsMap.AddString(L"SC-8820/8850");
+	m_gsMap.AddString(L"XG");
+	m_gsMap.SetCurSel(m_doc.gsMap >= 0 && m_doc.gsMap <= 5 ? m_doc.gsMap : 0);
 
 	/* 譜面UX: 範囲再生・小節ジャンプ・Mute/Solo・詳細パネル・情報バー */
 	auto mkNav = [&](CCustomStandardButton& b, int id, const wchar_t* txt) {
@@ -799,6 +823,17 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 		if (x > pad && x + 168 > right) { y += btnH + 4; x = pad; }
 		layoutCombo(m_out, x, y, 168, btnH + 4, 200);
 		x += 174;
+		groupGap();
+	}
+	if (m_gsMapLbl.GetSafeHwnd()) {
+		if (x > pad && x + 52 > right) { y += btnH + 4; x = pad; }
+		m_gsMapLbl.MoveWindow(x, y + 4, 48, 20);
+		x += 52;
+	}
+	if (m_gsMap.GetSafeHwnd()) {
+		if (x > pad && x + 148 > right) { y += btnH + 4; x = pad; }
+		layoutCombo(m_gsMap, x, y, 148, btnH + 4, 180);
+		x += 154;
 		groupGap();
 	}
 	vis(m_btnPencil, 1); vis(m_btnErase, 1); vis(m_btnSel, 1);
@@ -3234,6 +3269,59 @@ void CSasamiMidiScoreDlg::OnCbnScoreOut()
 	m_outSel = sel;
 }
 
+static int s_gsMapBusy;
+
+static int ScChIsDrum(const ScMidiDoc* d, int ch)
+{
+	if (ch == 9) return 1;
+	if (!d || !d->ev) return 0;
+	for (int i = 0; i < d->evCount; i++) {
+		if ((int)d->ev[i].ch != ch) continue;
+		if (d->ev[i].kind == SC_EV_DRUM) return 1;
+	}
+	return 0;
+}
+
+/* メロディのキャピタルだけ。ch9 とドラム印、MSB 127（LA）は触らない。 */
+static void ScApplyGsMapBanks(ScMidiDoc* d, int map)
+{
+	if (!d || !d->ev || map < 1 || map > 5) return;
+	const int lsb = (map == 5) ? 0 : map;
+	for (int i = 0; i < d->evCount; i++) {
+		if (d->ev[i].kind != SC_EV_BANK) continue;
+		if (ScChIsDrum(d, (int)d->ev[i].ch)) continue;
+		if (d->ev[i].a == 127) continue;
+		if (d->ev[i].a != 0) continue;
+		const int old = (int)d->ev[i].b;
+		if (old == 0 || (old >= 1 && old <= 4))
+			d->ev[i].b = (uint8_t)lsb;
+	}
+}
+
+static int ScGsMapFromPeek(const VstMidiListPeek* p)
+{
+	if (!p) return 0;
+	if (p->sysMode == 2 || p->mapKind == 7) return 5;
+	if (p->mapKind >= 1 && p->mapKind <= 4) return p->mapKind;
+	return 0;
+}
+
+void CSasamiMidiScoreDlg::OnCbnGsMap()
+{
+	if (s_gsMapBusy) return;
+	int sel = m_gsMap.GetCurSel();
+	if (sel < 0 || sel > 5) sel = 0;
+	if (sel == m_doc.gsMap) return;
+	m_doc.gsMap = sel;
+	if (sel >= 1)
+		ScApplyGsMapBanks(&m_doc, sel);
+	RefreshProgLabels();
+	PushDocToText();
+	PersistSession();
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
+}
+
 void CSasamiMidiScoreDlg::OnCbnSnap()
 {
 	const int s = m_snap.GetCurSel();
@@ -3910,6 +3998,14 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src, int applyFx)
 	RefreshProgLabels();
 	RefreshPartEnabled();
 	ScStaffEnsureStripFromDoc(&m_ui, m_doc.ev, m_doc.evCount, m_curCh);
+	ScStaffEnsureGlobalTempoFromDoc(&m_ui, m_doc.ev, m_doc.evCount, 120);
+	if (m_gsMap.GetSafeHwnd()) {
+		int g = m_doc.gsMap;
+		if (g < 0 || g > 5) g = 0;
+		s_gsMapBusy = 1;
+		m_gsMap.SetCurSel(g);
+		s_gsMapBusy = 0;
+	}
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	if (m_bodyRc.Width() > 0)
@@ -4031,9 +4127,14 @@ void CSasamiMidiScoreDlg::PersistSession()
 void CSasamiMidiScoreDlg::OnBnClickedOpen()
 {
 	CFileDialog dlg(TRUE, L"mpsmv", NULL, OFN_FILEMUSTEXIST,
-		L"MPSMV/MPW2 (*.mpsmv;*.mpw2)|*.mpsmv;*.mpw2|All|*.*||", this);
+		L"MPSMV/MPW2/MIDI (*.mpsmv;*.mpw2;*.mid;*.midi)|*.mpsmv;*.mpw2;*.mid;*.midi|All|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	const CString path = dlg.GetPathName();
+	if (path.Right(4).CompareNoCase(L".mid") == 0 || path.Right(5).CompareNoCase(L".midi") == 0
+		|| path.Right(4).CompareNoCase(L".smf") == 0) {
+		ImportStandardMidi(path);
+		return;
+	}
 	SasamiSong song;
 	SasamiSongInit(&song);
 	if (!SasamiLoadFileW(path, &song)) {
@@ -4506,6 +4607,59 @@ void CSasamiMidiScoreDlg::OnBnClickedHelp()
 	CSasamiCmdHelpDlg::Show(this, CSasamiCmdHelpDlg::kTabScore1);
 }
 
+void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
+{
+	CString path;
+	if (pathOpt && pathOpt[0])
+		path = pathOpt;
+	else {
+		CFileDialog dlg(TRUE, L"mid", NULL, OFN_FILEMUSTEXIST,
+			L"Standard MIDI (*.mid;*.midi;*.smf)|*.mid;*.midi;*.smf|All|*.*||", this);
+		if (dlg.DoModal() != IDOK) return;
+		path = dlg.GetPathName();
+	}
+	ScMidiDoc* tmp = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
+	if (!tmp) return;
+	int dropped = 0;
+	if (!ScMidiDocFromSmfFile(tmp, path, &dropped)) {
+		ScMidiDocClear(tmp);
+		HeapFree(GetProcessHeap(), 0, tmp);
+		m_status.SetWindowText(LL14(L"標準MIDIを読めませんでした", L"Could not read standard MIDI",
+			L"Lecture MIDI impossible", L"Lettura MIDI non riuscita", L"No se pudo leer el MIDI",
+			L"표준 MIDI를 읽지 못했습니다", L"无法读取标准MIDI", L"تعذر قراءة MIDI", L"Не удалось прочитать MIDI",
+			L"MIDI konnte nicht gelesen werden", L"Falha ao ler o MIDI", L"MIDI lezen mislukt",
+			L"Nie udało się odczytać MIDI", L"Standart MIDI okunamadı"));
+		return;
+	}
+	{
+		VstMidiListPeek pk;
+		memset(&pk, 0, sizeof(pk));
+		if (VstMidiPeekListMarks(path, &pk))
+			tmp->gsMap = ScGsMapFromPeek(&pk);
+		if (tmp->gsMap >= 1)
+			ScApplyGsMapBanks(tmp, tmp->gsMap);
+	}
+	LoadFromDoc(*tmp, 0);
+	ScMidiDocClear(tmp);
+	HeapFree(GetProcessHeap(), 0, tmp);
+	PushDocToText();
+	PersistSession();
+	CString st;
+	st.Format(LL14(L"標準MIDIを譜面に入れました（捨てた音符 %d）", L"Imported standard MIDI onto the score (dropped %d notes)",
+		L"MIDI importé sur la partition (%d notes écartées)", L"MIDI importato nello spartito (%d note scartate)",
+		L"MIDI importado a la partitura (%d notas omitidas)", L"표준 MIDI를 악보에 넣었습니다 (버린 음표 %d)",
+		L"已将标准MIDI写入乐谱（丢弃 %d 个音）", L"استُورد MIDI إلى النوتة (أُسقط %d)", L"MIDI перенесён на ноты (отброшено %d)",
+		L"Standard-MIDI in die Partitur (%d Noten verworfen)", L"MIDI importado para a pauta (%d notas omitidas)",
+		L"Standaard-MIDI op de partituur (%d noten weggelaten)", L"MIDI na pięciolinię (pominięto %d)",
+		L"Standart MIDI partisyona alındı (%d nota atıldı)"), dropped);
+	if (m_doc.gsMap >= 1 && m_doc.gsMap <= 5) {
+		static const wchar_t* name[] = { L"", L"SC-55", L"SC-88", L"SC-88Pro", L"SC-8820/8850", L"XG" };
+		st += L"  ";
+		st += name[m_doc.gsMap];
+	}
+	m_status.SetWindowText(st);
+}
+
 void CSasamiMidiScoreDlg::ExportStandardMidi()
 {
 	wchar_t built[MAX_PATH];
@@ -4872,6 +5026,10 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(IDC_SASAMI_MIDI_EXPORT, LL14(
 		L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...", L"Exportar audio...",
 		L"Audio export...", L"导出音频...", L"Audio export...", L"Audio export...", L"Audio export...", L"Exportar audio...", L"Audio exporteren...", L"Eksport audio...", L"Ses disa aktar..."));
+	menu.AddCommand(9087, LL14(
+		L"標準MIDIから取り込む…", L"Import standard MIDI…", L"Importer un MIDI standard…", L"Importa MIDI standard…", L"Importar MIDI estándar…",
+		L"표준 MIDI 가져오기…", L"导入标准MIDI…", L"استيراد MIDI قياسي…", L"Импорт стандартного MIDI…", L"Standard-MIDI importieren…",
+		L"Importar MIDI padrão…", L"Standaard-MIDI importeren…", L"Importuj standardowe MIDI…", L"Standart MIDI içe aktar…"));
 	menu.AddCommand(9088, LL14(
 		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
 		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
@@ -4895,6 +5053,10 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",
 		L"Help", L"帮助", L"Help", L"Help", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardim"));
 	const UINT cmd = menu.Track(point, this);
+	if (cmd == 9087) {
+		ImportStandardMidi(NULL);
+		return;
+	}
 	if (cmd == 9088) {
 		ExportStandardMidi();
 		return;
@@ -6110,6 +6272,7 @@ void CSasamiMidiScoreDlg::AutoArrangeStop()
 void CSasamiMidiScoreDlg::AutoArrangeRefresh()
 {
 	RefreshProgLabels();
+	ScStaffEnsureGlobalTempoFromDoc(&m_ui, m_doc.ev, m_doc.evCount, 120);
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
@@ -6143,6 +6306,7 @@ void CSasamiMidiScoreDlg::OpenAutoArrange()
 	host.defMeterD = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
 	host.defKey = m_ui.keySig;
 	host.tempoT = &m_doc.tempoT;
+	host.gsMap = m_doc.gsMap;
 	host.ctx = this;
 	host.refresh = MidiAaRefresh;
 	host.preview = MidiAaPreview;

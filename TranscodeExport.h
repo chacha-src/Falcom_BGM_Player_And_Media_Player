@@ -19,6 +19,7 @@ public:
 	bool multiFile;
 	int m_initialTab; // 0=WAV 1=mp3 2=FLAC (-1=保存値から mp3/FLAC)
 	bool m_preferXfade; // コンテキストメニューからクロスフェード起動
+	int m_sasamiSrc; // 1 = 選択がすべてささみ作曲ファイル。MIDIタブを出す
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -37,7 +38,8 @@ protected:
 	float DefaultKpiDurationSec() const;
 	void PersistKpiDurationFromUi();
 	void PersistOptionsFromUi(BOOL clamp);
-	int  CurrentFormat() const; // -1=WAV, 0=mp3, 1=FLAC
+	int  CurrentFormat() const; // -1=WAV, 0=mp3, 1=FLAC, 2=MIDI
+	int  SourcesAreSasami() const;
 	bool IsXfadeMode();
 	bool IsMixMode();
 	CString ExtForFormat(int fmt) const;

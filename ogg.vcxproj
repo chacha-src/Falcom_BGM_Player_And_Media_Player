@@ -878,6 +878,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CSasamiPianoRollDlg.cpp" />
     <ClCompile Include="SasamiToneNames.cpp" />
     <ClCompile Include="SasamiComposerDoc.cpp" />
+    <ClCompile Include="ScSmfImport.cpp" />
     <ClCompile Include="kb_sasami\source\sasami_write.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>

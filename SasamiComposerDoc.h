@@ -140,6 +140,8 @@ struct ScMidiDoc {
 	ScEvent ev[SC_EV_MAX];
 	int evCount;
 	int tempoT; /* SASAMI T, 13000 ≈ 120BPM */
+	/* 0=自動 1=SC-55 2=SC-88 3=88Pro 4=8820/8850 5=XG */
+	int gsMap;
 	int numer, denom;
 	char titleSjis[65];
 	ScMidiVstBind bind; /* VST paths / prog for MPW3 — streams built at write time */
@@ -275,6 +277,11 @@ uint32_t ScFmDocMaxTick(const ScFmDoc* d);
 int ScFmDocNoteCount(const ScFmDoc* d);
 /* Emit FM MML text from fm doc (score → text sync). */
 int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch);
+
+/* 標準MIDIを譜面へ。MIDI譜面はチャンネルのまま。FMは6音+SSG3+リズムに振り、
+   余った音は捨てる。FM音色は gs.wopn を @VOICEHEX に落とす。dropped は捨てた音符数。 */
+int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped);
+int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped);
 
 /* Emit binary writers from docs */
 int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w);

@@ -6058,6 +6058,7 @@ int ScSessionSaveLastMidi(const ScMidiDoc* d, const wchar_t* mmlOpt)
 	hdr.reserved[1] = (uint32_t)d->numer;
 	hdr.reserved[2] = (uint32_t)d->denom;
 	hdr.reserved[3] = (uint32_t)d->evCount;
+	hdr.reserved[6] = (uint32_t)(d->gsMap + 1);
 	DWORD wr = 0;
 	BOOL ok = WriteFile(h, &hdr, sizeof(hdr), &wr, NULL) && wr == sizeof(hdr);
 	if (ok) ok = WriteFile(h, mmlBuf, hdr.mmlBytes, &wr, NULL) && wr == hdr.mmlBytes;
@@ -6107,6 +6108,8 @@ int ScSessionLoadLastMidi(ScMidiDoc* d, wchar_t* mmlOut, int mmlCch)
 	if (!ok) return 0;
 	if (hdr.reserved[1] > 0) d->numer = (int)hdr.reserved[1];
 	if (hdr.reserved[2] > 0) d->denom = (int)hdr.reserved[2];
+	if (hdr.reserved[6] >= 1 && hdr.reserved[6] <= 6)
+		d->gsMap = (int)hdr.reserved[6] - 1;
 	return 1;
 }
 

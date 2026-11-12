@@ -35,6 +35,7 @@ public:
 	void HistPush();
 	void CycleClefTrack(int tr); /* Auto→G→F→G+F→Dr→Auto; RHY stays drum */
 	void ExportStandardMidi();
+	void ImportStandardMidi(const wchar_t* pathOpt = NULL);
 	void OpenAutoArrange();
 	void AutoArrangeRefresh();
 	void AutoArrangeStop();

@@ -2635,9 +2635,14 @@ void CSasamiFmScoreDlg::LoadFromDoc(const ScFmDoc& src)
 void CSasamiFmScoreDlg::OnBnClickedOpen()
 {
 	CFileDialog dlg(TRUE, L"mml", NULL, OFN_FILEMUSTEXIST,
-		L"Text/MML/DAT (*.mml;*.mml2;*.mml3;*.m;*.txt;*.dat;*.f)|*.mml;*.mml2;*.mml3;*.m;*.txt;*.dat;*.f|All|*.*||", this);
+		L"Text/MML/MIDI (*.mml;*.txt;*.dat;*.f;*.mid;*.midi)|*.mml;*.mml2;*.mml3;*.m;*.txt;*.dat;*.f;*.mid;*.midi|All|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	const CString path = dlg.GetPathName();
+	if (path.Right(4).CompareNoCase(L".mid") == 0 || path.Right(5).CompareNoCase(L".midi") == 0
+		|| path.Right(4).CompareNoCase(L".smf") == 0) {
+		ImportStandardMidi(path);
+		return;
+	}
 	if (path.Right(4).CompareNoCase(L".fpy") == 0) {
 		m_status.SetWindowText(LL14(
 			L".fpy はバイナリです — MML/.dat を開くか譜面で編集してください",
@@ -2920,6 +2925,54 @@ static int FmSmfPut(uint8_t* d, uint32_t cap, uint32_t* n, const uint8_t* s, uin
 	memcpy(d + *n, s, sn);
 	*n += sn;
 	return 1;
+}
+
+void CSasamiFmScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
+{
+	CString path;
+	if (pathOpt && pathOpt[0])
+		path = pathOpt;
+	else {
+		CFileDialog dlg(TRUE, L"mid", NULL, OFN_FILEMUSTEXIST,
+			L"Standard MIDI (*.mid;*.midi;*.smf)|*.mid;*.midi;*.smf|All|*.*||", this);
+		if (dlg.DoModal() != IDOK) return;
+		path = dlg.GetPathName();
+	}
+	ScFmDoc* tmp = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
+	if (!tmp) return;
+	int dropped = 0;
+	if (!ScFmDocFromSmfFile(tmp, path, &dropped)) {
+		ScFmDocClear(tmp);
+		HeapFree(GetProcessHeap(), 0, tmp);
+		m_status.SetWindowText(LL14(L"標準MIDIを読めませんでした", L"Could not read standard MIDI",
+			L"Lecture MIDI impossible", L"Lettura MIDI non riuscita", L"No se pudo leer el MIDI",
+			L"표준 MIDI를 읽지 못했습니다", L"无法读取标准MIDI", L"تعذر قراءة MIDI", L"Не удалось прочитать MIDI",
+			L"MIDI konnte nicht gelesen werden", L"Falha ao ler o MIDI", L"MIDI lezen mislukt",
+			L"Nie udało się odczytać MIDI", L"Standart MIDI okunamadı"));
+		return;
+	}
+	LoadFromDoc(*tmp);
+	ScFmDocClear(tmp);
+	HeapFree(GetProcessHeap(), 0, tmp);
+	PushDocToText();
+	PersistSession();
+	CString st;
+	st.Format(LL14(
+		L"FMへ変換しました。音色は gs.wopn、足りないパートは捨てました（%d音）",
+		L"Converted to FM. Tones from gs.wopn; extra parts dropped (%d notes)",
+		L"Converti en FM. Timbres gs.wopn; parties en trop écartées (%d notes)",
+		L"Convertito in FM. Timbri da gs.wopn; parti extra scartate (%d note)",
+		L"Convertido a FM. Timbres de gs.wopn; partes de más omitidas (%d notas)",
+		L"FM으로 변환했습니다. 음색은 gs.wopn, 넘치는 파트는 버렸습니다 (%d음)",
+		L"已转为FM。音色来自 gs.wopn，放不下的声部已丢弃（%d 音）",
+		L"حُوّل إلى FM. الطابع من gs.wopn، وأُسقط الزائد (%d)",
+		L"Переведено в FM. Тембры из gs.wopn, лишнее отброшено (%d)",
+		L"Nach FM gewandelt. Klänge aus gs.wopn, Rest verworfen (%d Noten)",
+		L"Convertido para FM. Timbres de gs.wopn; o resto foi omitido (%d notas)",
+		L"Omgezet naar FM. Klanken uit gs.wopn, de rest weg (%d noten)",
+		L"Zamieniono na FM. Barwy z gs.wopn, reszta pominięta (%d nut)",
+		L"FM'e çevrildi. Tınılar gs.wopn, sığmayanlar atıldı (%d nota)"), dropped);
+	m_status.SetWindowText(st);
 }
 
 void CSasamiFmScoreDlg::ExportStandardMidi()
@@ -3288,6 +3341,10 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…",
 		L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio exportieren…",
 		L"Exportar áudio…", L"Audio exporteren…", L"Eksport audio…", L"Ses dışa aktar…"));
+	menu.AddCommand(9087, LL14(
+		L"標準MIDIから取り込む…", L"Import standard MIDI…", L"Importer un MIDI standard…", L"Importa MIDI standard…", L"Importar MIDI estándar…",
+		L"표준 MIDI 가져오기…", L"导入标准MIDI…", L"استيراد MIDI قياسي…", L"Импорт стандартного MIDI…", L"Standard-MIDI importieren…",
+		L"Importar MIDI padrão…", L"Standaard-MIDI importeren…", L"Importuj standardowe MIDI…", L"Standart MIDI içe aktar…"));
 	menu.AddCommand(9088, LL14(
 		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
 		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
@@ -3298,6 +3355,10 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe",
 		L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
 	const UINT cmd = menu.Track(point, this);
+	if (cmd == 9087) {
+		ImportStandardMidi(NULL);
+		return;
+	}
 	if (cmd == 9088) {
 		ExportStandardMidi();
 		return;
@@ -3595,6 +3656,7 @@ void CSasamiFmScoreDlg::AutoArrangeStop()
 
 void CSasamiFmScoreDlg::AutoArrangeRefresh()
 {
+	ScStaffEnsureGlobalTempoFromDoc(&m_ui, m_doc.ev, m_doc.evCount, 120);
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	NotifyEdited();
@@ -3627,6 +3689,7 @@ void CSasamiFmScoreDlg::OpenAutoArrange()
 	host.defMeterN = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
 	host.defMeterD = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
 	host.defKey = m_ui.keySig;
+	host.tempoT = &m_doc.tempoT;
 	host.ctx = this;
 	host.refresh = FmAaRefresh;
 	host.preview = FmAaPreview;

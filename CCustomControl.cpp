@@ -9658,7 +9658,7 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     const int iconPadMax = max(20, r.Width() / 3);
     if (iconPad > iconPadMax) iconPad = iconPadMax;
     rt.left += bD ? max(4, r.Height() / 6) : iconPad;
-    pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     if (pOF)
     {
         pDC->SelectObject(pOF);

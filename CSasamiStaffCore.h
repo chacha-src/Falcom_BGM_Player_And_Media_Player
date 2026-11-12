@@ -358,6 +358,8 @@ int ScStaffWrittenToSounding(int writtenMidi, int octaves);
 /* Sounding MIDI of note event; written = sounding − 12*ottava(at note tick). */
 int ScStaffEvSoundingMidi(const ScEvent& e, int isFm, int tr);
 int ScStaffEvWrittenMidi(const ScEvent* ev, int evCount, const ScEvent& e, int isFm, int tr);
+/* 拍子・音部・オクターブの位置表を捨てる。途中挿入で tick がずれても、次の描画で組み直す。 */
+void ScStaffLayoutTouch(void);
 int ScStaffBarHasLayoutZone(const ScEvent* ev, int evCount, uint32_t barTick);
 int ScStaffLayoutPrefixPx(const ScEvent* ev, int evCount, uint32_t tick, const ScStaffUi* u);
 int ScStaffScoreContentWidthPx(const ScStaffUi* u, const ScEvent* ev, int evCount, uint32_t contentTicks);

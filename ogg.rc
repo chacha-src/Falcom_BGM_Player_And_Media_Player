@@ -269,6 +269,8 @@ IDR_U391                RCDATA                  "res\\u\\r8.bin"
 
 IDR_SASAMI_GS           RCDATA                  "res\\SASAMI_GS.DAT"
 
+IDR_GS_WOPN             RCDATA                  "kb_sasami\\data\\gs.wopn"
+
 IDR_SASAMI_XG           RCDATA                  "res\\SASAMI_XG.DAT"
 
 IDR_SASAMI_EX           RCDATA                  "res\\SASAMI_EX.DAT"
@@ -3119,7 +3121,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1658
+ FILEVERSION 0,9,1,1660
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3137,10 +3139,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.11 v1658"
-            VALUE "FileVersion", "0.9.1.1658"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.12 v1660"
+            VALUE "FileVersion", "0.9.1.1660"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.11"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.12"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"
