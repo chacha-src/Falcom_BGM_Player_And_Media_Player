@@ -1607,6 +1607,7 @@ if errorlevel 1 exit /b 1</Command>
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="kb_sasami\data\gs.wopn" />
     <None Include="oggDlg_DeferredHeavy.inc" />
     <None Include="res\cso\gpu_cs_glyph.cso" />
     <None Include="res\cso\gpu_cs_hex.cso" />

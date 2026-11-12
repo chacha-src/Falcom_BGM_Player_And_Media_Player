@@ -1196,6 +1196,41 @@ static int ProgAt(const StylePat* s, int col, int dup)
 	return s->progAll[i & 7];
 }
 
+/* FM1-6 と SSG は同時に1音。RHY と Misao は対象外。 */
+static int FmMelodic(int ch)
+{
+	return (ch >= 0 && ch < 10 && ch != 6) ? 1 : 0;
+}
+
+static void ClipFmMono(Ctx* c, int ch, uint32_t tick)
+{
+	if (!c || !c->ev || !c->n || !FmMelodic(ch)) return;
+	for (int i = 0; i < *c->n; i++) {
+		ScEvent& e = c->ev[i];
+		if ((int)e.ch != ch || e.kind != SC_EV_FM_NOTE) continue;
+		if (e.tick >= tick) continue;
+		uint32_t end = e.tick + (e.dur ? e.dur : 1);
+		if (end > tick) {
+			uint32_t nd = tick - e.tick;
+			if (nd < 1) nd = 1;
+			e.dur = (uint16_t)nd;
+		}
+	}
+}
+
+/* 低い塊はベースとして最低音。和音は最高音を残して1本の線にする。 */
+static int MonoKeep(const int* pit, int np)
+{
+	if (!pit || np < 1) return 0;
+	int lo = pit[0], hi = pit[0];
+	for (int i = 1; i < np; i++) {
+		if (pit[i] < lo) lo = pit[i];
+		if (pit[i] > hi) hi = pit[i];
+	}
+	if (hi - lo <= 12 && lo < 52) return lo;
+	return hi;
+}
+
 static int PlaceNote(Ctx* c, int ch, uint32_t tick, int midi, int dur, int vel, int gate)
 {
 	if (ch < 0 || midi < 0) return 0;
@@ -1207,6 +1242,7 @@ static int PlaceNote(Ctx* c, int ch, uint32_t tick, int midi, int dur, int vel, 
 	if (gate > 100) gate = 100;
 	if (c->isFm) {
 		if (ch == 6) return 0;
+		ClipFmMono(c, ch, tick);
 		return Push(c, tick, ch, SC_EV_FM_NOTE, PackFm(midi), 0, (uint8_t)gate, (uint16_t)dur);
 	}
 	return Push(c, tick, ch, SC_EV_NOTE, (uint8_t)midi, (uint8_t)vel, (uint8_t)gate, (uint16_t)dur);
@@ -1514,13 +1550,14 @@ static void SetHeadTempo(Ctx* c, int bpm, int rewrite, int* docTempoT)
 	const int header = (docTempoT && *docTempoT > 0) ? *docTempoT : 0;
 	const int haveReal = (have > 0 && have != 13000);
 	const int headReal = (header > 0 && header != 13000);
+	/* 上書きはスタイルのテンポにする。重ねは、入っているテンポを残す。 */
 	int want = styleT;
-	if (haveReal)
-		want = have;
-	else if (!rewrite && headReal)
-		want = header;
-	else if (rewrite && headReal && !haveReal && found < 0)
-		want = header;
+	if (!rewrite) {
+		if (haveReal)
+			want = have;
+		else if (headReal)
+			want = header;
+	}
 	if (want < 1) want = styleT;
 	if (found >= 0) {
 		c->ev[found].tick = 0;
@@ -2797,12 +2834,20 @@ static void EmitPitches(Ctx* c, ScEvent* ev, int* evCount, int* nEmit, int merge
 		return;
 	}
 	if (!merge && OnsetBusy(ev, *nEmit, ch, tick)) return;
-	for (int i = 0; i < np; i++) {
-		if (merge && MergeSlot(ev, evCount, nEmit, ch, slot0, slot1, pit[i], 0, removed, dur))
+	int solo = 0;
+	const int* use = pit;
+	int useN = np;
+	if (c->isFm && FmMelodic(ch) && np > 1) {
+		solo = MonoKeep(pit, np);
+		use = &solo;
+		useN = 1;
+	}
+	for (int i = 0; i < useN; i++) {
+		if (merge && MergeSlot(ev, evCount, nEmit, ch, slot0, slot1, use[i], 0, removed, dur))
 			continue;
 		int v = vel - i * 5;
 		if (v < 40) v = 40;
-		PlaceNote(c, ch, tick, pit[i], dur, v, gate);
+		PlaceNote(c, ch, tick, use[i], dur, v, gate);
 	}
 	if (bend) PlaceScoop(c, ch, tick);
 }
@@ -3107,7 +3152,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (explicitTargets) {
 		for (int ch = 0; ch < lim && ch < 32 && nDrum < 32; ch++) {
 			if (!((opt->drumMask >> ch) & 1u)) continue;
-			drumChs[nDrum] = ch;
+			/* FM のドラムは RHY（ch6）。チェック10は GM の定番で、そのまま書くと FM7 になる。 */
+			int dst = (isFm && 6 < lim) ? 6 : ch;
+			int dup = 0;
+			for (int k = 0; k < nDrum; k++) if (drumChs[k] == dst) dup = 1;
+			if (dup) continue;
+			drumChs[nDrum] = dst;
 			drumChSlot[nDrum] = opt->drumSlot[ch] ? 1 : 0;
 			nDrum++;
 		}
@@ -3219,8 +3269,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			w++;
 		}
 		nDrum = w;
-		if (nDrum == 0 && !explicitTargets && (opt->jobs & SC_AJ_DRUM) && 9 < lim) {
-			drumChs[0] = 9;
+		if (nDrum == 0 && !explicitTargets && (opt->jobs & SC_AJ_DRUM) && (isFm ? 6 : 9) < lim) {
+			drumChs[0] = isFm ? 6 : 9;
 			drumChSlot[0] = 0;
 			nDrum = 1;
 		}
@@ -3536,6 +3586,28 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	for (int i = 0; i < nStab; i++) EnsureMelodic(&ctx, opt->ui, stabCh[i], 1, st.progAll[6], anySolo, haveAcc);
 	for (int i = 0; i < nColor; i++) EnsureMelodic(&ctx, opt->ui, colorCh[i], 2, st.progAll[7], anySolo, haveAcc);
 
+	/* FM 同士は同じ拍で構成音を分ける。SSG は拍頭だけの別ライン。ベースは除く。 */
+	int fmToneIx[32], ssgToneIx[32];
+	for (int i = 0; i < 32; i++) { fmToneIx[i] = -1; ssgToneIx[i] = -1; }
+	if (isFm) {
+		int nf = 0, ns = 0;
+		auto takeTone = [&](int ch) {
+			if (ch < 0 || ch >= 32) return;
+			for (int k = 0; k < nBass; k++) if (bassCh[k] == ch) return;
+			if ((ch <= 2 || (ch >= 7 && ch <= 9)) && fmToneIx[ch] < 0)
+				fmToneIx[ch] = nf++;
+			else if (ch >= 3 && ch <= 5 && ssgToneIx[ch] < 0)
+				ssgToneIx[ch] = ns++;
+		};
+		for (int i = 0; i < nChord; i++) takeTone(chordCh[i]);
+		for (int i = 0; i < nPad; i++) takeTone(padCh[i]);
+		for (int i = 0; i < nArp; i++) takeTone(arpCh[i]);
+		for (int i = 0; i < nHarm; i++) takeTone(harmCh[i]);
+		for (int i = 0; i < nCnt; i++) takeTone(cntCh[i]);
+		for (int i = 0; i < nStab; i++) takeTone(stabCh[i]);
+		for (int i = 0; i < nColor; i++) takeTone(colorCh[i]);
+	}
+
 	int introN = 0, endN = 0;
 	for (int i = 0; i < nBars; i++) {
 		if (bars[i].section == SEC_INTRO) introN++;
@@ -3543,6 +3615,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	}
 	int introI = 0, endI = 0, bodyI = 0;
 	int nEmit = *evCount;
+	const int nPrior = nEmit;
 	for (int bi = 0; bi < nBars && !ctx.overflow; bi++) {
 		const BarInfo& b = bars[bi];
 		int last = (bi + 1 >= nBars) || (bars[bi + 1].section != b.section);
@@ -3684,13 +3757,21 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			const int introSoft = (b.section == SEC_INTRO && !last);
 			const int merge = haveAcc ? 1 : 0;
 			/* 複数ドラム ch は一人を分割しない。それぞれフルキットの別譜面。 */
-			int drumDur = isFm ? 2 : (slotDur > 12 ? 12 : slotDur);
+			int drumDur = slotDur > 12 ? 12 : slotDur;
+			if (isFm) {
+				if (drumDur < 12) drumDur = 12;
+				if (drumDur > 24) drumDur = 24;
+			}
 			for (int di = 0; di < nDrum; di++) {
 				for (int v = 0; v < DV_COUNT; v++) {
 					const int drumMidi = GmDrum(v);
 					const int hatMuted = (v == DV_HAT && (drm[DV_OHAT] & bit));
 					int styleHit = (di == 0) ? (!hatMuted && (drm[v] & bit))
 						: DrummerOn(di, v, slot, div, drm, patVar);
+					/* ドラムが1人でも、2拍目と4拍目にハンドクラップを足す。 */
+					if (!isFm && di == 0 && v == DV_CLAP && !styleHit && !drm[DV_CLAP]
+						&& (drm[DV_SNARE] & bit) && ((slot % 8) == 4))
+						styleHit = 1;
 					int ghostHat = 0;
 					const int prevHat = (slot > 0) && (drm[DV_HAT] & (uint16_t)(1u << (slot - 1)));
 					if (di == 0 && !styleHit && v == DV_HAT && prevHat && !StyleQuiet(opt->style)
@@ -3745,8 +3826,53 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				}
 			}
 			const int gvol = GrooveVol(opt->style, slot, div);
+			int block[6];
+			int nBlock = 0;
+			if (ctx.isFm) {
+				nBlock = FillVoicing(hr, ht, st.power, 4, barAt + (half ? 3 : 0), 52, 79, block);
+				for (int a = 0; a < nBlock; a++) {
+					for (int b2 = a + 1; b2 < nBlock; b2++) {
+						if (block[b2] < block[a]) {
+							int t = block[a]; block[a] = block[b2]; block[b2] = t;
+						}
+					}
+				}
+			}
+			auto lockPart = [&](int ch, int* hit, int* pit, int* np, int* span, int* gate) -> int {
+				if (!ctx.isFm || !hit || !pit || !np || !span || !gate) return 0;
+				if (ch < 0 || ch >= 32 || nBlock < 1) return 0;
+				if (fmToneIx[ch] >= 0) {
+					/* 16分で刻むと1音のFMが崩れる。拍頭で全員同時、音は構成音を分けて四分伸ばす。 */
+					*hit = ((slot % 4) == 0) ? 1 : 0;
+					*np = 0;
+					if (*hit) pit[(*np)++] = block[fmToneIx[ch] % nBlock];
+					*span = slotDur * 4;
+					if (*span < 2) *span = 2;
+					*gate = 88;
+					return 1;
+				}
+				if (ssgToneIx[ch] >= 0) {
+					*hit = ((slot % 4) == 0) ? 1 : 0;
+					*np = 0;
+					if (*hit) {
+						int n = block[ssgToneIx[ch] % nBlock];
+						while (n < 64) n += 12;
+						while (n > 88) n -= 12;
+						pit[(*np)++] = n;
+					}
+					*span = slotDur * 2;
+					if (*span < 2) *span = 2;
+					*gate = 55;
+					return 1;
+				}
+				return 0;
+			};
 			auto lay = [&](int ch, int hit, const int* pit, int np, int span, int vol, int gate, int bend) {
 				if (ch < 0) return;
+				/* 重ねのやり直しで、既に鳴っている拍へは足さない。 */
+				if (merge && hit && OnsetBusy(ev, nPrior, ch, tick)) {
+					return;
+				}
 				int lv = vol;
 				if (lv < 36) lv = 36;
 				if (lv > 127) lv = 127;
@@ -3771,7 +3897,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 						int midi = BassMidi(hr, SafeDeg(deg), ht);
 						pit[np++] = midi;
 						/* 拍の頭だけルート＋5度。それ以外は一本の線。 */
-						if (!bassSoft[slot] && (slot % 4) == 0
+						if (!ctx.isFm && !bassSoft[slot] && (slot % 4) == 0
 							&& (famNow == FAM_8 || famNow == FAM_METAL || famNow == FAM_JAZZ)) {
 							int fifth = BassMidi(hr, 2, ht);
 							if (fifth == midi) fifth = midi + 12;
@@ -3798,7 +3924,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(compM), div, b.t0, tick, b.len, slotDur), 1);
-				if (hit) {
+				int gate = ((slot % 4) == 0) ? 96 : 68;
+				if (!lockPart(chordCh[i], &hit, pit, &np, &span, &gate) && hit) {
 					int thick = (famNow == FAM_JAZZ || famNow == FAM_BLUES || famNow == FAM_BALLAD || famNow == FAM_PAD
 						|| famNow == FAM_DISCO || opt->style == SC_AS_HOUSE || opt->style == SC_AS_TRANCE
 						|| opt->style == SC_AS_EDM || opt->style == SC_AS_SYNTHWAVE || opt->style == SC_AS_GOSPEL);
@@ -3812,17 +3939,19 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int cv = gvol - 4 - i * 3;
 				if ((slot % 4) == 0) cv += 16;
 				if (cv > 127) cv = 127;
-				lay(chordCh[i], hit, pit, np, span, cv, ((slot % 4) == 0) ? 96 : 68, 0);
+				lay(chordCh[i], hit, pit, np, span, cv, gate, 0);
 			}
 			for (int i = 0; i < nPad; i++) {
 				int hit = BitOn(padM, slot);
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(padM), div, b.t0, tick, b.len, slotDur), 2);
-				if (hit)
+				int gate = 96;
+				const int locked = lockPart(padCh[i], &hit, pit, &np, &span, &gate);
+				if (!locked && hit)
 					np = FillVoicing(hr, ht, 0, 3, phrase + 2 + i + (half ? 3 : 0), 55, 86, pit);
-				lay(padCh[i], hit, pit, np, span, gvol - 16 - i * 2, 96, 0);
-				if (i == 0 && hit && span >= 48)
+				lay(padCh[i], hit, pit, np, span, gvol - 16 - i * 2, gate, 0);
+				if (!locked && i == 0 && hit && span >= 48)
 					PlaceSing(&ctx, padCh[i], tick, span, opt->style, 0);
 			}
 			for (int i = 0; i < nArp; i++) {
@@ -3830,6 +3959,11 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(arpM), div, b.t0, tick, b.len, slotDur), 3);
+				int gate = 70;
+				if (lockPart(arpCh[i], &hit, pit, &np, &span, &gate)) {
+					lay(arpCh[i], hit, pit, np, span, gvol - 6, gate, 0);
+					continue;
+				}
 				/* 拍の途中だけ 32分や64分。全部を同じ音価にしない。 */
 				int sub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figArp[slot] : 0;
 				if (i == 0 && arpCh[i] >= 0 && hit && (sub > 0 || (run32 && slot >= midSlot))) {
@@ -3871,6 +4005,11 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext((i == 0) ? innM : innBlock), div, b.t0, tick, b.len, slotDur), 4);
+				int gate = 74;
+				if (lockPart(harmCh[i], &hit, pit, &np, &span, &gate)) {
+					lay(harmCh[i], hit, pit, np, span, gvol - 6, gate, 0);
+					continue;
+				}
 				/* じゃらんの拍はブロックを置かず、あとで 64 分を書く。 */
 				if (i == 0 && slot == jaranSlot) {
 					lay(harmCh[i], 0, pit, 0, span, 0, 0, 0);
@@ -3894,6 +4033,11 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(cntM), div, b.t0, tick, b.len, slotDur), 5);
+				int gate = 78;
+				if (lockPart(cntCh[i], &hit, pit, &np, &span, &gate)) {
+					lay(cntCh[i], hit, pit, np, span, gvol - 8, gate, 0);
+					continue;
+				}
 				int cntSub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figCnt[slot] : 0;
 				if (i == 0 && hit && cntSub > 0 && cntCh[i] >= 0) {
 					if (merge)
@@ -3927,24 +4071,25 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int pit[6];
 				int np = 0;
 				int span = slotDur > 2 ? slotDur : 2;
-				if (hit)
+				int gate = 36;
+				if (!lockPart(stabCh[i], &hit, pit, &np, &span, &gate) && hit)
 					np = FillVoicing(hr, ht, st.power, 4, phrase + i, 67, 96, pit);
 				int sv = gvol + 18 - i * 3;
 				if (sv > 127) sv = 127;
-				lay(stabCh[i], hit, pit, np, span, sv, 36, 0);
+				lay(stabCh[i], hit, pit, np, span, sv, gate, 0);
 			}
 			for (int i = 0; i < nColor; i++) {
 				int hit = BitOn(colM, slot);
 				int pit[6];
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(colM), div, b.t0, tick, b.len, slotDur), 2);
-				if (hit) {
+				int gate = 84;
+				if (!lockPart(colorCh[i], &hit, pit, &np, &span, &gate) && hit)
 					np = FillVoicing(hr, ht, 0, 2, phrase, 72, 96, pit);
-				}
-				lay(colorCh[i], hit, pit, np, span, gvol - 18, 84, 0);
+				lay(colorCh[i], hit, pit, np, span, gvol - 18, gate, 0);
 			}
 			/* その拍だけ、コードトーンを 64 分で4つ。じゃらん。 */
-			if (slot == jaranSlot && slotDur >= 8 && !(run32 && slot >= midSlot)) {
+			if (!ctx.isFm && slot == jaranSlot && slotDur >= 8 && !(run32 && slot >= midSlot)) {
 				int ch = (nHarm > 0) ? harmCh[0] : ((nArp > 0) ? arpCh[0] : -1);
 				if (ch >= 0) {
 					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
@@ -3962,7 +4107,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					}
 				}
 			}
-			if (genMel && melodyCh == 0 && allowBar && MelodySlot(patVar, slot, div, compM, bassSlots, drm[DV_HAT])) {
+			if (genMel && melodyCh == 0 && allowBar && MelodySlot(patVar, slot, div, compM, bassSlots, drm[DV_HAT])
+				&& !(ctx.isFm && (slot % 4) != 0)) {
 				static const uint8_t md[8][8] = {
 					{ 1, 5, 3, 8, 5, 3, 2, 1 },
 					{ 5, 8, 5, 3, 1, 3, 5, 8 },
@@ -3977,8 +4123,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int midi = ShiftOct(BassMidi(hr, deg, ht), 1, 52, 74);
 				int mv = ((slot % 4) == 0) ? 114 : 86;
 				int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
-				int mdor = ((patVar & 7) == 3) ? slotDur : slotDur * 2;
-				if (mdor > room) mdor = room;
+				int mdor = ctx.isFm ? (slotDur * 4) : (((patVar & 7) == 3) ? slotDur : slotDur * 2);
+				if (!ctx.isFm && mdor > room) mdor = room;
 				if (mdor < 2) mdor = 2;
 				PlaceNote(&ctx, melodyCh, tick, midi, mdor, mv, 84);
 			}

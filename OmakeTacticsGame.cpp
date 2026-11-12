@@ -210,6 +210,7 @@ Game::Game()
 	m_shopWho = -1;
 	m_sumOn = 0;
 	m_sumFx = 0;
+	m_sumRank = 0;
 	m_sumHit = 0;
 	m_sumU = 0;
 	m_partyBack = 0;
@@ -317,6 +318,8 @@ Game::Game()
 	m_evoT = 0;
 	m_evoRoster = m_evoFrom = m_evoTo = -1;
 	m_jobRedo = 0;
+	m_jobForce = 0;
+	m_jobForceAt = 0;
 	m_jobWho = m_jobStep = m_jobN = m_jobSkipAll = 0;
 	m_jobSel = -1;
 	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
@@ -341,6 +344,10 @@ Game::Game()
 	m_lvqN = m_lvqCur = 0;
 	m_promoAsk = 0;
 	m_victory = 0;
+	m_bgmTick = 0;
+	m_bgmWatch = -1;
+	m_bgmHoldWin = 0;
+	m_bgmHoldDanger = 0;
 	m_resultN = 0;
 	m_menuConfirm = 0;
 	m_enemyWait = 0;
@@ -1122,7 +1129,7 @@ void Game::Tick(float dt)
 				WarmHomeAvatars();
 				NoteLoad(1000);
 				m_r.DropLoadSky();
-				m_screen = SC_BASE;
+				m_screen = m_jobForce ? SC_EVOLVE : SC_BASE;
 				m_r.SetLoadPulse(NULL, NULL);
 				m_loadLive = FALSE;
 				holdGame = TRUE;
@@ -1213,13 +1220,14 @@ void Game::Tick(float dt)
 
 	static_assert(TAC_BGM_LANTERN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 勝利目前は二つのときだけ。距離も匹数も見ない。毎フレーム組み直す。
+// 勝利目前は二つのときだけ。距離も匹数も見ない。開幕の体力では切り替えない。
 // 掃討は索敵の外も全員。最大HPも残りHPも数える。倒した敵の最大HPは分母に残す。
 // ボス戦は、索敵済みに加え、今いる地点からボスまでの途上と、ボスから8マス以内の未起動も入れる。
 // 生存ボスのHPが最大の半分を超えていれば通常曲。半分以下で勝利目前。雑魚の有無は見ない。
 // ボスがいないときだけ、対象の残りHPが最大HP合計の1/4以下で勝利目前。
-// 敗北寸前曲は毎フレーム見る。味方の残りHPが最大の33%未満、または死者が人数の半数以上。
-// その条件を外れたら、勝利目前ならそちら、まだなら地形曲。危険曲はラッチしない。
+// 勝利目前はダメージを与えた着弾で、敗北寸前は与えた時と受けた時に組み直す。
+// 敗北寸前は味方の残りHPが最大の33%未満、または死者が人数の半数以上。条件を外れた着弾で戻す。
+// ボスを倒した瞬間、またはボスのいないマップで最後の敵を倒した着弾で、カットシーンの途中から勝利曲。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -1227,8 +1235,11 @@ void Game::SyncBgm()
 		TacBgmFadeOut();
 		return;
 	}
-	static int danger = 0;
-	if (m_screen != SC_BATTLE) danger = 0;
+	if (m_screen != SC_BATTLE && !(m_screen == SC_RESULT && m_victory)) {
+		m_bgmWatch = -1;
+		m_bgmHoldWin = 0;
+		m_bgmHoldDanger = 0;
+	}
 	int scene = TAC_BGM_HUB;
 	if (m_screen == SC_BATTLE || (m_screen == SC_RESULT && m_victory)) {
 		int alive = m_b.AliveCount(TEAM_ENEMY);
@@ -1277,24 +1288,46 @@ void Game::SyncBgm()
 			if (u.alive && u.hp > 0) hp += u.hp;
 			else deadN++;
 		}
-		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
+		int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
+		if (m_phase == PH_ACTION) {
+			int anyBoss = 0, bossUp = 0, foeUp = 0, anyFoe = 0;
+			for (int i = 0; i < m_b.nUnits; i++) {
+				const Unit& u = m_b.u[i];
+				if (u.team != TEAM_ENEMY) continue;
+				anyFoe = 1;
+				if (u.boss) anyBoss = 1;
+				if (m_dispHp[i] <= 0.5f) continue;
+				foeUp = 1;
+				if (u.boss) bossUp = 1;
+			}
+			fightWon = (anyFoe && ((anyBoss && !bossUp) || (!anyBoss && !foeUp))) ? 1 : 0;
+		}
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
 			if (bossAlive) nearWin = bossLow;
 			else if (m_b.bgmWin) nearWin = 1;
 			else nearWin = (eMx > 0 && eHp * 4 <= eMx) ? 1 : 0;
 		}
-		m_b.bgmWin = nearWin;
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
-		if (fightWon || players <= 0 || m_phase == PH_OVER) danger = 0;
-		else if (m_screen == SC_BATTLE) danger = (lowHp || halfDown) ? 1 : 0;
-		const int fewLeft = m_b.bgmWin != 0;
+		int dangerNow = 0;
+		if (fightWon || players <= 0 || m_phase == PH_OVER) dangerNow = 0;
+		else if (m_screen == SC_BATTLE) dangerNow = (lowHp || halfDown) ? 1 : 0;
+		if (m_bgmWatch < 0 && m_bgmTick == 0) {
+			m_bgmWatch = 0;
+		} else if (m_bgmTick != m_bgmWatch) {
+			m_bgmWatch = m_bgmTick;
+			m_bgmHoldWin = nearWin;
+			m_bgmHoldDanger = dangerNow;
+		}
+		if (fightWon) m_bgmHoldDanger = 0;
+		m_b.bgmWin = m_bgmHoldWin;
+		const int fewLeft = m_bgmHoldWin != 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 		scene = TAC_BGM_PLAINS + th;
 		if (fewLeft) scene = TAC_BGM_WIN;
 		if (fightWon) scene = TacBgmHas(TAC_BGM_CLEAR) ? TAC_BGM_CLEAR : TAC_BGM_WIN;
-		if (danger && m_screen == SC_BATTLE && m_phase != PH_OVER && !fightWon && TacBgmHas(TAC_BGM_DANGER))
+		if (m_bgmHoldDanger && m_screen == SC_BATTLE && m_phase != PH_OVER && !fightWon && TacBgmHas(TAC_BGM_DANGER))
 			scene = TAC_BGM_DANGER;
 	} else if (m_shop) {
 		scene = TAC_BGM_SHOP;
@@ -2279,6 +2312,7 @@ void Game::NavBack()
 		return;
 	}
 	if (m_jobRedo == 2) {
+		if (m_jobForce && m_jobStep <= m_jobForceAt) { TacSfx(TS_CANCEL); return; }
 		if (m_jobStep > 0) {
 			m_jobStep--;
 			m_jobSel = m_jobPath[m_jobStep];
@@ -2290,7 +2324,10 @@ void Game::NavBack()
 		TacSfx(TS_CANCEL);
 		return;
 	}
-	if (m_jobRedo == 1) { m_jobRedo = 0; TacSfx(TS_CANCEL); return; }
+	if (m_jobRedo == 1) {
+		if (m_jobForce) { TacSfx(TS_CANCEL); return; }
+		m_jobRedo = 0; TacSfx(TS_CANCEL); return;
+	}
 	if (m_slotUi) {
 		if (m_textFocus) { m_textFocus = 0; TacSfx(TS_CANCEL); return; }
 		if (m_slotUi == 5) m_slotUi = 4;
@@ -4554,6 +4591,7 @@ void Game::EnterBase()
 		if (yc.used && yc.jobDone == 0 && yc.lv < young) { yc.jobDone = 1; ydirty = 1; }
 	}
 	if (ydirty) Persist();
+	if (BeginJobForce()) return;
 	if (NextJobPending(0) < 0) m_jobRedo = 0;
 	else if (m_jobRedo != 1) m_jobRedo = 1;
 }
@@ -5728,8 +5766,15 @@ void Game::DrawCodex()
 			int rowNopt[14];
 			int rowPick[14];
 			for (int d = 0; d < m_growN && rowsN < 14; d++) {
+				EvoOption raw[4];
+				int nr = EvoOptions(m_growPath[d], raw);
+				int n = 0;
 				EvoOption o[4];
-				int n = EvoOptions(m_growPath[d], o);
+				for (int k = 0; k < nr && n < 4; k++) {
+					if (raw[k].target < 0) continue;
+					if (m_growPath[0] >= 0 && JobLineFar(m_growPath[0], raw[k].target)) continue;
+					o[n++] = raw[k];
+				}
 				if (n <= 0) break;
 				rowNopt[rowsN] = n;
 				rowPick[rowsN] = -1;
@@ -5753,10 +5798,22 @@ void Game::DrawCodex()
 			if (need <= avail) m_growScroll = 0.f;
 			if (m_growScroll < 0.f) m_growScroll = 0.f;
 			if (need > avail && m_growScroll > need - avail) m_growScroll = need - avail;
-			const ClassDef& cd0 = ClassInfo(m_growPath[0]);
-			const wchar_t* role = cd0.magic
-				? LangPick14(L"魔法側。物理の職へは分岐しない", L"Magic side. No branch into physical jobs", L"Côté magie. Pas de branche physique", L"Lato magico. Nessun ramo fisico", L"Lado mágico. Sin rama física", L"마법 쪽. 물리 직업으로는 갈라지지 않는다", L"魔法侧。不分向物理职业", L"جانب السحر. لا فرع نحو الجسدي", L"Сторона магии. Без ветки в физические", L"Magieseite. Kein Zweig zu physisch", L"Lado mágico. Sem ramo físico", L"Magische kant. Geen tak naar fysiek", L"Strona magii. Bez gałęzi w fizyczne", L"Büyü yanı. Fiziksel işe dal yok")
-				: LangPick14(L"物理側。魔法の職へは分岐しない", L"Physical side. No branch into magic jobs", L"Côté physique. Pas de branche magique", L"Lato fisico. Nessun ramo magico", L"Lado físico. Sin rama mágica", L"물리 쪽. 마법 직업으로는 갈라지지 않는다", L"物理侧。不分向魔法职业", L"جانب الجسد. لا فرع نحو السحر", L"Сторона физики. Без ветки в магию", L"Physische Seite. Kein Zweig zur Magie", L"Lado físico. Sem ramo mágico", L"Fysieke kant. Geen tak naar magie", L"Strona fizyczna. Bez gałęzi w magię", L"Fiziksel yan. Büyü işine dal yok");
+			wchar_t role[180];
+			swprintf_s(role, LangPick14(
+				L"%sの系統。大きく違う職へは進まない",
+				L"%s line. It does not branch into a different role",
+				L"Lignée %s. Pas de branche vers un autre rôle",
+				L"Linea %s. Non si dirama in un altro ruolo",
+				L"Línea %s. No se ramifica a otro rol",
+				L"%s 계통. 크게 다른 직업으로는 가지 않는다",
+				L"%s的系统。不会转到差别很大的职业",
+				L"خط %s. لا يتفرع إلى دور مختلف",
+				L"Линия %s. Без ветки в другую роль",
+				L"Linie %s. Kein Zweig in eine andere Rolle",
+				L"Linha %s. Não ramifica para outro papel",
+				L"Lijn %s. Geen tak naar een andere rol",
+				L"Linia %s. Bez gałęzi w inną rolę",
+				L"%s soyu. Başka bir role dallanmaz"), ClassName(m_growPath[0]));
 			m_r.HudText(role, rx, ry, FitTextPx(role, rw - U(120), U(13), 0), RGBA8(180, 196, 220), 0, 0);
 			if (need > avail)
 				m_r.HudText(LangPick14(L"ホイールで上下", L"Wheel to scroll", L"Molette pour défiler", L"Rotella per scorrere", L"Rueda para desplazar", L"휠로 스크롤", L"滚轮上下", L"العجلة للتمرير", L"Колесо листает", L"Rad zum Scrollen", L"Roda para rolar", L"Wiel om te scrollen", L"Kółko przewija", L"Tekerle kaydır"),
@@ -7110,6 +7167,7 @@ void Game::AdoptActiveSlot(BOOL leaveBattle)
 		for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
 		InvalidatePortraits();
 		BuildShowcase();
+		BeginJobForce();
 	}
 	RefreshSlotPeek();
 }
@@ -7121,7 +7179,7 @@ void Game::SwitchToSlot(int to)
 	FlushCurrentSlot();
 	SlotSelect(to);
 	AdoptActiveSlot(battle);
-	m_slotUi = 1;
+	m_slotUi = m_jobForce ? 0 : 1;
 	m_slotPick = to;
 	m_textFocus = 0;
 	wchar_t sn[TAC_SLOT_NAME];
@@ -9467,8 +9525,45 @@ void Game::BeginJobRedo()
 	m_focusId = ID_JOB_OPT0;
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
 }
+bool Game::BeginJobForce()
+{
+	int cap = RosterCap();
+	int who = -1, at = -1;
+	for (int i = 0; i < cap; i++) {
+		int s = JobWrongStep(m_save.roster[i]);
+		if (s >= 0) { who = i; at = s; break; }
+	}
+	if (who < 0) { m_jobForce = 0; m_jobForceAt = 0; return false; }
+	const CharData& c = m_save.roster[who];
+	m_jobForce = 1;
+	m_jobForceAt = at;
+	m_jobWho = who;
+	m_jobStep = at;
+	m_jobN = JobStepsForLevel(c.lv);
+	if (m_jobN < at + 1) m_jobN = at + 1;
+	if (m_jobN > 12) m_jobN = 12;
+	if (m_jobStep >= m_jobN) m_jobStep = m_jobN - 1;
+	if (m_jobStep < 0) m_jobStep = 0;
+	m_jobSkipAll = 0;
+	m_jobSel = -1;
+	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+	for (int i = 0; i < m_jobStep && i < 12; i++) {
+		if (c.jobPath[i] < 0) break;
+		m_jobPath[i] = c.jobPath[i];
+	}
+	m_jobRedo = 2;
+	m_screen = SC_EVOLVE;
+	m_shop = 0;
+	m_codex = 0;
+	m_slotUi = 0;
+	m_showHelp = FALSE;
+	m_focusId = ID_JOB_OPT0;
+	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
+	return true;
+}
 void Game::FinishJobSkip()
 {
+	if (m_jobForce) return;
 	if (m_jobSkipAll) {
 		int cap = RosterCap();
 		for (int i = 0; i < cap; i++) if (m_save.roster[i].used && m_save.roster[i].jobDone == 0) m_save.roster[i].jobDone = 1;
@@ -9494,15 +9589,35 @@ void Game::ApplyJobPick(int cls)
 	if (m_jobWho < 0 || m_jobWho >= MAX_ROSTER) return;
 	CharData& c = m_save.roster[m_jobWho];
 	if (!c.used || m_jobStep < 0 || m_jobStep >= 12) return;
+	if (m_jobStep > 0 && m_jobPath[0] >= 0 && JobLineFar(m_jobPath[0], cls)) return;
 	m_jobPath[m_jobStep] = cls;
 	for (int i = m_jobStep + 1; i < 12; i++) m_jobPath[i] = -1;
 	m_jobSel = -1;
 	if (m_jobStep + 1 < m_jobN) { m_jobStep++; return; }
-	int n = m_jobStep + 1;
+	CommitJobRedo(m_jobStep + 1);
+}
+void Game::CommitJobRedo(int n)
+{
+	if (m_jobWho < 0 || m_jobWho >= MAX_ROSTER) return;
+	CharData& c = m_save.roster[m_jobWho];
+	if (!c.used) return;
+	if (n < 1) n = 1;
+	if (n > 12) n = 12;
 	JobRebook(c, m_jobPath, n);
 	JobRefitGear(c, m_save);
+	if (m_jobForce) {
+		c.trialFrom = -1;
+		c.trialLv = 0;
+		c.jobDone = 1;
+	}
 	AddBanner(c.name, ClassName(c.cls), RGBA8(255, 226, 150), 1, 2.2f, MSG_DEPTH);
 	Persist();
+	if (m_jobForce) {
+		m_jobForce = 0;
+		m_jobForceAt = 0;
+		EnterBase();
+		return;
+	}
 	int nxt = NextJobPending(m_jobWho + 1);
 	if (nxt < 0) {
 		m_jobRedo = 0;
@@ -9535,8 +9650,13 @@ void Game::DrawJobGate()
 }
 void Game::DrawJobRedo()
 {
-	if (m_jobRedo == 3 && m_jobSkipAll) { DrawJobGate(); return; }
-	if (m_jobWho < 0 || m_jobWho >= RosterCap() || !m_save.roster[m_jobWho].used || m_save.roster[m_jobWho].jobDone != 0) {
+	if (m_jobRedo == 3 && m_jobSkipAll && !m_jobForce) { DrawJobGate(); return; }
+	if (m_jobWho < 0 || m_jobWho >= RosterCap() || !m_save.roster[m_jobWho].used
+		|| (!m_jobForce && m_save.roster[m_jobWho].jobDone != 0)) {
+		if (m_jobForce) {
+			if (!BeginJobForce()) { m_jobRedo = 0; EnterBase(); }
+			return;
+		}
 		int nxt = NextJobPending(0);
 		if (nxt < 0) { m_jobRedo = 0; EnterBase(); return; }
 		m_jobWho = nxt;
@@ -9549,7 +9669,10 @@ void Game::DrawJobRedo()
 	int ord = 0, total = 0;
 	int cap = RosterCap();
 	int jobGate = PromoteLevel(1);
-	for (int i = 0; i < cap; i++) if (m_save.roster[i].used && m_save.roster[i].jobDone == 0 && m_save.roster[i].lv >= jobGate) {
+	for (int i = 0; i < cap; i++) {
+		BOOL hit = m_jobForce ? (JobWrongStep(m_save.roster[i]) >= 0)
+			: (m_save.roster[i].used && m_save.roster[i].jobDone == 0 && m_save.roster[i].lv >= jobGate);
+		if (!hit) continue;
 		total++;
 		if (i <= m_jobWho) ord++;
 	}
@@ -9558,11 +9681,14 @@ void Game::DrawJobRedo()
 	float x = ((float)m_w - w) * .5f;
 	float y = ((float)m_h - h) * .5f;
 	if (m_jobRedo == 3) {
+		if (m_jobForce) m_jobRedo = 2;
+		else {
 		Panel(x, y, w, h);
 		m_r.HudTextBox(TT(TX_JOB_SKIP_Q), x + U(28), y + h * .35f, w - U(56), U(64), U(18), RGBA8(255, 190, 170));
 		if (Btn(ID_JOB_YES, x + U(48), y + h - U(72), U(220), U(42), TT(TX_PT_YES), TRUE, FALSE, U(16), RGBA8(150, 48, 40, 240))) { FinishJobSkip(); return; }
 		if (Btn(ID_JOB_NO, x + w - U(268), y + h - U(72), U(220), U(42), TT(TX_PT_NO))) m_jobRedo = 2;
 		return;
+		}
 	}
 	x = U(16);
 	y = U(16);
@@ -9592,7 +9718,14 @@ void Game::DrawJobRedo()
 		else if (st == S_MP) col = hpUp ? RGBA8(150, 150, 158) : RGBA8(170, 210, 230);
 		m_r.HudText(bit, x + U(88) + kspan * (float)i, ky0, U(15), col, 0, 1);
 	}
-	m_r.HudTextBox(m_jobStep == 0 ? TT(TX_JOB_ASK1) : TT(TX_JOB_ASKN), x + U(20), y + U(78), w - U(40), U(40), U(16), RGBA8(255, 226, 150));
+	wchar_t ask[360];
+	if (m_jobForce) {
+		wchar_t stepAsk[180];
+		swprintf_s(stepAsk, TT(TX_JOB_FORCE_ASK), m_jobStep + 1);
+		swprintf_s(ask, L"%s\n%s", TT(TX_JOB_FORCE), stepAsk);
+	} else wcscpy_s(ask, m_jobStep == 0 ? TT(TX_JOB_ASK1) : TT(TX_JOB_ASKN));
+	float askH = m_jobForce ? U(72) : U(40);
+	m_r.HudTextBox(ask, x + U(20), y + U(78), w - U(40), askH, U(15), RGBA8(255, 226, 150));
 	wchar_t chain[320];
 	chain[0] = 0;
 	for (int i = 0; i < m_jobStep && i < 12; i++) {
@@ -9602,7 +9735,8 @@ void Game::DrawJobRedo()
 		if (i) wcscat_s(chain, L" → ");
 		wcscat_s(chain, bit);
 	}
-	if (chain[0]) m_r.HudTextBox(chain, x + U(20), y + U(122), w - U(40), U(32), U(13), RGBA8(210, 220, 230));
+	float chainY = y + U(82) + askH;
+	if (chain[0]) m_r.HudTextBox(chain, x + U(20), chainY, w - U(40), U(32), U(13), RGBA8(210, 220, 230));
 	int opt[8], no = 0;
 	if (m_jobStep <= 0) {
 		static const int base[6] = { C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC };
@@ -9610,22 +9744,19 @@ void Game::DrawJobRedo()
 	} else {
 		EvoOption raw[4];
 		int nr = EvoOptions(m_jobPath[m_jobStep - 1], raw);
-		int rootM = ClassInfo(m_jobPath[0]).magic;
-		for (int pass = 0; pass < 2 && no == 0; pass++) {
-			no = 0;
-			for (int k = 0; k < nr && no < 8; k++) {
-				int t = raw[k].target;
-				if (t < 0) continue;
-				if (pass == 0 && ClassInfo(t).magic != rootM) continue;
-				opt[no++] = t;
-			}
+		int root = m_jobPath[0];
+		for (int k = 0; k < nr && no < 8; k++) {
+			int t = raw[k].target;
+			if (t < 0) continue;
+			if (root >= 0 && JobLineFar(root, t)) continue;
+			opt[no++] = t;
 		}
 	}
 	BOOL selOk = FALSE;
 	for (int k = 0; k < no; k++) if (opt[k] == m_jobSel) selOk = TRUE;
 	if (!selOk) m_jobSel = -1;
 	float leftW = min(U(860.f), w * .62f);
-	float top = y + U(162);
+	float top = chainY + U(40);
 	float bot = y + h - U(64);
 	float avail = bot - top;
 	float rowH = no > 0 ? avail / (float)no : U(72);
@@ -9720,22 +9851,12 @@ void Game::DrawJobRedo()
 	}
 	if (no == 0 && m_jobStep > 0) {
 		if (Btn(ID_JOB_GO, x + U(16), ty, leftW - U(24), U(40), TT(TX_JOB_GO), TRUE, FALSE, U(16))) {
-			int n = m_jobStep;
-			if (n < 1) n = 1;
-			JobRebook(m_save.roster[m_jobWho], m_jobPath, n);
-			JobRefitGear(m_save.roster[m_jobWho], m_save);
-			Persist();
-			int nxt = NextJobPending(m_jobWho + 1);
-			if (nxt < 0) { m_jobRedo = 0; EnterBase(); return; }
-			m_jobWho = nxt;
-			m_jobStep = 0;
-			m_jobN = JobStepsForLevel(m_save.roster[nxt].lv);
-			m_jobSel = -1;
-			for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+			CommitJobRedo(m_jobStep);
 			return;
 		}
 	}
-	if (Btn(ID_JOB_BACK, x + U(16), y + h - U(52), U(150), U(36), TT(TX_CR_BACK))) {
+	BOOL canBack = !(m_jobForce && m_jobStep <= m_jobForceAt);
+	if (canBack && Btn(ID_JOB_BACK, x + U(16), y + h - U(52), U(150), U(36), TT(TX_CR_BACK))) {
 		if (m_jobStep > 0) {
 			m_jobStep--;
 			m_jobSel = m_jobPath[m_jobStep];
@@ -9747,7 +9868,7 @@ void Game::DrawJobRedo()
 		ApplyJobPick(m_jobSel);
 		return;
 	}
-	if (Btn(ID_JOB_SKIP, x + w - U(180), y + h - U(52), U(160), U(36), TT(TX_JOB_SKIP))) { m_jobSkipAll = 0; m_jobRedo = 3; }
+	if (!m_jobForce && Btn(ID_JOB_SKIP, x + w - U(180), y + h - U(52), U(160), U(36), TT(TX_JOB_SKIP))) { m_jobSkipAll = 0; m_jobRedo = 3; }
 }
 
 void Game::DrawEvolveUi()

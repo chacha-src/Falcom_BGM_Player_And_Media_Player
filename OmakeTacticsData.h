@@ -592,6 +592,9 @@ void CharGiveSkill(CharData& c, int s);
 // 進化
 struct EvoOption { int target; int needGroup; };   // needGroup=-1 で不問
 int EvoOptions(int cls, EvoOption out[4]);
+int JobLineOf(int cls);                            // 0剣 1拳 2弓 3盗 4魔 5聖。不明は -1
+bool JobLineFar(int root, int cls);                // 起点の系統から大きく外れている
+int JobWrongStep(const CharData& c);               // 振り直しを始める段。0始まり。無しは -1
 bool EvoMainEligible(const CharData& c);
 bool EvoTrialOpen(const CharData& c);             // 転職後 +3 レベルのお試し
 void EvoRetrain(CharData& c, int target);         // お試し中の選び直し。上乗せは重ねない
@@ -662,7 +665,7 @@ struct Unit {
 	CharData ch;         // 戦闘中の能力（敵も同形式）
 	int hp, mp;
 	int x, z;
-	int span;            // 1..3。原点 (x,z) から span×span。味方は 1
+	int span;            // 1..5。原点 (x,z) から span×span。味方は 1
 	int ct;
 	float face;          // 向き（ラジアン）
 	int buffDef, buffAgi, buffAtk, poison, slow, defDown;   // 残りターン。毒・鈍足・防御低下は1〜3
@@ -695,7 +698,7 @@ inline int UnitSpan(const Unit& u)
 {
 	int s = u.span;
 	if (s < 1) s = 1;
-	if (s > 3) s = 3;
+	if (s > 5) s = 5;
 	return s;
 }
 inline int UnitIsLucky(const Unit& u)
@@ -840,6 +843,7 @@ void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int&
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
+int  ExpForHeal(const Unit& a, const Unit& d, int healed, int stage);
 long long ExpShareAoe(long long e, int nHit);
 int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
 
@@ -1268,7 +1272,7 @@ bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
 enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 10, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 798, CP_MAX = 200, CRAFT_SLOT_N = 4 };
-enum { SUMMON_BASE = 250000, SUMMON_N = 36 };
+enum { SUMMON_BASE = 250000, SUMMON_N = 76 };
 enum { SUM_FX_FIRE = 0, SUM_FX_ICE, SUM_FX_BOLT, SUM_FX_SPIKE, SUM_FX_WIND, SUM_FX_WAVE, SUM_FX_HOLY, SUM_FX_DARK, SUM_FX_MIASMA, SUM_FX_ROAR, SUM_FX_SLEEP, SUM_FX_WEB };
 inline bool IsSummonId(int skill) { return skill >= SUMMON_BASE && skill < SUMMON_BASE + SUMMON_N; }
 bool IsCraftId(int skill);
@@ -1340,6 +1344,8 @@ const wchar_t* SummonName(int id);
 const wchar_t* SummonDesc(int id);
 int SummonPrice(int index);
 int SummonFx(int index);
+int SummonRank(int index);
+const wchar_t* SummonRankWord(int rank);
 int SummonMesh(int index);
 int SummonHpCost(const Unit& u, int skill);
 int SummonCpCost(const Unit& u, int skill);

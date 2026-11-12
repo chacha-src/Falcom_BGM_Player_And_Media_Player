@@ -3,6 +3,9 @@
 // ホスト起動時は lang=0。本体が最初の PING で savedata.lang を上書きする。
 save savedata = {};
 
+/* 譜面コンボは本体だけ。ホストは未接続扱いで通常の GS/XG 選択に落とす。 */
+extern "C" int ScStaffScorePreviewOut(void) { return 0; }
+
 const wchar_t* LangPick14(
 	const wchar_t* s0, const wchar_t* s1, const wchar_t* s2, const wchar_t* s3,
 	const wchar_t* s4, const wchar_t* s5, const wchar_t* s6, const wchar_t* s7,

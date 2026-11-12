@@ -1007,6 +1007,8 @@ void Game::ResumeBattle(int kind)
 	m_hailBurstT = 0; m_hailAcc = 0;
 	m_wxFlash = 0;
 	m_seqCut = FALSE; m_cutStage = 0; m_victory = 0; m_hoverUnit = -1;
+	m_bgmTick = 1;
+	m_bgmWatch = -1;
 	m_lvqN = m_lvqCur = 0; m_promoAsk = 0; m_menuConfirm = 0; m_proj.active = 0;
 	m_screen = SC_BATTLE;
 	m_phase = (Phase)s->phase;
@@ -1197,6 +1199,10 @@ void Game::StartBattle(int stage)
 	m_cutStage = 0;
 	m_bossDown = 0;
 	m_victory = 0;
+	m_bgmTick = 0;
+	m_bgmWatch = -1;
+	m_bgmHoldWin = 0;
+	m_bgmHoldDanger = 0;
 	m_cur = -1;
 	m_curDeck0 = 0;
 	m_cLayer = 0;
@@ -1392,6 +1398,7 @@ void Game::BeginTurn()
 		Burst(v3(u.px, u.py + .3f, u.pz), 8, .6f, .08f, .7f, .75f, .05f, .05f, 0, 0, 1.2f, 0, .2f);
 	}
 	if (showHeal > 0) { swprintf_s(s, L"+%s", TacNum(showHeal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE, dotSum > 0 ? .2f : 0.f); TacSfx(TS_HEAL); }
+	if (dotSum > 0 || heal > 0) m_bgmTick++;
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
 		u.hp = 0; u.alive = 0; u.killed = 1;
@@ -1714,6 +1721,7 @@ void Game::ConfuseSelf(int ui)
 	Unit& u = m_b.u[ui];
 	int dmg = max(1, (UnitStat(u, S_STR) + UnitWeaponPow(u)) / 4);
 	u.hp -= dmg;
+	m_bgmTick++;
 	u.sleep = 0;
 	wchar_t s[32];
 	swprintf_s(s, L"-%s", TacNum(dmg));
@@ -1744,6 +1752,7 @@ void Game::FinishUnitTurn(int acted)
 		Unit& u = m_b.u[ui];
 		int lava = LavaHurt(m_b, ui);
 		if (lava > 0) {
+			m_bgmTick++;
 			V3 hp = v3(u.px, u.py + m_act[ui].height + .2f, u.pz);
 			wchar_t s[48];
 			swprintf_s(s, L"-%s %s", TacNum(lava), TT(TX_TER_LAVA));
@@ -2338,6 +2347,58 @@ void Game::BuildOverlayQuads()
 		take(bandV[1], a1.n);
 		take(bandV[2], a2.n);
 		{
+			// 青や攻撃範囲の下に沈む宝箱・ワープは、その床の上へ枠と芯を重ねる。
+			BOOL showMove = (m_phase == PH_P_MOVE || m_phase == PH_E_SHOW || m_phase == PH_E_MOVE);
+			auto stamp = [&](int x, int z, float u0, float v0, float u1, float v1, DWORD col, float y) {
+				if (m_ovQuads.size() + 4 > 65536) return;
+				int at = (int)m_ovQuads.size();
+				m_ovQuads.resize(at + 4);
+				float px[4] = { (float)x + u0, (float)x + u0, (float)x + u1, (float)x + u1 };
+				float pz[4] = { (float)z + v0, (float)z + v1, (float)z + v1, (float)z + v0 };
+				float uvx[4] = { u0, u0, u1, u1 };
+				float uvy[4] = { v0, v1, v1, v0 };
+				for (int k = 0; k < 4; k++) {
+					VtxS& vt = m_ovQuads[at + k];
+					vt.p[0] = px[k]; vt.p[1] = y; vt.p[2] = pz[k];
+					vt.n[0] = 0; vt.n[1] = 1; vt.n[2] = 0;
+					vt.uv[0] = uvx[k]; vt.uv[1] = uvy[k];
+					vt.c = col;
+				}
+			};
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				const Cell& cc = m.At(x, z);
+				if (!cc.gimm) continue;
+				float bestY = -1e9f;
+				int covered = 0;
+				int nL = CellLayN(cc);
+				for (int L = 0; L < nL; L++) {
+					int move = showMove && ReachCostAt(m_reach, L, x, z) >= 0;
+					unsigned long long bits = m_ovAtkLay[z][x];
+					int atk = m_ovAtk[z][x] && (!bits || (bits & TacLayBit(L))) && LayerOn(cc, L);
+					if (!move && !atk) continue;
+					covered = 1;
+					float wy = m.WalkY(x, z, L);
+					if (wy > bestY) bestY = wy;
+				}
+				if (!covered) continue;
+				DWORD c = RGBA8(120, 255, 160, 255);
+				if (cc.gimm == GM_MIGHT) c = RGBA8(255, 210, 80, 255);
+				if (cc.gimm == GM_WARP) c = kWarp[cc.gparam & 7] | 0xFF000000;
+				if (cc.gimm == GM_CHEST) c = RGBA8(255, 196, 64, 255);
+				if (cc.gimm == GM_LEVER) c = RGBA8(80, 230, 210, 255);
+				if (cc.gimm == GM_FENCE) c = RGBA8(210, 168, 84, 255);
+				if (cc.gimm == GM_DROP) c = RGBA8(255, 150, 48, 255);
+				if (cc.gimm == GM_HEAL) c = RGBA8(130, 255, 170, 255);
+				float y = bestY + 0.26f;
+				const float mgn = 0.12f, th = 0.07f;
+				stamp(x, z, mgn, mgn, 1.f - mgn, mgn + th, c, y);
+				stamp(x, z, mgn, 1.f - mgn - th, 1.f - mgn, 1.f - mgn, c, y);
+				stamp(x, z, mgn, mgn, mgn + th, 1.f - mgn, c, y);
+				stamp(x, z, 1.f - mgn - th, mgn, 1.f - mgn, 1.f - mgn, c, y);
+				stamp(x, z, 0.36f, 0.36f, 0.64f, 0.64f, c, y + 0.012f);
+			}
+		}
+		{
 			int wxc = TacWx(m_b.weather);
 			if (wxc != WX_CLEAR && wxc != WX_FOG && wxc != WX_HEAT) {
 				int cx = (int)m_camTarget.x, cz = (int)m_camTarget.z;
@@ -2489,20 +2550,29 @@ static int MoveFieldNear(const Reach& r, int x, int z, int margin)
 	return 0;
 }
 
-// 移動範囲（青マス）とその周囲 margin マスは、到達できる層／いまの階に留める。上の床に吸い付かない。
+// 青マスが一つの層だけなら、いまの階を優先する。別の層にも青マスがあるときは、そのうち高い床へ載せる。
 static int MoveRangeLayer(const Reach& r, const Map& m, int x, int z, int unitL, float unitY)
 {
 	if (!Map::In(x, z)) return -1;
 	const Cell& c = m.At(x, z);
 	int n = CellLayN(c), best = -1, bestSc = -1;
+	int nBlue = 0, upper = -1;
+	float upperY = -1e9f;
 	for (int L = 0; L < n; L++) {
 		if (ReachCostAt(r, L, x, z) < 0) continue;
+		nBlue++;
+		float y = m.WalkY(x, z, L);
+		if (upper < 0 || y > upperY + 0.02f || (fabsf(y - upperY) <= 0.02f && L > upper)) {
+			upperY = y;
+			upper = L;
+		}
 		int sc = 4;
 		if (ReachCanStopLayer(r, x, z, L)) sc += 4;
 		if (L == unitL) sc += 4;
-		if (unitY > -1e8f && fabsf(m.WalkY(x, z, L) - unitY) <= 0.55f) sc += 4;
+		if (unitY > -1e8f && fabsf(y - unitY) <= 0.55f) sc += 4;
 		if (sc > bestSc) { bestSc = sc; best = L; }
 	}
+	if (nBlue >= 2 && upper >= 0) return upper;
 	if (best >= 0) return best;
 	if (!MoveFieldNear(r, x, z, kMoveLayerMargin)) return -1;
 	for (int L = 0; L < n; L++) {
@@ -2514,6 +2584,100 @@ static int MoveRangeLayer(const Reach& r, const Map& m, int x, int z, int unitL,
 		if (sc > bestSc) { bestSc = sc; best = L; }
 	}
 	return (bestSc >= 4) ? best : -1;
+}
+
+// 青マスのうち、指定の高さに一番近い層。
+static int BlueLayerNearY(const Reach& r, const Map& m, int x, int z, float wantY, float band, int& outL, float& outDy)
+{
+	if (!Map::In(x, z)) return 0;
+	const Cell& c = m.At(x, z);
+	int n = CellLayN(c);
+	int best = -1;
+	float bestDy = band, bestY = -1e9f;
+	for (int L = 0; L < n; L++) {
+		if (ReachCostAt(r, L, x, z) < 0) continue;
+		float y = m.WalkY(x, z, L);
+		float dy = fabsf(y - wantY);
+		if (dy > band) continue;
+		if (best < 0 || dy < bestDy - 0.02f || (fabsf(dy - bestDy) <= 0.02f && y > bestY)) {
+			best = L;
+			bestDy = dy;
+			bestY = y;
+		}
+	}
+	if (best < 0) return 0;
+	outL = best;
+	outDy = bestDy;
+	return 1;
+}
+
+// 下の床に当たった視線を、上の青マスの高さで引き直す。層だけ替えると、斜めから見たマスがずれる。
+static int RepickUpperBlue(const Reach& r, const Map& m, const V3& org, const V3& dir, int& bx, int& bz, int& bl)
+{
+	if (!Map::In(bx, bz) || fabsf(dir.y) < 1e-4f) return 0;
+	for (int guard = 0; guard < 3; guard++) {
+		if (!Map::In(bx, bz)) return guard > 0 ? 1 : 0;
+		const Cell& c = m.At(bx, bz);
+		int n = CellLayN(c);
+		int nBlue = 0, top = -1;
+		float topY = -1e9f;
+		for (int L = 0; L < n; L++) {
+			if (ReachCostAt(r, L, bx, bz) < 0) continue;
+			nBlue++;
+			float y = m.WalkY(bx, bz, L);
+			if (top < 0 || y > topY + 0.02f || (fabsf(y - topY) <= 0.02f && L > top)) {
+				topY = y;
+				top = L;
+			}
+		}
+		if (nBlue < 2 || top < 0) return guard > 0 ? 1 : 0;
+		float hitY = m.WalkY(bx, bz, bl);
+		// 下の床に当たっているときは上へ持ち上げない。上の青マス範囲の外は下レイヤーのまま。
+		if (fabsf(hitY - topY) > 0.20f) return guard > 0 ? 1 : 0;
+		float tPlane = (topY - org.y) / dir.y;
+		if (!(tPlane > 0.05f && tPlane < 280.f)) { bl = top; return 1; }
+		V3 p = org + dir * tPlane;
+		int ix = (int)floorf(p.x), iz = (int)floorf(p.z);
+		int shift = abs(ix - bx) + abs(iz - bz);
+		int lift = fabsf(hitY - topY) > 0.20f;
+		if (shift < 2 && !(lift && shift >= 1)) { bl = top; return 1; }
+		int hx = -1, hz = -1, hL = -1;
+		int cand = -1;
+		float dy = 0.f;
+		if (BlueLayerNearY(r, m, ix, iz, topY, 1.35f, cand, dy)) {
+			hx = ix; hz = iz; hL = cand;
+		} else {
+			float bestD = 1e9f;
+			for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+				if (!dx && !dz) continue;
+				int sx = ix + dx, sz = iz + dz;
+				cand = -1;
+				if (!BlueLayerNearY(r, m, sx, sz, topY, 1.35f, cand, dy)) continue;
+				float ddx = (sx + 0.5f) - p.x, ddz = (sz + 0.5f) - p.z;
+				float d = ddx * ddx + ddz * ddz;
+				if (hx < 0 || d < bestD) { hx = sx; hz = sz; hL = cand; bestD = d; }
+			}
+		}
+		if (hx < 0) { bl = top; return 1; }
+		bx = hx; bz = hz; bl = hL;
+		int top2 = -1, nBlue2 = 0;
+		float top2Y = -1e9f;
+		const Cell& c2 = m.At(bx, bz);
+		int n2 = CellLayN(c2);
+		for (int L = 0; L < n2; L++) {
+			if (ReachCostAt(r, L, bx, bz) < 0) continue;
+			nBlue2++;
+			float y = m.WalkY(bx, bz, L);
+			if (top2 < 0 || y > top2Y + 0.02f || (fabsf(y - top2Y) <= 0.02f && L > top2)) {
+				top2Y = y;
+				top2 = L;
+			}
+		}
+		if (top2 < 0) return 1;
+		if (nBlue2 < 2 || top2Y <= topY + 1.35f) { bl = top2; return 1; }
+		bl = top2;
+	}
+	return 1;
 }
 
 BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
@@ -2539,6 +2703,8 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 	BOOL moving = (m_phase == PH_P_MOVE);
 	int bestSc = -1;
 	int bestReach = 0;
+	float nearT = 1e9f;
+	int nx = -1, nz = -1, nL = -1;
 	for (float t = t0; t < t1; t += dt) {
 		V3 p = org + dir * t;
 		if (p.y < -4.f && dir.y <= 0.f) break;
@@ -2555,6 +2721,13 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 			float y = m.WalkY(ix, iz, L);
 			float y0 = (L == 0) ? y - 0.16f : y - 0.72f;
 			float th = 0;
+			if (moving && ReachCostAt(m_reach, L, ix, iz) >= 0) {
+				float thTop = 0;
+				// 床の面だけを見る。下側の厚い判定だと、横から下の青マスを狙っても上の床に吸われる。
+				if (RaySlab(org, dir, (float)ix, y - 0.10f, (float)iz, (float)ix + 1.f, y + 0.06f, (float)iz + 1.f, thTop) && thTop < nearT) {
+					nearT = thTop; nx = ix; nz = iz; nL = L;
+				}
+			}
 			if (!RaySlab(org, dir, (float)ix, y0, (float)iz, (float)ix + 1.f, y + 0.04f, (float)iz + 1.f, th)) continue;
 			int sc = 0;
 			int reach = 0;
@@ -2579,10 +2752,18 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 			bestSc = sc; bestT = th; bestY = y; bx = ix; bz = iz; bl = L; bestReach = reach;
 		}
 	}
+	if (outLayer && moving && nx >= 0) {
+		bx = nx; bz = nz; bl = nL;
+	}
 	if (bx < 0) return FALSE;
 	if (outLayer && moving) {
-		int ml = MoveRangeLayer(m_reach, m, bx, bz, unitL, unitY);
-		if (ml >= 0) bl = ml;
+		int onBlue = ReachCostAt(m_reach, bl, bx, bz) >= 0;
+		if (onBlue)
+			RepickUpperBlue(m_reach, m, org, dir, bx, bz, bl);
+		else if (!RepickUpperBlue(m_reach, m, org, dir, bx, bz, bl)) {
+			int ml = MoveRangeLayer(m_reach, m, bx, bz, unitL, unitY);
+			if (ml >= 0) bl = ml;
+		}
 	}
 	cx = bx; cz = bz;
 	if (outLayer) *outLayer = bl;
@@ -2624,6 +2805,7 @@ void Game::SyncCursorLayer()
 	const Cell& c = m_b.map.At(m_cx, m_cz);
 	if (m_cLayer < 0 || m_cLayer >= LAY_N) m_cLayer = 0;
 	if (m_phase == PH_P_MOVE && !m_layerLock) {
+		if (ReachCostAt(m_reach, m_cLayer, m_cx, m_cz) >= 0) return;
 		int unitL = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].deck : m_cLayer;
 		float unitY = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].py : 0.f;
 		int ml = MoveRangeLayer(m_reach, m_b.map, m_cx, m_cz, unitL, unitY);
@@ -2696,7 +2878,8 @@ void Game::UpdateHover()
 			if (m_cursorValid && moved
 				&& (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET))
 				TacSfx(TS_CURSOR);
-			if (moved && prevH >= 0 && abs(cx - prevX) + abs(cz - prevZ) <= 2) {
+			BOOL layBlue = (m_phase == PH_P_MOVE && ReachCostAt(m_reach, lay, cx, cz) >= 0);
+			if (!layBlue && moved && prevH >= 0 && abs(cx - prevX) + abs(cz - prevZ) <= 2) {
 				int unitL = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].deck : m_cLayer;
 				float unitY = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].py : 0.f;
 				int ml = (m_phase == PH_P_MOVE) ? MoveRangeLayer(m_reach, m_b.map, cx, cz, unitL, unitY) : -1;
@@ -2715,7 +2898,7 @@ void Game::UpdateHover()
 			}
 			m_cx = cx; m_cz = cz; m_cursorValid = TRUE;
 			if (moved) m_layerLock = 0;
-			if (!m_layerLock && moved) m_cLayer = lay;
+			if (!m_layerLock && (moved || lay != m_cLayer)) m_cLayer = lay;
 		}
 	}
 	SyncCursorLayer();
@@ -3174,10 +3357,10 @@ void Game::BattleClick(int x, int y)
 	{
 		int unitL = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].deck : lay;
 		float unitY = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].py : m_b.map.WalkY(cx, cz, lay);
-		int ml = (m_phase == PH_P_MOVE) ? MoveRangeLayer(m_reach, m_b.map, cx, cz, unitL, unitY) : -1;
+		int ml = (m_phase == PH_P_MOVE && ReachCostAt(m_reach, lay, cx, cz) < 0) ? MoveRangeLayer(m_reach, m_b.map, cx, cz, unitL, unitY) : -1;
 		if (ml >= 0)
 			lay = ml;
-		else {
+		else if (m_phase != PH_P_MOVE || ReachCostAt(m_reach, lay, cx, cz) < 0) {
 			float pickY = m_b.map.WalkY(cx, cz, lay);
 			BOOL home = (m_cur >= 0 && (lay == m_b.u[m_cur].deck || fabsf(pickY - unitY) <= 0.55f));
 			if (!home && prevH >= 0 && !ReachCanStopLayer(m_reach, cx, cz, lay) && m_b.UnitAt(cx, cz, lay) < 0 && CellLayN(pickedC) >= 2)
@@ -3793,7 +3976,12 @@ float Game::CutIntroLen() const
 {
 	if (m_cutKind == 1) return IsCraftSuper(m_seqSkill) ? 2.35f : 1.55f;
 	if (m_cutKind == 2) return 1.75f;
-	if (m_cutKind == 3) return 2.45f;
+	if (m_cutKind == 3) {
+		int rank = SummonCutRank();
+		if (rank >= 2) return 3.25f;
+		if (rank >= 1) return 2.85f;
+		return 2.45f;
+	}
 	if (m_ult) return 2.15f;
 	switch (m_cutPat) {
 	case 1: return 1.35f;
@@ -4007,6 +4195,7 @@ BOOL Game::UnitInArena(int ui) const
 void Game::SeqImpact(const SeqStep& st, int volley)
 {
 	BOOL cutView = m_seqCut && m_cutStage >= 1 && m_cutStage <= 3;
+	int music = 0;
 	const SkillDef* sd = st.skill >= 0 ? &SkillInfo(st.skill) : NULL;
 	int el = sd ? sd->element : EL_NONE;
 	int kind = sd ? sd->kind : SK_PHYS;
@@ -4044,6 +4233,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			}
 		};
 		if (kind == SK_HEAL) {
+			music = 1;
 			m_dispHp[d] = min((float)du.ch.stat[S_HP], m_dispHp[d] - h.dmg);
 			swprintf_s(s, L"+%s", TacNum(-h.dmg));
 			pop(s, RGBA8(120, 255, 150), 0, MSG_RISE, 0);
@@ -4092,6 +4282,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			if (sfxOnce(4)) TacSfxMiss(kind, UnitMotionStyle(m_b.u[h.attacker], st.skill));
 			continue;
 		}
+		music = 1;
 		m_dispHp[d] = max(0.f, m_dispHp[d] - h.dmg);
 		if (h.guts) m_dispHp[d] = max(1.f, m_dispHp[d]);
 		if (h.drain > 0) {
@@ -4184,6 +4375,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			}
 		}
 	}
+	if (music) m_bgmTick++;
 }
 
 // 弓を装備していれば弦を引く。既定の弩は両手で構えて撃つ。
@@ -4288,6 +4480,21 @@ void Game::UpdateSeq(float dt)
 					const SkillDef& sd = SkillInfo(m_seqSkill);
 					Burst(m_cutPosA + v3(0, .1f, 0), 30, 2.f, .14f, 1.2f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 2, 1, -2.5f, 0, 1.5f);
 					Burst(m_cutPosA + v3(0, .05f, 0), 2, 0, .8f, 1.f, 1.f, 1.f, 1.f, 1, 1, 0, 0, 0, 1.6f);
+					if (m_cutKind == 3 && IsSummonId(m_seqSkill)) {
+						int rk = SummonRank(m_seqSkill - SUMMON_BASE);
+						if (rk >= 1) {
+							DWORD col = ElemColor(sd.element);
+							float cr = (col & 255) / 255.f;
+							float cg = ((col >> 8) & 255) / 255.f;
+							float cb = ((col >> 16) & 255) / 255.f;
+							int n = rk >= 2 ? 36 : 18;
+							Burst(m_cutPosA + v3(0, rk >= 2 ? 2.8f : 1.2f, 0), n, rk >= 2 ? 3.4f : 2.2f, rk >= 2 ? 0.2f : 0.12f, 1.3f, cr, cg, cb, 2, 1, rk >= 2 ? -1.8f : -0.8f, 0.2f, 1.8f);
+							if (rk >= 2) {
+								Burst(m_cutPosA + v3(0, 0.08f, 0), 16, 1.2f, 0.55f, 1.f, 1.f, 0.92f, 0.65f, 1, 1, 0.1f, 0.f, 0.4f);
+								m_flashWhite = max(m_flashWhite, 0.45f);
+							} else m_flashWhite = max(m_flashWhite, 0.16f);
+						}
+					}
 				}
 				{
 					// 技名の間は詠唱か技の閃きだけ。振りの音は攻防で振り下ろすときに鳴らす。
@@ -4777,11 +4984,7 @@ void Game::AwardExp()
 		long long e;
 		if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_HEAL) {
 			int healed = -s.dmg;
-			if (healed > 0) {
-				e = ExpForAction(a, d, healed, m_battleStage);
-				e = e * 3 / 2;
-				if (e < 21) e = 21;
-			} else e = 12;
+			e = ExpForHeal(a, d, healed, m_battleStage);
 		} else if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_BUFF) e = 16 + m_battleStage / 2;
 		else if (!s.hit) e = 1;
 		else {
@@ -5736,6 +5939,8 @@ static const unsigned char kSumAt[SUMMON_N] = {
 	0, 2, 3, 1, 6, 9, 1, 0, 8, 9, 4, 3,
 	5, 9, 6, 2, 5, 6, 7, 0, 8, 4, 2, 7,
 	3, 9, 6, 0, 5, 6, 5, 1, 0, 6, 2, 3,
+	0, 2, 4, 6, 8, 1, 3, 5, 7, 9, 2, 4, 6, 8, 0, 3, 5, 7, 9, 1,
+	4, 6, 8, 0, 2, 5, 7, 9, 1, 3, 6, 8, 0, 2, 4, 7, 9, 1, 3, 5,
 };
 static_assert(sizeof(kSumAt) / sizeof(kSumAt[0]) == SUMMON_N, "summon attack");
 
@@ -5799,8 +6004,26 @@ static void SummonClip(Actor& a, int clip, int loop, float speed)
 		ActorPlay(a, clip, loop, .08f);
 	a.animSpeed = speed;
 }
-static float SumStrikeSpan() { return 1.35f; }
-static float SumDepartSpan() { return 2.20f; }
+int Game::SummonCutRank() const
+{
+	if (IsSummonId(m_seqSkill)) return SummonRank(m_seqSkill - SUMMON_BASE);
+	if (m_sumOn) return m_sumRank;
+	return 0;
+}
+float Game::SummonStrikeSpan() const
+{
+	int rank = SummonCutRank();
+	if (rank >= 2) return 1.85f;
+	if (rank >= 1) return 1.55f;
+	return 1.35f;
+}
+float Game::SummonDepartSpan() const
+{
+	int rank = SummonCutRank();
+	if (rank >= 2) return 2.55f;
+	if (rank >= 1) return 2.35f;
+	return 2.20f;
+}
 
 static void SumPose(int th, int at, int index, int phase, float u,
 	const V3& from, const V3& to, V3& pos, float& yaw, float& dissolve, int& hidden)
@@ -5891,7 +6114,9 @@ static void SumPose(int th, int at, int index, int phase, float u,
 void Game::BindSummonCut()
 {
 	m_sumOn = 0;
+	m_sumRank = 0;
 	if (!IsSummonId(m_seqSkill)) return;
+	m_sumRank = SummonRank(m_seqSkill - SUMMON_BASE);
 	int index = m_seqSkill - SUMMON_BASE;
 	memset(&m_sumAct, 0, sizeof(m_sumAct));
 	m_sumAct.model = -1;
@@ -5917,17 +6142,24 @@ void Game::BindSummonCut()
 		float cx = 0, cy = 0, cz = 0, rad = 0;
 		float fit = 1.f;
 		if (m_r.CreatureExtent(mi, cx, cy, cz, rad) && rad > 0.05f) fit = 1.35f / rad;
+		if (m_sumRank >= 2) fit *= 1.42f;
+		else if (m_sumRank >= 1) fit *= 1.18f;
+		float fitHi = m_sumRank >= 2 ? 3.1f : m_sumRank >= 1 ? 2.6f : 2.2f;
 		if (fit < 0.45f) fit = 0.45f;
-		if (fit > 2.2f) fit = 2.2f;
+		if (fit > fitHi) fit = fitHi;
 		m_sumAct.scale = fit;
 		m_sumAct.height = max(0.8f, (cy > 0.05f ? cy : 1.2f) * fit);
+		if (m_sumRank >= 2) m_sumAct.tint = RGBA8(255, 244, 214);
+		else if (m_sumRank >= 1) m_sumAct.tint = RGBA8(255, 250, 236);
 	} else {
 		m_sumAct.proc = 1;
 		m_sumAct.look = LK_GOLEM;
 		m_sumAct.model = m_lib.procModel[LK_GOLEM];
 		m_sumAct.rig = -1;
-		m_sumAct.scale = 1.15f;
-		m_sumAct.height = 1.75f * 1.15f;
+		m_sumAct.scale = m_sumRank >= 2 ? 1.55f : m_sumRank >= 1 ? 1.32f : 1.15f;
+		m_sumAct.height = 1.75f * m_sumAct.scale;
+		if (m_sumRank >= 2) m_sumAct.tint = RGBA8(255, 244, 214);
+		else if (m_sumRank >= 1) m_sumAct.tint = RGBA8(255, 250, 236);
 		if (m_sumAct.model >= 0 && m_sumAct.model < (int)m_r.models.size()) m_sumAct.mods.Reset(m_r.models[m_sumAct.model].nJ);
 	}
 	V3 foe = m_cutFoeN > 0 ? m_cutFoePos[0] : v3(1.4f, 0, 0);
@@ -5958,12 +6190,12 @@ void Game::BindSummonCut()
 
 float Game::SummonStrikeNeed() const
 {
-	return SumStrikeSpan() + SumDepartSpan();
+	return SummonStrikeSpan() + SummonDepartSpan();
 }
 
 float Game::SummonDepartNeed() const
 {
-	return SumDepartSpan();
+	return SummonDepartSpan();
 }
 
 void Game::SummonApply(int phase, float u)
@@ -5995,7 +6227,7 @@ void Game::SummonArrive(float dt)
 void Game::SummonStrike(float dt)
 {
 	(void)dt;
-	float u = m_cutStageT / SumStrikeSpan();
+	float u = m_cutStageT / SummonStrikeSpan();
 	int at = SumAtOf(m_seqSkill);
 	if (!m_sumHit) {
 		SummonApply(1, u > 1.f ? 1.f : u);
@@ -6008,7 +6240,12 @@ void Game::SummonStrike(float dt)
 		if (u >= 1.f) {
 			m_sumHit = 1;
 			SummonImpactFx();
-			Shake(at == 2 || at == 3 || at == 5 ? 1.05f : .8f);
+			{
+				float sh = (at == 2 || at == 3 || at == 5) ? 1.05f : .8f;
+				if (m_sumRank >= 2) sh = 1.45f;
+				else if (m_sumRank >= 1) sh = max(sh, 1.15f);
+				Shake(sh);
+			}
 			TacSfxSummon(2, m_sumFx);
 			SummonLeave(dt);
 		}
@@ -6021,17 +6258,73 @@ void Game::SummonLeave(float dt)
 {
 	(void)dt;
 	float t = m_cutStageT;
-	if (m_cutStage < 3) t -= SumStrikeSpan();
+	if (m_cutStage < 3) t -= SummonStrikeSpan();
 	if (t < 0.f) t = 0.f;
-	float u = t / SumDepartSpan();
+	float u = t / SummonDepartSpan();
 	if (u > 1.f) u = 1.f;
 	SummonApply(2, u);
 	SummonClip(m_sumAct, CL_IDLE, 1, 0.85f);
 	SummonMedium(2, u);
 }
 
+static void SumFxRgb(int fx, float& r, float& g, float& b)
+{
+	r = 0.9f; g = 0.85f; b = 1.f;
+	switch (fx) {
+	case SUM_FX_FIRE: r = 1.f; g = 0.35f; b = 0.08f; break;
+	case SUM_FX_ICE: r = 0.7f; g = 0.9f; b = 1.f; break;
+	case SUM_FX_BOLT: r = 0.75f; g = 0.85f; b = 1.f; break;
+	case SUM_FX_SPIKE: r = 0.55f; g = 0.42f; b = 0.28f; break;
+	case SUM_FX_WIND: r = 0.7f; g = 0.95f; b = 0.8f; break;
+	case SUM_FX_WAVE: r = 0.25f; g = 0.55f; b = 1.f; break;
+	case SUM_FX_HOLY: r = 1.f; g = 0.92f; b = 0.55f; break;
+	case SUM_FX_DARK: r = 0.45f; g = 0.15f; b = 0.7f; break;
+	case SUM_FX_MIASMA: r = 0.45f; g = 0.85f; b = 0.25f; break;
+	default: break;
+	}
+}
+
+void Game::SummonTierFx(int phase, float u)
+{
+	if (m_sumRank < 1) return;
+	int supreme = m_sumRank >= 2;
+	float cr, cg, cb;
+	SumFxRgb(m_sumFx, cr, cg, cb);
+	V3 c = (phase <= 0) ? m_sumFrom : m_sumPos;
+	float h = m_sumAct.height;
+	if (h < 0.6f) h = 1.2f;
+	float spin = m_time * (supreme ? 3.1f : 1.8f);
+	int rings = supreme ? 2 : 1;
+	for (int ring = 0; ring < rings; ring++) {
+		float rad = (supreme ? 1.15f : 0.78f) + ring * 0.72f;
+		float ang = spin * (ring ? -0.65f : 1.f) + ring * 0.7f;
+		float y = h * (0.35f + ring * 0.22f) + sinf(m_time * 4.f + ring) * 0.12f;
+		Burst(c + v3(cosf(ang) * rad, y, sinf(ang) * rad), supreme ? 2 : 1, 0.35f, supreme ? 0.11f : 0.07f, 0.45f, cr, cg, cb, 2, 1, 0.15f, 0.05f, 0.2f);
+		ang += 3.14159265f;
+		Burst(c + v3(cosf(ang) * rad, h * 0.42f, sinf(ang) * rad), 1, 0.3f, 0.06f, 0.4f, cr, cg, cb, 2, 1, 0.1f, 0.02f, 0.15f);
+	}
+	float gAng = -spin * 0.5f;
+	float gr = supreme ? 1.7f : 1.05f;
+	Burst(c + v3(cosf(gAng) * gr, 0.05f, sinf(gAng) * gr), 1, 0.2f, supreme ? 0.14f : 0.09f, 0.35f, cr, cg, cb, 3, 0, 0.4f, 0.02f, 0.1f);
+	if (supreme) {
+		Burst(c + v3(0, h * 0.85f, 0), 1, 1.6f, 0.07f, 0.28f, 1.f, 0.92f, 0.7f, 3, 1, 2.2f, 0.4f, 0.05f);
+		float o = gAng + 1.2f;
+		Burst(c + v3(cosf(o) * 2.35f, 0.04f, sinf(o) * 2.35f), 1, 0.15f, 0.1f, 0.3f, 1.f, 0.86f, 0.45f, 2, 1, 0.2f, 0.f, 0.05f);
+	}
+	if (phase == 0 && u < 0.45f) {
+		float rise = u / 0.45f;
+		int n = supreme ? 3 : 2;
+		for (int i = 0; i < n; i++) {
+			float a = m_time * 2.f + i * 2.1f;
+			float rad = 0.4f + rise * (supreme ? 2.2f : 1.3f);
+			Burst(m_sumFrom + v3(cosf(a) * rad, rise * (supreme ? 3.2f : 1.8f), sinf(a) * rad), 1, 0.8f, 0.1f, 0.5f, cr, cg, cb, 2, 1, 1.2f, 0.2f, 0.3f);
+		}
+	}
+}
+
 void Game::SummonMedium(int phase, float u)
 {
+	if (m_sumRank >= 1) SummonTierFx(phase, u);
 	float amp = SumAmp(phase, u);
 	if (amp < 0.04f) return;
 	int th = SumTheater(m_sumFx);
@@ -6153,21 +6446,33 @@ void Game::SummonImpactFx()
 			Burst(p, 20, 1.8f, .12f, .8f, .8f, .8f, .85f, 3, 1, .4f, .8f, .1f);
 			break;
 		}
+		if (m_sumRank >= 1) {
+			float cr, cg, cb;
+			SumFxRgb(m_sumFx, cr, cg, cb);
+			int supreme = m_sumRank >= 2;
+			Burst(p, supreme ? 28 : 14, supreme ? 4.2f : 2.4f, supreme ? 0.22f : 0.14f, 1.1f, cr, cg, cb, 2, 1, 0.2f, 0.15f, 1.6f);
+			if (supreme) {
+				Burst(p + v3(0, 2.8f, 0), 16, 5.5f, 0.1f, 0.7f, 1.f, 0.95f, 0.75f, 3, 1, 6.f, 1.2f, 0.2f);
+				Burst(p, 10, 0.4f, 0.7f, 0.9f, cr, cg, cb, 1, 1, 0.f, 0.f, 0.f);
+			}
+		}
 	}
+	if (m_sumRank >= 2) m_flashWhite = max(m_flashWhite, 0.72f);
+	else if (m_sumRank >= 1) m_flashWhite = max(m_flashWhite, 0.28f);
 }
 
 void Game::DrawSummonGate()
 {
 	if (!m_sumOn || m_cutStage >= 4) return;
-	int leaving = m_sumHit && (m_cutStage >= 3 || m_cutStageT >= SumStrikeSpan());
+	int leaving = m_sumHit && (m_cutStage >= 3 || m_cutStageT >= SummonStrikeSpan());
 	int phase = leaving ? 2 : (m_cutStage == 2 ? 1 : 0);
 	float u = 0.f;
 	if (phase == 0) u = m_cutStageT / max(0.2f, CutIntroLen());
-	else if (phase == 1) u = m_cutStageT / SumStrikeSpan();
+	else if (phase == 1) u = m_cutStageT / SummonStrikeSpan();
 	else {
-		float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SumStrikeSpan());
+		float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SummonStrikeSpan());
 		if (t < 0.f) t = 0.f;
-		u = t / SumDepartSpan();
+		u = t / SummonDepartSpan();
 	}
 	if (u < 0.f) u = 0.f;
 	if (u > 1.f) u = 1.f;
@@ -6256,6 +6561,8 @@ void Game::DrawSummonGate()
 		tint = RGBA8(168, 146, 235);
 		break;
 	}
+	if (m_sumRank >= 2) { sx *= 1.55f; sy *= 1.45f; sz *= 1.55f; }
+	else if (m_sumRank >= 1) { sx *= 1.22f; sy *= 1.18f; sz *= 1.22f; }
 	DrawParams sig = {};
 	sig.emissive = 1.f;
 	sig.flash = .8f;
@@ -6263,6 +6570,19 @@ void Game::DrawSummonGate()
 	sig.tint = tint;
 	M4 w = MMul(MMul(MScale(sx, sy, sz), MRotY(yaw)), MTrans(at.x, at.y, at.z));
 	m_r.DrawStatic(m_lib.orb, w, sig);
+	if (m_sumRank >= 1) {
+		float k = m_sumRank >= 2 ? 2.1f : 1.45f;
+		M4 w2 = MMul(MMul(MScale(sx * k, sy * 0.28f, sz * k), MRotY(yaw + m_time * (m_sumRank >= 2 ? 1.4f : 0.8f))), MTrans(at.x, 0.06f, at.z));
+		DrawParams ring = sig;
+		ring.tint = m_sumRank >= 2 ? RGBA8(255, 236, 170) : tint;
+		m_r.DrawStatic(m_lib.orb, w2, ring);
+	}
+	if (m_sumRank >= 2) {
+		M4 w3 = MMul(MMul(MScale(sx * 0.28f, sy * 2.4f, sz * 0.28f), MRotY(yaw)), MTrans(at.x, at.y + sy, at.z));
+		DrawParams beam = sig;
+		beam.tint = RGBA8(255, 250, 220);
+		m_r.DrawStatic(m_lib.orb, w3, beam);
+	}
 }
 
 // 0攻撃 1射撃 2魔法 3回復 4補助 5戦技 6陣形 7召喚
@@ -6377,7 +6697,7 @@ void Game::DrawCutIn3D()
 			eye = look + v3(.4f, 5.4f, -1.2f);
 		}
 	} else if (m_cutKind == 3) {
-		int leaving = m_cutStage >= 3 || (m_sumHit && m_cutStageT >= SumStrikeSpan());
+		int leaving = m_cutStage >= 3 || (m_sumHit && m_cutStageT >= SummonStrikeSpan());
 		int th = SumTheater(m_sumFx);
 		V3 beast = m_sumOn ? m_sumPos : m_cutPosA;
 		float bh = m_sumOn ? m_sumAct.height : .8f;
@@ -6392,7 +6712,7 @@ void Game::DrawCutIn3D()
 		float ang = atan2f(fwd.x, fwd.z);
 		float high = (th == 0 || th == 2 || th == 4 || th == 6) ? 1.7f : 1.2f;
 		if (leaving) {
-			float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SumStrikeSpan());
+			float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SummonStrikeSpan());
 			if (t < 0.f) t = 0.f;
 			float u = t / max(0.2f, SummonDepartNeed());
 			if (u > 1.f) u = 1.f;
@@ -6413,6 +6733,18 @@ void Game::DrawCutIn3D()
 			if (m_shake > .3f) eye = Lerp(eye, look, .12f);
 		} else {
 			eye = look + v3(2.2f, 1.15f, -2.4f);
+		}
+		{
+			int rk = SummonCutRank();
+			if (rk >= 1) {
+				float pull = rk >= 2 ? 1.28f : 1.12f;
+				float lift = rk >= 2 ? 0.85f : 0.32f;
+				eye = look + (eye - look) * pull + v3(0, lift, 0);
+				if (rk >= 2 && m_cutStage == 1) {
+					float su = m_cutStageT / max(0.4f, CutIntroLen());
+					eye = eye + v3(0, Lerpf(2.4f, 0.f, Smooth01(su)), 0);
+				}
+			}
 		}
 	} else if (m_cutStage == 1 && m_seqSkill >= 0) {
 		float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
@@ -6719,7 +7051,7 @@ void Game::DrawCutIn3D()
 	m_r.SetCamNear(cutHide, cutSolid, 1.f);
 	m_r.CommitFrame();
 	if (m_sumOn) DrawSummonGate();
-	if (m_sumOn && m_sumHit && (m_cutStageT - SumStrikeSpan()) < 0.55f && (m_sumFx == SUM_FX_ICE || m_sumFx == SUM_FX_HOLY)) {
+	if (m_sumOn && m_sumHit && (m_cutStageT - SummonStrikeSpan()) < 0.55f && (m_sumFx == SUM_FX_ICE || m_sumFx == SUM_FX_HOLY)) {
 		DrawParams sig = {};
 		sig.emissive = 1.f;
 		sig.flash = .9f;
@@ -7593,7 +7925,7 @@ void Game::DrawMinimap(float x, float y, float s, int layer)
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (!u.alive) continue;
-		if (u.team == TEAM_ENEMY && !seenCell(u.x, u.z)) continue;
+		if (u.team == TEAM_ENEMY && !u.alert && !seenCell(u.x, u.z)) continue;
 		int deck = u.deck;
 		if (deck < 0 || deck >= LAY_N || !LayerOn(m_b.map.At(u.x, u.z), deck)) deck = 0;
 		if (deck != layer) continue;
@@ -7713,7 +8045,6 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 		const Unit& d = m_b.u[ids[i]];
 		if (skill >= 0 && SkillInfo(skill).kind == SK_HEAL) {
 			const SkillDef& sd = SkillInfo(skill);
-			long long e;
 			int healed = 0;
 			if (sd.effect == EF_RAISE) healed = max(1, d.ch.stat[S_HP] * 45 / 100);
 			else {
@@ -7723,11 +8054,7 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 				if (room < 0) room = 0;
 				healed = amt < room ? amt : room;
 			}
-			if (healed > 0) {
-				e = ExpForAction(a, d, healed, m_battleStage);
-				e = e * 3 / 2;
-				if (e < 21) e = 21;
-			} else e = 12;
+			long long e = ExpForHeal(a, d, healed, m_battleStage);
 			rawOpt += e;
 			rawPes += e;
 			counted++;
@@ -7961,7 +8288,7 @@ static const int kItemThrow = 3;
 
 static BOOL ItemHarms(const GoodDef* g)
 {
-	return g && (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == IX_VENOM || g->extra == 107 || g->extra == 108);
+	return g && (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == IX_VENOM || g->extra == 107 || g->extra == 108 || g->extra == 117);
 }
 
 static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
@@ -7973,7 +8300,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 		for (int dz = 0; dz < st; dz++) for (int dx = 0; dx < st; dx++)
 			dist = min(dist, max(abs((src.x + ax) - (t.x + dx)), abs((src.z + az) - (t.z + dz))));
 	if (dist > kItemThrow) return FALSE;
-	if (g->item == IT_RAISE || g->extra == 106)
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116)
 		return t.team == src.team && !t.alive && t.hp <= 0 && dist >= 0;
 	if (ItemHarms(g))
 		return t.team != src.team && t.alive && dist >= 1;
@@ -7983,7 +8310,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t)
 {
 	if (!ItemThrowOk(g, src, t)) return FALSE;
-	if (g->item == IT_RAISE || g->extra == 106) return TRUE;
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) return TRUE;
 	BOOL hurt = t.alive && t.hp < t.ch.stat[S_HP];
 	BOOL mana = t.alive && t.mp < t.ch.stat[S_MP];
 	BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
@@ -8011,6 +8338,11 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	if (g->extra == 111) return t.buffAgi < 5 || t.ct < 980;
 	if (g->extra == 112) return t.burn > 0;
 	if (g->extra == 113) return t.freeze > 0;
+	if (g->extra == 114) return hurt || mana || ail;
+	if (g->extra == 115) return t.buffAtk < 6 || t.buffDef < 6 || t.buffAgi < 6;
+	if (g->extra == 117) return (!noPoi && t.poison <= 0) || (!noSlow && (t.ct > 0 || t.slow < 4));
+	if (g->extra == 118) return hurt || ail || t.buffDef < 6;
+	if (g->extra == 119) return mana || t.buffAgi < 6 || t.ct < 900;
 	return FALSE;
 }
 
@@ -8040,25 +8372,31 @@ void Game::UseConsumable(int good, int target)
 	if (target < 0 || target >= m_b.nUnits) return;
 	Unit& self = m_b.u[m_cur];
 	if (!ItemThrowOk(g, self, m_b.u[target])) return;
-	if ((g->item == IT_RAISE || g->extra == 106) && !RaisePlaceable(m_b, m_b.u[target])) {
+	if ((g->item == IT_RAISE || g->extra == 106 || g->extra == 116) && !RaisePlaceable(m_b, m_b.u[target])) {
 		AddBanner(RaiseNoRoomWord(), NULL, RGBA8(255, 180, 160), 2, 1.8f, MSG_DROP);
 		return;
 	}
 	if (!GoodTake(m_save, good)) return;
 	Unit* dst = &m_b.u[target];
+	int hpBefore = dst->hp;
+	int aliveBefore = dst->alive;
 	if (g->item == IT_ELIXIR) {
 		dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] / 2));
 	} else if (g->item == IT_MIGHT) {
 		dst->mulTurns = max(dst->mulTurns, 3);
 	} else if (g->item == IT_DELAY) {
 		if (!UnitHasPas(*dst, PAS_NOSLOW) && !UnitAilmentHeld(*dst)) dst->ct = max(0, dst->ct - 800);
-	} else if (g->item == IT_RAISE || g->extra == 106) {
+	} else if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) {
 		if (SettleRaised(m_b, *dst)) {
 			dst->alive = 1;
 			dst->killed = 0;
-			dst->hp = max(1, dst->ch.stat[S_HP] * (g->extra == 106 ? 80 : 45) / 100);
+			dst->hp = max(1, dst->ch.stat[S_HP] * (g->extra == 116 ? 100 : g->extra == 106 ? 80 : 45) / 100);
 			dst->dissolve = 0;
-			dst->ct = max(dst->ct, 200);
+			dst->ct = max(dst->ct, g->extra == 116 ? 400 : 200);
+			if (g->extra == 116) {
+				dst->poison = dst->slow = dst->sleep = dst->stun = dst->confuse = dst->defDown = 0;
+				dst->freeze = dst->burn = dst->bleed = dst->blind = dst->silence = 0;
+			}
 			dst->flash = 1.f;
 			if (target >= 0) {
 				m_dieT[target] = -1;
@@ -8130,17 +8468,38 @@ void Game::UseConsumable(int good, int target)
 		dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] * 15 / 100));
 	} else if (g->extra == 113) {
 		dst->freeze = 0;
+	} else if (g->extra == 114 || g->extra == 118) {
+		dst->hp = dst->ch.stat[S_HP];
+		dst->poison = dst->slow = dst->sleep = dst->stun = dst->confuse = dst->defDown = 0;
+		dst->freeze = dst->burn = dst->bleed = dst->blind = dst->silence = 0;
+		if (g->extra == 114) dst->mp = dst->ch.stat[S_MP];
+		if (g->extra == 118) dst->buffDef = 6;
+	} else if (g->extra == 115) {
+		dst->buffAtk = 6;
+		dst->buffDef = 6;
+		dst->buffAgi = 6;
+	} else if (g->extra == 117) {
+		if (!UnitHasPas(*dst, PAS_NOPOISON) && dst->poison <= 0) dst->poison = 5;
+		if (!UnitHasPas(*dst, PAS_NOSLOW) && !UnitAilmentHeld(*dst)) {
+			dst->ct = max(0, dst->ct - 700);
+			dst->slow = 4;
+		}
+	} else if (g->extra == 119) {
+		dst->mp = dst->ch.stat[S_MP];
+		dst->buffAgi = 6;
+		dst->ct += 280;
 	}
+	if (dst->hp != hpBefore || dst->alive != aliveBefore) m_bgmTick++;
 	dst->flash = 1.f;
 	AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), TT(g->nameTx), RGBA8(140, 230, 170), 1, MSG_FACE);
 	AddLog(TT(g->nameTx), RGBA8(140, 230, 170));
-	if (g->item == IT_RAISE || g->extra == 106) TacSfx(TS_RAISE);
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) TacSfx(TS_RAISE);
 	else if (g->item == IT_ELIXIR) TacSfx(TS_HEAL);
 	else if (g->item == IT_MIGHT) TacSfx(TS_BUFF);
-	else if (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == 108) TacSfx(TS_SLOW);
+	else if (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == 108 || g->extra == 117) TacSfx(TS_SLOW);
 	else if (g->extra == IX_VENOM || g->extra == 107) TacSfx(TS_POISON);
-	else if (g->extra == IX_CURE || (g->extra >= 100 && g->extra <= 103) || g->extra == 109 || g->extra == 112 || g->extra == 113) TacSfx(TS_CLEANSE);
-	else if (g->extra == IX_FULL || g->extra == IX_ETHER || g->extra == 104 || g->extra == 105) TacSfx(TS_HEAL);
+	else if (g->extra == IX_CURE || (g->extra >= 100 && g->extra <= 103) || g->extra == 109 || g->extra == 112 || g->extra == 113 || g->extra == 114 || g->extra == 118) TacSfx(TS_CLEANSE);
+	else if (g->extra == IX_FULL || g->extra == IX_ETHER || g->extra == 104 || g->extra == 105 || g->extra == 119) TacSfx(TS_HEAL);
 	else TacSfx(TS_BUFF);
 	m_b.RebuildOcc();
 	m_itemAim = -1;
@@ -9678,7 +10037,7 @@ void Game::DrawCutInUi()
 					m_r.HudRect(m_w * .92f + slideX, by + slideY + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
 				}
 				m_r.HudText(title, m_w * .5f, by + slideY + bh2 * .48f, ougi ? U(72) : (form || sum ? U(56) : (craft ? U(58) : (m_ult ? U(64) : U(44)))), ec, 1, 1, 1, a);
-				const wchar_t* kind = ougi ? TT(TX_OUGI) : (craft ? TT(TX_CRAFT) : (form ? TT(TX_SK_TAB_FORM) : (sum ? SummonWord() : (m_ult ? TT(TX_BT_ULT) : NULL))));
+				const wchar_t* kind = ougi ? TT(TX_OUGI) : (craft ? TT(TX_CRAFT) : (form ? TT(TX_SK_TAB_FORM) : (sum ? SummonRankWord(m_sumRank) : (m_ult ? TT(TX_BT_ULT) : NULL))));
 				if (kind) m_r.HudText(kind, m_w * .5f, by + slideY + U(22), form || ougi ? U(24) : U(18), form ? RGBA8(255, 220, 130) : RGBA8(255, 226, 150), 1, 1, 1, a);
 				wchar_t nm[64];
 				UnitTitle(m_b.u[m_cutA], nm, 64);
@@ -9686,7 +10045,7 @@ void Game::DrawCutInUi()
 			}
 			if (m_cutStage == 2) {
 				const wchar_t* title = m_cutKind == 1 ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
-				const wchar_t* kind = m_cutKind == 1 ? (IsCraftSuper(m_seqSkill) ? TT(TX_OUGI) : TT(TX_CRAFT)) : (m_cutKind == 2 ? TT(TX_SK_TAB_FORM) : (m_cutKind == 3 ? SummonWord() : NULL));
+				const wchar_t* kind = m_cutKind == 1 ? (IsCraftSuper(m_seqSkill) ? TT(TX_OUGI) : TT(TX_CRAFT)) : (m_cutKind == 2 ? TT(TX_SK_TAB_FORM) : (m_cutKind == 3 ? SummonRankWord(m_sumRank) : NULL));
 				if (kind) m_r.HudText(kind, U(24), U(22), U(14), RGBA8(255, 220, 140), 0, 1);
 				m_r.HudText(title, U(24), kind ? U(42) : U(28), U(22), ec, 0, 1);
 			}
@@ -10193,19 +10552,8 @@ void Game::DrawBattleUi()
 		const Unit& u = m_b.u[i];
 		if (u.team == TEAM_ENEMY && (!u.alive || u.dissolve >= 1.f || !u.alert)) continue;
 		float dx = u.px - m_camTarget.x, dz = u.pz - m_camTarget.z;
-		if (u.team != TEAM_PLAYER && dx * dx + dz * dz > 28.f * 28.f) continue;
-		if (u.team == TEAM_ENEMY) {
-			int sight = TacSightTiles(m_b.weather);
-			if (sight > 0) {
-				int nearest = 9999;
-				for (int p = 0; p < m_b.nUnits; p++) {
-					if (!m_b.u[p].alive || m_b.u[p].team != TEAM_PLAYER) continue;
-					int d = Dist(u.x, u.z, m_b.u[p].x, m_b.u[p].z);
-					if (d < nearest) nearest = d;
-				}
-				if (nearest > sight) continue;
-			}
-		}
+		float barFar = (u.team == TEAM_ENEMY && u.alert) ? 48.f : 28.f;
+		if (u.team != TEAM_PLAYER && dx * dx + dz * dz > barFar * barFar) continue;
 		float sx, sy;
 		if (!m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + .12f, u.pz), sx, sy)) continue;
 		float bw = U(36);

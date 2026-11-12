@@ -3936,6 +3936,42 @@ static int ScSoftEmitFmNote(SasamiTrackStream* s, ScSoftSt* st, int ch, int note
 	return 1;
 }
 
+/* 最後の音が小節の途中で終わっても、その小節の終わりまで待つ。 */
+static uint32_t ScWriteBarEndTick(const ScEvent* ev, int n, uint32_t last)
+{
+	int numer = 4, denom = 4;
+	uint32_t bar = 0;
+	for (int guard = 0; guard < 100000; guard++) {
+		int n0 = 4, d0 = 4;
+		uint32_t best = 0;
+		int have = 0;
+		if (ev) {
+			for (int i = 0; i < n; i++) {
+				if (ev[i].kind != SC_EV_METER || ev[i].tick > bar) continue;
+				if (!have || ev[i].tick >= best) {
+					best = ev[i].tick;
+					n0 = ev[i].a ? (int)ev[i].a : 4;
+					d0 = ev[i].b ? (int)ev[i].b : 4;
+					have = 1;
+				}
+			}
+		}
+		if (n0 < 1) n0 = 4;
+		if (d0 < 1) d0 = 4;
+		numer = n0;
+		denom = d0;
+		int beat = (SC_PPQN * 4) / denom;
+		if (beat < 1) beat = 1;
+		uint32_t len = (uint32_t)numer * (uint32_t)beat;
+		if (len < (uint32_t)SC_PPQN) len = (uint32_t)SC_PPQN;
+		if (last <= bar + len) return bar + len;
+		bar += len;
+		if (bar > last) break;
+	}
+	(void)numer;
+	return last;
+}
+
 int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 {
 	s_scLastWriteErr[0] = 0;
@@ -4053,17 +4089,19 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			s->part = ch & 15;
 		if (!preambleDone[ch]) {
 			uint32_t preWait = 0;
+			if (ch >= 16 && !SasamiStreamPut3(s, 38, 0, 0)) return 0;
 			if (!putPreamble(s, &preWait)) return 0;
 			/* Align stream time with score ticks (preamble waits used to skew this). */
 			lastTick[ch] = preWait;
 			preambleDone[ch] = 1;
 			vel[ch] = 105;
-			/* KAKU1: GS USE FOR RHYTHM PART / XG CC0=127. Default ch10 already drum. */
+			/* KAKU1: 0 通常、1 ドラム1、2 ドラム2。既定の ch10 は 1。 */
 			{
-				const int defD = ((s->part & 15) == 9) ? 1 : 0;
+				const int defMode = ((s->part & 15) == 9) ? 1 : 0;
 				const int drum0 = ScMidiPartIsDrum(sorted, n, ch, 0);
-				if (drum0 != defD) {
-					if (!SasamiStreamPut3(s, 29, (uint8_t)drum0, 0)) return 0;
+				const int mode = drum0 ? (ScMidiPartDrumSlot(sorted, n, ch, 0) ? 2 : 1) : 0;
+				if (mode != defMode) {
+					if (!SasamiStreamPut3(s, 29, (uint8_t)mode, 0)) return 0;
 				}
 			}
 		}
@@ -4332,15 +4370,34 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		else
 			w->tr[ch].part = ch & 15;
 		uint32_t preWait = 0;
+		if (ch >= 16 && !SasamiStreamPut3(&w->tr[ch], 38, 0, 0)) return 0;
 		if (!putPreamble(&w->tr[ch], &preWait)) return 0;
 		{
-			const int defD = ((w->tr[ch].part & 15) == 9) ? 1 : 0;
+			const int defMode = ((w->tr[ch].part & 15) == 9) ? 1 : 0;
 			const int drum0 = ScMidiPartIsDrum(d->ev, d->evCount, ch, 0);
-			if (drum0 != defD) {
-				if (!SasamiStreamPut3(&w->tr[ch], 29, (uint8_t)drum0, 0)) return 0;
+			const int mode = drum0 ? (ScMidiPartDrumSlot(d->ev, d->evCount, ch, 0) ? 2 : 1) : 0;
+			if (mode != defMode) {
+				if (!SasamiStreamPut3(&w->tr[ch], 29, (uint8_t)mode, 0)) return 0;
 			}
 		}
 		if (!SasamiStreamPut3(&w->tr[ch], 8, 0, 1)) return 0;
+	}
+	{
+		uint32_t songEnd = 0;
+		for (int ch = 0; ch < SC_MIDI_CH; ch++)
+			if (w->tr[ch].used && lastTick[ch] > songEnd) songEnd = lastTick[ch];
+		if (songEnd > 0) {
+			const uint32_t barEnd = ScWriteBarEndTick(sorted, n, songEnd);
+			for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+				if (!w->tr[ch].used || lastTick[ch] >= barEnd) continue;
+				uint32_t gap = barEnd - lastTick[ch];
+				while (gap > 0) {
+					uint8_t w8 = (gap > 255) ? 255 : (uint8_t)gap;
+					if (!SasamiStreamPut3(&w->tr[ch], 8, 0, w8)) return 0;
+					gap -= w8;
+				}
+			}
+		}
 	}
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used)
@@ -4362,6 +4419,7 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	} else {
 		w->trackCount = 32;
 		w->isMpw3 = 1;
+		w->dualPort = 1;
 	}
 	if (w->isMpw3) {
 		w->mpw3Ver = (d->macros.count > 0 || d->needMpsmv) ? 2 : 1;
@@ -4446,6 +4504,8 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		if (ch >= SC_FM_CH && (ch - SC_FM_CH + 1) > misaoMax)
 			misaoMax = ch - SC_FM_CH + 1;
 
+		if (ch == 6 && e->kind == SC_EV_FM_NOTE && e->tick < lastTick[ch])
+			continue;
 		if (e->kind == SC_EV_FM_NOTE || e->kind == SC_EV_FM_REST
 			|| e->kind == SC_EV_JUMP_MARK || e->kind == SC_EV_FM_JUMP
 			|| e->kind == SC_EV_FM_LOOP_START || e->kind == SC_EV_FM_LOOP_END
@@ -4589,27 +4649,41 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			break;
 		case SC_EV_FM_NOTE: {
 			if (ch == 6) {
-				int pad = e->a & 0x0F;
-				if (pad < 0) pad = 0;
-				if (pad > 5) pad = 5;
-				const uint8_t mask = (uint8_t)(1 << pad);
-				if (!SasamiStreamPut3(s, 8, 0x10, mask)) return 0;
-				uint32_t totalDur = e->dur ? e->dur : 2;
-				/* Coalesce following TIEs (same pitch) into one sounding length. */
-				for (int j = i + 1; j < n; j++) {
-					const ScEvent* te = &sorted[j];
-					if (te->ch != e->ch) break;
-					if (te->kind == SC_EV_TIE && te->a == e->a) {
-						totalDur += te->dur ? te->dur : 0;
-						continue;
-					}
-					if (te->kind == SC_EV_FM_NOTE || te->kind == SC_EV_FM_REST || te->kind == SC_EV_TIE)
+				/* 同じ拍の BD+SD+HH は別ノートだと直列になり、2 tick で切るとクリックになる。
+				   マスクをまとめて、次の打点まで鳴らしてから止める。 */
+				uint8_t mask = 0;
+				uint32_t nextTick = 0;
+				int haveNext = 0;
+				for (int k = i; k < n; k++) {
+					const ScEvent* te = &sorted[k];
+					if (te->ch != 6 || te->kind != SC_EV_FM_NOTE) continue;
+					if (te->tick == e->tick) {
+						int pad = (int)(te->a & 0x0F);
+						if (pad < 0) pad = 0;
+						if (pad > 5) pad = pad % 6;
+						mask = (uint8_t)(mask | (uint8_t)(1 << pad));
+					} else if (te->tick > e->tick) {
+						nextTick = te->tick;
+						haveNext = 1;
 						break;
+					}
 				}
-				uint8_t wait = (totalDur > 255) ? 255 : (uint8_t)(totalDur < 2 ? 2 : totalDur);
-				if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
-				if (!SasamiStreamPut3(s, 8, 0x10, (uint8_t)(0x80 | mask))) return 0;
-				lastTick[ch] += totalDur;
+				if (!mask) break;
+				uint32_t gap = haveNext ? (nextTick - e->tick) : 36u;
+				if (gap < 2) gap = 2;
+				/* すぐにキーオフするとバスとハイハットのサンプルが切れる。
+				   次の打点で同じパッドを叩き直すまで鳴らしたままにする。 */
+				if (!SasamiStreamPut3(s, 8, 0x10, mask)) return 0;
+				auto putWait = [&](uint32_t w) -> int {
+					while (w > 0) {
+						uint8_t w8 = (w > 255) ? 255 : (uint8_t)w;
+						if (!SasamiStreamPut3(s, 1, 0, w8)) return 0;
+						w -= w8;
+					}
+					return 1;
+				};
+				if (!putWait(gap)) return 0;
+				lastTick[ch] = e->tick + gap;
 				break;
 			}
 			if (!IsSsgCh(ch)) {
@@ -4646,10 +4720,13 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				if (te->kind == SC_EV_FM_NOTE || te->kind == SC_EV_FM_REST || te->kind == SC_EV_TIE)
 					break;
 			}
+			/* 鳴っている待ちだけで lastTick を全長進めると、その ch だけ先へずれる。
+			   ゲートの余りと 255 を超えた分は休符で埋めて、次の音を譜面の tick に合わせる。 */
 			uint32_t sounding = totalDur;
 			if (e->c >= 1 && e->c <= 100)
 				sounding = (totalDur * (uint32_t)e->c) / 100u;
-			if (sounding < 2) sounding = 2;
+			if (sounding < 1) sounding = 1;
+			if (sounding > totalDur) sounding = totalDur;
 			{
 				const int legato = (chHadVoice[ch] & 0x80) ? 1 : 0;
 				chHadVoice[ch] = (uint8_t)(chHadVoice[ch] & 0x7F);
@@ -4657,14 +4734,14 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 					softF[ch].tCur = 0;
 					if (!ScSoftEmitFmNote(s, &softF[ch], ch, (int)e->a, (int)sounding, legato)) return 0;
 				} else {
-					uint8_t wait = (sounding > 255) ? 255 : (uint8_t)sounding;
-					if (legato) {
-						if (!SasamiStreamPut3(s, 24, e->a, wait)) return 0;
-					} else {
-						if (!SasamiStreamPut3(s, 0, e->a, wait)) return 0;
-					}
+					uint32_t head = sounding > 255u ? 255u : sounding;
+					const uint8_t cmd = legato ? 24 : 0;
+					if (!SasamiStreamPut3(s, cmd, e->a, (uint8_t)head)) return 0;
+					/* cmd10 はキーオフしない待ち。長い音を 255 で切らない。 */
+					if (sounding > head && !ScPutWait8(s, 10, 0, (int)(sounding - head))) return 0;
 				}
 			}
+			if (totalDur > sounding && !ScPutWait8(s, 1, 0, (int)(totalDur - sounding))) return 0;
 			lastTick[ch] += totalDur;
 			break;
 		}
@@ -4681,16 +4758,14 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 			if (consumed) break;
 			if (e->tick > lastTick[ch]) {
 				uint32_t gap = e->tick - lastTick[ch];
-				while (gap > 0) {
-					uint8_t w8 = (gap > 255) ? 255 : (uint8_t)gap;
-					if (!SasamiStreamPut3(s, 1, 0, w8)) return 0;
-					gap -= w8;
-				}
+				if (!ScPutWait8(s, 1, 0, (int)gap)) return 0;
 				lastTick[ch] = e->tick;
 			}
-			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
-			if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
-			lastTick[ch] += e->dur ? e->dur : wait;
+			{
+				uint32_t dur = e->dur ? e->dur : 2;
+				if (!ScPutWait8(s, 1, 0, (int)dur)) return 0;
+				lastTick[ch] += dur;
+			}
 			break;
 		}
 		case SC_EV_FM_REST: {
@@ -4699,9 +4774,11 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 				softF[ch].noteOn = 0;
 				softF[ch].tCur = 0;
 			}
-			uint8_t wait = (e->dur > 255) ? 255 : (uint8_t)(e->dur < 2 ? 2 : e->dur);
-			if (!SasamiStreamPut3(s, 1, 0, wait)) return 0;
-			lastTick[ch] += e->dur ? e->dur : wait;
+			{
+				uint32_t dur = e->dur ? e->dur : 2;
+				if (!ScPutWait8(s, 1, 0, (int)dur)) return 0;
+				lastTick[ch] += dur;
+			}
 			break;
 		}
 		default: break;
@@ -4711,6 +4788,23 @@ int ScFmDocToWrite(const ScFmDoc* d, SasamiWriteFm* w)
 		if (!softF[ch].noteOn) continue;
 		SasamiTrackStream* rs = (ch < SC_FM_CH) ? &w->tr[ch] : &w->misao[ch - SC_FM_CH];
 		ScSoftPutFmRestore(rs, &softF[ch], ch);
+	}
+	{
+		uint32_t songEnd = 0;
+		for (int ch = 0; ch < SC_FM_TOTAL; ch++)
+			if (lastTick[ch] > songEnd) songEnd = lastTick[ch];
+		if (songEnd > 0) {
+			const uint32_t barEnd = ScWriteBarEndTick(sorted, n, songEnd);
+			for (int ch = 0; ch < SC_FM_CH; ch++) {
+				if (!w->tr[ch].used || lastTick[ch] >= barEnd) continue;
+				if (!ScPutWait8(&w->tr[ch], 1, 0, (int)(barEnd - lastTick[ch]))) return 0;
+			}
+			for (int ch = 0; ch < SASAMI_MISAO_MAX_CH; ch++) {
+				const int ix = SC_FM_CH + ch;
+				if (ix >= SC_FM_TOTAL || !w->misao[ch].used || lastTick[ix] >= barEnd) continue;
+				if (!ScPutWait8(&w->misao[ch], 1, 0, (int)(barEnd - lastTick[ix]))) return 0;
+			}
+		}
 	}
 	for (int ch = 0; ch < SC_FM_CH; ch++) {
 		if (w->tr[ch].used)

@@ -283,7 +283,9 @@ struct CraftStoreV7 {
 	unsigned char goodN[16];
 	CraftRec rec[128];
 };
-struct CraftStore {
+// v8 は今までの所持。召喚 48、パッシブ 64、道具 16。配列を伸ばすときはこの形のまま読む。
+enum { CRAFT_SUM_OWN = 96, CRAFT_PAS_OWN = 96, CRAFT_GOOD_OWN = 32 };
+struct CraftStoreV8 {
 	int stones;
 	unsigned char beadN[CRAFT_N];
 	unsigned short accN[1024];
@@ -293,12 +295,26 @@ struct CraftStore {
 	unsigned char sumN[48];
 	unsigned char sumEq[128][2];
 };
+struct CraftStore {
+	int stones;
+	unsigned char beadN[CRAFT_N];
+	unsigned short accN[1024];
+	unsigned char pasN[CRAFT_PAS_OWN];
+	unsigned char goodN[CRAFT_GOOD_OWN];
+	CraftRec rec[128];
+	unsigned char sumN[CRAFT_SUM_OWN];
+	unsigned char sumEq[128][2];
+};
 #pragma pack(pop)
 static_assert(sizeof(CraftRecV4) == 12, "旧戦技記録は 12 バイト");
 static_assert(sizeof(CraftRecV5) == 16, "戦技記録 v5 は 16 バイト");
 static_assert(sizeof(CraftRec) == 20, "戦技記録は 20 バイト");
 static_assert(CRAFT_N >= CRAFT_LEGACY * 2 && CRAFT_LEGACY == 147, "先頭 147 は動かさない");
 static_assert(sizeof(((CraftStore*)0)->rec) / sizeof(CraftRec) >= MAX_ROSTER, "戦技記録は名簿以上");
+static_assert(sizeof(((CraftStore*)0)->sumN) == CRAFT_SUM_OWN, "召喚所持は 96");
+static_assert(sizeof(((CraftStore*)0)->pasN) == CRAFT_PAS_OWN, "パッシブ所持は 96");
+static_assert(sizeof(((CraftStore*)0)->goodN) == CRAFT_GOOD_OWN, "道具所持は 32");
+static_assert(sizeof(CraftStore) > sizeof(CraftStoreV8), "クラフト v9 は v8 より大きい");
 
 static CraftStore g_craft;
 static const DWORD kCraftMagic = 0x54435246u;
@@ -368,8 +384,21 @@ void CraftLoad()
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return;
 	DWORD magic = 0; int ver = 0;
-	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 8) {
+	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 9) {
 		if (fread(&g_craft, sizeof(g_craft), 1, fp) != 1) memset(&g_craft, 0, sizeof(g_craft));
+	} else if (magic == kCraftMagic && ver == 8) {
+		CraftStoreV8 old8;
+		memset(&old8, 0, sizeof(old8));
+		if (fread(&old8, sizeof(old8), 1, fp) == 1) {
+			g_craft.stones = old8.stones;
+			memcpy(g_craft.beadN, old8.beadN, sizeof(old8.beadN));
+			memcpy(g_craft.accN, old8.accN, sizeof(old8.accN));
+			memcpy(g_craft.pasN, old8.pasN, sizeof(old8.pasN));
+			memcpy(g_craft.goodN, old8.goodN, sizeof(old8.goodN));
+			memcpy(g_craft.rec, old8.rec, sizeof(old8.rec));
+			memcpy(g_craft.sumN, old8.sumN, sizeof(old8.sumN));
+			memcpy(g_craft.sumEq, old8.sumEq, sizeof(old8.sumEq));
+		}
 	} else if (magic == kCraftMagic && ver == 7) {
 		CraftStoreV7 old7;
 		memset(&old7, 0, sizeof(old7));
@@ -491,7 +520,9 @@ void CraftLoad()
 			if (g_craft.sumEq[i][k] > SUMMON_N) g_craft.sumEq[i][k] = 0;
 		}
 	}
-	for (int i = 0; i < SUMMON_N && i < 48; i++) if (g_craft.sumN[i] > kCraftItemMax) g_craft.sumN[i] = (unsigned char)kCraftItemMax;
+	for (int i = 0; i < SUMMON_N && i < CRAFT_SUM_OWN; i++) if (g_craft.sumN[i] > kCraftItemMax) g_craft.sumN[i] = (unsigned char)kCraftItemMax;
+	for (int i = 0; i < kPasN && i < CRAFT_PAS_OWN; i++) if (g_craft.pasN[i] > kCraftItemMax) g_craft.pasN[i] = (unsigned char)kCraftItemMax;
+	for (int i = 0; i < (int)sizeof(g_craft.goodN); i++) if (g_craft.goodN[i] > kCraftItemMax) g_craft.goodN[i] = (unsigned char)kCraftItemMax;
 	for (int i = 0; i < kAccN && i < 1024; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
 	CraftFixBeads();
 }
@@ -500,7 +531,7 @@ void CraftSave()
 	CString path = DatArc_Path(TacLeafCraft());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
-	int ver = 8;
+	int ver = 9;
 	fwrite(&kCraftMagic, 4, 1, fp);
 	fwrite(&ver, 4, 1, fp);
 	fwrite(&g_craft, sizeof(g_craft), 1, fp);
@@ -1032,8 +1063,8 @@ bool DropExtraLoot(SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int 
 			return true;
 		}
 		if (order[o] == 1) {
-			int pool[64], n = 0, fullPrice = 0;
-			int lim = kPasN < 64 ? kPasN : 64;
+			int pool[CRAFT_PAS_OWN], n = 0, fullPrice = 0;
+			int lim = kPasN < CRAFT_PAS_OWN ? kPasN : CRAFT_PAS_OWN;
 			for (int i = 0; i < lim; i++) {
 				if (kPasRow[i].price < 1 || kPasRow[i].price > budget) continue;
 				if (g_craft.pasN[i] >= kCraftItemMax) { if (kPasRow[i].price > fullPrice) fullPrice = kPasRow[i].price; continue; }
@@ -1053,8 +1084,8 @@ bool DropExtraLoot(SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int 
 		}
 		if (order[o] == 2) {
 			int sumBudget = boss ? (budget * 3 / 2) : budget;
-			int pool[48], n = 0, fullPrice = 0;
-			int lim = SUMMON_N < 48 ? SUMMON_N : 48;
+			int pool[CRAFT_SUM_OWN], n = 0, fullPrice = 0;
+			int lim = SUMMON_N < CRAFT_SUM_OWN ? SUMMON_N : CRAFT_SUM_OWN;
 			for (int i = 0; i < lim; i++) {
 				int price = SummonPrice(i);
 				if (price < 1 || price > sumBudget) continue;

@@ -1354,9 +1354,9 @@ static void LayDeck(Cell& c, int L, int t, int h);
 static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN]);
 static int CellStand(const Cell& c, int L);
 
-// スパイラルマップ（0〜999 レイヤーのバネ円スパイラル／時空の狭間・時間の迷宮のように交差しながら登り降りする立体マップ）。
-// 0〜999 の仮想レイヤー空間でぐるぐる回る、またはジグザグに交差しながら上下する3D軌道を先に描き、
-// 同じ (x,z) に重なった部分から MAX5 レイヤー（同時3〜5層）をセルへ載せ、途切れた箇所を補完して連結させる。
+// スパイラルマップ。大きさ 20 段階（中心の小ぶりな軌道〜ほぼ全域）× 形 10 種。
+// 円・四角・三角・菱形・楕円・二重らせん・8の字・星・蛇行・交差迷宮。
+// 同じ (x,z) に重なった高さだけを層にし、1歩は最大1段なので徒歩でつながる。
 static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& paz, int& endX, int& endZ)
 {
 	gGenSpiral = 1;
@@ -1369,7 +1369,16 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 	static short sx[MAX_SPINE], sz[MAX_SPINE], sh[MAX_SPINE];
 	int ns = 0;
 	const int cx = MAPN / 2, cz = MAPN / 2;
-	const int style = (int)((m.seed / 30u) % 3u); // 0: バネ円スパイラル, 1: 二重螺旋コイル, 2: 時間の迷宮（時空の狭間）
+	// 別マップを引き直すと同じ種から別の規模・形が出る。抽選そのものの確率はいじらない。
+	const int tier = (int)((m.seed / 11u) % 20u);
+	const int shape = (int)((m.seed / 13u) % 10u);
+	const float tf = (float)tier / 19.f;
+	const float radIn = 4.2f + tf * 3.2f;
+	const float radOut = 9.f + tf * 15.f;
+	const int turns = 1 + tier / 6;
+	const int hTop = 48 + (int)(tf * (float)(MAXH_SPIRAL - 48));
+	const int nRing = tier < 7 ? 0 : (tier < 14 ? 1 : 2);
+	const int style = (shape == 6 || shape == 7 || shape == 9) ? 2 : (shape == 5 ? 1 : 0);
 	const int climbUp = (r.Next() & 1) != 0;
 	int curX = cx, curZ = cz;
 	auto pushStep = [&](int tx, int tz) {
@@ -1394,39 +1403,136 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		}
 	};
 
-	if (style == 0 || style == 1) {
-		// バネの円のようにぐるぐる回りながら重なり合う3Dコイル軌道
-		const int turns = 3 + (int)(r.Next() % 2); // 3〜4周
-		const int pts = turns * 44;
-		const float ph0 = r.F(0.f, 6.2831853f);
-		const float baseR = style == 0 ? 15.5f + r.F(-1.2f, 1.8f) : 14.2f + r.F(-1.0f, 1.6f);
+	const float ph0 = r.F(0.f, 6.2831853f);
+	const float dirA = climbUp ? 1.f : -1.f;
+	const float TAU = 6.2831853f;
+	auto polar = [&](float ang, float rad, float ax, float az) {
+		int tx = (int)lroundf((float)cx + cosf(ang) * rad * ax);
+		int tz = (int)lroundf((float)cz + sinf(ang) * rad * az);
+		pushStep(tx, tz);
+	};
+	auto coil = [&](float rad0, float rad1, float phase, float aspectX, float aspectZ, int pts, float wobble) {
+		if (pts < 8) pts = 8;
 		for (int i = 0; i <= pts; i++) {
 			float u = (float)i / (float)pts;
-			float ang = ph0 + (climbUp ? 1.f : -1.f) * u * (float)turns * 6.2831853f;
-			float ox = 2.4f * cosf(ang * 0.47f + ph0) + 1.1f * sinf(ang * 1.7f);
-			float oz = 2.4f * sinf(ang * 0.53f + ph0) + 1.1f * cosf(ang * 1.3f);
-			float rad = baseR
-				+ 3.6f * sinf(ang * (style == 0 ? 1.35f : 1.9f))
-				+ 2.2f * sinf(ang * 2.8f + ph0)
-				+ (u - 0.5f) * 2.4f;
+			float ang = phase + dirA * u * (float)turns * TAU;
+			float rad = rad0 + (rad1 - rad0) * u;
+			rad += wobble * (sinf(ang * 1.35f) * 0.55f + sinf(ang * 2.6f + phase) * 0.35f);
+			polar(ang, rad, aspectX, aspectZ);
+		}
+	};
+	if (shape == 1) {
+		// 四角い渦。内側から一辺ずつ伸ばす。
+		int leg = max(4, (int)lroundf(radIn * 1.3f));
+		int limit = max(leg + 4, (int)lroundf(radOut * 2.f));
+		int x = cx, z = cz, dir = (int)(r.Next() & 3u);
+		static const int kdx[4] = { 1, 0, -1, 0 }, kdz[4] = { 0, 1, 0, -1 };
+		int grow = 1 + tier / 8;
+		int sides = turns * 4 + 2;
+		for (int s = 0; s < sides && leg <= limit; s++) {
+			for (int k = 0; k < leg; k++) {
+				x += kdx[dir];
+				z += kdz[dir];
+				pushStep(x, z);
+				x = curX;
+				z = curZ;
+			}
+			dir = (dir + 1) & 3;
+			if (s & 1) leg += grow * 2;
+		}
+	} else if (shape == 2 || shape == 3) {
+		// 2 三角、3 菱形。頂点を結ぶので辺は直線になる。
+		int sides = (shape == 2) ? 3 : 4;
+		float spin = (shape == 3) ? (ph0 + 0.78539816f) : ph0;
+		int nV = turns * sides;
+		if (nV < sides) nV = sides;
+		for (int i = 0; i <= nV; i++) {
+			float u = (float)i / (float)nV;
+			float ang = spin + (float)i * (TAU / (float)sides);
+			float rad = radIn + (radOut - radIn) * u;
+			polar(ang, rad, 1.f, 1.f);
+		}
+	} else if (shape == 4) {
+		coil(radIn, radOut, ph0, 1.55f, 0.58f, turns * 36, radOut * 0.04f);
+	} else if (shape == 5) {
+		coil(radIn, radOut, ph0, 1.f, 1.f, turns * 32, radOut * (0.04f + tf * 0.08f));
+		coil(radIn * 0.7f, radOut * 0.68f, ph0 + 2.2f, 1.f, 1.f, turns * 28, radOut * 0.03f);
+	} else if (shape == 6) {
+		int pts = turns * 40;
+		for (int i = 0; i <= pts; i++) {
+			float u = (float)i / (float)pts;
+			float ang = ph0 + u * (float)turns * TAU;
+			float s = sinf(ang), c = cosf(ang);
+			float rad = radIn + (radOut - radIn) * (0.4f + 0.6f * fabsf(s));
+			pushStep((int)lroundf((float)cx + s * rad), (int)lroundf((float)cz + s * c * rad * 0.9f));
+		}
+	} else if (shape == 7) {
+		int nV = turns * 5;
+		if (nV < 5) nV = 5;
+		for (int k = 0; k <= nV; k++) {
+			float u = (float)k / (float)nV;
+			float ang = ph0 + (float)(k * 2) * (TAU / 5.f);
+			float rad = radIn + (radOut - radIn) * u;
+			polar(ang, rad, 1.f, 1.f);
+		}
+	} else if (shape == 8) {
+		int rows = 3 + tier / 2;
+		if (rows > 12) rows = 12;
+		int halfW = max(4, (int)lroundf(radOut));
+		int z0 = cz - ((rows - 1) * 3) / 2;
+		for (int row = 0; row < rows; row++) {
+			int z = z0 + row * 3;
+			int xA = (row & 1) ? cx + halfW : cx - halfW;
+			int xB = (row & 1) ? cx - halfW : cx + halfW;
+			pushStep(xA, z);
+			pushStep(xB, z);
+		}
+		if (tier >= 10) {
+			int cols = 3 + (tier - 10) / 3;
+			if (cols > 6) cols = 6;
+			int halfH = max(4, rows * 3 / 2);
+			int x0 = cx - ((cols - 1) * 3) / 2;
+			for (int col = 0; col < cols; col++) {
+				int x = x0 + col * 3;
+				int zA = (col & 1) ? cz + halfH : cz - halfH;
+				int zB = (col & 1) ? cz - halfH : cz + halfH;
+				pushStep(x, zA);
+				pushStep(x, zB);
+			}
+		}
+	} else if (shape == 9) {
+		int nWp = 5 + tier / 2;
+		if (nWp > 16) nWp = 16;
+		float ang = ph0;
+		for (int w = 0; w < nWp; w++) {
+			ang += 2.35f + r.F(-0.45f, 0.45f);
+			float rad = (w % 3 == 1) ? radIn * r.F(0.85f, 1.25f) : radOut * r.F(0.72f, 1.f);
+			int wx = (int)lroundf((float)cx + cosf(ang) * rad);
+			int wz = (int)lroundf((float)cz + sinf(ang) * rad);
+			int mx = (curX + wx) / 2 + r.Range(-2, 2);
+			int mz = (curZ + wz) / 2 + r.Range(-2, 2);
+			pushStep(mx, mz);
+			pushStep(wx, wz);
+		}
+	} else {
+		float wob = radOut * (0.05f + tf * 0.12f);
+		float oxs = 0.4f + tf * 2.0f;
+		int pts = turns * (30 + tier / 3);
+		for (int i = 0; i <= pts; i++) {
+			float u = (float)i / (float)pts;
+			float ang = ph0 + dirA * u * (float)turns * TAU;
+			float ox = oxs * cosf(ang * 0.47f + ph0);
+			float oz = oxs * sinf(ang * 0.53f + ph0);
+			float rad = radIn + (radOut - radIn) * u + wob * sinf(ang * 1.35f);
 			int tx = (int)lroundf((float)cx + ox + cosf(ang) * rad);
 			int tz = (int)lroundf((float)cz + oz + sinf(ang) * rad);
 			pushStep(tx, tz);
 		}
-	} else {
-		// 時間の迷宮（時空の狭間）：ジグザグ・8の字・星型に何度も交差しながら上下するヘンテコな立体迷宮
-		const int nWp = 13 + (int)(r.Next() % 4);
-		float ang = r.F(0.f, 6.2831853f);
-		for (int w = 0; w < nWp; w++) {
-			// 対角側へジグザグに飛びつつ中央付近を何度も横切る
-			ang += 2.35f + r.F(-0.55f, 0.55f);
-			float rad = (w % 3 == 1) ? r.F(5.f, 12.f) : r.F(15.f, 24.f);
-			int wx = (int)lroundf((float)cx + cosf(ang) * rad);
-			int wz = (int)lroundf((float)cz + sinf(ang) * rad);
-			int mx = (curX + wx) / 2 + r.Range(-4, 4);
-			int mz = (curZ + wz) / 2 + r.Range(-4, 4);
-			pushStep(mx, mz);
-			pushStep(wx, wz);
+	}
+	if (ns < 24) {
+		for (int i = 0; i <= 32; i++) {
+			float a = ph0 + dirA * (float)i / 32.f * TAU;
+			polar(a, radOut, 1.f, 1.f);
 		}
 	}
 
@@ -1437,22 +1543,24 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 	// 0〜999 レイヤー空間の高さを軌道へ割り当てる（1歩あたり最大±2段なので徒歩で全域を登り降り可能）。
 	// ぐるぐる登り降り・ジグザグ高低差を付け、最大 999 レイヤーまで到達させる。
 	{
-		float hCur = climbUp ? 12.f : 960.f;
+		float hCur = climbUp ? 12.f : (float)hTop;
 		const float dirSign = climbUp ? 1.f : -1.f;
+		const float waveAmp = 0.2f + tf * 0.65f;
+		const float wave2 = 0.08f + tf * 0.24f;
 		for (int i = 0; i < ns; i++) {
 			float u = (float)i / (float)max(1, ns - 1);
-			// ベースは 0〜999 空間を大きく縦断しつつ、途中でジグザグに登ったり降りたりする波を重ねる
-			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * 0.85f
-				+ 0.32f * sinf(u * 19.7f + (float)style);
-			float delta = dirSign * 1.45f + wave;
+			// 小さい軌道はゆるく登る。大きい軌道だけ 0〜999 を縦断し、途中で折り返す。
+			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * waveAmp
+				+ wave2 * sinf(u * 19.7f + (float)shape);
+			float delta = dirSign * (0.6f + tf * 0.85f) + wave;
 			// 1歩は最大1段。2段を超える上書きが、選択できない切れ目になる。
 			delta = Clampf(delta, -1.f, 1.f);
-			if (i > 0) hCur = Clampf(hCur + delta, 2.f, (float)MAXH_SPIRAL);
-			int hi = Clampi((int)lroundf(hCur), 2, MAXH_SPIRAL);
+			if (i > 0) hCur = Clampf(hCur + delta, 2.f, (float)hTop);
+			int hi = Clampi((int)lroundf(hCur), 2, hTop);
 			if (i > 0) {
 				int prev = (int)sh[i - 1];
 				hi = Clampi(hi, prev - 1, prev + 1);
-				hi = Clampi(hi, 2, MAXH_SPIRAL);
+				hi = Clampi(hi, 2, hTop);
 			}
 			sh[i] = (short)hi;
 		}
@@ -1471,18 +1579,18 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 				for (int k = k0; k <= i; k++) {
 					int prev = (int)sh[k - 1];
 					sh[k] = (short)Clampi((int)sh[k] + dir, prev - 1, prev + 1);
-					sh[k] = (short)Clampi((int)sh[k], 2, MAXH_SPIRAL);
+					sh[k] = (short)Clampi((int)sh[k], 2, hTop);
 				}
 				for (int k = i + 1; k < ns; k++) {
 					int prev = (int)sh[k - 1];
 					sh[k] = (short)Clampi((int)sh[k], prev - 1, prev + 1);
-					sh[k] = (short)Clampi((int)sh[k], 2, MAXH_SPIRAL);
+					sh[k] = (short)Clampi((int)sh[k], 2, hTop);
 				}
 			}
 		}
 	}
 
-	// 幅は 2〜4。1マス道は置かない。途中で太さが変わる。
+	// 幅は 2〜5。1マス道は置かない。細い区間も、5マスの足場も残す。
 	struct VSlot { short h; short pass; BYTE t; };
 	static VSlot vgrid[MAPN][MAPN][LAY_N];
 	static BYTE vcnt[MAPN][MAPN];
@@ -1494,12 +1602,23 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		int w = 3, plaza = -1, lane = -1;
 		for (int i = 0; i < ns; i++) {
 			if (i < 8 || i > ns - 9) w = 3;
-			else if (i <= plaza) w = 4;
+			else if (i <= plaza) w = 5;
 			else if (i <= lane) w = 2;
-			else if (r.Chance(8)) { plaza = i + r.Range(6, 14); w = 4; }
+			else if (r.Chance(12)) { plaza = i + r.Range(5, 12); w = 5; }
 			else if (r.Chance(14)) { lane = i + r.Range(8, 16); w = 2; }
-			else if (r.Chance(18)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 2, 4);
+			else if (r.Chance(18)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 2, 5);
+			if (w < 2) w = 2;
+			if (w > 5) w = 5;
 			spineW[i] = (BYTE)w;
+		}
+		{
+			int has5 = 0;
+			for (int i = 0; i < ns; i++) if (spineW[i] >= 5) has5 = 1;
+			if (!has5 && ns > 20) {
+				int a = ns / 3;
+				if (a < 8) a = 8;
+				for (int i = a; i < a + 6 && i < ns - 6; i++) spineW[i] = 5;
+			}
 		}
 	}
 	auto walkT = [&](int i) -> BYTE {
@@ -1559,7 +1678,7 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		if (perpz) perpz = perpz > 0 ? 1 : -1;
 		int w = (int)spineW[i];
 		if (w < 2) w = 2;
-		if (w > 4) w = 4;
+		if (w > 5) w = 5;
 		putVSlot(gx, gz, h, i, walkT(i), true);
 		if (w >= 2 && (perpx || perpz))
 			putVSlot(gx + perpx, gz + perpz, h, i, edgeT(i), false);
@@ -1567,6 +1686,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			putVSlot(gx - perpx, gz - perpz, h, i, edgeT(i + 3), false);
 		if (w >= 4 && (perpx || perpz))
 			putVSlot(gx + perpx * 2, gz + perpz * 2, h, i, edgeT(i + 9), false);
+		if (w >= 5 && (perpx || perpz))
+			putVSlot(gx - perpx * 2, gz - perpz * 2, h, i, edgeT(i + 11), false);
 	}
 
 	// スタートとボス地点は足場を少し広げる。穴を残して正方形にはしない。
@@ -1574,23 +1695,34 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 	for (int e = 0; e < 2; e++) {
 		int idx = ends[e];
 		int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
-		int rad = r.Range(2, 3);
+		int rad = tier < 8 ? 2 : r.Range(2, 3);
 		for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
 			if (abs(dx) + abs(dz) > rad + 1) continue;
 			if ((dx || dz) && r.Chance(18)) continue;
 			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
 		}
 	}
+	// 道幅は 2〜5。そのうち 1 か所は、5x5 の敵がそのまま立つ同じ高さの床。
+	if (ns > 16) {
+		int idx = ns / 3;
+		if (idx < 8) idx = 8;
+		if (idx > ns - 8) idx = ns / 2;
+		int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
+		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
+			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
+	}
 
-	// 本線とは別に、半径をずらした螺旋を 2 本足す。交差は段を離し、坂で届くところだけ幅 2 で結ぶ。
+	// 大きい軌道だけ、半径をずらした環を 1〜2 本足す。交差は段を離し、坂で届くところだけ結ぶ。
 	{
 		enum { MAXP = 1400 };
 		static short bx[2][MAXP], bz[2][MAXP], bh[2][MAXP];
 		int bn[2] = { 0, 0 };
 		float phase = r.F(0.f, 6.2831853f);
-		int turnsUse = 3 + (int)(r.Next() % 2);
-		const float radBase[2] = { 17.2f, 23.6f };
-		for (int ri = 0; ri < 2; ri++) {
+		int turnsUse = turns;
+		float radBase[2] = { radOut * 0.78f, radOut * 1.02f };
+		if (radBase[1] > 26.f) radBase[1] = 26.f;
+		const int liftMax = 6 + (tier * 8) / 19;
+		for (int ri = 0; ri < nRing; ri++) {
 			int curX = cx, curZ = cz, n = 0;
 			auto push = [&](int tx, int tz) {
 				tx = Clampi(tx, 4, MAPN - 5);
@@ -1630,15 +1762,15 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 					float u = (float)i / (float)max(1, n - 1);
 					int j = Clampi((int)(u * (float)(ns - 1)), 0, ns - 1);
 					int lift = 0;
-					if (ri == 1) {
-						if (u > 0.14f && u < 0.8f) lift = 14;
-						else if (u > 0.08f && u <= 0.14f) lift = (int)((u - 0.08f) / 0.06f * 14.f);
-						else if (u >= 0.8f && u < 0.9f) lift = (int)((0.9f - u) / 0.1f * 14.f);
+					if (ri == 1 || nRing == 1) {
+						if (u > 0.14f && u < 0.8f) lift = liftMax;
+						else if (u > 0.08f && u <= 0.14f) lift = (int)((u - 0.08f) / 0.06f * (float)liftMax);
+						else if (u >= 0.8f && u < 0.9f) lift = (int)((0.9f - u) / 0.1f * (float)liftMax);
 					}
 					int want = (int)sh[j] + (climbUp ? lift : -lift);
 					if (want > h + 1) want = h + 1;
 					if (want < h - 1) want = h - 1;
-					h = Clampi(want, 2, MAXH_SPIRAL);
+					h = Clampi(want, 2, hTop);
 				}
 				bh[ri][i] = (short)h;
 			}
@@ -1646,7 +1778,7 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		auto stampWide = [&](const short* xs, const short* zs, const short* hs, int n, int pass0) {
 			int w = 3, left = 0;
 			for (int i = 0; i < n; i++) {
-				if (left <= 0) { w = 2 + (int)(r.Next() % 3); left = 8 + (int)(r.Next() % 10); }
+				if (left <= 0) { w = 2 + (int)(r.Next() % 4); left = 8 + (int)(r.Next() % 10); }
 				left--;
 				if (i < 6 || i > n - 7) w = 3;
 				int gx = (int)xs[i], gz = (int)zs[i], hh = (int)hs[i];
@@ -1661,6 +1793,7 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 					putVSlot(gx + perpx, gz + perpz, hh, pass, roadT, false);
 					if (w >= 3) putVSlot(gx - perpx, gz - perpz, hh, pass, roadT, false);
 					if (w >= 4) putVSlot(gx + perpx * 2, gz + perpz * 2, hh, pass, roadT, false);
+					if (w >= 5) putVSlot(gx - perpx * 2, gz - perpz * 2, hh, pass, roadT, false);
 				}
 			}
 		};
@@ -1668,7 +1801,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		if (bn[1] >= 16) stampWide(bx[1], bz[1], bh[1], bn[1], 80000);
 		auto bridge = [&](const short* x0, const short* z0, const short* h0, int n0,
 			const short* x1, const short* z1, const short* h1, int n1) {
-			for (int i = 20; i < n0 - 20; i += 36) {
+			int step = tier >= 16 ? 28 : 48;
+			for (int i = 20; i < n0 - 20; i += step) {
 				int best = -1, bestD = 99;
 				for (int j = 0; j < n1; j++) {
 					int d = abs((int)x0[i] - (int)x1[j]) + abs((int)z0[i] - (int)z1[j]);
@@ -1691,8 +1825,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 				}
 			}
 		};
-		if (bn[0] >= 16) bridge(sx, sz, sh, ns, bx[0], bz[0], bh[0], bn[0]);
-		if (bn[0] >= 16 && bn[1] >= 16) bridge(bx[0], bz[0], bh[0], bn[0], bx[1], bz[1], bh[1], bn[1]);
+		if (tier >= 12 && bn[0] >= 16) bridge(sx, sz, sh, ns, bx[0], bz[0], bh[0], bn[0]);
+		if (tier >= 12 && bn[0] >= 16 && bn[1] >= 16) bridge(bx[0], bz[0], bh[0], bn[0], bx[1], bz[1], bh[1], bn[1]);
 	}
 
 	// 各セルで高さを昇順に並べ、同時デッキへ書き込む
@@ -1727,7 +1861,7 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 
 	pax = (int)sx[0]; paz = (int)sz[0];
 	endX = (int)sx[ns - 1]; endZ = (int)sz[ns - 1];
-	return Clampi(ns / 10, 26, 48);
+	return Clampi(ns / 8, 16 + tier / 4, 28 + tier);
 }
 
 // 幅3の螺旋。腕のあいだは空白なので、飛び越えて近道できない。
@@ -3322,11 +3456,16 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 
 int MapIsSpiral(const Map& m)
 {
+	// 2〜3層の橋・洞窟・空中歩廊は通常マップ。螺旋は 4 層以上の重なりか、丘の高さを大きく超える軌道。
+	int maxLay = 1, above = 0;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		if ((int)m.c[z][x].h > MAXH) return 1;
-		int n = CellLayN(m.c[z][x]);
-		if (n >= 2 && abs(LayerHt(m.c[z][x], n - 1) - LayerHt(m.c[z][x], 0)) > 8) return 1;
+		const Cell& c = m.c[z][x];
+		int n = CellLayN(c);
+		if (n > maxLay) maxLay = n;
+		for (int L = 0; L < n; L++) if (LayerHt(c, L) > 28) above++;
 	}
+	if (maxLay >= 4) return 1;
+	if (above >= 20) return 1;
 	return 0;
 }
 
@@ -4781,22 +4920,23 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learn
 
 // ============================================================ 進化
 struct EvoRow { int from; EvoOption o[4]; };
+// 1次は同じ系統の2次だけ。3次以降もその系統の次の段だけ。11次で隣と対になるのはカタログ側。
 static const EvoRow kEvo[] = {
-	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_SKYKNIGHT, -1 }, { C_HERO, -1 }, { -1, -1 } } },
-	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_GLADIATOR, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
-	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_PHANTOM, -1 }, { C_JOB0 + 29, -1 }, { -1, -1 } } },
-	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SHADOW, -1 }, { C_JOB0 + 36, -1 }, { -1, -1 } } },
-	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_BISHOP, -1 } } },
-	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_SAINT, -1 }, { C_WIZARD, -1 }, { -1, -1 } } },
+	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_SKYKNIGHT, -1 }, { -1, -1 }, { -1, -1 } } },
+	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } } },
+	{ C_ARCHER,     { { C_SNIPER, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } } },
+	{ C_THIEF,      { { C_ASSASSIN, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } } },
+	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { -1, -1 }, { -1, -1 } } },
+	{ C_CLERIC,     { { C_BISHOP, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } } },
 	{ C_PALADIN,    { { C_HERO, -1 }, { C_JOB0 + 23, -1 }, { C_JOB0 + 37, -1 }, { -1, -1 } } },
 	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_DRAGONLORD, -1 }, { C_JOB0 + 25, -1 }, { -1, -1 } } },
-	{ C_RUNEKNIGHT, { { C_ARCHMAGE, -1 }, { C_ARCHALCHEMIST, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
+	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_JOB0 + 23, -1 }, { C_JOB0 + 37, -1 }, { -1, -1 } } },
 	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_JOB0 + 29, -1 }, { C_JOB0 + 30, -1 }, { -1, -1 } } },
 	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_JOB0 + 36, -1 }, { C_JOB0 + 39, -1 }, { -1, -1 } } },
 	{ C_SKYKNIGHT,  { { C_HERO, -1 }, { C_JOB0 + 23, -1 }, { C_JOB0 + 37, -1 }, { -1, -1 } } },
-	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_ARCHALCHEMIST, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
+	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 }, { -1, -1 } } },
 	{ C_BISHOP,     { { C_SAINT, -1 }, { C_JOB0 + 26, -1 }, { C_JOB0 + 72, -1 }, { -1, -1 } } },
-	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_JOB0 + 13, -1 }, { -1, -1 } } },
+	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } } },
 };
 
 static int LegacyLine(int cls)
@@ -5420,6 +5560,7 @@ static float ClassicFoot(int look)
 }
 static int SpanFromHalf(float half)
 {
+	if (half > 4.05f) return 5;
 	if (half > 3.15f) return 4;
 	if (half > 2.15f) return 3;
 	if (half > 1.05f) return 2;
@@ -5664,13 +5805,13 @@ static void SeedUnitSteps(const Unit& u, const Map& m, int* sx, int* sz, int* sL
 
 void FillWalkSteps(const Battle& b, int fromUi)
 {
-	int sx[16], sz[16], sL[16], n = 0;
+	int sx[32], sz[32], sL[32], n = 0;
 	if (fromUi < 0 || fromUi >= b.nUnits || !b.u[fromUi].alive) {
 		FloodWalk(b, MV_FOOT, -1, sx, sz, sL, 0);
 		return;
 	}
 	const Unit& u = b.u[fromUi];
-	SeedUnitSteps(u, b.map, sx, sz, sL, n, 16);
+	SeedUnitSteps(u, b.map, sx, sz, sL, n, 32);
 	FloodWalk(b, UnitMoveType(u), -1, sx, sz, sL, n);
 }
 
@@ -5775,6 +5916,56 @@ static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, in
 	// 徒歩は隣の層まで、飛行は2層まで。高さが離れすぎる立体交差の別アームへは飛ばない。
 	if (dl <= hop && dh <= rise * hop) return 1;
 	return 0;
+}
+
+// 索敵は、この敵が今いる床から一歩で踏めるマスだけを数える。層番号が近い別の床へは渡さない。
+static void FillNoticeSteps(const Battle& b, int ei, int limit)
+{
+	for (int L = 0; L < LAY_N; L++)
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) g_stepDist[L][z][x] = 30000;
+	memset(g_laySeen, 0, sizeof(g_laySeen));
+	if (ei < 0 || ei >= b.nUnits || !b.u[ei].alive || limit < 0) return;
+	const Unit& u = b.u[ei];
+	if (!Map::In(u.x, u.z)) return;
+	int mt = UnitMoveType(u);
+	int rise = StepRise(mt);
+	int L0 = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+	int sp = UnitSpan(u);
+	int qh = 0, qt = 0;
+	for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
+		int x = u.x + dx, z = u.z + dz;
+		if (!Map::In(x, z) || !LayerOn(b.map.At(x, z), L0) || g_laySeen[L0][z][x]) continue;
+		g_laySeen[L0][z][x] = 1;
+		g_stepDist[L0][z][x] = 0;
+		if (qt < LAY_Q) { g_layQx[qt] = x; g_layQz[qt] = z; g_layQL[qt] = L0; qt++; }
+	}
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
+		int c0 = g_stepDist[L][z][x];
+		if (c0 >= limit) continue;
+		const Cell& f = b.map.At(x, z);
+		if (!LayerOn(f, L)) continue;
+		int h = LayerHt(f, L);
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			const Cell& t = b.map.At(nx, nz);
+			int nL = CellLayN(t);
+			int dest = -1, best = 99999;
+			for (int NL = 0; NL < nL; NL++) {
+				if (!LayerOpen(t, NL, mt)) continue;
+				int dh = abs(LayerHt(t, NL) - h);
+				if (dh > rise) continue;
+				int score = dh * 10 + (NL == L ? 0 : 1);
+				if (score < best) { best = score; dest = NL; }
+			}
+			if (dest < 0 || g_laySeen[dest][nz][nx]) continue;
+			g_laySeen[dest][nz][nx] = 1;
+			g_stepDist[dest][nz][nx] = (short)(c0 + 1);
+			if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = dest; qt++; }
+		}
+	}
 }
 
 static int ChooseLayer(const Cell& from, int fromLayer, const Cell& to, int jump, int moveType)
@@ -7242,6 +7433,8 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 	return n;
 }
 
+static int StageEnemyLevel(int stage);
+
 int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 {
 	if (stage < 1) stage = 1;
@@ -7260,6 +7453,31 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 	if (d.boss) e *= 1.25;
 	// ラッキー☆の×3は AwardExp / Preview 側で明示適用（ここだと見積と実付与の差が分かりにくい）。
 	if (e < 1.0) return 1;
+	if (e > 2000000000.0) return 2000000000;
+	return (int)(e + 0.5);
+}
+
+// 回復の経験。基礎は従来の2倍。治した割合が大きいほど、そのステージの敵を叩いた1撃に近づく。
+// 満タンへの回復は 12 のまま。見積もりと実付与は同じ式。
+int ExpForHeal(const Unit& a, const Unit& d, int healed, int stage)
+{
+	if (stage < 1) stage = 1;
+	if (healed <= 0) return 12;
+	int hp = d.ch.stat[S_HP];
+	if (hp < 1) hp = 1;
+	double frac = (double)healed / (double)hp;
+	if (frac > 1.0) frac = 1.0;
+	int base = ExpForAction(a, d, healed, stage);
+	base = base * 3;
+	if (base < 42) base = 42;
+	int fightLv = StageEnemyLevel(stage);
+	if (d.ch.lv > fightLv) fightLv = d.ch.lv;
+	Unit ref = d;
+	ref.ch.lv = fightLv;
+	int fight = ExpForAction(a, ref, healed, stage) / 2;
+	if (fight < 1) fight = 1;
+	double e = (double)base;
+	if (fight > base) e += (double)(fight - base) * frac;
 	if (e > 2000000000.0) return 2000000000;
 	return (int)(e + 0.5);
 }
@@ -7956,6 +8174,48 @@ static int BossMonster(int stage, Rng& r)
 	return PickClassic(stage, r);
 }
 
+// その大きさの別の敵。近いレベル帯を先に使い、いなければ同じステージに出るもの。
+static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
+{
+	EnsureMonsters();
+	if (span < 1 || span > 5) return -1;
+	static int cacheKey = -999999;
+	static int pool[6][160];
+	static int pn[6];
+	int key = stage * 2 + (boss ? 1 : 0);
+	if (cacheKey != key) {
+		cacheKey = key;
+		for (int s = 0; s < 6; s++) pn[s] = 0;
+		int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+		int hiId = M_COUNT + nImp;
+		for (int pass = 0; pass < 2; pass++) {
+			int band = pass == 0 ? 48 : 0;
+			for (int id = 0; id < hiId; id++) {
+				if (id >= M_COUNT) {
+					int model = id - M_COUNT;
+					const wchar_t* nm = kImportName[model];
+					if (!nm || wcsncmp(nm, L"Sum", 3) == 0) continue;
+					if (ImportPool(nm) == POOL_HUM) continue;
+				}
+				const MonsterDef& md = MonsterInfo(id);
+				if (md.weight <= 0) continue;
+				int s = MonsterSpan(md, boss ? 1 : 0);
+				if (s < 1 || s > 5) continue;
+				if (pass == 1 && pn[s] > 0) continue;
+				int lo = MonsterFirstStage(id);
+				if (lo > stage) continue;
+				int top = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
+				if (stage > top) continue;
+				if (band > 0 && stage - lo > band) continue;
+				if (pn[s] >= 160) continue;
+				pool[s][pn[s]++] = id;
+			}
+		}
+	}
+	if (pn[span] <= 0) return -1;
+	return pool[span][r.Range(0, pn[span] - 1)];
+}
+
 static int OpenWidth(const Map& m, int x, int z)
 {
 	if (!Map::In(x, z) || !FootPassable(m.At(x, z).t)) return 0;
@@ -7964,6 +8224,25 @@ static int OpenWidth(const Map& m, int x, int z)
 	for (int i = 1; Map::In(x + i, z) && FootPassable(m.At(x + i, z).t); i++) wx++;
 	for (int i = 1; Map::In(x, z - i) && FootPassable(m.At(x, z - i).t); i++) wz++;
 	for (int i = 1; Map::In(x, z + i) && FootPassable(m.At(x, z + i).t); i++) wz++;
+	return wx < wz ? wx : wz;
+}
+
+static int LayerOpenWidth(const Map& m, int x, int z, int layer)
+{
+	auto ok = [&](int cx, int cz) -> int {
+		if (!Map::In(cx, cz)) return 0;
+		const Cell& c = m.At(cx, cz);
+		if (!LayerOn(c, layer)) return 0;
+		int tr = LayerTr(c, layer);
+		if (tr == T_VOID || tr == T_CHASM) return 0;
+		return TerrainInfo(tr).costFoot < 99;
+	};
+	if (!ok(x, z)) return 0;
+	int wx = 1, wz = 1;
+	for (int i = 1; ok(x - i, z); i++) wx++;
+	for (int i = 1; ok(x + i, z); i++) wx++;
+	for (int i = 1; ok(x, z - i); i++) wz++;
+	for (int i = 1; ok(x, z + i); i++) wz++;
 	return wx < wz ? wx : wz;
 }
 
@@ -7986,7 +8265,7 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 	int jp = max(1, UnitJump(u));
 	int dL = u.deck;
 	if (dL < 0 || dL >= LAY_N) dL = 0;
-	int hmin = 99999, hmax = -99999;
+	int hmin = 99999, hmax = -99999, room = 99;
 	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
 		int x = ax + dx, z = az + dz;
 		if (!Map::In(x, z)) return false;
@@ -8002,10 +8281,14 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 			int h = LayerHt(c, useL);
 			if (h < hmin) hmin = h;
 			if (h > hmax) hmax = h;
+			if (s > 1) {
+				int w = LayerOpenWidth(b.map, x, z, useL);
+				if (w < room) room = w;
+			}
 		}
 	}
 	if (mt != MV_FLY && hmax - hmin > jp) return false;
-	if (s > 1 && mt != MV_FLY && FootRoom(b.map, ax, az, s) < s) return false;
+	if (s > 1 && mt != MV_FLY && room < s) return false;
 	return true;
 }
 
@@ -8185,6 +8468,78 @@ static void RescueStuckFeet(Battle& b)
 	}
 }
 
+// 同じ層番号の span×span が、一段以内の歩行床で空いている。
+static bool DeckSpanOpen(const Battle& b, int x, int z, int layer, int span)
+{
+	if (span < 1 || span > 5 || layer < 0 || layer >= LAY_N) return false;
+	int hmin = 99999, hmax = -99999;
+	for (int dz = 0; dz < span; dz++) for (int dx = 0; dx < span; dx++) {
+		int cx = x + dx, cz = z + dz;
+		if (!Map::In(cx, cz)) return false;
+		const Cell& c = b.map.At(cx, cz);
+		if (!LayerOn(c, layer)) return false;
+		int tr = LayerTr(c, layer);
+		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) return false;
+		if (b.UnitAt(cx, cz, layer) >= 0) return false;
+		int h = LayerHt(c, layer);
+		if (h < hmin) hmin = h;
+		if (h > hmax) hmax = h;
+	}
+	return hmax - hmin <= 2;
+}
+
+// 拠点マスを含むように、原点をずらして span が収まるか。
+static int FitSpanAt(const Battle& b, int gx, int gz, int layer, int span, int* outX, int* outZ)
+{
+	for (int oz = 0; oz < span; oz++) for (int ox = 0; ox < span; ox++) {
+		int x = gx - ox, z = gz - oz;
+		if (!DeckSpanOpen(b, x, z, layer, span)) continue;
+		if (outX) *outX = x;
+		if (outZ) *outZ = z;
+		return 1;
+	}
+	return 0;
+}
+
+// 同じ床（高さ差 2 以内）を、拠点から近い順に並べる。
+static int RibbonCells(const Battle& b, int ax, int az, int aLayer, int* xs, int* zs, int* ls, int cap)
+{
+	if (cap < 1 || !Map::In(ax, az)) return 0;
+	if (aLayer < 0 || aLayer >= LAY_N) aLayer = 0;
+	memset(g_laySeen, 0, sizeof(g_laySeen));
+	int qh = 0, qt = 0, n = 0;
+	xs[n] = ax; zs[n] = az; ls[n] = aLayer; n++;
+	g_laySeen[aLayer][az][ax] = 1;
+	if (qt < LAY_Q) { g_layQx[qt] = ax; g_layQz[qt] = az; g_layQL[qt] = aLayer; qt++; }
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt && n < cap) {
+		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
+		if (!Map::In(x, z) || !LayerOn(b.map.At(x, z), L)) continue;
+		int h = LayerHt(b.map.At(x, z), L);
+		for (int k = 0; k < 4 && n < cap; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			const Cell& t = b.map.At(nx, nz);
+			int nL = CellLayN(t);
+			int dest = -1, best = 99999;
+			for (int NL = 0; NL < nL; NL++) {
+				if (g_laySeen[NL][nz][nx]) continue;
+				int tr = LayerTr(t, NL);
+				if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+				int dh = abs(LayerHt(t, NL) - h);
+				if (dh > 2) continue;
+				int score = dh * 10 + (NL == L ? 0 : 1);
+				if (score < best) { best = score; dest = NL; }
+			}
+			if (dest < 0) continue;
+			g_laySeen[dest][nz][nx] = 1;
+			xs[n] = nx; zs[n] = nz; ls[n] = dest; n++;
+			if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = dest; qt++; }
+		}
+	}
+	return n;
+}
+
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
@@ -8362,52 +8717,70 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.sweep = kind;
 	int baseLv = StageEnemyLevel(stage);
-	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
-		const MapGroup& grp = b.map.grp[g];
-		int mon = grp.boss ? BossMonster(stage, r) : PickMonster(stage, r);
-		for (int k = 0; k < grp.n && n < MAX_UNITS; k++) {
+	int walkFrom = -1;
+	for (int i = 0; i < n; i++) if (b.u[i].alive && b.u[i].team == TEAM_PLAYER) { walkFrom = i; break; }
+	if (walkFrom >= 0) FillWalkSteps(b, walkFrom);
+	auto standLayer = [&](int x, int z) -> int {
+		if (!Map::In(x, z)) return 0;
+		const Cell& c = b.map.At(x, z);
+		int nL = CellLayN(c);
+		int best = -1, bestD = 30000;
+		for (int L = 0; L < nL; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+			int d = walkFrom >= 0 ? WalkStepsAt(x, z, L) : 0;
+			if (d < 0) d = 30000;
+			if (d < bestD) { bestD = d; best = L; }
+		}
+		if (best >= 0 && bestD < 30000) return best;
+		best = 0;
+		int bestH = -1;
+		for (int L = 0; L < nL; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+			int h = LayerHt(c, L);
+			if (h > bestH) { bestH = h; best = L; }
+		}
+		return best;
+	};
+	auto placeSized = [&](int gx, int gz, int layer, int lv, int boss, int grp) -> int {
+		for (int span = 5; span >= 1; span--) {
+			int px = gx, pz = gz;
+			if (!FitSpanAt(b, gx, gz, layer, span, &px, &pz)) continue;
+			int id = PickMonsterOfSpan(stage, span, boss, r);
+			if (id < 0) continue;
 			Unit& u = b.u[n];
-			bool boss = grp.boss && k == 0;
-			int lv = baseLv + r.Range(-1, 1) + (boss ? 3 : 0) + (grp.boss ? 1 : 0);
-			if (stage <= 2) lv = max(1, lv - 1);
-			int use = k == 0 ? mon : PickMonster(stage, r);
-			int room = OpenWidth(b.map, grp.x[k], grp.z[k]);
-			if (room < 2) {
-				int slim = -1;
-				for (int t = 0; t < 10; t++) {
-					int id = PickMonster(stage, r);
-					if (MonsterSpan(MonsterInfo(id), 0) <= 1) { slim = id; break; }
-				}
-				if (slim < 0) slim = PickClassic(stage, r);
-				if (!boss) use = slim;
-			}
-			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
-			if (UnitSpan(u) > 1 && room < 2 && !boss) u.span = 1;
+			MakeEnemy(u, id, lv, boss, r);
 			u.face = faceToE + 3.14159f;
 			u.ct = r.Range(80, 480) + UnitStat(u, S_AGI) * 6;
 			u.hpShow = (float)u.hp;
-			u.grp = g;
+			u.grp = grp;
 			u.alert = 0;
-			if (!PlaceFoot(b, n, grp.x[k], grp.z[k])) {
-				if (!boss && k > 0) continue;
-				int s = max(1, UnitSpan(u));
-				int gx = Clampi((int)grp.x[k], 1, MAPN - s - 1);
-				int gz = Clampi((int)grp.z[k], 1, MAPN - s - 1);
-				u.x = gx;
-				u.z = gz;
-				n++;
-				b.nUnits = n;
-				b.RebuildOcc();
-				if (!RelocateWide(b, n - 1)) {
-					u.span = 1;
-					if (!PlaceFoot(b, n - 1, gx, gz)) { u.x = gx; u.z = gz; }
-				}
-				b.RebuildOcc();
-				continue;
-			}
+			u.x = px;
+			u.z = pz;
+			u.deck = layer;
 			n++;
 			b.nUnits = n;
 			b.RebuildOcc();
+			return 1;
+		}
+		return 0;
+	};
+	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
+		const MapGroup& grp = b.map.grp[g];
+		for (int k = 0; k < grp.n && n < MAX_UNITS; k++) {
+			int boss = (grp.boss && k == 0) ? 1 : 0;
+			int lv = baseLv + r.Range(-1, 1) + (boss ? 3 : 0) + (grp.boss ? 1 : 0);
+			if (stage <= 2) lv = max(1, lv - 1);
+			int gx = grp.x[k], gz = grp.z[k];
+			int aL = standLayer(gx, gz);
+			if (placeSized(gx, gz, aL, lv, boss, g)) continue;
+			enum { RIB_CAP = 2048 };
+			static int rx[RIB_CAP], rz[RIB_CAP], rL[RIB_CAP];
+			int nc = RibbonCells(b, gx, gz, aL, rx, rz, rL, RIB_CAP);
+			for (int ci = 1; ci < nc && n < MAX_UNITS; ci++) {
+				if (placeSized(rx[ci], rz[ci], rL[ci], lv, boss, g)) break;
+			}
 		}
 	}
 	b.nUnits = n;
@@ -8582,7 +8955,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (!u.alive || u.team != TEAM_ENEMY) continue;
 			if (b.sweep == TAC_VAR_AMBUSH) { u.alert = 1; continue; }
 			int closeBy = 0;
-			FillWalkSteps(b, i);
+			FillNoticeSteps(b, i, TAC_NOTICE_STEPS);
 			for (int p = 0; p < b.nUnits; p++) {
 				if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
 				int pL = (b.u[p].deck >= 0 && b.u[p].deck < LAY_N) ? b.u[p].deck : 0;
@@ -8842,22 +9215,6 @@ static void MarkGroup(Battle& b, int grp, int immediate, int& newly)
 	}
 }
 
-// 障害物を避けた歩数。山や段差で通れないマスは数えず、回り込んだ長さを返す。層を畳まない。
-static void ScoutFlood(const Battle& b, int ei, int limit, short dist[MAPN][MAPN])
-{
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) dist[z][x] = -1;
-	const Unit& u = b.u[ei];
-	if (!Map::In(u.x, u.z) || limit < 0) return;
-	int sx[16], sz[16], sL[16], n = 0;
-	SeedUnitSteps(u, b.map, sx, sz, sL, n, 16);
-	FloodWalk(b, UnitMoveType(u), limit, sx, sz, sL, n);
-	for (int L = 0; L < LAY_N; L++) for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		int d = g_stepDist[L][z][x];
-		if (d >= 30000) continue;
-		if (dist[z][x] < 0 || d < dist[z][x]) dist[z][x] = (short)d;
-	}
-}
-
 // 低い側から高い側は見えない。山や尾根で視線が切れるときも見えない。
 static bool ScoutSee(const Map& m, int ex, int ez, int px, int pz, int eLayer, int pLayer)
 {
@@ -8868,17 +9225,14 @@ static bool ScoutSee(const Map& m, int ex, int ez, int px, int pz, int eLayer, i
 	return LineOfSightY(m, ex, ez, TacHToY(eh) + .6f, px, pz, TacHToY(ph) + .6f);
 }
 
-static bool UnitCanScout(const Battle& b, int ei, int pi, int limit, const short dist[MAPN][MAPN])
+static bool UnitCanScout(const Battle& b, int pi, int limit)
 {
-	(void)dist;
-	(void)ei;
 	const Unit& p = b.u[pi];
 	int spn = max(1, UnitSpan(p));
 	int pL = (p.deck >= 0 && p.deck < LAY_N) ? p.deck : 0;
 	for (int z = 0; z < spn; z++) for (int x = 0; x < spn; x++) {
 		int cx = p.x + x, cz = p.z + z;
 		if (!Map::In(cx, cz)) continue;
-		// 層番号ではなく、この敵が歩いて届くマスだけ。届かない別階は気づかない。
 		if (!LayerOn(b.map.At(cx, cz), pL)) continue;
 		int d = WalkStepsAt(cx, cz, pL);
 		if (d >= 0 && d < 30000 && d <= limit) return true;
@@ -8890,15 +9244,14 @@ int WakeNearPlayers(Battle& b, int rad, int immediate)
 {
 	int newly = 0;
 	int lim = rad > 0 ? rad : TAC_NOTICE_STEPS;
-	static short dist[MAPN][MAPN];
 	for (int e = 0; e < b.nUnits; e++) {
 		Unit& u = b.u[e];
 		if (!u.alive || u.team != TEAM_ENEMY || u.alert) continue;
-		ScoutFlood(b, e, lim, dist);
+		FillNoticeSteps(b, e, lim);
 		int hit = 0;
 		for (int p = 0; p < b.nUnits; p++) {
 			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-			if (!UnitCanScout(b, e, p, lim, dist)) continue;
+			if (!UnitCanScout(b, p, lim)) continue;
 			hit = 1;
 			break;
 		}
@@ -9775,6 +10128,12 @@ const wchar_t* GoodDesc(int i)
 	case 111: return LangPick14(L"3マス以内の味方を5ターン素早さ30%上げ、行動順を少し早める。", L"Raises an ally's agility by 30% for 5 turns and hurries their next action. Within 3 tiles.", L"Agilité d'un allié +30 % pendant 5 tours, et son prochain tour avance. Portée 3.", L"Agilità di un alleato +30% per 5 turni, e il prossimo turno arriva prima. Entro 3 caselle.", L"Agilidad de un aliado +30% durante 5 turnos, y su siguiente turno llega antes. Alcance 3.", L"3칸 이내의 아군을 5턴 민첩 30% 올리고 행동 순서를 조금 당긴다.", L"使3格以内的同伴敏捷提高30%共5回合，并略微提前行动。", L"يرفع رشاقة حليف 30٪ لخمسة أدوار ويقرّب دوره. ضمن 3 مربعات.", L"Ловкость союзника +30% на 5 ходов, и следующий ход ближе. В пределах 3 клеток.", L"Beweglichkeit eines Verbündeten +30 % für 5 Züge, und der nächste Zug kommt früher. Reichweite 3.", L"Agilidade de um aliado +30% por 5 turnos e o próximo turno chega antes. Até 3 casas.", L"Behendigheid van een bondgenoot +30% gedurende 5 beurten, en de volgende beurt komt eerder. Binnen 3 vakken.", L"Zwinność sojusznika +30% przez 5 tur i następna tura przychodzi wcześniej. Zasięg 3 pól.", L"3 kare içindeki yoldaşın çevikliğini 5 tur %30 artırır ve sırasını biraz öne alır.");
 	case 112: return LangPick14(L"3マス以内の味方の炎上を消し、HPを最大の15%回復する。", L"Clears an ally's burn within 3 tiles and restores 15% max HP.", L"Éteint les flammes d'un allié dans 3 cases et rend 15 % des PV max.", L"Spegne le fiamme di un alleato entro 3 caselle e restituisce il 15% dei PS max.", L"Apaga la quemadura de un aliado a 3 casillas y recupera el 15% de PV máx.", L"3칸 이내의 아군 염상을 끄고 HP를 최대의 15% 회복한다.", L"解除3格以内同伴的炎上，并恢复最大HP的15%。", L"يطفئ احتراق حليف ضمن 3 مربعات ويعيد 15٪ من الصحة.", L"Снимает горение с союзника в 3 клетках и восстанавливает 15% макс. ОЗ.", L"Löscht das Brennen eines Verbündeten in 3 Feldern und stellt 15 % der max. LP her.", L"Apaga a queimadura de um aliado em até 3 casas e recupera 15% dos PV máx.", L"Dooft de brand van een bondgenoot binnen 3 vakken en herstelt 15% van de max. LP.", L"Gasi podpalenie sojusznika w zasięgu 3 pól i przywraca 15% maks. PŻ.", L"3 kare içindeki yoldaşın yanmasını söndürür ve azami CP'nin %15'ini iyileştirir.");
 	case 113: return LangPick14(L"3マス以内の味方の凍結を解く。", L"Thaws an ally's freeze within 3 tiles.", L"Dégèle un allié dans 3 cases.", L"Scongela un alleato entro 3 caselle.", L"Descongela a un aliado a 3 casillas.", L"3칸 이내의 아군 동결을 푼다.", L"解除3格以内同伴的冻结。", L"يذيب تجمد حليف ضمن 3 مربعات.", L"Снимает заморозку с союзника в пределах 3 клеток.", L"Taut das Einfrieren eines Verbündeten in 3 Feldern auf.", L"Descongela um aliado em até 3 casas.", L"Ontdooit een bondgenoot binnen 3 vakken.", L"Odmraża sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın donmasını çözer.");
+	case 114: return LangPick14(L"3マス以内の味方のHPとMPを全回復し、状態異常をすべて消す。", L"Fully restores an ally's HP and MP within 3 tiles and clears every ailment.", L"Rend tous les PV et PM d'un allié dans 3 cases et dissipe tout état.", L"Restituisce tutti i PS e PM di un alleato entro 3 caselle e toglie ogni malus.", L"Recupera todos los PV y PM de un aliado a 3 casillas y quita todo estado.", L"3칸 이내의 아군 HP와 MP를 전부 회복하고 상태 이상을 모두 푼다.", L"完全恢复3格以内同伴的HP和MP，并解除全部异常。", L"يعيد كل الصحة والطاقة لحليف ضمن 3 مربعات ويزيل كل الحالات.", L"Полностью восстанавливает ОЗ и ОМ союзника в 3 клетках и снимает все состояния.", L"Stellt alle LP und MP eines Verbündeten in 3 Feldern her und hebt alle Zustände auf.", L"Recupera todos os PV e PM de um aliado em até 3 casas e remove todo estado.", L"Herstelt alle LP en MP van een bondgenoot binnen 3 vakken en heft alle toestanden op.", L"Przywraca wszystkie PŻ i PM sojusznika w zasięgu 3 pól i zdejmuje wszystkie stany.", L"3 kare içindeki yoldaşın tüm can ve MP'sini yeniler ve bütün durumları siler.");
+	case 115: return LangPick14(L"3マス以内の味方の攻撃・守備・素早さを、それぞれ上限まで上げる。", L"Raises an ally's attack, defense, and agility to the cap. Within 3 tiles.", L"Porte attaque, défense et agilité d'un allié au maximum. Portée 3.", L"Porta attacco, difesa e agilità di un alleato al massimo. Entro 3 caselle.", L"Sube ataque, defensa y agilidad de un aliado al tope. Alcance 3.", L"3칸 이내의 아군 공격·수비·민첩을 각각 상한까지 올린다.", L"使3格以内同伴的攻击、防御、敏捷都升到上限。", L"يرفع هجوم حليف ودفاعه ورشاقته إلى السقف. ضمن 3 مربعات.", L"Поднимает атаку, защиту и ловкость союзника до потолка. В пределах 3 клеток.", L"Hebt Angriff, Abwehr und Gewandtheit eines Verbündeten aufs Maximum. Reichweite 3.", L"Sobe ataque, defesa e agilidade de um aliado ao teto. Até 3 casas.", L"Zet aanval, verdediging en behendigheid van een bondgenoot op het maximum. Binnen 3 vakken.", L"Podnosi atak, obronę i zwinność sojusznika do sufitu. Zasięg 3 pól.", L"3 kare içindeki yoldaşın saldırı, savunma ve çevikliğini tavana çıkarır.");
+	case 116: return LangPick14(L"3マス以内の倒れた味方を起こし、HPを全快にして状態異常を消す。", L"Raises a fallen ally within 3 tiles at full HP and clears every ailment.", L"Relève un allié tombé dans 3 cases, à tous les PV, sans état.", L"Rialza un alleato caduto entro 3 caselle, a tutti i PS, senza malus.", L"Levanta a un aliado caído dentro de 3 casillas, con todos los PV y sin estados.", L"3칸 이내의 쓰러진 아군을 일으키고 HP를 전부 채우며 상태 이상을 푼다.", L"扶起3格以内倒下的同伴，HP完全恢复并解除异常。", L"ينهض حليفًا ساقطًا ضمن 3 مربعات بكامل الصحة وبلا حالات.", L"Поднимает павшего союзника в 3 клетках с полными ОЗ и без состояний.", L"Richtet einen gefallenen Verbündeten in 3 Feldern mit vollen LP und ohne Zustand auf.", L"Ergue um aliado caído em até 3 casas com todos os PV e sem estados.", L"Laat een gevallene binnen 3 vakken opstaan met volle LP en zonder toestand.", L"Podnosi poległego sojusznika w zasięgu 3 pól z pełnym PŻ i bez stanów.", L"3 kare içindeki düşmüş yoldaşı tam canla ve durumsuz kaldırır.");
+	case 117: return LangPick14(L"1〜3マス先の敵に5ターン毒を与え、行動を遅らせ、4ターン鈍足にする。", L"Poisons an enemy 1 to 3 tiles away for 5 turns, delays them, and slows them for 4 turns.", L"Empoisonne un ennemi à 1–3 cases pour 5 tours, le retarde et le ralentit 4 tours.", L"Avvelena un nemico a 1–3 caselle per 5 turni, lo ritarda e lo rallenta per 4 turni.", L"Envenena a un enemigo a 1–3 casillas durante 5 turnos, lo retrasa y lo ralentiza 4 turnos.", L"1〜3칸 앞의 적에게 5턴 독을 주고, 행동을 늦추며, 4턴 둔화시킨다.", L"使1至3格外的敌人中毒5回合，推迟行动，并迟缓4回合。", L"يسمم عدوًا على بعد 1–3 مربعات لخمسة أدوار ويؤخره ويبطئه 4 أدوار.", L"Отравляет врага в 1–3 клетках на 5 ходов, откладывает его и замедляет на 4 хода.", L"Vergiftet einen Feind in 1–3 Feldern für 5 Züge, verzögert ihn und verlangsamt ihn 4 Züge.", L"Envenena um inimigo a 1–3 casas por 5 turnos, atrasa-o e o deixa lento por 4 turnos.", L"Vergiftigt een vijand op 1–3 vakken voor 5 beurten, vertraagt hem en maakt hem 4 beurten traag.", L"Zatruwa wroga w odległości 1–3 pól na 5 tur, opóźnia go i spowalnia na 4 tury.", L"1–3 kare ötedeki düşmanı 5 tur zehirler, sırasını geciktirir ve 4 tur yavaşlatır.");
+	case 118: return LangPick14(L"3マス以内の味方のHPを全回復し、状態異常を消し、守備を上限まで上げる。", L"Fully restores an ally's HP within 3 tiles, clears ailments, and raises defense to the cap.", L"Rend tous les PV d'un allié dans 3 cases, dissipe les états et porte la défense au maximum.", L"Restituisce tutti i PS di un alleato entro 3 caselle, toglie i malus e porta la difesa al massimo.", L"Recupera todos los PV de un aliado a 3 casillas, quita los estados y sube la defensa al tope.", L"3칸 이내의 아군 HP를 전부 회복하고, 상태 이상을 풀며, 수비를 상한까지 올린다.", L"完全恢复3格以内同伴的HP，解除异常，并将防御升到上限。", L"يعيد كل صحة حليف ضمن 3 مربعات ويزيل الحالات ويرفع الدفاع إلى السقف.", L"Полностью восстанавливает ОЗ союзника в 3 клетках, снимает состояния и поднимает защиту до потолка.", L"Stellt alle LP eines Verbündeten in 3 Feldern her, hebt Zustände auf und hebt die Abwehr aufs Maximum.", L"Recupera todos os PV de um aliado em até 3 casas, remove estados e sobe a defesa ao teto.", L"Herstelt alle LP van een bondgenoot binnen 3 vakken, heft toestanden op en zet de verdediging op het maximum.", L"Przywraca wszystkie PŻ sojusznika w zasięgu 3 pól, zdejmuje stany i podnosi obronę do sufitu.", L"3 kare içindeki yoldaşın tüm canını yeniler, durumları siler ve savunmayı tavana çıkarır.");
+	case 119: return LangPick14(L"3マス以内の味方のMPを全回復し、素早さを上限まで上げ、行動順を早める。", L"Fully restores an ally's MP within 3 tiles, raises agility to the cap, and hurries their next action.", L"Rend tous les PM d'un allié dans 3 cases, porte l'agilité au maximum et avance son tour.", L"Restituisce tutti i PM di un alleato entro 3 caselle, porta l'agilità al massimo e anticipa il turno.", L"Recupera todos los PM de un aliado a 3 casillas, sube la agilidad al tope y adelanta su turno.", L"3칸 이내의 아군 MP를 전부 회복하고, 민첩을 상한까지 올리며, 행동 순서를 당긴다.", L"完全恢复3格以内同伴的MP，将敏捷升到上限，并提前行动。", L"يعيد كل طاقة حليف ضمن 3 مربعات ويرفع الرشاقة إلى السقف ويقرّب دوره.", L"Полностью восстанавливает ОМ союзника в 3 клетках, поднимает ловкость до потолка и приближает ход.", L"Stellt alle MP eines Verbündeten in 3 Feldern her, hebt die Gewandtheit aufs Maximum und zieht den Zug vor.", L"Recupera todos os PM de um aliado em até 3 casas, sobe a agilidade ao teto e adianta o turno.", L"Herstelt alle MP van een bondgenoot binnen 3 vakken, zet de behendigheid op het maximum en haalt de beurt naar voren.", L"Przywraca wszystkie PM sojusznika w zasięgu 3 pól, podnosi zwinność do sufitu i przyspiesza turę.", L"3 kare içindeki yoldaşın tüm MP'sini yeniler, çevikliği tavana çıkarır ve sırasını öne alır.");
 	default: break;
 	}
 	return L"";
@@ -10098,6 +10457,12 @@ static const GoodDef kGood[] = {
 	{ 85, -1, 111, TX_GD_STEP, 0 },
 	{ 55, -1, 112, TX_GD_SOOTHE, 0 },
 	{ 50, -1, 113, TX_GD_THAW, 0 },
+	{ 18000, -1, 114, TX_GD_ELIXIA, 0 },
+	{ 14000, -1, 115, TX_GD_TRINE, 0 },
+	{ 32000, -1, 116, TX_GD_REVIVE, 0 },
+	{ 9000, -1, 117, TX_GD_MIRE, 0 },
+	{ 22000, -1, 118, TX_GD_BULWARK, 0 },
+	{ 20000, -1, 119, TX_GD_GALEPH, 0 },
 };
 int GoodCount() { return (int)(sizeof(kGood) / sizeof(kGood[0])); }
 const GoodDef* GoodAt(int i) { return (i >= 0 && i < GoodCount()) ? &kGood[i] : NULL; }
@@ -11282,6 +11647,57 @@ static void JobPathSanitize(CharData& c)
 	if (c.jobDone != 1) c.jobDone = 0;
 }
 
+int JobLineOf(int cls)
+{
+	switch (cls) {
+	case C_SOLDIER: case C_PALADIN: case C_SKYKNIGHT: case C_HERO: case C_RUNEKNIGHT: return 0;
+	case C_FIGHTER: case C_BERSERKER: case C_GLADIATOR: case C_DRAGONLORD: return 1;
+	case C_ARCHER: case C_SNIPER: case C_PHANTOM: return 2;
+	case C_THIEF: case C_ASSASSIN: case C_SHADOW: return 3;
+	case C_MAGE: case C_WIZARD: case C_ALCHEMIST: case C_ARCHMAGE: case C_ARCHALCHEMIST: return 4;
+	case C_CLERIC: case C_BISHOP: case C_SAINT: return 5;
+	}
+	static const int kMap[8] = { 0, 4, 5, 2, 1, 4, 1, 3 };
+	if (cls >= C_PLAYER_COUNT && cls < C_GLADIATOR)
+		return kMap[(cls - C_PLAYER_COUNT) / TAC_RANK_N];
+	if (cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
+		int f = kJobFam[cls - C_JOB0];
+		if (f < 0 || f >= 8) return -1;
+		return kMap[f];
+	}
+	return -1;
+}
+
+bool JobLineFar(int root, int cls)
+{
+	int a = JobLineOf(root);
+	int b = JobLineOf(cls);
+	if (a < 0 || b < 0 || a == b) return false;
+	if (ClassInfo(cls).tier >= 11 && (a / 2) == (b / 2)) return false;
+	return true;
+}
+
+int JobWrongStep(const CharData& c)
+{
+	if (!c.used) return -1;
+	int root = c.jobPath[0];
+	if (root < 0 || JobLineOf(root) < 0) return -1;
+	int steps = JobStepsForLevel(c.lv);
+	if (steps > JOB_PATH_N) steps = JOB_PATH_N;
+	if (steps < 2) return -1;
+	int n = 0;
+	for (; n < JOB_PATH_N && c.jobPath[n] >= 0; n++) {}
+	int limit = n < steps ? n : steps;
+	for (int i = 1; i < limit; i++)
+		if (JobLineFar(root, c.jobPath[i])) return i;
+	if (!JobLineFar(root, c.cls)) return -1;
+	for (int i = 0; i < limit; i++) if (c.jobPath[i] == c.cls) return -1;
+	int at = n;
+	if (at >= steps) at = steps - 1;
+	if (at < 1) at = 1;
+	return at;
+}
+
 static int JobRailRoot(const CharData& c)
 {
 	if (c.jobPath[0] >= 0) return c.jobPath[0];
@@ -11321,12 +11737,17 @@ static void JobRailWrite(CharData& c, int cls, const int* par)
 	for (int i = 0; i < n; i++) c.jobPath[i] = rev[n - 1 - i];
 }
 
-// 履歴の起点から新しい転職先を辿れない職は、同じ段に一番近い職へ戻す。
+// 履歴が辿れても、系統が外れた職はここでは置き換えない。ロード後の振り直しに残す。
 static bool JobRailFix(CharData& c)
 {
 	if (!c.used) return false;
 	int root = JobRailRoot(c);
 	if (root < 0 || root >= 1024) return false;
+	if (c.jobPath[0] >= 0) {
+		for (int i = 1; i < JOB_PATH_N && c.jobPath[i] >= 0; i++)
+			if (JobLineFar(c.jobPath[0], c.jobPath[i])) return false;
+		if (JobLineFar(c.jobPath[0], c.cls)) return false;
+	}
 	int par[1024];
 	int que[1024];
 	for (int i = 0; i < 1024; i++) par[i] = -2;
@@ -11350,28 +11771,7 @@ static bool JobRailFix(CharData& c)
 		JobRailWrite(c, cls, par);
 		return true;
 	}
-	int want = ClassInfo(cls).tier;
-	int best = -1;
-	int bestD = 99;
-	for (int i = 0; i < qn; i++) {
-		int v = que[i];
-		int t = ClassInfo(v).tier;
-		int d = t - want;
-		if (d < 0) d = -d;
-		if (best < 0 || d < bestD || (d == bestD && v < best)) {
-			best = v;
-			bestD = d;
-		}
-	}
-	if (best < 0 || best == c.cls) return false;
-	c.cls = best;
-	JobRailWrite(c, best, par);
-	c.trialFrom = -1;
-	c.trialLv = 0;
-	const ClassDef& cd = ClassInfo(best);
-	for (int s = 0; s < S_COUNT; s++) if (c.stat[s] < cd.base[s]) c.stat[s] = cd.base[s];
-	if (c.stat[S_HP] < 1) c.stat[S_HP] = 1;
-	return true;
+	return false;
 }
 
 // レベルで許される段(JobStepsForLevel)を超えた職は、履歴をたどって段相応の一番進んだ職へ戻す。

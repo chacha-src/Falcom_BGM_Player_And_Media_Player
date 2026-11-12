@@ -3,7 +3,7 @@
 
 struct SumRow {
 	const wchar_t* mesh;
-	int el, mp, hpPct, power, rMin, rMax, area, hits, effect, fx, price;
+	int el, mp, hpPct, power, rMin, rMax, area, hits, effect, fx, price, rank;
 	const wchar_t* nm[14];
 };
 
@@ -12,42 +12,43 @@ struct SumRow {
 #define S14(a,b,c,d,e,f,g,h,i,j,k,l,m,n) { W(a), W(b), W(c), W(d), W(e), W(f), W(g), W(h), W(i), W(j), W(k), W(l), W(m), W(n) }
 
 static const SumRow kSum[SUMMON_N] = {
-	{ L"SumDemon", EL_FIRE, 26, 16, 18, 2, 7, 4, 1, EF_NONE, SUM_FX_FIRE, 2200, S14("炎霊カグツチ","Flame Kagutsuchi","Esprit de feu","Spirito di fuoco","Espíritu de fuego","화염령","炎灵","روح النار","Дух огня","Flammengeist","Espírito de fogo","Vuurgeest","Duch ognia","Ateş ruhu") },
-	{ L"SumYeti", EL_ICE, 28, 16, 16, 2, 7, 4, 1, EF_NONE, SUM_FX_ICE, 2400, S14("氷霊ヒョウガ","Frost Mammoth","Mammouth de givre","Mammut del gelo","Mamut de escarcha","빙령","冰灵","روح الصقيع","Дух льда","Frostgeist","Espírito do gelo","IJsgeest","Duch mrozu","Buz ruhu") },
-	{ L"SumHywirl", EL_THUNDER, 24, 14, 17, 2, 8, 3, 2, EF_STUN, SUM_FX_BOLT, 2000, S14("雷霊イカヅチ","Thunder Eagle","Aigle du tonnerre","Aquila del tuono","Águila del trueno","뇌령","雷灵","نسر الرعد","Орёл грома","Donnervogel","Águia do trovão","Donderarend","Orzeł gromu","Yıldırım kartalı") },
-	{ L"SumGolelingEvolved", EL_EARTH, 30, 18, 20, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2600, S14("土霊ダイチ","Earth Elephant","Éléphant de terre","Elefante di terra","Elefante de tierra","토령","土灵","فيل الأرض","Слон земли","Erdelefant","Elefante da terra","Aardeolifant","Słoń ziemi","Toprak fili") },
-	{ L"SumNinja", EL_WIND, 22, 12, 16, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1800, S14("風霊ハヤテ","Gale Wing","Aile de bourrasque","Ala di burrasca","Ala de ráfaga","풍령","风灵","جناح العاصفة","Крыло бури","Sturmschwinge","Asa de ventania","Stormvleugel","Skrzydło wichury","Fırtına kanadı") },
-	{ L"SumSquidle", EL_ICE, 26, 15, 17, 2, 7, 4, 1, EF_SLOW, SUM_FX_WAVE, 2300, S14("水霊ミズチ","Tide Shark","Requin de marée","Squalo di marea","Tiburón de marea","수령","水灵","قرش المد","Акула прилива","Gezeitenhai","Tubarão da maré","Getijdenhaai","Rekin przypływu","Gelgit köpekbalığı") },
-	{ L"SumGoleling", EL_EARTH, 24, 15, 19, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2100, S14("岩霊ゴウガン","Boulder Rhino","Rhino de roc","Rinoceronte di roccia","Rino de roca","암령","岩灵","وحيد صخر","Носорог скалы","Felsenrhino","Rinoceronte de rocha","Rotsneushoorn","Nosorożec skały","Kaya gergedanı") },
-	{ L"SumWizard", EL_HOLY, 32, 18, 18, 2, 8, 4, 1, EF_NONE, SUM_FX_HOLY, 3200, S14("光霊セイカ","Radiant Peacock","Paon radieux","Pavone radioso","Pavo radiante","광령","光灵","طاووس مشع","Павлин света","Strahlpfau","Pavão radiante","Stralendpauw","Paw światła","Işıltılı tavus") },
-	{ L"SumGhost", EL_DARK, 28, 16, 17, 2, 7, 4, 1, EF_DEFDOWN, SUM_FX_DARK, 2500, S14("闇霊クラヤミ","Gloom Bat","Chauve-souris d'ombre","Pipistrello d'ombra","Murciélago de sombra","암령","暗灵","خفاش الظلام","Летучая тьма","Düsternisflatterer","Morcego da treva","Duisternisvleermuis","Nietoperz mroku","Karanlık yarasa") },
-	{ L"SumMushroomKing", EL_POISON, 24, 14, 15, 2, 7, 3, 1, EF_POISON, SUM_FX_MIASMA, 1900, S14("毒霊ドクゼ","Venom Scorpion","Scorpion venimeux","Scorpione velenoso","Escorpión venenoso","독령","毒灵","عقرب السم","Скорпион яда","Giftskorpion","Escorpião venenoso","Gifschorpioen","Skorpion jadu","Zehir akrebi") },
-	{ L"SumOrc", EL_FIRE, 20, 12, 16, 1, 6, 3, 1, EF_NONE, SUM_FX_FIRE, 1400, S14("牙狼ガロウ","Fang Wolf","Loup à crocs","Lupo zannuto","Lobo de colmillos","아랑","牙狼","ذئب الأنياب","Клыкастый волк","Fangwolf","Lobo de presas","Tandwolf","Wilk kłów","Diş kurdu") },
-	{ L"SumBirb", EL_WIND, 22, 12, 16, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1700, S14("大鷲ワシア","Great Eagle","Grand aigle","Grande aquila","Gran águila","대수리","大鹫","نسر كبير","Большой орёл","Riesenaar","Grande águia","Grote arend","Wielki orzeł","Büyük kartal") },
-	{ L"SumOrcEnemy", EL_EARTH, 34, 20, 22, 2, 6, 3, 1, EF_STUN, SUM_FX_ROAR, 3600, S14("巨熊トラバ","Colossus Bear","Ours colosse","Orso colosso","Oso coloso","거웅","巨熊","دب عملاق","Медведь-исполин","Kolossbär","Urso colosso","Kolossale beer","Niedźwiedź kolos","Dev ayı") },
-	{ L"SumArmabeeEvolved", EL_WIND, 20, 12, 15, 1, 6, 3, 1, EF_NONE, SUM_FX_WIND, 1300, S14("鎌蟲カマキリ","Sickle Mantis","Mante faucille","Mantide falce","Mantis hoz","낫벌레","镰螳","سرعوف المنجل","Богомол-серп","Sichelmantis","Louva-a-deus foice","Sikkelbidsprinkhaan","Modliszka sierp","Orak peygamberdevesi") },
-	{ L"SumGlubEvolved", EL_ICE, 32, 18, 18, 2, 7, 4, 1, EF_POISON, SUM_FX_WAVE, 3400, S14("海蛇ナーガ","Trench Naga","Naga des fosses","Naga degli abissi","Naga de la fosa","해사","海蛇","حورية الخندق","Нага пучины","Graben-Naga","Naga da fossa","Sleufnaga","Naga rowu","Hendek naga") },
-	{ L"SumTribal", EL_EARTH, 26, 16, 20, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2400, S14("猪王イノシ","Iron Boar","Sanglier de fer","Cinghiale di ferro","Jabalí de hierro","철멧돼지","铁猪王","خنزير الحديد","Железный кабан","Eisenkeiler","Javali de ferro","IJzeren ever","Żelazny dzik","Demir yaban") },
-	{ L"SumMonkroose", EL_FIRE, 30, 16, 19, 2, 7, 4, 1, EF_STUN, SUM_FX_ROAR, 3000, S14("獅子レオ","Roaring Lion","Lion rugissant","Leone ruggente","León rugiente","사자","狮子","أسد زائر","Рыкающий лев","Brüllender Löwe","Leão rugidor","Brullende leeuw","Ryczący lew","Kükreyen aslan") },
-	{ L"SumGreenSpikyBlob", EL_ICE, 22, 13, 16, 1, 6, 3, 1, EF_SLOW, SUM_FX_ICE, 1600, S14("巨蟹クラブ","Scarlet Crab","Crabe écarlate","Granchio scarlatto","Cangrejo escarlata","거대게","巨蟹","سلطعون قرمزي","Багровый краб","Scharlachkrabbe","Caranguejo escarlate","Scharlakenkrab","Szkarłatny krab","Kızıl yengeç") },
-	{ L"SumAlpaking", EL_EARTH, 20, 12, 15, 2, 7, 3, 1, EF_NONE, SUM_FX_SPIKE, 1200, S14("角鹿エルク","Antler Stag","Cerf ramure","Cervo ramato","Ciervo astado","뿔사슴","角鹿","أيل القرون","Рогатый олень","Geweihhirsch","Cervo de galhada","Geweiherte","Jeleń poroża","Boynuzlu geyik") },
-	{ L"SumGhostSkull", EL_DARK, 26, 14, 14, 2, 8, 4, 1, EF_SLEEP, SUM_FX_SLEEP, 2200, S14("夜梟フクロウ","Night Owl","Hibou de nuit","Gufo notturno","Búho nocturno","밤부엉이","夜枭","بومة الليل","Ночная сова","Nachteule","Coruja da noite","Nachtuil","Nocna sowa","Gece baykuşu") },
-	{ L"SumArmabee", EL_POISON, 18, 10, 14, 2, 7, 4, 1, EF_POISON, SUM_FX_MIASMA, 1100, S14("蜂群ホウネ","Swarm of Bees","Essaim d'abeilles","Sciame d'api","Enjambre de abejas","벌떼","蜂群","سرب النحل","Рой пчёл","Bienenschwarm","Enxame de abelhas","Bijenzwerm","Rój pszczół","Arı sürüsü") },
-	{ L"SumPinkSlime", EL_DARK, 16, 10, 13, 1, 6, 3, 1, EF_NONE, SUM_FX_DARK, 900, S14("群鼠ネズミ","Rat Tide","Marée de rats","Marea di ratti","Marea de ratas","쥐떼","群鼠","مد الجرذان","Крысиный вал","Rattenflut","Maré de ratos","Rattenvloed","Fala szczurów","Sıçan seli") },
-	{ L"SumAlien", EL_EARTH, 22, 12, 16, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 1500, S14("大猿エンコ","Great Ape","Grand singe","Grande scimmia","Gran simio","큰원숭이","大猿","قرد عظيم","Большая обезьяна","Großer Affe","Grande símio","Grote aap","Wielka małpa","Büyük maymun") },
-	{ L"SumAlpakingEvolved", EL_HOLY, 36, 18, 20, 2, 8, 4, 1, EF_NONE, SUM_FX_HOLY, 5200, S14("聖獣キリン","Qilin","Qilin","Qilin","Qilin","기린","麒麟","كيلين","Цилинь","Qilin","Qilin","Qilin","Qilin","Qilin") },
-	{ L"SumDragonEvolved", EL_FIRE, 40, 22, 22, 2, 8, 5, 2, EF_NONE, SUM_FX_FIRE, 8400, S14("不死鳥ホウオウ","Phoenix","Phénix","Fenice","Fénix","불사조","不死鸟","العنقاء","Феникс","Phönix","Fênix","Feniks","Feniks","Anka") },
-	{ L"SumCactoro", EL_HOLY, 34, 16, 19, 2, 7, 3, 1, EF_NONE, SUM_FX_HOLY, 4800, S14("一角獣ユニコーン","Unicorn","Licorne","Unicorno","Unicornio","유니콘","独角兽","وحيد القرن","Единорог","Einhorn","Unicórnio","Eenhoorn","Jednorożec","Tekboynuz") },
-	{ L"SumMonkroose", EL_WIND, 32, 16, 18, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 4200, S14("獅鷲グリフォン","Griffin","Griffon","Grifone","Grifo","그리폰","狮鹫","عنقاء أسد","Грифон","Greif","Grifo","Griffioen","Gryf","Grifon") },
-	{ L"SumDragon", EL_FIRE, 36, 18, 21, 2, 8, 4, 1, EF_NONE, SUM_FX_FIRE, 5600, S14("飛竜ワイバーン","Wyvern","Vouivre","Viverna","Güiverno","와이번","飞龙","وايفرن","Виверна","Wyvern","Wyvern","Wyvern","Wiwerna","Wyvern") },
-	{ L"SumMushnubEvolved", EL_EARTH, 30, 16, 17, 2, 7, 4, 1, EF_SLOW, SUM_FX_SPIKE, 3000, S14("樹霊トレント","Treant","Tréant","Treant","Treant","트렌트","树灵","شجرة حية","Древень","Treant","Treant","Treant","Treant","Treant") },
-	{ L"SumFish", EL_ICE, 42, 24, 22, 2, 8, 5, 1, EF_SLOW, SUM_FX_WAVE, 9200, S14("海王クジラ","Leviathan","Léviathan","Leviatano","Leviatán","리바이어던","海王","لوياثان","Левиафан","Leviathan","Leviatã","Leviathan","Lewiatan","Leviatan") },
-	{ L"SumDino", EL_EARTH, 38, 20, 22, 2, 7, 4, 1, EF_STUN, SUM_FX_ROAR, 7000, S14("巨獣ベヘモ","Behemoth","Béhémoth","Behemoth","Behemot","베헤모스","巨兽","بهيموث","Бегемот","Behemoth","Behemoth","Behemoth","Behemot","Behemot") },
-	{ L"SumGoleling", EL_EARTH, 28, 16, 18, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2800, S14("鎧竜アンキロ","Armored Saurian","Saurien cuirassé","Sauro corazzato","Saurio acorazado","갑룡","铠龙","سحلية مدرعة","Панцирный ящер","Panzerosaurier","Sáurio couraçado","Gepantserde sauriër","Opancerzony gad","Zırhlı sürüngen") },
-	{ L"SumGlub", EL_ICE, 24, 14, 15, 2, 7, 4, 1, EF_SLOW, SUM_FX_WAVE, 1800, S14("水精ウンディーネ","Undine","Ondine","Ondina","Ondina","운디네","水精","أوندين","Ундина","Undine","Ondina","Undine","Undyna","Undine") },
-	{ L"SumGreenBlob", EL_WIND, 18, 10, 14, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1000, S14("風精シルフ","Sylph","Sylphe","Silfide","Sílfide","실프","风精","سيلف","Сильф","Sylphe","Silfo","Sylf","Sylf","Silf") },
-	{ L"SumMushnub", EL_EARTH, 18, 12, 15, 1, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 1000, S14("地精ノーム","Gnome","Gnome","Gnomo","Gnomo","놈","地精","جنوم","Гном","Gnom","Gnomo","Gnoom","Gnom","Gnom") },
-	{ L"SumBlueDemon", EL_THUNDER, 34, 16, 20, 2, 7, 4, 2, EF_STUN, SUM_FX_BOLT, 4600, S14("雷獣ライジュウ","Thunder Beast","Bête du tonnerre","Bestia del tuono","Bestia del trueno","뇌수","雷兽","وحش الرعد","Зверь грома","Donnerbestie","Fera do trovão","Donderbeest","Bestia gromu","Gök gürültüsü canavarı") },
+	{ L"SumDemon", EL_FIRE, 26, 16, 18, 2, 7, 4, 1, EF_NONE, SUM_FX_FIRE, 2200, 0, S14("炎霊カグツチ","Flame Kagutsuchi","Esprit de feu","Spirito di fuoco","Espíritu de fuego","화염령","炎灵","روح النار","Дух огня","Flammengeist","Espírito de fogo","Vuurgeest","Duch ognia","Ateş ruhu") },
+	{ L"SumYeti", EL_ICE, 28, 16, 16, 2, 7, 4, 1, EF_NONE, SUM_FX_ICE, 2400, 0, S14("氷霊ヒョウガ","Frost Mammoth","Mammouth de givre","Mammut del gelo","Mamut de escarcha","빙령","冰灵","روح الصقيع","Дух льда","Frostgeist","Espírito do gelo","IJsgeest","Duch mrozu","Buz ruhu") },
+	{ L"SumHywirl", EL_THUNDER, 24, 14, 17, 2, 8, 3, 2, EF_STUN, SUM_FX_BOLT, 2000, 0, S14("雷霊イカヅチ","Thunder Eagle","Aigle du tonnerre","Aquila del tuono","Águila del trueno","뇌령","雷灵","نسر الرعد","Орёл грома","Donnervogel","Águia do trovão","Donderarend","Orzeł gromu","Yıldırım kartalı") },
+	{ L"SumGolelingEvolved", EL_EARTH, 30, 18, 20, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2600, 0, S14("土霊ダイチ","Earth Elephant","Éléphant de terre","Elefante di terra","Elefante de tierra","토령","土灵","فيل الأرض","Слон земли","Erdelefant","Elefante da terra","Aardeolifant","Słoń ziemi","Toprak fili") },
+	{ L"SumNinja", EL_WIND, 22, 12, 16, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1800, 0, S14("風霊ハヤテ","Gale Wing","Aile de bourrasque","Ala di burrasca","Ala de ráfaga","풍령","风灵","جناح العاصفة","Крыло бури","Sturmschwinge","Asa de ventania","Stormvleugel","Skrzydło wichury","Fırtına kanadı") },
+	{ L"SumSquidle", EL_ICE, 26, 15, 17, 2, 7, 4, 1, EF_SLOW, SUM_FX_WAVE, 2300, 0, S14("水霊ミズチ","Tide Shark","Requin de marée","Squalo di marea","Tiburón de marea","수령","水灵","قرش المد","Акула прилива","Gezeitenhai","Tubarão da maré","Getijdenhaai","Rekin przypływu","Gelgit köpekbalığı") },
+	{ L"SumGoleling", EL_EARTH, 24, 15, 19, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2100, 0, S14("岩霊ゴウガン","Boulder Rhino","Rhino de roc","Rinoceronte di roccia","Rino de roca","암령","岩灵","وحيد صخر","Носорог скалы","Felsenrhino","Rinoceronte de rocha","Rotsneushoorn","Nosorożec skały","Kaya gergedanı") },
+	{ L"SumWizard", EL_HOLY, 32, 18, 18, 2, 8, 4, 1, EF_NONE, SUM_FX_HOLY, 3200, 0, S14("光霊セイカ","Radiant Peacock","Paon radieux","Pavone radioso","Pavo radiante","광령","光灵","طاووس مشع","Павлин света","Strahlpfau","Pavão radiante","Stralendpauw","Paw światła","Işıltılı tavus") },
+	{ L"SumGhost", EL_DARK, 28, 16, 17, 2, 7, 4, 1, EF_DEFDOWN, SUM_FX_DARK, 2500, 0, S14("闇霊クラヤミ","Gloom Bat","Chauve-souris d'ombre","Pipistrello d'ombra","Murciélago de sombra","암령","暗灵","خفاش الظلام","Летучая тьма","Düsternisflatterer","Morcego da treva","Duisternisvleermuis","Nietoperz mroku","Karanlık yarasa") },
+	{ L"SumMushroomKing", EL_POISON, 24, 14, 15, 2, 7, 3, 1, EF_POISON, SUM_FX_MIASMA, 1900, 0, S14("毒霊ドクゼ","Venom Scorpion","Scorpion venimeux","Scorpione velenoso","Escorpión venenoso","독령","毒灵","عقرب السم","Скорпион яда","Giftskorpion","Escorpião venenoso","Gifschorpioen","Skorpion jadu","Zehir akrebi") },
+	{ L"SumOrc", EL_FIRE, 20, 12, 16, 1, 6, 3, 1, EF_NONE, SUM_FX_FIRE, 1400, 0, S14("牙狼ガロウ","Fang Wolf","Loup à crocs","Lupo zannuto","Lobo de colmillos","아랑","牙狼","ذئب الأنياب","Клыкастый волк","Fangwolf","Lobo de presas","Tandwolf","Wilk kłów","Diş kurdu") },
+	{ L"SumBirb", EL_WIND, 22, 12, 16, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1700, 0, S14("大鷲ワシア","Great Eagle","Grand aigle","Grande aquila","Gran águila","대수리","大鹫","نسر كبير","Большой орёл","Riesenaar","Grande águia","Grote arend","Wielki orzeł","Büyük kartal") },
+	{ L"SumOrcEnemy", EL_EARTH, 34, 20, 22, 2, 6, 3, 1, EF_STUN, SUM_FX_ROAR, 3600, 0, S14("巨熊トラバ","Colossus Bear","Ours colosse","Orso colosso","Oso coloso","거웅","巨熊","دب عملاق","Медведь-исполин","Kolossbär","Urso colosso","Kolossale beer","Niedźwiedź kolos","Dev ayı") },
+	{ L"SumArmabeeEvolved", EL_WIND, 20, 12, 15, 1, 6, 3, 1, EF_NONE, SUM_FX_WIND, 1300, 0, S14("鎌蟲カマキリ","Sickle Mantis","Mante faucille","Mantide falce","Mantis hoz","낫벌레","镰螳","سرعوف المنجل","Богомол-серп","Sichelmantis","Louva-a-deus foice","Sikkelbidsprinkhaan","Modliszka sierp","Orak peygamberdevesi") },
+	{ L"SumGlubEvolved", EL_ICE, 32, 18, 18, 2, 7, 4, 1, EF_POISON, SUM_FX_WAVE, 3400, 0, S14("海蛇ナーガ","Trench Naga","Naga des fosses","Naga degli abissi","Naga de la fosa","해사","海蛇","حورية الخندق","Нага пучины","Graben-Naga","Naga da fossa","Sleufnaga","Naga rowu","Hendek naga") },
+	{ L"SumTribal", EL_EARTH, 26, 16, 20, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2400, 0, S14("猪王イノシ","Iron Boar","Sanglier de fer","Cinghiale di ferro","Jabalí de hierro","철멧돼지","铁猪王","خنزير الحديد","Железный кабан","Eisenkeiler","Javali de ferro","IJzeren ever","Żelazny dzik","Demir yaban") },
+	{ L"SumMonkroose", EL_FIRE, 30, 16, 19, 2, 7, 4, 1, EF_STUN, SUM_FX_ROAR, 3000, 0, S14("獅子レオ","Roaring Lion","Lion rugissant","Leone ruggente","León rugiente","사자","狮子","أسد زائر","Рыкающий лев","Brüllender Löwe","Leão rugidor","Brullende leeuw","Ryczący lew","Kükreyen aslan") },
+	{ L"SumGreenSpikyBlob", EL_ICE, 22, 13, 16, 1, 6, 3, 1, EF_SLOW, SUM_FX_ICE, 1600, 0, S14("巨蟹クラブ","Scarlet Crab","Crabe écarlate","Granchio scarlatto","Cangrejo escarlata","거대게","巨蟹","سلطعون قرمزي","Багровый краб","Scharlachkrabbe","Caranguejo escarlate","Scharlakenkrab","Szkarłatny krab","Kızıl yengeç") },
+	{ L"SumAlpaking", EL_EARTH, 20, 12, 15, 2, 7, 3, 1, EF_NONE, SUM_FX_SPIKE, 1200, 0, S14("角鹿エルク","Antler Stag","Cerf ramure","Cervo ramato","Ciervo astado","뿔사슴","角鹿","أيل القرون","Рогатый олень","Geweihhirsch","Cervo de galhada","Geweiherte","Jeleń poroża","Boynuzlu geyik") },
+	{ L"SumGhostSkull", EL_DARK, 26, 14, 14, 2, 8, 4, 1, EF_SLEEP, SUM_FX_SLEEP, 2200, 0, S14("夜梟フクロウ","Night Owl","Hibou de nuit","Gufo notturno","Búho nocturno","밤부엉이","夜枭","بومة الليل","Ночная сова","Nachteule","Coruja da noite","Nachtuil","Nocna sowa","Gece baykuşu") },
+	{ L"SumArmabee", EL_POISON, 18, 10, 14, 2, 7, 4, 1, EF_POISON, SUM_FX_MIASMA, 1100, 0, S14("蜂群ホウネ","Swarm of Bees","Essaim d'abeilles","Sciame d'api","Enjambre de abejas","벌떼","蜂群","سرب النحل","Рой пчёл","Bienenschwarm","Enxame de abelhas","Bijenzwerm","Rój pszczół","Arı sürüsü") },
+	{ L"SumPinkSlime", EL_DARK, 16, 10, 13, 1, 6, 3, 1, EF_NONE, SUM_FX_DARK, 900, 0, S14("群鼠ネズミ","Rat Tide","Marée de rats","Marea di ratti","Marea de ratas","쥐떼","群鼠","مد الجرذان","Крысиный вал","Rattenflut","Maré de ratos","Rattenvloed","Fala szczurów","Sıçan seli") },
+	{ L"SumAlien", EL_EARTH, 22, 12, 16, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 1500, 0, S14("大猿エンコ","Great Ape","Grand singe","Grande scimmia","Gran simio","큰원숭이","大猿","قرد عظيم","Большая обезьяна","Großer Affe","Grande símio","Grote aap","Wielka małpa","Büyük maymun") },
+	{ L"SumAlpakingEvolved", EL_HOLY, 36, 18, 20, 2, 8, 4, 1, EF_NONE, SUM_FX_HOLY, 5200, 0, S14("聖獣キリン","Qilin","Qilin","Qilin","Qilin","기린","麒麟","كيلين","Цилинь","Qilin","Qilin","Qilin","Qilin","Qilin") },
+	{ L"SumDragonEvolved", EL_FIRE, 40, 22, 22, 2, 8, 5, 2, EF_NONE, SUM_FX_FIRE, 8400, 0, S14("不死鳥ホウオウ","Phoenix","Phénix","Fenice","Fénix","불사조","不死鸟","العنقاء","Феникс","Phönix","Fênix","Feniks","Feniks","Anka") },
+	{ L"SumCactoro", EL_HOLY, 34, 16, 19, 2, 7, 3, 1, EF_NONE, SUM_FX_HOLY, 4800, 0, S14("一角獣ユニコーン","Unicorn","Licorne","Unicorno","Unicornio","유니콘","独角兽","وحيد القرن","Единорог","Einhorn","Unicórnio","Eenhoorn","Jednorożec","Tekboynuz") },
+	{ L"SumMonkroose", EL_WIND, 32, 16, 18, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 4200, 0, S14("獅鷲グリフォン","Griffin","Griffon","Grifone","Grifo","그리폰","狮鹫","عنقاء أسد","Грифон","Greif","Grifo","Griffioen","Gryf","Grifon") },
+	{ L"SumDragon", EL_FIRE, 36, 18, 21, 2, 8, 4, 1, EF_NONE, SUM_FX_FIRE, 5600, 0, S14("飛竜ワイバーン","Wyvern","Vouivre","Viverna","Güiverno","와이번","飞龙","وايفرن","Виверна","Wyvern","Wyvern","Wyvern","Wiwerna","Wyvern") },
+	{ L"SumMushnubEvolved", EL_EARTH, 30, 16, 17, 2, 7, 4, 1, EF_SLOW, SUM_FX_SPIKE, 3000, 0, S14("樹霊トレント","Treant","Tréant","Treant","Treant","트렌트","树灵","شجرة حية","Древень","Treant","Treant","Treant","Treant","Treant") },
+	{ L"SumFish", EL_ICE, 42, 24, 22, 2, 8, 5, 1, EF_SLOW, SUM_FX_WAVE, 9200, 0, S14("海王クジラ","Leviathan","Léviathan","Leviatano","Leviatán","리바이어던","海王","لوياثان","Левиафан","Leviathan","Leviatã","Leviathan","Lewiatan","Leviatan") },
+	{ L"SumDino", EL_EARTH, 38, 20, 22, 2, 7, 4, 1, EF_STUN, SUM_FX_ROAR, 7000, 0, S14("巨獣ベヘモ","Behemoth","Béhémoth","Behemoth","Behemot","베헤모스","巨兽","بهيموث","Бегемот","Behemoth","Behemoth","Behemoth","Behemot","Behemot") },
+	{ L"SumGoleling", EL_EARTH, 28, 16, 18, 2, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 2800, 0, S14("鎧竜アンキロ","Armored Saurian","Saurien cuirassé","Sauro corazzato","Saurio acorazado","갑룡","铠龙","سحلية مدرعة","Панцирный ящер","Panzerosaurier","Sáurio couraçado","Gepantserde sauriër","Opancerzony gad","Zırhlı sürüngen") },
+	{ L"SumGlub", EL_ICE, 24, 14, 15, 2, 7, 4, 1, EF_SLOW, SUM_FX_WAVE, 1800, 0, S14("水精ウンディーネ","Undine","Ondine","Ondina","Ondina","운디네","水精","أوندين","Ундина","Undine","Ondina","Undine","Undyna","Undine") },
+	{ L"SumGreenBlob", EL_WIND, 18, 10, 14, 2, 8, 4, 1, EF_NONE, SUM_FX_WIND, 1000, 0, S14("風精シルフ","Sylph","Sylphe","Silfide","Sílfide","실프","风精","سيلف","Сильф","Sylphe","Silfo","Sylf","Sylf","Silf") },
+	{ L"SumMushnub", EL_EARTH, 18, 12, 15, 1, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 1000, 0, S14("地精ノーム","Gnome","Gnome","Gnomo","Gnomo","놈","地精","جنوم","Гном","Gnom","Gnomo","Gnoom","Gnom","Gnom") },
+	{ L"SumBlueDemon", EL_THUNDER, 34, 16, 20, 2, 7, 4, 2, EF_STUN, SUM_FX_BOLT, 4600, 0, S14("雷獣ライジュウ","Thunder Beast","Bête du tonnerre","Bestia del tuono","Bestia del trueno","뇌수","雷兽","وحش الرعد","Зверь грома","Donnerbestie","Fera do trovão","Donderbeest","Bestia gromu","Gök gürültüsü canavarı") },
+#include "tactics_src/summon_high.inc"
 };
 
 #undef S14
@@ -92,46 +93,70 @@ static const wchar_t* SumFxLine(int fx)
 static int SummonMpOf(const SumRow& r)
 {
 	int m = r.mp * 2;
-	if (m < 40) m = 40;
-	if (m > 90) m = 90;
+	int lo = 40, hi = 90;
+	if (r.rank >= 2) { lo = 100; hi = 130; }
+	else if (r.rank == 1) { lo = 80; hi = 110; }
+	if (m < lo) m = lo;
+	if (m > hi) m = hi;
 	return m;
 }
 
 static int SummonHpPctOf(const SumRow& r)
 {
 	int p = r.hpPct * 2;
-	if (p < 30) p = 30;
-	if (p > 48) p = 48;
+	int lo = 30, hi = 48;
+	if (r.rank >= 2) { lo = 46; hi = 58; }
+	else if (r.rank == 1) { lo = 40; hi = 52; }
+	if (p < lo) p = lo;
+	if (p > hi) p = hi;
 	return p;
+}
+
+static int SummonCpOf(const SumRow& r)
+{
+	if (r.rank >= 2) return 160;
+	if (r.rank == 1) return 130;
+	return 100;
 }
 
 const wchar_t* SummonDesc(int id)
 {
-	static wchar_t buf[320];
+	static wchar_t buf[480];
 	if (id < 1 || id > SUMMON_N) return L"";
 	const SumRow& r = kSum[id - 1];
+	const wchar_t* tier = L"";
+	if (r.rank >= 2) tier = LangPick14(L"最上位精霊。", L"Supreme spirit. ", L"Esprit suprême. ", L"Spirito supremo. ", L"Espíritu supremo. ", L"최상위 정령. ", L"最上位精灵。", L"روح أسمى. ", L"Верховный дух. ", L"Höchster Geist. ", L"Espírito supremo. ", L"Oppergeest. ", L"Najwyższy duch. ", L"Yüce ruh. ");
+	else if (r.rank == 1) tier = LangPick14(L"上位精霊。", L"Higher spirit. ", L"Esprit majeur. ", L"Spirito maggiore. ", L"Espíritu mayor. ", L"상위 정령. ", L"上位精灵。", L"روح أعلى. ", L"Высший дух. ", L"Hoher Geist. ", L"Espírito maior. ", L"Hogere geest. ", L"Wyższy duch. ", L"Yüksek ruh. ");
 	const wchar_t* fmt = LangPick14(
-		L"%s 射程%d〜%d 範囲%d。MP %d、最大HPの%d%%、CP %d。",
-		L"%s Range %d-%d, area %d. MP %d, %d%% of max HP, CP %d.",
-		L"%s Portée %d-%d, zone %d. PM %d, %d%% des PV max, CP %d.",
-		L"%s Gittata %d-%d, area %d. PM %d, %d%% dei PV max, CP %d.",
-		L"%s Alcance %d-%d, área %d. PM %d, %d%% de PV máx., CP %d.",
-		L"%s 사거리 %d~%d, 범위 %d. MP %d, 최대 HP %d%%, CP %d.",
-		L"%s 射程%d～%d，范围%d。MP %d，最大HP的%d%%，CP %d。",
-		L"%s مدى %d-%d، مساحة %d. MP %d، %d%% من أقصى HP، CP %d.",
-		L"%s Дальность %d–%d, область %d. MP %d, %d%% макс. HP, CP %d.",
-		L"%s Reichweite %d–%d, Fläche %d. MP %d, %d%% max. HP, CP %d.",
-		L"%s Alcance %d-%d, área %d. MP %d, %d%% do HP máx., CP %d.",
-		L"%s Bereik %d-%d, gebied %d. MP %d, %d%% max HP, CP %d.",
-		L"%s Zasięg %d–%d, obszar %d. MP %d, %d%% maks. HP, CP %d.",
-		L"%s Menzil %d-%d, alan %d. MP %d, maks HP'nin %d%%'i, CP %d.");
-	swprintf_s(buf, fmt, SumFxLine(r.fx), r.rMin, r.rMax, r.area, SummonMpOf(r), SummonHpPctOf(r), 100);
+		L"%s%s 射程%d〜%d 範囲%d。MP %d、最大HPの%d%%、CP %d。",
+		L"%s%s Range %d-%d, area %d. MP %d, %d%% of max HP, CP %d.",
+		L"%s%s Portée %d-%d, zone %d. PM %d, %d%% des PV max, CP %d.",
+		L"%s%s Gittata %d-%d, area %d. PM %d, %d%% dei PV max, CP %d.",
+		L"%s%s Alcance %d-%d, área %d. PM %d, %d%% de PV máx., CP %d.",
+		L"%s%s 사거리 %d~%d, 범위 %d. MP %d, 최대 HP %d%%, CP %d.",
+		L"%s%s 射程%d～%d，范围%d。MP %d，最大HP的%d%%，CP %d。",
+		L"%s%s مدى %d-%d، مساحة %d. MP %d، %d%% من أقصى HP، CP %d.",
+		L"%s%s Дальность %d–%d, область %d. MP %d, %d%% макс. HP, CP %d.",
+		L"%s%s Reichweite %d–%d, Fläche %d. MP %d, %d%% max. HP, CP %d.",
+		L"%s%s Alcance %d-%d, área %d. MP %d, %d%% do HP máx., CP %d.",
+		L"%s%s Bereik %d-%d, gebied %d. MP %d, %d%% max HP, CP %d.",
+		L"%s%s Zasięg %d–%d, obszar %d. MP %d, %d%% maks. HP, CP %d.",
+		L"%s%s Menzil %d-%d, alan %d. MP %d, maks HP'nin %d%%'i, CP %d.");
+	swprintf_s(buf, fmt, tier, SumFxLine(r.fx), r.rMin, r.rMax, r.area, SummonMpOf(r), SummonHpPctOf(r), SummonCpOf(r));
 	return buf;
 }
 
 int SummonCount() { return SUMMON_N; }
 int SummonPrice(int index) { return (index < 0 || index >= SUMMON_N) ? 0 : kSum[index].price; }
 int SummonFx(int index) { return (index < 0 || index >= SUMMON_N) ? 0 : kSum[index].fx; }
+int SummonRank(int index) { return (index < 0 || index >= SUMMON_N) ? 0 : kSum[index].rank; }
+
+const wchar_t* SummonRankWord(int rank)
+{
+	if (rank >= 2) return LangPick14(L"最上位精霊", L"Supreme Spirit", L"Esprit suprême", L"Spirito supremo", L"Espíritu supremo", L"최상위 정령", L"最上位精灵", L"روح أسمى", L"Верховный дух", L"Höchster Geist", L"Espírito supremo", L"Oppergeest", L"Najwyższy duch", L"Yüce ruh");
+	if (rank >= 1) return LangPick14(L"上位精霊", L"Higher Spirit", L"Esprit majeur", L"Spirito maggiore", L"Espíritu mayor", L"상위 정령", L"上位精灵", L"روح أعلى", L"Высший дух", L"Hoher Geist", L"Espírito maior", L"Hogere geest", L"Wyższy duch", L"Yüksek ruh");
+	return SummonWord();
+}
 
 int SummonMesh(int index)
 {
@@ -157,7 +182,8 @@ int SummonHpCost(const Unit& u, int skill)
 int SummonCpCost(const Unit& u, int skill)
 {
 	(void)u;
-	return IsSummonId(skill) ? 100 : 0;
+	if (!IsSummonId(skill)) return 0;
+	return SummonCpOf(kSum[skill - SUMMON_BASE]);
 }
 
 const SkillDef& SummonSkillRef(int index)

@@ -130,6 +130,11 @@ static void ScStaffLedgerPadsCalc(const ScStaffUi* u, int track, int* outAbove, 
 		above = (yHi < 0) ? (-yHi + SC_STAFF_LEDGER_PAD) : SC_STAFF_LEDGER_PAD;
 		below = (yLo + SC_STAFF_LEDGER_PAD > staffH) ? (yLo + SC_STAFF_LEDGER_PAD - staffH) : SC_STAFF_LEDGER_PAD;
 	}
+	/* 符尾と連桁が隣の段へ出ないように、音符の上下へ余白を足す。リズム段はレーン固定。 */
+	if (!(u && u->isFmScore && track == 6 && cm == 3)) {
+		above += 36;
+		below += 36;
+	}
 	if (outAbove) *outAbove = above;
 	if (outBelow) *outBelow = below;
 }
@@ -357,7 +362,7 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 				u->clef[i] = 3; /* YM2608 rhythm pads — never auto */
 				u->clefAuto[i] = 0;
 			} else if (i < SC_FM_CH)
-				_snwprintf_s(u->names[i], _TRUNCATE, L"FM%d", i - 2);
+				_snwprintf_s(u->names[i], _TRUNCATE, L"FM%d", i - 3);
 			else
 				_snwprintf_s(u->names[i], _TRUNCATE, L"Misao %d", i - SC_FM_CH + 1);
 		} else {
@@ -799,7 +804,9 @@ void ScStaffScrollTickIntoView(ScStaffUi* u, const ScEvent* ev, int evCount,
 	if (!u) return;
 	const int pxBeat = u->pxBeat > 0 ? u->pxBeat : SC_PX_BEAT_DEFAULT;
 	const int margin = ScStaffClefMarginPx(u, ev, evCount);
-	const int x = (int)((tick * (uint32_t)pxBeat) / SC_PPQN) + margin;
+	int x = (int)((tick * (uint32_t)pxBeat) / SC_PPQN) + margin;
+	if (ev && evCount > 0)
+		x += ScStaffLayoutPrefixPx(ev, evCount, tick, u);
 	if (viewW < 80) viewW = 80;
 	if (x < u->scrollX + 48)
 		u->scrollX = max(0, x - 48);
@@ -1012,7 +1019,8 @@ void ScStaffRefreshAutoClefs(ScStaffUi* u, const ScEvent* ev, int n)
 			continue;
 		}
 		if (!u->isFmScore && ScMidiPartIsDrum(ev, n, i, 0)) {
-			if (u->clefAuto[i]) u->clef[i] = 3;
+			u->clef[i] = 3;
+			u->clefAuto[i] = 0;
 			continue;
 		}
 		if (!u->clefAuto[i]) continue;
@@ -1810,7 +1818,8 @@ uint32_t ScStaffXToTick(int x, int scrollX, int gridLeft, int pxBeat, int quantT
 		uint32_t lo = 0, hi = maxTick;
 		while (lo < hi) {
 			const uint32_t mid = lo + (hi - lo + 1) / 2;
-			if (ScStaffTickToX(mid, scrollX, gridLeft, pxBeat, u, ev, evCount) <= px)
+			/* TickToX は画面座標。px はスクロールを足した中身なので、渡された画面の x と比べる。 */
+			if (ScStaffTickToX(mid, scrollX, gridLeft, pxBeat, u, ev, evCount) <= x)
 				lo = mid;
 			else
 				hi = mid - 1;
@@ -5607,10 +5616,15 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 					dc.FillSolidRect(x1 - 1, ly + 4, 1, 8, oc);
 				} else if (e.kind == SC_EV_SLUR_START) {
 					uint32_t endTick = e.tick + (uint32_t)SC_PPQN * 2;
+					int haveEnd = 0;
 					for (int j = 0; j < evCount; j++) {
 						if ((int)ev[j].ch != tr) continue;
+						if (ev[j].kind != SC_EV_SLUR_END) continue;
 						if (ev[j].tick <= e.tick) continue;
-						if (ev[j].kind == SC_EV_SLUR_END) { endTick = ev[j].tick; break; }
+						if (!haveEnd || ev[j].tick < endTick) {
+							endTick = ev[j].tick;
+							haveEnd = 1;
+						}
 					}
 					int x1 = ScStaffTickToX(endTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 					if (x1 < x + 20) x1 = x + 20;
@@ -5657,8 +5671,17 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 			}
 		}
 
-		ScStaffPaintTrackNotes(dc, u, ev, evCount, isFm, tr, staffTop,
-			gridLeft, grid.right, pxBeat, ScStaffBeatTicks(defDenom));
+		{
+			const int noteTop = ScStaffRowNoteAreaTop(u, tr, rowTop);
+			const int noteBot = rowTop + rowH - SC_PART_GAP;
+			const int savedDc = dc.SaveDC();
+			CRect noteClip(grid.left, max(noteTop, staffOriginY), grid.right, min(noteBot, grid.bottom));
+			if (noteClip.Height() > 0)
+				dc.IntersectClipRect(noteClip);
+			ScStaffPaintTrackNotes(dc, u, ev, evCount, isFm, tr, staffTop,
+				gridLeft, grid.right, pxBeat, ScStaffBeatTicks(defDenom));
+			dc.RestoreDC(savedDc);
+		}
 
 		ScStaffPaintRowMeasureGrid(dc, grid, u, rowTop, rowH, staffTop, cm, staffOriginY,
 			gridLeft, pxBeat, grid.right, ev, evCount, beatsVisible, defNumer, defDenom);
@@ -7714,6 +7737,38 @@ int ScStaffPreviewViaWavout(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 	return 1;
 }
 
+/* モニタがささみの窓より前に出ると、アレンジを押せなくなる。重なるときだけ戻す。 */
+static void ScStaffKeepAboveMonitor()
+{
+	HWND mon = NULL;
+	HWND sas[32];
+	int n = 0;
+	for (HWND h = ::GetTopWindow(NULL); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h) || ::IsIconic(h)) continue;
+		DWORD pid = 0;
+		::GetWindowThreadProcessId(h, &pid);
+		if (pid != ::GetCurrentProcessId()) continue;
+		CWnd* wnd = CWnd::FromHandlePermanent(h);
+		if (!wnd) continue;
+		CRuntimeClass* rc = wnd->GetRuntimeClass();
+		const char* cn = rc ? rc->m_lpszClassName : NULL;
+		if (!cn) continue;
+		if (strcmp(cn, "CMidiMonitorDlg") == 0) mon = h;
+		else if (strncmp(cn, "CSasami", 7) == 0 && n < 32) sas[n++] = h;
+	}
+	if (!mon || n <= 0) return;
+	int monAbove = 0;
+	for (HWND h = ::GetTopWindow(NULL); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (h == mon) { monAbove = 1; break; }
+		int hit = 0;
+		for (int i = 0; i < n; i++) if (h == sas[i]) hit = 1;
+		if (hit) break;
+	}
+	if (!monAbove) return;
+	for (int i = n - 1; i >= 0; --i)
+		::SetWindowPos(sas[i], HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 {
 	if (!u || !u->previewActive) return 0;
@@ -7722,20 +7777,30 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 	int haveTick = 0;
 	unsigned vt = 0;
 	const double sec = OggGetGdiPlaybackTimeSec();
-	/* SMF の先頭 2分音符は 0小節（SysEx）。譜面の 1拍目はそこから。 */
+	/* SMF の先頭 2分音符は 0小節（SysEx）。譜面の 1拍目はそこから。
+	   FM 譜面の試聴にこの引き算を掛けると、位置が 0 のままになる。 */
 	const uint32_t lead = (uint32_t)SC_PPQN * 2;
 	auto scoreTick = [&](uint32_t smfTick) -> uint32_t {
 		return (smfTick > lead) ? (smfTick - lead) : 0;
 	};
 
-	/* Wavout score preview: map elapsed seconds onto marker origin. */
-	if (u->previewWavMode) {
+	/* FM は FPY。VST の SMF ティックは別曲の残りで、先頭に張り付く。 */
+	if (u->isFmScore) {
+		double s = sec;
+		if (s < 0.0) s = 0.0;
+		tick = u->previewOriginTick + ScStaffTickFromSec(s, tempoT);
+		haveTick = 1;
+	} else if (u->previewWavMode) {
 		tick = u->previewOriginTick + scoreTick(ScStaffTickFromSec(sec > 0 ? sec : 0, tempoT));
 		haveTick = 1;
 	} else {
 		/* Prefer audible PCM (DS heard) so the cursor matches what you hear.
 		   Fall back to engine playSample minus plugin latency only — no extra pad. */
-		const __int64 heard = OggGetHeardPcmFrames();
+		__int64 heard = OggGetHeardPcmFrames();
+		if (heard >= 0) {
+			const __int64 lat = (__int64)VstMidiGetLatencySamples();
+			if (lat > 0) heard = (heard > lat) ? (heard - lat) : 0;
+		}
 		if (heard >= 0 && VstMidiTickAtSample(heard, &vt)) {
 			tick = scoreTick(vt);
 			haveTick = 1;

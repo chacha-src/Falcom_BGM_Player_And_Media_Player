@@ -30963,7 +30963,15 @@ void timerog1(UINT nIDEvent)
 			hMp = mp->GetSafeHwnd();
 		SasamiZOrder sasamiZ;
 		HWND hSas = SasamiComposerWindows(&sasamiZ);
-		const int keepSasami = (hSas && (sasamiPreviewStopped || ForegroundIsSasami())) ? 1 : 0;
+		int fgMon = 0;
+		{
+			HWND fg = ::GetForegroundWindow();
+			CWnd* fgw = fg ? CWnd::FromHandlePermanent(fg) : NULL;
+			CRuntimeClass* rc = fgw ? fgw->GetRuntimeClass() : NULL;
+			const char* cn = rc ? rc->m_lpszClassName : NULL;
+			if (cn && strcmp(cn, "CMidiMonitorDlg") == 0) fgMon = 1;
+		}
+		const int keepSasami = (hSas && (sasamiPreviewStopped || ForegroundIsSasami() || fgMon)) ? 1 : 0;
 		if (keepSasami) {
 			RaiseSasamiFamily(&sasamiZ);
 			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0);
@@ -39136,8 +39144,15 @@ void COggDlg::ToggleMidiMonitor()
 	}
 
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
-		m_MidiMonitorDlg->ShowWindow(SW_SHOW);
-		m_MidiMonitorDlg->SetFocus();
+		SasamiZOrder z;
+		HWND hSas = SasamiComposerWindows(&z);
+		if (hSas) {
+			m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			RaiseSasamiFamily(&z);
+		} else {
+			m_MidiMonitorDlg->ShowWindow(SW_SHOW);
+			m_MidiMonitorDlg->SetFocus();
+		}
 	}
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))

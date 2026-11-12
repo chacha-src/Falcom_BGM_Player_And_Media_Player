@@ -14,6 +14,7 @@ struct SmNote {
 	uint8_t ch;
 	uint8_t note;
 	uint8_t vel;
+	uint8_t cc7;
 	uint8_t keep;
 };
 
@@ -36,6 +37,17 @@ struct SmMeter {
 	uint8_t den;
 };
 
+enum { kDmReset = 1, kDmGs = 2, kDmBank = 3, kDmXg = 4, kDmEvMax = 256 };
+
+struct SmDrumEv {
+	uint32_t tick;
+	uint16_t seq;
+	uint8_t kind;
+	uint8_t a;
+	uint8_t b;
+	uint8_t c;
+};
+
 struct SmBag {
 	SmNote* notes;
 	int nNotes;
@@ -47,6 +59,14 @@ struct SmBag {
 	int nMeters;
 	int ppqn;
 	int dropped;
+	/* 0 不明、1 ドラム、2 明示的に通常。ポートBは 16〜31。 */
+	uint8_t drumPart[32];
+	uint8_t drumSlot[32];
+	uint8_t gsReset;
+	uint8_t block50;
+	uint8_t portB; /* FF 21 でポートBがある */
+	SmDrumEv drumEv[kDmEvMax];
+	int nDrumEv;
 };
 
 static int PushEv(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind,
@@ -101,6 +121,156 @@ static int TempoFromUs(uint32_t us)
 	return (int)t;
 }
 
+static int PortCh(int port, int ch4)
+{
+	int c = port * 16 + (ch4 & 15);
+	if (c < 0 || c > 31) c = ch4 & 15;
+	return c;
+}
+
+/* GS 40 1n の n。n=0 は ch10、1〜9 は ch1〜9、A〜F は ch11〜16。 */
+static int GsNibbleToCh(int n)
+{
+	n &= 15;
+	if (n == 0) return 9;
+	if (n < 10) return n - 1;
+	return n;
+}
+
+static void PushDrumEv(SmBag* bag, uint32_t tick, int kind, int a, int b, int c)
+{
+	if (!bag || bag->nDrumEv >= kDmEvMax) return;
+	SmDrumEv& e = bag->drumEv[bag->nDrumEv];
+	e.tick = tick;
+	e.seq = (uint16_t)bag->nDrumEv;
+	e.kind = (uint8_t)kind;
+	e.a = (uint8_t)a;
+	e.b = (uint8_t)b;
+	e.c = (uint8_t)c;
+	bag->nDrumEv++;
+}
+
+static void ApplyDrumTo(int* mode, int* slot, SmBag* bag, const SmDrumEv& e)
+{
+	if (e.kind == kDmReset) {
+		for (int ch = 0; ch < 32; ch++) {
+			mode[ch] = 2;
+			slot[ch] = 0;
+		}
+		mode[9] = 1;
+		slot[9] = 0;
+		bag->gsReset = 1;
+		/* ポートBがある曲だけ、リセット後の B ch10 はドラム2。 */
+		if (bag->portB) {
+			mode[25] = 1;
+			slot[25] = 1;
+		}
+		return;
+	}
+	if (e.kind == kDmGs) {
+		int ch = GsNibbleToCh(e.b);
+		if (e.a == 0x50) {
+			/* 2本目のポートが無いファイルの 50 は、kbsasami と同じくパートに効かせない。 */
+			if (!bag->portB) return;
+			ch += 16;
+		} else if (e.a != 0x40) {
+			return;
+		}
+		if (ch < 0 || ch > 31) return;
+		if (e.c <= 0) {
+			mode[ch] = 2;
+			slot[ch] = 0;
+		} else if (e.c == 2) {
+			mode[ch] = 1;
+			slot[ch] = 1;
+		} else {
+			mode[ch] = 1;
+			slot[ch] = 0;
+		}
+		return;
+	}
+	if (e.kind == kDmXg) {
+		const int ch = e.a & 15;
+		if (e.c == 0) {
+			mode[ch] = 2;
+			slot[ch] = 0;
+		} else if (mode[ch] != 2) {
+			mode[ch] = 1;
+			slot[ch] = 0;
+		}
+		return;
+	}
+	if (e.kind == kDmBank) {
+		const int ch = e.a;
+		if (ch >= 0 && ch < 32 && mode[ch] != 2) {
+			mode[ch] = 1;
+			slot[ch] = 0;
+		}
+	}
+}
+
+/* 同じ tick ではリセットを先、その後の 15h が勝つ。曲末より後の指定は無視。 */
+static int DrumEvCmp(const void* a, const void* b)
+{
+	const SmDrumEv* x = (const SmDrumEv*)a;
+	const SmDrumEv* y = (const SmDrumEv*)b;
+	if (x->tick != y->tick) return (x->tick < y->tick) ? -1 : 1;
+	if (x->kind != y->kind) return (int)x->kind - (int)y->kind;
+	return (int)x->seq - (int)y->seq;
+}
+
+/* 最終的なパートモード。音符が終わった後の GS リセットでは戻さない。 */
+static void ResolveDrumParts(SmBag* bag)
+{
+	if (!bag) return;
+	uint32_t lastNote = 0;
+	int anyNote = 0;
+	for (int i = 0; i < bag->nNotes; i++) {
+		anyNote = 1;
+		if (bag->notes[i].tick > lastNote) lastNote = bag->notes[i].tick;
+		if (bag->notes[i].ch >= 16) bag->portB = 1;
+	}
+	if (bag->nDrumEv > 1)
+		qsort(bag->drumEv, (size_t)bag->nDrumEv, sizeof(SmDrumEv), DrumEvCmp);
+	int mode[32], slot[32];
+	memset(mode, 0, sizeof(mode));
+	memset(slot, 0, sizeof(slot));
+	for (int i = 0; i < bag->nDrumEv; i++) {
+		if (anyNote && bag->drumEv[i].tick > lastNote) continue;
+		ApplyDrumTo(mode, slot, bag, bag->drumEv[i]);
+	}
+	for (int ch = 0; ch < 32; ch++) {
+		bag->drumPart[ch] = (uint8_t)mode[ch];
+		bag->drumSlot[ch] = (uint8_t)(slot[ch] ? 1 : 0);
+	}
+}
+
+/* GS は 40 1n / 50 1n の 15h。50 はポートB（ch17〜32）。値 0 通常、1 ドラム1、2 ドラム2。 */
+static void NoteDrumSysex(SmBag* bag, uint32_t tick, const uint8_t* s, int n)
+{
+	if (!bag || !s || n < 8) return;
+	if (s[0] == 0xF0) {
+		s++;
+		n--;
+		if (n < 8) return;
+	}
+	if (s[0] == 0x41 && n >= 9 && s[2] == 0x42 && s[3] == 0x12) {
+		if (s[4] == 0x40 && s[5] == 0x00 && s[6] == 0x7F && s[7] == 0x00) {
+			PushDrumEv(bag, tick, kDmReset, 0, 0, 0);
+			return;
+		}
+		if ((s[4] == 0x40 || s[4] == 0x50) && (s[5] & 0xF0) == 0x10 && s[6] == 0x15) {
+			if (s[4] == 0x50) bag->block50 = 1;
+			PushDrumEv(bag, tick, kDmGs, s[4], s[5] & 0x0F, s[7] & 0x7F);
+			return;
+		}
+	}
+	if (s[0] == 0x43 && n >= 8 && s[2] == 0x4C && s[3] == 0x08 && s[5] == 0x07) {
+		const int ch = s[4] & 0x0F;
+		PushDrumEv(bag, tick, kDmXg, ch, 0, (s[6] == 0) ? 0 : 1);
+	}
+}
+
 static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 {
 	if (!b || n < 22 || !bag) return 0;
@@ -115,14 +285,16 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 	bag->ppqn = div;
 	if (fmt > 1) return 0;
 	int off = 8 + (int)hlen;
-	uint8_t openNote[16][128];
-	uint32_t openTick[16][128];
-	uint8_t openVel[16][128];
-	uint8_t cc0[16], cc32[16];
+	uint8_t openNote[32][128];
+	uint32_t openTick[32][128];
+	uint8_t openVel[32][128];
+	uint8_t cc0[32], cc32[32], cc7[32];
 	memset(openNote, 0, sizeof(openNote));
 	memset(cc0, 0, sizeof(cc0));
 	memset(cc32, 0, sizeof(cc32));
+	for (int i = 0; i < 32; i++) cc7[i] = 100;
 	for (int tr = 0; tr < ntr && off + 8 <= n; tr++) {
+		int port = 0;
 		if (memcmp(b + off, "MTrk", 4) != 0) break;
 		const uint32_t tlen = RdU32(b + off + 4);
 		off += 8;
@@ -153,6 +325,10 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 				off += used;
 				if (off + (int)ln > end) break;
 				if (meta == 0x2F) { off = end; break; }
+				if (meta == 0x21 && ln >= 1) {
+					port = (b[off] & 1);
+					if (port) bag->portB = 1;
+				}
 				if (meta == 0x51 && ln >= 3 && bag->nTempos < kSmfTempoMax) {
 					const uint32_t us = ((uint32_t)b[off] << 16) | ((uint32_t)b[off + 1] << 8) | b[off + 2];
 					bag->tempos[bag->nTempos].tick = ScaleTick(tick, div);
@@ -173,11 +349,14 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 			if (st == 0xF0 || st == 0xF7) {
 				uint32_t ln = 0;
 				if (!RdVlq(b + off, end - off, &used, &ln)) break;
-				off += used + (int)ln;
+				off += used;
+				if (st == 0xF0 && off + (int)ln <= end)
+					NoteDrumSysex(bag, ScaleTick(tick, div), b + off, (int)ln);
+				off += (int)ln;
 				continue;
 			}
 			const int cmd = st & 0xF0;
-			const int ch = st & 0x0F;
+			const int ch = PortCh(port, st & 0x0F);
 			if (cmd == 0xC0 || cmd == 0xD0) {
 				if (off >= end) break;
 				const int d1 = b[off++] & 0x7F;
@@ -188,6 +367,8 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 					bag->progs[bag->nProgs].msb = cc0[ch];
 					bag->progs[bag->nProgs].lsb = cc32[ch];
 					bag->nProgs++;
+					if (cc0[ch] >= 120)
+						PushDrumEv(bag, ScaleTick(tick, div), kDmBank, ch, 0, 1);
 				}
 				continue;
 			}
@@ -197,6 +378,7 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 			if (cmd == 0xB0) {
 				if (d1 == 0) cc0[ch] = (uint8_t)d2;
 				else if (d1 == 32) cc32[ch] = (uint8_t)d2;
+				else if (d1 == 7) cc7[ch] = (uint8_t)(d2 ? d2 : 1);
 				continue;
 			}
 			if (cmd == 0x90 && d2 > 0) {
@@ -212,6 +394,7 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 						nn.ch = (uint8_t)ch;
 						nn.note = (uint8_t)d1;
 						nn.vel = openVel[ch][d1] ? openVel[ch][d1] : 100;
+						nn.cc7 = cc7[ch] ? cc7[ch] : 100;
 						nn.keep = 1;
 					} else bag->dropped++;
 				}
@@ -233,13 +416,14 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 				nn.ch = (uint8_t)ch;
 				nn.note = (uint8_t)d1;
 				nn.vel = openVel[ch][d1] ? openVel[ch][d1] : 100;
+				nn.cc7 = cc7[ch] ? cc7[ch] : 100;
 				nn.keep = 1;
 			}
 		}
 		off = end;
 	}
 	/* ノートオフが無い音は四分で閉じる。 */
-	for (int ch = 0; ch < 16; ch++) {
+	for (int ch = 0; ch < 32; ch++) {
 		for (int nt = 0; nt < 128; nt++) {
 			if (!openNote[ch][nt]) continue;
 			if (bag->nNotes >= kSmfNoteMax) { bag->dropped++; continue; }
@@ -249,9 +433,11 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 			nn.ch = (uint8_t)ch;
 			nn.note = (uint8_t)nt;
 			nn.vel = openVel[ch][nt] ? openVel[ch][nt] : 100;
+			nn.cc7 = cc7[ch] ? cc7[ch] : 100;
 			nn.keep = 1;
 		}
 	}
+	ResolveDrumParts(bag);
 	return bag->nNotes > 0;
 }
 
@@ -325,12 +511,33 @@ int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 		for (int i = 0; i < bag.nMeters; i++)
 			ScMidiAddMeter(d, bag.meters[i].tick, bag.meters[i].num, bag.meters[i].den);
 	}
-	int sawDrum = 0;
-	for (int i = 0; i < bag.nNotes; i++) if (bag.notes[i].ch == 9) sawDrum = 1;
-	if (sawDrum) ScMidiAddDrum(d, 0, 9, 1);
+	/* ch10/26 は無指定ならドラム。40 10 15 00 は ch10 を通常へ。
+	   ポートBがあるときだけ 50 1n 15 を ch17〜32 に載せる。値 2 はドラム2。
+	   ドラムは音部記号も Dr にする。指定だけでは譜面が Dr にならない。 */
+	if (bag.portB) d->bind.dualPort = 1;
+	for (int ch = 0; ch < 32; ch++) {
+		int notes = 0;
+		for (int i = 0; i < bag.nNotes; i++) if (bag.notes[i].ch == (uint8_t)ch) notes++;
+		if (!notes && bag.drumPart[ch] == 0) continue;
+		const int defDrum = (ch == 9 || ch == 25) ? 1 : 0;
+		int drum = defDrum;
+		int slot = 0;
+		if (bag.drumPart[ch] == 1) {
+			drum = 1;
+			slot = bag.drumSlot[ch] ? 1 : 0;
+		} else if (bag.drumPart[ch] == 2) {
+			drum = 0;
+		}
+		if (ch >= 16 && (notes || drum)) d->bind.dualPort = 1;
+		if (drum != defDrum || (drum && slot))
+			ScMidiAddDrumEx(d, 0, ch, drum, slot);
+		else if (drum && notes)
+			ScMidiAddDrum(d, 0, ch, 1);
+		if (drum)
+			ScMidiAddClef(d, 0, ch, 3);
+	}
 	for (int i = 0; i < bag.nProgs; i++) {
 		const SmProg& p = bag.progs[i];
-		if (p.ch == 9) continue;
 		ScMidiApplyProgBankAt(d, p.ch, p.tick, p.pc, p.msb, p.lsb);
 	}
 	qsort(bag.notes, (size_t)bag.nNotes, sizeof(SmNote), NoteCmp);
@@ -465,6 +672,23 @@ static int LoadGsVoices(WopnVoice* tab)
 	return got > 0;
 }
 
+/* FVOL はキャリア TL を置き換える。0 が最大、127 が無音。ベロシティをそのまま引くと消える。 */
+static int FmAudibleTl(int vel, int cc7)
+{
+	if (vel < 1) vel = 100;
+	if (cc7 < 1) cc7 = 100;
+	int tl = (127 - vel) * 18 / 127;
+	tl += (127 - cc7) * 10 / 127;
+	if (tl < 6) tl = 6;
+	if (tl > 32) tl = 32;
+	return tl;
+}
+
+static const uint8_t kFmFallbackVoice[25] = {
+	0x3B, 0x00, 0x00, 0x20, 0x28, 0x20, 0x1A, 0x0D, 0x9F, 0x9E, 0xDE, 0x9E,
+	0x05, 0x05, 0x05, 0x05, 0x0F, 0x0B, 0x0C, 0x0B, 0x8A, 0xF6, 0x86, 0xF7, 0x1B
+};
+
 static uint8_t FmByte(int midi)
 {
 	if (midi < 0) midi = 0;
@@ -501,7 +725,10 @@ static int ProgAt(const SmBag* bag, int ch, uint32_t tick)
 
 static int IsDrumCh(const SmBag* bag, int ch, int noteCount)
 {
-	if (ch == 9) return 1;
+	if (ch < 0 || ch > 31) return 0;
+	if (bag->drumPart[ch] == 1) return 1;
+	if (bag->drumPart[ch] == 2) return 0;
+	if ((ch % 16) == 9) return 1;
 	if (noteCount < 4) return 0;
 	int drumPc = 0;
 	for (int i = 0; i < bag->nProgs; i++) {
@@ -515,6 +742,73 @@ static int IsDrumCh(const SmBag* bag, int ch, int noteCount)
 		if (bag->notes[i].note >= 27 && bag->notes[i].note <= 87) hits++;
 	}
 	return hits * 2 >= noteCount;
+}
+
+/* 先頭の SysEx セットアップで空いている小節を捨て、最初のノートがある小節を 1 小節目にする。 */
+static void DropFmLeadBars(SmBag* bag)
+{
+	if (!bag) return;
+	uint32_t first = 0xFFFFFFFFu;
+	for (int i = 0; i < bag->nNotes; i++) {
+		if (!bag->notes[i].keep) continue;
+		if (bag->notes[i].tick < first) first = bag->notes[i].tick;
+	}
+	if (first == 0xFFFFFFFFu || first == 0) return;
+	int num = 4;
+	int den = 4;
+	if (bag->nMeters > 0) {
+		if (bag->meters[0].num) num = bag->meters[0].num;
+		if (bag->meters[0].den) den = bag->meters[0].den;
+	}
+	if (den < 1) den = 4;
+	int bar = num * ((SC_PPQN * 4) / den);
+	if (bar < SC_PPQN) bar = SC_PPQN * 4;
+	const uint32_t shift = (first / (uint32_t)bar) * (uint32_t)bar;
+	if (!shift) return;
+	for (int i = 0; i < bag->nNotes; i++) {
+		if (bag->notes[i].tick >= shift) bag->notes[i].tick -= shift;
+		else if (bag->notes[i].keep) { bag->notes[i].keep = 0; bag->dropped++; }
+	}
+	for (int i = 0; i < bag->nProgs; i++) {
+		if (bag->progs[i].tick > shift) bag->progs[i].tick -= shift;
+		else bag->progs[i].tick = 0;
+	}
+	SmTempo tempos[kSmfTempoMax];
+	int nt = 0;
+	int keepT = -1;
+	for (int i = 0; i < bag->nTempos; i++)
+		if (bag->tempos[i].tick <= shift) keepT = i;
+	if (keepT >= 0) {
+		tempos[nt].tick = 0;
+		tempos[nt].tempoT = bag->tempos[keepT].tempoT;
+		nt++;
+	}
+	for (int i = 0; i < bag->nTempos; i++) {
+		if (bag->tempos[i].tick <= shift || nt >= kSmfTempoMax) continue;
+		tempos[nt].tick = bag->tempos[i].tick - shift;
+		tempos[nt].tempoT = bag->tempos[i].tempoT;
+		nt++;
+	}
+	for (int i = 0; i < nt; i++) bag->tempos[i] = tempos[i];
+	bag->nTempos = nt;
+	SmMeter meters[16];
+	int nm = 0;
+	int keepM = -1;
+	for (int i = 0; i < bag->nMeters; i++)
+		if (bag->meters[i].tick <= shift) keepM = i;
+	if (keepM >= 0 && nm < 16) {
+		meters[nm] = bag->meters[keepM];
+		meters[nm].tick = 0;
+		nm++;
+	}
+	for (int i = 0; i < bag->nMeters; i++) {
+		if (bag->meters[i].tick <= shift || nm >= 16) continue;
+		meters[nm] = bag->meters[i];
+		meters[nm].tick = bag->meters[i].tick - shift;
+		nm++;
+	}
+	for (int i = 0; i < nm; i++) bag->meters[i] = meters[i];
+	bag->nMeters = nm;
 }
 
 static int BassPc(const SmBag* bag, int ch)
@@ -554,15 +848,15 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 			return (int)x->ch - (int)y->ch;
 		});
 
-	int count[16];
+	int count[32];
 	memset(count, 0, sizeof(count));
-	for (int i = 0; i < bag.nNotes; i++) count[bag.notes[i].ch]++;
+	for (int i = 0; i < bag.nNotes; i++) if (bag.notes[i].ch < 32) count[bag.notes[i].ch]++;
 
-	int drumCh[16];
+	int drumCh[32];
 	int nDrum = 0;
-	int melCh[16];
+	int melCh[32];
 	int nMel = 0;
-	for (int ch = 0; ch < 16; ch++) {
+	for (int ch = 0; ch < 32; ch++) {
 		if (!count[ch]) continue;
 		if (IsDrumCh(&bag, ch, count[ch])) drumCh[nDrum++] = ch;
 		else melCh[nMel++] = ch;
@@ -577,9 +871,9 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 	/* FM 0,1,2,7,8,9 の6本、SSG 3,4,5 の3本。残りは捨てる。 */
 	static const int kFmSlot[6] = { 0, 1, 2, 7, 8, 9 };
 	static const int kSsgSlot[3] = { 3, 4, 5 };
-	int destOf[16];
-	int role[16]; /* 0 none, 1 fm, 2 ssg, 3 drum */
-	for (int i = 0; i < 16; i++) { destOf[i] = -1; role[i] = 0; }
+	int destOf[32];
+	int role[32]; /* 0 none, 1 fm, 2 ssg, 3 drum */
+	for (int i = 0; i < 32; i++) { destOf[i] = -1; role[i] = 0; }
 	for (int i = 0; i < nMel && i < 6; i++) {
 		destOf[melCh[i]] = kFmSlot[i];
 		role[melCh[i]] = 1;
@@ -592,7 +886,7 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 	const int rhy = 6;
 
 	/* 和音は1音。ベース系は低い方、それ以外は高い方。重なりは後ろを優先して前を切る。 */
-	for (int ch = 0; ch < 16; ch++) {
+	for (int ch = 0; ch < 32; ch++) {
 		if (role[ch] != 1 && role[ch] != 2) continue;
 		const int bass = (role[ch] == 1) && BassPc(&bag, ch);
 		int i = 0;
@@ -629,6 +923,8 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 		}
 	}
 
+	DropFmLeadBars(&bag);
+
 	WopnVoice tab[128];
 	LoadGsVoices(tab);
 
@@ -657,14 +953,14 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 		if (dst < 0) continue;
 		if (role[nn.ch] == 1) {
 			const int pc = ProgAt(&bag, nn.ch, nn.tick);
-			if (voiceOfPc[pc] < 0 && tab[pc].ok) {
+			if (voiceOfPc[pc] < 0 && tab[pc].ok)
 				voiceOfPc[pc] = ScFmAllocVoice(d, tab[pc].raw);
-			}
+			if (voiceOfPc[pc] < 0)
+				voiceOfPc[pc] = ScFmAllocVoice(d, kFmFallbackVoice);
 			if (voiceOfPc[pc] >= 0 && lastPc[dst] != pc) {
 				ScFmAddVoiceSelect(d, voiced[dst] ? nn.tick : 0, dst, voiceOfPc[pc], 1);
 				if (!voiced[dst]) {
-					const int tl = 127 - (nn.vel ? nn.vel : 100);
-					ScFmAddVolTl(d, 0, dst, tl < 8 ? 8 : tl);
+					ScFmAddVolTl(d, 0, dst, FmAudibleTl(nn.vel, nn.cc7));
 					voiced[dst] = 1;
 				}
 				lastPc[dst] = pc;
@@ -677,8 +973,9 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 			else bag.dropped++;
 		} else if (role[nn.ch] == 2) {
 			if (!voiced[dst]) {
-				int v = (nn.vel ? nn.vel : 100) * 15 / 127;
-				if (v < 1) v = 1;
+				int v = (nn.vel ? nn.vel : 100) * (nn.cc7 ? nn.cc7 : 100) / (127 * 8);
+				if (v < 9) v = 9;
+				if (v > 15) v = 15;
 				PushEv(d->ev, &d->evCount, 0, (uint8_t)dst, SC_EV_FM_VOL, (uint8_t)v, 1, 0, 0);
 				voiced[dst] = 1;
 			}

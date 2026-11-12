@@ -25,6 +25,10 @@ extern volatile LONG g_appExiting;
 int g_oggKpiLoading = 0;
 /* 本体の演奏開始中フラグ。ホストに play() は無いのでボタン凍結はしない。 */
 int OggInPlayOpen() { return 0; }
+/* 譜面コンボは本体だけ。ホストは未接続扱いで通常の GS/XG 選択に落とす。 */
+extern "C" int ScStaffScorePreviewOut(void) { return 0; }
+/* Cemu 曲名の引き直しは本体のプレイリスト側。ホストでは一覧を出さない。 */
+int PlCemuTitleRefreshBusy() { return 1; }
 
 static void PumpServeMsgs()
 {

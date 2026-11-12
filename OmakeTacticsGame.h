@@ -251,7 +251,9 @@ private:
 	void DrawJobRedo();
 	int NextJobPending(int from) const;
 	void BeginJobRedo();
+	bool BeginJobForce();
 	void ApplyJobPick(int cls);
+	void CommitJobRedo(int n);
 	void FinishJobSkip();
 
 	// 戦闘
@@ -337,7 +339,11 @@ private:
 	void SummonStrike(float dt);
 	void SummonLeave(float dt);
 	void SummonMedium(int phase, float u);
+	void SummonTierFx(int phase, float u);
 	void DrawSummonGate();
+	int SummonCutRank() const;
+	float SummonStrikeSpan() const;
+	float SummonDepartSpan() const;
 	float SummonStrikeNeed() const;
 	float SummonDepartNeed() const;
 	void DrawCutInUi();
@@ -620,6 +626,8 @@ private:
 	float m_evoT;
 	int m_evoRoster, m_evoFrom, m_evoTo;
 	int m_jobRedo;     // 0なし 1案内 2進化画面で振り直し 3スキップ確認
+	int m_jobForce;    // 1=系統が外れた職の振り直しを強要
+	int m_jobForceAt;  // この段(0始まり)より前には戻さない
 	int m_jobWho, m_jobStep, m_jobN, m_jobSkipAll, m_jobSel;
 	int m_jobPath[12];
 
@@ -710,7 +718,7 @@ private:
 	int m_cutAllyN, m_cutFoeN;
 	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
 	int m_cutPat;        // 0斬 1重 2旋 3突 4射 5火 6氷 7雷 8闇 9風 10回復 11範囲回復 12支援 13敵
-	int m_sumOn, m_sumFx, m_sumHit, m_sumHide;
+	int m_sumOn, m_sumFx, m_sumRank, m_sumHit, m_sumHide;
 	float m_sumU, m_sumYaw, m_sumFade;
 	V3 m_sumPos, m_sumFrom, m_sumTo;
 	Actor m_sumAct;
@@ -732,6 +740,10 @@ private:
 	int m_resultRoster[MAX_PARTY];
 	int m_resultN;
 	int m_bossDown;
+	int m_bgmTick;
+	int m_bgmWatch;
+	int m_bgmHoldWin;
+	int m_bgmHoldDanger;
 	int m_menuConfirm;
 	float m_enemyWait;
 	// 放置デモ。0=なし 1=入り幕 2=再生 3=出幕。マウスは動かさず、盤とメニューの枠だけ進める。

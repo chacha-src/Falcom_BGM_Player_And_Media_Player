@@ -231,17 +231,20 @@ void CSasamiAutoArrangeDlg::ShowResult(const ScAutoArrangeResult& r)
 BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
+	::LockWindowUpdate(m_hWnd);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
 	SetWindowText(LL14(L"自動伴奏", L"Auto accompaniment", L"Accompagnement auto", L"Accompagnamento auto", L"Acompañamiento auto",
 		L"자동 반주", L"自动伴奏", L"مرافقة تلقائية", L"Автоаккомпанемент", L"Auto-Begleitung", L"Acompanhamento auto", L"Auto-begeleiding", L"Automatyczny akompaniament", L"Otomatik eşlik"));
 	if (!m_host || !m_host->ev || !m_host->evCount || *m_host->evCount < 0) {
+		::LockWindowUpdate(NULL);
 		EndDialog(IDCANCEL);
 		return TRUE;
 	}
 	m_snapN = *m_host->evCount;
 	m_snap = (ScEvent*)HeapAlloc(GetProcessHeap(), 0, sizeof(ScEvent) * (size_t)(m_snapN > 0 ? m_snapN : 1));
 	if (!m_snap) {
+		::LockWindowUpdate(NULL);
 		EndDialog(IDCANCEL);
 		return TRUE;
 	}
@@ -566,6 +569,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
 	}
 	LayoutChrome();
+	::LockWindowUpdate(NULL);
 	return TRUE;
 }
 
@@ -904,6 +908,14 @@ int ScAutoArrangeDlgRun(const ScAutoArrangeHost* host)
 {
 	if (!host || !host->ev || !host->evCount) return IDCANCEL;
 	CWnd* parent = host->ctx ? (CWnd*)host->ctx : NULL;
+	HWND hp = (parent && parent->GetSafeHwnd()) ? parent->GetSafeHwnd() : NULL;
+	/* 巨大な譜面を親にすると、ダイアログを出す前に全面再描画が走る。出るまで止める。 */
+	if (hp) ::SendMessage(hp, WM_SETREDRAW, FALSE, 0);
 	CSasamiAutoArrangeDlg dlg(host, parent);
-	return (int)dlg.DoModal();
+	const int rc = (int)dlg.DoModal();
+	if (hp && ::IsWindow(hp)) {
+		::SendMessage(hp, WM_SETREDRAW, TRUE, 0);
+		::RedrawWindow(hp, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	}
+	return rc;
 }

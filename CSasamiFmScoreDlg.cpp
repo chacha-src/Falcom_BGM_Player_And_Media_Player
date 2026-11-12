@@ -333,7 +333,7 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 		else if (i == 6)
 			wcscpy_s(s, L"RHY");
 		else
-			_snwprintf_s(s, _TRUNCATE, L"FM%d", i - 2);
+			_snwprintf_s(s, _TRUNCATE, L"FM%d", i - 3);
 		m_ch.AddString(s);
 	}
 	for (int i = 0; i < SC_FM_MISAO; i++) {

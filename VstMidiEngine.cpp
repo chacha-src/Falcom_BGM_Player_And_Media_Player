@@ -11031,6 +11031,12 @@ extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, i
 		}
 	}
 	if (!portCover) return;
+	/* 試し再生が終わったあとも曲フラグが残ると、モニターが起きずクリックが無音になる。
+	   曲がまだ鳴っているあいだ（endflg==0）はここでは起こさない。 */
+	if (VstSongUseLiveBinds() && endflg != 0) {
+		VstSongUseLiveBindsSet(0);
+		VstLiveMonitorEnsure();
+	}
 	if (noteMidi < 0) noteMidi = 60;
 	if (noteMidi > 127) noteMidi = 127;
 	if (velocity < 1) velocity = 100;

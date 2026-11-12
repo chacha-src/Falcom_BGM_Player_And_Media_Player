@@ -1,5 +1,5 @@
 // パッシブ装備。価格は 1000G 以上。id は 1 始まり。効果は PasFx。
-// more は合併品の追加効果。0 は無し。種類を足すときはここへ行を足す（保存は 64 まで）。
+// more は合併品の追加効果。0 は無し。種類を足すときはここへ行を足す（保存は 96 まで）。
 struct PasRow { int price; int fx; const wchar_t* nm[14]; const wchar_t* ds[14]; int more[4]; };
 
 static const PasRow kPasRow[] = {
@@ -131,6 +131,7 @@ static const PasRow kPasRow[] = {
 		{ L"防御と魔防が 20% 上がる。", L"Defense and Resistance each rise by 20%.", L"Défense et Résistance augmentent de 20 %.", L"Difesa e Resistenza salgono del 20%.", L"Defensa y Resistencia suben un 20 %.", L"방어와 마방이 20% 오른다.", L"防御和魔防各提高 20%。", L"يزيد الدفاع والمقاومة 20٪.", L"Защита и сопротивление растут на 20%.", L"Abwehr und Resistenz steigen um 20 %.", L"Defesa e Resistência sobem 20%.", L"Verdediging en weerstand stijgen met 20%.", L"Obrona i odporność rosną o 20%.", L"Savunma ve direnç %20 artar." }, { PAS_RES2, 0, 0, 0 } },
 	{ 72000, PAS_FIRE2, { L"五行の大石", L"Stone of Five Ways", L"Pierre des cinq voies", L"Pietra delle cinque vie", L"Piedra de las cinco vías", L"오행의 큰 돌", L"五行大石", L"حجر الطرق الخمس", L"Камень пяти путей", L"Stein der fünf Wege", L"Pedra das cinco vias", L"Steen van vijf wegen", L"Kamień pięciu dróg", L"Beş Yol Taşı" },
 		{ L"炎・氷・雷・聖・闇のダメージを、それぞれ 50% 減らして受ける。", L"Fire, ice, thunder, holy, and dark damage taken each fall by 50%.", L"Feu, Glace, Foudre, Sacré et Ténèbres subis baissent chacun de 50 %.", L"Fuoco, Ghiaccio, Tuono, Sacro e Ombra subiti calano ciascuno del 50%.", L"Fuego, Hielo, Trueno, Sacro y Oscuridad recibidos bajan cada uno un 50 %.", L"화염·빙결·번개·신성·암흑 피해를 각각 50% 줄여 받는다.", L"受到的火、冰、雷、圣、暗伤害各减少 50%。", L"ينخفض ضرر النار والجليد والرعد والمقدس والظلام المتلقى 50٪ لكل منها.", L"Получаемый урон огнём, льдом, громом, светом и тьмой ниже на 50% каждый.", L"Erlittener Feuer-, Eis-, Donner-, heilig- und Dunkelschaden sinkt je um 50 %.", L"Dano de Fogo, Gelo, Trovão, Sagrado e Trevas recebido cai 50% cada.", L"Ontvangen vuur-, ijs-, donder-, heilige en duister-schade daalt elk met 50%.", L"Otrzymywane obrażenia od ognia, lodu, gromu, świętości i mroku maleją o 50% każde.", L"Alınan ateş, buz, yıldırım, kutsal ve karanlık hasarı her biri %50 azalır." }, { PAS_ICE2, PAS_THUNDER2, PAS_HOLY2, PAS_DARK2 } },
+#include "tactics_src/passive_high.inc"
 };
 static const int kPasN = (int)(sizeof(kPasRow) / sizeof(kPasRow[0]));
-static_assert(sizeof(kPasRow) / sizeof(kPasRow[0]) >= 20 && sizeof(kPasRow) / sizeof(kPasRow[0]) <= 64, "パッシブは 20..64");
+static_assert(sizeof(kPasRow) / sizeof(kPasRow[0]) >= 20 && sizeof(kPasRow) / sizeof(kPasRow[0]) <= 96, "パッシブは 20..96");

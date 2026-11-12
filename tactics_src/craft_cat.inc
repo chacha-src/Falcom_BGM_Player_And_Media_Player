@@ -368,6 +368,7 @@ static const AccRow kAccRow[] = {
 	{ 3200, { { S_STR, 3 }, { S_MAG, 3 }, { S_AGI, 3 }, { S_LUK, 3 } }, { L"剛力勲章", L"Mighty Brooch", L"Puissant broche", L"Possente spilla", L"Poderoso broche", L"완력 브로치", L"膂力勋章", L"بروش قوي", L"Могучий брошь", L"Mächtig Brosche", L"Poderoso broche", L"Machtig broche", L"Potężny broszka", L"Güçlü broş" } },
 	{ 4500, { { S_DEF, 6 }, { S_RES, 6 }, { S_GRD, 4 } }, { L"堅守霊符", L"Sturdy Talisman", L"Robuste talisman", L"Robusto talismano", L"Robusto talismán", L"견고 영부", L"坚守灵符", L"طلسم صلب", L"Крепкий талисман", L"Robust Talisman", L"Robusto talismã", L"Stevig talisman", L"Twardy talizman", L"Sağlam muska" } },
 #include "tactics_src/acc_extra.inc"
+#include "tactics_src/acc_high.inc"
 };
 static const int kAccN = (int)(sizeof(kAccRow) / sizeof(kAccRow[0]));
 static_assert(sizeof(kAccRow) / sizeof(kAccRow[0]) <= 1024, "CraftStore.accN は 1024 枠");

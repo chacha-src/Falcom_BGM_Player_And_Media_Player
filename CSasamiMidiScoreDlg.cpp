@@ -4640,6 +4640,22 @@ void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
 			ScApplyGsMapBanks(tmp, tmp->gsMap);
 	}
 	LoadFromDoc(*tmp, 0);
+	{
+		int hi = 0;
+		for (int i = 0; i < m_doc.evCount; i++) {
+			if (m_doc.ev[i].ch >= 16) { hi = 1; break; }
+		}
+		if (!hi && m_doc.bind.dualPort) hi = 1;
+		if (hi) {
+			ScStaffSetChannelViewAll(&m_ui);
+			savedata.sasamiMidiPartMask = ScStaffPackPartMask(&m_ui);
+			if (m_btnShowAll.GetSafeHwnd())
+				m_btnShowAll.SetWindowText(L"16ch");
+			UpdateScrollBars();
+			if (m_bodyRc.Width() > 0)
+				InvalidateRect(m_bodyRc, FALSE);
+		}
+	}
 	ScMidiDocClear(tmp);
 	HeapFree(GetProcessHeap(), 0, tmp);
 	PushDocToText();
