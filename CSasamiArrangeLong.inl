@@ -256,6 +256,428 @@ static void PaintHuman(int fam, int pat, int bar, int q, int kind, uint16_t* arp
 	*cntM = c;
 }
 
+/* 0低音 1コード 2パッド 3アルペジオ 4ハモ 5対旋律。単位は16分。16は全音符なので使わない。 */
+static int HoldSlots(int fam, int role, int style)
+{
+	if (style == SC_AS_HOUSE || style == SC_AS_DISCO) {
+		if (role == 1 || role == 0) return 2;
+		if (role == 2) return 4;
+		return 1;
+	}
+	if (style == SC_AS_TRANCE || style == SC_AS_EDM || style == SC_AS_SYNTHWAVE) {
+		if (role == 1 || role == 2) return 4;
+		if (role == 0 || role == 3) return 1;
+		return 2;
+	}
+	if (style == SC_AS_TECHNO) return 1;
+	switch (fam) {
+	case FAM_BALLAD: case FAM_PAD:
+		if (role == 0 || role == 2) return 8;
+		return 4;
+	case FAM_JAZZ: case FAM_BLUES: case FAM_SHUF: case FAM_BOSSA: case FAM_WALTZ:
+		if (role == 0 || role == 1) return 4;
+		if (role == 2) return 1;
+		return 2;
+	case FAM_8: case FAM_METAL: case FAM_MARCH:
+		if (role == 2) return 4;
+		return 2;
+	case FAM_FUNK: case FAM_DISCO: case FAM_FLOOR: case FAM_DNB:
+		if (role == 2) return 2;
+		return 1;
+	default:
+		if (role == 2) return 3;
+		if (role == 0) return 2;
+		if (role == 1) return 1;
+		return 2;
+	}
+}
+
+/* コードの白玉を、パートごとの短い刻みに置き換える。音程はコードトーンのまま。 */
+/* 参考曲の打点の癖。1小節をそのまま写さず、キック・スネア・ハットの役割だけ合わせる。 */
+static void Drumify(int style, int fam, int pat, int bar,
+	uint16_t* kick, uint16_t* snare, uint16_t* hat, uint16_t* ohat, uint16_t* ride, uint16_t* drm)
+{
+	if (!kick || !snare || !hat || !ohat || !ride || !drm) return;
+	int v = (pat + (bar & 3)) & 3;
+	int take = (fam == FAM_16 || fam == FAM_8 || fam == FAM_METAL || fam == FAM_JAZZ
+		|| fam == FAM_BLUES || fam == FAM_SHUF || style == SC_AS_HOUSE || style == SC_AS_TRANCE
+		|| style == SC_AS_TECHNO || style == SC_AS_EDM || style == SC_AS_SYNTHWAVE
+		|| style == SC_AS_DISCO || style == SC_AS_DNB || style == SC_AS_PUNK
+		|| style == SC_AS_GRUNGE || style == SC_AS_SLOWROCK);
+	if (!take) return;
+	static const uint16_t k16[4] = { 0x4049, 0x4149, 0x40C9, 0x4141 };
+	static const uint16_t s16[4] = { 0x1010, 0x1210, 0x1110, 0x1090 };
+	static const uint16_t h16[4] = { 0xF3FF, 0xF3F7, 0xE3FF, 0xF3EF };
+	static const uint16_t o16[4] = { 0x0400, 0x4400, 0x0400, 0x0040 };
+	static const uint16_t kRk[4] = { 0x4505, 0x4504, 0x4515, 0x0505 };
+	static const uint16_t hRk[4] = { 0x5155, 0x5515, 0x1555, 0x5551 };
+	static const uint16_t oRk[4] = { 0x4000, 0x0400, 0x4004, 0x0040 };
+	static const uint16_t tRk[4] = { 0x0800, 0x0200, 0x0080, 0x2000 };
+	static const uint16_t kJz[4] = { 0x0081, 0x0801, 0x0080, 0x8001 };
+	static const uint16_t sJz[4] = { 0x1800, 0x1810, 0x0800, 0x1010 };
+	*ride = 0;
+	drm[DV_CLAP] = 0;
+	drm[DV_RIM] = 0;
+	drm[DV_TOM] = 0;
+	if (style == SC_AS_16BEAT || style == SC_AS_CITYPOP || style == SC_AS_FUSION) {
+		*kick = k16[v];
+		*snare = s16[v];
+		*hat = h16[v];
+		*ohat = (style == SC_AS_CITYPOP) ? (uint16_t)0x4444 : o16[v];
+		if (style == SC_AS_FUSION) *ride = 0x2222;
+		return;
+	}
+	if (style == SC_AS_ANISON || style == SC_AS_GAME) {
+		*kick = 0x5555;
+		*snare = 0x1110;
+		*hat = 0xFFFF;
+		*ohat = 0x0100;
+		return;
+	}
+	if (style == SC_AS_KAYOKYOKU) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0x5555;
+		*ohat = 0x0100;
+		return;
+	}
+	if (style == SC_AS_CHIPTUNE) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0xAAAA;
+		*ohat = 0;
+		return;
+	}
+	if (style == SC_AS_HOUSE) {
+		*kick = 0x1111;
+		*snare = 0;
+		*hat = 0x1111;
+		*ohat = 0x4444;
+		drm[DV_CLAP] = 0x1010;
+		return;
+	}
+	if (style == SC_AS_TRANCE) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0xFFFF;
+		*ohat = 0x0100;
+		return;
+	}
+	if (style == SC_AS_TECHNO) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0xDDDD;
+		*ohat = 0x0010;
+		drm[DV_RIM] = 0x2222;
+		return;
+	}
+	if (style == SC_AS_EDM) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0x5555;
+		*ohat = 0x8888;
+		drm[DV_CLAP] = 0x1010;
+		return;
+	}
+	if (style == SC_AS_SYNTHWAVE) {
+		*kick = (v & 1) ? (uint16_t)0x1511 : (uint16_t)0x1111;
+		*snare = 0x1010;
+		*hat = 0x5555;
+		*ohat = 0x0100;
+		return;
+	}
+	if (style == SC_AS_DISCO) {
+		*kick = 0x1111;
+		*snare = 0x1010;
+		*hat = 0x1111;
+		*ohat = 0x4444;
+		return;
+	}
+	if (style == SC_AS_DNB) {
+		*kick = (v & 1) ? (uint16_t)0x2145 : (uint16_t)0x4521;
+		*snare = 0x1010;
+		*hat = 0xFFFF;
+		*ohat = 0;
+		return;
+	}
+	if (style == SC_AS_PUNK) {
+		*kick = 0x5555;
+		*snare = 0x1111;
+		*hat = 0xFFFF;
+		*ohat = 0;
+		return;
+	}
+	if (style == SC_AS_GRUNGE || style == SC_AS_SLOWROCK) {
+		*kick = 0x1111;
+		*snare = 0x0100;
+		*hat = 0x5555;
+		*ohat = 0x0010;
+		return;
+	}
+	if (fam == FAM_JAZZ || fam == FAM_BLUES || fam == FAM_SHUF) {
+		*kick = kJz[v];
+		*snare = sJz[v];
+		*hat = 0x9090;
+		*ohat = 0x0101;
+		*ride = 0;
+		drm[DV_CLAP] = 0x1008;
+		return;
+	}
+	if (fam == FAM_8 || fam == FAM_METAL) {
+		*kick = (fam == FAM_METAL) ? (uint16_t)0x5555 : kRk[v];
+		*snare = (fam == FAM_METAL) ? (uint16_t)0x1111 : (uint16_t)0x1010;
+		*hat = (fam == FAM_METAL) ? (uint16_t)0xFFFF : hRk[v];
+		*ohat = (fam == FAM_METAL) ? (uint16_t)0 : oRk[v];
+		if (fam == FAM_8) drm[DV_TOM] = tRk[v];
+		return;
+	}
+	if (fam == FAM_16) {
+		*kick = k16[v];
+		*snare = s16[v];
+		*hat = h16[v];
+		*ohat = o16[v];
+	}
+}
+
+static void Densify(int style, int fam, int pat, int bar,
+	uint16_t* comp, uint16_t* pad, uint16_t* arp, uint16_t* harm, uint16_t* cnt,
+	uint16_t* bass, const uint8_t** deg, int* nd)
+{
+	if (!comp || !pad || !arp || !harm || !cnt || !bass) return;
+	ClearFig();
+	int k = (pat + (pat >> 3) + (bar & 7)) & 7;
+	static const uint16_t c16[8] = { 0x5D5D, 0x9B3B, 0xD657, 0x75B9, 0xB36D, 0xB975, 0x6D5B, 0x97D3 };
+	static const uint16_t p16[8] = { 0x0842, 0x1084, 0x2108, 0x4210, 0x0421, 0x4082, 0x8204, 0x1048 };
+	static const uint16_t b16[8] = { 0x1515, 0x4545, 0x5151, 0x5454, 0x1515, 0x4545, 0x1155, 0x5511 };
+	static const uint16_t a16[8] = { 0x2222, 0x4444, 0x0A0A, 0xA0A0, 0x2222, 0x0842, 0x4208, 0x00AA };
+	static const uint16_t h16[8] = { 0x8888, 0x1111, 0x1248, 0x8421, 0x4842, 0x2424, 0x4848, 0x2121 };
+	static const uint16_t c8[8] = { 0x0045, 0x4401, 0x0144, 0x4014, 0x0450, 0x5004, 0x1044, 0x4410 };
+	static const uint16_t p8[8] = { 0x0100, 0x0010, 0x1000, 0x0001, 0x0100, 0x4000, 0x0010, 0x1000 };
+	static const uint16_t b8[8] = { 0x1515, 0x4545, 0x5555, 0x1454, 0x5151, 0x4511, 0x1145, 0x5454 };
+	static const uint16_t cJz[8] = { 0x0101, 0x1010, 0x0011, 0x1100, 0x1001, 0x0110, 0x0101, 0x1010 };
+	static const uint16_t pJz[8] = { 0x0088, 0x8800, 0x8080, 0x0880, 0x8008, 0x0808, 0x0088, 0x8080 };
+	static const uint16_t bJz[8] = { 0x1111, 0x1111, 0x0111, 0x1110, 0x1111, 0x1011, 0x1111, 0x1101 };
+	static const uint16_t cHop[8] = { 0x4444, 0x4044, 0x4404, 0x0444, 0x2222, 0x4224, 0x2242, 0x2422 };
+	static const uint16_t bHop[8] = { 0x1511, 0x1145, 0x4511, 0x0101, 0x1451, 0x5114, 0x1111, 0x1011 };
+	static const uint8_t walk[8] = { 1, 5, 2, 8, 1, 2, 5, 3 };
+	static const uint8_t syncd[8] = { 1, 2, 5, 1, 8, 2, 5, 3 };
+	static const uint8_t rootd[4] = { 1, 1, 2, 1 };
+	*arp = a16[k];
+	*harm = h16[k];
+	*cnt = a16[(k + 3) & 7];
+	if (style == SC_AS_HOUSE) {
+		*comp = 0x4444;
+		*pad = 0x0101;
+		*bass = 0x4444;
+		*arp = 0x0404;
+		*harm = 0x0040;
+		*cnt = 0x4004;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_TRANCE) {
+		*comp = 0x1111;
+		*pad = 0x0101;
+		*bass = 0x5555;
+		*arp = 0xFFFF;
+		*harm = 0x2222;
+		*cnt = 0x8888;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (style == SC_AS_TECHNO) {
+		*comp = 0x0101;
+		*pad = 0x0001;
+		*bass = 0x1515;
+		*arp = 0x0100;
+		*harm = 0;
+		*cnt = 0x0010;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_EDM) {
+		*comp = 0x8888;
+		*pad = 0x1111;
+		*bass = 0x1111;
+		*arp = 0x0F0F;
+		*harm = 0x2222;
+		*cnt = 0x4444;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_SYNTHWAVE) {
+		*comp = 0x0101;
+		*pad = 0x1111;
+		*bass = 0x5555;
+		*arp = 0xAAAA;
+		*harm = 0x1111;
+		*cnt = 0x2222;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (style == SC_AS_DISCO) {
+		*comp = 0xAAAA;
+		*pad = 0x1111;
+		*bass = 0x5555;
+		*arp = 0x2222;
+		*harm = 0x8888;
+		*cnt = 0x4444;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (style == SC_AS_DNB) {
+		*comp = 0x0101;
+		*pad = 0x0001;
+		*bass = 0x3333;
+		*arp = 0xAAAA;
+		*harm = 0x0404;
+		*cnt = 0x1010;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (style == SC_AS_PUNK) {
+		*comp = 0x5555;
+		*pad = 0;
+		*bass = 0x5555;
+		*arp = 0x1111;
+		*harm = 0;
+		*cnt = 0;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_GRUNGE || style == SC_AS_SLOWROCK) {
+		*comp = 0x0101;
+		*pad = 0x0001;
+		*bass = 0x1111;
+		*arp = 0x0010;
+		*harm = 0x0100;
+		*cnt = 0;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_CITYPOP || style == SC_AS_FUSION) {
+		*comp = c16[k];
+		*pad = cJz[k];
+		*bass = b16[k];
+		*arp = a16[k];
+		*harm = p16[k];
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (style == SC_AS_KAYOKYOKU || style == SC_AS_ACOUSTIC) {
+		*comp = c8[k];
+		*pad = p8[k];
+		*bass = 0x1111;
+		*arp = 0x0101;
+		*harm = 0x0010;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (style == SC_AS_GAME || style == SC_AS_CHIPTUNE) {
+		*comp = 0x1111;
+		*pad = 0x0101;
+		*bass = 0x5555;
+		*arp = (style == SC_AS_CHIPTUNE) ? (uint16_t)0xAAAA : (uint16_t)0xFFFF;
+		*harm = 0x2222;
+		*cnt = 0x4444;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (fam == FAM_SAMBA || fam == FAM_LATIN || fam == FAM_AFRO) {
+		*comp = 0xAAAA;
+		*pad = 0x1111;
+		*bass = 0x1515;
+		*arp = 0x2222;
+		*harm = 0x4444;
+		*cnt = 0x8888;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (fam == FAM_JAZZ || fam == FAM_BLUES || fam == FAM_SHUF || fam == FAM_BOSSA) {
+		*comp = cJz[k];
+		*pad = pJz[k];
+		*bass = bJz[k];
+		*arp = (uint16_t)(0x0008u << (k & 3));
+		*harm = (uint16_t)(0x0800u >> (k & 3));
+		*cnt = pJz[(k + 1) & 7];
+		if (deg) *deg = walk;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (fam == FAM_8 || fam == FAM_METAL || fam == FAM_MARCH) {
+		*comp = c8[k];
+		*pad = p8[k];
+		*bass = b8[k];
+		*arp = (uint16_t)(0x0101u << (k & 1));
+		*harm = 0x0010;
+		*cnt = 0x1000;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (fam == FAM_HOP || fam == FAM_TRAP) {
+		*comp = cHop[k];
+		*pad = pJz[k];
+		*bass = bHop[k];
+		*arp = 0x2222;
+		*harm = 0x0808;
+		if (deg) *deg = syncd;
+		if (nd) *nd = 8;
+		return;
+	}
+	if (fam == FAM_BALLAD || fam == FAM_PAD) {
+		*comp = cJz[k];
+		*pad = 0x0101;
+		*bass = 0x0101;
+		*arp = 0x1111;
+		*harm = 0x0010;
+		*cnt = 0x1000;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	if (fam == FAM_WALTZ) {
+		*comp = 0x0111;
+		*pad = 0x0100;
+		*bass = 0x0111;
+		*arp = 0x0010;
+		*harm = 0x0001;
+		*cnt = 0x0100;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 3;
+		return;
+	}
+	if (fam == FAM_REG || fam == FAM_SKA) {
+		*comp = 0x4444;
+		*pad = 0x4444;
+		*bass = bHop[k];
+		*arp = 0;
+		*harm = 0x0040;
+		*cnt = 0x0400;
+		if (deg) *deg = rootd;
+		if (nd) *nd = 4;
+		return;
+	}
+	*comp = c16[k];
+	*pad = p16[k];
+	*bass = (fam == FAM_FUNK) ? (uint16_t)0x5757 : b16[k];
+	if (deg) *deg = syncd;
+	if (nd) *nd = 8;
+}
+
 /* 16分格子にしないスタイル。4分と8分と 8+16+16 だけをアレンジでずらす。 */
 static void PaintSlow(int fam, int pat, int q, uint16_t* arpM, uint16_t* cntM)
 {
@@ -535,13 +957,10 @@ static void WriteLiveChart(int style, int pat, int bar, int div, int section,
 		else
 			PaintSlow(fam, pat, q, &arpM, &cntM);
 	}
-	if ((fam == FAM_16 || fam == FAM_FUNK) && section == SEC_BODY && !qLast && !loopLast
-		&& kind != AR_QUIET && kind != AR_DARK && kind != AR_PAD && kind != AR_HALF) {
-		/* ベースは小節ごとに 16分3つ と 8+16+16 を行き来する。32分は上の線に任せる。 */
-		bassHit = (bar & 1) ? 0xDDDD : 0x7777;
-		deg = degSync;
-		nd = 8;
-	}
+	if (section == SEC_BODY && !qLast && !loopLast
+		&& kind != AR_QUIET && kind != AR_DARK && kind != AR_PAD && kind != AR_HALF)
+		Densify(style, fam, pat, bar, &compM, &padM, &arpM, &harmM, &cntM, &bassHit, &deg, &nd);
+		Drumify(style, fam, pat, bar, &kick, &snare, &hat, &ohat, &ride, drm);
 
 	drm[DV_KICK] = Fit16(kick, div);
 	drm[DV_SNARE] = Fit16(snare, div);

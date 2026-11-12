@@ -2843,6 +2843,18 @@ static int SpanTicks(int slot, int next, int div, uint32_t t0, uint32_t tick, in
 	return span;
 }
 
+/* 次の打点まで伸ばすと全音符になる。スタイルごとの上限で切る。 */
+static int CapSpan(int span, int slotDur, int maxSlots)
+{
+	if (slotDur < 1) slotDur = 1;
+	if (maxSlots < 1) maxSlots = 1;
+	int cap = slotDur * maxSlots;
+	if (cap < 2) cap = 2;
+	if (span > cap) span = cap;
+	if (span < 2) span = 2;
+	return span;
+}
+
 static int NthBit(uint16_t m, int slot)
 {
 	int n = 0;
@@ -3656,6 +3668,18 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				if (b.root2 >= 0 && midSlot > 0 && slot < midSlot && n > midSlot) return midSlot;
 				return n;
 			};
+			const int famNow = StyleFam(opt->style);
+			const int kindNow = ArrangeKind(opt->style, patVar);
+			auto clip = [&](int span, int role) -> int {
+				int h = HoldSlots(famNow, role, opt->style);
+				int quietish = (b.section == SEC_INTRO || b.section == SEC_BREAK
+					|| kindNow == AR_QUIET || kindNow == AR_DARK || kindNow == AR_PAD || kindNow == AR_HALF);
+				if (quietish) {
+					if (h < 4) h = 4;
+					if (h > 8) h = 8;
+				}
+				return CapSpan(span, slotDur, h);
+			};
 			uint16_t bit = (uint16_t)(1u << slot);
 			const int introSoft = (b.section == SEC_INTRO && !last);
 			const int merge = haveAcc ? 1 : 0;
@@ -3738,7 +3762,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = bHit0;
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur), 0);
 				if (i == 0) {
 					if (hit) {
 						int deg = phraseEnd ? 1 : (int)bass[slot];
@@ -3747,7 +3771,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 						int midi = BassMidi(hr, SafeDeg(deg), ht);
 						pit[np++] = midi;
 						/* 拍の頭だけルート＋5度。それ以外は一本の線。 */
-						if (!bassSoft[slot] && (slot % 4) == 0) {
+						if (!bassSoft[slot] && (slot % 4) == 0
+							&& (famNow == FAM_8 || famNow == FAM_METAL || famNow == FAM_JAZZ)) {
 							int fifth = BassMidi(hr, 2, ht);
 							if (fifth == midi) fifth = midi + 12;
 							while (fifth > 64) fifth -= 12;
@@ -3756,7 +3781,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					}
 				} else if (hit) {
 					np = FillVoicing(hr, ht, st.power, 2, barAt + i, 40, 67, pit);
-					span = SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur);
+					span = clip(SpanTicks(slot, cutNext(bassSlots), div, b.t0, tick, b.len, slotDur), 0);
 				} else hit = 0;
 				int bend = (i == 0 && hit && slot == 0 && (phrase % 4) == 0
 					&& (st.bend || StyleFam(opt->style) == FAM_FUNK || StyleFam(opt->style) == FAM_BLUES
@@ -3772,9 +3797,13 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				if (i > 0 && slot == cFirst) hit = 0;
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(compM), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(compM), div, b.t0, tick, b.len, slotDur), 1);
 				if (hit) {
-					int nVoice = (i == 0) ? 5 : 4;
+					int thick = (famNow == FAM_JAZZ || famNow == FAM_BLUES || famNow == FAM_BALLAD || famNow == FAM_PAD
+						|| famNow == FAM_DISCO || opt->style == SC_AS_HOUSE || opt->style == SC_AS_TRANCE
+						|| opt->style == SC_AS_EDM || opt->style == SC_AS_SYNTHWAVE || opt->style == SC_AS_GOSPEL);
+					int nVoice = thick ? 4 : 3;
+					if (i > 0) nVoice = 3;
 					int inv = barAt * 5 + opt->style + patVar * 7 + i * 3 + slot + (half ? 4 : 0);
 					int lo = 48 + ((barAt & 3) == 2 ? 5 : 0) + (i % 2) * 7;
 					int hi = 80 - ((barAt & 3) == 1 ? 4 : 0);
@@ -3789,9 +3818,9 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = BitOn(padM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(padM), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(padM), div, b.t0, tick, b.len, slotDur), 2);
 				if (hit)
-					np = FillVoicing(hr, ht, 0, 4, phrase + 2 + i + (half ? 3 : 0), 55, 86, pit);
+					np = FillVoicing(hr, ht, 0, 3, phrase + 2 + i + (half ? 3 : 0), 55, 86, pit);
 				lay(padCh[i], hit, pit, np, span, gvol - 16 - i * 2, 96, 0);
 				if (i == 0 && hit && span >= 48)
 					PlaceSing(&ctx, padCh[i], tick, span, opt->style, 0);
@@ -3800,7 +3829,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = BitOn(arpM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(arpM), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(arpM), div, b.t0, tick, b.len, slotDur), 3);
 				/* 拍の途中だけ 32分や64分。全部を同じ音価にしない。 */
 				int sub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figArp[slot] : 0;
 				if (i == 0 && arpCh[i] >= 0 && hit && (sub > 0 || (run32 && slot >= midSlot))) {
@@ -3841,7 +3870,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = BitOn((i == 0) ? innM : innBlock, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext((i == 0) ? innM : innBlock), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext((i == 0) ? innM : innBlock), div, b.t0, tick, b.len, slotDur), 4);
 				/* じゃらんの拍はブロックを置かず、あとで 64 分を書く。 */
 				if (i == 0 && slot == jaranSlot) {
 					lay(harmCh[i], 0, pit, 0, span, 0, 0, 0);
@@ -3864,7 +3893,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = BitOn(cntM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(cntM), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(cntM), div, b.t0, tick, b.len, slotDur), 5);
 				int cntSub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figCnt[slot] : 0;
 				if (i == 0 && hit && cntSub > 0 && cntCh[i] >= 0) {
 					if (merge)
@@ -3908,7 +3937,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int hit = BitOn(colM, slot);
 				int pit[6];
 				int np = 0;
-				int span = SpanTicks(slot, cutNext(colM), div, b.t0, tick, b.len, slotDur);
+				int span = clip(SpanTicks(slot, cutNext(colM), div, b.t0, tick, b.len, slotDur), 2);
 				if (hit) {
 					np = FillVoicing(hr, ht, 0, 2, phrase, 72, 96, pit);
 				}
