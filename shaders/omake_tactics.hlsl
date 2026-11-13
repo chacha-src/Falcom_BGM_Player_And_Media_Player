@@ -71,11 +71,14 @@ cbuffer AirNow : register(b4)
 {
 	float4 AirB; // xy=そよ風 zw=強風+暴風
 	float4 AirL; // x=上下 y=GustAmt
+	float4 AirHide0; // 折れて飛んだ木などの xz。x>=900 は空き
+	float4 AirHide1;
 };
 float2 AirBreeze() { return AirB.xy; }
 float2 AirMain() { return AirB.zw; }
 float AirLift() { return AirL.x; }
 float GustAmt() { return AirL.y; }
+float RainFilm();
 
 float3 FallLean(float3 w, float3 n, float amount)
 {
@@ -256,6 +259,12 @@ void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 	float gust = GustAmt();
 	h *= 1.0 + gust * 1.15;
 	dh *= 1.0 + gust * 1.15;
+	if (RainFilm() > 0.5) {
+		h *= 1.65;
+		dh *= 1.85;
+		h += sin(xz.x * 9.2 + t * 7.4) * sin(xz.y * 8.1 - t * 6.2) * amp * 0.42;
+		dh += float2(cos(xz.x * 9.2 + t * 7.4), -cos(xz.y * 8.1 - t * 6.2)) * amp * 1.6;
+	}
 	if (Q.x > 1.5 && !(Q.x > 3.5 && Q.x < 4.5)) {
 		float2 d4 = normalize(float2(0.72, 0.69));
 		float2 d5 = normalize(float2(-0.88, 0.42));
@@ -288,11 +297,25 @@ float3 Sway(float3 w, float amt)
 	float g = saturate(length(m) / 2.70);
 	float t = Eye.w;
 	float s = sin(t * 1.7 + w.x * 0.9 + w.z * 0.7) * 0.55 + sin(t * 2.9 + w.x * 1.7) * 0.28;
-	float flick = bend * (0.06 + g * 0.18);
+	float rain = RainFilm();
+	if (rain > 0.5) { bend *= 1.45; g = saturate(g + 0.35); }
+	float flick = bend * (0.06 + g * 0.18) * (1.0 + rain * 0.85);
 	w.x += s * flick + b.x * bend * 0.38 + m.x * bend * 0.26;
 	w.z += cos(t * 1.3 + w.z * 1.1 + w.x * 0.3) * flick * 0.85 + b.y * bend * 0.32 + m.y * bend * 0.22;
 	w.y += lift * bend * 0.16;
+	if (rain > 0.5) w.y -= bend * 0.045 * sin(t * 2.2 + w.x);
 	return w;
+}
+
+float GustGone(float3 w)
+{
+	float2 p = w.xz;
+	float2 h0 = AirHide0.xy, h1 = AirHide0.zw, h2 = AirHide1.xy, h3 = AirHide1.zw;
+	if (h0.x < 900.0 && dot(p - h0, p - h0) < 0.36) return 1;
+	if (h1.x < 900.0 && dot(p - h1, p - h1) < 0.36) return 1;
+	if (h2.x < 900.0 && dot(p - h2, p - h2) < 0.36) return 1;
+	if (h3.x < 900.0 && dot(p - h3, p - h3) < 0.36) return 1;
+	return 0;
 }
 
 // 足は残し、頭の高さだけ同じ風で倒す。量は頭蓋も髪の頭もこの式だけ。
@@ -739,18 +762,17 @@ float OpaqueHi()
 	return hi >= lo ? hi : (lo + 0.55);
 }
 
-// カーソル／キャラの層＋移動帯は残す。別高さの床は層ごと透かす。部分くり抜きはしない。
+// カーソル／キャラの層＋移動帯は残す。上の階だけ透かす。下の階は残す。
 float OtherLayer(float3 w, float ny)
 {
 	if (max(Hole2.y, Wx.w) < 0.5) return 0;
-	float yLo = OpaqueLo();
 	float yHi = OpaqueHi();
 	float rad = Hole2.w > 1.0 ? Hole2.w : 18.0;
 	float xz = length(w.xz - Hole0.xz);
 	if (Hole1.w > 0.5) xz = min(xz, length(w.xz - Hole1.xz));
 	if (xz >= rad) return 0;
+	// 上の階だけ透かす。下の階は見えていても邪魔にならないので残す。
 	if (w.y > yHi + 0.04) return 1;
-	if (ny > 0.55 && w.y < yLo - 0.04) return 1;
 	return 0;
 }
 
@@ -760,6 +782,7 @@ float ViewOccludeAt(float3 w, float ny, float4 spos, float3 focus)
 	float yLo = OpaqueLo();
 	float yHi = OpaqueHi();
 	if (w.y >= yLo - 0.06 && w.y <= yHi + 0.06) return 0;
+	if (w.y < yLo - 0.06) return 0;
 	float dFrag = dot(w - Eye.xyz, CamFwd.xyz);
 	float dFocus = dot(focus - Eye.xyz, CamFwd.xyz);
 	if (dFocus - dFrag < 0.06) return 0;
@@ -820,14 +843,12 @@ float LiquidAway(float3 w)
 {
 	if (ReflectInfo.z > 0.5) return 0;
 	if (max(Hole2.y, Wx.w) < 0.5) return 0;
-	float yLo = OpaqueLo();
 	float yHi = OpaqueHi();
 	float rad = Hole2.w > 1.0 ? Hole2.w : 18.0;
 	float xz = length(w.xz - Hole0.xz);
 	if (Hole1.w > 0.5) xz = min(xz, length(w.xz - Hole1.xz));
 	if (xz >= rad) return 0;
 	if (w.y > yHi + 0.04) return 1;
-	if (w.y < yLo - 0.04) return 1;
 	return 0;
 }
 
@@ -2115,7 +2136,11 @@ GOut PSGX(PSIn i) { return GroundPS(i, FogColor.a); }
 
 GOut PSProp(PSIn i)
 {
-	BeginGhost(i.pos, i.w, i.n.y);
+	// mode 9 は足元の輪。別階でも捨てず、視界の外でも色を残す。
+	if (!(Params.y > 8.5 && Params.y < 9.5)) {
+		if (GustGone(i.w) > 0.5) clip(-1);
+		BeginGhost(i.pos, i.w, i.n.y);
+	}
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
 	float mat = Params.z;
@@ -2189,6 +2214,12 @@ GOut PSProp(PSIn i)
 		float pore = fbm2(i.w.xz * 7.5 + i.w.y * 2.2);
 		col *= 0.94 + pore * 0.1;
 		col += SkyAmb.rgb * pow(1.0 - saturate(dot(nLit, v)), 3.0) * ThemeWet(FogColor.a) * 0.08;
+	}
+	if (Params.y > 8.5 && Params.y < 9.5) {
+		float d = length(Eye.xyz - i.w);
+		float fg = saturate((d - Fog.x) / max(0.01, Fog.y - Fog.x));
+		col = lerp(col, FogColor.rgb, fg * fg * 0.25);
+		return Emit(float4(col, Tint.a), i.w);
 	}
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(Tint.a)), i.w);
 }

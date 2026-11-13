@@ -231,20 +231,17 @@ void CSasamiAutoArrangeDlg::ShowResult(const ScAutoArrangeResult& r)
 BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
-	::LockWindowUpdate(m_hWnd);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
 	SetWindowText(LL14(L"自動伴奏", L"Auto accompaniment", L"Accompagnement auto", L"Accompagnamento auto", L"Acompañamiento auto",
 		L"자동 반주", L"自动伴奏", L"مرافقة تلقائية", L"Автоаккомпанемент", L"Auto-Begleitung", L"Acompanhamento auto", L"Auto-begeleiding", L"Automatyczny akompaniament", L"Otomatik eşlik"));
 	if (!m_host || !m_host->ev || !m_host->evCount || *m_host->evCount < 0) {
-		::LockWindowUpdate(NULL);
 		EndDialog(IDCANCEL);
 		return TRUE;
 	}
 	m_snapN = *m_host->evCount;
 	m_snap = (ScEvent*)HeapAlloc(GetProcessHeap(), 0, sizeof(ScEvent) * (size_t)(m_snapN > 0 ? m_snapN : 1));
 	if (!m_snap) {
-		::LockWindowUpdate(NULL);
 		EndDialog(IDCANCEL);
 		return TRUE;
 	}
@@ -257,6 +254,9 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		memcpy(m_clef, m_host->ui->clef, sizeof(m_clef));
 		m_uiSnap = 1;
 	}
+	/* コントロールを作る前に枠を出す。ロックしたままだと全部できるまで何も見えない。 */
+	ShowWindow(SW_SHOW);
+	UpdateWindow();
 
 	CRect z(0, 0, 10, 10);
 	m_styleLbl.Create(LL14(L"パターン", L"Pattern", L"Motif", L"Schema", L"Patrón", L"패턴", L"型", L"نمط", L"Рисунок", L"Muster", L"Padrão", L"Patroon", L"Wzór", L"Kalıp"),
@@ -569,7 +569,8 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
 	}
 	LayoutChrome();
-	::LockWindowUpdate(NULL);
+	SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetForegroundWindow();
 	return TRUE;
 }
 

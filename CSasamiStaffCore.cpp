@@ -4786,13 +4786,25 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 		int g1 = g0;
 		while (g1 < nCol && cols[g1].grp == g0) g1++;
 		const int stemUp = cols[g0].stemUp;
+		/* 符尾の先を音高ごとにずらすと、連桁が斜めに折れて別の音符へ飛ぶ。
+		   グループでは一番外側の符頭から一定の横線に揃える。 */
+		int edge = stemUp ? 100000 : -100000;
+		for (int k = g0; k < g1; k++) {
+			if (cols[k].nHeads <= 0) continue;
+			const int topY = cols[k].heads[0].y;
+			const int botY = cols[k].heads[cols[k].nHeads - 1].y;
+			if (stemUp) { if (topY < edge) edge = topY; }
+			else if (botY > edge) edge = botY;
+		}
+		if (edge > 90000 || edge < -90000) edge = cols[g0].heads[0].y;
+		const int beamY = stemUp ? (edge - 18) : (edge + 18);
 		for (int k = g0; k < g1; k++) {
 			cols[k].stemUp = stemUp;
 			const int topY = cols[k].heads[0].y;
 			const int botY = cols[k].heads[cols[k].nHeads - 1].y;
 			cols[k].stemX = cols[k].x + (stemUp ? 11 : 0);
 			cols[k].stemAttachY = stemUp ? botY : topY;
-			cols[k].stemTipY = stemUp ? (topY - 20) : (botY + 20);
+			cols[k].stemTipY = beamY;
 		}
 		i = g1;
 	}
@@ -5615,27 +5627,53 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 						dc.FillSolidRect(dx, ly + 8, 3, 1, oc);
 					dc.FillSolidRect(x1 - 1, ly + 4, 1, 8, oc);
 				} else if (e.kind == SC_EV_SLUR_START) {
+					/* 入れ子は深さで対にする。近い終端へ全部繋ぐと交差する。 */
 					uint32_t endTick = e.tick + (uint32_t)SC_PPQN * 2;
-					int haveEnd = 0;
-					for (int j = 0; j < evCount; j++) {
-						if ((int)ev[j].ch != tr) continue;
-						if (ev[j].kind != SC_EV_SLUR_END) continue;
-						if (ev[j].tick <= e.tick) continue;
-						if (!haveEnd || ev[j].tick < endTick) {
-							endTick = ev[j].tick;
-							haveEnd = 1;
+					uint32_t curTick = e.tick;
+					uint32_t curSeq = e.seq;
+					int depth = 1;
+					for (int step = 0; step < 32 && depth > 0; step++) {
+						int best = -1;
+						uint32_t bestTick = 0xFFFFFFFFu;
+						uint32_t bestSeq = 0xFFFFFFFFu;
+						for (int j = 0; j < evCount; j++) {
+							if ((int)ev[j].ch != tr) continue;
+							if (ev[j].kind != SC_EV_SLUR_START && ev[j].kind != SC_EV_SLUR_END) continue;
+							if (ev[j].tick < curTick) continue;
+							if (ev[j].tick == curTick && ev[j].seq <= curSeq) continue;
+							if (ev[j].tick < bestTick || (ev[j].tick == bestTick && ev[j].seq < bestSeq)) {
+								best = j;
+								bestTick = ev[j].tick;
+								bestSeq = ev[j].seq;
+							}
+						}
+						if (best < 0) break;
+						curTick = bestTick;
+						curSeq = bestSeq;
+						if (ev[best].kind == SC_EV_SLUR_START) depth++;
+						else {
+							depth--;
+							if (depth == 0) endTick = curTick;
 						}
 					}
-					int x1 = ScStaffTickToX(endTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
-					if (x1 < x + 20) x1 = x + 20;
+					int xL = x;
+					int xR = ScStaffTickToX(endTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+					int saw = 0;
+					for (int j = 0; j < evCount; j++) {
+						if ((int)ev[j].ch != tr || ev[j].kind != SC_EV_NOTE) continue;
+						if (ev[j].tick < e.tick || ev[j].tick > endTick) continue;
+						const int nx = ScStaffTickToX(ev[j].tick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+						if (!saw || nx < xL) xL = nx;
+						if (!saw || nx > xR) xR = nx;
+						saw = 1;
+					}
+					if (xR < xL + 12) xR = xL + 12;
 					const COLORREF sc = RGB(50, 90, 140);
-					const int mid = (x + x1) / 2;
-					const int ly = y0 - 6;
+					const int ly = y0 - 4;
 					CPen pen(PS_SOLID, 1, sc);
 					CPen* op = dc.SelectObject(&pen);
-					dc.MoveTo(x, ly + 6);
-					dc.LineTo(mid, ly);
-					dc.LineTo(x1, ly + 6);
+					dc.MoveTo(xL + 6, ly);
+					dc.LineTo(xR - 2, ly);
 					dc.SelectObject(op);
 				} else if (e.kind == SC_EV_CRESC || e.kind == SC_EV_DIM) {
 					int span = e.dur > 0 ? (int)e.dur : SC_PPQN * 2;
@@ -7310,6 +7348,30 @@ static int g_scoreFmPreview = 0;
 static int g_scPreviewOn = 0;
 static void (*g_scPreviewStopFn)(void*) = NULL;
 static void* g_scPreviewStopCtx = NULL;
+static void (*g_scPump)(void*) = NULL;
+static void* g_scPumpCtx = NULL;
+
+extern "C" void ScStaffSetPreviewPump(void (*fn)(void*), void* ctx)
+{
+	if (!fn) {
+		if (g_scPumpCtx == ctx) {
+			g_scPump = NULL;
+			g_scPumpCtx = NULL;
+		}
+		return;
+	}
+	g_scPump = fn;
+	g_scPumpCtx = ctx;
+}
+
+extern "C" void ScStaffPumpOpenScorePreview(void)
+{
+	static DWORD s_last = 0;
+	const DWORD now = GetTickCount();
+	if (now - s_last < 30) return;
+	s_last = now;
+	if (g_scPump) g_scPump(g_scPumpCtx);
+}
 
 extern "C" void ScStaffPreviewBindStop(void (*fn)(void*), void* ctx)
 {
@@ -7360,7 +7422,9 @@ static void ScPutBe32(BYTE* p, DWORD v)
 
 int ScStaffAuditionRouteNote(int part1to32, int bankMsb, int bankLsb, int prog, int note, int velocity)
 {
-	if (g_scoreOut != SC_OUT_FMMIDI && g_scoreOut != SC_OUT_MAPPER) return 0;
+	/* 未接続でも 1音ファイルを再生経路へ渡す。再生でライブが外れたあとのクリック用。 */
+	if (g_scoreOut != SC_OUT_NONE && g_scoreOut != SC_OUT_FMMIDI && g_scoreOut != SC_OUT_MAPPER
+		&& g_scoreOut != SC_OUT_GS && g_scoreOut != SC_OUT_XG) return 0;
 	if (part1to32 < 1) part1to32 = 1;
 	if (part1to32 > 32) part1to32 = 32;
 	if (bankMsb < 0) bankMsb = 0;
@@ -7379,7 +7443,8 @@ int ScStaffAuditionRouteNote(int part1to32, int bankMsb, int bankLsb, int prog, 
 	trk[n++] = 0x00; trk[n++] = (BYTE)(0xB0 | ch); trk[n++] = 0x00; trk[n++] = (BYTE)(bankMsb & 127);
 	trk[n++] = 0x00; trk[n++] = (BYTE)(0xB0 | ch); trk[n++] = 32; trk[n++] = (BYTE)(bankLsb & 127);
 	trk[n++] = 0x00; trk[n++] = (BYTE)(0xC0 | ch); trk[n++] = (BYTE)(prog & 127);
-	trk[n++] = 0x00; trk[n++] = (BYTE)(0x90 | ch); trk[n++] = (BYTE)note; trk[n++] = (BYTE)velocity;
+	/* プログラムと同じ tick のノートは鳴らない。四分ほど空けてから半拍鳴らす。 */
+	trk[n++] = 0x18; trk[n++] = (BYTE)(0x90 | ch); trk[n++] = (BYTE)note; trk[n++] = (BYTE)velocity;
 	trk[n++] = 0x83; trk[n++] = 0x60;
 	trk[n++] = (BYTE)(0x80 | ch); trk[n++] = (BYTE)note; trk[n++] = 0x00;
 	trk[n++] = 0x00; trk[n++] = 0xFF; trk[n++] = 0x2F; trk[n++] = 0x00;
@@ -7784,9 +7849,11 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 		return (smfTick > lead) ? (smfTick - lead) : 0;
 	};
 
-	/* FM は FPY。VST の SMF ティックは別曲の残りで、先頭に張り付く。 */
+	/* FM は FPY。VST の SMF ティックは別曲の残りで、先頭に張り付く。
+	   モニタと同じく出力ラグ（基準 900ms）だけ戻す。2拍の SysEx 引きはしない。 */
 	if (u->isFmScore) {
 		double s = sec;
+		s -= (double)OggGetPlaybackLagMs(900) / 1000.0;
 		if (s < 0.0) s = 0.0;
 		tick = u->previewOriginTick + ScStaffTickFromSec(s, tempoT);
 		haveTick = 1;
@@ -7798,8 +7865,12 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 		   Fall back to engine playSample minus plugin latency only — no extra pad. */
 		__int64 heard = OggGetHeardPcmFrames();
 		if (heard >= 0) {
+			extern int wavbit_sample_Hz;
+			const int sr = (wavbit_sample_Hz > 8000) ? wavbit_sample_Hz : 44100;
 			const __int64 lat = (__int64)VstMidiGetLatencySamples();
-			if (lat > 0) heard = (heard > lat) ? (heard - lat) : 0;
+			const __int64 lag = (__int64)sr * OggGetPlaybackLagMs(700) / 1000;
+			const __int64 cut = lat + lag;
+			heard = (heard > cut) ? (heard - cut) : 0;
 		}
 		if (heard >= 0 && VstMidiTickAtSample(heard, &vt)) {
 			tick = scoreTick(vt);

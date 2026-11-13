@@ -1194,7 +1194,7 @@ BOOL Renderer::CreateStates()
 	bd.ByteWidth = (sizeof(FrameCB) + 15) & ~15;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbFrame))) return FALSE;
 	TacCbRingMake(m_dev, g_frameR, bd.ByteWidth);
-	bd.ByteWidth = 32;
+	bd.ByteWidth = 64;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbAir))) return FALSE;
 	TacCbRingMake(m_dev, g_airR, bd.ByteWidth);
 	bd.ByteWidth = 48 * 16;
@@ -11444,6 +11444,47 @@ int Renderer::FindModel(const char* n) const
 int Renderer::FindAttach(const char* n) const { for (int i = 0; i < (int)attaches.size(); i++) if (!strcmp(attaches[i].name, n)) return i; return -1; }
 int Renderer::FindStatic(const char* n) const { for (int i = 0; i < (int)statics.size(); i++) if (!strcmp(statics[i].name, n)) return i; return -1; }
 
+static int g_shaderAirOk = 0;
+static float g_shaderAirTime = 0.f;
+static float g_gustHide[8] = { 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f };
+
+void Renderer::SetGustHide(const float* xz8)
+{
+	if (!xz8) return;
+	if (memcmp(g_gustHide, xz8, sizeof(g_gustHide)) == 0) return;
+	memcpy(g_gustHide, xz8, sizeof(g_gustHide));
+	g_shaderAirOk = 0;
+}
+
+void Renderer::DrawStaticNamed(const char* name, const M4& world, const DrawParams& dp)
+{
+	if (!name || !name[0] || !m_ctx) return;
+	struct Slot { char name[32]; GpuMesh mesh; int live; };
+	static Slot slot[12];
+	static int nslot = 0;
+	GpuMesh* mesh = NULL;
+	for (int i = 0; i < nslot; i++) if (slot[i].live && !strcmp(slot[i].name, name)) { mesh = &slot[i].mesh; break; }
+	if (!mesh) {
+		int si = FindStatic(name);
+		if (si < 0 || statics[si].v.empty() || statics[si].i.empty() || nslot >= 12) return;
+		Slot& s = slot[nslot];
+		memset(&s, 0, sizeof(s));
+		strncpy_s(s.name, name, _TRUNCATE);
+		if (!MakeMesh(s.mesh, statics[si].v.data(), sizeof(VtxS), (UINT)statics[si].v.size(), statics[si].i.data(), (UINT)statics[si].i.size())) return;
+		s.mesh.tex = statics[si].tex;
+		s.live = 1;
+		nslot++;
+		mesh = &s.mesh;
+	}
+	ID3D11PixelShader* prev = m_psOverride;
+	m_psOverride = m_psProp ? m_psProp : prev;
+	DrawParams d = dp;
+	d.noTess = 1;
+	d.twoSided = 1;
+	DrawStatic(*mesh, MMul(world, m_sceneShift), d);
+	m_psOverride = prev;
+}
+
 int Renderer::AddProcModel(const Model& m, const Buf<VtxK>& v, const Buf<WORD>& idx)
 {
 	Model mm = m;
@@ -11550,8 +11591,6 @@ void Renderer::EvalPoseLocal(const Model& m, const Q4* rot, const V3* trans, con
 }
 
 // 同じ時刻の風は定数バッファも中身も同じ。ClearState のあとだけ結び直す。
-static int g_shaderAirOk = 0;
-static float g_shaderAirTime = 0.f;
 static int g_fcbLive = 0;
 static unsigned char g_fcbSnap[1024];
 static int g_ptSavedOk = 0;
@@ -11589,7 +11628,8 @@ static void TacUploadShaderAir(ID3D11DeviceContext* ctx, ID3D11Buffer* fallback,
 	float gust = sqrtf(mx * mx + mz * mz) / 2.70f + sqrtf(bx * bx + bz * bz) * 0.45f + fabsf(y) * 0.28f;
 	if (gust < 0.f) gust = 0.f;
 	if (gust > 1.f) gust = 1.f;
-	float o[8] = { bx, bz, mx, mz, y, gust, 0.f, 0.f };
+	float o[16] = { bx, bz, mx, mz, y, gust, 0.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f };
+	memcpy(o + 8, g_gustHide, sizeof(g_gustHide));
 	D3D11_MAPPED_SUBRESOURCE ms;
 	ID3D11Buffer* b = TacCbAcquire(g_airR, ctx, fallback, ms);
 	if (!b) return;

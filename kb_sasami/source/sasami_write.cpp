@@ -63,6 +63,48 @@ static void CopySjisField(uint8_t* dest, const char* src, int cap)
 	memcpy(dest, src, n);
 }
 
+/* 再生 (cmd 0 / 13-15 / 36 / 37 / 40 / 46 / 47) と同じ幅。
+   3 バイト固定で歩くと SysEx 内の 0x0A をジャンプと見て F7 や
+   直後の待ちを書き換え、SysEx のあるパートだけ拍が縮む。 */
+static uint32_t MidiCmdSpan(const uint8_t* b, uint32_t size, uint32_t i)
+{
+	if (!b || i >= size) return 0;
+	const uint8_t cmd = b[i];
+	if (cmd == 0) return 1;
+	if (cmd == 13 || cmd == 14 || cmd == 15 || cmd == 37 || cmd == 46 || cmd == 47)
+		return (i + 4 <= size) ? 4u : (size - i);
+	if (cmd == 36) {
+		uint32_t p = i + 1;
+		if (p < size && b[p] == 0xF0) {
+			int n = 0;
+			while (p < size && b[p] != 0xFF && n < 127) {
+				const uint8_t v = b[p++];
+				n++;
+				if (v == 0xF7) break;
+			}
+		} else {
+			int n = 0;
+			while (p < size && b[p] != 0xFF && n < 120) {
+				p++;
+				n++;
+			}
+		}
+		if (p < size) p++;
+		return (p > i) ? (p - i) : 1u;
+	}
+	if (cmd == 40) {
+		uint32_t p = i + 1;
+		int fe = 0;
+		while (p < size && fe < 2 && (p - i) < 220) {
+			if (b[p++] == 0xFE) fe++;
+		}
+		while (p < size && b[p] != 0xFF && (p - i) < 220) p++;
+		if (p < size) p++;
+		return (p > i) ? (p - i) : 1u;
+	}
+	return (i + 3 <= size) ? 3u : (size - i);
+}
+
 static uint32_t FinalizeMidiTracks(const SasamiWriteMidi* w, uint8_t* out, uint32_t dataBaseAbs, uint32_t headerBytes, int v2)
 {
 	/* dataBaseAbs = absolute address (0x1000+fileOff). headerBytes = seed size before track data. */
@@ -97,38 +139,38 @@ static uint32_t FinalizeMidiTracks(const SasamiWriteMidi* w, uint8_t* out, uint3
 		   0xE000 = jump to song-first |: (cross-track; classic DO-- [5:8]). */
 		{
 			const uint32_t trackFileOff = fileOff;
-			for (uint32_t i = 0; i + 2 < s->size; ) {
+			for (uint32_t i = 0; i < s->size; ) {
 				uint8_t* p = out + trackFileOff + i;
 				const uint8_t cmd = p[0];
-				if (cmd == 13 || cmd == 14 || cmd == 15) {
-					i += 4;
-					continue;
-				}
+				const uint32_t span = MidiCmdSpan(out + trackFileOff, s->size, i);
+				if (span < 1) break;
 				if (cmd == 23 && firstLoopAbs == 0)
 					firstLoopAbs = (uint32_t)(0x1000 + trackFileOff + i);
-				if (cmd == 24) {
-					uint16_t rel = (uint16_t)(p[1] | (p[2] << 8));
-					uint16_t abs = (uint16_t)(0x1000 + trackFileOff + rel);
-					p[1] = (uint8_t)(abs & 0xFF);
-					p[2] = (uint8_t)(abs >> 8);
-				} else if (cmd == 0x0A) {
-					uint16_t w1 = (uint16_t)(p[1] | (p[2] << 8));
-					if (w1 == 0xE000) {
-						/* resolved in second pass once firstLoopAbs known */
-					} else if ((w1 & 0xF000) == 0xF000) {
-						/* Legacy soft-rel: 0xF000 | rel12 */
-						uint16_t rel = (uint16_t)(w1 & 0x0FFF);
+				if (span >= 3 && (cmd == 24 || cmd == 0x0A)) {
+					if (cmd == 24) {
+						uint16_t rel = (uint16_t)(p[1] | (p[2] << 8));
 						uint16_t abs = (uint16_t)(0x1000 + trackFileOff + rel);
 						p[1] = (uint8_t)(abs & 0xFF);
 						p[2] = (uint8_t)(abs >> 8);
-					} else if (w1 < 0x1000) {
-						/* Full track-relative (score Q/J); keep 0x10F0 end as-is */
-						uint16_t abs = (uint16_t)(0x1000 + trackFileOff + w1);
-						p[1] = (uint8_t)(abs & 0xFF);
-						p[2] = (uint8_t)(abs >> 8);
+					} else {
+						uint16_t w1 = (uint16_t)(p[1] | (p[2] << 8));
+						if (w1 == 0xE000) {
+							/* resolved in second pass once firstLoopAbs known */
+						} else if ((w1 & 0xF000) == 0xF000) {
+							/* Legacy soft-rel: 0xF000 | rel12 */
+							uint16_t rel = (uint16_t)(w1 & 0x0FFF);
+							uint16_t abs = (uint16_t)(0x1000 + trackFileOff + rel);
+							p[1] = (uint8_t)(abs & 0xFF);
+							p[2] = (uint8_t)(abs >> 8);
+						} else if (w1 < 0x1000) {
+							/* Full track-relative (score Q/J); keep 0x10F0 end as-is */
+							uint16_t abs = (uint16_t)(0x1000 + trackFileOff + w1);
+							p[1] = (uint8_t)(abs & 0xFF);
+							p[2] = (uint8_t)(abs >> 8);
+						}
 					}
 				}
-				i += 3;
+				i += span;
 			}
 		}
 		fileOff += s->size;
@@ -155,20 +197,17 @@ static uint32_t FinalizeMidiTracks(const SasamiWriteMidi* w, uint8_t* out, uint3
 	/* Second pass: 0xE000 soft-J → first |: in song */
 	if (firstLoopAbs != 0) {
 		const uint32_t dataEnd = fileOff;
-		for (uint32_t i = headerBytes; i + 2 < dataEnd; ) {
-			uint8_t cmd = out[i];
-			if (cmd == 13 || cmd == 14 || cmd == 15) {
-				i += 4;
-				continue;
-			}
-			if (cmd == 0x0A) {
+		for (uint32_t i = headerBytes; i < dataEnd; ) {
+			const uint32_t span = MidiCmdSpan(out, dataEnd, i);
+			if (span < 1) break;
+			if (out[i] == 0x0A && span >= 3) {
 				uint16_t w1 = (uint16_t)(out[i + 1] | (out[i + 2] << 8));
 				if (w1 == 0xE000) {
 					out[i + 1] = (uint8_t)(firstLoopAbs & 0xFF);
 					out[i + 2] = (uint8_t)(firstLoopAbs >> 8);
 				}
 			}
-			i += 3;
+			i += span;
 		}
 	}
 	return fileOff;

@@ -291,10 +291,18 @@ void CSasamiFmScoreDlg::ApplyLang()
 	UpdateHelpBar();
 }
 
+static void FmScorePumpThunk(void* ctx)
+{
+	CSasamiFmScoreDlg* d = (CSasamiFmScoreDlg*)ctx;
+	if (d && ::IsWindow(d->GetSafeHwnd()))
+		d->PumpPreviewTick();
+}
+
 BOOL CSasamiFmScoreDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 	s_inst = this;
+	ScStaffSetPreviewPump(FmScorePumpThunk, this);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
 
@@ -2832,6 +2840,20 @@ void CSasamiFmScoreDlg::OnBnClickedShowAll()
 	InvalidateRect(m_bodyRc, FALSE);
 }
 
+void CSasamiFmScoreDlg::PumpPreviewTick()
+{
+	if (!m_ui.previewActive && !ScStaffPreviewIsRunning()) return;
+	if (ScStaffSyncPreviewPlayhead(&m_ui, m_doc.tempoT)) {
+		ApplyFollowScroll();
+		InvalidateRect(m_bodyRc, FALSE);
+		if (m_ui.showRollSplit) InvalidateRect(m_rollRc, FALSE);
+	}
+	if (ScStaffPreviewFinished(&m_ui)) {
+		KillTimer(kScFmPreviewTimer);
+		SetPreviewBtn(0);
+	}
+}
+
 void CSasamiFmScoreDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1 || nIDEvent == kScFmPreviewTimer) {
@@ -3542,6 +3564,7 @@ void CSasamiFmScoreDlg::OnClose()
 }
 void CSasamiFmScoreDlg::OnDestroy()
 {
+	ScStaffSetPreviewPump(NULL, this);
 	KillTimer(kScFmPreviewTimer);
 	KillTimer(kScFmMetroTimer);
 	ScScoreMidiInShutdown(&m_midiIn);

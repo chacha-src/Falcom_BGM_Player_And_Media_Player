@@ -2077,8 +2077,10 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				while (IsWs(*p)) p++;
 				int n = ParseInt(&p);
 				if (n < 0) n = 1;
+				int slot = 0;
+				if (n >= 2) { slot = 1; n = 1; }
 				drumPart[ch] = n ? 1 : 0;
-				ScMidiAddDrum(out, tick[ch], ch, drumPart[ch]);
+				ScMidiAddDrumEx(out, tick[ch], ch, drumPart[ch], slot);
 				ScMidiAddClef(out, tick[ch], ch, drumPart[ch] ? 3 : 2);
 				continue;
 			}
@@ -3319,8 +3321,12 @@ static void ScMidiExpandChordVoices(ScEvent* ev, int* nio, int nMax, uint8_t tra
 		if (ch >= 0 && ch < SC_MIDI_CH) occupied[ch] = 1;
 	}
 
-	auto allocSlot = [&]() -> int {
-		for (int s = 0; s < SC_MIDI_CH; s++) {
+	/* 空きは同じ SC-VA の 1–16 だけ。16 パート曲の和音を 17 以降へ置くと
+	   もう一方の音源が開き、そちらの ch10 がドラムになる。
+	   空きが無ければホームの和音のまま（1 トラック 8 音）。 */
+	auto allocSlot = [&](int home) -> int {
+		const int base = (home >= 16) ? 16 : 0;
+		for (int s = base; s < base + 16 && s < SC_MIDI_CH; s++) {
 			if (!occupied[s]) {
 				occupied[s] = 1;
 				return s;
@@ -3382,7 +3388,7 @@ static void ScMidiExpandChordVoices(ScEvent* ev, int* nio, int nMax, uint8_t tra
 			}
 			if (v < 0) {
 				if (nVoice >= kMaxVoice) continue; /* leave on home — sequential fallback */
-				const int slot = allocSlot();
+				const int slot = allocSlot(home);
 				if (slot < 0) continue;
 				v = nVoice++;
 				voiceSlot[v] = slot;
@@ -4078,10 +4084,32 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		return 1;
 	};
 
+	/* 17–32 は音符かドラムがあるときだけポート B。
+	   GS リセット由来の「ch26 は通常」だけだと、16ch 曲が 32ch になり
+	   A の ch10（ROOM）が落ちて B10 が STANDARD になる。 */
+	uint8_t skipCh[SC_MIDI_CH];
+	memset(skipCh, 0, sizeof(skipCh));
+	for (int ch = 16; ch < SC_MIDI_CH; ch++) {
+		if (ScMidiPartIsDrum(sorted, n, ch, 0)) continue;
+		int live = 0;
+		for (int i = 0; i < n; i++) {
+			if ((int)sorted[i].ch != ch) continue;
+			const int k = sorted[i].kind;
+			if (k == SC_EV_NOTE || k == SC_EV_PROG || k == SC_EV_BANK
+				|| k == SC_EV_CC || k == SC_EV_SYSEX || k == SC_EV_VOL
+				|| k == SC_EV_PAN || k == SC_EV_PITCH) {
+				live = 1;
+				break;
+			}
+		}
+		if (!live) skipCh[ch] = 1;
+	}
+
 	for (int i = 0; i < n; i++) {
 		const ScEvent* e = &sorted[i];
 		int ch = e->ch;
 		if (ch < 0 || ch >= SC_MIDI_CH) continue;
+		if (skipCh[ch]) continue;
 		SasamiTrackStream* s = &w->tr[ch];
 		if (xPart[ch] != 0xFF)
 			s->part = xPart[ch] & 15;
@@ -4095,13 +4123,18 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			lastTick[ch] = preWait;
 			preambleDone[ch] = 1;
 			vel[ch] = 105;
-			/* KAKU1: 0 通常、1 ドラム1、2 ドラム2。既定の ch10 は 1。 */
+			/* KAKU1: 0 通常、1 ドラム1、2 ドラム2。既定の ch10 は 1。
+			   和音を分けたレーンはホームの MIDI ch を共有するだけなので、
+			   ここから 15h を出すと A の ch10 が通常パートに戻る。 */
 			{
-				const int defMode = ((s->part & 15) == 9) ? 1 : 0;
-				const int drum0 = ScMidiPartIsDrum(sorted, n, ch, 0);
-				const int mode = drum0 ? (ScMidiPartDrumSlot(sorted, n, ch, 0) ? 2 : 1) : 0;
-				if (mode != defMode) {
-					if (!SasamiStreamPut3(s, 29, (uint8_t)mode, 0)) return 0;
+				const int borrowed = (xPart[ch] != 0xFF && (int)(xPart[ch] & 15) != (ch & 15));
+				if (!borrowed) {
+					const int defMode = ((s->part & 15) == 9) ? 1 : 0;
+					const int drum0 = ScMidiPartIsDrum(sorted, n, ch, 0);
+					const int mode = drum0 ? (ScMidiPartDrumSlot(sorted, n, ch, 0) ? 2 : 1) : 0;
+					if (mode != defMode) {
+						if (!SasamiStreamPut3(s, 29, (uint8_t)mode, 0)) return 0;
+					}
 				}
 			}
 		}
@@ -4198,9 +4231,11 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			break;
 		}
 		case SC_EV_DRUM:
-			/* 先頭も途中も、バンクと PC より前の seq でリズム指定を出す。
-			   ここで落とすと ch10 以外が通常パートのまま、キット PC がピアノになる。 */
-			if (!SasamiStreamPut3(s, 29, e->a ? 1 : 0, 0)) return 0;
+			/* 0 通常、1 ドラム1、2 ドラム2。a だけの 0/1 だとドラム2 が 1 に戻る。 */
+			{
+				const int mode = e->a ? (e->b ? 2 : 1) : 0;
+				if (!SasamiStreamPut3(s, 29, (uint8_t)mode, 0)) return 0;
+			}
 			break;
 		case SC_EV_JUMP_MARK: {
 			/* Q always wins as soft-J land (overrides an earlier |:). */
@@ -4270,18 +4305,26 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		case SC_EV_NOTE: {
 			/* 同じ拍に重なった音は待ち 0 で同時に鳴らし、一番長い 1 音だけ時間を進める。
 			   ベロシティはノートごとに cmd 19。ドラムの強弱もここで乗る。 */
-			if (chordLeft > 0 && ch == chordCh && e->tick == chordTick) {
+			/* div96 の和音は 2ファイルtick ずつずれ、ささみでは 0,+1,+2 に割れる。
+			   +1 だけまとめると 3 音目が「次の音」になり、その発音が次の拍の
+			   近くへ飛んで、密集したところだけ約 1 拍速く聞こえる。 */
+			if (chordLeft > 0 && ch == chordCh && e->tick <= chordTick + 2u) {
 				chordLeft--;
 				break;
 			}
+			const uint32_t cluster = e->tick;
 			const ScEvent* noteEv = e;
 			if (!ScSoftActive(&softM[ch])) {
-				int grp[8];
+				int grp[16];
 				int ng = 0;
 				grp[ng++] = i;
-				for (int j = i + 1; j < n && ng < 8; j++) {
-					if ((int)sorted[j].ch != ch || sorted[j].tick != e->tick) break;
-					if (sorted[j].kind != SC_EV_NOTE) continue;
+				for (int j = i + 1; j < n && ng < 16; j++) {
+					if ((int)sorted[j].ch != ch) continue;
+					if (sorted[j].kind != SC_EV_NOTE) {
+						if (sorted[j].tick > cluster + 2u) break;
+						continue;
+					}
+					if (sorted[j].tick > cluster + 2u) break;
 					grp[ng++] = j;
 				}
 				if (ng > 1) {
@@ -4317,6 +4360,32 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			uint32_t sounding = (dur * (uint32_t)gate) / 100u;
 			if (sounding < 1) sounding = 1;
 			if (sounding > dur) sounding = dur;
+			/* 次の音より長く待つと、そのパートだけ後ろへずれて戻らない。
+			   待ち 0 のまま時刻だけ先へ進めると、逆に休符が足りず前へずれる。
+			   出した待ちの分だけ lastTick を進める。 */
+			uint32_t span = dur;
+			for (int j = i + 1; j < n; j++) {
+				if ((int)sorted[j].ch != ch) continue;
+				const int k = sorted[j].kind;
+				if (k != SC_EV_NOTE && k != SC_EV_REST && k != SC_EV_TIE) continue;
+				/* 同じ打鍵に畳んだ音までは待たない。基準は先頭の tick。
+				   一番長い音の tick を基準にすると、その先の音まで読み飛ばす。 */
+				if (k == SC_EV_NOTE && sorted[j].tick <= cluster + 2u) continue;
+				if (sorted[j].tick <= cluster) continue;
+				const uint32_t gap = sorted[j].tick - cluster;
+				if (gap < span) span = gap;
+				break;
+			}
+			{
+				const uint32_t target = cluster + span;
+				const uint32_t advance = (target > lastTick[ch]) ? (target - lastTick[ch]) : 0;
+				if (advance == 0) {
+					if (!SasamiStreamPut3(s, 1, noteEv->a, 0)) return 0;
+					break;
+				}
+				span = advance;
+			}
+			if (sounding > span) sounding = span;
 			if (ScSoftActive(&softM[ch])) {
 				if (softM[ch].noteOn && !ScSoftPutMidiRestore(s, &softM[ch])) return 0;
 				softM[ch].tCur = 0;
@@ -4328,8 +4397,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 				if (!SasamiStreamPut3(s, 1, noteEv->a, (uint8_t)head)) return 0;
 				if (sounding > head && !ScPutWait8(s, 3, 0, (int)(sounding - head))) return 0;
 			}
-			if (dur > sounding && !ScPutWait8(s, 8, 0, (int)(dur - sounding))) return 0;
-			lastTick[ch] += dur;
+			if (span > sounding && !ScPutWait8(s, 8, 0, (int)(span - sounding))) return 0;
+			lastTick[ch] += span;
 			break;
 		}
 		case SC_EV_REST: {
@@ -4365,6 +4434,9 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used) continue;
 		if (!d->bind.vstPath[ch][0]) continue;
+		/* 17–32 は譜面に音符やドラム指定があるときだけポートBにする。
+		   音源を32chへ載せただけでは、16ch曲のB10がドラムになる。 */
+		if (ch >= 16) continue;
 		if (xPart[ch] != 0xFF)
 			w->tr[ch].part = xPart[ch] & 15;
 		else
@@ -4403,14 +4475,15 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 		if (w->tr[ch].used)
 			SasamiStreamPut3(&w->tr[ch], 0x0A, 0xF0, 0x10);
 	}
-	/* If parts 17–32 unused and no VST bind there → 16ch (MPW2/MPY OK unless VST on 1–16) */
+	/* 17–32 に譜面の中身があるときだけ 32ch / ポートB。
+	   VST のパスだけ、または出力コンボで載せた 17ch 目では B を開かない。 */
 	int hiUsed = 0;
 	for (int ch = 16; ch < SC_MIDI_CH; ch++) {
 		if (w->tr[ch].used) { hiUsed = 1; break; }
-		if (d->bind.vstPath[ch][0]) { hiUsed = 1; break; }
 	}
 	if (!hiUsed) {
 		w->trackCount = 16;
+		w->dualPort = 0;
 		int need3 = ScMidiDocNeedsMpsmv(d) ? 1 : 0;
 		for (int i = 0; i < 16; i++) {
 			if (d->bind.vstPath[i][0]) { need3 = 1; break; }
@@ -5453,7 +5526,7 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 			}
 			if (e.kind == SC_EV_DRUM) {
 				emitGap(e.tick);
-				ScAppendF(out, outCch, &len, L"@DRUM %d ", e.a ? 1 : 0);
+				ScAppendF(out, outCch, &len, L"@DRUM %d ", e.a ? (e.b ? 2 : 1) : 0);
 				continue;
 			}
 			if (e.kind == SC_EV_RPN) {

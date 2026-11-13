@@ -521,6 +521,7 @@ extern volatile LONG g_appExiting;
 extern void COgg_DropPlaybackUiPostedMsg(UINT message);
 extern int playy;
 extern int endflg;
+extern int playf;
 #endif
 static volatile LONG g_liveSkipProcess = 0;
 static DWORD g_liveUiTid = 0;
@@ -5193,10 +5194,8 @@ static void JuicyRackSysex(int unit, const BYTE* d, int n)
 		const int cc = d[7];
 		if (cc == 0x15) {
 			const int on = (n > 8) ? (d[8] ? 1 : 0) : 0;
-			if (p == 9)
-				g_sfDrum[sl][unit][p] = 1;
-			else
-				g_sfDrum[sl][unit][p] = (BYTE)on;
+			/* ch10 も 15h=0 なら通常。固定で 1 にすると P&C1 の ch10 がドラムのまま。 */
+			g_sfDrum[sl][unit][p] = (BYTE)on;
 			if (on) g_sfDrumMsb[sl][unit][p] = 128;
 			if (p >= 0 && p < np && g_sfPart[sl][unit][p])
 				JuicyArmPart(g_sfPart[sl][unit][p], g_sfDrum[sl][unit][p],
@@ -5218,10 +5217,7 @@ static void JuicyRackSysex(int unit, const BYTE* d, int n)
 		const int p = d[5] & 0x0f;
 		if (n >= 9 && d[6] == 0x07) {
 			const int on = d[7] ? 1 : 0;
-			if (p == 9)
-				g_sfDrum[sl][unit][p] = 1;
-			else
-				g_sfDrum[sl][unit][p] = (BYTE)on;
+			g_sfDrum[sl][unit][p] = (BYTE)on;
 			if (on) g_sfDrumMsb[sl][unit][p] = 127;
 			if (p >= 0 && p < np && g_sfPart[sl][unit][p])
 				JuicyArmPart(g_sfPart[sl][unit][p], g_sfDrum[sl][unit][p],
@@ -11031,10 +11027,11 @@ extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, i
 		}
 	}
 	if (!portCover) return;
-	/* 試し再生が終わったあとも曲フラグが残ると、モニターが起きずクリックが無音になる。
-	   曲がまだ鳴っているあいだ（endflg==0）はここでは起こさない。 */
-	if (VstSongUseLiveBinds() && endflg != 0) {
-		VstSongUseLiveBindsSet(0);
+	/* 停止後（playf==0）はモニターが起きていない。再生中は曲の出力を奪わない。
+	   playy==0 は Plays() の準備中なので、ここでは起こさない。 */
+	if (playf == 0 || endflg != 0) {
+		if (VstSongUseLiveBinds())
+			VstSongUseLiveBindsSet(0);
 		VstLiveMonitorEnsure();
 	}
 	if (noteMidi < 0) noteMidi = 60;
@@ -11813,7 +11810,8 @@ extern "C" void VstLiveMonitorEnsure(void)
 	   ここで waveOut を開くと、停止時に積んだ 1.5 秒タイマーが再生を奪い、
 	   1小節だけ鳴ってから無音のまま終端まで進む。 */
 	if (VstSongUseLiveBinds()) {
-		if (playy == 0 || endflg == 0)
+		/* 鳴っているあいだだけ戻す。停止（playy==0）や曲終了はモニターを起こす。 */
+		if (playy != 0 && endflg == 0)
 			return;
 		VstSongUseLiveBindsSet(0);
 	}

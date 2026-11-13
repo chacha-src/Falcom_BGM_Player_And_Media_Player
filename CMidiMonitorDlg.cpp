@@ -4092,11 +4092,12 @@ void CMidiMonitorDlg::SyncFromPlayback()
 				while (m_evPos < m_evCount && m_ev[m_evPos].sample < m_loopStartSample)
 					++m_evPos;
 				m_dirtyRows = 0xFFFFFFFFu;
-			} else if (rawBack || heardBack) {
-				/* 途中の揺らぎで ResetParts すると前の音と次の音が交互に出る。
-				   曲頭へ戻ったときだけやり直す。 */
+			} else if (rawBack) {
+				/* heard だけ 0 に落ちたフレームで先頭からやり直すと、
+				   長い曲のイベントを UI に一気に吐き、モニタと譜面が応答なしになる。
+				   エンジン位置が本当に頭へ戻ったときだけやり直す。 */
 				const int srJ = (m_sampleRate > 0) ? m_sampleRate : 44100;
-				if (pbHeard < (__int64)srJ / 5 && m_hearPlayb > (__int64)srJ) {
+				if (pbRaw < (__int64)srJ / 5 && m_lastPlayb > (__int64)srJ) {
 					ResetParts();
 					m_evPos = 0;
 					m_hadNote = 0;
@@ -4138,12 +4139,17 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		int lastHeard = m_evPos - 1;
 		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbHeard; ++i)
 			lastHeard = i;
+		if (lastHeard > m_evPos + 511)
+			lastHeard = m_evPos + 511;
 		if (lastHeard >= m_evPos)
 			ApplyDueEvents(lastHeard);
 	} else {
 		int lastDue = m_evPos - 1;
 		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbHeard; ++i)
 			lastDue = i;
+		/* 1フレームで数万件を適用するとメッセージが溜まったまま戻らない。 */
+		if (lastDue > m_evPos + 511)
+			lastDue = m_evPos + 511;
 		if (lastDue >= m_evPos)
 			ApplyDueEvents(lastDue);
 	}
@@ -6360,6 +6366,8 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 
 LRESULT CMidiMonitorDlg::OnUiTick(WPARAM, LPARAM)
 {
+	/* 譜面の赤バーは再生描画側が進める。ここではモニタ自身の同期を毎ティック行う。
+	   手前へ持ち上げたり同期を間引くと、モニタの行が止まったままになる。 */
 	if (!m_paintDisabled && ::IsWindow(m_hWnd) && !IsIconic())
 		PumpSyncNow();
 	m_tickPump.Ack();

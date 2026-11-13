@@ -6784,10 +6784,14 @@ enum {
 	OGG_WM_ANALYZER_SYNC = WM_APP + 512
 };
 
+extern "C" void ScStaffPumpOpenScorePreview(void);
+
 static void OggDispatchVizWindows()
 {
 	if (!og)
 		return;
+	/* 再生の VSYNC で譜面タイマーが飢える。赤バーはここからも進める。 */
+	ScStaffPumpOpenScorePreview();
 	if (og->m_EqualizerDlg) {
 		HWND h = og->m_EqualizerDlg->GetSafeHwnd();
 		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
@@ -30886,6 +30890,18 @@ static int ForegroundIsSasami()
 	return (cn && strncmp(cn, "CSasami", 7) == 0) ? 1 : 0;
 }
 
+/* モニタを前面にした直後に譜面へ SetForegroundWindow すると、
+   オーナーの WM_NCACTIVATE が 4923 を掛け直し、描画が回り続けて固まる。 */
+static int ForegroundIsMidiMonitor(HWND fg)
+{
+	if (!fg || !og || !og->m_MidiMonitorDlg) return 0;
+	HWND h = og->m_MidiMonitorDlg->GetSafeHwnd();
+	if (!h || !::IsWindow(h)) return 0;
+	if (fg == h || ::IsChild(h, fg)) return 1;
+	HWND root = ::GetAncestor(fg, GA_ROOT);
+	return (root == h) ? 1 : 0;
+}
+
 static void RaiseSasamiFamily(const SasamiZOrder* z)
 {
 	if (!z || z->n <= 0) return;
@@ -30963,17 +30979,16 @@ void timerog1(UINT nIDEvent)
 			hMp = mp->GetSafeHwnd();
 		SasamiZOrder sasamiZ;
 		HWND hSas = SasamiComposerWindows(&sasamiZ);
-		int fgMon = 0;
-		{
-			HWND fg = ::GetForegroundWindow();
-			CWnd* fgw = fg ? CWnd::FromHandlePermanent(fg) : NULL;
-			CRuntimeClass* rc = fgw ? fgw->GetRuntimeClass() : NULL;
-			const char* cn = rc ? rc->m_lpszClassName : NULL;
-			if (cn && strcmp(cn, "CMidiMonitorDlg") == 0) fgMon = 1;
-		}
-		const int keepSasami = (hSas && (sasamiPreviewStopped || ForegroundIsSasami() || fgMon)) ? 1 : 0;
+		HWND fg = ::GetForegroundWindow();
+		const int fgMp = (hMp && fg && (fg == hMp || ::IsChild(hMp, fg))) ? 1 : 0;
+		/* 譜面やアレンジが開いていて、操作中の窓が MP でなければ MP を被せない。 */
+		const int keepSasami = (hSas && !fgMp) ? 1 : 0;
+		(void)sasamiPreviewStopped;
+		/* すでに譜面かモニタを操作中なら、前面を奪い返さない。 */
+		const int fgTool = (ForegroundIsSasami() || ForegroundIsMidiMonitor(fg)) ? 1 : 0;
 		if (keepSasami) {
-			RaiseSasamiFamily(&sasamiZ);
+			if (!fgTool)
+				RaiseSasamiFamily(&sasamiZ);
 			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0);
 			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1);
 			UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2);
@@ -39147,8 +39162,9 @@ void COggDlg::ToggleMidiMonitor()
 		SasamiZOrder z;
 		HWND hSas = SasamiComposerWindows(&z);
 		if (hSas) {
-			m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
-			RaiseSasamiFamily(&z);
+			/* 開いたモニタをすぐ譜面の下に戻さない。戻すと 4923 と活性化が回り続ける。 */
+			m_MidiMonitorDlg->ShowWindow(SW_SHOW);
+			m_MidiMonitorDlg->SetForegroundWindow();
 		} else {
 			m_MidiMonitorDlg->ShowWindow(SW_SHOW);
 			m_MidiMonitorDlg->SetFocus();

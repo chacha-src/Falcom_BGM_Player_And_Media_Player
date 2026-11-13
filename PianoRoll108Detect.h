@@ -1439,6 +1439,30 @@ namespace PianoRoll108
                     }
                 }
             }
+            // オクターブ上げすぎの補正(畳み処理の後)。2 倍音を基音と誤認して note+12 を
+            // 点けた音。1 オクターブ下に 2f・3f を持つ本物の基音があれば本来は下の音。
+            // 下の基音を起こし、上の音が自分の奇数倍音(3f)を持たなければ倍音として落とす。
+            {
+                auto hzOf2 = [&](int k) -> float {
+                    return (seriesHz[k] > 1.0f) ? seriesHz[k] : PianoKey::KeyHz(k);
+                };
+                for (int h = EDGE_HI - 1; h >= C4_KEY; --h) {
+                    if (!seriesOn[h]) continue;
+                    const float fh = hzOf2(h);
+                    const float flo = fh * 0.5f;
+                    const int loKey = KeyFromHzTune(flo, p.tuneSemis);
+                    if (loKey < MUSIC_LOW_FLOOR || loKey >= COUNT || seriesOn[loKey]) continue;
+                    const float aLo = partialAt(flo, 1);
+                    if (aLo < seriesA[h] * 0.10f || aLo < seriesMax * 0.05f) continue;
+                    if (!hasFullBassSeries(flo, aLo)) continue;
+                    seriesOn[loKey] = true;
+                    seriesHz[loKey] = flo;
+                    seriesA[loKey] = aLo;
+                    const float hOdd3 = partialAt(fh, 3);
+                    if (hOdd3 < seriesA[h] * 0.30f && seriesA[h] < aLo * 1.10f)
+                        seriesOn[h] = false;
+                }
+            }
         }
         nPicked = 0;
         for (int i = 0; i < COUNT; ++i) {

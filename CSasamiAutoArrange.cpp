@@ -3526,14 +3526,14 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			int ap = pn - 1;
 			if (ap > 0 && prog[ap].off == prog[0].off) ap--;
 			int endSeen = 0, endCount = 0;
-			for (int i = 0; i < nBars; i++) if (bars[i].section == SEC_END) endCount++;
-			for (int i = 0; i < nBars; i++) {
-				if (bars[i].section != SEC_END) continue;
-				endSeen++;
-				if (endSeen < endCount) {
+		for (int i = 0; i < nBars; i++) if (bars[i].section == SEC_END) endCount++;
+		for (int i = 0; i < nBars; i++) {
+			if (bars[i].section != SEC_END) continue;
+			endSeen++;
+			if (endSeen < endCount) {
 					bars[i].root = ((tonic2 + (int)prog[ap].off) % 12 + 12) % 12;
 					bars[i].type = prog[ap].type;
-				} else {
+			} else {
 					bars[i].root = ((tonic2 + (int)prog[0].off) % 12 + 12) % 12;
 					bars[i].type = prog[0].type;
 				}
@@ -3869,9 +3869,10 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			};
 			auto lay = [&](int ch, int hit, const int* pit, int np, int span, int vol, int gate, int bend) {
 				if (ch < 0) return;
-				/* 重ねのやり直しで、既に鳴っている拍へは足さない。 */
+				/* 短い裏拍は既にある拍へ足さない。拍以上の新しい音は、その拍の古い音を外してから置く。 */
 				if (merge && hit && OnsetBusy(ev, nPrior, ch, tick)) {
-					return;
+					if (span < slotDur) return;
+					MergeSlot(ev, evCount, &nEmit, ch, slot0, slot1, -1, 1, &removedNotes, 1);
 				}
 				int lv = vol;
 				if (lv < 36) lv = 36;
@@ -3962,7 +3963,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int gate = 70;
 				if (lockPart(arpCh[i], &hit, pit, &np, &span, &gate)) {
 					lay(arpCh[i], hit, pit, np, span, gvol - 6, gate, 0);
-					continue;
+						continue;
 				}
 				/* 拍の途中だけ 32分や64分。全部を同じ音価にしない。 */
 				int sub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figArp[slot] : 0;

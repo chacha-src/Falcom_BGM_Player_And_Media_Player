@@ -6,6 +6,8 @@
 #include "VstMidiEngine.h"
 #include "CSasamiStaffCore.h"
 
+extern int playf;
+
 IMPLEMENT_DYNAMIC(CSasamiToneMapDlg, CCustomBlurDialogExBase)
 
 struct ScToneMapInfo {
@@ -338,6 +340,12 @@ int CSasamiToneMapDlg::ToneIsEmpty(int pc) const
 	return (m_names[pc][0] == 0 || wcscmp(m_names[pc], L"------") == 0) ? 1 : 0;
 }
 
+static int ToneOutCanAudition(int out)
+{
+	(void)out;
+	return 1;
+}
+
 void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 {
 	if (pc < 0 || pc > 127) return;
@@ -350,12 +358,14 @@ void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 	m_hint.SetWindowText(h);
 	InvalidateRect(m_gridRc, FALSE);
 	const int hear = TonePortLive(m_part);
-	if (audition && hear) {
-		/* Still send bank+PC once for audition hearing, then note — SHM only. */
+	const int out = ScStaffScorePreviewOut();
+	/* playf==0 は停止中。再生でライブ出力が止まっているので、譜面と同じ経路で1音出す。
+	   playy==0 は曲の準備中なので、ここでは停止の判定に使わない。 */
+	if (audition && playf == 0 && ToneOutCanAudition(out)) {
+		ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
+	} else if (audition && hear) {
 		VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
 		VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 280);
-	} else if (audition && (ScStaffScorePreviewOut() == SC_OUT_FMMIDI || ScStaffScorePreviewOut() == SC_OUT_MAPPER)) {
-		ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
 	}
 }
 
@@ -419,12 +429,12 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int pc = HitTone(point);
 	if (pc >= 0) {
 		ApplyTone(pc, 0);
-		if (TonePortLive(m_part)) {
+		if (playf == 0 && ToneOutCanAudition(ScStaffScorePreviewOut())) {
+			ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
+		} else if (TonePortLive(m_part)) {
 			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
 			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 60000);
 			m_auditionHold = 1;
-		} else if (ScStaffScorePreviewOut() == SC_OUT_FMMIDI || ScStaffScorePreviewOut() == SC_OUT_MAPPER) {
-			ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
 		}
 	}
 	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);

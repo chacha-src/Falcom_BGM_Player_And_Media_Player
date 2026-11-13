@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-enum { kSmfNoteMax = 48000, kSmfProgMax = 2048, kSmfTempoMax = 64 };
+enum { kSmfNoteMax = 48000, kSmfProgMax = 2048, kSmfTempoMax = 64, kSmfCcMax = 8192, kSmfSxMax = 64, kSmfSxBytes = 120 };
 
 struct SmNote {
 	uint32_t tick;
@@ -37,6 +37,20 @@ struct SmMeter {
 	uint8_t den;
 };
 
+struct SmCc {
+	uint32_t tick;
+	uint8_t ch;
+	uint8_t cc;
+	uint8_t val;
+};
+
+struct SmSx {
+	uint32_t tick;
+	uint8_t ch;
+	uint8_t len;
+	uint8_t bytes[kSmfSxBytes];
+};
+
 enum { kDmReset = 1, kDmGs = 2, kDmBank = 3, kDmXg = 4, kDmEvMax = 256 };
 
 struct SmDrumEv {
@@ -65,9 +79,28 @@ struct SmBag {
 	uint8_t gsReset;
 	uint8_t block50;
 	uint8_t portB; /* FF 21 でポートBがある */
+	/* ポートBの Rx.Channel。0=同じ番号、1〜16=聴くch+1、0xFF=受信なし。 */
+	uint8_t rxB[16];
 	SmDrumEv drumEv[kDmEvMax];
 	int nDrumEv;
+	SmCc* ccs;
+	int nCcs;
+	SmSx* sxs;
+	int nSxs;
 };
+
+static void SmBagFree(SmBag* bag)
+{
+	if (!bag) return;
+	free(bag->notes);
+	free(bag->progs);
+	free(bag->ccs);
+	free(bag->sxs);
+	bag->notes = NULL;
+	bag->progs = NULL;
+	bag->ccs = NULL;
+	bag->sxs = NULL;
+}
 
 static int PushEv(ScEvent* ev, int* n, uint32_t tick, uint8_t ch, uint8_t kind,
 	uint8_t a, uint8_t b, uint8_t c, uint16_t dur)
@@ -153,15 +186,21 @@ static void PushDrumEv(SmBag* bag, uint32_t tick, int kind, int a, int b, int c)
 static void ApplyDrumTo(int* mode, int* slot, SmBag* bag, const SmDrumEv& e)
 {
 	if (e.kind == kDmReset) {
-		for (int ch = 0; ch < 32; ch++) {
+		/* 16ch の GS リセットは A の 1–16 だけ。B まで通常にしてしまうと、
+		   音符の無い ch26 が「非ドラム」になり、書き戻しでポート B が開く。
+		   その 40 10 15 00 が A の ch10 を消し、B10 が STANDARD になる。 */
+		for (int ch = 0; ch < 16; ch++) {
 			mode[ch] = 2;
 			slot[ch] = 0;
 		}
 		mode[9] = 1;
 		slot[9] = 0;
 		bag->gsReset = 1;
-		/* ポートBがある曲だけ、リセット後の B ch10 はドラム2。 */
-		if (bag->portB) {
+		if (bag->portB || bag->block50) {
+			for (int ch = 16; ch < 32; ch++) {
+				mode[ch] = 2;
+				slot[ch] = 0;
+			}
 			mode[25] = 1;
 			slot[25] = 1;
 		}
@@ -170,8 +209,8 @@ static void ApplyDrumTo(int* mode, int* slot, SmBag* bag, const SmDrumEv& e)
 	if (e.kind == kDmGs) {
 		int ch = GsNibbleToCh(e.b);
 		if (e.a == 0x50) {
-			/* 2本目のポートが無いファイルの 50 は、kbsasami と同じくパートに効かせない。 */
-			if (!bag->portB) return;
+			/* 50=ポートB。FF21 が無くてもブロック50 があれば ch17〜32 に載せる
+			   （ホスト VST / SC-88 32ch と同じ扱い。手抜きで捨てない）。 */
 			ch += 16;
 		} else if (e.a != 0x40) {
 			return;
@@ -233,10 +272,14 @@ static void ResolveDrumParts(SmBag* bag)
 	if (bag->nDrumEv > 1)
 		qsort(bag->drumEv, (size_t)bag->nDrumEv, sizeof(SmDrumEv), DrumEvCmp);
 	int mode[32], slot[32];
-	memset(mode, 0, sizeof(mode));
-	memset(slot, 0, sizeof(slot));
+	for (int ch = 0; ch < 32; ch++) {
+		mode[ch] = bag->drumPart[ch];
+		slot[ch] = bag->drumSlot[ch];
+	}
 	for (int i = 0; i < bag->nDrumEv; i++) {
-		if (anyNote && bag->drumEv[i].tick > lastNote) continue;
+		/* 曲末より後の GS リセットだけ捨てる。15h のドラム指定は残す。 */
+		if (anyNote && bag->drumEv[i].tick > lastNote && bag->drumEv[i].kind == kDmReset)
+			continue;
 		ApplyDrumTo(mode, slot, bag, bag->drumEv[i]);
 	}
 	for (int ch = 0; ch < 32; ch++) {
@@ -261,7 +304,32 @@ static void NoteDrumSysex(SmBag* bag, uint32_t tick, const uint8_t* s, int n)
 		}
 		if ((s[4] == 0x40 || s[4] == 0x50) && (s[5] & 0xF0) == 0x10 && s[6] == 0x15) {
 			if (s[4] == 0x50) bag->block50 = 1;
-			PushDrumEv(bag, tick, kDmGs, s[4], s[5] & 0x0F, s[7] & 0x7F);
+			const int nib = s[5] & 0x0F;
+			const int val = s[7] & 0x7F;
+			int ch = GsNibbleToCh(nib);
+			if (s[4] == 0x50) ch += 16;
+			/* イベントバッファが溢れたときも、A(40) と B(50) の両方を残す。 */
+			if (ch >= 0 && ch < 32) {
+				if (val <= 0) {
+					bag->drumPart[ch] = 2;
+					bag->drumSlot[ch] = 0;
+				} else {
+					bag->drumPart[ch] = 1;
+					bag->drumSlot[ch] = (val == 2) ? 1 : 0;
+				}
+			}
+			PushDrumEv(bag, tick, kDmGs, s[4], nib, val);
+			return;
+		}
+		/* 50 1n 02 はポートBの受信チャンネル。ドラムパートはここが指す ch の音符を載せる。 */
+		if (s[4] == 0x50 && (s[5] & 0xF0) == 0x10 && s[6] == 0x02) {
+			bag->block50 = 1;
+			const int part = GsNibbleToCh(s[5] & 0x0F);
+			const int val = s[7] & 0x7F;
+			if (part >= 0 && part < 16) {
+				if (val >= 16) bag->rxB[part] = 0xFF;
+				else bag->rxB[part] = (uint8_t)(val + 1);
+			}
 			return;
 		}
 	}
@@ -350,8 +418,30 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 				uint32_t ln = 0;
 				if (!RdVlq(b + off, end - off, &used, &ln)) break;
 				off += used;
-				if (st == 0xF0 && off + (int)ln <= end)
+				if (st == 0xF0 && off + (int)ln <= end) {
 					NoteDrumSysex(bag, ScaleTick(tick, div), b + off, (int)ln);
+					/* リズム指定と GS リセットはドラム判定側。挿入FXなど残りは譜面へ。 */
+					const uint8_t* s = b + off;
+					int skip = 0;
+					if ((int)ln >= 8 && s[0] == 0x41 && s[2] == 0x42 && s[3] == 0x12) {
+						if (s[4] == 0x40 && s[5] == 0x00 && s[6] == 0x7F) skip = 1;
+						if ((s[4] == 0x40 || s[4] == 0x50) && (s[5] & 0xF0) == 0x10 && s[6] == 0x15)
+							skip = 1;
+						/* B の受信指定は音符側へ写したので、再生時に二重に掛けない。 */
+						if (s[4] == 0x50 && (s[5] & 0xF0) == 0x10 && s[6] == 0x02)
+							skip = 1;
+					}
+					if (!skip && bag->sxs && bag->nSxs < kSmfSxMax && ln >= 2 && (int)ln + 1 <= kSmfSxBytes) {
+						SmSx& sx = bag->sxs[bag->nSxs++];
+						sx.tick = ScaleTick(tick, div);
+						sx.ch = (uint8_t)PortCh(port, 0);
+						sx.bytes[0] = 0xF0;
+						memcpy(sx.bytes + 1, s, (size_t)ln);
+						sx.len = (uint8_t)(ln + 1);
+						if (sx.bytes[sx.len - 1] != 0xF7 && sx.len < kSmfSxBytes)
+							sx.bytes[sx.len++] = 0xF7;
+					}
+				}
 				off += (int)ln;
 				continue;
 			}
@@ -379,6 +469,14 @@ static int ParseSmf(const uint8_t* b, int n, SmBag* bag)
 				if (d1 == 0) cc0[ch] = (uint8_t)d2;
 				else if (d1 == 32) cc32[ch] = (uint8_t)d2;
 				else if (d1 == 7) cc7[ch] = (uint8_t)(d2 ? d2 : 1);
+				/* バンク(CC0/32)はプログラム側。それ以外の CC は譜面へ。 */
+				if (bag->ccs && bag->nCcs < kSmfCcMax && d1 != 0 && d1 != 32) {
+					SmCc& c = bag->ccs[bag->nCcs++];
+					c.tick = ScaleTick(tick, div);
+					c.ch = (uint8_t)ch;
+					c.cc = (uint8_t)d1;
+					c.val = (uint8_t)d2;
+				}
 				continue;
 			}
 			if (cmd == 0x90 && d2 > 0) {
@@ -481,6 +579,70 @@ static void PutTempos(ScEvent* ev, int* n, int ch, uint8_t kind, const SmBag* ba
 	}
 }
 
+/* ポートBのパートが聴く A 側チャンネル。未指定は同じ番号。-1 は受信なし。 */
+static int RxSource(const SmBag* bag, int part)
+{
+	if (!bag || part < 0 || part >= 16) return part;
+	const int rx = bag->rxB[part];
+	if (rx == 0xFF) return -1;
+	if (rx == 0) return part;
+	return (rx - 1) & 15;
+}
+
+/* FF21 も ch17 以降の音符も無いがブロック50 がある曲は、A の音符を B へ写す。
+   受信チャンネルがあるパートは、同じ番号ではなくその ch の音符を載せる。
+   ドラムパートはドラム ch の音符になる。既に 17〜32 に音符があるファイルは写さない。 */
+static void MirrorPortB(SmBag* bag)
+{
+	if (!bag || !bag->block50 || !bag->notes) return;
+	for (int i = 0; i < bag->nNotes; i++)
+		if (bag->notes[i].ch >= 16) return;
+	const int n = bag->nNotes;
+	for (int i = 0; i < n; i++) {
+		const int src = bag->notes[i].ch;
+		if (src >= 16) continue;
+		for (int p = 0; p < 16 && bag->nNotes < kSmfNoteMax; p++) {
+			if (RxSource(bag, p) != src) continue;
+			SmNote c = bag->notes[i];
+			c.ch = (uint8_t)(16 + p);
+			bag->notes[bag->nNotes++] = c;
+		}
+	}
+	const int np = bag->nProgs;
+	for (int i = 0; i < np; i++) {
+		const int src = bag->progs[i].ch;
+		if (src >= 16) continue;
+		for (int p = 0; p < 16 && bag->nProgs < kSmfProgMax; p++) {
+			if (RxSource(bag, p) != src) continue;
+			SmProg c = bag->progs[i];
+			c.ch = (uint8_t)(16 + p);
+			bag->progs[bag->nProgs++] = c;
+		}
+	}
+	if (bag->ccs) {
+		const int nc = bag->nCcs;
+		for (int i = 0; i < nc; i++) {
+			const int src = bag->ccs[i].ch;
+			if (src >= 16) continue;
+			for (int p = 0; p < 16 && bag->nCcs < kSmfCcMax; p++) {
+				if (RxSource(bag, p) != src) continue;
+				SmCc c = bag->ccs[i];
+				c.ch = (uint8_t)(16 + p);
+				bag->ccs[bag->nCcs++] = c;
+			}
+		}
+	}
+	/* ドラム ch を聴く B パートは、15h が無くてもドラムにする。明示の通常は維持。 */
+	for (int p = 0; p < 16; p++) {
+		const int src = RxSource(bag, p);
+		if (src < 0) continue;
+		const int srcDrum = (bag->drumPart[src] == 1) || (bag->drumPart[src] == 0 && src == 9);
+		if (!srcDrum || bag->drumPart[16 + p] == 2 || bag->drumPart[16 + p] == 1) continue;
+		bag->drumPart[16 + p] = 1;
+		bag->drumSlot[16 + p] = bag->drumSlot[src];
+	}
+}
+
 int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 {
 	if (dropped) *dropped = 0;
@@ -492,15 +654,17 @@ int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 	memset(&bag, 0, sizeof(bag));
 	bag.notes = (SmNote*)malloc(sizeof(SmNote) * kSmfNoteMax);
 	bag.progs = (SmProg*)malloc(sizeof(SmProg) * kSmfProgMax);
+	bag.ccs = (SmCc*)malloc(sizeof(SmCc) * kSmfCcMax);
+	bag.sxs = (SmSx*)malloc(sizeof(SmSx) * kSmfSxMax);
 	if (!bag.notes || !bag.progs) {
-		free(bag.notes); free(bag.progs); free(raw);
+		SmBagFree(&bag); free(raw);
 		return 0;
 	}
 	const int ok = ParseSmf(raw, rawN, &bag);
 	free(raw);
 	if (!ok) {
 		if (dropped) *dropped = bag.dropped;
-		free(bag.notes); free(bag.progs);
+		SmBagFree(&bag);
 		return 0;
 	}
 	ScMidiDocClear(d);
@@ -511,10 +675,11 @@ int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 		for (int i = 0; i < bag.nMeters; i++)
 			ScMidiAddMeter(d, bag.meters[i].tick, bag.meters[i].num, bag.meters[i].den);
 	}
+	MirrorPortB(&bag);
 	/* ch10/26 は無指定ならドラム。40 10 15 00 は ch10 を通常へ。
-	   ポートBがあるときだけ 50 1n 15 を ch17〜32 に載せる。値 2 はドラム2。
-	   ドラムは音部記号も Dr にする。指定だけでは譜面が Dr にならない。 */
-	if (bag.portB) d->bind.dualPort = 1;
+	   50 1n 15 はポートB（ch17〜32）。FF21 が無くてもブロック50 があれば生成する。
+	   値 2 はドラム2。ドラムは音部記号も Dr にする（指定だけでは譜面が Dr にならない）。 */
+	if (bag.portB || bag.block50) d->bind.dualPort = 1;
 	for (int ch = 0; ch < 32; ch++) {
 		int notes = 0;
 		for (int i = 0; i < bag.nNotes; i++) if (bag.notes[i].ch == (uint8_t)ch) notes++;
@@ -540,6 +705,18 @@ int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 		const SmProg& p = bag.progs[i];
 		ScMidiApplyProgBankAt(d, p.ch, p.tick, p.pc, p.msb, p.lsb);
 	}
+	if (bag.ccs) {
+		for (int i = 0; i < bag.nCcs; i++) {
+			const SmCc& c = bag.ccs[i];
+			ScMidiAddCc(d, c.tick, c.ch, c.cc, c.val);
+		}
+	}
+	if (bag.sxs) {
+		for (int i = 0; i < bag.nSxs; i++) {
+			const SmSx& sx = bag.sxs[i];
+			ScMidiAddSysex(d, sx.tick, sx.ch, sx.bytes, sx.len);
+		}
+	}
 	qsort(bag.notes, (size_t)bag.nNotes, sizeof(SmNote), NoteCmp);
 	int landed = 0;
 	for (int i = 0; i < bag.nNotes; i++) {
@@ -552,8 +729,7 @@ int ScMidiDocFromSmfFile(ScMidiDoc* d, const wchar_t* path, int* dropped)
 		landed++;
 	}
 	if (dropped) *dropped = bag.dropped;
-	free(bag.notes);
-	free(bag.progs);
+	SmBagFree(&bag);
 	return landed > 0;
 }
 
@@ -828,15 +1004,17 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 	memset(&bag, 0, sizeof(bag));
 	bag.notes = (SmNote*)malloc(sizeof(SmNote) * kSmfNoteMax);
 	bag.progs = (SmProg*)malloc(sizeof(SmProg) * kSmfProgMax);
+	bag.ccs = (SmCc*)malloc(sizeof(SmCc) * kSmfCcMax);
+	bag.sxs = (SmSx*)malloc(sizeof(SmSx) * kSmfSxMax);
 	if (!bag.notes || !bag.progs) {
-		free(bag.notes); free(bag.progs); free(raw);
+		SmBagFree(&bag); free(raw);
 		return 0;
 	}
 	const int ok = ParseSmf(raw, rawN, &bag);
 	free(raw);
 	if (!ok) {
 		if (dropped) *dropped = bag.dropped;
-		free(bag.notes); free(bag.progs);
+		SmBagFree(&bag);
 		return 0;
 	}
 	qsort(bag.notes, (size_t)bag.nNotes, sizeof(SmNote), NoteCmp);
@@ -1005,7 +1183,6 @@ int ScFmDocFromSmfFile(ScFmDoc* d, const wchar_t* path, int* dropped)
 	}
 
 	if (dropped) *dropped = bag.dropped;
-	free(bag.notes);
-	free(bag.progs);
+	SmBagFree(&bag);
 	return landed > 0;
 }

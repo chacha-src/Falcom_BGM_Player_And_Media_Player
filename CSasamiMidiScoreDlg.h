@@ -46,6 +46,7 @@ public:
 	void ImportStandardMidi(const wchar_t* pathOpt = NULL);
 	void PreviewRangeInstant(); /* その場再生（ロールからも呼ぶ） */
 	void NotifyMuteSolo(); /* ロールのミュート/ソロをライブへ */
+	void PumpPreviewTick(); /* モニタ表示中でも赤バーを進める */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

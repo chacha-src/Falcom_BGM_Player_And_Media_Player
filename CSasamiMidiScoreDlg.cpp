@@ -386,10 +386,18 @@ void CSasamiMidiScoreDlg::ApplyLang()
 	UpdateHelpBar();
 }
 
+static void MidiScorePumpThunk(void* ctx)
+{
+	CSasamiMidiScoreDlg* d = (CSasamiMidiScoreDlg*)ctx;
+	if (d && ::IsWindow(d->GetSafeHwnd()))
+		d->PumpPreviewTick();
+}
+
 BOOL CSasamiMidiScoreDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 	s_inst = this;
+	ScStaffSetPreviewPump(MidiScorePumpThunk, this);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
 
@@ -3273,13 +3281,8 @@ static int s_gsMapBusy;
 
 static int ScChIsDrum(const ScMidiDoc* d, int ch)
 {
-	if (ch == 9) return 1;
-	if (!d || !d->ev) return 0;
-	for (int i = 0; i < d->evCount; i++) {
-		if ((int)d->ev[i].ch != ch) continue;
-		if (d->ev[i].kind == SC_EV_DRUM) return 1;
-	}
-	return 0;
+	if (!d || !d->ev) return ScMidiPartDefaultDrum(ch);
+	return ScMidiPartIsDrum(d->ev, d->evCount, ch, 0);
 }
 
 /* メロディのキャピタルだけ。ch9 とドラム印、MSB 127（LA）は触らない。 */
@@ -3816,9 +3819,13 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t from
 	int w = 0;
 	for (int i = 0; i < tmp->evCount; i++) {
 		int ch = tmp->ev[i].ch;
-		if (ch < 0 || ch >= m_ui.trackCount) continue;
-		if (m_ui.mute[ch]) continue;
-		if (anySolo && !m_ui.solo[ch]) continue;
+		const int kind = tmp->ev[i].kind;
+		const int global = (kind == SC_EV_TEMPO || kind == SC_EV_METER || kind == SC_EV_SYSEX);
+		if (!global) {
+			if (ch < 0 || ch >= m_ui.trackCount) continue;
+			if (m_ui.mute[ch]) continue;
+			if (anySolo && !m_ui.solo[ch]) continue;
+		}
 		tmp->ev[w++] = tmp->ev[i];
 	}
 	tmp->evCount = w;
@@ -4056,9 +4063,32 @@ void CSasamiMidiScoreDlg::PullDocFromText()
 
 void CSasamiMidiScoreDlg::NewDocument()
 {
+	ScStaffStopHostPreview(&m_ui);
 	ScMidiDocClear(&m_doc);
 	m_doc.tempoT = 13000;
 	m_ui.selEv = -1;
+	m_ui.nSel = 0;
+	m_ui.playheadTick = 0;
+	m_ui.previewActive = 0;
+	m_ui.previewEngineSeen = 0;
+	m_ui.markerTick = 0;
+	m_ui.loopATick = -1;
+	m_ui.loopBTick = -1;
+	m_ui.markerSeekArmed = 0;
+	m_ui.previewOriginTick = 0;
+	m_ui.previewWavMode = 0;
+	for (int i = 0; i < 32; i++) {
+		m_ui.mute[i] = 0;
+		m_ui.solo[i] = 0;
+		m_ui.vstIsVst3[i] = 0;
+		m_ui.vstLabel[i][0] = 0;
+		m_ui.progLabel[i][0] = 0;
+	}
+	if (m_gsMap.GetSafeHwnd()) {
+		s_gsMapBusy = 1;
+		m_gsMap.SetCurSel(0);
+		s_gsMapBusy = 0;
+	}
 	SyncMeterFromDoc();
 	ScStaffApplyDocClef(&m_ui, m_doc.ev, m_doc.evCount);
 	RefreshProgLabels();
@@ -4066,6 +4096,19 @@ void CSasamiMidiScoreDlg::NewDocument()
 	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 	UpdateScrollBars();
 	ScSessionClearLast();
+	{
+		wchar_t dir[MAX_PATH];
+		wchar_t p[MAX_PATH];
+		GetTempPathW(MAX_PATH, dir);
+		_snwprintf_s(p, _TRUNCATE, L"%sogg_sasami_score.mpsmv", dir);
+		SasamiInvalidateTempMidi(p);
+		DeleteFileW(p);
+		_snwprintf_s(p, _TRUNCATE, L"%sogg_sasami_score.mpw2", dir);
+		SasamiInvalidateTempMidi(p);
+		DeleteFileW(p);
+		_snwprintf_s(p, _TRUNCATE, L"%sogg_sasami_score.mid", dir);
+		DeleteFileW(p);
+	}
 	if (CSasamiTextDlg* t = CSasamiTextDlg::Instance()) {
 		if (::IsWindow(t->GetSafeHwnd()))
 			t->SetMmlFromScore(L"; SASAMI MML / MML3\r\n@METER 4/4\r\n#1\r\nt120\r\nl4 o4\r\n");
@@ -4446,6 +4489,20 @@ void CSasamiMidiScoreDlg::OnBnClickedFx()
 	CSasamiInsertFxDlg::OpenOwned(this, &m_doc, part);
 }
 
+void CSasamiMidiScoreDlg::PumpPreviewTick()
+{
+	if (!m_ui.previewActive && !ScStaffPreviewIsRunning()) return;
+	if (ScStaffSyncPreviewPlayhead(&m_ui, m_doc.tempoT)) {
+		ApplyFollowScroll();
+		InvalidateRect(m_bodyRc, FALSE);
+		if (m_ui.showRollSplit) InvalidateRect(m_rollRc, FALSE);
+	}
+	if (ScStaffPreviewFinished(&m_ui)) {
+		KillTimer(kScPreviewTimer);
+		SetPreviewBtn(0);
+	}
+}
+
 void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kScPreviewTimer) {
@@ -4640,6 +4697,11 @@ void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
 			ScApplyGsMapBanks(tmp, tmp->gsMap);
 	}
 	LoadFromDoc(*tmp, 0);
+	for (int ch = 0; ch < 32; ch++) {
+		if (!ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, ch, 0)) continue;
+		m_ui.clef[ch] = 3;
+		m_ui.clefAuto[ch] = 0;
+	}
 	{
 		int hi = 0;
 		for (int i = 0; i < m_doc.evCount; i++) {
@@ -4661,6 +4723,14 @@ void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
 	PushDocToText();
 	PersistSession();
 	CString st;
+	CString drumList;
+	for (int ch = 0; ch < 32; ch++) {
+		if (!ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, ch, 0)) continue;
+		CString one;
+		one.Format(L"%d", ch + 1);
+		if (!drumList.IsEmpty()) drumList += L",";
+		drumList += one;
+	}
 	st.Format(LL14(L"標準MIDIを譜面に入れました（捨てた音符 %d）", L"Imported standard MIDI onto the score (dropped %d notes)",
 		L"MIDI importé sur la partition (%d notes écartées)", L"MIDI importato nello spartito (%d note scartate)",
 		L"MIDI importado a la partitura (%d notas omitidas)", L"표준 MIDI를 악보에 넣었습니다 (버린 음표 %d)",
@@ -4672,6 +4742,13 @@ void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
 		static const wchar_t* name[] = { L"", L"SC-55", L"SC-88", L"SC-88Pro", L"SC-8820/8850", L"XG" };
 		st += L"  ";
 		st += name[m_doc.gsMap];
+	}
+	if (!drumList.IsEmpty()) {
+		st += L"  ";
+		st += LL14(L"ドラム MIDI ", L"Drum MIDI ", L"Batterie MIDI ", L"Batteria MIDI ", L"Batería MIDI ",
+			L"드럼 MIDI ", L"鼓 MIDI ", L"طبول MIDI ", L"Барабаны MIDI ", L"Drum MIDI ",
+			L"Bateria MIDI ", L"Drum MIDI ", L"Perkusja MIDI ", L"Davul MIDI ");
+		st += drumList;
 	}
 	m_status.SetWindowText(st);
 }
@@ -5609,6 +5686,7 @@ void CSasamiMidiScoreDlg::OnClose()
 }
 void CSasamiMidiScoreDlg::OnDestroy()
 {
+	ScStaffSetPreviewPump(NULL, this);
 	VstLiveEditorSetNotifyHwnd(NULL);
 	VstLiveEditorOpenCancelPending();
 	KillTimer(kScPreviewTimer);
@@ -5827,13 +5905,36 @@ void CSasamiMidiScoreDlg::ApplyMuteSoloToLive()
 	int anySolo = 0;
 	for (int i = 0; i < m_ui.trackCount; i++)
 		if (m_ui.solo[i]) { anySolo = 1; break; }
+	int hear[32];
+	memset(hear, 0, sizeof(hear));
 	for (int i = 0; i < m_ui.trackCount && i < 32; i++) {
 		int muted = m_ui.mute[i] ? 1 : 0;
 		if (anySolo && !m_ui.solo[i]) muted = 1;
-		/* Soft mute via CC7=0 when muted during live; restore strip vol when unmuted is heavy — skip restore. */
-		if (muted)
-			VstLiveMidiToPart(i + 1, (DWORD)(0xB0 | (i & 0x0F)) | (7 << 8) | (0 << 16));
+		hear[i] = muted ? 0 : 1;
 	}
+	/* 32ch は下位4bitが同じ。鳴っている側と同じチャンネルへ CC7=0 を送るとソロも無音になる。 */
+	int heardNib[2][16];
+	memset(heardNib, 0, sizeof(heardNib));
+	for (int i = 0; i < 32; i++)
+		if (hear[i]) heardNib[i / 16][i & 15] = 1;
+	static uint32_t s_mutedBits = 0;
+	uint32_t want = 0;
+	for (int i = 0; i < m_ui.trackCount && i < 32; i++) {
+		if (hear[i]) continue;
+		const int nib = i & 15;
+		const int port = i / 16;
+		if (heardNib[port][nib] || heardNib[port ^ 1][nib]) continue;
+		want |= (1u << i);
+	}
+	if (want == s_mutedBits) return;
+	for (int i = 0; i < 32; i++) {
+		const int nowM = (want & (1u << i)) ? 1 : 0;
+		const int wasM = (s_mutedBits & (1u << i)) ? 1 : 0;
+		if (nowM == wasM) continue;
+		const int vol = nowM ? 0 : 100;
+		VstLiveMidiToPart(i + 1, (DWORD)(0xB0 | (i & 0x0F)) | (7 << 8) | ((DWORD)vol << 16));
+	}
+	s_mutedBits = want;
 }
 
 void CSasamiMidiScoreDlg::NotifyMuteSolo()

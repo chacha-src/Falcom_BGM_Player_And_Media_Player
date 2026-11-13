@@ -266,6 +266,11 @@ Game::Game()
 	m_boltT = 0; m_boltMag = 0;
 	m_quakeT = 0; m_quakeMag = 0; m_quakeAcc = 0;
 	m_hailBurstT = 0; m_hailAcc = 0;
+	memset(m_gust, 0, sizeof(m_gust));
+	memset(m_gustHx, 0, sizeof(m_gustHx));
+	memset(m_gustHz, 0, sizeof(m_gustHz));
+	m_gustHN = 0;
+	m_gustCool = 5.f;
 	m_wxFlash = 0;
 	m_wxFlashCol[0] = 0.82f; m_wxFlashCol[1] = 0.88f; m_wxFlashCol[2] = 1.f;
 	memset(m_cover, 0, sizeof(m_cover));
@@ -1220,12 +1225,10 @@ void Game::Tick(float dt)
 
 	static_assert(TAC_BGM_LANTERN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 勝利目前は二つのときだけ。距離も匹数も見ない。開幕の体力では切り替えない。
-// 掃討は索敵の外も全員。最大HPも残りHPも数える。倒した敵の最大HPは分母に残す。
-// ボス戦は、索敵済みに加え、今いる地点からボスまでの途上と、ボスから8マス以内の未起動も入れる。
-// 生存ボスのHPが最大の半分を超えていれば通常曲。半分以下で勝利目前。雑魚の有無は見ない。
-// ボスがいないときだけ、対象の残りHPが最大HP合計の1/4以下で勝利目前。
-// 勝利目前はダメージを与えた着弾で、敗北寸前は与えた時と受けた時に組み直す。
+// 勝利目前は二つのうちどちらか。両方は要らない。距離も匹数も見ない。開幕の体力では切り替えない。
+// ボスが1体なら、その残りHPが最大の60%未満。2体以上いるあいだは、生存ボスの合計が最大合計の50%未満。
+// または、全敵（ボスを含む）の今のHP合計が、全敵の最大HP合計の30%以下。倒した敵の最大HPは分母に残す。
+// 着弾の見た目HPで切り、ダメージを与えた瞬間に組み直す。敗北寸前は与えた時と受けた時。
 // 敗北寸前は味方の残りHPが最大の33%未満、または死者が人数の半数以上。条件を外れた着弾で戻す。
 // ボスを倒した瞬間、またはボスのいないマップで最後の敵を倒した着弾で、カットシーンの途中から勝利曲。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
@@ -1246,41 +1249,21 @@ void Game::SyncBgm()
 		int players = m_b.AliveCount(TEAM_PLAYER);
 		int all = 0;
 		int hp = 0, mx = 0, partyN = 0, deadN = 0;
-		long long eHp = 0, eMx = 0;
-		int bossAlive = 0, bossLow = 0;
-		int bossX = -1, bossZ = -1;
-		for (int i = 0; i < m_b.nUnits; i++) {
-			const Unit& u = m_b.u[i];
-			if (u.team == TEAM_ENEMY && u.boss && u.alive && u.hp > 0) { bossX = u.x; bossZ = u.z; break; }
-		}
-		int hereX = 0, hereZ = 0, hereD = 9999;
-		if (bossX >= 0) {
-			for (int i = 0; i < m_b.nUnits; i++) {
-				const Unit& u = m_b.u[i];
-				if (u.team != TEAM_PLAYER || !u.alive || u.hp <= 0) continue;
-				int d = Dist(u.x, u.z, bossX, bossZ);
-				if (d < hereD) { hereD = d; hereX = u.x; hereZ = u.z; }
-			}
-		}
+		long long eHp = 0, eMx = 0, bHp = 0, bMx = 0;
+		int bossN = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
 				all++;
 				int em = max(1, u.ch.stat[S_HP]);
-				if (u.boss && u.alive && u.hp > 0) {
-					bossAlive = 1;
-					if ((long long)u.hp * 2 <= (long long)em) bossLow = 1;
-				}
-				int inPool = (m_b.sweep == TAC_VAR_SWEEP) || u.alert != 0;
-				if (!inPool && bossX >= 0) {
-					int dBoss = Dist(u.x, u.z, bossX, bossZ);
-					// ボスの周囲と、今いる地点からボスまでの途上は起き上がる想定。
-					if (dBoss <= 8) inPool = 1;
-					else if (hereD < 9999 && Dist(hereX, hereZ, u.x, u.z) + dBoss <= hereD + 8) inPool = 1;
-				}
-				if (!inPool) continue;
 				eMx += em;
-				if (u.alive && u.hp > 0) eHp += u.hp;
+				float shown = (m_phase == PH_ACTION) ? m_dispHp[i] : (float)((u.alive && u.hp > 0) ? u.hp : 0);
+				if (shown < 0.f) shown = 0.f;
+				long long cur = (long long)(shown + 0.5f);
+				if (cur < 0) cur = 0;
+				if (cur > em) cur = em;
+				eHp += cur;
+				if (u.boss && cur > 0) { bossN++; bHp += cur; bMx += em; }
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			partyN++;
@@ -1304,9 +1287,11 @@ void Game::SyncBgm()
 		}
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
-			if (bossAlive) nearWin = bossLow;
-			else if (m_b.bgmWin) nearWin = 1;
-			else nearWin = (eMx > 0 && eHp * 4 <= eMx) ? 1 : 0;
+			int bossLow = 0;
+			if (bossN >= 2) bossLow = (bHp * 2 < bMx) ? 1 : 0;
+			else if (bossN == 1) bossLow = (bHp * 5 < bMx * 3) ? 1 : 0;
+			int poolLow = (eMx > 0 && eHp * 10 <= eMx * 3) ? 1 : 0;
+			nearWin = (bossLow || poolLow) ? 1 : 0;
 		}
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
@@ -3995,6 +3980,7 @@ void Game::UpdateParticles(float dt)
 			m_wxMesh = 0;
 			m_wxMeshWait = 0.45f;
 			m_r.BuildTerrain(m_b.map);
+			for (int gi = 0; gi < GUST_N; gi++) if (m_gust[gi].on && m_gust[gi].phase >= 3) m_gust[gi].on = 0;
 		}
 	}
 	UpdateWeatherEvents(dt);
@@ -4054,9 +4040,306 @@ void Game::LightningStrike(V3 to, float mag)
 	}
 }
 
+// 強風・雨で折れて飛ぶ地形物。水面には生えない。波紋を出して沈み、奈落へ落ちる。
+struct GustSpec {
+	const char* mesh;
+	float sc, rest, mat;
+	int prop, a, b;
+};
+static const GustSpec kGust[TH_COUNT] = {
+	{ "tree_single_A", 1.35f, 0.32f, 0.f, PK_TREE, PK_TREE, PK_TREES },
+	{ "rock_single_A", 3.2f, 0.55f, 1.f, PK_ROCK, PK_ROCK, -1 },
+	{ "tree_single_B", 1.35f, 0.32f, 0.f, PK_TREE, PK_TREE, PK_TREES },
+	{ "tree_pine_orange_large", 0.22f, 0.30f, 0.f, PK_PINE, PK_PINE, -1 },
+	{ "tree_dead_large", 0.30f, 0.28f, 0.f, PK_DEAD, PK_DEAD, -1 },
+	{ "rock_single_C", 2.6f, 0.52f, 1.f, PK_ROCK, PK_ROCK, -1 },
+	{ "tree_dead_medium", 0.34f, 0.28f, 0.f, PK_DEAD, PK_DEAD, -1 },
+	{ "crate_A_big", 2.6f, 0.42f, 2.f, PK_CRATE, PK_CRATE, PK_BARREL },
+	{ "waterlily_A", 3.0f, 0.15f, 8.f, PK_LILY, PK_LILY, -1 },
+	{ "tree_single_A", 1.35f, 0.32f, 0.f, PK_TREE, PK_TREE, PK_TREES },
+	{ "crate_A_big", 2.4f, 0.40f, 2.f, PK_CRATE, PK_CRATE, -1 },
+	{ "crate_A_big", 2.4f, 0.40f, 2.f, PK_CRATE, PK_CRATE, PK_BARREL },
+	{ "flag_red", 3.0f, 0.18f, 5.f, PK_FLAG, PK_FLAG, -1 },
+	{ "lantern_standing", 0.6f, 0.22f, 6.f, PK_LANTERN, PK_LANTERN, -1 },
+};
+
+static int GustSolid(const Map& m, float x, float z, float& gy, int& water)
+{
+	water = 0;
+	int ix = (int)floorf(x), iz = (int)floorf(z);
+	if (!Map::In(ix, iz)) { gy = -80.f; return 0; }
+	const Cell& c = m.At(ix, iz);
+	if (c.t == T_VOID || c.t == T_CHASM) { gy = -80.f; return 0; }
+	gy = m.TopY(ix, iz);
+	water = (c.t == T_WATER || c.t == T_LAVA) ? 1 : 0;
+	return 1;
+}
+
+static int GustPlantable(const Map& m, int x, int z)
+{
+	if (!Map::In(x, z)) return 0;
+	const Cell& c = m.At(x, z);
+	if (c.t == T_VOID || c.t == T_CHASM || c.t == T_WATER || c.t == T_LAVA) return 0;
+	if (c.t == T_ROCK || c.t == T_MOUNTAIN || c.t == T_DOOR) return 0;
+	if (TerrainInfo(c.t).costFoot >= 99) return 0;
+	return c.prop == PK_NONE;
+}
+
+void Game::SpawnGust()
+{
+	if (m_screen != SC_BATTLE) return;
+	int slot = -1;
+	for (int i = 0; i < GUST_N; i++) if (!m_gust[i].on) { slot = i; break; }
+	if (slot < 0) return;
+	int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+	const GustSpec& sp = kGust[th];
+	int fx = 0, fz = 0, found = 0;
+	float cx = m_camTarget.x, cz = m_camTarget.z;
+	for (int n = 0; n < 32 && !found; n++) {
+		int x = (int)floorf(cx) + m_rng.Range(-14, 14);
+		int z = (int)floorf(cz) + m_rng.Range(-14, 14);
+		if (!Map::In(x, z)) continue;
+		int p = m_b.map.At(x, z).prop;
+		if (p == sp.a || (sp.b >= 0 && p == sp.b)) { found = 1; fx = x; fz = z; }
+	}
+	int incoming = (!found || m_rng.Range(0, 99) < 48) ? 1 : 0;
+	GustBit& g = m_gust[slot];
+	memset(&g, 0, sizeof(g));
+	g.on = 1;
+	g.kind = th;
+	g.prop = sp.prop;
+	g.plant = 1;
+	g.rest = sp.rest;
+	g.sc = sp.sc;
+	g.yaw = m_rng.F(0.f, 6.28318f);
+	g.hx = g.hz = -1;
+	if (!incoming) {
+		g.phase = 0;
+		g.leave = 1;
+		g.x = fx + 0.5f;
+		g.z = fz + 0.5f;
+		g.y = m_b.map.TopY(fx, fz);
+		g.hx = fx;
+		g.hz = fz;
+		m_b.map.At(fx, fz).prop = PK_NONE;
+		if (m_gustHN < GUST_HIDE) { m_gustHx[m_gustHN] = fx; m_gustHz[m_gustHN] = fz; m_gustHN++; }
+		else {
+			for (int i = 1; i < GUST_HIDE; i++) { m_gustHx[i - 1] = m_gustHx[i]; m_gustHz[i - 1] = m_gustHz[i]; }
+			m_gustHx[GUST_HIDE - 1] = fx;
+			m_gustHz[GUST_HIDE - 1] = fz;
+		}
+		return;
+	}
+	float wx, wz, lift;
+	WindField(m_time, cx, cz, wx, wz, lift, th);
+	float mag = sqrtf(wx * wx + wz * wz);
+	if (mag < 0.35f) { wx = 1.2f; wz = 0.4f; mag = 1.26f; }
+	float side = m_rng.F(-6.f, 6.f);
+	g.x = cx - wx / mag * m_rng.F(12.f, 16.f) + (-wz / mag) * side;
+	g.z = cz - wz / mag * m_rng.F(12.f, 16.f) + (wx / mag) * side;
+	g.vx = wx * 0.72f;
+	g.vz = wz * 0.72f;
+	g.spin = m_rng.F(-2.4f, 2.4f);
+	g.phase = 1;
+	float gy = 0.f; int water = 0;
+	int solid = GustSolid(m_b.map, g.x, g.z, gy, water);
+	int mode = m_rng.Range(0, 2);
+	if (!solid) { g.y = m_rng.F(2.f, 6.f); g.vy = m_rng.F(-1.2f, 0.4f); g.phase = 5; g.noLand = 1; }
+	else if (mode == 0) { g.y = gy - m_rng.F(1.2f, 3.5f); g.vy = m_rng.F(-0.4f, 0.8f); g.phase = 5; g.noLand = 1; }
+	else if (mode == 1) { g.y = gy + 0.12f; g.vy = m_rng.F(-0.6f, -0.15f); }
+	else { g.y = gy + m_rng.F(3.2f, 7.5f); g.vy = m_rng.F(-2.2f, -0.5f); }
+	g.prevY = g.y;
+}
+
+void Game::TickGust(float dt)
+{
+	if (m_screen != SC_BATTLE || dt <= 0.f) return;
+	if (dt > 0.05f) dt = 0.05f;
+	int wx = TacWx(m_b.weather);
+	BOOL wet = (wx == WX_RAIN || wx == WX_STORM);
+	BOOL storm = (wx == WX_STORM);
+	float burst = TacBurst(m_time);
+	if (wet || burst > 0.58f) {
+		m_gustCool -= dt;
+		if (m_gustCool <= 0.f) {
+			SpawnGust();
+			m_gustCool = storm ? m_rng.F(9.f, 18.f) : wet ? m_rng.F(14.f, 28.f) : m_rng.F(22.f, 42.f);
+		}
+	}
+	if (wet) {
+		static float ripAcc = 0.f;
+		ripAcc += dt;
+		if (ripAcc > 0.28f) {
+			ripAcc = 0.f;
+			for (int n = 0; n < 2; n++) {
+				int x = (int)floorf(m_camTarget.x) + m_rng.Range(-10, 10);
+				int z = (int)floorf(m_camTarget.z) + m_rng.Range(-10, 10);
+				if (!Map::In(x, z)) continue;
+				int t = m_b.map.At(x, z).t;
+				if (t != T_WATER && t != T_LAVA) continue;
+				int s = m_ripHead % TAC_RIPN;
+				m_rip[s][0] = x + m_rng.F(0.15f, 0.85f);
+				m_rip[s][1] = m_time;
+				m_rip[s][2] = z + m_rng.F(0.15f, 0.85f);
+				m_rip[s][3] = storm ? 1.15f : 0.72f;
+				m_ripHead++;
+			}
+		}
+	}
+	int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
+	for (int i = 0; i < GUST_N; i++) {
+		GustBit& g = m_gust[i];
+		if (!g.on || g.phase == 6) continue;
+		g.t += dt;
+		g.prevY = g.y;
+		if (g.phase == 0) {
+			g.yaw += dt * 0.4f;
+			if (g.t < 0.62f) continue;
+			float wxv, wzv, lift;
+			WindField(m_time, g.x, g.z, wxv, wzv, lift, th);
+			g.vx = wxv * 1.15f + m_rng.F(-0.4f, 0.4f);
+			g.vz = wzv * 1.15f + m_rng.F(-0.4f, 0.4f);
+			g.vy = 3.6f + lift * 0.25f;
+			g.spin = m_rng.F(-3.5f, 3.5f);
+			g.phase = 1;
+			g.t = 0.f;
+			continue;
+		}
+		float wxv, wzv, lift;
+		WindField(m_time, g.x, g.z, wxv, wzv, lift, g.kind);
+		if (g.phase == 1 || g.phase == 5) {
+			g.vx += wxv * dt * 0.55f;
+			g.vz += wzv * dt * 0.55f;
+			g.vy += (-9.4f + lift * 0.15f) * dt;
+		}
+		if (g.phase == 4) {
+			g.vy = -0.72f;
+			g.vx *= (1.f - dt * 1.8f);
+			g.vz *= (1.f - dt * 1.8f);
+		}
+		if (g.phase == 2) {
+			g.vx *= (1.f - dt * 1.7f);
+			g.vz *= (1.f - dt * 1.7f);
+			g.vy = 0.f;
+		}
+		g.x += g.vx * dt;
+		g.y += g.vy * dt;
+		g.z += g.vz * dt;
+		g.yaw += g.spin * dt;
+		float dx = g.x - m_camTarget.x, dz = g.z - m_camTarget.z;
+		if (g.leave && (dx * dx + dz * dz > 24.f * 24.f || g.y < -6.f)) { g.on = 0; continue; }
+		if (g.phase == 5 && g.y < -28.f) { g.on = 0; continue; }
+		if (g.phase == 3) {
+			g.y = g.prevY;
+			if (g.t > 2.3f) g.phase = 6;
+			continue;
+		}
+		if (!g.hit && !g.leave && (g.phase == 1 || g.phase == 2)) {
+			for (int u = 0; u < m_b.nUnits; u++) {
+				const Unit& un = m_b.u[u];
+				if (!un.alive || un.hp <= 0) continue;
+				float ddx = g.x - un.px, ddz = g.z - un.pz;
+				if (ddx * ddx + ddz * ddz > 0.72f) continue;
+				if (fabsf(g.y - un.py) > 1.5f) continue;
+				g.hit = 1;
+				if (m_act[u].clip != CL_DEATH) ActorPlay(m_act[u], CL_HIT_A, 0, 0.06f);
+				float sx = sinf(un.face), cz = cosf(un.face);
+				int bx = un.x, bz = un.z;
+				if (fabsf(sx) > fabsf(cz)) bx += (sx > 0.f ? 1 : -1);
+				else bz += (cz > 0.f ? 1 : -1);
+				float gy = 0.f; int water = 0;
+				int solid = GustSolid(m_b.map, bx + 0.5f, bz + 0.5f, gy, water);
+				g.x = bx + 0.5f; g.z = bz + 0.5f; g.y = solid ? gy + 0.02f : g.y;
+				g.vx *= 0.12f; g.vz *= 0.12f; g.vy = 0.f; g.spin *= 0.35f; g.t = 0.f;
+				Shake(0.16f);
+				if (!solid) { g.phase = 5; g.noLand = 1; g.vy = -1.4f; }
+				else if (water) g.phase = 4;
+				else g.phase = 2;
+				break;
+			}
+		}
+		if (g.phase == 4) {
+			if (g.t < 0.15f || fmodf(g.t, 0.22f) < dt) {
+				int s = m_ripHead % TAC_RIPN;
+				m_rip[s][0] = g.x; m_rip[s][1] = m_time; m_rip[s][2] = g.z; m_rip[s][3] = 1.35f;
+				m_ripHead++;
+			}
+			if (g.t > 1.05f) { g.phase = 5; g.noLand = 1; g.vy = -2.4f; g.vx *= 0.3f; g.vz *= 0.3f; }
+			continue;
+		}
+		if (g.leave || g.noLand || g.phase == 5 || g.phase == 3 || g.phase == 6) continue;
+		float gy = 0.f; int water = 0;
+		int solid = GustSolid(m_b.map, g.x, g.z, gy, water);
+		if (!solid) {
+			if (g.phase == 2 || g.y < 1.f) { g.phase = 5; g.noLand = 1; if (g.vy > -0.5f) g.vy = -1.6f; }
+			continue;
+		}
+		if (g.phase == 2 && g.y > gy + 0.45f) { g.phase = 1; g.vy = -1.4f; continue; }
+		if (g.y > gy + 0.05f) continue;
+		g.y = gy + 0.02f;
+		if (water) { g.phase = 4; g.t = 0.f; g.vy = -0.55f; g.vx *= 0.35f; g.vz *= 0.35f; continue; }
+		if (g.phase == 2) {
+			float sp = sqrtf(g.vx * g.vx + g.vz * g.vz);
+			if (g.t > 0.85f || sp < 0.18f) {
+				int ix = (int)floorf(g.x), iz = (int)floorf(g.z);
+				if (g.plant && GustPlantable(m_b.map, ix, iz)) {
+					m_b.map.At(ix, iz).prop = (BYTE)g.prop;
+					g.phase = 3; g.t = 0.f; g.x = ix + 0.5f; g.z = iz + 0.5f; g.vx = g.vz = 0.f;
+				} else { g.phase = 5; g.noLand = 1; g.vy = -1.8f; }
+			}
+			continue;
+		}
+		int fromAbove = (g.prevY > gy + 0.55f) ? 1 : 0;
+		if (fromAbove && g.bounces == 0) {
+			g.phase = 2; g.t = 0.f; g.vy = 0.f; g.vx *= 0.42f; g.vz *= 0.42f; g.spin *= 0.5f;
+			continue;
+		}
+		g.bounces++;
+		g.vy = fabsf(g.vy) * g.rest;
+		if (g.vy < 0.35f) g.vy = 0.35f;
+		g.vx *= 0.7f; g.vz *= 0.7f;
+		Shake(0.08f);
+		if (g.bounces >= 2) { g.phase = 5; g.noLand = 1; g.vy = -1.5f; g.vx *= 1.15f; g.vz *= 1.15f; }
+	}
+}
+
+void Game::DrawGust()
+{
+	float h[8];
+	for (int i = 0; i < 8; i++) h[i] = 99999.f;
+	for (int i = 0; i < m_gustHN && i < GUST_HIDE; i++) {
+		h[i * 2] = m_gustHx[i] + 0.5f;
+		h[i * 2 + 1] = m_gustHz[i] + 0.5f;
+	}
+	m_r.SetGustHide(h);
+	if (m_screen != SC_BATTLE) return;
+	for (int i = 0; i < GUST_N; i++) {
+		const GustBit& g = m_gust[i];
+		if (!g.on) continue;
+		int th = Clampi(g.kind, 0, TH_COUNT - 1);
+		const GustSpec& sp = kGust[th];
+		float sc = g.sc;
+		float lean = 0.f;
+		if (g.phase == 0) lean = sinf(g.t * 14.f) * 0.08f + g.t * 0.55f;
+		if (g.phase == 3) {
+			float u = g.t / 2.3f; if (u > 1.f) u = 1.f;
+			sc *= 0.06f + 0.94f * u * u;
+		}
+		if (g.phase == 4) { float k = 1.f - g.t * 0.22f; if (k < 0.45f) k = 0.45f; sc *= k; }
+		M4 w = MMul(MMul(MMul(MScale(sc, sc, sc), MRotX(lean)), MRotY(g.yaw)), MTrans(g.x, g.y, g.z));
+		DrawParams dp = {};
+		dp.tint = 0xFFFFFFFFu;
+		dp.emissive = sp.mat;
+		dp.sway = (g.phase == 0 || g.phase == 3 || g.phase == 6) ? 1.f : 0.f;
+		dp.twoSided = 1;
+		m_r.DrawStaticNamed(sp.mesh, w, dp);
+	}
+}
+
 void Game::UpdateWeatherEvents(float dt)
 {
 	if (m_screen != SC_BATTLE) return;
+	TickGust(dt);
 	int wx = TacWx(m_b.weather);
 	int theme = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 	BOOL wet = (wx == WX_RAIN || wx == WX_STORM);

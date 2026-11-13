@@ -485,6 +485,9 @@ void ScStaffStopHostPreview(ScStaffUi* u);
 /* 譜面の試し再生中だけ 1。MP の Space はここを止めて、本体の再生には流さない。 */
 extern "C" void ScStaffPreviewBindStop(void (*fn)(void*), void* ctx);
 extern "C" int ScStaffPreviewIsRunning(void);
+/* モニタや再生描画から、開いている譜面の赤バーを進める。WM_TIMER が飢えても動く。 */
+extern "C" void ScStaffSetPreviewPump(void (*fn)(void*), void* ctx);
+extern "C" void ScStaffPumpOpenScorePreview(void);
 extern "C" int ScStaffPreviewStopFromHost(void);
 /* 試し再生が終わっていたら previewActive を下ろし、VST クリック試聴用の process() を再開。 */
 int ScStaffPreviewFinished(ScStaffUi* u);

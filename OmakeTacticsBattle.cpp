@@ -1116,6 +1116,9 @@ void Game::StartBattle(int stage)
 	m_importBind = 0;
 	LoadBattleCast();
 	m_importBind = 1;
+	memset(m_gust, 0, sizeof(m_gust));
+	m_gustHN = 0;
+	m_gustCool = 5.f;
 	m_battleStage = stage;
 	m_logN = 0;
 	if (m_showBuilt) m_r.ParkHomeLand(m_showStage, m_showTheme, m_mapSeed);
@@ -5401,6 +5404,15 @@ void Game::DrawBattle3D()
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	m_r.SetSceneShift(MIdent());
+	{
+		float gh[8];
+		for (int i = 0; i < 8; i++) gh[i] = 99999.f;
+		for (int i = 0; i < m_gustHN && i < GUST_HIDE; i++) {
+			gh[i * 2] = m_gustHx[i] + 0.5f;
+			gh[i * 2 + 1] = m_gustHz[i] + 0.5f;
+		}
+		m_r.SetGustHide(gh);
+	}
 	m_r.SetCutDeck(-1);
 	m_r.SetCamNear(0.f, 0.f, 0.f);
 	m_r.ClearCoverGhost();
@@ -5565,12 +5577,12 @@ void Game::DrawBattle3D()
 		if (u.alive || u.team == TEAM_PLAYER) return FALSE;
 		return m_dieT[i] < 0.f || m_dieT[i] > 1.15f;
 	};
-	// 同一レイヤー＋移動帯の味方・敵は残す。別高さだけ半透明。床の部分くり抜きはしない。
+	// 上の階のキャラだけ半透明。下の階は床ごと残し、キャラも透かさない。
 	auto offLayer = [&](int i) -> BOOL {
 		const Unit& u = m_b.u[i];
 		if (i == m_cur) return FALSE;
 		if (m_phase == PH_ACTION || m_phase == PH_INTRO || m_phase == PH_OVER) return FALSE;
-		if (u.py >= opaqueLo - 0.08f && u.py <= opaqueHi + 0.08f) return FALSE;
+		if (u.py <= opaqueHi + 0.08f) return FALSE;
 		float fx = ghostHaveC ? ghostCx : ghostAx;
 		float fy = ghostHaveC ? ghostCy : ghostAy;
 		float fz = ghostHaveC ? ghostCz : ghostAz;
@@ -5746,12 +5758,19 @@ void Game::DrawBattle3D()
 		}
 		m_r.DrawOverlayQuads(cq, cqn, 1);
 	}
-	// 足元リング。手番中は二重にして目立たせ、倒れた味方は蘇生できる位置が分かる輪を残す。
+	// 足元リング。敵は未発見でも出す。今見ている床と違う階は半透明で、床に隠さない。
 	m_r.BeginInstBatch();
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
-		if (!nearCam(u)) continue;
 		if (!u.alive && u.team != TEAM_PLAYER) continue;
+		if (u.team != TEAM_PLAYER && u.dissolve >= 1.f) continue;
+		int sp = UnitSpan(u);
+		if (sp < 1) sp = 1;
+		if (sp > 5) sp = 5;
+		BOOL onScreen = (i == m_cur || i == m_hoverUnit)
+			|| m_r.InView(v3(u.px, u.py + 0.15f, u.pz), 4.f * (float)sp)
+			|| nearCam(u);
+		if (!onScreen) continue;
 		BOOL turnMark = TurnGlowOn(m_phase, m_cur, i, u);
 		DrawParams rp;
 		rp.noTess = 1;
@@ -5767,16 +5786,20 @@ void Game::DrawBattle3D()
 			pulse = k;
 			rp.emissive = 1.05f;
 		}
-		BOOL ghost = offLayer(i);
-		if (ghost) {
-			tc = (tc & 0x00FFFFFF) | 0x60000000;
-			m_r.SetDepthTest(FALSE);
+		float focusY = ghostHaveC ? ghostCy : ghostFocusY;
+		BOOL otherFloor = FALSE;
+		if (u.alive && m_phase != PH_ACTION && m_phase != PH_INTRO && m_phase != PH_OVER)
+			otherFloor = fabsf(u.py - focusY) > 1.05f;
+		if (otherFloor) {
+			int a = ((tc >> 24) & 255) * 50 / 100;
+			if (a < 96) a = 96;
+			tc = (tc & 0x00FFFFFF) | ((DWORD)a << 24);
+			rp.emissive = max(rp.emissive, 0.85f);
+			m_r.SetDepthWant(FALSE);
 		}
 		rp.tint = tc;
+		rp.mode = 9.f;
 		float s = turnMark ? 1.14f + .08f * sinf(m_time * 6.f) : (!u.alive ? 0.98f : .85f);
-		int sp = UnitSpan(u);
-		if (sp < 1) sp = 1;
-		if (sp > 4) sp = 4;
 		float sc = s * (float)sp * 0.92f;
 		V3 g = v3(u.px, u.py + .05f, u.pz);
 		m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(sc, 1, sc), MRotY(m_time * (turnMark ? 1.8f : .3f))), MTrans(g.x, g.y, g.z)), rp);
@@ -5784,11 +5807,12 @@ void Game::DrawBattle3D()
 			DrawParams hp = rp;
 			hp.emissive = 1.15f;
 			int ha = (int)(90 + 40 * (0.5f + 0.5f * sinf(m_time * 6.f)));
+			if (otherFloor && ha > 120) ha = 120;
 			hp.tint = (tc & 0x00FFFFFF) | ((DWORD)ha << 24);
 			float hs = sc * 1.28f;
 			m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(hs, 1, hs), MRotY(-m_time * 1.1f)), MTrans(g.x, g.y + 0.01f, g.z)), hp);
 		}
-		if (ghost) m_r.SetDepthTest(TRUE);
+		if (otherFloor) m_r.SetDepthWant(TRUE);
 	}
 	m_r.EndInstBatch();
 	for (int pass = 0; pass < 2; pass++) {
@@ -5929,6 +5953,7 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
+	DrawGust();
 	m_r.DrawWxGpu();
 }
 

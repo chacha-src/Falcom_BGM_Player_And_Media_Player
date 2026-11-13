@@ -56,7 +56,7 @@ struct MidiTrackState {
 	int portaGlide;
 	int portaLeft;
 	/* 同一トラックの和音。待ち 0 のノートは重ね、待ち付きの 1 音で閉じる。 */
-	enum { CHORD_MAX = 8 };
+	enum { CHORD_MAX = 16 };
 	int chordN;
 	int chordOpen;
 	uint8_t chordNt[CHORD_MAX];
@@ -182,10 +182,19 @@ static void PushGs(uint32_t tick, int port, uint8_t a, uint8_t b, uint8_t c, uin
 	PushEv(tick, port, sx, 11);
 }
 
+/* 再生側はアドレス 0x40 を A だけに送る。B は 0x50、C は 0x60。
+   ポート番号では振り分けないので、パート SysEx の上位はこちらで付ける。 */
+static uint8_t GsUnitBlock(int port)
+{
+	if (port >= 2) return 0x60;
+	if (port == 1) return 0x50;
+	return 0x40;
+}
+
 /* 0小節（2分音符）の途中。ch10 をリズムへ。GS Reset と同じ拍に置くと無視される。 */
 static void PushGsRhythmLead(uint32_t tick, int port)
 {
-	PushGs(tick, port, 0x40, 0x10, 0x15, 0x01);
+	PushGs(tick, port, GsUnitBlock(port), 0x10, 0x15, 0x01);
 }
 
 /* XG part 10 (addr 09) = drum. チェックサム無し。 */
@@ -1603,7 +1612,7 @@ struct SasamiTempCache {
 	int exportLoops;
 };
 static SasamiTempCache s_tempCache;
-enum { SASAMI_SMF_CACHE_VER = 16 };
+enum { SASAMI_SMF_CACHE_VER = 21 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -1639,6 +1648,69 @@ static int SasamiTempCacheValid(const wchar_t* src, int mapForce, const wchar_t*
 	if (CompareFileTime(&s_tempCache.srcWrite, &wt) != 0 || s_tempCache.srcSize != sz) return 0;
 	const DWORD attr = GetFileAttributesW(dest);
 	return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) ? 1 : 0;
+}
+
+/* 曲自身の CC32 か System Mode（00 00 7F）があるとき、初期化の CC32 を足さない。
+   足すとファイル内の最大 LSB が 4 になり、モニタの MAP が SC-8820 になる。 */
+static int SongKeepsOwnMap(const SasamiSong& song)
+{
+	for (int i = 0; i < song.trackCount && i < 64; i++) {
+		if (song.tracks[i].unused) continue;
+		uint32_t addr = song.tracks[i].fileOff;
+		int guard = 0;
+		while (SasamiOffOk(song, addr, 1) && addr != 0xF0 && guard++ < 8192) {
+			const int cmd = SasamiGet(song, addr);
+			if (cmd == 0xF0) break;
+			if (cmd == 0) { addr += 1; continue; }
+			if (cmd == 41 && SasamiOffOk(song, addr, 3) && SasamiGet(song, addr + 1) == 32)
+				return 1;
+			if (cmd == 36) {
+				uint32_t p = addr + 1;
+				uint8_t b[16];
+				int n = 0;
+				int guardSx = 0;
+				while (SasamiOffOk(song, p, 1) && guardSx++ < 140) {
+					const uint8_t c = SasamiGet(song, p);
+					if (c == 0xFF && (n == 0 || b[0] != 0xF0)) break;
+					if (n < 16) b[n] = c;
+					n++;
+					p++;
+					if (c == 0xF7) break;
+				}
+				if (n >= 8 && b[0] == 0xF0 && b[5] == 0x00 && b[6] == 0x00 && b[7] == 0x7F)
+					return 1;
+				if (n >= 3 && b[0] == 0x00 && b[1] == 0x00 && b[2] == 0x7F)
+					return 1;
+				if (n == 0 || b[0] != 0xF0) {
+					while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF) p++;
+				}
+				/* 書き出しは F7 の次に 0xFF を置く。再生側と同じくそれも読み飛ばす。 */
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFF) p++;
+				addr = p;
+				continue;
+			}
+			if (cmd == 40) {
+				uint32_t p = addr + 1;
+				while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFE) {
+					p++;
+					if (p - addr > 64) break;
+				}
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFE) p++;
+				while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF) {
+					p++;
+					if (p - addr > 200) break;
+				}
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFF) p++;
+				addr = p;
+				continue;
+			}
+			if (cmd == 13 || cmd == 14 || cmd == 15 || cmd == 37 || cmd == 46 || cmd == 47)
+				addr += 4;
+			else
+				addr += 3;
+		}
+	}
+	return 0;
 }
 
 void SasamiInvalidateTempMidi(const wchar_t* src)
@@ -1752,6 +1824,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	const uint32_t leadTicks = (uint32_t)SASAMI_PPQN * 2;
 	const uint32_t syxB = leadTicks / 3;
 	const uint32_t syxC = (leadTicks * 2) / 3;
+	/* 取り込み曲の CC32 / System Mode を、変換側の LSB で上書きしない。 */
+	const int initLsb = SongKeepsOwnMap(song) ? 0 : gsBankLsb;
 	for (int p = 0; p < nports; p++) {
 		if (map == SASAMI_MAP_XG) PushEv(0, p, kXgOn, 9);
 		else if (map == SASAMI_MAP_GM) PushEv(0, p, kGmOn, 6);
@@ -1764,7 +1838,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		/* 曲本体と同じ拍に CC0=0 を置くと、その直後の音色 PC がピアノに戻る。
 		   リセットとリズムのあと、1拍目より前にチャンネル初期化だけ済ませる。 */
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(syxC, p, ch, map, gsBankLsb, flg88, laBankMsb);
+			PushMmodeChannelInit(syxC, p, ch, map, initLsb, flg88, laBankMsb);
 	}
 	/* モニターレターはリセットの拍を避ける。 */
 	PushSongLcd(syxC, 0, song);
@@ -1831,18 +1905,20 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		else
 			PushGsRhythmLead(syxB, 1);
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(syxC, 1, ch, map, gsBankLsb, flg88, laBankMsb);
+			PushMmodeChannelInit(syxC, 1, ch, map, initLsb, flg88, laBankMsb);
 	};
 
+	int zeroBurst = 0;
 	while (tick < SASAMI_MAX_TICKS) {
 		int any = 0;
+		int moreZero = 0;
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
 			if (!tr[i].alive) continue;
 			any = 1;
 			s_pushTrk = i;
 			s_pushPass = tr[i].pass;
 			int guard = 0;
-			while (tr[i].alive && tr[i].count < 1 && guard++ < 4096) {
+			while (tr[i].alive && tr[i].count < 1 && guard++ < 8192) {
 				const uint32_t addr = tr[i].addr;
 				if (!SasamiOffOk(song, addr, 1) || addr == 0xF0) {
 					killTrack(i);
@@ -2118,7 +2194,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				}
 				case 16: // EFX。SASAMI2 は flg==0（88Pro）のときだけ 40 4n 22
 					if (lv2 && flg88 == 0 && !isGm && gsBankLsb >= 3)
-						PushGs(tick, port, 0x40, (uint8_t)(0x40 + GsPartIdx(ch)), 0x22, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x40 + GsPartIdx(ch)), 0x22, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 17:
@@ -2223,7 +2299,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						tr[i].drum = 0;
 					} else {
 						/* GM マップでもリズム指定は出す。省くと SC-VA が通常パートのまま。 */
-						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x15, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x10 + GsPartIdx(ch)), 0x15, b1);
 					}
 					tr[i].addr = addr + 3;
 					break;
@@ -2231,28 +2307,28 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					if (flg88 == 2)
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 					else if (!isGm)
-						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x30, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x10 + GsPartIdx(ch)), 0x30, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 31: // KAKU3
 					if (flg88 == 2)
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 					else if (!isGm)
-						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x36, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x10 + GsPartIdx(ch)), 0x36, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 32: // KAKU4
 					if (flg88 == 2)
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 					else if (!isGm)
-						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x32, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x10 + GsPartIdx(ch)), 0x32, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 33: // KAKU5
 					if (flg88 == 2)
 						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 					else if (!isGm)
-						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x33, b1);
+						PushGs(tick, port, GsUnitBlock(port), (uint8_t)(0x10 + GsPartIdx(ch)), 0x33, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 34:
@@ -2433,8 +2509,17 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				}
 				if (!again) break;
 			}
+			/* CC や SysEx が待ちの間に溜まっても、時計を進めない。
+			   4096 で切るとそのパートだけ拍がずれる。 */
+			if (tr[i].alive && tr[i].count < 1)
+				moreZero = 1;
 		}
 		if (!any) break;
+		if (moreZero && zeroBurst < 32) {
+			zeroBurst++;
+			continue;
+		}
+		zeroBurst = 0;
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
 			if (!tr[i].alive) continue;
 			if (tr[i].count > 0) tr[i].count--;

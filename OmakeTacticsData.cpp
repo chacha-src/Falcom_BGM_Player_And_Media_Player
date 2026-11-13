@@ -708,6 +708,81 @@ static void EnsureClimbPath(Map& m, int sx, int sz, int tx, int tz)
 	}
 }
 
+static void StripActorCell(Cell& c)
+{
+	int keepH = -1;
+	int n = CellLayN(c);
+	if (c.t != T_VOID && c.t != T_CHASM && TerrainInfo(c.t).costFoot < 99)
+		keepH = (int)c.h;
+	else {
+		for (int L = 0; L < n; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+			keepH = LayerHt(c, L);
+			break;
+		}
+	}
+	if (keepH < 1) {
+		if (c.t == T_VOID) return;
+		keepH = (c.h > 0) ? (int)c.h : 2;
+		c.t = T_PLAIN;
+	} else if (c.t == T_ROCK || c.t == T_MOUNTAIN || c.t == T_DOOR || TerrainInfo(c.t).costFoot >= 99)
+		c.t = T_PLAIN;
+	c.h = (WORD)Clampi(keepH, 1, MAXH_SPIRAL);
+	c.prop = PK_NONE;
+	if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+	ClearDecks(c);
+}
+
+static void OpenBeside(Map& m, int cx, int cz)
+{
+	if (!Map::In(cx, cz)) return;
+	StripActorCell(m.c[cz][cx]);
+	int h = (int)m.c[cz][cx].h;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int k = 0; k < 4; k++) {
+		int x = cx + dx[k], z = cz + dz[k];
+		if (!Map::In(x, z)) continue;
+		Cell& n = m.c[z][x];
+		if (n.t == T_VOID || n.t == T_CHASM) continue;
+		int blocked = (n.t == T_ROCK || n.t == T_MOUNTAIN || n.t == T_DOOR || TerrainInfo(n.t).costFoot >= 99);
+		int clip = 0;
+		if (n.nLay >= 2) {
+			for (int L = 1; L < CellLayN(n); L++)
+				if (abs(LayerHt(n, L) - h) < 8) clip = 1;
+		}
+		if (!blocked && !clip) continue;
+		int keep = (!blocked && TerrainInfo(n.t).costFoot < 99) ? (int)n.h : h;
+		if (abs(keep - h) > 2) keep = h;
+		n.t = T_PLAIN;
+		n.h = (WORD)Clampi(keep, 1, MAXH_SPIRAL);
+		n.prop = PK_NONE;
+		if (n.gimm == GM_FENCE || n.gimm == GM_DROP) { n.gimm = 0; n.gparam = 0; }
+		ClearDecks(n);
+	}
+}
+
+static void SealActorFeet(Map& m, int spiral)
+{
+	for (int i = 0; i < m.nP && i < MAX_PARTY; i++) {
+		int x = m.pStartX[i], z = m.pStartZ[i];
+		if (!Map::In(x, z)) continue;
+		if (spiral) OpenBeside(m, x, z);
+		else StripActorCell(m.c[z][x]);
+	}
+	for (int g = 0; g < m.nGrp; g++) {
+		for (int k = 0; k < m.grp[g].n && k < GRP_CAP; k++) {
+			int x = m.grp[g].x[k], z = m.grp[g].z[k];
+			if (!Map::In(x, z)) continue;
+			if (spiral) OpenBeside(m, x, z);
+			else StripActorCell(m.c[z][x]);
+		}
+	}
+	if (!spiral || m.nP <= 0) return;
+	for (int g = 0; g < m.nGrp; g++) if (m.grp[g].n > 0)
+		EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].x[0], m.grp[g].z[0]);
+}
+
 static int NearPartyOrGroup(const Map& m, int x, int z, int extra)
 {
 	for (int i = 0; i < m.nP && i < MAX_PARTY; i++)
@@ -2167,24 +2242,22 @@ static void StampSpiralDecor(Map& m, Rng& r, int th)
 		Cell& c = m.c[z][x];
 		c.prop = PK_NONE;
 		if (c.t == T_VOID || c.t == T_CHASM) continue;
-		int nWalk = 0, nVoid = 0;
+		int nVoid = 0;
 		for (int k = 0; k < 4; k++) {
 			int nx = x + kDx[k], nz = z + kDz[k];
 			if (!Map::In(nx, nz) || m.c[nz][nx].t == T_VOID || m.c[nz][nx].t == T_CHASM) nVoid++;
-			else if (FootPassable(m.c[nz][nx].t)) nWalk++;
 		}
-		int nearStart = NearPartyOrGroup(m, x, z, 1);
+		int nearStart = NearPartyOrGroup(m, x, z, 3);
 		int roll = (int)((c.var + (x * 13 + z * 29)) & 255);
 		if (!c.gimm && c.nLay <= 1 && !nearStart && FootPassable(c.t) && c.t != T_BRIDGE && c.t != T_DOOR) {
-			if (nWalk >= 4 && nVoid >= 1 && roll < 14) c.t = T_ROCK;
-			else if (roll < 42 && c.t != T_FOREST) c.t = T_FOREST;
+			if (roll < 42 && c.t != T_FOREST) c.t = T_FOREST;
 			else if (roll < 54) c.t = T_RUINS;
 			else if (roll < 62) c.t = T_HILL;
 			else if (th == TH_SWAMP && roll < 70) c.t = T_SWAMP;
 			else if ((th == TH_DESERT || th == TH_VOLCANO) && roll < 68) c.t = T_SAND;
 		}
 		if (c.t == T_VOID) continue;
-		if (nearStart) continue;
+		if (NearPartyOrGroup(m, x, z, 2)) { c.prop = PK_NONE; continue; }
 		if (th == TH_SEABED) {
 			if (c.t == T_ROCK || c.t == T_MOUNTAIN) c.prop = PK_KIT;
 			else if (FootPassable(c.t) && (roll % 17) == 0) c.prop = PK_KIT;
@@ -3349,7 +3422,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			c.gparam = (BYTE)r.Range(0, 2);
 			c.prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_CRATE);
 		}
-		int nDoor = Clampi(span / 14, 0, 4);
+		int nDoor = (vertical == 2) ? 0 : Clampi(span / 14, 0, 4);
 		for (int i = 0; i < nDoor; i++) {
 			int s = take(8);
 			if (s < 0) break;
@@ -3383,7 +3456,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			m.c[lz][lx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_LANTERN);
 			link++;
 		}
-		int nFence = Clampi(span / 16, 0, 3);
+		int nFence = (vertical == 2) ? 0 : Clampi(span / 16, 0, 3);
 		for (int i = 0; i < nFence; i++) {
 			int s = take(6);
 			if (s < 0) break;
@@ -3401,12 +3474,12 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			}
 		}
 	}
-	if (m.nP > 0 && vertical != 2) {
+	if (m.nP > 0) {
 		EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], pax, paz);
 		for (int g = 0; g < m.nGrp; g++)
 			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].ax, m.grp[g].az);
 	}
-	if (m.nP > 0 && m.nE > 0) {
+	if (m.nP > 0 && m.nE > 0 && vertical != 2) {
 		int nDrop = 0;
 		for (int z = 1; z < MAPN - 1 && nDrop < 3; z++) for (int x = 1; x < MAPN - 1 && nDrop < 3; x++) {
 			Cell& c = m.c[z][x];
@@ -3448,10 +3521,11 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	}
 	if (vertical != 2) CutLooseIslands(m);
 	OpenStandPads(m);
-	if (m.nP > 0 && vertical != 2) {
+	if (m.nP > 0) {
 		for (int g = 0; g < m.nGrp; g++) if (m.grp[g].n > 0)
 			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].x[0], m.grp[g].z[0]);
 	}
+	SealActorFeet(m, gGenSpiral);
 }
 
 int MapIsSpiral(const Map& m)
@@ -5928,7 +6002,8 @@ static void FillNoticeSteps(const Battle& b, int ei, int limit)
 	const Unit& u = b.u[ei];
 	if (!Map::In(u.x, u.z)) return;
 	int mt = UnitMoveType(u);
-	int rise = StepRise(mt);
+	// 飛行でも立体交差は一歩にしない。続く床か、2段以内の坂だけ。
+	int rise = 2;
 	int L0 = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
 	int sp = UnitSpan(u);
 	int qh = 0, qt = 0;
@@ -5952,13 +6027,16 @@ static void FillNoticeSteps(const Battle& b, int ei, int limit)
 			if (!Map::In(nx, nz)) continue;
 			const Cell& t = b.map.At(nx, nz);
 			int nL = CellLayN(t);
-			int dest = -1, best = 99999;
-			for (int NL = 0; NL < nL; NL++) {
-				if (!LayerOpen(t, NL, mt)) continue;
-				int dh = abs(LayerHt(t, NL) - h);
-				if (dh > rise) continue;
-				int score = dh * 10 + (NL == L ? 0 : 1);
-				if (score < best) { best = score; dest = NL; }
+			int dest = -1;
+			if (L < nL && LayerOpen(t, L, mt) && abs(LayerHt(t, L) - h) <= rise) dest = L;
+			if (dest < 0) {
+				int best = 99999;
+				for (int NL = 0; NL < nL; NL++) {
+					if (!LayerOpen(t, NL, mt)) continue;
+					int dh = abs(LayerHt(t, NL) - h);
+					if (dh > rise) continue;
+					if (dh < best) { best = dh; dest = NL; }
+				}
 			}
 			if (dest < 0 || g_laySeen[dest][nz][nx]) continue;
 			g_laySeen[dest][nz][nx] = 1;
@@ -8455,11 +8533,29 @@ static void RescueStuckFeet(Battle& b)
 			if (u.x < 0) { u.x = gx; u.z = gz; }
 			b.RebuildOcc();
 			if (s > 1 && RelocateWide(b, i)) continue;
+			// 3x3 の足だけ 2x2 にはしない。入る大きさの別の敵に入れ替える。
 			if (s > 1) {
-				u.span = 1;
+				Unit kept = u;
+				int placed = 0;
+				u.x = -1; u.z = -1;
 				b.RebuildOcc();
-				if (PlaceFoot(b, i, gx, gz) && FootCanLeave(b, i, u.x, u.z)) continue;
-				u.span = s;
+				for (int span = s - 1; span >= 1 && !placed; span--) {
+					Rng rr((unsigned)b.stage * 97u ^ (unsigned)i * 131u ^ (unsigned)span * 17u);
+					int id = PickMonsterOfSpan(b.stage, span, kept.boss, rr);
+					if (id < 0) continue;
+					MakeEnemy(u, id, kept.ch.lv, kept.boss, rr);
+					u.x = gx; u.z = gz; u.deck = kept.deck;
+					u.face = kept.face; u.ct = kept.ct; u.grp = kept.grp; u.alert = kept.alert;
+					u.lucky = kept.lucky;
+					u.hpShow = (float)u.hp;
+					b.RebuildOcc();
+					if (!FootFits(b, i, u.x, u.z)) continue;
+					if (span > 1 && !FootCanLeave(b, i, u.x, u.z)) continue;
+					placed = 1;
+				}
+				if (placed) continue;
+				u = kept;
+				if (u.x < 0) { u.x = gx; u.z = gz; }
 				b.RebuildOcc();
 			}
 			CarveFootExit(b, i);

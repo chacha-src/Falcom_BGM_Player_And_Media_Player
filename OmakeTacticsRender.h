@@ -464,6 +464,8 @@ public:
 	int FindModel(const char* n) const;
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
+	void DrawStaticNamed(const char* name, const M4& world, const DrawParams& dp);
+	void SetGustHide(const float* xz8);
 	int CreatureCount() const { return (int)m_creatures.size(); }
 	BOOL CreatureExtent(int model, float& cx, float& cy, float& cz, float& rad) const;
 	// 今のポーズでスキンしたメッシュの中心と半径（モデル空間）。肖像の枠はこれをワールドへ変換して使う。
@@ -542,6 +544,8 @@ public:
 	void SetCutDeck(int deck) { m_cutDeck = deck; }
 	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
 	void SetDepthTest(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsOff, 0); }
+	// キューに積む描画へ深度を残す。SetDepthTest は直後の DrawStatic に届かない。
+	void SetDepthWant(BOOL on) { m_dsWant = on ? m_dsWrite : m_dsOff; if (m_ctx) m_ctx->OMSetDepthStencilState(m_dsWant, 0); }
 	void DrawWater();
 	void SetLiquidRipples(const float* rip, int n);
 	void SetStageId(int stage);

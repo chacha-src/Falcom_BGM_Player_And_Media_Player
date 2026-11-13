@@ -369,6 +369,9 @@ private:
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void UpdateParticles(float dt);
 	void UpdateWeatherEvents(float dt);
+	void TickGust(float dt);
+	void SpawnGust();
+	void DrawGust();
 	void LightningStrike(V3 to, float mag);
 	void WeatherTread(const Unit& u, int x, int z);
 	void Shake(float s) { m_shake = max(m_shake, s); }
@@ -504,6 +507,15 @@ private:
 	float m_quakeAcc;      // 地震の砂塵スポーン蓄積
 	float m_hailBurstT;    // にわか雹の残り時間
 	float m_hailAcc;       // にわか雹のスポーン蓄積
+	// 強風・雨で折れて飛ぶ地形物。セーブしない。水面には生えない。
+	struct GustBit {
+		int on, phase, kind, prop, plant, hit, leave, noLand, bounces, hx, hz;
+		float rest, sc, x, y, z, vx, vy, vz, yaw, spin, t, prevY;
+	};
+	enum { GUST_N = 6, GUST_HIDE = 4 };
+	GustBit m_gust[GUST_N];
+	int m_gustHx[GUST_HIDE], m_gustHz[GUST_HIDE], m_gustHN;
+	float m_gustCool;
 	float m_wxFlash;       // 稲妻フラッシュの強さ 0..1
 	float m_wxFlashCol[3]; // フラッシュの色（寒色の白）
 	unsigned char m_cover[MAPN * MAPN];
