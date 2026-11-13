@@ -57,6 +57,10 @@ protected:
 	afx_msg void OnTimer(UINT_PTR id);
 	afx_msg LRESULT OnTacPace(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnEnterSizeMove();
+	afx_msg void OnExitSizeMove();
+	afx_msg LRESULT OnNcHitTest(CPoint pt);
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
@@ -76,6 +80,9 @@ protected:
 	void LayoutView();
 	void StoreWindowRect();
 	void ApplyWinMode();
+	void SyncBorderlessZ();
+	void ApplyChrome(BOOL windowed);
+	BOOL MonitorSize(RECT* rc, int* pxW, int* pxH) const;
 	void PollPad(float dt);
 	void KickPace();
 	void StartPace();
@@ -101,6 +108,8 @@ protected:
 	volatile LONG m_pacePosted = 0;
 	volatile LONG m_paceHz = 240;
 	int m_winApplied = -1;
+	BOOL m_sizing = FALSE;
+	BOOL m_exclFail = FALSE;
 	int m_viewW = 0, m_viewH = 0;
 	CEdit m_ime;
 	CFont m_imeFont;

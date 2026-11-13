@@ -206,7 +206,7 @@ Renderer::Renderer()
 	m_menuCam = FALSE;
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
-	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
+	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_exclusive = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_qDisjoint = m_qTs0 = m_qTs1 = NULL; m_gpuMs = 0; m_gpuArmed = FALSE;
 	m_fadeAbove = -1;
 	m_fadeY = -999.f;
@@ -433,6 +433,10 @@ void Renderer::Release()
 	for (int i = 0; i < LAY_N; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
 	if (m_wait) { CloseHandle(m_wait); m_wait = NULL; }
 	TAC_REL(m_qDisjoint); TAC_REL(m_qTs0); TAC_REL(m_qTs1); m_gpuArmed = FALSE;
+	if (m_swap && m_exclusive) {
+		m_swap->SetFullscreenState(FALSE, NULL);
+		m_exclusive = FALSE;
+	}
 	TAC_REL(m_swap);
 	if (m_ctx) { m_ctx->ClearState(); m_ctx->Flush(); }
 	TacBindCacheDrop();
@@ -840,6 +844,75 @@ BOOL Renderer::Resize(int w, int h)
 	m_w = w; m_h = h;
 	if (!CreateTargets()) return FALSE;
 	WarmTargets();
+	return TRUE;
+}
+
+BOOL Renderer::SetExclusive(BOOL on)
+{
+	if (!m_swap || !m_hwnd || !m_dev) return FALSE;
+	BOOL cur = FALSE;
+	m_swap->GetFullscreenState(&cur, NULL);
+	if (!on) {
+		if (cur || m_exclusive)
+			m_swap->SetFullscreenState(FALSE, NULL);
+		m_exclusive = FALSE;
+		IDXGIFactory* fac = NULL;
+		if (SUCCEEDED(m_swap->GetParent(__uuidof(IDXGIFactory), (void**)&fac)) && fac) {
+			fac->MakeWindowAssociation(m_hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+			fac->Release();
+		}
+		return TRUE;
+	}
+	if (cur && m_exclusive) return TRUE;
+	IDXGIOutput* pick = NULL;
+	IDXGIDevice* xd = NULL;
+	IDXGIAdapter* xa = NULL;
+	if (FAILED(m_dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&xd)) || FAILED(xd->GetAdapter(&xa))) {
+		TAC_REL(xa); TAC_REL(xd);
+		return FALSE;
+	}
+	HMONITOR want = ::MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
+	for (UINT i = 0; ; i++) {
+		IDXGIOutput* o = NULL;
+		if (xa->EnumOutputs(i, &o) == DXGI_ERROR_NOT_FOUND) break;
+		DXGI_OUTPUT_DESC od = {};
+		o->GetDesc(&od);
+		if (!pick && od.Monitor == want) pick = o;
+		else o->Release();
+	}
+	TAC_REL(xa); TAC_REL(xd);
+	if (!pick) return FALSE;
+	DXGI_OUTPUT_DESC od = {};
+	pick->GetDesc(&od);
+	int pw = od.DesktopCoordinates.right - od.DesktopCoordinates.left;
+	int ph = od.DesktopCoordinates.bottom - od.DesktopCoordinates.top;
+	UINT hz = 0;
+	DEVMODEW dm = {};
+	dm.dmSize = sizeof(dm);
+	if (::EnumDisplaySettingsW(od.DeviceName, ENUM_CURRENT_SETTINGS, &dm)) {
+		if (dm.dmPelsWidth > 0) pw = (int)dm.dmPelsWidth;
+		if (dm.dmPelsHeight > 0) ph = (int)dm.dmPelsHeight;
+		hz = dm.dmDisplayFrequency;
+	}
+	DXGI_MODE_DESC wantMode = {};
+	wantMode.Width = (UINT)max(8, pw);
+	wantMode.Height = (UINT)max(8, ph);
+	wantMode.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	if (hz > 0) { wantMode.RefreshRate.Numerator = hz; wantMode.RefreshRate.Denominator = 1; }
+	DXGI_MODE_DESC got = wantMode;
+	if (FAILED(pick->FindClosestMatchingMode(&wantMode, &got, m_dev)))
+		got = wantMode;
+	IDXGIFactory* fac = NULL;
+	if (SUCCEEDED(m_swap->GetParent(__uuidof(IDXGIFactory), (void**)&fac)) && fac) {
+		fac->MakeWindowAssociation(m_hwnd, DXGI_MWA_NO_ALT_ENTER);
+		fac->Release();
+	}
+	m_swap->ResizeTarget(&got);
+	HRESULT hr = m_swap->SetFullscreenState(TRUE, pick);
+	pick->Release();
+	if (FAILED(hr)) { m_lastHr = hr; m_exclusive = FALSE; return FALSE; }
+	m_exclusive = TRUE;
+	Resize((int)got.Width, (int)got.Height);
 	return TRUE;
 }
 
@@ -2433,75 +2506,8 @@ void Renderer::FlashAvaPct(int pct)
 		m_loadFn(pct, 100, m_loadUser);
 		return;
 	}
-	if (m_avaBuildOnly) {
-		if (pct > m_avaShown || pct >= 100) m_avaShown = pct;
-		return;
-	}
-	if (m_inPortrait || !m_ctx || !m_bbRtv || !m_swap || m_w < 8 || m_h < 8) return;
-	if (pct == m_avaShown) return;
-	// 頂点ループから毎パーセント Present すると、衣装を替える待ちの大半が描画になる。80ms に一回、最後は必ず出す。
-	{
-		unsigned now = GetTickCount();
-		static unsigned tick = 0;
-		if (pct < 100 && tick != 0 && now - tick < 80) return;
-		tick = now;
-	}
-	m_avaShown = pct;
-	m_avaFlashed = TRUE;
-	M4 oldView = m_view, oldProj = m_proj, oldVp = m_vp;
-	V3 oldEye = m_eye;
-	float oldTime = m_time;
-	const BOOL full = m_avaLoadFull != 0;
-	if (full) {
-		V3 dir = v3(0.f, sinf(0.3f), cosf(0.3f));
-		V3 eye = dir * 10.f;
-		SetCamera(MLookAtLH(eye, v3(0, 0, 0), v3(0, 1, 0)), MPerspLH(0.8f, (float)m_w / (float)max(1, m_h), 0.1f, 400.f), eye, m_time);
-		BeginMainPass();
-		DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
-		BeginHud();
-	} else {
-		if (!m_avaPlate) GrabAvaPlate();
-		else RestoreAvaPlate();
-		m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
-		D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
-		m_ctx->RSSetViewports(1, &vp);
-		m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
-		m_fcb.screen[2] = 1.f / (float)m_w; m_fcb.screen[3] = 1.f / (float)m_h;
-		UpdateFrameCB();
-		m_hud.clear();
-		m_hudSrv = m_srv[TEX_WHITE];
-		m_hudPipe = 0;
-	}
-	float ui = (float)m_w / 1280.f;
-	float uiH = (float)m_h / 720.f;
-	if (uiH < ui) ui = uiH;
-	if (ui < 0.62f) ui = 0.62f;
-	if (ui > 2.2f) ui = 2.2f;
-	if (full) {
-		const wchar_t* title = TT(TX_TITLE);
-		float th = 40.f * ui;
-		float maxW = (float)m_w * .86f;
-		while (th > 12.f && TextWidth(title, th, 1) > maxW) th *= 0.92f;
-		HudText(title, m_w * .5f, m_h * .38f, th, RGBA8(255, 230, 160), 1, 1);
-	}
-	wchar_t line[80];
-	swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
-	HudText(line, m_w * .5f, m_h * .50f, 20.f * ui, RGBA8(255, 255, 255), 1, 1, 1);
-	float bw = 520.f * ui;
-	if (bw > m_w * .62f) bw = m_w * .62f;
-	float bh = 22.f * ui;
-	float bx = ((float)m_w - bw) * .5f;
-	float by = m_h * .56f;
-	HudRect(bx, by, bw, bh, RGBA8(40, 28, 18, 220));
-	float fill = bw * (pct / 100.f);
-	if (pct > 0 && fill < 2.f) fill = 2.f;
-	if (fill > 0.f) HudRect(bx, by, fill, bh, RGBA8(255, 214, 120, 255));
-	EndHud();
-	Present();
-	if (full) {
-		SetCamera(oldView, oldProj, oldEye, oldTime);
-		m_vp = oldVp;
-	}
+	// 起動後の衣装作りで全面ロードを Present すると、その絵が残って操作できなくなる。
+	if (pct > m_avaShown || pct >= 100) m_avaShown = pct;
 }
 
 BOOL Renderer::LoadAssets()
@@ -8602,7 +8608,18 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			PlateHold(Renderer* r) { g_avaPlate = r; }
 			~PlateHold() { g_avaPlate = NULL; }
 		} plateHold(this);
-		if (TacAvaBad()) { g_avaNeedReset = 1; return holdBare(); }
+		if (TacAvaBad()) {
+			g_avaNeedReset = 1;
+			static int stuck = 0;
+			if (++stuck > 12) {
+				stuck = 0;
+				m_avaHide = 0;
+				m_avaLoading = 0;
+				if (slot >= 0) m_avaWait[slot].frame = -1;
+				return FALSE;
+			}
+			return holdBare();
+		}
 		while ((int)m_avaCache.size() >= cap) {
 			int drop = -1;
 			for (int i = 0; i < (int)m_avaCache.size(); i++) if (m_avaCache[i].model != model) { drop = i; break; }
@@ -13579,6 +13596,80 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if ((h % 3) == 0) AddPuff(puff, puffN, 13, px, py + 0.9f, pz, 10.f);
 			break;
 		default: break;
+		}
+		if ((h % 29) == 7 && c.t != T_WATER && c.t != T_LAVA && c.t != T_CHASM && c.t != T_VOID) {
+			float cy = py + 0.02f;
+			switch (theme) {
+			case TH_PLAINS:
+				for (int k = 0; k < 6; k++) {
+					float a = yaw + k * 1.0472f;
+					Tuft(mb, px + cosf(a) * 0.22f, py, pz + sinf(a) * 0.22f, 0.16f, 0.04f, a, RGBA8(70, 120, 40), RGBA8(240, 180, 210, 140));
+				}
+				break;
+			case TH_CANYON:
+				AddBox(mb, v3(px, cy + 0.08f, pz), v3(0.16f, 0.08f, 0.12f), RGBA8(150, 96, 62), -1);
+				AddBox(mb, v3(px, cy + 0.2f, pz), v3(0.1f, 0.06f, 0.08f), RGBA8(176, 120, 78), -1);
+				AddBox(mb, v3(px, cy + 0.3f, pz), v3(0.05f, 0.05f, 0.04f), RGBA8(120, 78, 52), -1);
+				break;
+			case TH_FOREST:
+				ConeRing(mb, px, cy, pz, cy + 0.55f, 0.22f, 0.02f, RGBA8(28, 72, 34));
+				ConeRing(mb, px, cy + 0.28f, pz, cy + 0.7f, 0.16f, 0.0f, RGBA8(46, 110, 48));
+				AddPuff(puff, puffN, 6, px, cy + 0.85f, pz, 8.f);
+				break;
+			case TH_SNOW:
+				ConeRing(mb, px, cy, pz, cy + 0.42f, 0.2f, 0.04f, RGBA8(236, 244, 252));
+				AddBox(mb, v3(px, cy + 0.5f, pz), v3(0.06f, 0.06f, 0.06f), RGBA8(255, 255, 255), -1);
+				break;
+			case TH_DESERT:
+				ConeRing(mb, px, cy, pz, cy + 0.35f, 0.28f, 0.08f, RGBA8(196, 164, 96));
+				AddPuff(puff, puffN, 8, px, cy + 0.5f, pz, 10.f);
+				break;
+			case TH_VOLCANO:
+				ConeRing(mb, px, cy, pz, cy + 0.22f, 0.18f, 0.1f, RGBA8(48, 28, 24));
+				AddBox(mb, v3(px, cy + 0.26f, pz), v3(0.06f, 0.04f, 0.06f), RGBA8(255, 90, 24), -1);
+				AddPuff(puff, puffN, 0, px, cy + 0.4f, pz, 6.f);
+				break;
+			case TH_SWAMP:
+				Tuft(mb, px, py, pz, 0.7f, 0.02f, yaw, RGBA8(40, 70, 36), RGBA8(160, 180, 70, 40));
+				AddPuff(puff, puffN, 3, px, cy + 0.2f, pz, 6.f);
+				break;
+			case TH_RUINS:
+				AddBox(mb, v3(px - 0.08f, cy + 0.18f, pz), v3(0.04f, 0.18f, 0.04f), RGBA8(150, 146, 138), -1);
+				AddBox(mb, v3(px + 0.08f, cy + 0.12f, pz), v3(0.04f, 0.12f, 0.04f), RGBA8(130, 126, 118), -1);
+				AddBox(mb, v3(px, cy + 0.34f, pz), v3(0.16f, 0.03f, 0.05f), RGBA8(168, 164, 156), -1);
+				break;
+			case TH_SEABED:
+				ConeRing(mb, px, cy, pz, cy + 0.18f, 0.16f, 0.22f, RGBA8(40, 120, 140));
+				AddBox(mb, v3(px + 0.12f, cy + 0.08f, pz), v3(0.05f, 0.04f, 0.08f), RGBA8(230, 120, 110), -1);
+				break;
+			case TH_FALLS:
+				for (int k = 0; k < 4; k++) {
+					float a = yaw + k * 1.5708f;
+					AddBox(mb, v3(px + cosf(a) * 0.12f, cy + 0.04f, pz + sinf(a) * 0.12f), v3(0.03f, 0.02f, 0.05f), RGBA8(180, 210, 230), -1);
+				}
+				AddPuff(puff, puffN, 14, px, cy + 0.3f, pz, 8.f);
+				break;
+			case TH_ORBIT:
+				AddBox(mb, v3(px, cy + 0.35f, pz), v3(0.04f, 0.35f, 0.04f), RGBA8(120, 150, 190), -1);
+				ConeRing(mb, px, cy + 0.7f, pz, cy + 0.78f, 0.16f, 0.16f, RGBA8(170, 210, 255));
+				break;
+			case TH_STATION:
+				AddBox(mb, v3(px, cy + 0.55f, pz), v3(0.02f, 0.55f, 0.02f), RGBA8(160, 170, 180), -1);
+				AddBox(mb, v3(px, cy + 1.05f, pz), v3(0.08f, 0.02f, 0.08f), RGBA8(40, 220, 255), -1);
+				AddPuff(puff, puffN, 11, px, cy + 1.15f, pz, 6.f);
+				break;
+			case TH_CITADEL:
+				AddBox(mb, v3(px, cy + 0.7f, pz), v3(0.05f, 0.7f, 0.05f), RGBA8(214, 206, 230), -1);
+				ConeRing(mb, px, cy + 1.35f, pz, cy + 1.55f, 0.02f, 0.14f, RGBA8(150, 90, 210));
+				AddPuff(puff, puffN, 12, px, cy + 1.6f, pz, 6.f);
+				break;
+			case TH_LANTERN:
+				AddBox(mb, v3(px, cy + 0.6f, pz), v3(0.015f, 0.6f, 0.015f), RGBA8(220, 200, 150), -1);
+				AddBox(mb, v3(px, cy + 1.18f, pz), v3(0.06f, 0.08f, 0.06f), RGBA8(255, 186, 70), -1);
+				AddPuff(puff, puffN, 13, px, cy + 1.28f, pz, 5.f);
+				break;
+			default: break;
+			}
 		}
 	}
 	if (theme != TH_VOLCANO) return;

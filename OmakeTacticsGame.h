@@ -43,6 +43,7 @@ struct Popup {
 	float t, life, size, delay;
 	int style;     // 0=数値 1=文字 2=クリティカル
 	int pat;       // MSG_*
+	int lane;      // 0=中央 1=上 2=右 3=左 4=さらに上。同じマスの文字を重ねない
 };
 
 struct Banner {
@@ -175,7 +176,7 @@ private:
 	void DrawBanners(float dt);
 	void DrawPopups(float dt);
 	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life, int pat);
-	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, int pat, float delay = 0, float life = 0);
+	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, int pat, float delay = 0, float life = 0, int lane = 0);
 	void AddLog(const wchar_t* s, DWORD col);
 	void DrawBattleLog(float x, float y, float w, float h);
 	void DrawHelpOverlay();
@@ -221,6 +222,7 @@ private:
 	void DrawMonStage();
 	void EnsureMonPreview();
 	void DrawShowcase3D();
+	void HomeSky(int& wx, int& hr) const;
 	int PartyCount() const;
 	int PartyCap() const;
 	int RosterCap() const;
@@ -305,6 +307,8 @@ private:
 	void BuildOverlayQuads();
 public:
 	void SetAudioMs(float ms) { m_msAud = ms; }
+	BOOL SetExclusive(BOOL on) { return m_r.SetExclusive(on); }
+	BOOL Exclusive() const { return m_r.Exclusive(); }
 	int AppendOverlayQuad(VtxS* dst, int n, int cap, int x, int z, DWORD c, float lift, float yAbs, int layer, int segs) const;
 	int BuildRangeBand(int z0, int z1, const BYTE* block, VtxS* dst, int cap) const;
 private:
@@ -592,6 +596,8 @@ private:
 	int m_showStage;
 	int m_showTheme;
 	int m_themeSel;
+	int m_homeWx;
+	int m_homeHr;
 	int m_mapLook;   // 1=ホームの地図を自分で見渡す
 	int m_homeUi;    // 0=ホームのUIを全部隠す
 	DWORD m_mapSeed;

@@ -3543,6 +3543,53 @@ int MapIsSpiral(const Map& m)
 	return 0;
 }
 
+int MapSpiralBand(const Map& m)
+{
+	if (!MapIsSpiral(m)) return 0;
+	int tier = (int)((m.seed / 11u) % 20u);
+	if (tier < 7) return 1;
+	if (tier < 14) return 2;
+	return 3;
+}
+
+void TacRollSky(int theme, DWORD seed, int& wx, int& hour)
+{
+	wx = WX_CLEAR;
+	hour = HR_NOON;
+	unsigned w = seed % 20u;
+	if (theme == TH_SNOW) {
+		if (w < 11) wx = WX_SNOW;
+		else if (w < 14) wx = WX_HAIL;
+		else if (w < 16) wx = WX_FOG;
+	} else if (theme == TH_VOLCANO) {
+		if (w < 10) wx = WX_ASH;
+		else if (w < 13) wx = WX_HEAT;
+	} else if (theme == TH_DESERT) {
+		if (w < 8) wx = WX_SAND;
+		else if (w < 11) wx = WX_HEAT;
+	} else if (theme == TH_FOREST || theme == TH_PLAINS) {
+		if (w < 4) wx = WX_RAIN;
+		else if (w < 6) wx = WX_STORM;
+		else if (w < 8) wx = WX_PETAL;
+		else if (w < 10) wx = WX_FOG;
+	} else if (theme == TH_SWAMP) {
+		if (w < 6) wx = WX_FOG;
+		else if (w < 9) wx = WX_RAIN;
+	} else if (w < 4) wx = WX_RAIN;
+	else if (w < 6) wx = WX_STORM;
+	else if (w < 8) wx = WX_FOG;
+	unsigned hs = (seed / 20u) % 20u;
+	if (hs == 0) hour = HR_DAWN;
+	else if (hs == 1) hour = HR_MORNING;
+	else if (hs == 2) hour = HR_DUSK;
+	else if (hs == 3) hour = HR_NIGHT;
+	else if (hs == 4) hour = HR_DEEP;
+	else if (hs == 5) hour = HR_ECLIPSE;
+	else if (hs == 6) hour = HR_DREAM;
+	else if (hs == 7) hour = HR_STAR;
+	else if (hs == 8) hour = HR_MOON;
+}
+
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	for (int attempt = 0; attempt < 60; attempt++) {
@@ -4285,11 +4332,35 @@ const SkillDef& SkillInfo(int s)
 		return s_art[s - SKL_ART0];
 	}
 	if (s >= SKL_FORM0 && s < SKL_FORMN) return kForm[s - SKL_FORM0];
-	if (s >= SKL_MORE0 && s < SKL_COUNT) {
+	if (s >= SKL_WARP0 && s < SKL_COUNT) {
+		static SkillDef warp[8];
+		static int ready = 0;
+		if (!ready) {
+			static const int nm[8] = {
+				TX_SK_WARP0, TX_SK_WARP1, TX_SK_WARP2, TX_SK_WARP3,
+				TX_SK_WARP4, TX_SK_WARP5, TX_SK_WARP6, TX_SK_WARP7
+			};
+			for (int i = 0; i < 8; i++) {
+				memset(&warp[i], 0, sizeof(warp[i]));
+				warp[i].nameTx = nm[i];
+				warp[i].descTx = TX_SKD_WARP;
+				warp[i].kind = SK_BUFF;
+				warp[i].mp = 500;
+				warp[i].rMin = 0;
+				warp[i].rMax = 0;
+				warp[i].area = 0;
+				warp[i].effect = EF_WARP;
+				warp[i].hits = 1;
+			}
+			ready = 1;
+		}
+		return warp[s - SKL_WARP0];
+	}
+	if (s >= SKL_MORE0 && s < SKL_WARP0) {
 		static const SkillDef kMore[] = {
 #include "tactics_src/skill_more_defs.inc"
 		};
-		static_assert(sizeof(kMore) / sizeof(kMore[0]) == (size_t)(SKL_COUNT - SKL_MORE0), "more skill table");
+		static_assert(sizeof(kMore) / sizeof(kMore[0]) == (size_t)(SKL_WARP0 - SKL_MORE0), "more skill table");
 		return kMore[s - SKL_MORE0];
 	}
 	if (s >= SKL_GALE && s < SKL_MORE0) {
@@ -4776,6 +4847,7 @@ static int PaceSkill(int cls, int lv)
 
 static int SupportAreaCap(const ClassDef& cd);
 static void CharTakeSkill(CharData& c, int s);
+static int WarpSkillFor(int cls);
 void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
@@ -4839,6 +4911,7 @@ void CharGrantReached(CharData& c)
 		}
 	}
 	if (c.stat[S_MP] < cd.base[S_MP]) c.stat[S_MP] = cd.base[S_MP];
+	if (cd.tier >= 3) CharGiveSkill(c, WarpSkillFor(c.cls));
 }
 
 void CharRecalcInit(CharData& c)
@@ -5021,6 +5094,25 @@ static int LegacyLine(int cls)
 		return (cls - C_PLAYER_COUNT) / TAC_RANK_N;
 	for (int i = 0; i < TAC_RANK_LINES; i++) if (kLineParent[i] == cls) return i;
 	return -1;
+}
+
+static int WarpSkillFor(int cls)
+{
+	int line = LegacyLine(cls);
+	if (line < 0 && cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
+		int fam = kJobFam[cls - C_JOB0];
+		if (fam >= 0 && fam < 8) line = fam;
+	}
+	if (line < 0) {
+		int g = ClassInfo(cls).group;
+		if (g == G_MAGIC) line = 1;
+		else if (g == G_HOLY) line = 2;
+		else if (g == G_SWIFT) line = 3;
+		else line = 0;
+	}
+	if (line < 0) line = 0;
+	if (line > 7) line = 7;
+	return SKL_WARP0 + line;
 }
 
 int EvoOptions(int cls, EvoOption out[4])
@@ -5993,6 +6085,13 @@ static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, in
 }
 
 // 索敵は、この敵が今いる床から一歩で踏めるマスだけを数える。層番号が近い別の床へは渡さない。
+static void FillNoticeSteps(const Battle& b, int ei, int limit);
+
+void FillRibbonSteps(const Battle& b, int fromUi, int limit)
+{
+	FillNoticeSteps(b, fromUi, limit);
+}
+
 static void FillNoticeSteps(const Battle& b, int ei, int limit)
 {
 	for (int L = 0; L < LAY_N; L++)
@@ -6397,11 +6496,11 @@ static bool AimFoot(const Battle& b, const Unit& a, int ax, int az, int rMin, in
 	return ok;
 }
 
-static bool UnitOnShape(const SkillDef& s, const Unit& c, int cx, int cz, const Unit& t)
+static bool UnitOnShape(const SkillDef& s, const Unit& c, int cx, int cz, const Unit& t, int area)
 {
 	int sp = UnitSpan(t);
 	for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
-		if (ShapeCell(s.shape, s.area, c.x, c.z, cx, cz, t.x + dx, t.z + dz)) return true;
+		if (ShapeCell(s.shape, area, c.x, c.z, cx, cz, t.x + dx, t.z + dz)) return true;
 	return false;
 }
 
@@ -6685,8 +6784,9 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			float floorv = offense * 1.6f;
 			if (want < floorv) want = floorv;
 			if (dm < want) dm = want;
-			dm *= 0.5f * 1.5f;
+			dm *= 1.35f;
 		} else if (sd && sd->hits > 1) dm /= (float)sd->hits;
+		if (sd && !IsSummonId(skill) && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) dm *= 1.22f;
 		hit = 96 + UnitStat(a, S_DEX) / 2 - UnitStat(d, S_AGI) / 3 - tavo / 3 + (sd ? 6 : 0);
 		if (a.blind > 0) hit -= 28;
 		crit = 0;
@@ -6785,7 +6885,10 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			else hit -= 4;
 		}
 	}
-	hit = Clampi(hit, magic ? 62 : 48, magic ? 100 : 99);
+	if (d.team == TEAM_PLAYER && a.team == TEAM_ENEMY && ClassInfo(d.ch.cls).magic) hit -= 14;
+	int hitLo = magic ? 62 : 48;
+	if (d.team == TEAM_PLAYER && a.team == TEAM_ENEMY && ClassInfo(d.ch.cls).magic) hitLo = magic ? 48 : 34;
+	hit = Clampi(hit, hitLo, magic ? 100 : 99);
 	{
 		int grd = UnitStat(d, S_GRD);
 		if (grd > 30) grd = 30;
@@ -6999,6 +7102,7 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	}
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	f.hits = sd ? max(1, sd->hits) : ((UnitStat(a, S_AGI) - UnitStat(d, S_AGI) >= 5) ? 2 : 1);
+	if (sd && sd->kind == SK_MAGIC && sd->hits >= 2 && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) f.hits += 1;
 	bool single = !sd || sd->area == 0;
 	f.canCounter = single && a.team != d.team && CanCounter(b, d, a);
 	if (f.canCounter) {
@@ -7015,7 +7119,27 @@ int SkillCastRangeMin(const Unit& u, int skill)
 int SkillCastRangeMax(const Unit& u, int skill)
 {
 	const SkillDef& s = SkillInfo(skill);
-	return s.rMax < 0 ? UnitRangeMax(u) : s.rMax;
+	int r = s.rMax < 0 ? UnitRangeMax(u) : s.rMax;
+	if (r > 0 && s.kind == SK_MAGIC && u.team == TEAM_PLAYER && ClassInfo(u.ch.cls).magic) r += 1;
+	return r;
+}
+
+int SkillMpCost(int maxMp, int skill)
+{
+	const SkillDef& s = SkillInfo(skill);
+	if (s.effect != EF_WARP) return s.mp;
+	if (maxMp < 1) maxMp = 1;
+	int c = maxMp * 70 / 100;
+	if (c < 500) c = 500;
+	return c;
+}
+
+int SkillAreaOf(const Unit& u, int skill)
+{
+	const SkillDef& s = SkillInfo(skill);
+	int a = s.area;
+	if (a > 0 && s.kind == SK_MAGIC && u.team == TEAM_PLAYER && ClassInfo(u.ch.cls).magic) a += 1;
+	return a;
 }
 
 bool IsFormSkill(int skill) { return skill >= SKL_FORM0 && skill < SKL_FORMN; }
@@ -7210,7 +7334,7 @@ static float FormAllyMul(const Battle& b, const Unit& a, int skill, int tx, int 
 	int extra = n - FormNeed(FormOf(skill));
 	if (extra < 0) extra = 0;
 	if (extra > 3) extra = 3;
-	return 1.f + extra * 0.2f;
+	return 1.35f + extra * 0.16f;
 }
 
 bool FormFits(const Battle& b, int ui, int skill, int tx, int tz)
@@ -7267,7 +7391,7 @@ int FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz)
 	int extra = n - FormNeed(FormOf(skill));
 	if (extra < 0) extra = 0;
 	if (extra > 3) extra = 3;
-	return 100 + extra * 15;
+	return 120 + extra * 12;
 }
 
 static bool FormReady(const Battle& b, int ui, int skill)
@@ -7281,7 +7405,7 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 	const Unit& u = b.u[ui];
 	if (u.silence > 0 && (IsSummonId(skill) || SkillInfo(skill).kind == SK_MAGIC)) return false;
 	if (IsFormSkill(skill)) {
-		if (!UnitHasSkill(u, skill) || u.mp < SkillInfo(skill).mp) return false;
+		if (!UnitHasSkill(u, skill) || u.mp < SkillMpCost(u.ch.stat[S_MP], skill)) return false;
 		return FormReady(b, ui, skill);
 	}
 	if (IsSummonId(skill)) {
@@ -7290,7 +7414,7 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 		for (int k = 0; k < 2; k++) if (EquippedSummonId(u.ch, k) == id) have = TRUE;
 		if (!have) return false;
 		const SkillDef& s = SkillInfo(skill);
-		if (u.mp < s.mp) return false;
+		if (u.mp < SkillMpCost(u.ch.stat[S_MP], skill)) return false;
 		if (u.cp < SummonCpCost(u, skill)) return false;
 		return u.hp > SummonHpCost(u, skill);
 	}
@@ -7308,7 +7432,7 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 	}
 	const SkillDef& s = SkillInfo(skill);
 	if (s.kind == SK_PASSIVE) return false;
-	return UnitHasSkill(u, skill) && u.mp >= s.mp;
+	return UnitHasSkill(u, skill) && u.mp >= SkillMpCost(u.ch.stat[S_MP], skill);
 }
 
 bool SkillTargetHelps(const Battle& b, int ui, int skill, int ti)
@@ -7316,8 +7440,11 @@ bool SkillTargetHelps(const Battle& b, int ui, int skill, int ti)
 	if (ti < 0 || ti >= b.nUnits) return false;
 	const Unit& t = b.u[ti];
 	const SkillDef& s = SkillInfo(skill);
-	if (s.effect == EF_RAISE)
-		return !t.alive && t.killed && t.team == b.u[ui].team && RaisePlaceable(b, t);
+	if (s.effect == EF_RAISE) {
+		if (t.team != b.u[ui].team) return false;
+		if (!t.alive) return t.killed && RaisePlaceable(b, t);
+		return t.hp < t.ch.stat[S_HP];
+	}
 	if (s.kind == SK_HEAL) {
 		if (!t.alive || t.team != b.u[ui].team) return false;
 		BOOL hurt = t.hp < t.ch.stat[S_HP];
@@ -7464,15 +7591,32 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 {
 	const Unit& c = b.u[caster];
 	const SkillDef& s = SkillInfo(skill);
+	int areaN = SkillAreaOf(c, skill);
 	if (IsFormSkill(skill) && !FormFits(b, caster, skill, cx, cz)) return 0;
 	bool friendly = (s.kind == SK_HEAL || s.kind == SK_BUFF);
 	int n = 0;
 	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
 		const Unit& t = b.u[i];
-		if (s.effect == EF_RAISE) {
-			if (t.alive || !t.killed || t.team != c.team) continue;
-			if (FootDist(cx, cz, 1, t.x, t.z, UnitSpan(t)) > max(0, s.area)) continue;
-			if (!RaisePlaceable(b, t)) continue;
+		if (s.effect == EF_RAISE && !t.alive) {
+			if (!t.killed || t.team != c.team || !RaisePlaceable(b, t)) continue;
+			int fromL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
+			int toL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
+			int dh = abs(LayerHt(b.map.At(c.x, c.z), fromL) - LayerHt(b.map.At(t.x, t.z), toL));
+			if (dh > 18) continue;
+			int add = (dh <= 4) ? 0 : LayerRangeCost(fromL, toL);
+			if (add < 0) continue;
+			if (areaN > 0) {
+				int ox = (s.rMax == 0) ? c.x : cx;
+				int oz = (s.rMax == 0) ? c.z : cz;
+				if (FootDist(ox, oz, 1, t.x, t.z, UnitSpan(t)) + add > areaN) continue;
+			} else {
+				int dist = FootDist(c.x, c.z, UnitSpan(c), t.x, t.z, UnitSpan(t));
+				if (dist > 0) {
+					int rmin = SkillCastRangeMin(c, skill);
+					int rmax = SkillCastRangeMax(c, skill);
+					if (dist + add < rmin || dist + add > rmax) continue;
+				}
+			}
 			out[n++] = i;
 			continue;
 		}
@@ -7488,19 +7632,25 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 			if (dh > 18) continue;
 			int add = (dh <= 4) ? 0 : LayerRangeCost(fromL, toL);
 			if (add < 0) continue;
-			if (s.area > 0) {
-				int blast = FootDist(cx, cz, 1, t.x, t.z, UnitSpan(t));
-				if (blast + add > max(0, s.area)) continue;
+			if (areaN > 0) {
+				int ox = (s.rMax == 0) ? c.x : cx;
+				int oz = (s.rMax == 0) ? c.z : cz;
+				int blast = FootDist(ox, oz, 1, t.x, t.z, UnitSpan(t));
+				if (blast + add > max(0, areaN)) continue;
 			} else {
 				int reach = (s.rMax == 0) ? 0 : SkillCastRangeMax(c, skill);
 				if (FootDist(c.x, c.z, UnitSpan(c), t.x, t.z, UnitSpan(t)) + add > reach) continue;
 			}
 		}
-		if (!UnitOnShape(s, c, cx, cz, t)) continue;
+		int sx = (s.rMax == 0) ? c.x : cx;
+		int sz = (s.rMax == 0) ? c.z : cz;
+		if (!UnitOnShape(s, c, sx, sz, t, areaN)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
 		if (!friendly) {
 			if (s.area > 0) {
-				if (!TileSeesUnit(b, cx, cz, t)) continue;
+				int ox = (s.rMax == 0) ? c.x : cx;
+				int oz = (s.rMax == 0) ? c.z : cz;
+				if (!TileSeesUnit(b, ox, oz, t)) continue;
 			} else {
 				int aL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
 				if (!UnitSeenFrom(b, c.x, c.z, aL, t)) continue;
@@ -7711,8 +7861,101 @@ int PreviewHealAmount(const Unit& a, const Unit& d, int skill)
 {
 	if (skill < 0) return 0;
 	const SkillDef& sd = SkillInfo(skill);
-	if (sd.kind != SK_HEAL || sd.effect == EF_RAISE) return 0;
+	if (sd.kind != SK_HEAL) return 0;
+	if (sd.effect == EF_RAISE && !d.alive) return 0;
 	return HealAmount(a, d, sd, skill);
+}
+
+static int WarpCaster(Battle& b, int ai, Rng& r)
+{
+	if (ai < 0 || ai >= b.nUnits) return 0;
+	Unit& a = b.u[ai];
+	if (!a.alive) return 0;
+	int span = UnitSpan(a);
+	if (span < 1) span = 1;
+	int fly = UnitMoveType(a) == MV_FLY;
+	int pickX = a.x, pickZ = a.z, pickL = a.deck;
+	int found = 0;
+	for (int z = 1; z < MAPN - 1; z++) for (int x = 1; x < MAPN - 1; x++) {
+		const Cell& cell = b.map.At(x, z);
+		int nL = CellLayN(cell);
+		for (int L = 0; L < nL; L++) {
+			int ok = 1;
+			for (int dz = 0; dz < span && ok; dz++) for (int dx = 0; dx < span; dx++) {
+				int nx = x + dx, nz = z + dz;
+				if (!Map::In(nx, nz)) { ok = 0; break; }
+				const Cell& c = b.map.At(nx, nz);
+				if (!LayerOn(c, L)) { ok = 0; break; }
+				int tr = LayerTr(c, L);
+				if (tr == T_VOID || tr == T_CHASM || tr == T_WATER || tr == T_LAVA) { ok = 0; break; }
+				const TerrainDef& ti = TerrainInfo(tr);
+				if (fly) { if (!ti.flyOk && ti.costFoot >= 99) { ok = 0; break; } }
+				else if (ti.costFoot >= 99) { ok = 0; break; }
+				int occ = b.UnitAt(nx, nz, L);
+				if (occ >= 0 && occ != ai) { ok = 0; break; }
+			}
+			if (!ok) continue;
+			if (x == a.x && z == a.z && L == a.deck) continue;
+			found++;
+			if ((int)(r.Next() % (unsigned)found) == 0) { pickX = x; pickZ = z; pickL = L; }
+		}
+	}
+	if (found <= 0) return 0;
+	a.x = pickX;
+	a.z = pickZ;
+	a.deck = pickL;
+	b.RebuildOcc();
+	return 1;
+}
+
+// 味方だけ。敵の攻撃を HP 2割以下で耐え切ったら、通常打撃のクリティカルのさらに倍を打ち返す。
+static void FairyAfter(Battle& b, Strike* out, int& n, int maxOut)
+{
+	if (!out || n <= 0 || n >= maxOut) return;
+	int mark[MAX_UNITS];
+	memset(mark, 0, sizeof(mark));
+	int ids[MAX_UNITS], foes[MAX_UNITS];
+	int nc = 0;
+	int baseN = n;
+	for (int i = 0; i < baseN; i++) {
+		const Strike& s = out[i];
+		if (!s.hit || s.counter == 2 || s.dmg <= 0) continue;
+		int d = s.defender, a = s.attacker;
+		if (d < 0 || d >= b.nUnits || a < 0 || a >= b.nUnits || mark[d]) continue;
+		const Unit& ally = b.u[d];
+		const Unit& foe = b.u[a];
+		if (ally.team != TEAM_PLAYER || foe.team == TEAM_PLAYER) continue;
+		if (ally.hp <= 0 || !ally.alive || foe.hp <= 0 || !foe.alive) continue;
+		int mx = ally.ch.stat[S_HP];
+		if (mx < 1 || ally.hp * 5 > mx) continue;
+		mark[d] = 1;
+		ids[nc] = d;
+		foes[nc] = a;
+		nc++;
+	}
+	for (int i = 0; i < nc && n < maxOut; i++) {
+		Unit& ally = b.u[ids[i]];
+		Unit& foe = b.u[foes[i]];
+		if (ally.hp <= 0 || foe.hp <= 0) continue;
+		int dmg, hit, crit;
+		StrikeCalc(b, ally, foe, -1, dmg, hit, crit);
+		int deal = dmg * 4;
+		if (deal < 1) deal = 1;
+		Strike s = {};
+		s.attacker = ids[i];
+		s.defender = foes[i];
+		s.skill = -1;
+		s.counter = 2;
+		s.hit = 1;
+		s.crit = 1;
+		s.dmg = deal;
+		if ((long long)deal >= (long long)foe.hp * 2) s.overkill = 1;
+		foe.hp -= deal;
+		AddCp(ally, 2 + deal / 20);
+		if (foe.hp <= 0) { foe.hp = 0; ClearAilments(foe); s.kill = 1; }
+		out[n++] = s;
+		(void)hit; (void)crit;
+	}
 }
 
 int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
@@ -7725,7 +7968,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			if (IsCraftSuper(skill)) a.cp = 0;
 			else a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
 		}
-		else a.mp = max(0, a.mp - sd->mp);
+		else a.mp = max(0, a.mp - SkillMpCost(a.ch.stat[S_MP], skill));
 		if (IsSummonId(skill)) {
 			a.hp = max(1, a.hp - SummonHpCost(a, skill));
 			a.cp = max(0, a.cp - SummonCpCost(a, skill));
@@ -7750,6 +7993,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		else { cx0 = b.u[di].x; cz0 = b.u[di].z; }
 		int nt = SkillTargets(b, ai, skill, cx0, cz0, targets, MAX_UNITS);
 		int waves = (sd->kind == SK_HEAL || sd->kind == SK_BUFF) ? 1 : max(1, sd->hits);
+		if (sd->kind == SK_MAGIC && sd->hits >= 2 && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) waves += 1;
 		for (int wave = 0; wave < waves && n < maxOut; wave++)
 		for (int k = 0; k < nt && n < maxOut; k++) {
 			if (targets[k] < 0 || targets[k] >= b.nUnits) continue;
@@ -7759,13 +8003,17 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			Strike s = {};
 			s.attacker = ai; s.defender = targets[k]; s.skill = skill; s.volley = wave;
 			if (sd->kind == SK_HEAL) {
-				if (sd->effect == EF_RAISE) {
+				if (sd->effect == EF_RAISE && corpse) {
 					if (!SettleRaised(b, d)) continue;
 					d.alive = 1;
 					d.killed = 0;
 					d.hp = max(1, d.ch.stat[S_HP] * 45 / 100);
 					d.dissolve = 0;
 					d.ct = max(d.ct, 200);
+					int amt = HealAmount(a, d, *sd, skill);
+					if (IsFormSkill(skill)) amt = (int)(amt * FormAllyMul(b, a, skill, a.x, a.z));
+					amt = amt * FormBoostPct(b, ai, skill, cx0, cz0) / 100;
+					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
 					s.dmg = -d.hp;
 					s.hit = 1;
 					b.RebuildOcc();
@@ -7782,8 +8030,13 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					AddCp(a, 2);
 				}
 			} else if (sd->kind == SK_BUFF) {
-				s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
-				s.hit = 1;
+				if (sd->effect == EF_WARP && &d == &a) {
+					s.hit = 1;
+					s.landed = WarpCaster(b, ai, r) ? 1 : 0;
+				} else {
+					s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
+					s.hit = 1;
+				}
 			} else {
 				int dmg, hit, crit;
 				StrikeCalc(b, a, d, skill, dmg, hit, crit);
@@ -7855,6 +8108,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				out[n++] = s;
 			}
 		}
+		FairyAfter(b, out, n, maxOut);
 		return n;
 	}
 	// 単体（通常・物理スキル・単体魔法）＋反撃
@@ -7862,18 +8116,18 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 	Forecast f;
 	CalcForecast(b, ai, di, skill, f);
 	int aLeft = f.hits, dLeft = f.canCounter ? f.chits : 0;
-	// 多段は攻撃側の段をまとめてから反撃。段ごとにモーションを分け、同じ段の複数対象は同時着弾。
-	auto swing = [&](bool atkTurn, int volley) -> bool {
-		Unit& x = atkTurn ? a : d;
-		Unit& y = atkTurn ? d : a;
+	// 多段は攻撃側の段をまとめてから反撃。1体を倒して他に生きている敵が射程にいれば、余った段はそちらへ続ける。
+	auto swing = [&](bool atkTurn, int volley, int yi) -> bool {
+		Unit& x = atkTurn ? a : b.u[yi];
+		Unit& y = atkTurn ? b.u[yi] : a;
 		if (x.hp <= 0 || n >= maxOut) return true;
 		if (y.hp <= 0) return true;
 		int sk = atkTurn ? skill : -1;
 		int dmg, hit, crit;
 		StrikeCalc(b, x, y, sk, dmg, hit, crit);
 		Strike s = {};
-		s.attacker = atkTurn ? ai : di;
-		s.defender = atkTurn ? di : ai;
+		s.attacker = atkTurn ? ai : yi;
+		s.defender = atkTurn ? yi : ai;
 		s.skill = sk;
 		s.counter = atkTurn ? 0 : 1;
 		s.volley = volley;
@@ -7908,12 +8162,42 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		out[n++] = s;
 		return s.kill != 0 || s.overkill != 0;
 	};
+	auto nextFoe = [&](int avoid) -> int {
+		int rMin = skill >= 0 ? SkillCastRangeMin(a, skill) : UnitRangeMin(a);
+		int rMax = skill >= 0 ? SkillCastRangeMax(a, skill) : UnitRangeMax(a);
+		int best = -1, bestD = 1 << 30;
+		int nx = (avoid >= 0 && avoid < b.nUnits) ? b.u[avoid].x : a.x;
+		int nz = (avoid >= 0 && avoid < b.nUnits) ? b.u[avoid].z : a.z;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (i == ai || i == avoid) continue;
+			const Unit& t = b.u[i];
+			if (t.team == a.team || !t.alive || t.hp <= 0) continue;
+			if (!InRangeOfUnit(b, a, a.x, a.z, rMin, rMax, t, true)) continue;
+			int dx = t.x - nx, dz = t.z - nz;
+			if (dx < 0) dx = -dx;
+			if (dz < 0) dz = -dz;
+			int dist = (dx > dz ? dx : dz);
+			if (dist < bestD) { bestD = dist; best = i; }
+		}
+		return best;
+	};
 	int missed = 0;
+	int cur = di;
 	for (int v = 0; aLeft > 0 && n < maxOut; aLeft--, v++) {
 		if (a.hp <= 0) break;
+		if (cur < 0 || cur >= b.nUnits || b.u[cur].hp <= 0) {
+			int nxt = nextFoe(cur);
+			if (nxt < 0) break;
+			cur = nxt;
+		}
 		int before = n;
-		if (swing(true, v)) break; // kill / overkill で余剰段を止める
+		bool down = swing(true, v, cur);
 		if (n > before && !out[n - 1].hit) missed = 1;
+		if (!down) continue;
+		if (b.u[cur].hp > 0) break;
+		int nxt = nextFoe(cur);
+		if (nxt < 0) break;
+		cur = nxt;
 	}
 	// 攻撃側が1段でも MISS したら、反撃権が無くても必ず1回カウンター（睡眠・スタン・凍結中は除く）。
 	int missCounter = 0;
@@ -7926,7 +8210,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		if (a.hp <= 0 || d.hp <= 0) break;
 		if (d.sleep > 0 || d.stun > 0) break;
 		int before = n;
-		if (swing(false, v)) break;
+		if (swing(false, v, di)) break;
 		// MISS 起点の反撃は命中を強制（振れ幅でまた外さない）。
 		if (missCounter && n > before && out[n - 1].counter && !out[n - 1].hit && a.hp > 0) {
 			Strike& cs = out[n - 1];
@@ -7948,6 +8232,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		}
 		missCounter = 0; // 強制は1発だけ
 	}
+	FairyAfter(b, out, n, maxOut);
 	return n;
 }
 
@@ -8643,43 +8928,8 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.stage = stage;
 	b.lastActTeam = -1;
 	GenerateMap(b.map, stage, seed, theme);
-	int wx = WX_CLEAR;
-	int hour = HR_NOON;
-	{
-		int th = b.map.theme;
-		unsigned w = seed % 20u;
-		if (th == TH_SNOW) {
-			if (w < 11) wx = WX_SNOW;
-			else if (w < 14) wx = WX_HAIL;
-			else if (w < 16) wx = WX_FOG;
-		} else if (th == TH_VOLCANO) {
-			if (w < 10) wx = WX_ASH;
-			else if (w < 13) wx = WX_HEAT;
-		} else if (th == TH_DESERT) {
-			if (w < 8) wx = WX_SAND;
-			else if (w < 11) wx = WX_HEAT;
-		} else if (th == TH_FOREST || th == TH_PLAINS) {
-			if (w < 4) wx = WX_RAIN;
-			else if (w < 6) wx = WX_STORM;
-			else if (w < 8) wx = WX_PETAL;
-			else if (w < 10) wx = WX_FOG;
-		} else if (th == TH_SWAMP) {
-			if (w < 6) wx = WX_FOG;
-			else if (w < 9) wx = WX_RAIN;
-		} else if (w < 4) wx = WX_RAIN;
-		else if (w < 6) wx = WX_STORM;
-		else if (w < 8) wx = WX_FOG;
-		unsigned hs = (seed / 20u) % 20u;
-		if (hs == 0) hour = HR_DAWN;
-		else if (hs == 1) hour = HR_MORNING;
-		else if (hs == 2) hour = HR_DUSK;
-		else if (hs == 3) hour = HR_NIGHT;
-		else if (hs == 4) hour = HR_DEEP;
-		else if (hs == 5) hour = HR_ECLIPSE;
-		else if (hs == 6) hour = HR_DREAM;
-		else if (hs == 7) hour = HR_STAR;
-		else if (hs == 8) hour = HR_MOON;
-	}
+	int wx = WX_CLEAR, hour = HR_NOON;
+	TacRollSky(b.map.theme, seed, wx, hour);
 	b.weather = TacPackSky(wx, hour);
 	Rng r(seed ^ 0xA5A5A5A5u);
 	int n = 0;
@@ -9297,6 +9547,34 @@ void WakeGroup(Battle& b, int grp)
 		b.u[i].alert = 1;
 		if (wake) JoinTurnClock(b, i);
 	}
+}
+
+static bool UnitCanScout(const Battle& b, int pi, int limit);
+
+int WakeStruck(Battle& b, int attacker, int target)
+{
+	if (target < 0 || target >= b.nUnits || attacker < 0 || attacker >= b.nUnits) return 0;
+	Unit& hit = b.u[target];
+	if (!hit.alive || hit.team != TEAM_ENEMY || b.u[attacker].team != TEAM_PLAYER) return 0;
+	int n = 0;
+	if (hit.alert != 1) {
+		hit.alert = 1;
+		JoinTurnClock(b, target);
+		n++;
+	}
+	int g = hit.grp;
+	if (g < 0) return n;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (i == target) continue;
+		Unit& u = b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY || u.grp != g || u.alert) continue;
+		FillNoticeSteps(b, i, TAC_NOTICE_STEPS);
+		if (!UnitCanScout(b, attacker, TAC_NOTICE_STEPS)) continue;
+		u.alert = 1;
+		JoinTurnClock(b, i);
+		n++;
+	}
+	return n;
 }
 
 static void MarkGroup(Battle& b, int grp, int immediate, int& newly)

@@ -306,6 +306,10 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_TAC_PACE, OnTacPace)
 	ON_MESSAGE(WM_TAC_DESTROY, OnTacDestroy)
 	ON_WM_SIZE()
+	ON_WM_ENTERSIZEMOVE()
+	ON_WM_EXITSIZEMOVE()
+	ON_WM_NCHITTEST()
+	ON_WM_LBUTTONDOWN()
 	ON_WM_SHOWWINDOW()
 	ON_WM_DESTROY()
 	ON_WM_CLOSE()
@@ -423,41 +427,103 @@ void COmakeTacticsDlg::LayoutView()
 	}
 }
 
-static void TacPulseFront(HWND hwnd)
+static const DWORD kTacChrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER | WS_DLGFRAME;
+
+void COmakeTacticsDlg::ApplyChrome(BOOL windowed)
 {
-	if (!hwnd) return;
-	::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-	::SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	if (windowed) {
+		ModifyStyle(0, kTacChrome, SWP_FRAMECHANGED);
+		CCC_CaptionShow(m_hWnd, TRUE);
+	} else {
+		CCC_CaptionShow(m_hWnd, FALSE);
+		ModifyStyle(kTacChrome, 0, SWP_FRAMECHANGED);
+	}
+}
+
+BOOL COmakeTacticsDlg::MonitorSize(RECT* rc, int* pxW, int* pxH) const
+{
+	if (!rc) return FALSE;
+	HMONITOR mon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+	MONITORINFOEXW mi = { sizeof(mi) };
+	if (!::GetMonitorInfoW(mon, &mi)) return FALSE;
+	*rc = mi.rcMonitor;
+	int w = mi.rcMonitor.right - mi.rcMonitor.left;
+	int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+	DEVMODEW dm = {};
+	dm.dmSize = sizeof(dm);
+	if (::EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm)) {
+		if (dm.dmPelsWidth > 0) w = (int)dm.dmPelsWidth;
+		if (dm.dmPelsHeight > 0) h = (int)dm.dmPelsHeight;
+	}
+	if (pxW) *pxW = w;
+	if (pxH) *pxH = h;
+	return w > 0 && h > 0;
+}
+
+void COmakeTacticsDlg::SyncBorderlessZ()
+{
+	if (!m_gameOk || !GetSafeHwnd()) return;
+	if (otac::TacWinMode(m_game.Save()) != 1) return;
+	::SetWindowPos(m_hWnd, m_fg ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void COmakeTacticsDlg::ApplyWinMode()
 {
-	if (!m_gameOk || !GetSafeHwnd()) return;
+	if (!m_gameOk || !GetSafeHwnd() || m_sizing) return;
 	int mode = otac::TacWinMode(m_game.Save());
-	if (m_winApplied == mode) return;
-	int prev = m_winApplied;
-	m_winApplied = mode;
-	if (prev < 0 && mode == 0) return;
-	if (mode) {
-		HMONITOR mon = MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
-		MONITORINFO mi = { sizeof(mi) };
-		if (GetMonitorInfo(mon, &mi)) {
-			SetWindowPos(NULL, mi.rcMonitor.left, mi.rcMonitor.top,
-				mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-				SWP_NOZORDER | SWP_SHOWWINDOW);
-			TacPulseFront(m_hWnd);
+	if (m_winApplied == mode) {
+		if (mode == 1) SyncBorderlessZ();
+		if (mode == 2 && m_fg && !IsIconic() && !m_exclFail && !m_game.Exclusive()) {
+			if (!m_game.SetExclusive(TRUE)) m_exclFail = TRUE;
 		}
-	} else {
-		otac::SaveData& s = m_game.Save();
-		if (s.winW >= 200 && s.winH >= 150)
-			SetWindowPos(NULL, s.winX, s.winY, s.winW, s.winH, SWP_NOZORDER | SWP_NOACTIVATE);
+		return;
+	}
+	int prev = m_winApplied;
+	if (prev <= 0) StoreWindowRect();
+	otac::SaveData& saved = m_game.Save();
+	const int rx = saved.winX, ry = saved.winY, rw = saved.winW, rh = saved.winH;
+	m_exclFail = FALSE;
+	if (prev < 0 && mode == 0) {
+		m_winApplied = 0;
+		return;
+	}
+	// 窓に戻すまでは m_winApplied を 0 にしない。0 にした瞬間の OnSize が、
+	// まだ画面いっぱいの矩形をウィンドウサイズとして保存してしまう。
+	if (mode != 0) m_winApplied = mode;
+	if (prev == 2) m_game.SetExclusive(FALSE);
+	RECT mon = {};
+	int pxW = 0, pxH = 0;
+	const BOOL haveMon = MonitorSize(&mon, &pxW, &pxH);
+	if (mode == 0) {
+		ApplyChrome(TRUE);
+		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		if (rw >= 200 && rh >= 150)
+			SetWindowPos(NULL, rx, ry, rw, rh, SWP_NOZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+		saved.winX = rx; saved.winY = ry; saved.winW = rw; saved.winH = rh;
+		saved.winSizeVer = 3;
+		m_winApplied = 0;
+		LayoutView();
+		return;
+	}
+	ApplyChrome(FALSE);
+	if (haveMon) {
+		::SetWindowPos(m_hWnd, mode == 1 ? HWND_TOPMOST : HWND_NOTOPMOST,
+			mon.left, mon.top, mon.right - mon.left, mon.bottom - mon.top,
+			SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+		if (mode == 1) ::SetForegroundWindow(m_hWnd);
+	}
+	LayoutView();
+	if (mode == 2) {
+		if (!m_game.SetExclusive(TRUE)) m_exclFail = TRUE;
+		LayoutView();
 	}
 }
 
 void COmakeTacticsDlg::StoreWindowRect()
 {
 	if (!GetSafeHwnd()) return;
-	if (m_gameOk && otac::TacWinMode(m_game.Save())) return;
+	if (m_winApplied > 0) return;
 	WINDOWPLACEMENT wp = { sizeof(wp) };
 	if (!GetWindowPlacement(&wp)) return;
 	const CRect r(wp.rcNormalPosition);
@@ -595,7 +661,7 @@ void COmakeTacticsDlg::DrainInput()
 LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 {
 	static int windowCheckFlag = 0;
-	if (m_destroying || m_inPace || !m_gameOk) {
+	if (m_destroying || m_inPace || !m_gameOk || m_sizing) {
 		InterlockedExchange(&m_pacePosted, 0);
 		return 0;
 	}
@@ -616,7 +682,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 		m_fg = (::GetForegroundWindow() == m_hWnd);
 		{
 			static int pri = -1;
-			int want = m_fg ? THREAD_PRIORITY_TIME_CRITICAL : THREAD_PRIORITY_NORMAL;
+			int want = m_fg ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL;
 			if (pri != want) {
 				SetThreadPriority(GetCurrentThread(), want);
 				if (m_paceThread) SetThreadPriority(m_paceThread, want);
@@ -654,10 +720,75 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 void COmakeTacticsDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
-	if (nType != SIZE_MINIMIZED) {
-		LayoutView();
-		StoreWindowRect();
+	if (nType == SIZE_MINIMIZED) return;
+	if (m_sizing) {
+		if (m_view.GetSafeHwnd()) {
+			CRect rc;
+			GetClientRect(&rc);
+			int cap = CCC_GetCustomCaptionHeight(m_hWnd);
+			if (cap > 0 && cap < rc.Height()) rc.top += cap;
+			m_view.SetWindowPos(NULL, rc.left, rc.top, rc.Width(), rc.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+		return;
 	}
+	LayoutView();
+	StoreWindowRect();
+}
+
+void COmakeTacticsDlg::OnEnterSizeMove()
+{
+	m_sizing = TRUE;
+	CWnd::OnEnterSizeMove();
+}
+
+void COmakeTacticsDlg::OnExitSizeMove()
+{
+	m_sizing = FALSE;
+	CWnd::OnExitSizeMove();
+	LayoutView();
+	StoreWindowRect();
+	QueryPerformanceCounter(&m_tickAt);
+	KickPace();
+}
+
+LRESULT COmakeTacticsDlg::OnNcHitTest(CPoint pt)
+{
+	if (IsZoomed() || (m_gameOk && otac::TacWinMode(m_game.Save())))
+		return CCustomBlurDialogBase::OnNcHitTest(pt);
+	CRect wr;
+	GetWindowRect(&wr);
+	const int grip = 8;
+	const BOOL L = pt.x < wr.left + grip;
+	const BOOL R = pt.x >= wr.right - grip;
+	const BOOL T = pt.y < wr.top + grip;
+	const BOOL B = pt.y >= wr.bottom - grip;
+	if (T && L) return HTTOPLEFT;
+	if (T && R) return HTTOPRIGHT;
+	if (B && L) return HTBOTTOMLEFT;
+	if (B && R) return HTBOTTOMRIGHT;
+	if (L) return HTLEFT;
+	if (R) return HTRIGHT;
+	if (T) return HTTOP;
+	if (B) return HTBOTTOM;
+	return CCustomBlurDialogBase::OnNcHitTest(pt);
+}
+
+void COmakeTacticsDlg::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && point.y >= 0 && point.y < capH && (!m_gameOk || otac::TacWinMode(m_game.Save()) == 0)) {
+		CWnd* hit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+		if (!hit || hit == this) {
+			m_sizing = TRUE;
+			SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+			m_sizing = FALSE;
+			QueryPerformanceCounter(&m_tickAt);
+			LayoutView();
+			KickPace();
+			return;
+		}
+	}
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
 }
 
 void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
@@ -675,9 +806,11 @@ void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void COmakeTacticsDlg::OnGetMinMaxInfo(MINMAXINFO* mmi)
 {
+	CCustomBlurDialogBase::OnGetMinMaxInfo(mmi);
 	mmi->ptMinTrackSize.x = 800;
 	mmi->ptMinTrackSize.y = 560;
-	CCustomBlurDialogBase::OnGetMinMaxInfo(mmi);
+	if (mmi->ptMaxTrackSize.x < 16000) mmi->ptMaxTrackSize.x = 16000;
+	if (mmi->ptMaxTrackSize.y < 16000) mmi->ptMaxTrackSize.y = 16000;
 }
 
 void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
@@ -699,8 +832,10 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 			m_game.OnBecameActive();
 			KickPace();
 		}
+		SyncBorderlessZ();
 	} else {
 		ReleaseUiInput();
+		SyncBorderlessZ();
 	}
 }
 
@@ -714,8 +849,10 @@ void COmakeTacticsDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 			m_game.OnBecameActive();
 			KickPace();
 		}
+		SyncBorderlessZ();
 	} else {
 		ReleaseUiInput();
+		SyncBorderlessZ();
 	}
 }
 

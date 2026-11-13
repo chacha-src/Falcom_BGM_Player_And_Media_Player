@@ -250,6 +250,8 @@ public:
 	BOOL Init(HWND hwnd, int quality);
 	void Release();
 	BOOL Resize(int w, int h);
+	BOOL SetExclusive(BOOL on);
+	BOOL Exclusive() const { return m_exclusive; }
 	BOOL Ready() const { return m_dev != NULL && m_swap != NULL; }
 	BOOL AssetsReady() const { return m_assetsOk; }
 	int W() const { return m_w; }
@@ -707,6 +709,7 @@ private:
 	float m_gpuMs;
 	BOOL m_gpuArmed;
 	BOOL m_lost;
+	BOOL m_exclusive;
 	BOOL m_presented;
 	BOOL m_presentBusy;
 	BOOL m_occluded;

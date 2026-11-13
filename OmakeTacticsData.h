@@ -343,6 +343,8 @@ float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int la
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
 int  MapIsSpiral(const Map& m);
+int  MapSpiralBand(const Map& m);
+void TacRollSky(int theme, DWORD seed, int& wx, int& hour);
 
 // ---------------- 能力値・クラス・スキル ----------------
 enum Stat {
@@ -482,7 +484,8 @@ enum SkillId {
 	SKL_MIASMA,
 	SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELHOLY, SKL_ELDARK, SKL_ELWIND, SKL_ELEATH, SKL_ELPOISON,
 	SKL_MORE0,
-	SKL_COUNT = SKL_MORE0 + 96
+	SKL_WARP0 = SKL_MORE0 + 96,
+	SKL_COUNT = SKL_WARP0 + 8
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 enum FormKind {
@@ -508,7 +511,7 @@ struct SkillDef {
 enum SkillEffect {
 	EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE,
 	EF_SLEEP, EF_CONFUSE, EF_STUN, EF_CLEANSE,
-	EF_FREEZE, EF_BURN, EF_BLEED, EF_BLIND, EF_SILENCE
+	EF_FREEZE, EF_BURN, EF_BLEED, EF_BLIND, EF_SILENCE, EF_WARP
 };
 const wchar_t* ElemWord(int el);
 const wchar_t* EffectWord(int ef);
@@ -768,6 +771,7 @@ bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int
 int  Dist(int ax, int az, int bx, int bz);
 void FillWalkSteps(const Battle& b, int fromUi);
 void FillWalkStepsFromTeam(const Battle& b, int team);
+void FillRibbonSteps(const Battle& b, int fromUi, int limit);
 int  WalkStepsAt(int x, int z, int layer);
 // 層差の距離。2層以上は届かない。1層差は範囲技が隣接なら届く。届かないとき -1。
 inline int LayerRangeCost(int fromL, int toL)
@@ -846,6 +850,8 @@ int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
 int  ExpForHeal(const Unit& a, const Unit& d, int healed, int stage);
 long long ExpShareAoe(long long e, int nHit);
 int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
+int  SkillMpCost(int maxMp, int skill);
+int  SkillAreaOf(const Unit& u, int skill);
 
 // ---------------- 戦闘全体 ----------------
 enum { MAX_UNITS = MAX_PARTY + MAX_ENEMY };
@@ -896,6 +902,7 @@ int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnOut, int* bleedOut);
 void WakeGroup(Battle& b, int grp);
+int WakeStruck(Battle& b, int attacker, int target);
 void JoinTurnClock(Battle& b, int ui);
 // 敵が気づく歩数。10 は二手分で近く、以前の 16 は螺旋の別階まで届いて遠い。
 // 直線や層番号ではなく、その敵が実際に歩けるマスだけを数える。
@@ -1138,12 +1145,22 @@ inline int TacVsyncHz(const SaveData& s)
 {
 	return TacHzAt(TacVsync(s));
 }
-inline int TacWinMode(const SaveData& s) { return ((s.showGrid & (1 << 9)) != 0 && (s.showGrid & (1 << 8)) != 0) ? 1 : 0; }
+// 0 ウィンドウ、1 仮想フルスクリーン（bit8）、2 フルスクリーン（bit17）。
+inline int TacWinMode(const SaveData& s)
+{
+	if ((s.showGrid & (1 << 9)) == 0) return 0;
+	if (s.showGrid & (1 << 17)) return 2;
+	if (s.showGrid & (1 << 8)) return 1;
+	return 0;
+}
 inline void TacSetWinMode(SaveData& s, int m)
 {
 	TacEnsureOpt(s);
-	if (m) s.showGrid |= (1 << 8);
-	else s.showGrid &= ~(1 << 8);
+	m %= 3;
+	if (m < 0) m += 3;
+	s.showGrid &= ~((1 << 8) | (1 << 17));
+	if (m == 1) s.showGrid |= (1 << 8);
+	else if (m == 2) s.showGrid |= (1 << 17);
 }
 inline int TacAiTx(int a)
 {
@@ -1151,7 +1168,11 @@ inline int TacAiTx(int a)
 	if (a < 0 || a > 5) a = 2;
 	return tx[a];
 }
-inline int TacWinTx(int m) { return m ? TX_WIN_FULL : TX_WIN_BOX; }
+inline int TacWinTx(int m)
+{
+	if (m == 2) return TX_WIN_EXCL;
+	return m ? TX_WIN_FULL : TX_WIN_BOX;
+}
 // showGrid の bit10。0 が既定で、フレームレート表示は出さない。
 inline int TacFpsOn(const SaveData& s) { return (s.showGrid & (1 << 10)) != 0; }
 inline void TacSetFps(SaveData& s, int on)

@@ -6,8 +6,6 @@
 #include "VstMidiEngine.h"
 #include "CSasamiStaffCore.h"
 
-extern int playf;
-
 IMPLEMENT_DYNAMIC(CSasamiToneMapDlg, CCustomBlurDialogExBase)
 
 struct ScToneMapInfo {
@@ -340,33 +338,20 @@ int CSasamiToneMapDlg::ToneIsEmpty(int pc) const
 	return (m_names[pc][0] == 0 || wcscmp(m_names[pc], L"------") == 0) ? 1 : 0;
 }
 
-static int ToneOutCanAudition(int out)
-{
-	(void)out;
-	return 1;
-}
-
 void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 {
 	if (pc < 0 || pc > 127) return;
 	if (ToneIsEmpty(pc)) return;
 	m_prog = pc;
-	/* UI only while picking. Live bank/PC is applied on preview / score play —
-	   SendBankProgram on every click (and on 入力) froze Host32 return path. */
 	CString h;
 	h.Format(L"PC#%d  %s  (Bank %d/%d)", m_prog + 1, m_names[m_prog], m_bankMsb, m_bankLsb);
 	m_hint.SetWindowText(h);
 	InvalidateRect(m_gridRc, FALSE);
-	const int hear = TonePortLive(m_part);
-	const int out = ScStaffScorePreviewOut();
-	/* playf==0 は停止中。再生でライブ出力が止まっているので、譜面と同じ経路で1音出す。
-	   playy==0 は曲の準備中なので、ここでは停止の判定に使わない。 */
-	if (audition && playf == 0 && ToneOutCanAudition(out)) {
-		ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
-	} else if (audition && hear) {
-		VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
-		VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 280);
-	}
+	if (!audition || !TonePortLive(m_part)) return;
+	/* 再生は起動しない。バンクと 1 音だけ。鳴っている曲の waveOut は
+	   VstLiveAuditionNote が開かない。マルチは MIDI の CC/PC のみ（PROGRAMS は呼ばない）。 */
+	VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
+	VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 280);
 }
 
 int CSasamiToneMapDlg::HitTone(CPoint pt) const
@@ -429,11 +414,9 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int pc = HitTone(point);
 	if (pc >= 0) {
 		ApplyTone(pc, 0);
-		if (playf == 0 && ToneOutCanAudition(ScStaffScorePreviewOut())) {
-			ScStaffAuditionRouteNote(m_part, m_bankMsb, m_bankLsb, m_prog, m_isDrum ? 36 : 60, 100);
-		} else if (TonePortLive(m_part)) {
+		if (TonePortLive(m_part)) {
 			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
-			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 60000);
+			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 2000);
 			m_auditionHold = 1;
 		}
 	}

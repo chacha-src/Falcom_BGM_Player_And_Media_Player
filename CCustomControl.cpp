@@ -20544,6 +20544,8 @@ struct CCC_CaptionEntry {
     BOOL paintValid = FALSE;
     BOOL paintActive = FALSE;
     BOOL paintHadIcon = FALSE;
+    BOOL captionHidden = FALSE;
+    int captionKeepH = 0;
     int paintW = 0;
     int paintH = 0;
     int paintTitleRight = 0;
@@ -21280,13 +21282,44 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
     }
 }
 
-// CCC_CaptionRefreshDpi: カスタム UI / アクリル補助。
-// ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
-// 詳細は呼び出し元のコメントを優先。
-void CCC_CaptionRefreshDpi(HWND hDlg)
+void CCC_CaptionRefreshDpi(HWND hDlg);
+
+// 仮想フルスクリーンでは帯とボタンを消し、戻したときに高さを返す。
+void CCC_CaptionShow(HWND hDlg, BOOL show)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
     if (!e || !e->installed || !::IsWindow(hDlg))
+        return;
+    if (show) {
+        if (!e->captionHidden)
+            return;
+        e->captionHidden = FALSE;
+        CCC_CaptionRefreshDpi(hDlg);
+        return;
+    }
+    if (e->captionHidden)
+        return;
+    e->captionHidden = TRUE;
+    if (e->height > 0)
+        e->captionKeepH = e->height;
+    e->height = 0;
+    e->paintValid = FALSE;
+    auto hide = [](CCustomStandardButton* p) {
+        if (p && ::IsWindow(p->GetSafeHwnd()))
+            p->ShowWindow(SW_HIDE);
+    };
+    hide(e->pClose);
+    hide(e->pMin);
+    hide(e->pMax);
+    hide(e->pSettings);
+    hide(e->pPin);
+    hide(e->pOfflineHelp);
+}
+
+void CCC_CaptionRefreshDpi(HWND hDlg)
+{
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed || !::IsWindow(hDlg) || e->captionHidden)
         return;
     const UINT dpi = CCC_GetControlDpi(hDlg);
     int sysCap = ::GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
@@ -21309,6 +21342,19 @@ void CCC_CaptionLayout(HWND hDlg)
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
     if (!e || !e->installed || !::IsWindow(hDlg))
         return;
+    if (e->captionHidden) {
+        auto hide = [](CCustomStandardButton* p) {
+            if (p && ::IsWindow(p->GetSafeHwnd()) && p->IsWindowVisible())
+                p->ShowWindow(SW_HIDE);
+        };
+        hide(e->pClose);
+        hide(e->pMin);
+        hide(e->pMax);
+        hide(e->pSettings);
+        hide(e->pPin);
+        hide(e->pOfflineHelp);
+        return;
+    }
     CRect cr;
     ::GetClientRect(hDlg, &cr);
     const int y = (e->height - CCC_CAP_BTN) / 2;

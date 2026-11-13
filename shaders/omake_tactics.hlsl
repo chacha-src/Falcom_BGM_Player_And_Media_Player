@@ -1474,6 +1474,13 @@ GOut PSWater(PSIn i)
 		col += float3(1, 1, 1) * foam * rush * 0.35;
 		see = lerp(see, 0.16, rush * 0.55);
 	}
+	{
+		float thick = saturate(0.55 - h / max(amp, 1e-3));
+		col = lerp(col, col * float3(0.4, 0.58, 0.7), thick * (0.32 + fr * 0.38));
+		col += albedo * pow(saturate(1.0 - fr), 1.6) * thick * 0.1;
+		float lip = pow(fr, 0.7);
+		col += float3(0.84, 0.94, 1.0) * lip * 0.07;
+	}
 	return Emit(float4(GhostCol(FogAt(col, i.w)), FadeA(lerp(see, 0.78, fr) * alpha)), i.w);
 }
 
@@ -1517,6 +1524,7 @@ GOut LavaFall(PSIn i)
 	float3 vn = normalize(i.n);
 	float fr = pow(1.0 - saturate(dot(vn, normalize(Eye.xyz - i.w))), 2.2);
 	hot += float3(1, 0.55, 0.12) * fr * 0.22;
+	hot += float3(1.0, 0.62, 0.14) * pow(saturate(1.0 - edge), 2.2) * rope * 0.18;
 	float a = saturate((0.88 + rope * 0.18) * (0.62 + sag * 0.38) * (1.0 - edge * 0.22));
 	return Emit(float4(GhostCol(FogAt(hot, i.w)), GhostA(a)), i.w);
 }
@@ -1556,6 +1564,13 @@ GOut PSLava(PSIn i)
 	float rh = RippleH(i.w.xz, t, rdh);
 	col += float3(1, 0.55, 0.08) * saturate(abs(rh) * 28.0);
 	ApplyReflect(col, float3(0, 1, 0), v, i.w, 0.62, 0.12);
+	{
+		float2 vg2 = VoronoiGap(i.w.xz * 2.1 - float2(t * 0.05, t * 0.02));
+		float vein = 1.0 - smoothstep(0.012, 0.07, vg2.y);
+		float crust2 = smoothstep(0.08, 0.22, vg2.y);
+		col = lerp(col, col * float3(0.55, 0.3, 0.16), crust2 * 0.32);
+		col += float3(1.0, 0.48, 0.06) * vein * (0.26 + 0.12 * sin(t * 2.4 + vg2.x * 8.0));
+	}
 	if (Q.x > 1.5) {
 		float heat = pow(0.5 + 0.5 * sin(i.w.x * 3.2 + t * 1.6) * sin(i.w.z * 2.7 - t * 1.1), 2);
 		col += float3(1, 0.25, 0.02) * heat * 0.08;
@@ -1722,6 +1737,56 @@ void GroundSurfaceLayer(float theme, float3 w, float3 n, float cliff, float t, f
 		glow += float3(1.0, 0.74, 0.32) * pool * (0.75 + 0.25 * sin(t * 2.4 + lh * 15.0)) * up * 0.72;
 		glow += float3(0.95, 0.82, 0.55) * mist * up * 0.22;
 	}
+}
+
+// 地形と設置物だけ。画質の段は動かさない。最軽量でも一回のノイズで大きな起伏を足す。
+float3 MapNudge(float3 n, float3 w)
+{
+	float2 p = w.xz * 1.35 + w.y * 0.45;
+	float e = 0.22;
+	float h0 = vnoise(p);
+	float hx = vnoise(p + float2(e, 0));
+	float hz = vnoise(p + float2(0, e));
+	float3 tng = normalize(cross(abs(n.y) < 0.92 ? float3(0, 1, 0) : float3(1, 0, 0), n));
+	float3 bn = cross(n, tng);
+	return normalize(n + (tng * (h0 - hx) + bn * (h0 - hz)) * 1.15);
+}
+
+// ライティングのあと。くぼみ、谷、透過っぽい色漏れ、コート。人物には掛けない。
+void MapFinish(inout float3 col, float3 albedo, float3 nGeo, float3 nLit, float3 v, float3 w, float rough, float gloss, float sh, float leaf)
+{
+	nGeo = normalize(nGeo);
+	nLit = normalize(nLit);
+	float cavity = saturate(dot(nGeo, nLit));
+	float3 L = normalize(LightDir.xyz);
+	float ndl = saturate(dot(nLit, L));
+	float ndv = saturate(dot(nLit, v));
+	if (gloss < 0.55) {
+		float ao = lerp(0.62, 1.0, cavity * cavity);
+		float2 crev = abs(frac(w.xz * 2.0) - 0.5);
+		float seam = smoothstep(0.42, 0.5, max(crev.x, crev.y));
+		ao *= lerp(1.0, 0.78, seam * saturate(nGeo.y));
+		float valley = vnoise(w.xz * 0.42 + w.y * 0.15);
+		ao *= lerp(0.84, 1.05, valley);
+		col *= ao;
+	}
+	float wrap = saturate(ndl * 0.35 + 0.65);
+	col += albedo * wrap * (1.0 - ndl) * (leaf > 0.5 ? 0.28 : 0.12) * sh;
+	if (leaf > 0.5) col += float3(0.4, 0.72, 0.26) * wrap * (1.0 - ndl) * 0.16 * sh;
+	float3 H = normalize(L + v);
+	float coatP = lerp(24.0, 80.0, saturate(1.0 - rough));
+	float coat = pow(saturate(dot(nLit, H)), coatP) * ndl * sh * lerp(0.45, 1.0, cavity);
+	col += float3(1.0, 0.97, 0.9) * coat * (0.05 + gloss * 0.16);
+	{
+		float2 wind = AirMain() + AirBreeze() + float2(0.15, 0.05);
+		float travel = dot(w.xz, wind);
+		float up = saturate(nGeo.y);
+		float sheen = pow(0.5 + 0.5 * sin(travel * 0.85 - Eye.w * (0.7 + GustAmt() * 1.2)), 4.0);
+		col += albedo * sheen * up * (0.035 + GustAmt() * 0.055) * sh;
+	}
+	float fr = pow(1.0 - ndv, 3.0);
+	col += SkyAmb.rgb * fr * (0.05 + gloss * 0.1) * (0.45 + 0.55 * sh);
+	col *= lerp(0.86, 1.0, smoothstep(0.0, 0.28, ndv));
 }
 
 GOut GroundPS(PSIn i, float theme)
@@ -2056,7 +2121,7 @@ GOut GroundPS(PSIn i, float theme)
 			glow += albedo * wrap * skin * 0.045;
 		}
 	}
-	if (StageTier() > 1.5) {
+	if (tier > 1.5) {
 		float face = saturate(n.y);
 		float rain = RainFilm();
 		if (rain > 0.0 && !(theme > 4.5 && theme < 5.5)) {
@@ -2079,9 +2144,10 @@ GOut GroundPS(PSIn i, float theme)
 			nLit = normalize(nLit + float3(sin(i.w.x * 7.0), 0.03, cos(i.w.z * 6.2)) * iceW * 0.12);
 		}
 	}
+	nLit = MapNudge(nLit, i.w);
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
-	col += glow * (0.7 + StageTier() * 0.22);
+	col += glow * (0.7 + tier * 0.22);
 	if (bedCaus > 0) {
 		float3 causCol = float3(0.65, 0.85, 1);
 		if (theme > 4.5 && theme < 5.5) causCol = float3(1, 0.55, 0.25);
@@ -2109,7 +2175,7 @@ GOut GroundPS(PSIn i, float theme)
 		float micro = fbm2(i.w.xz * microF + i.w.y * 2.0);
 		col *= 0.95 + micro * ((Q.x > 4.5) ? 0.09 : 0.05);
 	}
-	if (StageTier() > 1.5) {
+	if (tier > 1.5) {
 		float gloss = FloorGloss(theme, nLit.y, i.w.xz);
 		gloss *= lerp(1.0, 0.10, saturate(sGhost));
 		ApplyReflect(col, nLit, v, i.w, rough, gloss);
@@ -2118,6 +2184,10 @@ GOut GroundPS(PSIn i, float theme)
 			float edge2 = smoothstep(0.468, 0.5, max(ge.x, ge.y));
 			col *= 1.0 - edge2 * 0.3;
 		}
+	}
+	{
+		float glossF = FloorGloss(theme, nLit.y, i.w.xz);
+		MapFinish(col, albedo, n, nLit, v, i.w, rough, glossF, sh, 0);
 	}
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(1)), i.w);
 }
@@ -2199,13 +2269,15 @@ GOut PSProp(PSIn i)
 	}
 	albedo *= Tint.rgb;
 	nLit = DetailN(nLit, i.w);
-	if (StageTier() > 1.5 && RainFilm() > 0.5 && n.y > 0.45 && !(FogColor.a > 4.5 && FogColor.a < 5.5)) {
+	nLit = MapNudge(nLit, i.w);
+	float tier = StageTier();
+	if (tier > 1.5 && RainFilm() > 0.5 && n.y > 0.45 && !(FogColor.a > 4.5 && FogColor.a < 5.5)) {
 		albedo *= lerp(1.0, 0.78, saturate(n.y));
 		rough = lerp(rough, 0.12, saturate(n.y) * (leaf > 0.5 ? 0.35 : 0.8));
 	}
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
-	if (StageTier() > 1.5) {
+	if (tier > 1.5) {
 		float gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
 		gloss *= leaf > 0.5 ? 0.35 : 0.82;
 		ApplyReflect(col, nLit, v, i.w, rough, gloss);
@@ -2220,6 +2292,11 @@ GOut PSProp(PSIn i)
 		float fg = saturate((d - Fog.x) / max(0.01, Fog.y - Fog.x));
 		col = lerp(col, FogColor.rgb, fg * fg * 0.25);
 		return Emit(float4(col, Tint.a), i.w);
+	}
+	{
+		float gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
+		gloss *= leaf > 0.5 ? 0.35 : 0.82;
+		MapFinish(col, albedo, n, nLit, v, i.w, rough, gloss, sh, leaf);
 	}
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(Tint.a)), i.w);
 }
@@ -2714,6 +2791,45 @@ float Mote(float2 uv, float t, float2 vel, float density, float cutoff, float ra
 	return smoothstep(rad, 0, length(f - j * 0.55)) * step(cutoff, hash21(cell));
 }
 
+// 画面全体の空気。画質の段では分岐しない。風向きに塵が流れ、遠い空だけが薄く揺れる。
+void AirCraft(inout float3 col, float2 uv, float z, float th, float t)
+{
+	float2 wind = AirMain() + AirBreeze();
+	float gust = GustAmt();
+	float sky = saturate((0.58 - uv.y) * 2.4);
+	float far = (z > 0.04) ? smoothstep(0.28, 0.82, z) : sky;
+	float nearCut = (z > 0.02 && z < 0.2) ? 0.08 : 1.0;
+	float veil = max(sky * 0.7, far) * nearCut;
+	if (veil < 0.02) return;
+	float2 vel = wind * float2(0.045, -0.02) + float2(0.012, -0.008);
+	float m1 = Mote(uv, t, vel, 38.0, 0.94, 0.07);
+	float m2 = Mote(uv, t * 1.35, vel * 1.7 + float2(0.01, -0.015), 64.0, 0.97, 0.045);
+	float3 tint = float3(1.0, 0.97, 0.86);
+	if (th < 0.5) tint = float3(0.96, 0.98, 0.72);
+	else if (th < 1.5) tint = float3(1.0, 0.72, 0.42);
+	else if (th < 2.5) tint = float3(0.72, 1.0, 0.55);
+	else if (th < 3.5) tint = float3(0.86, 0.94, 1.0);
+	else if (th < 4.5) tint = float3(1.0, 0.86, 0.55);
+	else if (th < 5.5) tint = float3(1.0, 0.42, 0.12);
+	else if (th < 6.5) tint = float3(0.62, 0.95, 0.4);
+	else if (th < 7.5) tint = float3(0.75, 0.82, 1.0);
+	else if (th < 8.5) tint = float3(0.45, 0.82, 1.0);
+	else if (th < 9.5) tint = float3(0.9, 0.96, 1.0);
+	else if (th < 10.5) tint = float3(0.62, 0.55, 1.0);
+	else if (th < 11.5) tint = float3(0.45, 0.85, 1.0);
+	else if (th < 12.5) tint = float3(0.9, 0.72, 1.0);
+	else tint = float3(1.0, 0.82, 0.48);
+	col += tint * (m1 * 0.5 + m2 * 0.9) * veil * (0.28 + gust * 0.45);
+	float2 dir = wind;
+	float dl = length(dir);
+	dir = dl > 1e-4 ? dir / dl : float2(1.0, 0.15);
+	float streak = pow(0.5 + 0.5 * sin(dot(uv, dir * float2(16.0, 6.0)) - t * (0.55 + gust * 0.9)), 6.0);
+	col += tint * streak * veil * (0.025 + gust * 0.03);
+	float horz = smoothstep(0.34, 0.48, uv.y) * (1.0 - smoothstep(0.52, 0.66, uv.y));
+	float shim = vnoise(uv * float2(48.0, 18.0) + wind * t * 0.8);
+	col += tint * horz * shim * 0.04 * (0.5 + gust * 0.5);
+}
+
 void HourFx(inout float3 col, float2 uv, float hour, float t)
 {
 	if (hour < 0.5) return;
@@ -3042,6 +3158,7 @@ float4 PSGrade(QOut i) : SV_Target
 		}
 		col += (col - nb * 0.125) * (Q.x > 5.5 ? 0.22 : 0.14);
 	}
+	AirCraft(col, i.uv, zpix, th, gt);
 	WeatherFx(col, i.uv, Extra.x, gt);
 	HourFx(col, i.uv, Extra.y, gt);
 	return float4(saturate(col), 1);
@@ -3055,6 +3172,7 @@ float4 PSGradeTiny(QOut i) : SV_Target
 	float2 q = (i.uv - 0.5) * float2(Screen.x * Screen.w, 1);
 	scene *= 1. - saturate(dot(q, q) * 0.35) * 0.08;
 	ThemeWorld(scene, i.uv, FogColor.a, Eye.w, 0);
+	AirCraft(scene, i.uv, DepthMap.SampleLevel(SL, i.uv, 0).r, FogColor.a, Eye.w);
 	WeatherFx(scene, i.uv, Extra.x, Eye.w);
 	HourFx(scene, i.uv, Extra.y, Eye.w);
 	return float4(saturate(scene), 1);

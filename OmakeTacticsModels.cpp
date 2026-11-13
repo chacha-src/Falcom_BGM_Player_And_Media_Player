@@ -1023,6 +1023,26 @@ static void BuildRing(Renderer& r, GpuMesh& out)
 	GeoToStatic(r, g, out);
 }
 
+static void BuildPyr(Renderer& r, GpuMesh& out)
+{
+	Geo& g = g_procGeo;
+	g.Clear();
+	g.curCol = 0xFFFFFFFF;
+	V3 apex = v3(0, 0, 0);
+	V3 b0 = v3(0.62f, 1.15f, 0);
+	V3 b1 = v3(-0.31f, 1.15f, 0.54f);
+	V3 b2 = v3(-0.31f, 1.15f, -0.54f);
+	V3 tri[4][3] = { { apex, b0, b1 }, { apex, b1, b2 }, { apex, b2, b0 }, { b0, b2, b1 } };
+	for (int f = 0; f < 4; f++) {
+		V3 n = Norm(Cross(tri[f][1] - tri[f][0], tri[f][2] - tri[f][0]));
+		int ia = g.V(tri[f][0], n), ib = g.V(tri[f][1], n), ic = g.V(tri[f][2], n);
+		g.T(ia, ib, ic);
+		int ja = g.V(tri[f][0], v3(-n.x, -n.y, -n.z)), jb = g.V(tri[f][2], v3(-n.x, -n.y, -n.z)), jc = g.V(tri[f][1], v3(-n.x, -n.y, -n.z));
+		g.T(ja, jb, jc);
+	}
+	GeoToStatic(r, g, out);
+}
+
 static void BuildOrb(Renderer& r, GpuMesh& out)
 {
 	Geo& g = g_procGeo;
@@ -1101,6 +1121,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) { BuildWing(r, d, l, lib.wing[d][l]); step(); }
 	BuildCrown(r, lib.crown); step();
 	BuildRing(r, lib.ring); step();
+	BuildPyr(r, lib.pyr); step();
 	BuildOrb(r, lib.orb); step();
 	BuildIce(r, lib.ice); step();
 	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
@@ -1124,6 +1145,7 @@ void ReleaseLibrary(Library& lib)
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) lib.wing[d][l].Release();
 	lib.crown.Release();
 	lib.ring.Release();
+	lib.pyr.Release();
 	lib.orb.Release();
 	lib.ice.Release();
 	lib.ready = 0;
@@ -2186,7 +2208,12 @@ int CastClipFor(int kind, int skill)
 			return (skill & 1) ? CL_CAST_RAISE : CL_CAST_LONG;
 		}
 		if (kind == SK_MAGIC) {
-			if (sd.element == EL_FIRE) return CL_THROW;
+			if (skill == SKL_METEOR || skill == SKL_APOC || skill == SKL_STORM || skill == SKL_GRAVITY
+				|| skill == SKL_NOVA || skill == SKL_FROSTFIELD || skill == SKL_THUNDERFIELD
+				|| skill == SKL_BLIZZARD || skill == SKL_RUIN)
+				return CL_CAST_LONG;
+			if (sd.shape == SH_LINE) return CL_CAST_SHOOT;
+			if (sd.element == EL_FIRE) return CL_CAST_SHOOT;
 			if (sd.element == EL_ICE || sd.element == EL_HOLY) return CL_CAST_RAISE;
 			if (sd.element == EL_THUNDER || sd.element == EL_POISON) return CL_CAST_SHOOT;
 			if (sd.element == EL_DARK) return CL_TAUNT;

@@ -27,6 +27,7 @@ struct Library {
 	GpuMesh wing[2][2];     // [羽根/竜][0=右(-X) / 1=左(+X)]
 	GpuMesh crown;
 	GpuMesh ring;
+	GpuMesh pyr;
 	GpuMesh orb;
 	GpuMesh ice;
 	int ready;
