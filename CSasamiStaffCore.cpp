@@ -7586,8 +7586,15 @@ void ScStaffStopHostPreview(ScStaffUi* u)
 	g_scPreviewOn = 0;
 	extern int endflg;
 	endflg = 1;
-	if (og && ::IsWindow(og->GetSafeHwnd()))
+	/* 試し聴きの再演奏がキューに残ったまま止めると、閉じたあと再生が戻り、
+	   続けて書き出したテンポラリを掴んだスレッドが止まらなくなる。 */
+	OggCancelPendingPlaybackRestart();
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		extern volatile LONG g_interactiveTrackChange;
+		InterlockedExchange(&g_interactiveTrackChange, 1);
 		og->stop1();
+		InterlockedExchange(&g_interactiveTrackChange, 0);
+	}
 	ScStaffRestorePlaylistGlobals();
 	ScStaffRestoreLiveAudioAfterPreview();
 }

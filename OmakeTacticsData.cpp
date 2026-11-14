@@ -463,6 +463,9 @@ static const ThemeParam kTheme[TH_COUNT] = {
 	{ 2.4f, .07f, 2, T_RUINS, .88f, 0, 1, 2, 1, 0 },
 	{ 4.8f, .05f, 3, T_RUINS, .72f, 0, 2, 4, 1, 0 },
 	{ 3.2f, .046f, 2, T_PLAIN, .8f, 0, 1, 2, 1, 0 },
+	{ 2.2f, .04f, 2, T_RUINS, .92f, 0, 1, 2, 1, 0 },
+	{ 3.5f, .035f, 3, T_PLAIN, .9f, 0, 1, 1, 1, 0 },
+	{ 2.8f, .055f, 2, T_PLAIN, .42f, 0, 1, 1, 1, 0 },
 };
 
 static bool FootPassable(int t) { return TerrainInfo(t).costFoot < 99; }
@@ -3291,6 +3294,32 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		}
 		(void)r;
 	}
+	if (vertical != 2 && (th == TH_MIRROR || th == TH_HEAVEN || th == TH_MARCHEN)) {
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			Cell& c = m.c[z][x];
+			if (c.t == T_VOID || c.t == T_BRIDGE || c.t == T_DOOR || c.t == T_CHASM) continue;
+			int dx = x - MAPN / 2, dz = z - MAPN / 2;
+			int d2 = dx * dx + dz * dz;
+			if (th == TH_MIRROR) {
+				if (c.t == T_MOUNTAIN || c.t == T_HILL || c.t == T_FOREST || c.t == T_SAND || c.t == T_SNOW || c.t == T_SWAMP) c.t = T_RUINS;
+				if (c.t == T_PLAIN && (c.var % 5) == 0) c.t = T_RUINS;
+				if (d2 > 7 * 7 && d2 < 12 * 12 && (c.var % 2) == 0) c.t = T_WATER;
+			} else if (th == TH_HEAVEN) {
+				if (c.t != T_BRIDGE && c.t != T_DOOR) c.t = T_SNOW;
+				if (abs(dz) <= 1 || abs(dx) <= 1) c.t = T_ROAD;
+				if ((c.var % 23) == 0) c.t = T_RUINS;
+				if (d2 > 10 * 10 && d2 < 14 * 14 && (c.var % 4) == 0) c.t = T_WATER;
+			} else {
+				if (c.t == T_SAND || c.t == T_SNOW || c.t == T_SWAMP || c.t == T_MOUNTAIN) c.t = T_PLAIN;
+				if (c.t == T_PLAIN && (c.var % 2) == 0) c.t = T_FOREST;
+				if (c.t == T_HILL) c.t = T_FOREST;
+				if ((abs(dx) % 6) == 0 || (abs(dz) % 8) == 0) {
+					if (c.t != T_WATER) c.t = T_ROAD;
+				}
+			}
+		}
+		(void)r;
+	}
 	// 8) 小物
 	if (vertical == 2) {
 		StampSpiralDecor(m, r, th);
@@ -3298,7 +3327,31 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	for (int z = 0; z < MAPN && vertical != 2; z++) for (int x = 0; x < MAPN; x++) {
 		Cell& c = m.c[z][x];
 		c.prop = PK_NONE;
-		if (th >= TH_SEABED) {
+		if (th == TH_MIRROR || th == TH_HEAVEN || th == TH_MARCHEN) {
+			if (NearPartyOrGroup(m, x, z, 1)) continue;
+			if (c.t == T_VOID || c.t == T_CHASM || c.t == T_DOOR || c.t == T_BRIDGE) continue;
+			if (th == TH_MIRROR) {
+				if (c.t == T_ROCK || c.t == T_MOUNTAIN || c.t == T_RUINS) c.prop = ((c.var & 1) ? PK_PILLAR : PK_LANTERN);
+				else if (c.t != T_WATER && (c.var % 4) == 0) c.prop = PK_PILLAR;
+				else if (c.t != T_WATER && (c.var % 5) == 0) c.prop = PK_LANTERN;
+				else if (c.t != T_WATER && (c.var % 9) == 0) c.prop = PK_CRATE;
+			} else if (th == TH_HEAVEN) {
+				if (c.t == T_RUINS || c.t == T_ROCK || c.t == T_HILL) c.prop = PK_PILLAR;
+				else if ((c.var % 4) == 0) c.prop = PK_FLAG;
+				else if ((c.var % 5) == 0) c.prop = PK_LANTERN;
+				else if ((c.var % 6) == 0) c.prop = PK_PILLAR;
+				else if (c.t == T_WATER) c.prop = PK_LILY;
+			} else {
+				if (c.t == T_FOREST) c.prop = (c.var & 1) ? PK_TREE : PK_TREES;
+				else if (c.t == T_WATER) c.prop = PK_LILY;
+				else if ((c.var % 3) == 0) c.prop = PK_PUMPKIN;
+				else if ((c.var % 4) == 0) c.prop = PK_FLAG;
+				else if ((c.var % 5) == 0) c.prop = PK_LANTERN;
+				else if ((c.var % 8) == 0) c.prop = PK_LILY;
+			}
+			continue;
+		}
+		if (th >= TH_SEABED && th <= TH_LANTERN) {
 			if (NearPartyOrGroup(m, x, z, 1)) continue;
 			if (c.t == T_ROCK || c.t == T_MOUNTAIN) c.prop = PK_KIT;
 			else if (c.t != T_VOID && c.t != T_WATER && c.t != T_LAVA && c.t != T_BRIDGE && c.t != T_CHASM && c.t != T_DOOR && (c.var % 17) == 0)
@@ -3338,21 +3391,21 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == tx && m.pStartZ[i] == tz) used = true;
 		if (!used && m.c[tz][tx].t != T_VOID) {
 			if (vertical != 2) m.c[tz][tx].t = T_ROCK;
-			m.c[tz][tx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_TENT);
+			m.c[tz][tx].prop = (BYTE)((th >= TH_SEABED && th <= TH_LANTERN) ? PK_KIT : PK_TENT);
 		}
 		int fx = Clampi(pax - 2, 1, MAPN - 2), fz = Clampi(paz + 2, 1, MAPN - 2);
 		used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == fx && m.pStartZ[i] == fz) used = true;
 		if (!used && m.c[fz][fx].t != T_VOID) {
 			if (vertical != 2) m.c[fz][fx].t = T_ROCK;
-			m.c[fz][fx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_FLAG);
+			m.c[fz][fx].prop = (BYTE)((th >= TH_SEABED && th <= TH_LANTERN) ? PK_KIT : PK_FLAG);
 		}
 		for (int k = 0; k < 3 && m.nGrp > 0; k++) {
 			const MapGroup& g0 = m.grp[0];
 			int cx = Clampi(g0.ax + r.Range(-4, 4), 1, MAPN - 2), cz = Clampi(g0.az + r.Range(-4, 4), 1, MAPN - 2);
 			if (taken[cz][cx] || !FootPassable(m.c[cz][cx].t)) continue;
 			if (vertical != 2) m.c[cz][cx].t = T_ROCK;
-			m.c[cz][cx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : (th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL));
+			m.c[cz][cx].prop = (BYTE)((th >= TH_SEABED && th <= TH_LANTERN) ? PK_KIT : (th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL));
 			taken[cz][cx] = 1;
 		}
 	}
@@ -3420,7 +3473,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			Cell& c = m.c[s / MAPN][s % MAPN];
 			c.gimm = GM_CHEST;
 			c.gparam = (BYTE)r.Range(0, 2);
-			c.prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_CRATE);
+			c.prop = (BYTE)((th >= TH_SEABED && th <= TH_LANTERN) ? PK_KIT : PK_CRATE);
 		}
 		int nDoor = (vertical == 2) ? 0 : Clampi(span / 14, 0, 4);
 		for (int i = 0; i < nDoor; i++) {
@@ -3453,7 +3506,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			m.c[z][x].gparam = (BYTE)link;
 			m.c[lz][lx].gimm = GM_LEVER;
 			m.c[lz][lx].gparam = (BYTE)link;
-			m.c[lz][lx].prop = (BYTE)(th >= TH_SEABED ? PK_KIT : PK_LANTERN);
+			m.c[lz][lx].prop = (BYTE)((th >= TH_SEABED && th <= TH_LANTERN) ? PK_KIT : PK_LANTERN);
 			link++;
 		}
 		int nFence = (vertical == 2) ? 0 : Clampi(span / 16, 0, 3);
@@ -4800,8 +4853,51 @@ static void EnsureMonsters()
 			if (end > TAC_STAGE_MAX) end = TAC_STAGE_MAX;
 			d.minStage = start;
 			d.maxStage = end >= TAC_STAGE_MAX ? 0 : end;
+			// 元モデルの並び順の成長を引き継ぐと、序盤に出る追加敵が終盤の体力になる。
+			// 追加敵は既存敵の約3倍いるので、初出ステージの既存敵と同じ段に戻す。
+			{
+				int tierMax = nImp > 1 ? (nImp - 1) / 12 : 0;
+				int tier = 0;
+				if (tierMax > 0 && TAC_STAGE_MAX > 1)
+					tier = (int)((long long)(start - 1) * tierMax / (TAC_STAGE_MAX - 1));
+				if (tier < 0) tier = 0;
+				if (tier > tierMax) tier = tierMax;
+				d.weaponPow = 4 + (i % 9);
+				d.base[S_HP] = 20 + tier * 6 + (i % 5) * 2;
+				d.base[S_MP] = d.magAttack ? 14 + tier : 2;
+				d.base[S_STR] = 5 + tier + (i % 4);
+				d.base[S_DEF] = 3 + tier;
+				d.base[S_MAG] = d.magAttack ? 6 + tier : 1;
+				d.base[S_RES] = 3 + tier / 2;
+				d.base[S_AGI] = 4 + (d.moveType == MV_FLY ? 3 : 0) + (i % 3);
+				d.base[S_DEX] = 4 + (d.attackStyle == AS_SHOOT || d.attackStyle == AS_SHOOT1 ? 3 : 0) + (i % 4);
+				d.base[S_LUK] = 2 + (i % 3);
+				if (d.attackStyle == AS_SHOOT) d.base[S_MOV] = 3 + (i % 2);
+				else if (d.magAttack) d.base[S_MOV] = 3 + (i % 2);
+				else if (d.moveType == MV_FLY) d.base[S_MOV] = 6 + (i % 3);
+				else d.base[S_MOV] = (i % 3 == 0) ? 5 : 4;
+				d.grow[S_MOV] = 0;
+				for (int s = S_JMP; s < S_COUNT; s++) { d.base[s] = 0; d.grow[s] = 0; }
+				int grp = d.magAttack ? G_MAGIC : (d.attackStyle == AS_SHOOT || d.attackStyle == AS_SHOOT1 ? G_SWIFT : (d.moveType == MV_FLY ? G_SWIFT : G_MELEE));
+				FillUnitSheet(d.base, d.grow, grp, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
+				d.grow[S_HP] = 45 + tier * 4;
+				d.grow[S_STR] = 40 + tier * 2;
+				d.grow[S_DEF] = 30 + tier;
+				d.grow[S_MAG] = d.magAttack ? 50 : 5;
+				d.grow[S_RES] = 25;
+				d.grow[S_AGI] = 30;
+				d.grow[S_DEX] = 25;
+				d.grow[S_MP] = d.magAttack ? 40 : 5;
+				if (!d.magAttack) {
+					for (int s = 0; s < 3; s++) if (d.skills[s] == SKL_FIRE || d.skills[s] == SKL_E_BREATH) {
+						if (d.base[S_MP] < 12) d.base[S_MP] = 12;
+					}
+				}
+			}
 			d.weight = 6;
-			d.scale = 0.86f + (float)(i % 7) * 0.04f;
+			// 素の寸法はメッシュごとにバラバラ。倍率は出すときに足下へ合わせる。
+			d.scale = 0.f;
+			d.footSpan = 0;
 			int rr = 150 + (i * 37) % 106;
 			int gg = 130 + (i * 53) % 126;
 			int bb = 140 + (i * 71) % 116;
@@ -5880,8 +5976,52 @@ static int HumanoidImport(const wchar_t* nm)
 	if (!nm || wcsncmp(nm, L"Hum", 3) != 0 || !nm[3]) return 0;
 	return nm[3] >= L'A' && nm[3] <= L'Z';
 }
+// 追加敵は、測った足幅の階級に合わせ、そのマスを実際に埋める倍率へ縮める。
+// 背が高すぎるときはマスを落として、足下より胴が何マスもはみ出さないようにする。
+static void FitExtraDef(MonsterDef& d)
+{
+	if (d.look != LK_MESH || d.scale > 0.02f) return;
+	if (d.model < 0 || !TacMonsterReady(d.model)) return;
+	float foot = TacMonsterFoot(d.model);
+	float tall = TacMonsterTall(d.model);
+	if (foot < 0.02f) {
+		d.scale = 1.f;
+		d.footSpan = 1;
+		return;
+	}
+	int span = SpanFromHalf(foot);
+	if (span < 1) span = 1;
+	if (span > 5) span = 5;
+	static const float kHCap[6] = { 0.f, 2.6f, 3.6f, 4.6f, 5.6f, 6.6f };
+	for (;;) {
+		float want = (float)span * 0.46f;
+		float sc = want / foot;
+		if (tall > 0.02f && tall * sc > kHCap[span]) sc = kHCap[span] / tall;
+		float vis = foot * sc;
+		if (vis + 0.001f >= want * 0.72f || span <= 1) {
+			if (sc < 0.04f) sc = 0.04f;
+			if (sc > 24.f) sc = 24.f;
+			d.scale = sc;
+			d.footSpan = span;
+			return;
+		}
+		span--;
+	}
+}
+
+void MonsterPrepareScale(int monster)
+{
+	if (monster < M_COUNT + kImportN) return;
+	int ex = monster - (M_COUNT + kImportN);
+	if (ex < 0 || ex >= kFoeExN || ex >= 4096) return;
+	FitExtraDef(s_foeEx[ex]);
+}
+
 static int MonsterSpan(const MonsterDef& md, int boss)
 {
+	if (md.look == LK_MESH && md.scale <= 0.02f && &md >= s_foeEx && &md < s_foeEx + 4096)
+		FitExtraDef(const_cast<MonsterDef&>(md));
+	if (md.footSpan >= 1 && md.footSpan <= 5) return md.footSpan;
 	float sc = md.scale * (boss ? 1.15f : 1.f);
 	float half = ClassicFoot(md.look);
 	if (md.look == LK_MESH) {

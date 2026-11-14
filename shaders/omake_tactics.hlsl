@@ -239,7 +239,10 @@ float WaveAmp(float th)
 	else if (th > 7.5 && th < 8.5) amp = 0.055;
 	else if (th > 9.5 && th < 10.5) amp = 0.018;
 	else if (th > 10.5 && th < 11.5) amp = 0.028;
-	else if (th > 12.5) amp = 0.05;
+	else if (th > 12.5 && th < 13.5) amp = 0.05;
+	else if (th > 13.5 && th < 14.5) amp = 0.012;
+	else if (th > 14.5 && th < 15.5) amp = 0.09;
+	else if (th > 15.5) amp = 0.11;
 	else if (th > 6.5) amp = 0.038;
 	return amp;
 }
@@ -1227,7 +1230,10 @@ GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
 	else if (thw > 7.5 && thw < 8.5) body = lerp(body, float3(0.12, 0.4, 0.5), 0.5);
 	else if (thw > 9.5 && thw < 10.5) body = lerp(body, float3(0.55, 0.72, 1), 0.28);
 	else if (thw > 11.5 && thw < 12.5) body = lerp(body, float3(0.72, 0.62, 0.95), 0.22);
-	else if (thw > 12.5) body = lerp(body, float3(1, 0.88, 0.62), 0.18);
+	else if (thw > 12.5 && thw < 13.5) body = lerp(body, float3(1, 0.88, 0.62), 0.18);
+	else if (thw > 13.5 && thw < 14.5) body = lerp(body, float3(0.82, 0.9, 0.98), 0.45);
+	else if (thw > 14.5 && thw < 15.5) body = lerp(body, float3(1, 0.94, 0.72), 0.28);
+	else if (thw > 15.5) body = lerp(body, float3(1, 0.72, 0.84), 0.32);
 	body += float3(1, 1, 1) * band * 0.26;
 	body += float3(0.86, 0.95, 1) * braid * 0.2;
 	body += float3(0.78, 0.9, 1) * sheet * 0.1;
@@ -1321,7 +1327,10 @@ float FloorGloss(float theme, float face, float2 xz)
 	else if (theme < 10.5) g = 0.26;
 	else if (theme < 11.5) g = 0.46;
 	else if (theme < 12.5) g = 0.52;
-	else g = 0.24;
+	else if (theme < 13.5) g = 0.24;
+	else if (theme < 14.5) g = 0.92;
+	else if (theme < 15.5) g = 0.34;
+	else g = 0.3;
 	float rain = RainFilm();
 	if (rain > 0.0 && !(theme > 4.5 && theme < 5.5)) {
 		float pud = smoothstep(0.34, 0.7, fbm2(xz * 0.62 + 2.4));
@@ -1333,6 +1342,7 @@ float FloorGloss(float theme, float face, float2 xz)
 		g = max(g, lerp(0.36, 0.8, sheet) * frost);
 	}
 	if (theme > 3.5 && theme < 4.5 && rain < 0.5 && frost < 0.5) g = 0.05;
+	if (theme > 13.5 && theme < 14.5) return lerp(0.86, 1.0, saturate(face));
 	return g * lerp(0.2, 1.0, saturate(face));
 }
 
@@ -1352,12 +1362,17 @@ bool ReflectMap(float3 n, float3 v, float rough, out float3 env)
 
 void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, float gloss)
 {
-	if (gloss < 0.04) return;
-	float3 env;
-	if (!ReflectMap(n, v, rough, env)) return;
+	float mirror = (FogColor.a > 13.5 && FogColor.a < 14.5) ? 1.0 : 0.0;
+	if (gloss < 0.04 && mirror < 0.5) return;
+	n = normalize(n);
+	float3 env = 0;
+	bool got = ReflectMap(n, v, mirror > 0.5 ? min(rough, 0.06) : rough, env);
+	if (!got && ReflectInfo.x < 0.5) return;
 	if (ReflectInfo.x > 0.5) {
 		float3 p = w;
 		p.y = ReflectInfo.y;
+		float3 rdir = reflect(-v, n);
+		p.xz += rdir.xz * (1.0 - saturate(n.y)) * mirror * 2.4;
 		float4 rp = mul(float4(p, 1), ReflectVP);
 		if (rp.w > 0.001) {
 			float2 uv = rp.xy / rp.w * float2(0.5, -0.5) + 0.5;
@@ -1366,7 +1381,7 @@ void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, f
 			if (keep > 0.02) {
 				float3 hit;
 				float b = ReflectInfo.w;
-				if (b > 0.00005) {
+				if (b > 0.00005 && mirror < 0.5) {
 					hit = LiveRef.SampleLevel(CL, uv, 0).rgb;
 					hit += LiveRef.SampleLevel(CL, uv + float2(b, 0), 0).rgb;
 					hit += LiveRef.SampleLevel(CL, uv - float2(b, 0), 0).rgb;
@@ -1374,20 +1389,29 @@ void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, f
 					hit += LiveRef.SampleLevel(CL, uv - float2(0, b), 0).rgb;
 					hit *= 0.2;
 				} else hit = LiveRef.SampleLevel(CL, uv, 0).rgb;
-				env = lerp(env, hit, keep);
+				if (mirror > 0.5) {
+					float2 uv2 = float2(1.0 - uv.y, uv.x);
+					float2 box2 = saturate(min(uv2, 1.0 - uv2) * 6.0);
+					float keep2 = min(box2.x, box2.y);
+					if (keep2 > 0.02) hit = lerp(hit, LiveRef.SampleLevel(CL, uv2, 0).rgb, 0.34 * keep2);
+				}
+				env = lerp(env, hit, mirror > 0.5 ? 1.0 : keep);
+				got = true;
 			}
 		}
 	}
-	float fres = pow(1.0 - saturate(dot(normalize(n), v)), 2.1);
+	if (!got) return;
+	float fres = pow(1.0 - saturate(dot(n, v)), 2.1);
 	float facing = 0.4;
 	float cap = lerp(0.46, 0.62, saturate(gloss));
-	if (ReflectInfo.x > 0.5) {
+	if (mirror > 0.5) { facing = lerp(0.92, 0.98, saturate(n.y)); cap = 0.98; }
+	else if (ReflectInfo.x > 0.5) {
 		if (Q.x > 5.5) { facing = 0.9; cap = lerp(0.74, 0.88, saturate(gloss)); }
 		else if (Q.x > 4.5) { facing = 0.82; cap = lerp(0.64, 0.78, saturate(gloss)); }
 		else if (Q.x > 2.5) { facing = 0.76; cap = lerp(0.56, 0.72, saturate(gloss)); }
 		else { facing = 0.68; cap = lerp(0.5, 0.66, saturate(gloss)); }
 	}
-	float amt = min(gloss * lerp(facing, 0.94, fres), cap);
+	float amt = min(max(gloss, mirror * 0.94) * lerp(facing, 0.98, fres), cap);
 	col = lerp(col, env, amt);
 }
 
@@ -1458,10 +1482,22 @@ GOut PSWater(PSIn i)
 		float bio = Sparkle(i.w.xz, t, 8.0, 0.91);
 		col += float3(0.2, 0.9, 0.75) * bio * 0.16;
 		see = 0.42;
-	} else if (thw > 12.5) {
+	} else if (thw > 12.5 && thw < 13.5) {
 		col = lerp(col, float3(0.55, 0.62, 0.82), 0.18);
 		col += float3(1, 0.82, 0.45) * caus * 0.08;
 		see = 0.28;
+	} else if (thw > 13.5 && thw < 14.5) {
+		col = lerp(col, float3(0.72, 0.8, 0.88), 0.55);
+		col += float3(0.85, 0.92, 1) * (0.15 + caus * 0.2);
+		see = 0.12;
+	} else if (thw > 14.5 && thw < 15.5) {
+		col = lerp(col, float3(1, 0.92, 0.7), 0.22);
+		col += float3(1, 0.95, 0.75) * caus * 0.16;
+		see = 0.34;
+	} else if (thw > 15.5) {
+		col = lerp(col, float3(1, 0.7, 0.84), 0.2);
+		col += float3(1, 0.85, 0.95) * caus * 0.12;
+		see = 0.3;
 	} else if (thw > 9.5 && thw < 10.5) {
 		col = lerp(col, float3(0.28, 0.38, 0.62), 0.28);
 		col += float3(0.7, 0.82, 1) * fr * 0.32;
@@ -2192,6 +2228,97 @@ GOut GroundPS(PSIn i, float theme)
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(1)), i.w);
 }
 
+GOut ExtraGround(PSIn i, float kind)
+{
+	BeginGhost(i.pos, i.w, i.n.y);
+	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
+	if (i.c.a < 0.999) {
+		float gBed = LiquidAway(i.w);
+		if (gBed > sGhost) { sGhost = gBed; ClipGhost(i.pos); }
+	}
+	float3 n = normalize(i.n);
+	float3 v = normalize(Eye.xyz - i.w);
+	float cliff = n.y > 0.72 ? 0 : 1;
+	float3 albedo = float3(0.7, 0.7, 0.7);
+	float3 nLit = n;
+	float rough = 0.4;
+	float3 glow = 0;
+	float3 f0 = float3(0.04, 0.04, 0.04);
+	float gloss = 0.2;
+	float t = Eye.w;
+	float2 xz = i.w.xz;
+	[branch] if (kind < 0.5) {
+		float2 g = abs(frac(xz) - 0.5);
+		float seam = smoothstep(0.42, 0.49, max(g.x, g.y));
+		float pane = 1.0 - seam;
+		albedo = lerp(float3(0.22, 0.26, 0.3), float3(0.05, 0.05, 0.06), seam);
+		float2 sc = floor(xz * 2.0);
+		float flick = step(0.8, hash21(sc)) * (0.45 + 0.55 * sin(t * 2.4 + hash21(sc) * 9.0));
+		glow += float3(0.75, 0.9, 1.0) * flick * pane * 0.22;
+		nLit = normalize(n + float3(sin(xz.x * 8.0) * seam, 0.04, cos(xz.y * 8.0) * seam));
+		rough = lerp(0.02, 0.38, seam);
+		f0 = lerp(float3(0.72, 0.76, 0.82), float3(0.12, 0.12, 0.13), seam);
+		gloss = lerp(1.0, 0.55, seam);
+	} else if (kind < 1.5) {
+		float2 cu = xz * 0.11;
+		float cloud = smoothstep(0.28, 0.62, fbm2(cu + float2(t * 0.03, t * 0.015)));
+		float bank = smoothstep(0.4, 0.75, fbm3(cu * 2.2 - float2(t * 0.02, 0.4)));
+		albedo = lerp(float3(1.0, 0.9, 0.62), float3(1.0, 0.99, 0.96), cloud);
+		albedo = lerp(albedo, float3(1.0, 0.78, 0.32), bank * 0.55);
+		float2 cell = xz * 0.16;
+		float2 hc = floor(cell);
+		float2 hf = frac(cell) - 0.5;
+		float ring = exp(-abs(length(hf) - 0.32) * 22.0);
+		float gate = step(0.42, hash21(hc));
+		glow += float3(1.0, 0.86, 0.35) * ring * gate * 1.15;
+		float shaft = pow(saturate(0.5 + 0.5 * sin(xz.x * 0.35 + t * 0.08)), 6.0);
+		glow += float3(1.0, 0.95, 0.7) * shaft * 0.55;
+		float feather = pow(saturate(0.5 + 0.5 * sin(xz.y * 1.6 + xz.x * 0.2)), 8.0);
+		albedo = lerp(albedo, float3(1.0, 0.98, 0.9), feather * 0.45);
+		glow += float3(1.0, 0.97, 0.85) * feather * 0.18;
+		rough = 0.42;
+		f0 = float3(0.1, 0.09, 0.05);
+		gloss = 0.62;
+		nLit = normalize(n + float3(0, 0.2, 0));
+	} else {
+		float stripe = saturate(0.5 + 0.5 * sin(xz.x * 1.7 + xz.y * 0.35));
+		albedo = lerp(float3(1.0, 0.45, 0.68), float3(0.45, 0.82, 1.0), stripe);
+		albedo = lerp(albedo, float3(1.0, 0.86, 0.35), saturate(0.5 + 0.5 * sin(xz.y * 1.7)) * 0.35);
+		float2 fg = xz * 0.85;
+		float2 fc = floor(fg);
+		float2 ff = frac(fg) - 0.5;
+		float flower = smoothstep(0.34, 0.05, length(ff)) * step(0.28, hash21(fc));
+		float3 petal = lerp(float3(1.0, 0.25, 0.55), float3(1.0, 0.92, 0.25), hash21(fc + 2.0));
+		albedo = lerp(albedo, petal, flower);
+		glow += petal * flower * 0.45;
+		float2 mg = xz * 0.42;
+		float2 mc = floor(mg);
+		float2 mf = frac(mg) - 0.5;
+		float cap = smoothstep(0.38, 0.12, length(mf)) * step(0.62, hash21(mc));
+		float stalk = smoothstep(0.08, 0.0, abs(mf.x)) * smoothstep(0.42, 0.12, abs(mf.y)) * cap;
+		albedo = lerp(albedo, float3(0.95, 0.12, 0.28), cap * 0.9);
+		albedo = lerp(albedo, float3(0.98, 0.95, 0.86), stalk);
+		glow += float3(1.0, 0.55, 0.75) * cap * 0.2;
+		glow += float3(1.0, 0.95, 0.55) * Sparkle(xz, t, 4.5, 0.9) * 0.45;
+		rough = lerp(0.48, 0.3, flower);
+		f0 = float3(0.06, 0.05, 0.05);
+		gloss = 0.6;
+		nLit = normalize(n + float3(sin(xz.x) * 0.04, 0.08, cos(xz.y) * 0.04));
+	}
+	albedo *= lerp(float3(1, 1, 1), i.c.rgb, kind < 0.5 ? 0.08 : 0.18);
+	albedo *= lerp(1.0, 0.72, cliff);
+	if (kind >= 0.5) gloss *= saturate(n.y * 1.15);
+	float sh = ShadowAt(i.w, n);
+	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
+	col += glow;
+	ApplyReflect(col, nLit, v, i.w, rough, gloss * lerp(1.0, 0.08, saturate(sGhost)));
+	MapFinish(col, albedo, n, nLit, v, i.w, rough, gloss, sh, 0);
+	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(1)), i.w);
+}
+GOut PSGM(PSIn i) { return ExtraGround(i, 0); }
+GOut PSGH(PSIn i) { return ExtraGround(i, 1); }
+GOut PSGK(PSIn i) { return ExtraGround(i, 2); }
+
 GOut PSG0(PSIn i) { return GroundPS(i, 0); }
 GOut PSG1(PSIn i) { return GroundPS(i, 1); }
 GOut PSG2(PSIn i) { return GroundPS(i, 2); }
@@ -2615,7 +2742,7 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		nave += float3(0.78, 0.52, 1.0) * (arch * 0.48 + rose * 0.65);
 		nave += float3(1.0, 0.76, 0.34) * candle * 0.9;
 		c = lerp(c, nave, down * 0.94);
-	} else {
+	} else if (ths < 13.5) {
 		float2 l1 = pit1 * 1.8 + float2(sin(t * 0.25), cos(t * 0.2)) * 0.4;
 		float2 l2 = pit2 * 3.2 - float2(cos(t * 0.18), sin(t * 0.22)) * 0.5;
 		float2 c1 = floor(l1), c2 = floor(l2);
@@ -2631,6 +2758,30 @@ void AbyssAndSky(inout float3 c, float3 rd, float ths, float t, float gust)
 		float2 sf = frac(sL) - 0.5 - (hash22(sc) - 0.5) * 0.4;
 		float skyOrb = exp(-dot(sf, sf) * 16.0) * step(0.58, hash21(sc));
 		c += float3(1.0, 0.74, 0.34) * skyOrb * up * 0.65;
+	} else if (ths < 14.5) {
+		float2 g = abs(frac(pit1 * 2.4) - 0.5);
+		float frame = smoothstep(0.4, 0.49, max(g.x, g.y));
+		float pane = exp(-length(frac(pit2 * 1.6) - 0.5) * 6.0);
+		float3 glass = lerp(float3(0.55, 0.68, 0.82), float3(0.92, 0.96, 1.0), pane);
+		glass += float3(0.7, 0.85, 1.0) * frame * 0.7;
+		c = lerp(c, glass, down * 0.94);
+		float streak = pow(0.5 + 0.5 * sin(pit1.x * 7.0 + pit1.y * 3.0 + t * 0.6), 8.0);
+		c += float3(0.8, 0.9, 1.0) * streak * up * 0.22;
+	} else if (ths < 15.5) {
+		float cloud = smoothstep(0.35, 0.75, fbmSky(pit1 * 0.8 + t * 0.04));
+		float3 sky = lerp(float3(1.0, 0.86, 0.55), float3(1.0, 0.97, 0.9), cloud);
+		float ray = pow(0.5 + 0.5 * sin(pit1.x * 2.2 + t * 0.12), 10.0);
+		sky += float3(1.0, 0.95, 0.7) * ray * 0.35;
+		c = lerp(c, sky, saturate(up * 0.8 + down * 0.94));
+	} else {
+		float2 pg = pit1 * 1.4 + float2(sin(t * 0.3), cos(t * 0.22)) * 0.3;
+		float2 pc = floor(pg);
+		float2 pf = frac(pg) - 0.5 - (hash22(pc) - 0.5) * 0.35;
+		float petal = exp(-dot(pf, pf) * 14.0) * step(0.5, hash21(pc));
+		float3 candy = lerp(float3(1.0, 0.72, 0.84), float3(0.72, 0.9, 1.0), fbmSky(pit2));
+		candy += float3(1.0, 0.85, 0.95) * petal * 0.8;
+		c = lerp(c, candy, down * 0.9);
+		c += float3(1.0, 0.7, 0.85) * petal * up * 0.35;
 	}
 }
 
@@ -2664,12 +2815,15 @@ GOut SkyPS(QOut i, float ths)
 		else if (ths > 4.5 && ths < 5.5) clAmt = 0;
 		else if (ths > 7.5 && ths < 8.5) clAmt = 0;
 		else if (ths > 9.5 && ths < 13.0) clAmt = 0;
+		else if (ths > 13.5 && ths < 14.5) clAmt = 0.04;
+		else if (ths > 14.5 && ths < 15.5) clAmt = 0.62;
+		else if (ths > 15.5) clAmt = 0.3;
 		c = lerp(c, float3(0.95, 0.97, 1), cl * clAmt);
 		float night = 1. - saturate(dot(Tint.rgb, float3(0.25, 0.5, 0.25)) * 3.0);
 		float2 cell = floor(i.uv * float2(240, 135));
 		float hs = hash21(cell);
 		float star = step(0.992, hs) * smoothstep(0.78, 0.12, y) * night;
-		if (ths < 2.5 || (ths > 5.5 && ths < 7.5) || (ths > 8.5 && ths < 9.5) || ths > 12.5)
+		if (ths < 2.5 || (ths > 5.5 && ths < 7.5) || (ths > 8.5 && ths < 9.5) || (ths > 12.5 && ths < 13.5) || (ths > 14.5 && ths < 15.5))
 			c += (0.55 + 0.45 * sin(t * 1.8 + hs * 30.)) * star;
 		float horz = smoothstep(0.18, 0.52, y) * smoothstep(0.92, 0.58, y);
 		float skyA = smoothstep(0.88, 0.05, y);
@@ -2752,7 +2906,7 @@ GOut SkyPS(QOut i, float ths)
 			c += float3(0.52, 0.32, 0.82) * exp(-dot(md, md) * 1.5) * skyA * 0.16;
 			float beam = pow(saturate(1.0 - abs(i.uv.x - 0.72) * 16.0), 3.2) * saturate(0.48 - y);
 			c += float3(0.7, 0.52, 1.0) * beam * 0.09;
-		} else {
+		} else if (ths < 13.5) {
 			c = lerp(c, float3(0.35, 0.32, 0.55), horz * 0.12);
 			float2 lg = i.uv * float2(5.0, 3.0);
 			float2 lc = floor(lg);
@@ -2760,6 +2914,28 @@ GOut SkyPS(QOut i, float ths)
 			float lh = hash21(lc);
 			float orb = exp(-dot(lf, lf) * 10.0) * step(0.62, lh);
 			c += float3(1.0, 0.72, 0.38) * orb * skyA * 0.45;
+		} else if (ths < 14.5) {
+			float2 g = abs(frac(i.uv * float2(9.0, 5.0)) - 0.5);
+			float frame = smoothstep(0.42, 0.49, max(g.x, g.y));
+			c = lerp(c, float3(0.62, 0.72, 0.84), 0.35);
+			c += float3(0.85, 0.92, 1.0) * frame * skyA * 0.55;
+			float kalei = pow(0.5 + 0.5 * sin(i.uv.x * 18.0 + i.uv.y * 11.0 + t * 0.4), 6.0);
+			c += float3(0.75, 0.88, 1.0) * kalei * skyA * 0.18;
+		} else if (ths < 15.5) {
+			c = lerp(float3(1.0, 0.78, 0.32), float3(1.0, 0.97, 0.86), smoothstep(0.05, 0.72, y));
+			float ray = pow(saturate(0.5 + 0.5 * sin(i.uv.x * 8.0 + t * 0.08)), 10.0);
+			c += float3(1.0, 0.95, 0.65) * ray * skyA * 0.7;
+			float2 hg = (i.uv - float2(0.5, 0.16)) * float2(1.2, 1.5);
+			c += float3(1.0, 0.98, 0.82) * exp(-dot(hg, hg) * 2.4) * 0.9;
+			c += float3(1.0, 1.0, 0.95) * exp(-dot(hg, hg) * 18.0) * 1.2;
+		} else {
+			c = lerp(float3(1.0, 0.45, 0.72), float3(0.55, 0.82, 1.0), smoothstep(0.0, 0.85, y));
+			float2 pg = i.uv * float2(9.0, 5.0) + float2(t * 0.05, t * 0.02);
+			float2 pc = floor(pg);
+			float2 pf = frac(pg) - 0.5;
+			float petal = exp(-dot(pf, pf) * 10.0) * step(0.35, hash21(pc));
+			c += float3(1.0, 0.55, 0.75) * petal * skyA * 0.85;
+			c += float3(1.0, 0.9, 0.4) * pow(saturate(0.5 + 0.5 * sin(i.uv.x * 4.0 + t * 0.25)), 6.0) * skyA * 0.16;
 		}
 		AbyssAndSky(c, WorldRay(i.uv), ths, t, gustS);
 	}
@@ -2818,7 +2994,10 @@ void AirCraft(inout float3 col, float2 uv, float z, float th, float t)
 	else if (th < 10.5) tint = float3(0.62, 0.55, 1.0);
 	else if (th < 11.5) tint = float3(0.45, 0.85, 1.0);
 	else if (th < 12.5) tint = float3(0.9, 0.72, 1.0);
-	else tint = float3(1.0, 0.82, 0.48);
+	else if (th < 13.5) tint = float3(1.0, 0.82, 0.48);
+	else if (th < 14.5) tint = float3(0.82, 0.9, 1.0);
+	else if (th < 15.5) tint = float3(1.0, 0.94, 0.7);
+	else tint = float3(1.0, 0.72, 0.84);
 	col += tint * (m1 * 0.5 + m2 * 0.9) * veil * (0.28 + gust * 0.45);
 	float2 dir = wind;
 	float dl = length(dir);
@@ -2996,7 +3175,7 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		float moon = pow(md, 180.0) + pow(md, 16.0) * 0.35;
 		float ray = pow(0.5 + 0.5 * sin(yaw * 14.0 + t * 0.15), 10.0);
 		col += (float3(0.92, 0.86, 1.0) * moon * 0.75 + float3(0.68, 0.48, 1.0) * ray * 0.35) * veil;
-	} else {
+	} else if (th < 13.5) {
 		float2 lg = wxz * 0.28 + float2(sin(t * 0.2), cos(t * 0.18)) * 0.35;
 		float2 lc = floor(lg);
 		float2 lf = frac(lg) - 0.5 - (hash22(lc) - 0.5) * 0.4;
@@ -3004,6 +3183,21 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		float orb = exp(-dot(lf, lf) * 16.0) * step(0.56, lh);
 		float bob = 0.55 + 0.45 * sin(t * 1.4 + lh * 12.0);
 		col += float3(1.0, 0.74, 0.36) * orb * bob * veil * 0.82;
+	} else if (th < 14.5) {
+		float2 g = abs(frac(wxz * 0.5) - 0.5);
+		float frame = smoothstep(0.42, 0.49, max(g.x, g.y));
+		float streak = pow(0.5 + 0.5 * sin(yaw * 9.0 + t * 0.35), 8.0);
+		col += float3(0.75, 0.88, 1.0) * (frame * 0.55 + streak * 0.28) * veil;
+	} else if (th < 15.5) {
+		float ray = pow(0.5 + 0.5 * sin(yaw * 6.0 + t * 0.12), 12.0);
+		float halo = pow(saturate(rd.y), 6.0);
+		col += (float3(1.0, 0.95, 0.72) * ray * 0.45 + float3(1.0, 0.98, 0.88) * halo * 0.35) * veil;
+	} else {
+		float2 pg = wxz * 0.4 + float2(sin(t * 0.25), cos(t * 0.2)) * 0.3;
+		float2 pc = floor(pg);
+		float2 pf = frac(pg) - 0.5 - (hash22(pc) - 0.5) * 0.35;
+		float petal = exp(-dot(pf, pf) * 14.0) * step(0.48, hash21(pc));
+		col += float3(1.0, 0.7, 0.84) * petal * veil * 0.7;
 	}
 }
 
@@ -3108,7 +3302,10 @@ float4 PSGrade(QOut i) : SV_Target
 	else if (th < 10.5) { grade = float3(0.96, 0.98, 1.14); shaftK = 0.08; }
 	else if (th < 11.5) { grade = float3(0.9, 0.95, 1.04); shaftK = 0.08; }
 	else if (th < 12.5) { grade = float3(1.08, 0.96, 1.14); shaftK = 0.1; }
-	else { grade = float3(0.96, 0.97, 1.06); shaftK = 0.55; }
+	else if (th < 13.5) { grade = float3(0.96, 0.97, 1.06); shaftK = 0.55; }
+	else if (th < 14.5) { grade = float3(0.94, 0.97, 1.06); shaftK = 0.15; }
+	else if (th < 15.5) { grade = float3(1.06, 1.02, 0.92); shaftK = 0.85; }
+	else { grade = float3(1.04, 0.98, 1.02); shaftK = 0.4; }
 	float gt = Eye.w;
 	float zpix = DepthMap.SampleLevel(SL, i.uv, 0).r;
 	float shaftAmt = 0.22 + saturate(StageTier() / 6.0) * 0.28;

@@ -42,6 +42,9 @@ R(TX_TH_ORBIT, L"軌道", L"Orbit", L"Orbite", L"Orbita", L"Órbita", L"궤도",
 R(TX_TH_STATION, L"船渠", L"Dock", L"Dock", L"Darsena", L"Dársena", L"선거", L"船坞", L"حوض", L"Док", L"Dock", L"Doca", L"Dok", L"Dok", L"Havuz")
 R(TX_TH_CITADEL, L"魔城", L"Citadel", L"Citadelle", L"Cittadella", L"Ciudadela", L"마성", L"魔城", L"قلعة", L"Цитадель", L"Zitadelle", L"Cidadela", L"Citadel", L"Cytadela", L"Kale")
 R(TX_TH_LANTERN, L"月灯", L"Moonlantern", L"Lanterne lunaire", L"Lanterna lunare", L"Farol lunar", L"월등", L"月灯", L"قنديل القمر", L"Лунный фонарь", L"Mondlaterne", L"Lanterna lunar", L"Maanlantaarn", L"Księżycowa latarnia", L"Ay feneri")
+R(TX_TH_MIRROR, L"鏡", L"Mirror", L"Miroir", L"Specchio", L"Espejo", L"거울", L"镜", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna")
+R(TX_TH_HEAVEN, L"天界", L"Heaven", L"Cieux", L"Cielo", L"Cielo", L"천계", L"天界", L"السماء", L"Небеса", L"Himmel", L"Céu", L"Hemel", L"Niebiosa", L"Gökyüzü")
+R(TX_TH_MARCHEN, L"メルヘン", L"Märchen", L"Conte", L"Fiaba", L"Cuento", L"메르헨", L"童话", L"حكاية", L"Сказка", L"Märchen", L"Conto", L"Sprookje", L"Bajka", L"Masal")
 // ---------------------------------------------------------------- 能力値
 R(TX_ST_HP, L"HP", L"HP", L"PV", L"PS", L"PV", L"HP", L"HP", L"الصحة", L"ОЗ", L"LP", L"PV", L"LP", L"PŻ", L"CP")
 R(TX_ST_MP, L"MP", L"MP", L"PM", L"PM", L"PM", L"MP", L"MP", L"المانا", L"ОМ", L"MP", L"PM", L"MP", L"PM", L"MP")

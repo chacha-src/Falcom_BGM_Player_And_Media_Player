@@ -105,6 +105,9 @@ call :job ps_5_0 PSG7 shaders\omake_tactics.hlsl tac_PSG7 tac_psg7
 call :job ps_5_0 PSG8 shaders\omake_tactics.hlsl tac_PSG8 tac_psg8
 call :job ps_5_0 PSG9 shaders\omake_tactics.hlsl tac_PSG9 tac_psg9
 call :job ps_5_0 PSGX shaders\omake_tactics.hlsl tac_PSGX tac_psgx
+call :job ps_5_0 PSGM shaders\omake_tactics.hlsl tac_PSGM tac_psgm
+call :job ps_5_0 PSGH shaders\omake_tactics.hlsl tac_PSGH tac_psgh
+call :job ps_5_0 PSGK shaders\omake_tactics.hlsl tac_PSGK tac_psgk
 call :job ps_5_0 PSProp shaders\omake_tactics.hlsl tac_PSProp tac_psprop
 call :job ps_5_0 PSWater shaders\omake_tactics.hlsl tac_PSWater tac_pswater
 call :job ps_5_0 PSLava shaders\omake_tactics.hlsl tac_PSLava tac_pslava

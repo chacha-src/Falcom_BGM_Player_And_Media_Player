@@ -2932,6 +2932,9 @@
     <None Include="res\cso\tac_vssbsh.cso" />
     <None Include="res\cso\tac_vsksh.cso" />
     <None Include="kb_sasami\data\gs.wopn" />
+    <None Include="res\cso\tac_psgm.cso" />
+    <None Include="res\cso\tac_psgh.cso" />
+    <None Include="res\cso\tac_psgk.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

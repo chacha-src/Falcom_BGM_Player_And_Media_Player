@@ -1518,6 +1518,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monster, int boss)
 {
 	ActorInit(a);
+	MonsterPrepareScale(monster);
 	a.gait = MonsterGait(monster);
 	const MonsterDef& md = MonsterInfo(monster);
 	a.look = md.look;
@@ -1527,8 +1528,14 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 	if (md.look == LK_MESH) {
 		int mi = r.CreatureModel(md.model);
 		a.model = md.model;
-		a.scale = md.scale * bs;
+		float sc = md.scale > 0.02f ? md.scale : 1.f;
+		a.scale = sc * bs;
 		a.height = 1.7f * a.scale;
+		if (md.footSpan >= 1 && md.footSpan <= 5) {
+			float tall = TacMonsterTall(md.model);
+			if (tall > 0.02f) a.height = tall * a.scale;
+			if (a.height < 0.55f) a.height = 0.55f;
+		}
 		a.hover = md.moveType == MV_FLY ? .4f : 0;
 		if (mi >= 0) {
 			a.proc = 3;

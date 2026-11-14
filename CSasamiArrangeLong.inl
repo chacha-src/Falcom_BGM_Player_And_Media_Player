@@ -802,6 +802,57 @@ static void ApplyPatGroove(int style, int pat, int bar, int div, int section,
 		hat = (uint16_t)((hat | ride) & 0x0111);
 		compM = (uint16_t)(compM & 0x0111);
 		bassHit = (uint16_t)(bassHit & 0x0111);
+	} else if (section == SEC_BODY && !StyleQuiet(style)) {
+		/* ループ全長を 8 小節ごとの節に分ける。節ごとに打点を変え、
+		   48 小節が同じ 8 小節のコピーにならないようにする。 */
+		int loop = s_loopBars;
+		if (loop < 16 || loop > 64) loop = 32;
+		const int at = (bar % loop);
+		const int sec = at / 8;
+		const int w = at - sec * 8;
+		switch (sec % 6) {
+		case 0:
+			arpM = (uint16_t)(arpM & 0x1111);
+			if (hat) hat = (uint16_t)(hat & 0x5555);
+			break;
+		case 1:
+			hat = (uint16_t)(hat | 0x2222);
+			bassHit = (uint16_t)(bassHit | 0x0505);
+			compM = (uint16_t)(compM | 0x1111);
+			break;
+		case 2:
+			ohat = (uint16_t)(ohat | 0x4444);
+			compM = (uint16_t)(compM | 0x4444);
+			arpM = (uint16_t)(arpM | 0x0A0A);
+			break;
+		case 3:
+			kick = (uint16_t)(kick & 0x0101);
+			hat = (uint16_t)(hat & 0x1111);
+			arpM = 0;
+			compM = (uint16_t)(compM & 0x0001);
+			bassHit = (uint16_t)(bassHit & 0x0101);
+			break;
+		case 4:
+			hat = (uint16_t)(0xFFFF);
+			bassHit = (uint16_t)(bassHit | 0x5555);
+			arpM = (uint16_t)(arpM | 0x5555);
+			break;
+		default:
+			hat = (uint16_t)(hat | 0xAAAA);
+			compM = (uint16_t)(compM | 0x2222);
+			if (w >= 4) arpM = (uint16_t)(arpM | 0x0F0F);
+			break;
+		}
+		if (w & 1)
+			compM = (uint16_t)(compM ^ 0x0100);
+		if (w == 0 && sec > 0)
+			drm[DV_CRASH] = 1;
+		if (w == 7) {
+			static const uint16_t fill[6] = { 0x00F0, 0x0FF0, 0x5550, 0x3330, 0x0F00, 0x00FF };
+			snare = (uint16_t)(snare | fill[sec % 6]);
+			hat = (uint16_t)(hat & (uint16_t)~fill[sec % 6]);
+			arpM = 0;
+		}
 	}
 	drm[DV_KICK] = Fit16(kick, div);
 	drm[DV_SNARE] = Fit16(snare, div);
@@ -818,9 +869,15 @@ static void ApplyPatGroove(int style, int pat, int bar, int div, int section,
 	int k = 0;
 	int n = div < 16 ? div : 16;
 	uint16_t bh = Fit16(bassHit, div);
+	int rot = 0;
+	if (section == SEC_BODY && nd > 0) {
+		int loop = s_loopBars;
+		if (loop < 16 || loop > 64) loop = 32;
+		rot = (bar % loop) % nd;
+	}
 	for (int i = 0; i < n; i++) {
 		if (bh & (uint16_t)(1u << i)) {
-			bass[i] = deg[k % nd];
+			bass[i] = deg[(k + rot) % nd];
 			k++;
 		}
 	}

@@ -35,6 +35,8 @@ enum {
 	IDC_SAA_LFORM = 4948,
 	IDC_SAA_FORM = 4949,
 	IDC_SAA_FORMVAL = 4950,
+	IDC_SAA_LTIMES = 4951,
+	IDC_SAA_TIMES = 4952,
 	IDC_SAA_TGT_BASE = 4960,   /* +ch */
 	IDC_SAA_DRM_BASE = 5000    /* +ch */
 };
@@ -83,10 +85,10 @@ protected:
 	int m_heard;
 	int m_vis[32], m_mute[32], m_solo[32], m_clef[32];
 	CCustomStatic m_styleLbl, m_pitchLbl, m_introLbl, m_breakLbl, m_endLbl, m_hint, m_status;
-	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl, m_loopLbl;
+	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl, m_loopLbl, m_timesLbl;
 	CCustomStatic m_patLbl, m_accLbl, m_melLbl, m_formLbl, m_formVal;
 	CCustomSliderCtrl m_form;
-	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_loopBars, m_pat;
+	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_loopBars, m_loopTimes, m_pat;
 	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending, m_vary;
 	CCustomRadioButton m_modeOver, m_modeRw;
 	CCustomCheckBox m_tgt[32], m_drm[32];
@@ -154,6 +156,10 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	static const int kLoop[] = { 0, 16, 24, 32, 48, 64 };
 	int li = m_loopBars.GetSafeHwnd() ? m_loopBars.GetCurSel() : 0;
 	o->loopBars = kLoop[(li >= 0 && li < 6) ? li : 0];
+	int times = m_loopTimes.GetSafeHwnd() ? m_loopTimes.GetCurSel() + 1 : 1;
+	if (times < 1) times = 1;
+	if (times > 20) times = 20;
+	o->loopTimes = times;
 	int pat = m_pat.GetSafeHwnd() ? m_pat.GetCurSel() : 0;
 	if (pat < 0 || pat >= SC_ARRANGE_COUNT) pat = 0;
 	o->patVar = pat;
@@ -411,6 +417,16 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	addBarItem(m_loopBars, 48);
 	addBarItem(m_loopBars, 64);
 	m_loopBars.SetCurSel(0);
+	m_timesLbl.Create(LL14(L"ループを入れる回数（1〜20。24小節×3回＝72小節）", L"How many times to play the loop (1–20. 24 bars × 3 = 72)", L"Nombre de boucles (1–20)", L"Quante volte il ciclo (1–20)", L"Cuántas veces el ciclo (1–20)", L"루프 반복 횟수(1–20)", L"循环播放次数（1–20）", L"عدد تكرار الحلقة (1–20)", L"Сколько раз петля (1–20)", L"Wie oft die Schleife (1–20)", L"Quantas vezes o ciclo (1–20)", L"Hoe vaak de loop (1–20)", L"Ile razy pętla (1–20)", L"Döngü kaç kez (1–20)"),
+		stStyle, z, this, IDC_SAA_LTIMES);
+	m_loopTimes.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_TIMES);
+	m_loopTimes.SetAeroMode(FALSE);
+	for (int n = 1; n <= 20; n++) {
+		wchar_t s[32];
+		_snwprintf_s(s, _TRUNCATE, LL14(L"%d回", L"%d", L"%d", L"%d", L"%d", L"%d회", L"%d次", L"%d", L"%d", L"%d×", L"%d", L"%d", L"%d", L"%d"), n);
+		m_loopTimes.AddString(s);
+	}
+	m_loopTimes.SetCurSel(0);
 
 	m_introLbl.Create(LL14(L"イントロの小節数", L"Intro bars", L"Mesures d'intro", L"Battute intro", L"Compases de intro", L"인트로 마디", L"前奏小节数", L"موازير المقدمة", L"Такты вступления", L"Intro-Takte", L"Compassos de intro", L"Intromaten", L"Takty intra", L"Giriş ölçüleri"),
 		stStyle, z, this, IDC_SAA_LINTRO);
@@ -563,7 +579,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_patLbl, &m_pat, &m_formLbl, &m_formVal, &m_form, &m_progLbl, &m_prog, &m_progDesc,
 		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl, &m_accLbl, &m_melLbl,
 		&m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
-		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars, &m_loopLbl, &m_loopBars,
+		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars, &m_loopLbl, &m_loopBars, &m_timesLbl, &m_loopTimes,
 		&m_introLbl, &m_breakLbl, &m_endLbl, &m_introBars, &m_breakBars, &m_endBars,
 		&m_pitchLbl, &m_pitch, &m_hint, &m_status, &m_preview, &m_reroll, &m_ok, &m_cancel };
 	for (int i = 0; i < (int)(sizeof(kids) / sizeof(kids[0])); i++)
@@ -583,7 +599,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	prepLbl(m_styleLbl); prepLbl(m_pitchLbl); prepLbl(m_introLbl); prepLbl(m_breakLbl); prepLbl(m_endLbl);
 	prepLbl(m_hint); prepLbl(m_status); prepLbl(m_progLbl); prepLbl(m_progDesc);
 	prepLbl(m_targetLbl); prepLbl(m_drumLbl); prepLbl(m_groupLbl); prepLbl(m_genLbl);
-	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl); prepLbl(m_loopLbl);
+	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl); prepLbl(m_loopLbl); prepLbl(m_timesLbl);
 	prepLbl(m_formLbl); prepLbl(m_formVal);
 	{
 		const int nCh = NumCh();
@@ -796,6 +812,10 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_loopLbl.MoveWindow(x, y, w, labH);
 	y += labH + 2;
 	placeCombo(m_loopBars, x, y, w);
+	y += comboH + 8;
+	m_timesLbl.MoveWindow(x, y, w, labH);
+	y += labH + 2;
+	placeCombo(m_loopTimes, x, y, w);
 	y += comboH + 10;
 	const int lw = (w - 16) / 3;
 	m_introLbl.MoveWindow(x, y, lw, labH);
@@ -853,7 +873,7 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 
 	raise(m_styleLbl); raise(m_groupLbl); raise(m_progLbl); raise(m_progDesc);
 	raise(m_patLbl); raise(m_formLbl); raise(m_formVal); raise(m_accLbl); raise(m_melLbl);
-	raise(m_genLbl); raise(m_loopLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
+	raise(m_genLbl); raise(m_loopLbl); raise(m_timesLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
 	raise(m_targetLbl); raise(m_drumLbl);
 	ScStaffForceOpaqueKids(this);
 }
@@ -974,13 +994,17 @@ int ScAutoArrangeDlgRun(const ScAutoArrangeHost* host)
 	if (!host || !host->ev || !host->evCount) return IDCANCEL;
 	CWnd* parent = host->ctx ? (CWnd*)host->ctx : NULL;
 	HWND hp = (parent && parent->GetSafeHwnd()) ? parent->GetSafeHwnd() : NULL;
-	/* 巨大な譜面を親にすると、ダイアログを出す前に全面再描画が走る。出るまで止める。 */
+	/* 出す直前だけ再描画を止める。閉じたあとは無効化するだけ。
+	   子ウィンドウごと消去すると、開いて閉じるたびに譜面が UI スレッドで固まる。 */
 	if (hp) ::SendMessage(hp, WM_SETREDRAW, FALSE, 0);
-	CSasamiAutoArrangeDlg dlg(host, parent);
-	const int rc = (int)dlg.DoModal();
+	int rc = IDCANCEL;
+	{
+		CSasamiAutoArrangeDlg dlg(host, parent);
+		rc = (int)dlg.DoModal();
+	}
 	if (hp && ::IsWindow(hp)) {
 		::SendMessage(hp, WM_SETREDRAW, TRUE, 0);
-		::RedrawWindow(hp, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		::InvalidateRect(hp, NULL, FALSE);
 	}
 	return rc;
 }

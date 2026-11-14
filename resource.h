@@ -2408,6 +2408,9 @@
 #define IDR_CSO_TAC_PSSKY9              4999
 #define IDR_CSO_TAC_CSWX                5000
 #define IDR_CSO_TAC_VSPWX               5001
+#define IDR_CSO_TAC_PSGM                5002
+#define IDR_CSO_TAC_PSGH                5003
+#define IDR_CSO_TAC_PSGK                5004
 #define IDR_GS_WOPN                     399
 
 // Next default values for new objects

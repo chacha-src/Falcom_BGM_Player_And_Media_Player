@@ -2953,6 +2953,122 @@ static int ArpPitch(int root, int type, int power, int step, int shape, int dup)
 	return m;
 }
 
+/* 4曲に共通の身振り。リズム型でもコードの積み上げでもない。
+   分散は同じ指順（根・五・三・五・根の上）を次の和音へ運び、
+   部分メロディは3度の二音がスケールを数音歩いて折り返す。 */
+struct MotifWalk {
+	int sweep;
+	int prevSweep;
+	int deg;
+	int dir;
+	int run;
+	int prevTop;
+	int slotSweep;
+	int slotFrag;
+	int fragTop;
+	int fragThird;
+};
+
+static MotifWalk s_motif;
+
+static void MotifBegin(void)
+{
+	s_motif.sweep = 0;
+	s_motif.prevSweep = -1;
+	s_motif.deg = 0;
+	s_motif.dir = 1;
+	s_motif.run = 0;
+	s_motif.prevTop = -1;
+	s_motif.slotSweep = -1;
+	s_motif.slotFrag = -1;
+	s_motif.fragTop = 64;
+	s_motif.fragThird = 60;
+}
+
+static int NearMidi(int midi, int prev, int lo, int hi)
+{
+	if (hi < lo) hi = lo;
+	if (prev >= 0) {
+		while (midi < prev - 7) midi += 12;
+		while (midi > prev + 6) midi -= 12;
+	}
+	while (midi < lo) midi += 12;
+	while (midi > hi) midi -= 12;
+	if (midi < lo) midi = lo;
+	if (midi > hi) midi = hi;
+	if (midi < 0) midi = 0;
+	if (midi > 127) midi = 127;
+	return midi;
+}
+
+/* スチールギターの分散。一音ずつ。和音が変わっても指順は続け、近いオクターブへ寄せる。 */
+static int BrokenSweep(int root, int type, int power, int slotKey)
+{
+	if (s_motif.slotSweep == slotKey && s_motif.prevSweep >= 0)
+		return s_motif.prevSweep;
+	s_motif.slotSweep = slotKey;
+	int tones[4];
+	int nt = ChordTones(root, type, power, tones, 4);
+	if (nt < 1) return 64;
+	/* -1 は五度の下、0 根、1 三度、2 五度、3 根の上。上がってから2音降りる。 */
+	static const int finger[8] = { -1, 0, 1, 2, 3, 2, 1, 0 };
+	int f = finger[s_motif.sweep & 7];
+	s_motif.sweep++;
+	int m;
+	if (f < 0) m = tones[nt - 1] - 12;
+	else if (f >= 3) m = tones[0] + 12;
+	else if (f >= nt) m = tones[nt - 1];
+	else m = tones[f];
+	m = NearMidi(m, s_motif.prevSweep, 48, 84);
+	s_motif.prevSweep = m;
+	return m;
+}
+
+/* 弦の掛け合い。強拍はコードトーン、あいだは隣の音。もう一音は下の3度。 */
+static void PartialDyad(int root, int type, int strong, int slotKey, int* top, int* third)
+{
+	if (s_motif.slotFrag == slotKey) {
+		if (top) *top = s_motif.fragTop;
+		if (third) *third = s_motif.fragThird;
+		return;
+	}
+	s_motif.slotFrag = slotKey;
+	int deg = s_motif.deg;
+	if (strong) {
+		static const int chordDeg[3] = { 0, 2, 4 };
+		int best = 0;
+		int bestD = 99;
+		for (int i = 0; i < 3; i++) {
+			int d = deg - chordDeg[i];
+			if (d < 0) d = -d;
+			if (d < bestD) { bestD = d; best = chordDeg[i]; }
+		}
+		deg = best;
+		s_motif.run = 0;
+	} else {
+		deg += s_motif.dir;
+		s_motif.run++;
+		if (s_motif.run >= 4) {
+			s_motif.dir = -s_motif.dir;
+			s_motif.run = 0;
+		}
+	}
+	while (deg < 0) deg += 7;
+	while (deg > 6) deg -= 7;
+	s_motif.deg = deg;
+	int hi = ScaleStep(root, type, deg);
+	int lo = ScaleStep(root, type, deg - 2);
+	hi = NearMidi(hi, s_motif.prevTop, 64, 88);
+	lo = NearMidi(lo, hi - 4, 55, 81);
+	if (lo >= hi) lo = hi - 3;
+	if (lo < 0) lo = 0;
+	s_motif.prevTop = hi;
+	s_motif.fragTop = hi;
+	s_motif.fragThird = lo;
+	if (top) *top = hi;
+	if (third) *third = lo;
+}
+
 static int DrumVolOf(int section, int phase, int bar, int hot, int half)
 {
 	int v = 100;
@@ -3171,10 +3287,18 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	const int useProg = opt->useProg || explicitTargets || totalNotes <= 0;
 	const int rewrite = (opt->mode == SC_AM_REWRITE);
 	s_arrGsMap = opt->gsMap;
+	int bodyBars = 16;
 	{
 		int loop = opt->loopBars;
 		if (loop < 16 || loop > 64) loop = StyleLoopBars(opt->style);
 		s_loopBars = loop;
+		int times = opt->loopTimes;
+		if (times < 1) times = 1;
+		if (times > 20) times = 20;
+		bodyBars = loop * times;
+		if (opt->genBars > bodyBars) bodyBars = opt->genBars;
+		if (bodyBars < 16) bodyBars = 16;
+		if (bodyBars > 1280) bodyBars = 1280;
 	}
 
 	const int isFm = opt->isFm ? 1 : 0;
@@ -3617,19 +3741,19 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (lead0 == 0xFFFFFFFFu) { lead0 = introT1; lead1 = noteEnd; }
 	if (noteEnd == 0) {
 		/* 音符が無いときは C4（主音）が置いてあるものとして、指定小節ぶん書く。 */
-		int gb = opt->genBars > 0 ? opt->genBars : 16;
-		noteEnd = introT1 + (uint32_t)(gb * ScStaffMeterTicksPerMeasure(defN, defD));
+		noteEnd = introT1 + (uint32_t)(bodyBars * ScStaffMeterTicksPerMeasure(defN, defD));
 		lead0 = introT1; lead1 = noteEnd;
-	} else if (opt->genBars > 0) {
-		uint32_t want = introT1 + (uint32_t)(opt->genBars * ScStaffMeterTicksPerMeasure(defN, defD));
+	} else {
+		/* ループの長さ × 回数。24小節を3回なら本体は72小節。既存がそれより長ければ切らない。 */
+		uint32_t want = introT1 + (uint32_t)(bodyBars * ScStaffMeterTicksPerMeasure(defN, defD));
 		if (noteEnd < want) noteEnd = want;
 		if (lead1 < want) lead1 = want;
 	}
 	{
-		/* 本体は最低16小節。短い1小節の繰り返しで終わらせない。 */
+		/* 本体はループを指定回数ぶん。短い1小節の繰り返しで終わらせない。 */
 		int blMin = ScStaffMeterTicksPerMeasure(defN, defD);
 		if (blMin < 1) blMin = 1;
-		uint32_t minEnd = introT1 + (uint32_t)(16 * blMin);
+		uint32_t minEnd = introT1 + (uint32_t)(bodyBars * blMin);
 		if (noteEnd < minEnd) noteEnd = minEnd;
 		if (lead1 < minEnd) lead1 = minEnd;
 	}
@@ -3867,6 +3991,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		else if (bars[i].section == SEC_END) endN++;
 	}
 	int introI = 0, endI = 0, bodyI = 0;
+	MotifBegin();
 	int nEmit = *evCount;
 	const int nPrior = nEmit;
 	for (int bi = 0; bi < nBars && !ctx.overflow; bi++) {
@@ -3993,6 +4118,24 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			&& (orn & ORN_RUN) && !StyleQuiet(opt->style)) ? 1 : 0;
 		const int jaranSlot = (allowBar && !skipChord && (orn & ORN_JARAN))
 			? JaranAt(opt->style, barAt, patVar, div, b.section) : -1;
+		/* 譜面帳が空の役割でも、チェックした ch には書く。3パートで止めない。 */
+		if (allowBar && !skipChord && !(b.section == SEC_END && endFromEnd <= 0)) {
+			auto fillRole = [&](uint16_t& m, int nCh, uint16_t pat) {
+				if (nCh < 1 || m) return;
+				m = (uint16_t)(pat & slotLow);
+				if (!m) m = (uint16_t)((home ? home : (uint16_t)1) & slotLow);
+				if (!m) m = 1;
+			};
+			uint16_t down = home ? (uint16_t)(home & slotLow) : (uint16_t)(0x1111 & slotLow);
+			if (!down) down = 1;
+			fillRole(padM, nPad, down);
+			fillRole(arpM, nArp, bassSlots ? bassSlots : (uint16_t)(0xFFFF & slotLow));
+			fillRole(innM, nHarm, hatM ? hatM : (uint16_t)(0x2222 & slotLow));
+			fillRole(cntM, nCnt, (uint16_t)(0x4444 & slotLow));
+			fillRole(stabM, nStab, stabSrc ? (uint16_t)(stabSrc & slotLow) : (uint16_t)(0x1010 & slotLow));
+			fillRole(colM, nColor, (uint16_t)(0x0101 & slotLow));
+			if (nHarm > 1 && !innBlock) innBlock = innM;
+		}
 		for (int slot = 0; slot < div && !ctx.overflow; slot++) {
 			const uint32_t slot0 = b.t0 + (uint32_t)((uint64_t)slot * (uint64_t)b.len / (uint64_t)div);
 			const uint32_t slot1 = (slot + 1 >= div) ? (b.t0 + (uint32_t)b.len)
@@ -4247,14 +4390,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					int nSub = (sub == 2) ? 4 : 2;
 					int each = room / nSub;
 					if (each < 1) each = 1;
-					int shape = (opt->style + barAt + patVar) % 5;
-					int step = barAt * 16 + slot * 2;
 					int v0 = ((slot % 4) == 0) ? gvol : (gvol - 8);
 					if (sub == 2) v0 -= 10;
 					if (v0 < 48) v0 = 48;
 					if (v0 > 118) v0 = 118;
 					for (int k = 0; k < nSub && !ctx.overflow; k++) {
-						int midi = ArpPitch(hr, ht, st.power, step + k, shape, 0);
+						int midi = BrokenSweep(hr, ht, st.power, barAt * 64 + slot * 4 + k);
 						int v = v0 - ((k & 1) ? 8 : 0);
 						if (v < 42) v = 42;
 						PlaceNote(&ctx, arpCh[i], tick + (uint32_t)(k * each), midi, each, v, sub == 2 ? 36 : 48);
@@ -4263,13 +4404,24 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				}
 				if (run32 && slot >= midSlot) hit = 0;
 				if (hit) {
-					int shape = (opt->style + barAt + patVar) % 5;
-					int step = barAt * 4 + NthBit(arpM, slot);
-					if (barAt & 1) step = 48 - (step & 15);
-					if (i == 0)
-						pit[np++] = ArpPitch(hr, ht, st.power, step, shape, 0);
-					else
-						np = FillVoicing(hr, ht, st.power, 3, phrase + i, 64, 96, pit);
+					int midi = BrokenSweep(hr, ht, st.power, barAt * 64 + slot * 4);
+					if (i > 0) {
+						int tones[4];
+						int nt = ChordTones(hr, ht, st.power, tones, 4);
+						int want = midi - 8;
+						int best = midi - 12;
+						int bestD = 99;
+						for (int t = 0; t < nt; t++) {
+							int c = tones[t];
+							while (c < want - 6) c += 12;
+							while (c > want + 6) c -= 12;
+							int d = c - want;
+							if (d < 0) d = -d;
+							if (d < bestD) { bestD = d; best = c; }
+						}
+						midi = NearMidi(best, want, 40, 76);
+					}
+					pit[np++] = midi;
 				}
 				lay(arpCh[i], hit, pit, np, span, gvol - 6, 70, 0);
 			}
@@ -4289,17 +4441,17 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					lay(harmCh[i], 0, pit, 0, span, 0, 0, 0);
 					continue;
 				}
-				if (i == 0 && StyleFam(opt->style) != FAM_METAL && StyleFam(opt->style) != FAM_MARCH) {
-					if (hit) {
-						int nth = NthBit((i == 0) ? innM : innBlock, slot);
-						int deg = LeadDeg(opt->style, patVar, barAt, nth + 4, (slot % 4) == 0, ht);
-						pit[np++] = LeadMidi(hr, ht, deg, (patVar & 8) ? 1 : 0);
+				if (hit) {
+					int top = 0, third = 0;
+					PartialDyad(hr, ht, (slot % 4) == 0, barAt * 32 + slot, &top, &third);
+					if (i == 0) {
+						pit[np++] = top;
+						if (StyleFam(opt->style) != FAM_METAL && StyleFam(opt->style) != FAM_MARCH)
+							pit[np++] = third;
+					} else {
+						pit[np++] = NearMidi(top + 12, top + 12, 72, 96);
 					}
-					lay(harmCh[i], hit, pit, np, span, gvol - 6, 74, 0);
-					continue;
 				}
-				if (hit)
-					np = FillVoicing(hr, ht, st.power, 4, phrase + 5 + i, 60, 91, pit);
 				lay(harmCh[i], hit, pit, np, span, gvol - 10, 88, 0);
 			}
 			for (int i = 0; i < nCnt; i++) {
@@ -4323,20 +4475,18 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					int v0 = gvol - (cntSub == 2 ? 16 : 6);
 					if (v0 < 46) v0 = 46;
 					for (int k = 0; k < nSub && !ctx.overflow; k++) {
-						int deg = LeadDeg(opt->style, patVar, barAt, slot * 2 + k, k == 0 && (slot % 4) == 0, ht);
+						int top = 0, third = 0;
+						PartialDyad(hr, ht, k == 0 && (slot % 4) == 0, barAt * 32 + slot * 4 + k + 1, &top, &third);
 						int v = v0 - ((k & 1) ? 6 : 0);
 						if (v < 40) v = 40;
-						PlaceNote(&ctx, cntCh[i], tick + (uint32_t)(k * each), LeadMidi(hr, ht, deg, (patVar & 8) ? 1 : 0), each, v, cntSub == 2 ? 34 : 46);
+						PlaceNote(&ctx, cntCh[i], tick + (uint32_t)(k * each), top, each, v, cntSub == 2 ? 34 : 46);
 					}
 					continue;
 				}
-				if (hit && i == 0) {
-					int nth = NthBit(cntM, slot);
-					int deg = LeadDeg(opt->style, patVar, barAt, nth, (slot % 4) == 0 || (slot % 4) == 1, ht);
-					pit[np++] = LeadMidi(hr, ht, deg, (patVar & 8) ? 1 : 0);
-				} else if (hit) {
-					int deg = LeadDeg(opt->style, patVar + 3, barAt, NthBit(cntM, slot), 1, ht);
-					pit[np++] = LeadMidi(hr, ht, deg, (patVar & 8) ? 1 : 0);
+				if (hit) {
+					int top = 0, third = 0;
+					PartialDyad(hr, ht, (slot % 4) == 0, barAt * 32 + slot + 17, &top, &third);
+					pit[np++] = (i == 0) ? top : third;
 				}
 				lay(cntCh[i], hit, pit, np, span, gvol - 8, 78, 0);
 			}
@@ -4346,8 +4496,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int np = 0;
 				int span = slotDur > 2 ? slotDur : 2;
 				int gate = 36;
-				if (!lockPart(stabCh[i], &hit, pit, &np, &span, &gate) && hit)
-					np = FillVoicing(hr, ht, st.power, 4, phrase + i, 67, 96, pit);
+				if (!lockPart(stabCh[i], &hit, pit, &np, &span, &gate) && hit) {
+					int top = 0, third = 0;
+					PartialDyad(hr, ht, 1, barAt * 32 + slot, &top, &third);
+					pit[np++] = top;
+					if (i == 0) pit[np++] = third;
+				}
 				int sv = gvol + 18 - i * 3;
 				if (sv > 127) sv = 127;
 				lay(stabCh[i], hit, pit, np, span, sv, gate, 0);
@@ -4358,8 +4512,12 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int np = 0;
 				int span = clip(SpanTicks(slot, cutNext(colM), div, b.t0, tick, b.len, slotDur), 2);
 				int gate = 84;
-				if (!lockPart(colorCh[i], &hit, pit, &np, &span, &gate) && hit)
-					np = FillVoicing(hr, ht, 0, 2, phrase, 72, 96, pit);
+				if (!lockPart(colorCh[i], &hit, pit, &np, &span, &gate) && hit) {
+					int top = 0, third = 0;
+					PartialDyad(hr, ht, (slot % 4) == 0, barAt * 32 + slot, &top, &third);
+					pit[np++] = NearMidi(top + 12, top + 12, 76, 98);
+					if (i == 0) pit[np++] = NearMidi(third + 12, third + 12, 72, 96);
+				}
 				lay(colorCh[i], hit, pit, np, span, gvol - 18, gate, 0);
 			}
 			/* その拍だけ、コードトーンを 64 分で4つ。じゃらん。 */
@@ -4369,11 +4527,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
 					int each = room / 4;
 					if (each >= 2) {
-						int up = (barAt + opt->style) & 1;
-						int step0 = (barAt * 3 + slot) & 7;
 						for (int k = 0; k < 4 && !ctx.overflow; k++) {
-							int step = up ? (step0 + k) : (step0 + 3 - k);
-							int midi = ArpPitch(hr, ht, 0, step, 2, 0);
+							int midi = BrokenSweep(hr, ht, 0, barAt * 64 + slot * 4 + k + 8);
 							int v = 64 + k * 12;
 							if (v > 116) v = 116;
 							PlaceNote(&ctx, ch, tick + (uint32_t)(k * each), midi, each, v, 40);
@@ -4391,6 +4546,45 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				WriteBgmLead(&ctx, melodyCh, &b, barAt, opt->style, patVar, form, echo);
 			}
 
+		}
+	}
+
+	/* チェックした通常パートにノートが無ければ、同じ指順の分散を8分で書く。
+	   役割の打点が空のまま残った ch を埋め、ドラム指定は触らない。 */
+	if (explicitTargets && bars && nBars > 0 && !ctx.overflow) {
+		for (int ch = 0; ch < lim && ch < 32; ch++) {
+			if (!((opt->targetMask >> ch) & 1u)) continue;
+			if ((opt->drumMask >> ch) & 1u) continue;
+			if (isFm && ch == 6) continue;
+			int isDrumRole = 0;
+			for (int i = 0; i < nDrum; i++) if (drumChs[i] == ch) isDrumRole = 1;
+			if (isDrumRole) continue;
+			int has = 0;
+			for (int i = 0; i < *evCount; i++) {
+				if ((int)ev[i].ch == ch && IsNoteKind(ev[i].kind)) { has = 1; break; }
+			}
+			if (has) continue;
+			EnsureMelodic(&ctx, opt->ui, ch, 1, 4, anySolo, 0);
+			for (int bi = 0; bi < nBars && !ctx.overflow; bi++) {
+				const BarInfo& b = bars[bi];
+				if (b.root < 0 || b.section == SEC_BREAK || b.len < 4) continue;
+				int step = b.len / 8;
+				if (step < 2) step = b.len / 4;
+				if (step < 2) step = 2;
+				int nStep = b.len / step;
+				if (nStep < 1) nStep = 1;
+				if (nStep > 16) nStep = 16;
+				for (int s = 0; s < nStep && !ctx.overflow; s++) {
+					int hr = b.root, ht = b.type;
+					if (b.root2 >= 0 && s >= nStep / 2) { hr = b.root2; ht = b.type2; }
+					int midi = BrokenSweep(hr, ht, 0, (ch + 1) * 100000 + bi * 64 + s * 4);
+					midi += ((ch % 3) - 1) * 12;
+					while (midi < 48) midi += 12;
+					while (midi > 88) midi -= 12;
+					PlaceNote(&ctx, ch, b.t0 + (uint32_t)(s * step), midi, step, 90, 72);
+				}
+			}
+			MarkUi(opt->ui, ch, 0, anySolo);
 		}
 	}
 

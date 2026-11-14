@@ -11034,7 +11034,8 @@ static HWND AuditionEnsureWnd(void)
 		0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
 	return g_auditionWnd;
 }
-
+extern int playf;
+int endflg = 0;
 extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;

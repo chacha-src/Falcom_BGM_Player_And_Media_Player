@@ -285,7 +285,7 @@ public:
 	Fix<StaticSrc, 48> statics;
 	Fix<GpuMesh, 160> m_creatures;
 	// カタログは索引だけ。起動時に読む人型はパーティのもの。残りは作成・戦闘・図鑑でその時に読む。
-	enum { MON_CATALOG = 1024 };
+	enum { MON_CATALOG = 2048 };
 	int m_monN;
 	int m_monOff[MON_CATALOG];
 	int m_monModel[MON_CATALOG];

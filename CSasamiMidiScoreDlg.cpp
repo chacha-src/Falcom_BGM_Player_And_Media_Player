@@ -4755,6 +4755,9 @@ void CSasamiMidiScoreDlg::ImportStandardMidi(const wchar_t* pathOpt)
 
 void CSasamiMidiScoreDlg::ExportStandardMidi()
 {
+	/* 試し聴き中に同じテンポラリを上書きすると、止める側が戻らなくなる。 */
+	if (m_ui.previewActive || ScStaffPreviewIsRunning())
+		AutoArrangeStop();
 	wchar_t built[MAX_PATH];
 	if (!BuildToTemp(built, MAX_PATH))
 		return;

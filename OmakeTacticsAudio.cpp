@@ -1035,6 +1035,9 @@ static const wchar_t* TacBgmFile(int scene)
 	case TAC_BGM_STATION: return L"tacticsgamestation.ogg";
 	case TAC_BGM_CITADEL: return L"tacticsgamecitadel.ogg";
 	case TAC_BGM_LANTERN: return L"tacticsgamelantern.ogg";
+	case TAC_BGM_MIRROR: return L"tacticsgamemirror.ogg";
+	case TAC_BGM_HEAVEN: return L"tacticsgameheaven.ogg";
+	case TAC_BGM_MARCHEN: return L"tacticsgamemarchen.ogg";
 	case TAC_BGM_DANGER: return L"tacticsgamedanger.ogg";
 	case TAC_BGM_CLEAR: return L"tacticsgameclear.ogg";
 	default: return L"tactics.ogg";
@@ -1133,7 +1136,7 @@ void TacBgmScene(int scene)
 		swprintf_s(hub, L"%s\\tactics.ogg", dir);
 		const wchar_t* use = want;
 		if (!TacOggOk(want) && scene != TAC_BGM_HUB) {
-			const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_LANTERN;
+			const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_MARCHEN;
 			if (theme && TacOggOk(game)) use = game;
 			else use = hub;
 		}

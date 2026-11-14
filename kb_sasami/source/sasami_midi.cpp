@@ -456,12 +456,155 @@ static int TrkCap(int t)
 	return TRK2_CAP;
 }
 
-static void WriteSmf(int nports, uint8_t* out, int outCap, int* outSize)
+/* 書き出しだけ。Cubase は MTrk 1本を1パートにする。SSW は1本の中の
+   チャンネルを分解するので、同じファイルでも向こうでは分かれて見えた。
+   テンポと拍子は先頭トラック。各チャンネルは自分のノートと、そのポートの
+   SysEx（GS Reset がテンポトラックだけだと Cubase が送らない）。 */
+static void WriteSmfByChannel(int nports, uint8_t* out, int outCap, int* outSize)
+{
+	if (nports < 1) nports = 1;
+	if (nports > 2) nports = 2;
+	int used[2][16];
+	memset(used, 0, sizeof(used));
+	for (int i = 0; i < s_evCount; i++) {
+		const MidiEv& e = s_evs[i];
+		if (e.len < 1) continue;
+		const uint8_t st = e.bytes[0];
+		if (st < 0x80 || st >= 0xF0) continue;
+		const int p = e.port ? 1 : 0;
+		if (p >= nports) continue;
+		used[p][st & 0x0F] = 1;
+	}
+	int ntr = 1;
+	for (int p = 0; p < nports; p++)
+		for (int ch = 0; ch < 16; ch++)
+			if (used[p][ch]) ntr++;
+
+	if (!out || outCap < 14) {
+		if (outSize) *outSize = 0;
+		return;
+	}
+	int olen = 0;
+	out[olen++] = 'M'; out[olen++] = 'T'; out[olen++] = 'h'; out[olen++] = 'd';
+	PutBe32(out, &olen, outCap, 6);
+	PutBe16(out, &olen, outCap, 1);
+	PutBe16(out, &olen, outCap, (uint16_t)ntr);
+	PutBe16(out, &olen, outCap, (uint16_t)SASAMI_PPQN);
+
+	auto flushTrk = [&](const uint8_t* tb, int tl) -> int {
+		if (olen + 8 + tl > outCap) return 0;
+		out[olen++] = 'M'; out[olen++] = 'T'; out[olen++] = 'r'; out[olen++] = 'k';
+		PutBe32(out, &olen, outCap, (uint32_t)tl);
+		memcpy(out + olen, tb, (size_t)tl);
+		olen += tl;
+		return 1;
+	};
+	auto endTrk = [](uint8_t* tb, int* tl, int tc) {
+		PutVlq(tb, tl, tc, 0);
+		if (*tl + 3 <= tc) {
+			tb[(*tl)++] = 0xFF;
+			tb[(*tl)++] = 0x2F;
+			tb[(*tl)++] = 0x00;
+		}
+	};
+	auto putBytes = [](uint8_t* tb, int* tl, int tc, const MidiEv& e) {
+		if (e.bytes[0] == 0xF0) {
+			if (*tl + 1 > tc) return;
+			tb[(*tl)++] = 0xF0;
+			PutVlq(tb, tl, tc, (uint32_t)(e.len - 1));
+			const int rest = e.len - 1;
+			if (rest < 0 || *tl + rest > tc) return;
+			if (rest) memcpy(tb + *tl, e.bytes + 1, (size_t)rest);
+			*tl += rest;
+		} else {
+			if (*tl + e.len > tc) return;
+			memcpy(tb + *tl, e.bytes, e.len);
+			*tl += e.len;
+		}
+	};
+
+	{
+		uint8_t* tb = s_trk0;
+		int tl = 0;
+		const int tc = TRK0_CAP;
+		uint32_t last = 0;
+		for (int i = 0; i < s_evCount; i++) {
+			const MidiEv& e = s_evs[i];
+			if (e.len < 2 || e.bytes[0] != 0xFF) continue;
+			const uint32_t dt = e.tick >= last ? e.tick - last : 0;
+			PutVlq(tb, &tl, tc, dt);
+			last = e.tick;
+			putBytes(tb, &tl, tc, e);
+		}
+		endTrk(tb, &tl, tc);
+		if (!flushTrk(tb, tl)) {
+			if (outSize) *outSize = 0;
+			return;
+		}
+	}
+
+	for (int p = 0; p < nports; p++) {
+		for (int ch = 0; ch < 16; ch++) {
+			if (!used[p][ch]) continue;
+			uint8_t* tb = s_trk1;
+			int tl = 0;
+			const int tc = TRK1_CAP;
+			char name[16];
+			if (nports > 1)
+				sprintf_s(name, p ? "B Ch %d" : "A Ch %d", ch + 1);
+			else
+				sprintf_s(name, "Ch %d", ch + 1);
+			const int nl = (int)strlen(name);
+			PutVlq(tb, &tl, tc, 0);
+			if (tl + 3 + nl <= tc) {
+				tb[tl++] = 0xFF;
+				tb[tl++] = 0x03;
+				tb[tl++] = (uint8_t)nl;
+				memcpy(tb + tl, name, (size_t)nl);
+				tl += nl;
+			}
+			PutVlq(tb, &tl, tc, 0);
+			if (tl + 4 <= tc) {
+				tb[tl++] = 0xFF;
+				tb[tl++] = 0x21;
+				tb[tl++] = 0x01;
+				tb[tl++] = (uint8_t)p;
+			}
+			uint32_t last = 0;
+			for (int i = 0; i < s_evCount; i++) {
+				const MidiEv& e = s_evs[i];
+				if (e.len < 1) continue;
+				const int ep = e.port ? 1 : 0;
+				if (ep != p) continue;
+				const uint8_t st = e.bytes[0];
+				const int syx = (st == 0xF0 || st == 0xF7);
+				const int mine = (st >= 0x80 && st < 0xF0 && (st & 0x0F) == ch);
+				if (!syx && !mine) continue;
+				const uint32_t dt = e.tick >= last ? e.tick - last : 0;
+				PutVlq(tb, &tl, tc, dt);
+				last = e.tick;
+				putBytes(tb, &tl, tc, e);
+			}
+			endTrk(tb, &tl, tc);
+			if (!flushTrk(tb, tl)) {
+				if (outSize) *outSize = 0;
+				return;
+			}
+		}
+	}
+	if (outSize) *outSize = olen;
+}
+
+static void WriteSmf(int nports, uint8_t* out, int outCap, int* outSize, int splitCh = 0)
 {
 	std::stable_sort(s_evs, s_evs + s_evCount, [](const MidiEv& a, const MidiEv& b) {
 		if (a.tick != b.tick) return a.tick < b.tick;
 		return a.seq < b.seq;
 	});
+	if (splitCh) {
+		WriteSmfByChannel(nports, out, outCap, outSize);
+		return;
+	}
 
 	if (nports < 1) nports = 1;
 	if (nports > 2) nports = 2;
@@ -1612,7 +1755,7 @@ struct SasamiTempCache {
 	int exportLoops;
 };
 static SasamiTempCache s_tempCache;
-enum { SASAMI_SMF_CACHE_VER = 21 };
+enum { SASAMI_SMF_CACHE_VER = 25 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -2616,6 +2759,17 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			break;
 	}
 
+	/* 1拍目のノートと同じ tick にマスター音量やリズム指定の SysEx が乗ると、
+	   SC-VA はその拍の NoteOn を捨て、曲の頭だけ切れる。
+	   ノートとノートオフは 1拍目のまま。それ以外はチャンネル初期化の拍へ寄せる。 */
+	for (int i = 0; i < s_evCount; i++) {
+		if (s_evs[i].tick != leadTicks || s_evs[i].len < 1) continue;
+		const uint8_t st = s_evs[i].bytes[0];
+		const int type = st & 0xF0;
+		if (st < 0xF0 && (type == 0x90 || type == 0x80)) continue;
+		s_evs[i].tick = syxC;
+	}
+
 	/* 終端はシミュレーション中に決めた公倍数。ここでは一番長い Q/J に差し替えない。
 	   展開がイベント上限で先に止まったときは、届いていない終端を採用しない。 */
 	if (gLoopEnd > 0 && tick < gLoopEnd) {
@@ -2716,9 +2870,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			}
 		}
 		s_evCount = keepN;
-		{
-			/* mpy/mpw2 に拍子は無い。1 小節 = 192 tick（PPQN 48 の 4/4）。
-			   小節線はループ頭と同じ位相に置く。 */
+		if (exportLoops <= 0) {
+			/* 再生用。mpy/mpw2 に拍子は無い。1 小節 = 192 tick（PPQN 48 の 4/4）。
+			   小節線はループ頭と同じ位相に置く。
+			   書き出しは最後に 1 小節 1 拍へ 4/4 を置く。途中の拍子は掛け出しになる。 */
 			const uint32_t phase = (gLoopStart == 0xFFFFFFFFu) ? 0 : (gLoopStart % 192u);
 			uint8_t ts[7] = { 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08 };
 			PushEv(phase, 0, ts, 7);
@@ -2871,7 +3026,54 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 	}
 
-	WriteSmf(nports, out, outCap, outSize);
+	if (exportLoops > 0) {
+		/* ノートは leadTicks（96）からなので、4/4 では 1 小節の 3 拍目＝掛け出し。
+		   tick 0 の GS Reset とテンポは 1 小節 1 拍に残す。
+		   それ以外を 96 tick 後ろへずらし、最初のノートを 2 小節 1 拍（192）に置く。 */
+		const uint32_t barTicks = (uint32_t)SASAMI_PPQN * 4u;
+		if (barTicks > leadTicks) {
+			const uint32_t add = barTicks - leadTicks;
+			for (int i = 0; i < s_evCount; i++) {
+				if (s_evs[i].tick > 0)
+					s_evs[i].tick += add;
+			}
+		}
+		/* 音色と SysEx がノートの 16 分前まで残っていると、外の音源は
+		   処理が終わらないまま発音し、頭が 32 分音符ほど遅れてまごつく。
+		   準備は 2 小節 1 拍の 1 拍以上前に終える。テンポは 1 拍目に戻す。 */
+		uint32_t firstNote = 0xFFFFFFFFu;
+		for (int i = 0; i < s_evCount; i++) {
+			const MidiEv& e = s_evs[i];
+			if (e.len < 3 || e.bytes[0] >= 0xF0) continue;
+			if ((e.bytes[0] & 0xF0) == 0x90 && e.bytes[2] && e.tick < firstNote)
+				firstNote = e.tick;
+		}
+		const uint32_t beat = (uint32_t)SASAMI_PPQN;
+		if (firstNote != 0xFFFFFFFFu && firstNote >= beat * 2u) {
+			const uint32_t syxAt = beat;
+			uint32_t pcAt = firstNote - beat * 2u;
+			if (pcAt <= syxAt) pcAt = syxAt + beat / 2u;
+			for (int i = 0; i < s_evCount; i++) {
+				MidiEv& e = s_evs[i];
+				if (e.tick == 0 || e.tick >= firstNote || e.len < 1) continue;
+				const uint8_t st = e.bytes[0];
+				if (st < 0xF0 && ((st & 0xF0) == 0x90 || (st & 0xF0) == 0x80))
+					continue;
+				if (st == 0xFF && e.len >= 2 && e.bytes[1] == 0x51) {
+					e.tick = 0;
+					continue;
+				}
+				if (st == 0xF0 || st == 0xF7 || (st == 0xFF))
+					e.tick = syxAt;
+				else
+					e.tick = pcAt;
+			}
+		}
+		uint8_t ts[7] = { 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08 };
+		PushEv(0, 0, ts, 7);
+	}
+
+	WriteSmf(nports, out, outCap, outSize, exportLoops > 0 ? 1 : 0);
 	return *outSize > 22;
 }
 

@@ -196,7 +196,7 @@ struct TerrainDef {
 };
 const TerrainDef& TerrainInfo(int t);
 
-enum Theme { TH_PLAINS, TH_CANYON, TH_FOREST, TH_SNOW, TH_DESERT, TH_VOLCANO, TH_SWAMP, TH_RUINS, TH_SEABED, TH_FALLS, TH_ORBIT, TH_STATION, TH_CITADEL, TH_LANTERN, TH_COUNT };
+enum Theme { TH_PLAINS, TH_CANYON, TH_FOREST, TH_SNOW, TH_DESERT, TH_VOLCANO, TH_SWAMP, TH_RUINS, TH_SEABED, TH_FALLS, TH_ORBIT, TH_STATION, TH_CITADEL, TH_LANTERN, TH_MIRROR, TH_HEAVEN, TH_MARCHEN, TH_COUNT };
 int ThemeNameTx(int th);
 
 enum { MAPN = 64, MAXH = 12, MAXH_SPIRAL = 999 };
@@ -642,6 +642,7 @@ struct MonsterDef {
 	int nameB;         // 0未満なら nameTx だけ。0以上なら「形容 + 種族」
 	int weak[4];       // 弱点 1〜4。0 は空き。属性か、物理・魔法・近距離・遠距離
 	int ailWeak[2];    // 状態異常の弱点。0 は空き。EF_*
+	int footSpan;      // 追加敵の占有マス。0 は未確定。1..5 は足下に合わせた大きさ
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
@@ -789,6 +790,9 @@ inline int LayerRangeCost(int fromL, int toL)
 	return 0;
 }
 float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
+float TacMonsterTall(int packIndex);   // 同じ姿勢の身長。未計測は 0
+int TacMonsterReady(int packIndex);    // パックを測り終えた。未ロードは 0
+void MonsterPrepareScale(int monster); // 追加敵の倍率を、占有マスに合わせて確定する
 
 // ---------------- 戦闘計算 ----------------
 struct Strike {

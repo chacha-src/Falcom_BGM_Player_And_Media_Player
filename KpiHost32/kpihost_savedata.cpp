@@ -3,8 +3,14 @@
 // ホスト起動時は lang=0。本体が最初の PING で savedata.lang を上書きする。
 save savedata = {};
 
-/* 譜面コンボは本体だけ。ホストは未接続扱いで通常の GS/XG 選択に落とす。 */
+#ifndef KBSASAMI_HOST_BUILD
+/* 譜面コンボは本体だけ。ホストは未接続扱いで通常の GS/XG 選択に落とす。
+   kbsasami 側は kbsasami_host.cpp に同じスタブがある。 */
 extern "C" int ScStaffScorePreviewOut(void) { return 0; }
+/* 本体の再生中フラグ。ホストに play() は無いので停止のまま。
+   kbsasami 側は kbsasami_monhost.cpp が持つ。 */
+int playf = 0;
+#endif
 
 const wchar_t* LangPick14(
 	const wchar_t* s0, const wchar_t* s1, const wchar_t* s2, const wchar_t* s3,

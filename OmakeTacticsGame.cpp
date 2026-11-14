@@ -76,6 +76,9 @@ void ThemeEnv(int th, Env& e)
 		{ { 18, 22, 36 }, { 70, 90, 110 }, { 40, 50, 70 }, { 80, 100, 120 }, { 40, 44, 52 }, .55f, .7f, .25f, .42f, .7f, { 90, 98, 108 } },
 		{ { 48, 32, 72 }, { 140, 110, 150 }, { 90, 70, 110 }, { 130, 100, 150 }, { 70, 55, 78 }, .4f, .62f, .65f, .52f, .52f, { 168, 158, 176 } },
 		{ { 40, 48, 90 }, { 210, 200, 230 }, { 160, 170, 200 }, { 180, 190, 220 }, { 90, 90, 110 }, .25f, .8f, .4f, .5f, .45f, { 186, 190, 210 } },
+		{ { 150, 170, 200 }, { 220, 228, 236 }, { 190, 200, 214 }, { 180, 190, 210 }, { 140, 150, 160 }, .4f, .9f, .25f, .7f, .35f, { 176, 186, 198 } },
+		{ { 255, 214, 120 }, { 255, 248, 220 }, { 255, 230, 170 }, { 255, 220, 150 }, { 255, 236, 190 }, .2f, .98f, .15f, .85f, .28f, { 255, 236, 170 } },
+		{ { 255, 120, 176 }, { 186, 230, 255 }, { 255, 190, 220 }, { 255, 160, 200 }, { 255, 200, 220 }, .35f, .9f, .25f, .7f, .4f, { 255, 150, 190 } },
 	};
 	const T& t = k[Clampi(th, 0, TH_COUNT - 1)];
 	e.skyTop = RGBA8(t.top[0], t.top[1], t.top[2]);
@@ -1229,7 +1232,7 @@ void Game::Tick(float dt)
 	PulseQuality(work, span);
 }
 
-	static_assert(TAC_BGM_LANTERN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
+	static_assert(TAC_BGM_MARCHEN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
 // 勝利目前は二つのうちどちらか。両方は要らない。距離も匹数も見ない。開幕の体力では切り替えない。
 // ボスが1体なら、その残りHPが最大の60%未満。2体以上いるあいだは、生存ボスの合計が最大合計の50%未満。
@@ -3198,6 +3201,9 @@ static void WindField(float time, float x, float z, float& ox, float& oz, float&
 	else if (theme == TH_STATION) mag = 0.4f;
 	else if (theme == TH_CITADEL) mag = 0.7f;
 	else if (theme == TH_LANTERN) mag = 0.55f;
+	else if (theme == TH_MIRROR) mag = 0.28f;
+	else if (theme == TH_HEAVEN) mag = 0.95f;
+	else if (theme == TH_MARCHEN) mag = 0.6f;
 	ox = (air.bx + air.mx) * mag * 3.4f;
 	oz = (air.bz + air.mz) * mag * 3.4f;
 	float s = sinf(x * 0.41f + time * 0.55f) * cosf(z * 0.33f - time * 0.37f);
@@ -3210,6 +3216,8 @@ static void WindField(float time, float x, float z, float& ox, float& oz, float&
 	else if (theme == TH_SWAMP) lift += 0.25f;
 	else if (theme == TH_ORBIT) { ox *= 0.45f; oz *= 0.45f; lift = sinf(time * 0.4f + x) * 0.22f; }
 	else if (theme == TH_FALLS) lift += 0.55f;
+	else if (theme == TH_HEAVEN) lift += 0.85f;
+	else if (theme == TH_MARCHEN) lift += 0.2f;
 }
 
 void Game::UpdateParticles(float dt)
@@ -3420,6 +3428,9 @@ void Game::UpdateParticles(float dt)
 				else if (theme == TH_SWAMP || theme == TH_SEABED) sheet = 6;
 				else if (theme == TH_ORBIT) sheet = 10;
 				else if (theme == TH_LANTERN) sheet = 13;
+				else if (theme == TH_MIRROR) sheet = 10;
+				else if (theme == TH_HEAVEN) sheet = 3;
+				else if (theme == TH_MARCHEN) sheet = 2;
 				else if (theme == TH_FALLS) sheet = 7;
 				int nSpawn = (q == 4) ? 1 : ((q >= 5) ? 4 : 2);
 				for (int n = 0; n < nSpawn; n++) {
@@ -3487,6 +3498,15 @@ void Game::UpdateParticles(float dt)
 					} else if (theme == TH_LANTERN) {
 						if (!onLand(16.f, 0.9f, 2.6f, at)) continue;
 						born(13, at, v3(m_rng.F(-0.2f, 0.2f), 0.25f, m_rng.F(-0.15f, 0.15f)), 2.8f, 0.035f, 1.f, 0.82f, 0.45f, 1, -0.15f, 0.8f);
+					} else if (theme == TH_MIRROR) {
+						if (!onLand(16.f, 0.6f, 2.2f, at)) continue;
+						born(10, at, v3(m_rng.F(-0.15f, 0.15f), 0.35f, m_rng.F(-0.12f, 0.12f)), 2.4f, 0.02f, 0.82f, 0.9f, 1.f, 1, 0.05f, 0.35f);
+					} else if (theme == TH_HEAVEN) {
+						if (!onLand(16.f, 1.2f, 4.8f, at)) continue;
+						born(3, at, v3(wx * 0.18f, m_rng.F(0.15f, 0.55f), wz * 0.18f), 3.8f, 0.04f, 1.f, 0.96f, 0.82f, 1, -0.2f, 0.7f);
+					} else if (theme == TH_MARCHEN) {
+						if (!onLand(16.f, 0.4f, 2.4f, at)) continue;
+						born(2, at, v3(wx * 0.16f, m_rng.F(-0.15f, 0.2f), wz * 0.16f), 3.2f, 0.045f, 1.f, 0.62f, 0.78f, 2, 0.4f, 0.9f);
 					} else {
 						if (!onLand(16.f, 1.8f, 4.f, at)) continue;
 						born(0, at, v3(wx * 0.2f, 0.2f, wz * 0.2f), 2.4f, 0.038f, 0.9f, 0.92f, 1.f, 1, 0.3f, 0.8f);
@@ -3531,6 +3551,18 @@ void Game::UpdateParticles(float dt)
 							extra++;
 						} else if (t == T_LAVA && (abyss || theme == TH_VOLCANO)) {
 							born(5, ep + v3(0, abyss ? 0.2f : 0.08f, 0), v3(m_rng.F(-0.12f, 0.12f), abyss ? m_rng.F(-0.55f, -0.12f) : m_rng.F(1.4f, 2.8f), m_rng.F(-0.12f, 0.12f)), 2.4f, abyss ? 0.06f : 0.038f, 1.f, abyss ? 0.45f : 0.35f, 0.05f, 5, abyss ? 1.1f : -1.6f, 0.35f);
+							extra++;
+						} else if (theme == TH_MIRROR && (t == T_RUINS || t == T_PLAIN || t == T_ROAD)) {
+							ep.y += m_rng.F(0.4f, 1.4f);
+							born(10, ep, v3(m_rng.F(-0.1f, 0.1f), 0.25f, m_rng.F(-0.1f, 0.1f)), 2.2f, 0.018f, 0.85f, 0.92f, 1.f, 1, 0.04f, 0.4f);
+							extra++;
+						} else if (theme == TH_HEAVEN && (t == T_PLAIN || t == T_SNOW || t == T_ROAD)) {
+							ep.y += m_rng.F(1.4f, 3.6f);
+							born(3, ep, v3(wx * 0.12f, m_rng.F(0.1f, 0.4f), wz * 0.12f), 3.4f, 0.035f, 1.f, 0.95f, 0.78f, 1, -0.15f, 0.65f);
+							extra++;
+						} else if (theme == TH_MARCHEN && (t == T_FOREST || t == T_PLAIN || t == T_ROAD)) {
+							ep.y += m_rng.F(0.6f, 2.2f);
+							born(2, ep, v3(wx * 0.1f, m_rng.F(-0.1f, 0.15f), wz * 0.1f), 2.8f, 0.04f, 1.f, 0.7f, 0.82f, 2, 0.35f, 0.85f);
 							extra++;
 						} else if (theme == TH_LANTERN && (t == T_ROAD || t == T_RUINS || t == T_PLAIN)) {
 							ep.y += m_rng.F(0.8f, 1.8f);
@@ -4089,6 +4121,9 @@ static const GustSpec kGust[TH_COUNT] = {
 	{ "crate_A_big", 2.4f, 0.40f, 2.f, PK_CRATE, PK_CRATE, PK_BARREL },
 	{ "flag_red", 3.0f, 0.18f, 5.f, PK_FLAG, PK_FLAG, -1 },
 	{ "lantern_standing", 0.6f, 0.22f, 6.f, PK_LANTERN, PK_LANTERN, -1 },
+	{ "lantern_standing", 0.6f, 0.22f, 6.f, PK_LANTERN, PK_LANTERN, PK_PILLAR },
+	{ "flag_red", 3.0f, 0.18f, 5.f, PK_FLAG, PK_FLAG, PK_LANTERN },
+	{ "tree_single_A", 1.2f, 0.3f, 0.f, PK_TREE, PK_TREE, PK_LILY },
 };
 
 static int GustSolid(const Map& m, float x, float z, float& gy, int& water)

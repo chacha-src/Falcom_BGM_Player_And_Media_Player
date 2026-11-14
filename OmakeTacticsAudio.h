@@ -115,6 +115,9 @@ enum TacBgmId {
 	TAC_BGM_STATION, // tacticsgamestation.ogg
 	TAC_BGM_CITADEL, // tacticsgamecitadel.ogg
 	TAC_BGM_LANTERN, // tacticsgamelantern.ogg
+	TAC_BGM_MIRROR,  // tacticsgamemirror.ogg
+	TAC_BGM_HEAVEN,  // tacticsgameheaven.ogg
+	TAC_BGM_MARCHEN, // tacticsgamemarchen.ogg
 	TAC_BGM_DANGER,  // tacticsgamedanger.ogg（届く敵が味方を数巡で溶かすあいだ）
 	TAC_BGM_CLEAR,   // tacticsgameclear.ogg（勝利）
 	TAC_BGM_N

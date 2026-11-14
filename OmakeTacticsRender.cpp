@@ -1065,6 +1065,9 @@ BOOL Renderer::CreateShaders()
 		{ "PSG6", IDR_CSO_TAC_PSG6, &m_psGround[6] }, { "PSG7", IDR_CSO_TAC_PSG7, &m_psGround[7] },
 		{ "PSG8", IDR_CSO_TAC_PSG8, &m_psGround[8] }, { "PSG9", IDR_CSO_TAC_PSG9, &m_psGround[9] },
 		{ "PSGX", IDR_CSO_TAC_PSGX, &m_psTheme },
+		{ "PSGM", IDR_CSO_TAC_PSGM, &m_psGround[TH_MIRROR] },
+		{ "PSGH", IDR_CSO_TAC_PSGH, &m_psGround[TH_HEAVEN] },
+		{ "PSGK", IDR_CSO_TAC_PSGK, &m_psGround[TH_MARCHEN] },
 		{ "PSProp", IDR_CSO_TAC_PSPROP, &m_psProp }, { "PSWater", IDR_CSO_TAC_PSWATER, &m_psWater }, { "PSLava", IDR_CSO_TAC_PSLAVA, &m_psLava },
 	};
 	for (auto& d : ps) {
@@ -1859,22 +1862,26 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 	static const BYTE kTop[TH_COUNT][3] = {
 		{ 84, 146, 228 }, { 112, 146, 214 }, { 66, 128, 172 }, { 128, 160, 214 }, { 98, 162, 232 },
 		{ 40, 24, 34 }, { 70, 92, 82 }, { 58, 56, 120 }, { 36, 110, 150 }, { 150, 188, 214 },
-		{ 18, 24, 58 }, { 18, 22, 36 }, { 48, 32, 72 }, { 40, 48, 90 }
+		{ 18, 24, 58 }, { 18, 22, 36 }, { 48, 32, 72 }, { 40, 48, 90 },
+		{ 150, 170, 200 }, { 255, 214, 120 }, { 255, 120, 176 }
 	};
 	static const BYTE kHor[TH_COUNT][3] = {
 		{ 206, 228, 246 }, { 246, 206, 164 }, { 176, 214, 194 }, { 232, 238, 248 }, { 252, 228, 176 },
 		{ 170, 66, 40 }, { 156, 166, 132 }, { 206, 170, 204 }, { 140, 206, 214 }, { 226, 232, 236 },
-		{ 48, 62, 110 }, { 70, 90, 110 }, { 140, 110, 150 }, { 210, 200, 230 }
+		{ 48, 62, 110 }, { 70, 90, 110 }, { 140, 110, 150 }, { 210, 200, 230 },
+		{ 220, 228, 236 }, { 255, 248, 220 }, { 186, 230, 255 }
 	};
 	static const BYTE kGnd[TH_COUNT][3] = {
 		{ 110, 170, 80 }, { 170, 120, 80 }, { 70, 120, 60 }, { 230, 236, 246 }, { 220, 194, 140 },
 		{ 80, 70, 68 }, { 80, 96, 60 }, { 160, 156, 140 }, { 48, 110, 100 }, { 90, 140, 80 },
-		{ 70, 80, 108 }, { 90, 98, 108 }, { 168, 158, 176 }, { 186, 190, 210 }
+		{ 70, 80, 108 }, { 90, 98, 108 }, { 168, 158, 176 }, { 186, 190, 210 },
+		{ 176, 186, 198 }, { 255, 236, 170 }, { 255, 150, 190 }
 	};
 	static const float kSun[TH_COUNT][3] = {
 		{ .45f, .82f, .35f }, { .55f, .7f, .3f }, { .35f, .85f, .4f }, { .4f, .7f, .5f }, { .5f, .85f, .2f },
 		{ .3f, .75f, .55f }, { .35f, .8f, .45f }, { .6f, .6f, .35f }, { .4f, .62f, .28f }, { .4f, .8f, .3f },
-		{ .2f, .35f, .9f }, { .55f, .7f, .25f }, { .35f, .55f, .7f }, { .25f, .8f, .4f }
+		{ .2f, .35f, .9f }, { .55f, .7f, .25f }, { .35f, .55f, .7f }, { .25f, .8f, .4f },
+		{ .4f, .9f, .25f }, { .35f, .95f, .2f }, { .45f, .82f, .35f }
 	};
 	theme = Clampi(theme, 0, TH_COUNT - 1);
 	float len = sqrtf(x * x + y * y + z * z);
@@ -1938,6 +1945,18 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 		float moon = expf((y - 0.85f) * 8.f);
 		r += moon * 0.35f; g += moon * 0.4f; b += moon * 0.55f;
 		if (TNoise(15, x * 6.f, z * 6.f) > 0.7f) { r = Lerpf(r, 0.85f, 0.2f); g = Lerpf(g, 0.88f, 0.2f); b = Lerpf(b, 1.f, 0.25f); }
+	}
+	if (theme == TH_MIRROR && y > 0.02f) {
+		float band = 0.5f + 0.5f * sinf(x * 14.f + z * 6.f);
+		if (band > 0.92f) { r += 0.25f; g += 0.3f; b += 0.4f; }
+	}
+	if (theme == TH_HEAVEN && y > -0.05f) {
+		float ray = expf(-fabsf(x * 2.2f) * 1.4f) * Clampf(y * 0.5f + 0.5f, 0, 1);
+		r += ray * 0.7f; g += ray * 0.5f; b += ray * 0.12f;
+		r = Lerpf(r, 1.f, 0.45f); g = Lerpf(g, 0.92f, 0.35f); b = Lerpf(b, 0.62f, 0.2f);
+	}
+	if (theme == TH_MARCHEN && y > 0.05f && TNoise(19, x * 5.f, z * 5.f) > 0.72f) {
+		r = Lerpf(r, 1.f, 0.25f); g = Lerpf(g, 0.7f, 0.18f); b = Lerpf(b, 0.85f, 0.22f);
 	}
 }
 
@@ -2009,17 +2028,18 @@ static BOOL BuildPhoto(ID3D11Device* dev, ID3D11DeviceContext* ctx, int side, Ta
 	static DWORD px[1024 * 1024];
 	int live = 0;
 	D3D11_TEXTURE2D_DESC td = {};
-	td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 0; td.ArraySize = (UINT)(TH_COUNT * 2);
+	enum { TAC_PHOTO_THEMES = 14 };
+	td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 0; td.ArraySize = (UINT)(TAC_PHOTO_THEMES * 2);
 	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
 	td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 	td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
 	ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
 	if (FAILED(dev->CreateTexture2D(&td, NULL, &t)) || !t) return FALSE;
 	t->GetDesc(&td);
-	for (int theme = 0; theme < TH_COUNT; theme++) {
+	for (int theme = 0; theme < TAC_PHOTO_THEMES; theme++) {
 		for (int nrm = 0; nrm < 2; nrm++) {
 			const BYTE* data = NULL; DWORD n = 0;
-			int slice = theme + nrm * TH_COUNT;
+			int slice = theme + nrm * TAC_PHOTO_THEMES;
 			if (LockRc(IDR_TAC_PH0 + slice, &data, &n) && DecodeScaled(data, (int)n, side, px)) {
 				if (!nrm) live++;
 			} else memset(px, 0, pix * sizeof(DWORD));
@@ -2032,7 +2052,7 @@ static BOOL BuildPhoto(ID3D11Device* dev, ID3D11DeviceContext* ctx, int side, Ta
 	sv.Format = td.Format;
 	sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 	sv.Texture2DArray.MipLevels = td.MipLevels;
-	sv.Texture2DArray.ArraySize = (UINT)(TH_COUNT * 2);
+	sv.Texture2DArray.ArraySize = (UINT)(TAC_PHOTO_THEMES * 2);
 	if (FAILED(dev->CreateShaderResourceView(t, &sv, &s)) || !s) {
 		TAC_REL(s); TAC_REL(t); return FALSE;
 	}
@@ -2833,13 +2853,15 @@ static BOOL IsBodyName(const char* n)
 	return FALSE;
 }
 
-static BOOL SkipTackRec(Reader& rd, char* name, float* foot);
+static BOOL SkipTackRec(Reader& rd, char* name, float* foot, float* tall);
 
-static float g_tacFoot[1024];
-static unsigned char g_footGot[1024];
+enum { TAC_FOOT_N = 2048 };
+static float g_tacFoot[TAC_FOOT_N];
+static float g_tacTall[TAC_FOOT_N];
+static unsigned char g_footGot[TAC_FOOT_N];
 static const BYTE* g_packBytes = NULL;
 static DWORD g_packBytesN = 0;
-static int g_packOff[1024];
+static int g_packOff[TAC_FOOT_N];
 static int g_packN = 0;
 static char g_faceNm[64][32];
 static int g_faceSetI[64], g_face0[64], g_faceNvI[64];
@@ -2856,26 +2878,51 @@ static void ClearMonPack()
 	g_faceReady = 0;
 	memset(g_footGot, 0, sizeof(g_footGot));
 	memset(g_tacFoot, 0, sizeof(g_tacFoot));
+	memset(g_tacTall, 0, sizeof(g_tacTall));
+}
+
+static void MeasureTacFoot(int id)
+{
+	if (id < 0 || id >= TAC_FOOT_N || g_footGot[id]) return;
+	if (!g_packBytes || id >= g_packN || g_packOff[id] <= 0 || g_packOff[id] >= (int)g_packBytesN) return;
+	Reader one(g_packBytes + g_packOff[id], g_packBytesN - (DWORD)g_packOff[id]);
+	char name[32];
+	float foot = 0.f, tall = 0.f;
+	if (SkipTackRec(one, name, &foot, &tall)) {
+		g_tacFoot[id] = foot;
+		g_tacTall[id] = tall;
+	}
+	g_footGot[id] = 1;
 }
 
 float TacMonsterFoot(int id)
 {
-	if (id < 0 || id >= 1024) return 0.f;
-	if (!g_footGot[id] && g_packBytes && id < g_packN && g_packOff[id] > 0 && g_packOff[id] < (int)g_packBytesN) {
-		Reader one(g_packBytes + g_packOff[id], g_packBytesN - (DWORD)g_packOff[id]);
-		char name[32];
-		float foot = 0.f;
-		if (SkipTackRec(one, name, &foot)) g_tacFoot[id] = foot;
-		g_footGot[id] = 1;
-	}
+	if (id < 0 || id >= TAC_FOOT_N) return 0.f;
+	MeasureTacFoot(id);
 	return g_tacFoot[id] > 0.f ? g_tacFoot[id] : 0.f;
+}
+
+float TacMonsterTall(int id)
+{
+	if (id < 0 || id >= TAC_FOOT_N) return 0.f;
+	MeasureTacFoot(id);
+	return g_tacTall[id] > 0.f ? g_tacTall[id] : 0.f;
+}
+
+int TacMonsterReady(int id)
+{
+	if (id < 0 || id >= TAC_FOOT_N) return 1;
+	if (!g_packBytes) return 0;
+	if (id >= g_packN || g_packOff[id] <= 0) return 1;
+	MeasureTacFoot(id);
+	return g_footGot[id] ? 1 : 0;
 }
 
 // バインド座標は数センチ。描画は休息姿勢の骨スケールで身長約 1.7 まで伸びる。
 // その姿勢で、高さの下 45%（腹や足。翼や腕は入らない）の半幅を返す。
 static float PosedFootHalf(UINT nJ, const int* parent, const V3* restT, const Q4* restR, const V3* restS,
 	const M4& top, const M4* inv, UINT nv, const short* ps, const BYTE* jj, const BYTE* ww,
-	float mid0, float mid1, float mid2, float hx, float hy, float hz)
+	float mid0, float mid1, float mid2, float hx, float hy, float hz, float* outTall)
 {
 	static M4 glob[MAXJ], pal[MAXJ];
 	for (UINT j = 0; j < nJ; j++) {
@@ -2908,6 +2955,7 @@ static float PosedFootHalf(UINT nJ, const int* parent, const V3* restT, const Q4
 		if (y < y0) y0 = y;
 		if (y > y1) y1 = y;
 	}
+	if (outTall) *outTall = (y1 > y0) ? (y1 - y0) : 0.f;
 	float cut = y0 + (y1 - y0) * 0.45f;
 	float mx = 0.f;
 	for (UINT k = 0; k < nv; k++) {
@@ -2921,7 +2969,7 @@ static float PosedFootHalf(UINT nJ, const int* parent, const V3* restT, const Q4
 }
 
 // 目録用。描画と同じ休息姿勢で、地面側の胴体がタイルからどれだけ出るかを測る。
-static BOOL SkipTackRec(Reader& rd, char* name, float* foot)
+static BOOL SkipTackRec(Reader& rd, char* name, float* foot, float* tall)
 {
 	if (foot) *foot = 0.f;
 	rd.Name(name, 32);
@@ -2983,7 +3031,7 @@ static BOOL SkipTackRec(Reader& rd, char* name, float* foot)
 	const BYTE* jj = rd.Bytes((size_t)nv * 4);
 	const BYTE* ww = rd.Bytes((size_t)nv * 4);
 	if (ps && jj && ww && foot)
-		*foot = PosedFootHalf(nJ, parent, restT, restR, restS, top, inv, nv, ps, jj, ww, mid[0], mid[1], mid[2], halfv[0], halfv[1], halfv[2]);
+		*foot = PosedFootHalf(nJ, parent, restT, restR, restS, top, inv, nv, ps, jj, ww, mid[0], mid[1], mid[2], halfv[0], halfv[1], halfv[2], tall);
 	rd.Align4();
 	if (!rd.Bytes((size_t)ni * 2)) return FALSE;
 	rd.Align4();
@@ -3688,6 +3736,7 @@ void Renderer::LoadCreaturePack()
 		m_monN = 0;
 		memset(g_footGot, 0, sizeof(g_footGot));
 		memset(g_tacFoot, 0, sizeof(g_tacFoot));
+		memset(g_tacTall, 0, sizeof(g_tacTall));
 		g_packBytes = data;
 		g_packBytesN = size;
 		char bodyName[64][32];
@@ -3696,10 +3745,10 @@ void Renderer::LoadCreaturePack()
 		for (UINT i = 0; i < n; i++) {
 			if (rd.o > 0x7fffffff) break;
 			m_monOff[i] = (int)(4 + rd.o);
-			if (i < 1024) g_packOff[i] = m_monOff[i];
+			if (i < TAC_FOOT_N) g_packOff[i] = m_monOff[i];
 			char name[32];
 			// 足幅はここでは測らない。全種の頂点を撫でると起動が止まる。出す種だけ TacMonsterFoot が測る。
-			if (!SkipTackRec(rd, name, NULL)) break;
+			if (!SkipTackRec(rd, name, NULL, NULL)) break;
 			m_monBody[i] = 0;
 			m_bodySlot[i] = -1;
 			m_monModel[i] = -1;
@@ -13271,6 +13320,9 @@ static int TopTile(int t, int theme)
 		case TH_VOLCANO: return TL_ASH;
 		case TH_SWAMP: return TL_FOREST;
 		case TH_SEABED: return TL_SAND;
+		case TH_MIRROR: return TL_RUINS;
+		case TH_HEAVEN: return TL_SNOW;
+		case TH_MARCHEN: return TL_GRASS;
 		default: return TL_GRASS;
 		}
 	case T_FOREST: return theme == TH_SNOW ? TL_SNOW : (theme == TH_SEABED ? TL_SAND : (theme == TH_DESERT ? TL_SAND : (theme == TH_VOLCANO ? TL_ASH : TL_FOREST)));
@@ -13292,7 +13344,8 @@ static int TopTile(int t, int theme)
 
 static int SideTile(int t, int theme)
 {
-	if (theme == TH_SNOW && t != T_WATER) return TL_CLIFF_SNOW;
+	if ((theme == TH_SNOW || theme == TH_HEAVEN) && t != T_WATER) return TL_CLIFF_SNOW;
+	if (theme == TH_MIRROR && t != T_WATER) return TL_CLIFF_ROCK;
 	if (theme == TH_SEABED && t != T_WATER) return TL_CLIFF_ROCK;
 	if (t == T_MOUNTAIN || t == T_ROCK || t == T_CHASM || theme == TH_VOLCANO || theme == TH_RUINS) return TL_CLIFF_ROCK;
 	return TL_CLIFF_DIRT;
@@ -13316,6 +13369,9 @@ static DWORD ThemeTint(int theme, float var)
 	case TH_DESERT: r = 1.02f; g = .98f; b = .92f; break;
 	case TH_SEABED: r = .62f; g = .88f; b = 1.0f; break;
 	case TH_FALLS: r = .92f; g = .98f; b = 1.0f; break;
+	case TH_MIRROR: r = .86f; g = .9f; b = .98f; break;
+	case TH_HEAVEN: r = 1.04f; g = 1.0f; b = .9f; break;
+	case TH_MARCHEN: r = 1.02f; g = .94f; b = .98f; break;
 	default: break;
 	}
 	return RGBAf(Clampf(r * var, 0, 1), Clampf(g * var, 0, 1), Clampf(b * var, 0, 1));
@@ -13596,6 +13652,22 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if ((h % 4) == 0) AddBox(mb, v3(px, py + 0.88f, pz), v3(0.07f, 0.05f, 0.07f), RGBA8(255, 210, 120), -1);
 			if ((h % 3) == 0) AddPuff(puff, puffN, 13, px, py + 0.9f, pz, 10.f);
 			break;
+		case TH_MIRROR:
+			if ((h % 3) == 0) AddBox(mb, v3(px, py + 0.28f, pz), v3(0.22f, 0.02f, 0.02f), RGBA8(210, 224, 236), -1);
+			if ((h % 3) == 0) AddBox(mb, v3(px, py + 0.28f, pz), v3(0.02f, 0.02f, 0.22f), RGBA8(180, 196, 214), -1);
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.16f, pz), v3(0.05f, 0.16f, 0.01f), RGBA8(230, 240, 255), -1);
+			if ((h % 7) == 0) AddPuff(puff, puffN, 10, px, py + 0.7f, pz, 8.f);
+			break;
+		case TH_HEAVEN:
+			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.9f, pz), v3(0.08f, 0.9f, 0.08f), RGBA8(255, 250, 236), -1);
+			if ((h % 2) == 0) AddBox(mb, v3(px, py + 1.85f, pz), v3(0.28f, 0.06f, 0.28f), RGBA8(255, 196, 70), -1);
+			if ((h % 2) == 0) AddPuff(puff, puffN, 3, px, py + 2.3f, pz, 14.f);
+			break;
+		case TH_MARCHEN:
+			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.16f, pz), v3(0.07f, 0.16f, 0.07f), RGBA8(255, 244, 220), -1);
+			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.4f, pz), v3(0.26f, 0.1f, 0.26f), RGBA8(230, 40, 90), -1);
+			AddPuff(puff, puffN, 2, px, py + 0.7f, pz, 12.f);
+			break;
 		default: break;
 		}
 		if ((h % 29) == 7 && c.t != T_WATER && c.t != T_LAVA && c.t != T_CHASM && c.t != T_VOID) {
@@ -13668,6 +13740,21 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 				AddBox(mb, v3(px, cy + 0.6f, pz), v3(0.015f, 0.6f, 0.015f), RGBA8(220, 200, 150), -1);
 				AddBox(mb, v3(px, cy + 1.18f, pz), v3(0.06f, 0.08f, 0.06f), RGBA8(255, 186, 70), -1);
 				AddPuff(puff, puffN, 13, px, cy + 1.28f, pz, 5.f);
+				break;
+			case TH_MIRROR:
+				AddBox(mb, v3(px, cy + 0.42f, pz), v3(0.18f, 0.02f, 0.02f), RGBA8(220, 232, 244), -1);
+				AddBox(mb, v3(px, cy + 0.42f, pz), v3(0.02f, 0.02f, 0.18f), RGBA8(190, 206, 222), -1);
+				AddBox(mb, v3(px, cy + 0.22f, pz), v3(0.04f, 0.22f, 0.012f), RGBA8(236, 244, 255), -1);
+				break;
+			case TH_HEAVEN:
+				AddBox(mb, v3(px, cy + 0.8f, pz), v3(0.05f, 0.8f, 0.05f), RGBA8(255, 250, 236), -1);
+				AddBox(mb, v3(px, cy + 1.62f, pz), v3(0.14f, 0.04f, 0.14f), RGBA8(255, 210, 110), -1);
+				AddPuff(puff, puffN, 3, px, cy + 2.0f, pz, 6.f);
+				break;
+			case TH_MARCHEN:
+				AddBox(mb, v3(px, cy + 0.1f, pz), v3(0.04f, 0.1f, 0.04f), RGBA8(245, 236, 214), -1);
+				AddBox(mb, v3(px, cy + 0.24f, pz), v3(0.12f, 0.07f, 0.12f), RGBA8(230, 70, 110), -1);
+				AddPuff(puff, puffN, 2, px, cy + 0.5f, pz, 5.f);
 				break;
 			default: break;
 			}
@@ -14394,6 +14481,9 @@ BOOL Renderer::BuildTerrain(Map& m)
 	case TH_STATION: m_waterColor = RGBA8(40, 140, 170); break;
 	case TH_CITADEL: m_waterColor = RGBA8(90, 62, 130); break;
 	case TH_LANTERN: m_waterColor = RGBA8(170, 186, 220); break;
+	case TH_MIRROR: m_waterColor = RGBA8(190, 205, 220); break;
+	case TH_HEAVEN: m_waterColor = RGBA8(255, 236, 200); break;
+	case TH_MARCHEN: m_waterColor = RGBA8(255, 170, 200); break;
 	default: m_waterColor = RGBA8(55, 125, 190); break;
 	}
 
@@ -14533,6 +14623,9 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 		else if (m.theme == TH_STATION) { r = 90; g = 100; b = 112; }
 		else if (m.theme == TH_CITADEL) { r = 158; g = 140; b = 172; }
 		else if (m.theme == TH_LANTERN) { r = 190; g = 196; b = 214; }
+		else if (m.theme == TH_MIRROR) { r = 176; g = 186; b = 198; }
+		else if (m.theme == TH_HEAVEN) { r = 255; g = 244; b = 220; }
+		else if (m.theme == TH_MARCHEN) { r = 236; g = 170; b = 196; }
 		else { r = 105; g = 165; b = 80; }
 		break;
 	case T_FOREST:
