@@ -219,6 +219,11 @@ struct ScStaffUi {
 	int loopATick;         /* -1 = unset */
 	int loopBTick;         /* -1 = unset */
 	uint32_t playheadTick; /* live playhead while previewing */
+	double playheadPos;    /* fractional ticks; the bar draws this */
+	double playheadFrom;   /* glide start */
+	double playheadAnchor; /* last engine tick */
+	double playheadSpan;   /* seconds to cover the last engine step */
+	LONGLONG playheadQpc;
 	int previewActive;
 	int previewEngineSeen; /* 0 idle, 1 Plays() entered, 2 heard running */
 	int transportMode;     /* 0=none 1=set marker 2=set A 3=set B */

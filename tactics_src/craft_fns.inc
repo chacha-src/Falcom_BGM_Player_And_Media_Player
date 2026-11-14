@@ -238,7 +238,12 @@ const wchar_t* CraftDesc(int skill)
 			L"Działa od 100 CP. Użycie zeruje CP.",
 			L"100 CP ve üstünde kullanılır, kullanım CP'yi 0 yapar."));
 	}
-	return buf;
+	static wchar_t named[1024];
+	swprintf_s(named, LangPick14(
+		L"%s。%s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s",
+		L"%s。%s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s", L"%s. %s"),
+		CraftName(skill), buf);
+	return named;
 }
 int CraftLineOf(int skill)
 {
@@ -274,47 +279,59 @@ static bool CraftSuperOpen(int index, int cls)
 #pragma pack(push, 4)
 struct CraftRecV4 { DWORD uid; short cp; unsigned char bead[2], acc[2], pas[2]; };
 struct CraftRecV5 { DWORD uid; short cp; unsigned char bead[4], acc[2], pas[2], pad[2]; };
-struct CraftRec { DWORD uid; short cp; unsigned short bead[4]; unsigned short acc[2]; unsigned char pas[2]; };  // bead 0..2=戦技 3=奥義。装飾 id は 1 始まり
+struct CraftRecV9 { DWORD uid; short cp; unsigned short bead[4]; unsigned short acc[2]; unsigned char pas[2]; };  // v9 までの 20 バイト
+struct CraftRec { DWORD uid; short cp; unsigned short bead[4]; unsigned short acc[2]; unsigned short pas[2]; unsigned short spare[4]; };
 struct CraftStoreV7 {
 	int stones;
-	unsigned char beadN[CRAFT_N];
+	unsigned char beadN[798];
 	unsigned short accN[1024];
 	unsigned char pasN[64];
 	unsigned char goodN[16];
-	CraftRec rec[128];
+	CraftRecV9 rec[128];
 };
-// v8 は今までの所持。召喚 48、パッシブ 64、道具 16。配列を伸ばすときはこの形のまま読む。
-enum { CRAFT_SUM_OWN = 96, CRAFT_PAS_OWN = 96, CRAFT_GOOD_OWN = 32 };
+// v8 は召喚 48、パッシブ 64、道具 16。配列を伸ばすときはこの形のまま読む。
 struct CraftStoreV8 {
 	int stones;
-	unsigned char beadN[CRAFT_N];
+	unsigned char beadN[798];
 	unsigned short accN[1024];
 	unsigned char pasN[64];
 	unsigned char goodN[16];
-	CraftRec rec[128];
+	CraftRecV9 rec[128];
 	unsigned char sumN[48];
 	unsigned char sumEq[128][2];
 };
+// v9。技珠 798、装飾 1024、パッシブ 96、道具 32、召喚 96。生の fread はもうしない。
+struct CraftStoreV9 {
+	int stones;
+	unsigned char beadN[798];
+	unsigned short accN[1024];
+	unsigned char pasN[96];
+	unsigned char goodN[32];
+	CraftRecV9 rec[128];
+	unsigned char sumN[96];
+	unsigned char sumEq[128][2];
+};
+enum { CRAFT_BEAD_OWN = 4096, CRAFT_ACC_OWN = 4096, CRAFT_PAS_OWN = 2048, CRAFT_GOOD_OWN = 1024, CRAFT_SUM_OWN = 2048, CRAFT_REC_N = 128 };
 struct CraftStore {
 	int stones;
-	unsigned char beadN[CRAFT_N];
-	unsigned short accN[1024];
-	unsigned char pasN[CRAFT_PAS_OWN];
-	unsigned char goodN[CRAFT_GOOD_OWN];
-	CraftRec rec[128];
-	unsigned char sumN[CRAFT_SUM_OWN];
-	unsigned char sumEq[128][2];
+	unsigned char beadN[CRAFT_BEAD_OWN];
+	unsigned short accN[CRAFT_ACC_OWN];
+	unsigned short pasN[CRAFT_PAS_OWN];
+	unsigned short goodN[CRAFT_GOOD_OWN];
+	CraftRec rec[CRAFT_REC_N];
+	unsigned short sumN[CRAFT_SUM_OWN];
+	unsigned short sumEq[CRAFT_REC_N][4]; // 0,1 が装備。2,3 は次の拡張用
+	unsigned char reserve[32768];
 };
 #pragma pack(pop)
 static_assert(sizeof(CraftRecV4) == 12, "旧戦技記録は 12 バイト");
 static_assert(sizeof(CraftRecV5) == 16, "戦技記録 v5 は 16 バイト");
-static_assert(sizeof(CraftRec) == 20, "戦技記録は 20 バイト");
+static_assert(sizeof(CraftRecV9) == 20, "戦技記録 v9 は 20 バイト");
+static_assert(sizeof(CraftRec) == 32, "戦技記録 v10 は予備込み 32 バイト");
 static_assert(CRAFT_N >= CRAFT_LEGACY * 2 && CRAFT_LEGACY == 147, "先頭 147 は動かさない");
+static_assert(CRAFT_N <= CRAFT_BEAD_OWN, "技珠の所持枠");
 static_assert(sizeof(((CraftStore*)0)->rec) / sizeof(CraftRec) >= MAX_ROSTER, "戦技記録は名簿以上");
-static_assert(sizeof(((CraftStore*)0)->sumN) == CRAFT_SUM_OWN, "召喚所持は 96");
-static_assert(sizeof(((CraftStore*)0)->pasN) == CRAFT_PAS_OWN, "パッシブ所持は 96");
-static_assert(sizeof(((CraftStore*)0)->goodN) == CRAFT_GOOD_OWN, "道具所持は 32");
-static_assert(sizeof(CraftStore) > sizeof(CraftStoreV8), "クラフト v9 は v8 より大きい");
+static_assert(sizeof(CraftStore) > sizeof(CraftStoreV9), "クラフト v10 は v9 より大きい");
 
 static CraftStore g_craft;
 static const DWORD kCraftMagic = 0x54435246u;
@@ -345,6 +362,21 @@ static void CopyRecV4(CraftRec& d, const CraftRecV4& s)
 	d.acc[1] = s.acc[1];
 	d.pas[0] = s.pas[0];
 	d.pas[1] = s.pas[1];
+}
+static void CopyRecV9(CraftRec& d, const CraftRecV9& s)
+{
+	memset(&d, 0, sizeof(d));
+	d.uid = s.uid;
+	d.cp = s.cp;
+	for (int k = 0; k < 4; k++) d.bead[k] = s.bead[k];
+	d.acc[0] = s.acc[0];
+	d.acc[1] = s.acc[1];
+	d.pas[0] = s.pas[0];
+	d.pas[1] = s.pas[1];
+}
+static void PromoteU8(unsigned short* dst, const unsigned char* src, int n)
+{
+	for (int i = 0; i < n; i++) dst[i] = src[i];
 }
 static void CopyRecV5(CraftRec& d, const CraftRecV5& s)
 {
@@ -384,8 +416,21 @@ void CraftLoad()
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return;
 	DWORD magic = 0; int ver = 0;
-	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 9) {
+	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 10) {
 		if (fread(&g_craft, sizeof(g_craft), 1, fp) != 1) memset(&g_craft, 0, sizeof(g_craft));
+	} else if (magic == kCraftMagic && ver == 9) {
+		CraftStoreV9 old9;
+		memset(&old9, 0, sizeof(old9));
+		if (fread(&old9, sizeof(old9), 1, fp) == 1) {
+			g_craft.stones = old9.stones;
+			memcpy(g_craft.beadN, old9.beadN, sizeof(old9.beadN));
+			memcpy(g_craft.accN, old9.accN, sizeof(old9.accN));
+			PromoteU8(g_craft.pasN, old9.pasN, 96);
+			PromoteU8(g_craft.goodN, old9.goodN, 32);
+			for (int i = 0; i < 128; i++) CopyRecV9(g_craft.rec[i], old9.rec[i]);
+			PromoteU8(g_craft.sumN, old9.sumN, 96);
+			for (int i = 0; i < 128; i++) for (int k = 0; k < 2; k++) g_craft.sumEq[i][k] = old9.sumEq[i][k];
+		}
 	} else if (magic == kCraftMagic && ver == 8) {
 		CraftStoreV8 old8;
 		memset(&old8, 0, sizeof(old8));
@@ -393,11 +438,11 @@ void CraftLoad()
 			g_craft.stones = old8.stones;
 			memcpy(g_craft.beadN, old8.beadN, sizeof(old8.beadN));
 			memcpy(g_craft.accN, old8.accN, sizeof(old8.accN));
-			memcpy(g_craft.pasN, old8.pasN, sizeof(old8.pasN));
-			memcpy(g_craft.goodN, old8.goodN, sizeof(old8.goodN));
-			memcpy(g_craft.rec, old8.rec, sizeof(old8.rec));
-			memcpy(g_craft.sumN, old8.sumN, sizeof(old8.sumN));
-			memcpy(g_craft.sumEq, old8.sumEq, sizeof(old8.sumEq));
+			PromoteU8(g_craft.pasN, old8.pasN, 64);
+			PromoteU8(g_craft.goodN, old8.goodN, 16);
+			for (int i = 0; i < 128; i++) CopyRecV9(g_craft.rec[i], old8.rec[i]);
+			PromoteU8(g_craft.sumN, old8.sumN, 48);
+			for (int i = 0; i < 128; i++) for (int k = 0; k < 2; k++) g_craft.sumEq[i][k] = old8.sumEq[i][k];
 		}
 	} else if (magic == kCraftMagic && ver == 7) {
 		CraftStoreV7 old7;
@@ -406,9 +451,9 @@ void CraftLoad()
 			g_craft.stones = old7.stones;
 			memcpy(g_craft.beadN, old7.beadN, sizeof(old7.beadN));
 			memcpy(g_craft.accN, old7.accN, sizeof(old7.accN));
-			memcpy(g_craft.pasN, old7.pasN, sizeof(old7.pasN));
-			memcpy(g_craft.goodN, old7.goodN, sizeof(old7.goodN));
-			memcpy(g_craft.rec, old7.rec, sizeof(old7.rec));
+			PromoteU8(g_craft.pasN, old7.pasN, 64);
+			PromoteU8(g_craft.goodN, old7.goodN, 16);
+			for (int i = 0; i < 128; i++) CopyRecV9(g_craft.rec[i], old7.rec[i]);
 		}
 	} else if (magic == kCraftMagic && ver == 6) {
 #pragma pack(push, 4)
@@ -422,8 +467,8 @@ void CraftLoad()
 			g_craft.stones = old6.stones;
 			memcpy(g_craft.beadN, old6.beadN, sizeof(old6.beadN));
 			for (int i = 0; i < 64; i++) g_craft.accN[i] = old6.accN[i];
-			memcpy(g_craft.pasN, old6.pasN, sizeof(old6.pasN));
-			memcpy(g_craft.goodN, old6.goodN, sizeof(old6.goodN));
+			PromoteU8(g_craft.pasN, old6.pasN, 64);
+			PromoteU8(g_craft.goodN, old6.goodN, 16);
 			for (int i = 0; i < 128; i++) {
 				CraftRec& d = g_craft.rec[i];
 				memset(&d, 0, sizeof(d));
@@ -446,7 +491,7 @@ void CraftLoad()
 			g_craft.stones = old5.stones;
 			memcpy(g_craft.beadN, old5.beadN, sizeof(old5.beadN));
 			for (int ai = 0; ai < 32; ai++) g_craft.accN[ai] = old5.accN[ai];
-			memcpy(g_craft.pasN, old5.pasN, sizeof(old5.pasN));
+			PromoteU8(g_craft.pasN, old5.pasN, 32);
 			for (int i = 0; i < 128; i++) CopyRecV5(g_craft.rec[i], old5.rec[i]);
 		}
 	} else if (magic == kCraftMagic && ver == 4) {
@@ -459,7 +504,7 @@ void CraftLoad()
 			g_craft.stones = old4.stones;
 			memcpy(g_craft.beadN, old4.beadN, sizeof(old4.beadN));
 			for (int ai = 0; ai < 32; ai++) g_craft.accN[ai] = old4.accN[ai];
-			memcpy(g_craft.pasN, old4.pasN, sizeof(old4.pasN));
+			PromoteU8(g_craft.pasN, old4.pasN, 32);
 			for (int i = 0; i < 128; i++) CopyRecV4(g_craft.rec[i], old4.rec[i]);
 		}
 	} else if (magic == kCraftMagic && ver == 3) {
@@ -520,10 +565,10 @@ void CraftLoad()
 			if (g_craft.sumEq[i][k] > SUMMON_N) g_craft.sumEq[i][k] = 0;
 		}
 	}
-	for (int i = 0; i < SUMMON_N && i < CRAFT_SUM_OWN; i++) if (g_craft.sumN[i] > kCraftItemMax) g_craft.sumN[i] = (unsigned char)kCraftItemMax;
-	for (int i = 0; i < kPasN && i < CRAFT_PAS_OWN; i++) if (g_craft.pasN[i] > kCraftItemMax) g_craft.pasN[i] = (unsigned char)kCraftItemMax;
-	for (int i = 0; i < (int)sizeof(g_craft.goodN); i++) if (g_craft.goodN[i] > kCraftItemMax) g_craft.goodN[i] = (unsigned char)kCraftItemMax;
-	for (int i = 0; i < kAccN && i < 1024; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < SUMMON_N && i < CRAFT_SUM_OWN; i++) if (g_craft.sumN[i] > kWideMax) g_craft.sumN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < kPasN && i < CRAFT_PAS_OWN; i++) if (g_craft.pasN[i] > kWideMax) g_craft.pasN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < CRAFT_GOOD_OWN; i++) if (g_craft.goodN[i] > kWideMax) g_craft.goodN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < kAccN && i < CRAFT_ACC_OWN; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
 	CraftFixBeads();
 }
 void CraftSave()
@@ -531,7 +576,7 @@ void CraftSave()
 	CString path = DatArc_Path(TacLeafCraft());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
-	int ver = 9;
+	int ver = 10;
 	fwrite(&kCraftMagic, 4, 1, fp);
 	fwrite(&ver, 4, 1, fp);
 	fwrite(&g_craft, sizeof(g_craft), 1, fp);
@@ -657,7 +702,7 @@ void EquipNextAcc(CharData& c, int slot)
 		next = v;
 		break;
 	}
-	r->acc[slot] = (unsigned char)next;
+	r->acc[slot] = (unsigned short)next;
 }
 const wchar_t* EquippedBeadName(const CharData& c, int slot)
 {
@@ -705,7 +750,7 @@ bool EquipAccId(CharData& c, int slot, int id)
 	if (!r) return false;
 	if (id <= 0) { r->acc[slot] = 0; return true; }
 	if (id > kAccN || (r->acc[slot] != id && AccSpare(c, slot, id - 1) < 1)) return false;
-	r->acc[slot] = (unsigned char)id;
+	r->acc[slot] = (unsigned short)id;
 	return true;
 }
 bool EquipBeadId(CharData& c, int slot, int bead)
@@ -722,16 +767,16 @@ bool EquipBeadId(CharData& c, int slot, int bead)
 // ---------------- 魔石・技珠 ----------------
 int CraftGoodGet(int i)
 {
-	if (i < 0 || i >= (int)sizeof(g_craft.goodN)) return 0;
+	if (i < 0 || i >= CRAFT_GOOD_OWN) return 0;
 	return g_craft.goodN[i];
 }
 void CraftGoodAdd(int i, int d)
 {
-	if (i < 0 || i >= (int)sizeof(g_craft.goodN)) return;
+	if (i < 0 || i >= CRAFT_GOOD_OWN) return;
 	int c = (int)g_craft.goodN[i] + d;
 	if (c < 0) c = 0;
-	if (c > kCraftItemMax) c = kCraftItemMax;
-	g_craft.goodN[i] = (unsigned char)c;
+	if (c > kWideMax) c = kWideMax;
+	g_craft.goodN[i] = (unsigned short)c;
 }
 int StoneCount() { return g_craft.stones; }
 void StoneAdd(int d) { g_craft.stones = Clampi(g_craft.stones + d, 0, kStoneMax); }
@@ -872,7 +917,7 @@ static int PasInUse(int index, const CraftRec* skipRec, int skipSlot)
 bool PasBuy(SaveData& s, int index)
 {
 	if (index < 0 || index >= kPasN) return false;
-	if (s.gold < kPasRow[index].price || g_craft.pasN[index] >= kCraftItemMax) return false;
+	if (s.gold < kPasRow[index].price || g_craft.pasN[index] >= kWideMax) return false;
 	s.gold -= kPasRow[index].price;
 	g_craft.pasN[index]++;
 	return true;
@@ -899,7 +944,7 @@ int PasSpare(const CharData& c, int slot, int index)
 {
 	if (slot < 0 || slot > 1 || index < 0 || index >= kPasN) return 0;
 	const CraftRec* r = FindRec(c.uid, false);
-	if (r && r->pas[slot ^ 1] == (unsigned char)(index + 1)) return 0;
+	if (r && r->pas[slot ^ 1] == (unsigned short)(index + 1)) return 0;
 	return max(0, (int)g_craft.pasN[index] - PasInUse(index, r, slot));
 }
 int PasFree(int index)
@@ -913,9 +958,9 @@ bool EquipPasId(CharData& c, int slot, int id)
 	CraftRec* r = FindRec(c.uid, true);
 	if (!r) return false;
 	if (id <= 0) { r->pas[slot] = 0; return true; }
-	if (r->pas[slot ^ 1] == (unsigned char)id) return false;
+	if (r->pas[slot ^ 1] == (unsigned short)id) return false;
 	if (id > kPasN || (r->pas[slot] != id && PasSpare(c, slot, id - 1) < 1)) return false;
-	r->pas[slot] = (unsigned char)id;
+	r->pas[slot] = (unsigned short)id;
 	return true;
 }
 static bool PasRowHas(const PasRow& row, int fx)
@@ -1067,7 +1112,7 @@ bool DropExtraLoot(SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int 
 			int lim = kPasN < CRAFT_PAS_OWN ? kPasN : CRAFT_PAS_OWN;
 			for (int i = 0; i < lim; i++) {
 				if (kPasRow[i].price < 1 || kPasRow[i].price > budget) continue;
-				if (g_craft.pasN[i] >= kCraftItemMax) { if (kPasRow[i].price > fullPrice) fullPrice = kPasRow[i].price; continue; }
+				if (g_craft.pasN[i] >= kWideMax) { if (kPasRow[i].price > fullPrice) fullPrice = kPasRow[i].price; continue; }
 				pool[n++] = i;
 			}
 			if (n < 1) {
@@ -1089,7 +1134,7 @@ bool DropExtraLoot(SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int 
 			for (int i = 0; i < lim; i++) {
 				int price = SummonPrice(i);
 				if (price < 1 || price > sumBudget) continue;
-				if (g_craft.sumN[i] >= kCraftItemMax) { if (price > fullPrice) fullPrice = price; continue; }
+				if (g_craft.sumN[i] >= kWideMax) { if (price > fullPrice) fullPrice = price; continue; }
 				pool[n++] = i;
 			}
 			if (n < 1) {
@@ -1123,7 +1168,7 @@ static int SummonInUse(int index, const CraftRec* skipRec, int skipSlot)
 		if (!g_craft.rec[i].uid) continue;
 		for (int k = 0; k < 2; k++) {
 			if (&g_craft.rec[i] == skipRec && k == skipSlot) continue;
-			if (g_craft.sumEq[i][k] == (unsigned char)(index + 1)) n++;
+			if (g_craft.sumEq[i][k] == (unsigned short)(index + 1)) n++;
 		}
 	}
 	return n;
@@ -1143,7 +1188,7 @@ bool SummonBuy(SaveData& s, int index)
 {
 	if (index < 0 || index >= SUMMON_N) return false;
 	int price = SummonPrice(index);
-	if (s.gold < price || g_craft.sumN[index] >= kCraftItemMax) return false;
+	if (s.gold < price || g_craft.sumN[index] >= kWideMax) return false;
 	s.gold -= price;
 	g_craft.sumN[index]++;
 	return true;
@@ -1172,8 +1217,8 @@ int SummonSpare(const CharData& c, int slot, int index)
 	if (slot < 0 || slot > 1 || index < 0 || index >= SUMMON_N) return 0;
 	const CraftRec* r = FindRec(c.uid, false);
 	int i = RecSlot(r);
-	if (i >= 0 && slot == 0 && g_craft.sumEq[i][1] == (unsigned char)(index + 1)) return 0;
-	if (i >= 0 && slot == 1 && g_craft.sumEq[i][0] == (unsigned char)(index + 1)) return 0;
+	if (i >= 0 && slot == 0 && g_craft.sumEq[i][1] == (unsigned short)(index + 1)) return 0;
+	if (i >= 0 && slot == 1 && g_craft.sumEq[i][0] == (unsigned short)(index + 1)) return 0;
 	return max(0, (int)g_craft.sumN[index] - SummonInUse(index, r, slot));
 }
 int SummonFree(int index)
@@ -1189,7 +1234,7 @@ bool EquipSummonId(CharData& c, int slot, int id)
 	if (i < 0) return false;
 	if (id <= 0) { g_craft.sumEq[i][slot] = 0; return true; }
 	if (id > SUMMON_N) return false;
-	if (g_craft.sumEq[i][slot] != (unsigned char)id && SummonSpare(c, slot, id - 1) < 1) return false;
-	g_craft.sumEq[i][slot] = (unsigned char)id;
+	if (g_craft.sumEq[i][slot] != (unsigned short)id && SummonSpare(c, slot, id - 1) < 1) return false;
+	g_craft.sumEq[i][slot] = (unsigned short)id;
 	return true;
 }

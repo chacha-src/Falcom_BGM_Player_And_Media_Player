@@ -2789,6 +2789,7 @@ R(TX_WX_CLEAR, L"晴れ", L"Clear", L"Clair", L"Sereno", L"Despejado", L"맑음"
 R(TX_HOME_WX, L"天候", L"Weather", L"Météo", L"Meteo", L"Clima", L"날씨", L"天气", L"طقس", L"Погода", L"Wetter", L"Tempo", L"Weer", L"Pogoda", L"Hava")
 R(TX_HOME_HR, L"気候", L"Daylight", L"Lumière", L"Luce", L"Luz", L"기후", L"时辰", L"ضوء", L"Свет", L"Tageslicht", L"Luz", L"Daglicht", L"Światło", L"Işık")
 R(TX_BT_FAIRY, L"妖精自恣の反撃ダメージ", L"Fairy Spite", L"Riposte de la fée", L"Ritorno della fata", L"Réplica del hada", L"요정의 제멋대로 반격", L"妖精恣意反击", L"رد الجنية", L"Ответ феи", L"Feenvergelter", L"Réplica da fada", L"Feeënslag", L"Odpór wróżki", L"Peri karşılığı")
+R(TX_MK_LINK, L"連", L"Ln", L"Ln", L"Ln", L"Ln", L"연", L"连", L"ر", L"Св", L"V", L"Ln", L"Ln", L"Ł", L"B")
 #include "tactics_src/skill_more_text.inc"
 
 };

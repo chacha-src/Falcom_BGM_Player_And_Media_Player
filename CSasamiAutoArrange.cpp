@@ -1178,6 +1178,187 @@ static int BassMidi(int rootPc, int deg, int type)
 	return m;
 }
 
+static int PlaceNote(Ctx* c, int ch, uint32_t tick, int midi, int dur, int vel, int gate);
+static int ShiftOct(int midi, int oct, int lo, int hi);
+
+static int ScaleStep(int rootPc, int type, int deg)
+{
+	static const int8_t maj[7] = { 0, 2, 4, 5, 7, 9, 11 };
+	static const int8_t minr[7] = { 0, 2, 3, 5, 7, 8, 10 };
+	static const int8_t dom[7] = { 0, 2, 4, 5, 7, 9, 10 };
+	const int8_t* sc = maj;
+	if (type == CH_MIN || type == CH_M7 || type == CH_DIM) sc = minr;
+	else if (type == CH_7) sc = dom;
+	int d = deg;
+	int oct = 0;
+	while (d < 0) { d += 7; oct--; }
+	while (d > 6) { d -= 7; oct++; }
+	int pc = (rootPc + (int)sc[d]) % 12;
+	if (pc < 0) pc += 12;
+	return 60 + oct * 12 + pc;
+}
+
+static int LeadProg(int style)
+{
+	switch (style) {
+	case SC_AS_TECHNO: case SC_AS_HOUSE: case SC_AS_TRANCE:
+	case SC_AS_DNB: case SC_AS_GAME: case SC_AS_BREAKS:
+		return 81;
+	case SC_AS_HIPHOP: case SC_AS_RNB: case SC_AS_CITYPOP:
+		return 80;
+	case SC_AS_ROCK: case SC_AS_METAL: case SC_AS_ROCKNROLL:
+		return 29;
+	case SC_AS_PIANO: case SC_AS_BALLAD: case SC_AS_SLOWROCK:
+		return 0;
+	case SC_AS_ORCH: case SC_AS_ENKA: case SC_AS_FANFARE:
+		return 40;
+	default:
+		return 73;
+	}
+}
+
+/* 空のパートへ、コードに沿ったメロディを1本。form が低いほど音が少なく、高いほどフレーズとして繋がる。 */
+static void WriteBgmLead(Ctx* c, int ch, const BarInfo* b, int barAt, int style, int pat, int form, int echoCh)
+{
+	if (!c || !b || ch < 0 || form < 18 || b->len < 8) return;
+	if (b->section == SEC_BREAK) return;
+	if (b->section == SEC_INTRO && form < 35) return;
+	/* A〜P で輪郭が別。強拍はコードトーン、裏は隣の音。 */
+	static const int8_t phr[16][8] = {
+		{ 0, 2, 4, 2,  5, 4, 2, 0 },
+		{ 7, 5, 4, 2,  4, 5, 7, 4 },
+		{ 2, 2, 4, 2,  0, 2, 4, 5 },
+		{ 0, 4, 7, 5,  4, 2, 0, 2 },
+		{ 4, 5, 7, 5,  4, 2, 0, 0 },
+		{ 0, -1, 4, 2,  5, 4, 2, 0 },
+		{ 2, 4, 2, 0,  2, 5, 4, 2 },
+		{ 5, 4, 2, 0,  2, 4, 7, 5 },
+		{ 0, 0, 2, 4,  7, 5, 4, 2 },
+		{ 4, 2, 0, 2,  4, 5, 4, 0 },
+		{ 7, 4, 5, 7,  5, 4, 2, 0 },
+		{ 2, 0, 2, 4,  5, 7, 5, 4 },
+		{ 0, 5, 4, 2,  0, 2, 4, 0 },
+		{ 4, 7, 5, 4,  2, 0, 2, 4 },
+		{ 0, 2, 0, 4,  2, 5, 4, 7 },
+		{ 5, 2, 4, 0,  2, 5, 7, 4 }
+	};
+	const int stepDur = b->len / 8;
+	if (stepDur < 2) return;
+	int pi = pat & 15;
+	int answer = barAt & 1;
+	int phrasePos = barAt & 3;
+	int cad = (phrasePos == 3) || (b->section == SEC_END);
+	const int fam = StyleFam(style);
+	int mask = 0xD5;
+	int lo = 72, hi = 93;
+	switch (fam) {
+	case FAM_BALLAD: case FAM_PAD: case FAM_WALTZ:
+		mask = (form >= 75) ? 0xD5 : 0x55; lo = 64; hi = 84; break;
+	case FAM_JAZZ: case FAM_BLUES: case FAM_SHUF:
+		mask = (pat & 1) ? 0xDB : 0xB6; lo = 64; hi = 88; break;
+	case FAM_HOP: case FAM_TRAP:
+		mask = (barAt & 1) ? 0x94 : 0x51; if (form >= 85) mask |= 0x22; lo = 70; hi = 91; break;
+	case FAM_FLOOR: case FAM_DISCO:
+		mask = (form >= 60) ? 0xBB : 0xAA; lo = 74; hi = 96; break;
+	case FAM_REG: case FAM_SKA:
+		mask = (form >= 70) ? 0x55 : 0x44; lo = 72; hi = 91; break;
+	case FAM_METAL: case FAM_8:
+		mask = (form >= 65) ? 0xFF : 0x55; lo = 76; hi = 96; break;
+	case FAM_DNB:
+		mask = (form >= 80) ? 0xFF : ((barAt & 1) ? 0xF0 : 0x0F); lo = 74; hi = 96; break;
+	case FAM_FUNK: case FAM_16:
+		mask = (form >= 70) ? 0xFF : 0xAD; lo = 72; hi = 93; break;
+	case FAM_LATIN: case FAM_SAMBA: case FAM_BOSSA: case FAM_AFRO:
+		mask = (form >= 70) ? 0xDB : 0xA9; lo = 72; hi = 93; break;
+	default:
+		mask = (form >= 75) ? 0xFF : 0xD5; break;
+	}
+	if (form < 30) mask &= 0x55;
+	if (!mask) mask = 0x11;
+	int8_t deg[8];
+	for (int s = 0; s < 8; s++) {
+		int d = phr[pi][s];
+		if (d >= 0 && answer) d += ((pat & 1) ? 2 : -1);
+		if (d >= 0 && phrasePos == 2) d += 2;
+		if (cad && s >= 6) d = (s == 7) ? 0 : 2;
+		if (!(mask & (1 << s))) d = -1;
+		if (d >= 0 && (fam == FAM_METAL || fam == FAM_8 || fam == FAM_HOP || fam == FAM_TRAP)) {
+			static const int8_t pent[] = { 0, 2, 4, 7, 9 };
+			int ix = d < 0 ? 0 : d;
+			d = pent[ix % 5];
+		}
+		if (d >= 0 && (fam == FAM_JAZZ || fam == FAM_BLUES || fam == FAM_SHUF) && (s & 1) && form >= 40)
+			d -= 1;
+		if (d >= 0 && (fam == FAM_BALLAD || fam == FAM_PAD || fam == FAM_WALTZ) && d > 4) d = 4;
+		if (d >= 0 && (fam == FAM_FLOOR || fam == FAM_DISCO))
+			d = (s & 2) ? 4 : 0;
+		if (b->section == SEC_INTRO && (s & 1)) d = -1;
+		if (c->isFm && form < 75 && (s & 1)) d = -1;
+		deg[s] = (int8_t)d;
+	}
+	if (b->section == SEC_END) {
+		for (int s = 1; s < 8; s++) deg[s] = -1;
+		deg[0] = 0;
+	}
+	int prevMidi = -1;
+	for (int s = 0; s < 8 && !c->overflow; s++) {
+		if (deg[s] < 0) continue;
+		int half = (b->root2 >= 0 && s >= 4);
+		int root = half ? b->root2 : b->root;
+		int type = half ? b->type2 : b->type;
+		int d = deg[s];
+		int strong = ((s % 4) == 0);
+		if (strong) d = (d / 2) * 2;
+		int midi = ScaleStep(root, type, d);
+		while (midi < lo) midi += 12;
+		while (midi > hi) midi -= 12;
+		if (prevMidi >= 0 && midi == prevMidi && form >= 45 && !cad)
+			midi = ScaleStep(root, type, d + 1);
+		while (midi > hi) midi -= 12;
+		while (midi < lo) midi += 12;
+		uint32_t tk = b->t0 + (uint32_t)(s * stepDur);
+		int dur = stepDur;
+		if (cad && s == 0 && b->section == SEC_END) dur = b->len;
+		else if (cad && s >= 6) dur = stepDur * 2;
+		else if (form >= 80) {
+			int nxt = -1;
+			for (int n = s + 1; n < 8; n++) if (deg[n] >= 0) { nxt = n; break; }
+			if (nxt == s + 1) dur = stepDur;
+			else if (nxt < 0) dur = stepDur * 2;
+		}
+		if (dur > b->len - s * stepDur) dur = b->len - s * stepDur;
+		if (dur < 2) dur = 2;
+		int vel = 86 + (d > 0 ? d * 3 : 0);
+		if (strong) vel += 16;
+		if (s == 2 || s == 6) vel -= 8;
+		if (phrasePos == 3 && s >= 4) vel -= 6;
+		if (vel < 72) vel = 72;
+		if (vel > 122) vel = 122;
+		int gate = (form >= 60) ? 88 : 72;
+		if (cad && (s >= 6 || b->section == SEC_END)) gate = 94;
+		if (c->isFm) gate = 82;
+		if (form >= 55 && fam != FAM_BALLAD && fam != FAM_PAD && fam != FAM_WALTZ
+			&& s > 0 && deg[s - 1] < 0 && stepDur >= 4 && b->section != SEC_END) {
+			int pick = ScaleStep(root, type, d - 1);
+			while (pick < 67) pick += 12;
+			while (pick > 93) pick -= 12;
+			int pd = stepDur / 2;
+			if (pd >= 2)
+				PlaceNote(c, ch, tk - (uint32_t)pd, pick, pd, vel - 18, 50);
+		}
+		PlaceNote(c, ch, tk, midi, dur, vel, gate);
+		if (echoCh >= 0 && echoCh != ch && form >= 40 && (form >= 65 || (s % 2) == 0)) {
+			int em = ScaleStep(root, type, d - 2);
+			while (em < 55) em += 12;
+			while (em > 76) em -= 12;
+			if (em != midi)
+				PlaceNote(c, echoCh, tk, em, dur, vel - 20, gate);
+		}
+		prevMidi = midi;
+		if (b->section == SEC_END) break;
+	}
+}
+
 static int ShiftOct(int midi, int oct, int lo, int hi)
 {
 	midi += 12 * oct;
@@ -3072,17 +3253,20 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		}
 	}
 	int cur = opt->curPart;
-	if (cur >= 0 && cur < lim && cur < 32 && notes[cur] > 0 && notes[cur] < 1000000) {
+	if (cur >= 0 && cur < lim && cur < 32 && notes[cur] >= 8 && notes[cur] < 1000000) {
 		int ratio = tickCount[cur] ? (polyTicks[cur] * 100) / tickCount[cur] : 0;
-		if (ratio < 50) melodyCh = cur;
+		int avg = sumPitch[cur] / notes[cur];
+		if (ratio < 50 && avg >= 58) melodyCh = cur;
 	}
 	if (melodyCh < 0) {
 		int bestScore = -1;
 		for (int ch = 0; ch < lim && ch < 32; ch++) {
-			if (notes[ch] < 1 || notes[ch] >= 1000000) continue;
+			if (notes[ch] < 8 || notes[ch] >= 1000000) continue;
 			int ratio = tickCount[ch] ? (polyTicks[ch] * 100) / tickCount[ch] : 0;
 			if (ratio >= 50) continue;
 			int avg = sumPitch[ch] / notes[ch];
+			/* 低い単音はベース。メロディ扱いすると BGM の線が足されない。 */
+			if (avg < 58) continue;
 			int score = notes[ch] * 128 + avg;
 			if (score > bestScore) { bestScore = score; melodyCh = ch; }
 		}
@@ -3091,6 +3275,26 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		int ratio = tickCount[chordSrc] ? (polyTicks[chordSrc] * 100) / tickCount[chordSrc] : 0;
 		if (ratio >= 50) melodyCh = -1;
 		else chordSrc = -1;
+	}
+	int form = opt->form;
+	if (form < 0) form = 0;
+	if (form > 100) form = 100;
+	/* 既にメロディがある曲は上書きしない。無いときだけ、右へ倒すほどメロディ用の空きを取る。 */
+	const int userHadMelody = (melodyCh >= 0) ? 1 : 0;
+	int checkedLead = 0;
+	for (int ch = 0; ch < lim && ch < 32; ch++) {
+		if (!((opt->targetMask >> ch) & 1u)) continue;
+		if ((opt->drumMask >> ch) & 1u) continue;
+		checkedLead = 1;
+		break;
+	}
+	/* チェックがあるときは、チェック外の ch を先に押さえない。 */
+	if (form >= 22 && !userHadMelody && !checkedLead) {
+		const int preferLead[] = { 0, 11, 12, 13, 14, 4, 5, 2, 3 };
+		const int preferLeadFm[] = { 0, 1, 7, 8, 2, 9 };
+		int lead = PickEmpty(notes, lim, isFm, chordSrc, bassHave, -1,
+			isFm ? preferLeadFm : preferLead, isFm ? 6 : 9);
+		if (lead >= 0) melodyCh = lead;
 	}
 	for (int ch = 0; ch < lim && ch < 32; ch++) {
 		if (notes[ch] < 8 || notes[ch] >= 1000000 || ch == melodyCh || ch == chordSrc) continue;
@@ -3217,6 +3421,52 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (nBass == 0 && chBass >= 0) bassCh[nBass++] = chBass;
 	if (nChord == 0 && chChord >= 0) chordCh[nChord++] = chChord;
 	if (nHarm == 0 && chHarm >= 0) harmCh[nHarm++] = chHarm;
+	if (form < 18 || userHadMelody) {
+		genMel = 0;
+		if (!userHadMelody && melodyCh >= 0 && melodyCh < 32 && notes[melodyCh] == 0)
+			melodyCh = -1;
+	} else {
+		auto leadFree = [&](int ch) -> int {
+			if (ch < 0 || ch >= lim || ch >= 32) return 0;
+			if (notes[ch] != 0) return 0;
+			if (isFm && ch == 6) return 0;
+			if ((opt->drumMask >> ch) & 1u) return 0;
+			for (int i = 0; i < nDrum; i++) if (drumChs[i] == ch) return 0;
+			/* どれかチェックされているときは、その ch だけに書く。 */
+			if (checkedLead && !((opt->targetMask >> ch) & 1u)) return 0;
+			return 1;
+		};
+		auto soleRole = [&](int ch) -> int {
+			if (nBass == 1 && bassCh[0] == ch) return 1;
+			if (nChord == 1 && chordCh[0] == ch) return 1;
+			return 0;
+		};
+		int lead = -1;
+		{
+			int cand[6] = {
+				nHarm > 0 ? harmCh[0] : -1,
+				nColor > 0 ? colorCh[0] : -1,
+				nCnt > 0 ? cntCh[0] : -1,
+				nArp > 0 ? arpCh[0] : -1,
+				nPad > 0 ? padCh[0] : -1,
+				nStab > 0 ? stabCh[0] : -1
+			};
+			for (int i = 0; i < 6 && lead < 0; i++)
+				if (leadFree(cand[i]) && !soleRole(cand[i])) lead = cand[i];
+		}
+		if (lead < 0) {
+			for (int ch = 0; ch < lim && ch < 32 && lead < 0; ch++)
+				if (leadFree(ch) && !soleRole(ch)) lead = ch;
+		}
+		if (lead >= 0) {
+			melodyCh = lead;
+			genMel = 1;
+		} else {
+			genMel = 0;
+			if (melodyCh >= 0 && melodyCh < 32 && notes[melodyCh] == 0)
+				melodyCh = -1;
+		}
+	}
 
 	/* 伴奏はメロディパートには書かない。メロディの強弱・ハモリは別ジョブ。 */
 	if (melodyCh >= 0) {
@@ -3281,7 +3531,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		|| nCnt > 0 || nStab > 0 || nColor > 0);
 	int canMel = ((opt->jobs & SC_AJ_MEL_VOL) && melodyCh >= 0)
 		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0);
-	if (!canLayer && !canMel) {
+	int canLead = (genMel && melodyCh >= 0) ? 1 : 0;
+	if (!canLayer && !canMel && !canLead) {
 		if (out) { out->err = SC_AE_EMPTY; FillMsg(out); }
 		return SC_AE_EMPTY;
 	}
@@ -3585,6 +3836,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	for (int i = 0; i < nCnt; i++) EnsureMelodic(&ctx, opt->ui, cntCh[i], 2, st.progAll[5], anySolo, haveAcc);
 	for (int i = 0; i < nStab; i++) EnsureMelodic(&ctx, opt->ui, stabCh[i], 1, st.progAll[6], anySolo, haveAcc);
 	for (int i = 0; i < nColor; i++) EnsureMelodic(&ctx, opt->ui, colorCh[i], 2, st.progAll[7], anySolo, haveAcc);
+	if (genMel && melodyCh >= 0)
+		EnsureMelodic(&ctx, opt->ui, melodyCh, 2, LeadProg(opt->style), anySolo, 0);
 
 	/* FM 同士は同じ拍で構成音を分ける。SSG は拍頭だけの別ライン。ベースは除く。 */
 	int fmToneIx[32], ssgToneIx[32];
@@ -3709,6 +3962,23 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				bassSlots = (uint16_t)(bassSlots | (uint16_t)(1u << midSlot));
 			}
 		}
+		if (form >= 55 && allowBar && !skipChord && b.section != SEC_BREAK
+			&& !(b.section == SEC_END && endFromEnd <= 0)) {
+			/* アレンジごとの格子は残し、足りないときだけその文字の刻みを足す。 */
+			static const uint16_t kAdd[16] = {
+				0x4444, 0x2222, 0x8888, 0x4924, 0x5555, 0xAAAA, 0x1248, 0x8421,
+				0x2492, 0x9249, 0x3333, 0x6666, 0x9999, 0x0F0F, 0xF0F0, 0x5A5A
+			};
+			int hits = 0;
+			for (int s = 0; s < nSlot && s < 16; s++)
+				if (compM & (uint16_t)(1u << s)) hits++;
+			if (hits < 2) {
+				uint16_t add = kAdd[patVar & 15];
+				if (form < 75) add = (uint16_t)(add & 0x1111);
+				else if (form < 90) add = (uint16_t)(add & 0x5555);
+				compM = (uint16_t)((compM | add) & slotLow);
+			}
+		}
 		const int kind = ArrangeKind(opt->style, patVar);
 		const int orn = ArrangeOrnament(kind);
 		const int hook = (allowBar && !skipChord && b.section != SEC_END
@@ -3747,10 +4017,13 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				int h = HoldSlots(famNow, role, opt->style);
 				int quietish = (b.section == SEC_INTRO || b.section == SEC_BREAK
 					|| kindNow == AR_QUIET || kindNow == AR_DARK || kindNow == AR_PAD || kindNow == AR_HALF);
-				if (quietish) {
+				if (quietish && form < 50) {
 					if (h < 4) h = 4;
 					if (h > 8) h = 8;
 				}
+				/* 白玉だけは切る。16分まで削るとアレンジが薄くなる。 */
+				if (form >= 60 && role == 1 && h > 8) h = 8;
+				if (form >= 85 && role == 1 && h > 4) h = 4;
 				return CapSpan(span, slotDur, h);
 			};
 			uint16_t bit = (uint16_t)(1u << slot);
@@ -4040,7 +4313,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					continue;
 				}
 				int cntSub = (div >= 16 && slot >= 0 && slot < 16) ? (int)s_figCnt[slot] : 0;
-				if (i == 0 && hit && cntSub > 0 && cntCh[i] >= 0) {
+				if (i == 0 && hit && cntSub > 0 && cntCh[i] >= 0 && form < 75) {
 					if (merge)
 						MergeSlot(ev, evCount, &nEmit, cntCh[i], slot0, slot1, -1, 1, &removedNotes, slotDur);
 					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
@@ -4090,7 +4363,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 				lay(colorCh[i], hit, pit, np, span, gvol - 18, gate, 0);
 			}
 			/* その拍だけ、コードトーンを 64 分で4つ。じゃらん。 */
-			if (!ctx.isFm && slot == jaranSlot && slotDur >= 8 && !(run32 && slot >= midSlot)) {
+			if (!ctx.isFm && form < 70 && slot == jaranSlot && slotDur >= 8 && !(run32 && slot >= midSlot)) {
 				int ch = (nHarm > 0) ? harmCh[0] : ((nArp > 0) ? arpCh[0] : -1);
 				if (ch >= 0) {
 					int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
@@ -4108,26 +4381,14 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 					}
 				}
 			}
-			if (genMel && melodyCh == 0 && allowBar && MelodySlot(patVar, slot, div, compM, bassSlots, drm[DV_HAT])
-				&& !(ctx.isFm && (slot % 4) != 0)) {
-				static const uint8_t md[8][8] = {
-					{ 1, 5, 3, 8, 5, 3, 2, 1 },
-					{ 5, 8, 5, 3, 1, 3, 5, 8 },
-					{ 1, 3, 5, 3, 8, 5, 3, 1 },
-					{ 8, 5, 3, 1, 2, 3, 5, 1 },
-					{ 1, 1, 5, 8, 3, 5, 2, 1 },
-					{ 3, 5, 8, 5, 3, 2, 5, 1 },
-					{ 1, 8, 5, 3, 5, 8, 3, 1 },
-					{ 5, 3, 1, 5, 8, 3, 5, 1 }
-				};
-				int deg = md[patVar & 7][(slot + barAt * 3 + opt->style) & 7];
-				int midi = ShiftOct(BassMidi(hr, deg, ht), 1, 52, 74);
-				int mv = ((slot % 4) == 0) ? 114 : 86;
-				int room = (int)((slot1 > tick) ? (slot1 - tick) : (uint32_t)slotDur);
-				int mdor = ctx.isFm ? (slotDur * 4) : (((patVar & 7) == 3) ? slotDur : slotDur * 2);
-				if (!ctx.isFm && mdor > room) mdor = room;
-				if (mdor < 2) mdor = 2;
-				PlaceNote(&ctx, melodyCh, tick, midi, mdor, mv, 84);
+			if (genMel && melodyCh >= 0 && slot == 0 && b.root >= 0 && b.section != SEC_BREAK) {
+				int echo = -1;
+				if (form >= 48) {
+					if (nHarm > 0 && harmCh[0] != melodyCh) echo = harmCh[0];
+					else if (nCnt > 0 && cntCh[0] != melodyCh) echo = cntCh[0];
+					else if (nPad > 0 && padCh[0] != melodyCh && form >= 75) echo = padCh[0];
+				}
+				WriteBgmLead(&ctx, melodyCh, &b, barAt, opt->style, patVar, form, echo);
 			}
 
 		}
@@ -4157,6 +4418,28 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		out->usedMask = used;
 		out->err = ctx.overflow ? SC_AE_OVERFLOW : ((ctx.added > 0 || removedNotes > 0) ? SC_AE_OK : SC_AE_EMPTY);
 		FillMsg(out);
+		if (genMel && melodyCh >= 0) {
+			const wchar_t* fmt = LL14(
+				L"\nメロディ ch%d",
+				L"\nMelody ch%d",
+				L"\nMélodie ch%d",
+				L"\nMelodia ch%d",
+				L"\nMelodía ch%d",
+				L"\n멜로디 ch%d",
+				L"\n旋律 ch%d",
+				L"\nلحن ch%d",
+				L"\nМелодия ch%d",
+				L"\nMelodie ch%d",
+				L"\nMelodia ch%d",
+				L"\nMelodie ch%d",
+				L"\nMelodia ch%d",
+				L"\nMelodi ch%d");
+			wchar_t extra[128];
+			swprintf_s(extra, fmt, melodyCh + 1);
+			size_t used = wcslen(out->msg);
+			if (used + wcslen(extra) < 255)
+				wcscat_s(out->msg, extra);
+		}
 		if ((opt->jobs & (SC_AJ_MEL_VOL | SC_AJ_MEL_PITCH)) && melodyCh < 0) {
 			size_t used = wcslen(out->msg);
 			const wchar_t* extra = LL14(

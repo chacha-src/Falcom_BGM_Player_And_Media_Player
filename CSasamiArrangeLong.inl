@@ -699,6 +699,133 @@ static void PaintSlow(int fam, int pat, int q, uint16_t* arpM, uint16_t* cntM)
 }
 
 /* スタイルの骨格を、ループ全長の文に乗せる。8小節で同じ打点に戻さない。 */
+/* A〜P をスタイルの中で別グルーヴにする。譜面帳の似た型はここで上書きする。 */
+static void ApplyPatGroove(int style, int pat, int bar, int div, int section,
+	uint16_t* drm, uint8_t* bass, uint16_t* comp, uint16_t* pad,
+	uint16_t* arp, uint16_t* harm, uint16_t* cnt, uint16_t* stab)
+{
+	if (!drm || !bass || section == SEC_BREAK) return;
+	if (pat < 0) pat = 0;
+	const int fam = StyleFam(style);
+	const int v = pat & 15;
+	uint16_t kick = 0x1111, snare = 0x1010, hat = 0x5555, ohat = 0, ride = 0;
+	uint16_t compM = 0x4444, padM = 0x0001, arpM = 0x1111, harmM = 0x0101;
+	uint16_t cntM = 0x2222, stabM = 0;
+	uint16_t bassHit = 0x1111;
+	static const uint8_t degQ[] = { 1, 5, 1, 2 };
+	static const uint8_t deg8[] = { 1, 5, 8, 3, 1, 2, 5, 8 };
+	static const uint8_t degWalk[] = { 1, 5, 2, 8, 3, 5, 1, 2 };
+	static const uint8_t degOct[] = { 1, 3, 1, 3, 5, 3, 8, 3 };
+	static const uint8_t degOff[] = { 1, 8, 5, 2 };
+	const uint8_t* deg = degQ;
+	int nd = 4;
+	switch (fam) {
+	case FAM_METAL:
+		kick = 0x5555; snare = 0x1110; hat = 0xFFFF; bassHit = 0x5555; deg = degQ; compM = 0x1111; arpM = 0x5555;
+		break;
+	case FAM_FLOOR: case FAM_DISCO:
+		kick = 0x1111; snare = 0x1010; hat = 0; ohat = 0x4444; bassHit = 0x5555; deg = degOct; nd = 8;
+		compM = 0x4444; arpM = 0xAAAA;
+		break;
+	case FAM_JAZZ: case FAM_BLUES: case FAM_SHUF:
+		kick = 0x0101; snare = 0; ride = 0x5555; hat = 0; bassHit = 0x1111; deg = degWalk; nd = 8;
+		compM = 0x8888; arpM = 0x1111; drm[DV_RIM] = (uint16_t)0x1010;
+		break;
+	case FAM_WALTZ:
+		kick = 0x0001; snare = 0x0110; hat = 0x0111; bassHit = 0x0111; compM = 0x0110; arpM = 0x0010; nd = 3;
+		break;
+	case FAM_BALLAD: case FAM_PAD:
+		kick = 0x0101; snare = 0x1010; hat = 0x1111; bassHit = 0x0101; compM = 0x0001; padM = 0x0001; arpM = 0; cntM = 0x0101;
+		break;
+	case FAM_HOP: case FAM_TRAP:
+		kick = 0x0101; snare = 0x0100; hat = 0x5555; bassHit = 0x0001; compM = 0x0101; arpM = 0x1111; nd = 2;
+		break;
+	case FAM_DNB:
+		kick = 0x0111; snare = 0x1010; hat = 0xFFFF; bassHit = 0x1515; deg = deg8; nd = 8; compM = 0x0001; arpM = 0xAAAA;
+		break;
+	case FAM_REG: case FAM_SKA:
+		kick = 0x0100; snare = 0x0100; hat = 0x4444; bassHit = 0x0101; compM = 0x4444; stabM = 0x4444; arpM = 0; deg = degOff;
+		break;
+	case FAM_FUNK:
+		kick = 0x1511; snare = 0x1110; hat = 0xFFFF; ohat = 0x0404; bassHit = 0x5757; deg = deg8; nd = 8;
+		compM = 0x2222; arpM = 0xAAAA; cntM = 0x4444;
+		break;
+	case FAM_BOSSA:
+		kick = 0x0411; hat = 0x5555; snare = 0; bassHit = 0x0101; compM = 0x4444; arpM = 0x0101;
+		drm[DV_RIM] = (uint16_t)0x1041;
+		break;
+	case FAM_SAMBA: case FAM_LATIN: case FAM_AFRO:
+		kick = 0x1511; snare = 0x1010; hat = 0xFFFF; bassHit = 0x1515; deg = deg8; nd = 8; compM = 0x4545; arpM = 0xAAAA;
+		break;
+	case FAM_TANGO:
+		kick = 0x0051; snare = 0x1000; hat = 0x1111; bassHit = 0x1111; compM = 0x1111;
+		break;
+	case FAM_8:
+		kick = 0x1111; snare = 0x1010; hat = 0x5555; bassHit = 0x1111; compM = 0x1111; arpM = 0x0101;
+		break;
+	default:
+		kick = 0x1511; snare = 0x1010; hat = 0xFFFF; bassHit = 0x5555; deg = deg8; nd = 8;
+		compM = 0x4444; arpM = 0xAAAA; cntM = 0x2222;
+		break;
+	}
+	/* 同じスタイルでも A〜P で打点・ベース・厚みが別になる。 */
+	switch (v) {
+	case 1: hat = (uint16_t)(hat ? 0xFFFF : hat); bassHit = (uint16_t)(bassHit | 0x5555); arpM = 0xFFFF; break;
+	case 2: kick = 0x0101; snare = 0x0100; hat = 0x1111; bassHit = 0x0101; compM = 0x0100; arpM = 0; break;
+	case 3: compM = 0x4444; hat = 0x4444; stabM = 0x4444; bassHit = 0x4444; deg = degOff; nd = 4; arpM = 0; break;
+	case 4: kick = 0x1111; ohat = 0x4444; hat = 0x1111; bassHit = 0x1111; deg = degOct; nd = 8; break;
+	case 5: hat = 0; ride = 0x5555; bassHit = 0x1111; deg = degWalk; nd = 8; compM = 0x8888; arpM = 0x1111; break;
+	case 6: kick = 0x0001; snare = 0x0010; hat = 0x0101; bassHit = 0x0001; compM = 0x0001; padM = 0x0001; arpM = 0; cntM = 0; break;
+	case 7: kick = 0x1515; hat = 0xAAAA; bassHit = 0x5757; deg = deg8; nd = 8; compM = 0x2222; cntM = 0x8888; break;
+	case 8: bassHit = 0x5555; deg = degOct; nd = 8; ohat = (uint16_t)(ohat | 0x1010); compM = 0x4444; break;
+	case 9: kick = 0x0100; snare = 0x0100; compM = 0x4444; stabM = 0x4444; bassHit = 0x0101; arpM = 0; break;
+	case 10: kick = 0xFFFF; snare = 0x1111; hat = 0xFFFF; bassHit = 0x5555; compM = 0x1111; break;
+	case 11: arpM = 0xFFFF; compM = 0x0001; cntM = 0xAAAA; bassHit = (uint16_t)(bassHit | 0x1111); break;
+	case 12: kick = 0x0101; snare = 0; hat = 0; ride = 0; drm[DV_RIM] = 0x1010; padM = 0x0001; compM = 0x0001; arpM = 0; cntM = 0x0101; break;
+	case 13:
+		if (bar & 1) { arpM = 0; cntM = 0; compM = 0x0001; hat = 0x1111; }
+		else { arpM = 0xFFFF; cntM = 0x5555; compM = 0x1111; }
+		break;
+	case 14: {
+		int q = bar & 3;
+		hat = (q == 0) ? 0x1111 : (q == 1) ? 0x5555 : 0xFFFF;
+		kick = (q >= 2) ? 0x5555 : 0x0101;
+		if (q == 3) arpM = 0xFFFF;
+		break;
+	}
+	case 15: kick = 0x1511; hat = 0xAAAA; bassHit = 0x1515; deg = deg8; nd = 8; compM = 0x4545; stabM = 0x1010; break;
+	default: break;
+	}
+	if (fam == FAM_WALTZ) {
+		kick = (uint16_t)(kick & 0x0111);
+		snare = (uint16_t)(snare & 0x0110);
+		hat = (uint16_t)((hat | ride) & 0x0111);
+		compM = (uint16_t)(compM & 0x0111);
+		bassHit = (uint16_t)(bassHit & 0x0111);
+	}
+	drm[DV_KICK] = Fit16(kick, div);
+	drm[DV_SNARE] = Fit16(snare, div);
+	drm[DV_HAT] = Fit16(hat, div);
+	drm[DV_OHAT] = Fit16(ohat, div);
+	drm[DV_RIDE] = Fit16(ride, div);
+	if (comp) *comp = Fit16(compM, div);
+	if (pad) *pad = Fit16(padM, div);
+	if (arp) *arp = Fit16(arpM, div);
+	if (harm) *harm = Fit16(harmM, div);
+	if (cnt) *cnt = Fit16(cntM, div);
+	if (stab) *stab = Fit16(stabM, div);
+	memset(bass, 0, 16);
+	int k = 0;
+	int n = div < 16 ? div : 16;
+	uint16_t bh = Fit16(bassHit, div);
+	for (int i = 0; i < n; i++) {
+		if (bh & (uint16_t)(1u << i)) {
+			bass[i] = deg[k % nd];
+			k++;
+		}
+	}
+}
+
 static void WriteLiveChart(int style, int pat, int bar, int div, int section,
 	uint16_t* drm, uint8_t* bass, uint16_t* comp, uint16_t* pad,
 	uint16_t* arp, uint16_t* harm, uint16_t* cnt, uint16_t* stab, uint16_t* color)
@@ -976,5 +1103,18 @@ static void WriteLiveChart(int style, int pat, int bar, int div, int section,
 	if (cnt) *cnt = Fit16(cntM, div);
 	if (stab) *stab = Fit16(stabM, div);
 	if (color) *color = Fit16(colM, div);
+	/* A〜P はスタイルごとの別譜。上の共通型で潰さない。 */
+	if (style >= 0 && style < SC_AS_COUNT && pat >= 0 && pat < SC_ARRANGE_COUNT) {
+		int pb = bar & 7;
+		if (pb < 0) pb = 0;
+		int alive = 0;
+		const uint16_t* w = kPhrase[style][pat][pb];
+		for (int i = 0; i < 14 && !alive; i++) if (w[i]) alive = 1;
+		const uint8_t* bs = kPhraseBass[style][pat][pb];
+		for (int i = 0; i < 16 && !alive; i++) if (bs[i]) alive = 1;
+		if (alive)
+			ApplyPhraseBook(style, pat, bar, div, drm, bass, comp, pad, arp, harm, cnt, stab);
+	}
+	ApplyPatGroove(style, pat, bar, div, section, drm, bass, comp, pad, arp, harm, cnt, stab);
 	(void)kind;
 }

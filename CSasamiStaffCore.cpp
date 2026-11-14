@@ -1800,6 +1800,18 @@ int ScStaffTickToX(uint32_t tick, int scrollX, int gridLeft, int pxBeat,
 	return x;
 }
 
+static int ScStaffTickToXFrac(double tick, int scrollX, int gridLeft, int pxBeat,
+	const ScStaffUi* u, const ScEvent* ev, int evCount)
+{
+	if (tick < 0.0) tick = 0.0;
+	const uint32_t base = (uint32_t)tick;
+	const double frac = tick - (double)base;
+	const int x0 = ScStaffTickToX(base, scrollX, gridLeft, pxBeat, u, ev, evCount);
+	if (frac < 0.001) return x0;
+	const int x1 = ScStaffTickToX(base + 1u, scrollX, gridLeft, pxBeat, u, ev, evCount);
+	return x0 + (int)((double)(x1 - x0) * frac + 0.5);
+}
+
 uint32_t ScStaffXToTick(int x, int scrollX, int gridLeft, int pxBeat, int quantTicks,
 	const ScStaffUi* u, const ScEvent* ev, int evCount)
 {
@@ -5731,8 +5743,10 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 	/* Marker / playhead: dotted full-height; solid only on active (markerSolidTrack) row.
 	   Preview playhead stays solid full-height for visibility. */
 	{
-		uint32_t phTick = u->previewActive ? u->playheadTick : u->markerTick;
-		int xh = ScStaffTickToX(phTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
+		const double phPos = u->previewActive ? u->playheadPos : (double)u->markerTick;
+		int xh = u->previewActive
+			? ScStaffTickToXFrac(phPos, u->scrollX, gridLeft, pxBeat, u, ev, evCount)
+			: ScStaffTickToX(u->markerTick, u->scrollX, gridLeft, pxBeat, u, ev, evCount);
 		if (xh >= gridLeft && xh <= grid.right) {
 			COLORREF hc = u->previewActive ? RGB(230, 40, 50) : RGB(200, 50, 50);
 			const int y0 = staffOriginY;
@@ -7718,6 +7732,10 @@ int ScStaffPreviewViaHost(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 	u->previewWavMode = 0;
 	u->markerSeekArmed = 0;
 	u->playheadTick = u->markerTick;
+	u->playheadPos = (double)u->markerTick;
+	u->playheadFrom = u->playheadPos;
+	u->playheadAnchor = u->playheadPos;
+	u->playheadQpc = 0;
 	u->previewActive = 1;
 	u->previewEngineSeen = 0;
 	g_scPreviewOn = 1;
@@ -7783,6 +7801,10 @@ int ScStaffPreviewViaWavout(LPCTSTR builtPath, ScStaffUi* u, int tempoT)
 		u->previewWavMode = 1;
 		u->markerSeekArmed = 0;
 		u->playheadTick = u->markerTick;
+		u->playheadPos = (double)u->markerTick;
+		u->playheadFrom = u->playheadPos;
+		u->playheadAnchor = u->playheadPos;
+		u->playheadQpc = 0;
 		u->previewActive = 1;
 		u->previewEngineSeen = 0;
 		g_scPreviewOn = 1;
@@ -7834,20 +7856,82 @@ static void ScStaffKeepAboveMonitor()
 		::SetWindowPos(sas[i], HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+static double ScStaffTickFromSecF(double sec, int tempoT)
+{
+	if (sec < 0.0) sec = 0.0;
+	const double bpm = (double)ScStaffBpmFromTempoT(tempoT);
+	return sec * (bpm / 60.0) * (double)SC_PPQN;
+}
+
+/* エンジン位置はバッファ単位（おおよそ 1 秒に数回）でしか動かない。
+   その段差を、届いた間隔いっぱいに割り、描画のたびにバーを進める。 */
+static double GlideScorePos(ScStaffUi* u, double target, int tempoT)
+{
+	extern int playy;
+	LARGE_INTEGER freq, now;
+	if (!u || !QueryPerformanceFrequency(&freq) || freq.QuadPart <= 0)
+		return target;
+	QueryPerformanceCounter(&now);
+	if (playy == 0 || target + 1.0 < u->playheadPos) {
+		u->playheadFrom = target;
+		u->playheadAnchor = target;
+		u->playheadSpan = 0.05;
+		u->playheadQpc = now.QuadPart;
+		u->playheadPos = target;
+		return target;
+	}
+	const double arrived = (u->playheadQpc > 0)
+		? (double)(now.QuadPart - u->playheadQpc) / (double)freq.QuadPart : 1.0;
+	const int fresh = (u->playheadQpc == 0 || fabs(target - u->playheadAnchor) > 0.35);
+	if (fresh) {
+		double span = (u->playheadQpc > 0) ? arrived : 0.20;
+		/* エンジンが既に毎フレーム進んでいるときは、そのまま追う。
+		   0.2 秒級の段差のときだけ、その間隔いっぱいに割り付ける。 */
+		if (u->playheadQpc > 0 && span <= 0.05) {
+			u->playheadFrom = target;
+			u->playheadAnchor = target;
+			u->playheadSpan = 0.05;
+			u->playheadQpc = now.QuadPart;
+			u->playheadPos = target;
+			return target;
+		}
+		if (span < 0.04) span = 0.04;
+		if (span > 0.40) span = 0.25;
+		u->playheadFrom = (u->playheadQpc == 0) ? target : u->playheadPos;
+		u->playheadAnchor = target;
+		u->playheadSpan = span;
+		u->playheadQpc = now.QuadPart;
+		u->playheadPos = u->playheadFrom;
+		return u->playheadPos;
+	}
+	double span = u->playheadSpan;
+	if (span < 0.04) span = 0.04;
+	double t = arrived / span;
+	double pos;
+	if (t < 1.0) {
+		if (t < 0.0) t = 0.0;
+		pos = u->playheadFrom + (u->playheadAnchor - u->playheadFrom) * t;
+	} else {
+		double extra = arrived - span;
+		if (extra < 0.0) extra = 0.0;
+		if (extra > 0.20) extra = 0.20;
+		const double bpm = (double)ScStaffBpmFromTempoT(tempoT);
+		pos = u->playheadAnchor + extra * (bpm / 60.0) * (double)SC_PPQN;
+	}
+	if (pos < 0.0) pos = 0.0;
+	u->playheadPos = pos;
+	return pos;
+}
+
 int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 {
 	if (!u || !u->previewActive) return 0;
 
-	uint32_t tick = 0;
-	int haveTick = 0;
-	unsigned vt = 0;
 	const double sec = OggGetGdiPlaybackTimeSec();
 	/* SMF の先頭 2分音符は 0小節（SysEx）。譜面の 1拍目はそこから。
 	   FM 譜面の試聴にこの引き算を掛けると、位置が 0 のままになる。 */
-	const uint32_t lead = (uint32_t)SC_PPQN * 2;
-	auto scoreTick = [&](uint32_t smfTick) -> uint32_t {
-		return (smfTick > lead) ? (smfTick - lead) : 0;
-	};
+	const double lead = (double)SC_PPQN * 2.0;
+	double raw = 0.0;
 
 	/* FM は FPY。VST の SMF ティックは別曲の残りで、先頭に張り付く。
 	   モニタと同じく出力ラグ（基準 900ms）だけ戻す。2拍の SysEx 引きはしない。 */
@@ -7855,51 +7939,44 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 		double s = sec;
 		s -= (double)OggGetPlaybackLagMs(900) / 1000.0;
 		if (s < 0.0) s = 0.0;
-		tick = u->previewOriginTick + ScStaffTickFromSec(s, tempoT);
-		haveTick = 1;
+		raw = (double)u->previewOriginTick + ScStaffTickFromSecF(s, tempoT);
 	} else if (u->previewWavMode) {
-		tick = u->previewOriginTick + scoreTick(ScStaffTickFromSec(sec > 0 ? sec : 0, tempoT));
-		haveTick = 1;
+		double smf = ScStaffTickFromSecF(sec > 0.0 ? sec : 0.0, tempoT);
+		if (smf < lead) smf = 0.0;
+		else smf -= lead;
+		raw = (double)u->previewOriginTick + smf;
 	} else {
-		/* Prefer audible PCM (DS heard) so the cursor matches what you hear.
-		   Fall back to engine playSample minus plugin latency only — no extra pad. */
-		__int64 heard = OggGetHeardPcmFrames();
-		if (heard >= 0) {
-			extern int wavbit_sample_Hz;
-			const int sr = (wavbit_sample_Hz > 8000) ? wavbit_sample_Hz : 44100;
-			const __int64 lat = (__int64)VstMidiGetLatencySamples();
-			const __int64 lag = (__int64)sr * OggGetPlaybackLagMs(700) / 1000;
-			const __int64 cut = lat + lag;
-			heard = (heard > cut) ? (heard - cut) : 0;
-		}
-		if (heard >= 0 && VstMidiTickAtSample(heard, &vt)) {
-			tick = scoreTick(vt);
-			haveTick = 1;
-		}
-		if (!haveTick) {
-			__int64 playSmpl = VstMidiGetPlaySample();
-			if (playSmpl >= 0) {
-				playSmpl -= (__int64)VstMidiGetLatencySamples();
-				if (playSmpl < 0) playSmpl = 0;
-				if (VstMidiTickAtSample(playSmpl, &vt)) {
-					tick = scoreTick(vt);
-					haveTick = 1;
-				}
+		/* エンジンのサンプルを小数 tick にする。heard の 700ms 引きは
+		   先頭でバーを 0 に止めるので、ここでは遅延サンプルだけ引く。 */
+		int have = 0;
+		__int64 playSmpl = VstMidiGetPlaySample();
+		if (playSmpl >= 0) {
+			playSmpl -= (__int64)VstMidiGetLatencySamples();
+			if (playSmpl < 0) playSmpl = 0;
+			double smf = 0.0;
+			if (VstMidiTickAtSampleF(playSmpl, &smf)) {
+				if (smf < lead) smf = 0.0;
+				else smf -= lead;
+				raw = smf;
+				have = 1;
 			}
 		}
-		if (!haveTick)
-			tick = scoreTick(ScStaffTickFromSec(sec, tempoT));
-
-		/* Baked-from-marker files start at tick 0; map back onto staff time. */
-		tick = u->previewOriginTick + tick;
-
-		/* Keep playhead on marker until one-shot seek lands (avoid jump to 0). */
-		if (u->markerSeekArmed && u->markerTick > 0 && sec <= 0.05) {
-			tick = u->markerTick;
+		if (!have) {
+			double smf = ScStaffTickFromSecF(sec, tempoT);
+			if (smf < lead) smf = 0.0;
+			else smf -= lead;
+			raw = smf;
 		}
+		raw += (double)u->previewOriginTick;
+		if (u->markerSeekArmed && u->markerTick > 0 && sec <= 0.05)
+			raw = (double)u->markerTick;
 	}
 
-	int changed = (tick != u->playheadTick);
+	const double prevPos = u->playheadPos;
+	const double pos = GlideScorePos(u, raw, tempoT);
+	uint32_t tick = (pos > 4000000000.0) ? 4000000000u : (uint32_t)pos;
+
+	int changed = (tick != u->playheadTick) || (fabs(pos - prevPos) >= 0.12);
 	u->playheadTick = tick;
 
 	/* soft A-B loop in musical time */
@@ -7915,6 +7992,10 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 			og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, target),
 				(LPARAM)og->m_time.GetSafeHwnd());
 			u->playheadTick = (uint32_t)u->loopATick;
+			u->playheadPos = (double)u->loopATick;
+			u->playheadFrom = u->playheadPos;
+			u->playheadAnchor = u->playheadPos;
+			u->playheadQpc = 0;
 			changed = 1;
 		}
 	}
@@ -7943,7 +8024,7 @@ int ScStaffSyncPreviewPlayhead(ScStaffUi* u, int tempoT)
 	/* Keep playhead in view (follow scroll). */
 	const int clefMargin = ScStaffClefMarginPx(u, NULL, 0);
 	if (u->followViewW > clefMargin + 40 && u->pxBeat > 0) {
-		const int x = (int)(((__int64)u->playheadTick * (uint32_t)u->pxBeat) / (uint32_t)SC_PPQN);
+		const int x = ScStaffTickToXFrac(u->playheadPos, 0, 0, u->pxBeat, NULL, NULL, 0);
 		const int viewInner = u->followViewW - clefMargin;
 		const int margin = viewInner / 3;
 		const int left = u->scrollX;

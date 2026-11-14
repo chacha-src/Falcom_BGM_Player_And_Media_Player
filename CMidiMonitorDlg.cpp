@@ -4095,9 +4095,11 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			} else if (rawBack) {
 				/* heard だけ 0 に落ちたフレームで先頭からやり直すと、
 				   長い曲のイベントを UI に一気に吐き、モニタと譜面が応答なしになる。
-				   エンジン位置が本当に頭へ戻ったときだけやり直す。 */
+				   再生中の 0 はフォーカス切替でロックを取り損ねた値なので、
+				   止まったときだけ頭からやり直す。 */
+				extern int playy;
 				const int srJ = (m_sampleRate > 0) ? m_sampleRate : 44100;
-				if (pbRaw < (__int64)srJ / 5 && m_lastPlayb > (__int64)srJ) {
+				if (playy == 0 && pbRaw < (__int64)srJ / 5 && m_lastPlayb > (__int64)srJ) {
 					ResetParts();
 					m_evPos = 0;
 					m_hadNote = 0;

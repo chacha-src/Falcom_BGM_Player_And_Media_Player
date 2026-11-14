@@ -23,6 +23,7 @@ enum {
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
 	ID_SHOP_TIER0 = 1120,
 	ID_SHOP_BAND0 = 1140, ID_SHOP_BAND1, ID_SHOP_BAND2, ID_SHOP_BAND3,
+	ID_SHOP_FIND = 1144, ID_SHOP_FINDX, ID_SHOP_ALL, ID_SHOP_STAT0 = 1160,
 	ID_PT_SHOP = 362,
 	ID_SHOP_FREE = 1890, ID_SHOP_SELLALL, ID_SHOP_FIT_NO, ID_SHOP_FIT_PREV, ID_SHOP_FIT_NEXT, ID_SHOP_FIT0,
 	ID_SHOP_SELLJUNK = 1920, ID_SHOP_ARM0 = 1930, ID_SHOP_ARM_SELL = 1948, ID_SHOP_ARM_NO = 1949,
@@ -201,6 +202,8 @@ Game::Game()
 	m_shopPage = 0;
 	m_shopSellPage = 0;
 	m_shopKind = 0;
+	m_shopFind[0] = 0;
+	m_shopStat = 0;
 	m_shopSuper = 0;
 	m_shopBack = 0;
 	m_shopFit = 0;
@@ -1794,6 +1797,7 @@ BOOL Game::TextLive(wchar_t*& buf, int& maxLen)
 	if (m_textFocus == 1 && m_screen == SC_CREATE) { buf = m_edit.name; maxLen = NAME_LEN; return TRUE; }
 	if (m_textFocus == 2 && m_slotUi) { buf = m_slotEdit; maxLen = TAC_SLOT_NAME; return TRUE; }
 	if (m_textFocus == 4 && m_screen == SC_BASE && m_codex == 4) { buf = m_monFind; maxLen = 24; return TRUE; }
+	if (m_textFocus == 5 && m_shop) { buf = m_shopFind; maxLen = 32; return TRUE; }
 	return FALSE;
 }
 
@@ -1847,7 +1851,8 @@ void Game::SellToText(wchar_t* s, int n) const
 
 void Game::NotifyFindChanged()
 {
-	m_codexPage = 0;
+	if (m_textFocus == 5) m_shopPage = 0;
+	else m_codexPage = 0;
 }
 
 void Game::ArmFoeFind()
@@ -1876,6 +1881,7 @@ float Game::TextCaretPx()
 	if (m_textFocus == 1) s = m_edit.name;
 	else if (m_textFocus == 2) s = m_slotEdit;
 	else if (m_textFocus == 4) s = m_monFind;
+	else if (m_textFocus == 5) s = m_shopFind;
 	int n = TacWLen(s);
 	int caret = m_textCaret;
 	if (caret < 0 || caret > n) caret = n;
@@ -1905,7 +1911,7 @@ void Game::OnChar(wchar_t ch)
 	}
 	if (ch == 13 || ch == 27 || ch == 9) {
 		if (m_textFocus == 2 && ch == 13) CommitSlotName();
-		else if (!(m_textFocus == 4 && ch == 13)) {
+		else if (!((m_textFocus == 4 || m_textFocus == 5) && ch == 13)) {
 			m_textFocus = 0;
 			m_imeComp[0] = 0;
 		}
@@ -1914,10 +1920,11 @@ void Game::OnChar(wchar_t ch)
 	wchar_t* buf = NULL;
 	int maxLen = 0;
 	if (!TextLive(buf, maxLen) || !buf) return;
-	if (ch == 8) { TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; return; }
+	if (ch == 8) { TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; if (m_textFocus == 5) m_shopPage = 0; return; }
 	if (ch < 32) return;
 	TacInsertAt(buf, maxLen, m_textCaret, ch);
 	if (m_textFocus == 4) m_codexPage = 0;
+	if (m_textFocus == 5) m_shopPage = 0;
 }
 
 void Game::OnBecameActive()
@@ -1968,7 +1975,7 @@ void Game::OnKey(int vk, BOOL down)
 		else if (vk == VK_BACK || vk == VK_DELETE) { m_sellN /= 10; if (m_sellN < 1) m_sellN = 1; m_sellFresh = 0; }
 		return;
 	}
-	if (m_textFocus == 1 || m_textFocus == 2 || m_textFocus == 4) {
+	if (m_textFocus == 1 || m_textFocus == 2 || m_textFocus == 4 || m_textFocus == 5) {
 		wchar_t* buf = NULL;
 		int maxLen = 0;
 		TextLive(buf, maxLen);
@@ -1976,12 +1983,12 @@ void Game::OnKey(int vk, BOOL down)
 		if (m_textCaret < 0 || m_textCaret > n) m_textCaret = n;
 		if (vk == VK_RETURN) {
 			if (m_textFocus == 2) CommitSlotName();
-			else if (m_textFocus != 4) { m_textFocus = 0; m_imeComp[0] = 0; }
+			else if (m_textFocus != 4 && m_textFocus != 5) { m_textFocus = 0; m_imeComp[0] = 0; }
 			return;
 		}
 		if (vk == VK_ESCAPE || vk == VK_TAB) { m_textFocus = 0; m_imeComp[0] = 0; if (vk == VK_ESCAPE) TacSfx(TS_CANCEL); return; }
-		if (vk == VK_BACK) { if (buf) TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; return; }
-		if (vk == VK_DELETE) { if (buf) TacDeleteAt(buf, m_textCaret, FALSE); if (m_textFocus == 4) m_codexPage = 0; return; }
+		if (vk == VK_BACK) { if (buf) TacDeleteAt(buf, m_textCaret, TRUE); if (m_textFocus == 4) m_codexPage = 0; if (m_textFocus == 5) m_shopPage = 0; return; }
+		if (vk == VK_DELETE) { if (buf) TacDeleteAt(buf, m_textCaret, FALSE); if (m_textFocus == 4) m_codexPage = 0; if (m_textFocus == 5) m_shopPage = 0; return; }
 		if (vk == VK_LEFT) { if (m_textCaret > 0) m_textCaret--; return; }
 		if (vk == VK_RIGHT) { if (m_textCaret < n) m_textCaret++; return; }
 		if (vk == VK_HOME) { m_textCaret = 0; return; }
@@ -2376,7 +2383,14 @@ void Game::NavBack()
 		else if (m_shop && (m_shopHold || m_shopFit)) { m_shopHold = 0; m_shopFit = 0; m_shopWho = -1; TacSfx(TS_CANCEL); }
 		else if (m_shop && m_shopBand) { m_shopBand = 0; m_shopPage = 0; TacSfx(TS_CANCEL); }
 		else if (m_shop && m_shopTier) { m_shopTier = 0; m_shopPage = 0; TacSfx(TS_CANCEL); }
+		else if (m_shop && m_shopStat) { m_shopStat = 0; m_shopPage = 0; TacSfx(TS_CANCEL); }
+		else if (m_shop && m_shopFind[0]) {
+			m_shopFind[0] = 0; m_shopPage = 0;
+			if (m_textFocus == 5) { m_textCaret = 0; m_imeComp[0] = 0; m_textReload = 1; }
+			TacSfx(TS_CANCEL);
+		}
 		else if (m_shop) {
+			if (m_textFocus == 5) { m_textFocus = 0; m_imeComp[0] = 0; }
 			m_shop = 0; m_shopHold = 0; m_shopFit = 0; m_shopTier = 0; m_shopBand = 0; m_partyBack = 0; m_shopWho = -1;
 			if (m_shopBack) { m_shopBack = 0; EnterParty(); }
 			TacSfx(TS_CANCEL);
@@ -5427,7 +5441,7 @@ static int CodexFamJobs(int fam, int* dst, int cap)
 static BOOL PreviewAlt(int style);
 static void MonPreviewIn(int id, const Actor& a, int& style, BOOL& fly);
 
-enum { FOE_LIST_MAX = 2048 };
+enum { FOE_LIST_MAX = 8192 };
 
 static wchar_t FoldCh(wchar_t c)
 {
@@ -5474,9 +5488,23 @@ static void MonLvSpan(int id, int viewHi, int& lo, int& hi)
 
 static void FmtMonLv(int id, int viewHi, wchar_t* out, int n)
 {
-	int lo = 1, hi = 1;
-	MonLvSpan(id, viewHi, lo, hi);
-	if (hi > lo && MonsterInfo(id).maxStage <= 0 && viewHi >= TAC_STAGE_MAX) swprintf_s(out, n, L"%d+", lo);
+	// 戦闘のレベル曲線はそのまま。一覧に出す数字だけ、今開いているステージ上限で切る。
+	// 141–1107 は上限 999 のあいだ 141–999。下限が上限を超えたら範囲は出さない。
+	const MonsterDef& md = MonsterInfo(id);
+	int start = MonsterDebut(id);
+	int end = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
+	if (end > TAC_STAGE_MAX) end = TAC_STAGE_MAX;
+	if (start < 1) start = 1;
+	int lo = DebutLv(start);
+	int hi = DebutLv(end);
+	int cap = viewHi > 0 ? viewHi : 1;
+	if (lo > cap) {
+		swprintf_s(out, n, L"%s", LangPick14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor"));
+		return;
+	}
+	if (hi > cap) hi = cap;
+	if (hi < lo) hi = lo;
+	if (hi > lo && md.maxStage <= 0 && viewHi >= TAC_STAGE_MAX) swprintf_s(out, n, L"%d+", lo);
 	else if (hi > lo) swprintf_s(out, n, L"%d–%d", lo, hi);
 	else swprintf_s(out, n, L"%d", lo);
 }
@@ -5514,30 +5542,44 @@ static BOOL BandHasDebut(int band, int lo)
 
 int Game::FoeList(int* out, int cap) const
 {
-	int ids[FOE_LIST_MAX];
-	int n = MonsterCatalog(ids, FOE_LIST_MAX);
-	int w = 0;
-	if (!out || cap <= 0) return 0;
-	int view = StageFoeViewHi(m_save.stageCleared);
-	for (int i = 0; i < n && w < cap; i++) {
-		int id = ids[i];
-		if (MonsterDebut(id) > view) continue;
-		BOOL known = MonsterKnown(id, m_save.stageCleared);
-		if (m_monSeenOnly && !known) continue;
-		if (m_monFind[0]) {
-			if (!known) continue;
-			BOOL hit = FALSE;
-			for (int lang = 0; lang < 14; lang++) {
-				if (TextHas(MonsterLabelAt(id, lang), m_monFind)) { hit = TRUE; break; }
+	static int cache[FOE_LIST_MAX];
+	static int cn = -1;
+	static int cStage = -999999, cBand = -1, cSeen = -1;
+	static wchar_t cFind[24];
+	BOOL same = cn >= 0 && cStage == m_save.stageCleared && cBand == m_monBand && cSeen == (m_monSeenOnly ? 1 : 0) && wcscmp(cFind, m_monFind) == 0;
+	if (!same) {
+		int ids[FOE_LIST_MAX];
+		int n = MonsterCatalog(ids, FOE_LIST_MAX);
+		int w = 0;
+		int view = StageFoeViewHi(m_save.stageCleared);
+		for (int i = 0; i < n && w < FOE_LIST_MAX; i++) {
+			int id = ids[i];
+			if (MonsterDebut(id) > view) continue;
+			BOOL known = MonsterKnown(id, m_save.stageCleared);
+			if (m_monSeenOnly && !known) continue;
+			if (m_monFind[0]) {
+				if (!known) continue;
+				BOOL hit = FALSE;
+				for (int lang = 0; lang < 14; lang++) {
+					if (TextHas(MonsterLabelAt(id, lang), m_monFind)) { hit = TRUE; break; }
+				}
+				if (!hit) continue;
 			}
-			if (!hit) continue;
+			int lo = 1, hi = 1;
+			MonLvSpan(id, view, lo, hi);
+			(void)hi;
+			if (!BandHasDebut(m_monBand, lo)) continue;
+			cache[w++] = id;
 		}
-		int lo = 1, hi = 1;
-		MonLvSpan(id, view, lo, hi);
-		(void)hi;
-		if (!BandHasDebut(m_monBand, lo)) continue;
-		out[w++] = id;
+		cn = w;
+		cStage = m_save.stageCleared;
+		cBand = m_monBand;
+		cSeen = m_monSeenOnly ? 1 : 0;
+		wcscpy_s(cFind, m_monFind);
 	}
+	if (!out || cap <= 0) return cn < 0 ? 0 : cn;
+	int w = cn < cap ? cn : cap;
+	if (w > 0) memcpy(out, cache, (size_t)w * sizeof(int));
 	return w;
 }
 
@@ -5626,10 +5668,16 @@ void Game::DrawMonStage()
 void Game::DrawMonCodex()
 {
 	static int ids[FOE_LIST_MAX];
-	int nCat = MonsterCatalog(ids, FOE_LIST_MAX);
 	int view = StageFoeViewHi(m_save.stageCleared);
-	int nAll = 0;
-	for (int i = 0; i < nCat; i++) if (MonsterDebut(ids[i]) <= view) nAll++;
+	static int nAllCache = -1, nAllView = -1;
+	if (nAllView != view) {
+		int nCat = MonsterCatalog(ids, FOE_LIST_MAX);
+		int nAll = 0;
+		for (int i = 0; i < nCat; i++) if (MonsterDebut(ids[i]) <= view) nAll++;
+		nAllCache = nAll;
+		nAllView = view;
+	}
+	int nAll = nAllCache;
 	float x = U(24), y = U(24), w = min(U(520.f), (float)m_w * .46f), h = (float)m_h - U(108);
 	Panel(x, y, w, h);
 	const wchar_t* title = LangPick14(L"敵一覧", L"Foes", L"Ennemis", L"Nemici", L"Enemigos", L"적 목록", L"敌人一览", L"الأعداء", L"Враги", L"Gegner", L"Inimigos", L"Vijanden", L"Wrogowie", L"Düşmanlar");
@@ -6382,7 +6430,7 @@ void Game::DrawShopAsk()
 	if (m_shopFit == 6) {
 		const GoodDef* gd = GoodAt(m_shopFitId);
 		if (gd) {
-			swprintf_s(line, L"%s  %sG", TT(gd->nameTx), TacNum(gd->price));
+			swprintf_s(line, L"%s  %sG", GoodFace(m_shopFitId), TacNum(gd->price));
 			ok = m_save.gold >= gd->price && GoodHave(m_save, m_shopFitId) < GoodHoldMax(m_shopFitId);
 		}
 	} else if (m_shopFit == 7 || m_shopFit == 8) {
@@ -6881,6 +6929,118 @@ void Game::DrawShopRosterLayer(int mode, int line, int tier, const GearDef* gear
 	}
 }
 
+static BOOL ShopWordChar(wchar_t c)
+{
+	if ((c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9')) return TRUE;
+	if (c >= 0x3040 && c <= 0x30FF) return TRUE;
+	if (c >= 0x4E00 && c <= 0x9FFF) return TRUE;
+	if (c >= 0xAC00 && c <= 0xD7AF) return TRUE;
+	if (c >= 0x0400 && c <= 0x04FF) return TRUE;
+	if (c >= 0x0600 && c <= 0x06FF) return TRUE;
+	return FALSE;
+}
+
+static BOOL ShopLabelHit(const wchar_t* label, const wchar_t* q)
+{
+	if (!label || !q || !q[0]) return FALSE;
+	const wchar_t* a = label;
+	const wchar_t* b = q;
+	while (*a && *b && FoldCh(*a) == FoldCh(*b)) { a++; b++; }
+	return *b == 0;
+}
+
+static BOOL ShopBoundHit(const wchar_t* hay, const wchar_t* q)
+{
+	if (!hay || !q || !q[0]) return FALSE;
+	BOOL qCjk = (q[0] >= 0x3040 && q[0] <= 0x30FF) || (q[0] >= 0x4E00 && q[0] <= 0x9FFF) || (q[0] >= 0xAC00 && q[0] <= 0xD7AF);
+	for (const wchar_t* s = hay; *s; s++) {
+		const wchar_t* a = s;
+		const wchar_t* b = q;
+		while (*a && *b && FoldCh(*a) == FoldCh(*b)) { a++; b++; }
+		if (*b) continue;
+		if (qCjk && s > hay && ShopWordChar(s[-1])) continue;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static const wchar_t* kStatW[20][14] = {
+	{ L"HP", L"HP", L"PV", L"PS", L"PV", L"HP", L"HP", L"الصحة", L"ОЗ", L"LP", L"PV", L"LP", L"PŻ", L"CP" },
+	{ L"MP", L"MP", L"PM", L"PM", L"PM", L"MP", L"MP", L"المانا", L"ОМ", L"MP", L"PM", L"MP", L"PM", L"MP" },
+	{ L"力", L"STR", L"FOR", L"FOR", L"FUE", L"힘", L"力量", L"القوة", L"СИЛ", L"STÄ", L"FOR", L"KRA", L"SIŁ", L"GÜÇ" },
+	{ L"守備", L"DEF", L"DÉF", L"DIF", L"DEF", L"수비", L"防御", L"الدفاع", L"ЗАЩ", L"VER", L"DEF", L"VER", L"OBR", L"SAV" },
+	{ L"魔力", L"MAG", L"MAG", L"MAG", L"MAG", L"마력", L"魔力", L"السحر", L"МАГ", L"MAG", L"MAG", L"MAG", L"MAG", L"BÜY" },
+	{ L"魔防", L"RES", L"RÉS", L"RES", L"RES", L"마방", L"魔防", L"المقاومة", L"СОП", L"WID", L"RES", L"WEE", L"ODP", L"DİR" },
+	{ L"素早さ", L"AGI", L"AGI", L"AGI", L"AGI", L"민첩", L"敏捷", L"الرشاقة", L"ЛОВ", L"GEW", L"AGI", L"BEH", L"ZWI", L"ÇEV" },
+	{ L"技", L"DEX", L"DEX", L"DES", L"DES", L"기술", L"技巧", L"المهارة", L"ТЕХ", L"GES", L"DES", L"VAA", L"ZRĘ", L"BEC" },
+	{ L"運", L"LUK", L"CHA", L"FOR", L"SUE", L"운", L"幸运", L"الحظ", L"УДЧ", L"GLÜ", L"SOR", L"GEL", L"SZC", L"ŞAN" },
+	{ L"移動", L"MOV", L"DÉP", L"MOV", L"MOV", L"이동", L"移动", L"الحركة", L"ХОД", L"BEW", L"MOV", L"BEW", L"RUCH", L"HRK" },
+	{ L"跳躍", L"JMP", L"SAU", L"SAL", L"SAL", L"도약", L"跳跃", L"القفز", L"ПРЖ", L"SPR", L"PUL", L"SPR", L"SKO", L"ZLP" },
+	{ L"命中", L"HIT", L"PRÉ", L"PRE", L"PRE", L"명중", L"命中", L"الإصابة", L"МЕТ", L"TRF", L"ACE", L"TRF", L"CEL", L"İSB" },
+	{ L"回避", L"AVO", L"ESQ", L"SCH", L"ESQ", L"회피", L"回避", L"التفادي", L"УКЛ", L"AUS", L"ESQ", L"ONT", L"UNI", L"SAV" },
+	{ L"会心", L"CRT", L"CRI", L"CRI", L"CRÍ", L"치명", L"会心", L"حرج", L"КРИ", L"KRI", L"CRÍ", L"KRI", L"KRY", L"KRT" },
+	{ L"軽減", L"GRD", L"GAR", L"PAR", L"PAR", L"경감", L"减轻", L"التخفيف", L"СМЯ", L"MIN", L"RED", L"VER", L"RED", L"AZL" },
+	{ L"再生", L"RCV", L"RÉG", L"RIG", L"REG", L"재생", L"再生", L"التجدد", L"РЕГ", L"REG", L"REG", L"HER", L"REG", L"YEN" },
+	{ L"魔回", L"MPR", L"RM", L"RM", L"RM", L"마회", L"魔回", L"استرداد", L"ВОМ", L"MPR", L"RM", L"MPH", L"OMP", L"MPY" },
+	{ L"気合", L"CPL", L"CRI", L"SLN", L"ÁN", L"기합", L"气势", L"الهمة", L"ДУХ", L"KMP", L"ÁN", L"STR", L"DUC", L"GAZ" },
+	{ L"射程", L"RNG", L"POR", L"GIT", L"ALC", L"사정", L"射程", L"المدى", L"ДАЛ", L"RCH", L"ALC", L"BER", L"ZAS", L"MNZ" },
+	{ L"貫通", L"PEN", L"PÉN", L"PEN", L"PEN", L"관통", L"贯通", L"الاختراق", L"ПРО", L"DRC", L"PEN", L"DOR", L"PRZ", L"DEL" },
+};
+
+static BOOL ShopTextHit(int kind, int id, const wchar_t* q)
+{
+	const wchar_t* name = L"";
+	wchar_t own[640];
+	own[0] = 0;
+	const wchar_t* desc = NULL;
+	if (kind == 0 || kind == 1) {
+		name = GearName(id + 1);
+		const GearDef* g = GearOf(id + 1);
+		if (g) { GearTipText(g, own, 640, id + 1); desc = own; }
+	} else if (kind == 2 && id >= 0) {
+		name = GoodFace(id);
+		desc = GoodDesc(id);
+	} else if (kind == 2) {
+		name = id == -1 ? TT(TX_TICKET_PT) : (id == -2 ? TT(TX_TICKET_RS) : TT(TX_STONE));
+	} else if (kind == 3) {
+		TrophyNameOf(id, own, 80, NULL, NULL);
+		name = own;
+	} else if (kind == 4) {
+		name = AccName(id + 1);
+		AccTipText(id + 1, own, 640);
+		desc = own;
+	} else if (kind == 5) {
+		name = CraftName(id);
+		desc = CraftDesc(id);
+	} else if (kind == 6) {
+		name = PasName(id + 1);
+		desc = PasDesc(id + 1);
+	} else if (kind == 7) {
+		name = SummonName(id + 1);
+		desc = SummonDesc(id + 1);
+	}
+	if (TextHas(name, q)) return TRUE;
+	if (desc && ShopBoundHit(desc, q)) return TRUE;
+	for (int s = 0; s < S_COUNT; s++) {
+		if (!CatalogRaises(kind, id, s)) continue;
+		for (int lang = 0; lang < 14; lang++) if (ShopLabelHit(kStatW[s][lang], q)) return TRUE;
+	}
+	return FALSE;
+}
+
+static BOOL ShopShown(int kind, int id, const wchar_t* q, unsigned mask)
+{
+	if (mask) {
+		BOOL any = FALSE;
+		for (int s = 0; s < S_COUNT; s++) {
+			if ((mask & (1u << s)) && CatalogRaises(kind, id, s)) { any = TRUE; break; }
+		}
+		if (!any) return FALSE;
+	}
+	if (!q || !q[0]) return TRUE;
+	return ShopTextHit(kind, id, q);
+}
+
 void Game::DrawShop()
 {
 	if (!m_sellAsk && m_textFocus == 3) m_textFocus = 0;
@@ -6943,6 +7103,67 @@ void Game::DrawShop()
 	const float rowH = gearTab ? U(50.f) : U(30.f);
 	const float rowStep = gearTab ? U(54.f) : U(34.f);
 	float listTop = ky + U(36);
+	{
+		float boxL = x + U(16);
+		float boxR = sellX - U(8);
+		float bh = U(26);
+		float clearW = U(32);
+		float gapb = U(4);
+		float findW = boxR - boxL - clearW - gapb;
+		if (findW < U(80)) findW = U(80);
+		BOOL foc = m_textFocus == 5;
+		UiBtn findBtn = { ID_SHOP_FIND, boxL, listTop, findW, bh, 1, 0 };
+		m_btns.push_back(findBtn);
+		if (ClickIn(boxL, listTop, findW, bh) || m_activateId == ID_SHOP_FIND) {
+			if (m_textFocus != 5) {
+				m_textFocus = 5;
+				m_textCaret = TacWLen(m_shopFind);
+				m_imeComp[0] = 0;
+				m_textReload = 1;
+			}
+			m_activateId = -1;
+		}
+		BOOL nf = m_navMode && m_focusId == ID_SHOP_FIND;
+		TacMarkBox(m_textBox, boxL, listTop, findW, bh);
+		m_textPx = U(13);
+		m_textPad = U(8);
+		m_r.HudRect(boxL, listTop, findW, bh, foc ? RGBA8(40, 46, 80, 240) : RGBA8(20, 24, 44, 230));
+		m_r.HudFrame(boxL, listTop, findW, bh, U(1.5f), foc || nf ? RGBA8(255, 230, 150) : RGBA8(120, 104, 74));
+		wchar_t box[64];
+		const wchar_t* hint = LangPick14(L"名前・効果", L"Name or effect", L"Nom ou effet", L"Nome o effetto", L"Nombre o efecto", L"이름·효과", L"名字或效果", L"الاسم أو الأثر", L"Имя или эффект", L"Name oder Wirkung", L"Nome ou efeito", L"Naam of effect", L"Nazwa lub efekt", L"Ad veya etki");
+		if (foc) TacCaretStr(box, 64, m_shopFind, m_textCaret, m_imeComp, fmodf(m_time, 1.f) < .5f);
+		else if (m_shopFind[0]) wcsncpy_s(box, m_shopFind, _TRUNCATE);
+		else wcsncpy_s(box, hint, _TRUNCATE);
+		m_r.HudText(box, boxL + U(8), listTop + bh * .5f, U(13), (!foc && !m_shopFind[0]) ? RGBA8(140, 140, 150) : RGBA8(255, 255, 255), 0, 1);
+		if (Btn(ID_SHOP_FINDX, boxL + findW + gapb, listTop, clearW, bh, L"×", m_shopFind[0] != 0, FALSE, U(16))) {
+			m_shopFind[0] = 0;
+			m_shopPage = 0;
+			m_textFocus = 5;
+			m_textCaret = 0;
+			m_imeComp[0] = 0;
+			m_textReload = 1;
+		}
+		listTop += bh + gapb;
+		float cx = boxL, cy = listTop, ch = U(22), cgap = U(3);
+		const wchar_t* allLab = LangPick14(L"全", L"All", L"Tous", L"Tutti", L"Todo", L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Tudo", L"Alles", L"Wszystko", L"Tümü");
+		auto place = [&](int id, const wchar_t* lab, BOOL on) -> BOOL {
+			float tw = m_r.TextWidth(lab, U(11), 0) + U(14);
+			if (tw < U(32)) tw = U(32);
+			if (cx > boxL && cx + tw > boxR) { cx = boxL; cy += ch + cgap; }
+			BOOL hit = Btn(id, cx, cy, tw, ch, lab, TRUE, on, U(11));
+			cx += tw + cgap;
+			return hit;
+		};
+		if (place(ID_SHOP_ALL, allLab, m_shopStat == 0) && m_shopStat) { m_shopStat = 0; m_shopPage = 0; }
+		for (int s = 0; s < S_COUNT; s++) {
+			BOOL on = (m_shopStat & (1u << s)) != 0;
+			if (place(ID_SHOP_STAT0 + s, TT(StatNameTx(s)), on)) {
+				m_shopStat ^= (1u << s);
+				m_shopPage = 0;
+			}
+		}
+		listTop = cy + ch + U(6);
+	}
 	if (m_shopKind == 5) {
 		float fw = U(150);
 		if (Btn(ID_SHOP_ART, x + U(16), listTop, fw, U(28), TT(TX_CRAFT), TRUE, m_shopSuper == 0, U(13))) { m_shopSuper = 0; m_shopPage = 0; }
@@ -7002,16 +7223,16 @@ void Game::DrawShop()
 	int per = (int)((listBot - listTop) / rowStep);
 	if (per > 30) per = 30;
 	if (per < 3) per = 3;
-	int ids[1024], n = 0;
+	int ids[2048], n = 0;
 	if (m_shopKind == 3) {
 		n = TrophyList(ids, 512);
 	} else if (m_shopKind == 2) {
 		ids[n++] = -1;
 		ids[n++] = -2;
 		ids[n++] = -3;
-		for (int i = 0; i < GoodCount() && n < 512; i++) ids[n++] = i;
+		for (int i = 0; i < GoodCount() && n < 2048; i++) ids[n++] = i;
 	} else if (m_shopKind == 4) {
-		for (int i = 0; i < AccCount() && n < 1024; i++) {
+		for (int i = 0; i < AccCount() && n < 2048; i++) {
 			int price = AccPrice(i);
 			if (m_shopBand == 1 && price >= 1000) continue;
 			if (m_shopBand == 2 && (price < 1000 || price >= 100000)) continue;
@@ -7019,18 +7240,18 @@ void Game::DrawShop()
 			ids[n++] = i;
 		}
 	} else if (m_shopKind == 5) {
-		for (int i = 0; i < CRAFT_N && n < 512; i++) {
+		for (int i = 0; i < CRAFT_N && n < 2048; i++) {
 			if (CraftLineOf(CRAFT_BASE + i) != m_shopLine) continue;
 			BOOL sup = IsCraftSuper(CRAFT_BASE + i);
 			if (sup != (m_shopSuper != 0)) continue;
 			ids[n++] = i;
 		}
 	} else if (m_shopKind == 6) {
-		for (int i = 0; i < PasCount() && n < 512; i++) ids[n++] = i;
+		for (int i = 0; i < PasCount() && n < 2048; i++) ids[n++] = i;
 	} else if (m_shopKind == 7) {
-		for (int i = 0; i < SummonCount() && n < 512; i++) ids[n++] = i;
+		for (int i = 0; i < SummonCount() && n < 2048; i++) ids[n++] = i;
 	} else {
-		for (int i = 0; i < GearCount() && n < 512; i++) {
+		for (int i = 0; i < GearCount() && n < 2048; i++) {
 			const GearDef* g = GearOf(i + 1);
 			if (!g || g->line != m_shopLine || g->kind != m_shopKind) continue;
 			int need = g->req > 0 ? g->req : 1;
@@ -7043,6 +7264,23 @@ void Game::DrawShop()
 			while (j > 0 && GearListBefore(v, ids[j - 1])) { ids[j] = ids[j - 1]; j--; }
 			ids[j] = v;
 		}
+	}
+	if (m_shopFind[0] || m_shopStat) {
+		static int cK = -1, cLine, cTier, cBand, cSuper, cMask, cLang, cN;
+		static wchar_t cFind[32];
+		static int cIds[2048];
+		BOOL fresh = cK != m_shopKind || cLine != m_shopLine || cTier != m_shopTier || cBand != m_shopBand
+			|| cSuper != m_shopSuper || cMask != (int)m_shopStat || cLang != savedata.lang || wcscmp(cFind, m_shopFind) != 0;
+		if (fresh) {
+			int w = 0;
+			for (int i = 0; i < n; i++) if (ShopShown(m_shopKind, ids[i], m_shopFind, m_shopStat)) cIds[w++] = ids[i];
+			cN = w;
+			cK = m_shopKind; cLine = m_shopLine; cTier = m_shopTier; cBand = m_shopBand;
+			cSuper = m_shopSuper; cMask = (int)m_shopStat; cLang = savedata.lang;
+			wcscpy_s(cFind, m_shopFind);
+		}
+		n = cN;
+		for (int i = 0; i < n && i < 2048; i++) ids[i] = cIds[i];
 	}
 	int pages = max(1, (n + per - 1) / per);
 	if (m_shopPage >= pages) m_shopPage = pages - 1;
@@ -7137,7 +7375,7 @@ void Game::DrawShop()
 			}
 		} else if (m_shopKind == 6) {
 			swprintf_s(row, L"%s  %sG  x%d", PasName(ids[ix] + 1), TacNum(PasPrice(ids[ix])), PasHave(ids[ix]));
-			ok = m_save.gold >= PasPrice(ids[ix]) && PasHave(ids[ix]) < TAC_HOLD_BYTE;
+			ok = m_save.gold >= PasPrice(ids[ix]) && PasHave(ids[ix]) < TAC_HOLD_WIDE;
 			takeHover(ID_SHOP_BUY0 + s, yy, PasDesc(ids[ix] + 1));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
 				m_shopHold = 1; m_shopFit = 11; m_shopFitId = ids[ix]; m_shopFitPage = 0;
@@ -7145,7 +7383,7 @@ void Game::DrawShop()
 			}
 		} else if (m_shopKind == 7) {
 			swprintf_s(row, L"%s  %sG  x%d", SummonName(ids[ix] + 1), TacNum(SummonPrice(ids[ix])), SummonHave(ids[ix]));
-			ok = m_save.gold >= SummonPrice(ids[ix]) && SummonHave(ids[ix]) < TAC_HOLD_BYTE;
+			ok = m_save.gold >= SummonPrice(ids[ix]) && SummonHave(ids[ix]) < TAC_HOLD_WIDE;
 			takeHover(ID_SHOP_BUY0 + s, yy, SummonDesc(ids[ix] + 1));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
 				m_shopHold = 1; m_shopFit = 12; m_shopFitId = ids[ix]; m_shopFitPage = 0;
@@ -7153,7 +7391,7 @@ void Game::DrawShop()
 			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
-			swprintf_s(row, L"%s  %sG  x%d", TT(gd->nameTx), TacNum(gd->price), GoodHave(m_save, ids[ix]));
+			swprintf_s(row, L"%s  %sG  x%d", GoodFace(ids[ix]), TacNum(gd->price), GoodHave(m_save, ids[ix]));
 			ok = m_save.gold >= gd->price && GoodHave(m_save, ids[ix]) < GoodHoldMax(ids[ix]);
 			takeHover(ID_SHOP_BUY0 + s, yy, GoodDesc(ids[ix]));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
@@ -7167,7 +7405,7 @@ void Game::DrawShop()
 			ok = m_save.gold >= g->price && m_save.gearN < GEAR_STASH;
 			{
 				wchar_t tip[400];
-				GearTipText(g, tip, 400);
+				GearTipText(g, tip, 400, ids[ix] + 1);
 				swprintf_s(hovBuf, L"%s%s%s", GearName(ids[ix] + 1), tip[0] ? L"\n" : L"", tip);
 				takeHover(ID_SHOP_BUY0 + s, yy, hovBuf);
 				if (Hit(rowX, yy, rowW, rowH) || (m_navMode && m_focusId == ID_SHOP_BUY0 + s)) {
@@ -7313,7 +7551,7 @@ void Game::DrawShop()
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(id);
 			if (!gd) { sy += U(34); continue; }
-			swprintf_s(row, L"%s x%d  %sG", TT(gd->nameTx), GoodHave(m_save, id), TacNum(max(1, gd->price / 2)));
+			swprintf_s(row, L"%s x%d  %sG", GoodFace(id), GoodHave(m_save, id), TacNum(max(1, gd->price / 2)));
 			if (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa))) {
 				wcscpy_s(hovHold, GoodDesc(id));
 				hov = hovHold;
@@ -7332,7 +7570,7 @@ void Game::DrawShop()
 			swprintf_s(row, L"%s x%d  %sG", GearName(id), ncopy, TacNum(g ? max(1, g->price / 2) : 1));
 			if (g && (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa)))) {
 				wchar_t tip[360];
-				GearTipText(g, tip, 360);
+				GearTipText(g, tip, 360, id);
 				swprintf_s(hovHold, L"%s%s%s", GearName(id), tip[0] ? L"\n" : L"", tip);
 				hov = hovHold;
 			}
@@ -7401,6 +7639,13 @@ void Game::DrawShop()
 		if (m_shopHold || m_shopFit) { m_shopHold = 0; m_shopFit = 0; m_shopWho = -1; return; }
 		if (m_shopBand) { m_shopBand = 0; m_shopPage = 0; return; }
 		if (m_shopTier) { m_shopTier = 0; m_shopPage = 0; return; }
+		if (m_shopStat) { m_shopStat = 0; m_shopPage = 0; return; }
+		if (m_shopFind[0]) {
+			m_shopFind[0] = 0; m_shopPage = 0;
+			if (m_textFocus == 5) { m_textCaret = 0; m_imeComp[0] = 0; m_textReload = 1; }
+			return;
+		}
+		if (m_textFocus == 5) { m_textFocus = 0; m_imeComp[0] = 0; }
 		Persist();
 		m_shop = 0;
 		m_shopFit = 0;
@@ -7432,7 +7677,7 @@ void Game::DrawShop()
 		else if (m_sellKind == 6) nm = PasName(m_sellId + 1);
 		else if (m_sellKind == 7) nm = SummonName(m_sellId + 1);
 		else if (m_sellKind == 4) nm = AccName(m_sellId + 1);
-		else if (m_sellKind == 2) { const GoodDef* gd = GoodAt(m_sellId); nm = gd ? TT(gd->nameTx) : L""; }
+		else if (m_sellKind == 2) { const GoodDef* gd = GoodAt(m_sellId); nm = gd ? GoodFace(m_sellId) : L""; }
 		else nm = GearName(m_sellId);
 		m_r.HudText(nm, px + pw * .5f, py + U(28), U(16), RGBA8(255, 226, 150), 1, 1);
 		wchar_t num[32];
@@ -8722,6 +8967,15 @@ void Game::DrawCreate3D()
 	m_r.SetPreviewPost(TRUE);
 }
 
+#include "tactics_src/ava_more_nm.inc"
+static const wchar_t* AvaMoreName(int female, int ix)
+{
+	int n = female ? kAvaFMoreN : kAvaMMoreN;
+	if (ix < 0 || ix >= n) return L"?";
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	return female ? kAvaFMore[ix][lang] : kAvaMMore[ix][lang];
+}
 void Game::DrawCreateUi()
 {
 	float pw = U(420), x = U(20), y = U(20), ph = (float)m_h - U(40);
@@ -8818,11 +9072,14 @@ void Game::DrawCreateUi()
 	yy += rh + gap;
 	{
 		const int g = m_edit.gender ? 1 : 0;
-		const int nMax = g ? TX_AVA_F31 - TX_AVA_F0 + 1 : TX_AVA_M18 - TX_AVA_M0 + 1;
+		const int nMax = 63;
+		const int named = g ? TX_AVA_F31 - TX_AVA_F0 + 1 : TX_AVA_M18 - TX_AVA_M0 + 1;
 		int n = Clampi(m_r.AvatarCount(g), 0, nMax) + 1;
 		int av = Clampi(CharAvatar(m_edit), 0, n - 1);
-		int tx = av == 0 ? TX_AVA_NONE : (g ? TX_AVA_F0 : TX_AVA_M0) + av - 1;
-		if (int d = Sel(ID_CR_AVATAR, bx, yy, bw, rh, TT(TX_CR_AVATAR), TT(tx))) {
+		const wchar_t* face = TT(TX_AVA_NONE);
+		if (av > 0 && av - 1 < named) face = TT((g ? TX_AVA_F0 : TX_AVA_M0) + av - 1);
+		else if (av > 0) face = AvaMoreName(g, av - 1 - named);
+		if (int d = Sel(ID_CR_AVATAR, bx, yy, bw, rh, TT(TX_CR_AVATAR), face)) {
 			CharSetAvatar(m_edit, (av + d + n) % n); changed = TRUE;
 		}
 		note(ID_CR_AVATAR, TX_CRH_AVATAR);
@@ -9117,7 +9374,7 @@ void Game::DrawEquipLayer()
 	const wchar_t* title = TT(TX_GEAR_WPN);
 	wchar_t cur[96];
 	wcscpy_s(cur, TT(TX_PT_NONE));
-	int ids[96], n = 0, curId = 0;
+	int ids[2048], n = 0, curId = 0;
 	BOOL gear = kind <= 2;
 	int beadSlot = kind == 5 ? 0 : kind == 6 ? 1 : kind == 9 ? 2 : kind == 10 ? 3 : -1;
 	BOOL pasPick = kind == 7 || kind == 8;
@@ -9128,7 +9385,7 @@ void Game::DrawEquipLayer()
 		title = TT(gk ? TX_GEAR_ARM : TX_GEAR_WPN);
 		int eq = c.reserved[gk ? 7 : 6];
 		if (eq > 0) wcscpy_s(cur, GearName(eq));
-		for (int i = 0; i < m_save.gearN && n < 96; i++) {
+		for (int i = 0; i < m_save.gearN && n < 2048; i++) {
 			const GearDef* g = GearOf(m_save.gearId[i]);
 			if (!g || g->kind != gk || !GearCanWear(c.cls, g)) continue;
 			ids[n++] = i;
@@ -9138,26 +9395,26 @@ void Game::DrawEquipLayer()
 		title = TT(TX_ACC);
 		curId = EquippedAccId(c, slot);
 		if (curId > 0) wcscpy_s(cur, AccName(curId));
-		for (int i = 0; i < AccCount() && n < 96; i++)
+		for (int i = 0; i < AccCount() && n < 2048; i++)
 			if (AccSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	} else if (pasPick) {
 		int slot = kind - 7;
 		title = TT(TX_PAS);
 		curId = EquippedPasId(c, slot);
 		if (curId > 0) wcscpy_s(cur, PasName(curId));
-		for (int i = 0; i < PasCount() && n < 96; i++)
+		for (int i = 0; i < PasCount() && n < 2048; i++)
 			if (PasSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	} else if (sumPick) {
 		title = SummonWord();
 		curId = EquippedSummonId(c, sumSlot);
 		if (curId > 0) wcscpy_s(cur, SummonName(curId));
-		for (int i = 0; i < SummonCount() && n < 96; i++)
+		for (int i = 0; i < SummonCount() && n < 2048; i++)
 			if (SummonSpare(c, sumSlot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	} else if (beadSlot >= 0) {
 		title = beadSlot == 3 ? TT(TX_OUGI) : TT(TX_BEAD);
 		curId = EquippedBeadId(c, beadSlot);
 		if (curId > 0) wcscpy_s(cur, CraftName(curId - 1));
-		for (int i = 0; i < CRAFT_N && n < 96; i++)
+		for (int i = 0; i < CRAFT_N && n < 2048; i++)
 			if (BeadSpare(c, beadSlot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	}
 	m_r.HudText(title, px + pw * .5f, py + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
@@ -9257,7 +9514,7 @@ void Game::DrawEquipLayer()
 				const GearDef* gg = GearOf(m_save.gearId[ids[ix]]);
 				if (gg) {
 					wchar_t body[360];
-					GearTipText(gg, body, 360);
+					GearTipText(gg, body, 360, m_save.gearId[ids[ix]]);
 					swprintf_s(rowTip, L"%s%s%s", GearName(m_save.gearId[ids[ix]]), body[0] ? L"\n" : L"", body);
 				}
 			} else if (kind <= 4) AccTipText(ids[ix], rowTip, 480);
@@ -9462,6 +9719,12 @@ void Game::DrawPartyUi()
 		if (!CharHasSkill(c, s)) continue;
 		const SkillDef& sd = SkillInfo(s);
 		if (sd.enemyOnly) continue;
+		int dup = -1;
+		for (int i = 0; i < ns; i++) if (sks[i].kind == 0 && SkillSameMenu(sks[i].id, s)) { dup = i; break; }
+		if (dup >= 0) {
+			if (sd.power > SkillInfo(sks[dup].id).power) sks[dup].id = s;
+			continue;
+		}
 		DWORD col = RGBA8(236, 236, 240);
 		if (sd.kind == SK_PHYS) col = RGBA8(255, 214, 160);
 		else if (sd.kind == SK_MAGIC) col = RGBA8(214, 198, 255);
@@ -9673,7 +9936,7 @@ void Game::DrawPartyUi()
 		auto gearSee = [&](const GearDef* g, int gid, float hx, float hy, float hw, float hh) {
 			if (!g) { see(hx, hy, hw, hh, TT(TX_PT_NONE)); return; }
 			wchar_t body[400], line[520];
-			GearTipText(g, body, 400);
+			GearTipText(g, body, 400, gid);
 			swprintf_s(line, L"%s%s%s", GearName(gid), body[0] ? L"\n" : L"", body);
 			see(hx, hy, hw, hh, line);
 		};

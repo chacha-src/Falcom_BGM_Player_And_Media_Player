@@ -2739,7 +2739,7 @@ void CSasamiFmScoreDlg::OnBnClickedPlay()
 		return;
 	}
 	SetPreviewBtn(1);
-	SetTimer(1, 33, NULL);
+	SetTimer(1, 16, NULL);
 	CString st;
 	st.Format(LL14(L"FMプレビュー tick %u — Spaceで停止", L"FM preview tick %u — Space to stop", L"Aperçu FM tick %u", L"Anteprima FM tick %u", L"Vista previa FM tick %u",
 		L"FM 미리듣기 tick %u", L"FM预览 tick %u", L"معاينة FM tick %u", L"FM превью tick %u", L"FM-Vorschau tick %u", L"Prévia FM tick %u", L"FM-voorbeeld tick %u", L"Podgląd FM tick %u", L"FM önizleme tick %u"),
@@ -2810,7 +2810,7 @@ void CSasamiFmScoreDlg::PreviewRangeInstant()
 		return;
 	}
 	SetPreviewBtn(1);
-	SetTimer(1, 33, NULL);
+	SetTimer(1, 16, NULL);
 	CString st;
 	st.Format(LL14(L"範囲試聴 tick %u–%u — Spaceで停止", L"Range preview tick %u–%u — Space to stop", L"Aperçu plage tick %u–%u — Espace = stop", L"Anteprima intervallo tick %u–%u — Spazio = stop", L"Vista previa rango tick %u–%u — Espacio = stop",
 		L"범위 미리듣기 tick %u–%u — Space 정지", L"范围试听 tick %u–%u — Space停止", L"معاينة النطاق tick %u–%u — Space للإيقاف", L"Превью диапазона tick %u–%u — Space = стоп", L"Bereichsvorschau tick %u–%u — Leertaste = Stop", L"Prévia intervalo tick %u–%u — Espaço = parar", L"Bereikvoorbeeld tick %u–%u — Spatie = stop", L"Podgląd zakresu tick %u–%u — Spacja = stop", L"Aralık önizleme tick %u–%u — Space = dur"),

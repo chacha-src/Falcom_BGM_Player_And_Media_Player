@@ -4341,7 +4341,7 @@ void CSasamiMidiScoreDlg::OnBnClickedPlay()
 	SetPreviewBtn(1);
 	VstLiveMonitorStop();
 	PushDocToText();
-	SetTimer(kScPreviewTimer, 33, NULL);
+	SetTimer(kScPreviewTimer, 16, NULL);
 	CString st;
 	st.Format(LL14(L"プレビュー tick %u — 停止ボタンか Space（譜面が止める）", L"Preview tick %u — Stop button or Space (score stops it)", L"Aperçu tick %u — Stop ou Espace", L"Anteprima tick %u — Stop o Spazio", L"Vista previa tick %u — Detener o Espacio",
 		L"미리듣기 tick %u — 정지 또는 Space", L"预览 tick %u — 停止或 Space", L"معاينة tick %u — إيقاف أو Space", L"Превью tick %u — Стоп или Space", L"Vorschau tick %u — Stopp oder Leertaste", L"Prévia tick %u — Parar ou Espaço", L"Voorbeeld tick %u — Stop of Spatie", L"Podgląd tick %u — Stop lub Spacja", L"Önizleme tick %u — Dur veya Space"),
@@ -4426,7 +4426,7 @@ void CSasamiMidiScoreDlg::PreviewRangeInstant()
 	SetPreviewBtn(1);
 	VstLiveMonitorStop();
 	PushDocToText();
-	SetTimer(kScPreviewTimer, 33, NULL);
+	SetTimer(kScPreviewTimer, 16, NULL);
 	CString st;
 	st.Format(LL14(L"範囲試聴 tick %u–%u — Spaceで停止", L"Range preview tick %u–%u — Space to stop", L"Aperçu plage tick %u–%u — Espace = stop", L"Anteprima intervallo tick %u–%u — Spazio = stop", L"Vista previa rango tick %u–%u — Espacio = stop",
 		L"범위 미리듣기 tick %u–%u — Space 정지", L"范围试听 tick %u–%u — Space停止", L"معاينة النطاق tick %u–%u — Space للإيقاف", L"Превью диапазона tick %u–%u — Space = стоп", L"Bereichsvorschau tick %u–%u — Leertaste = Stop", L"Prévia intervalo tick %u–%u — Espaço = parar", L"Bereikvoorbeeld tick %u–%u — Spatie = stop", L"Podgląd zakresu tick %u–%u — Spacja = stop", L"Aralık önizleme tick %u–%u — Space = dur"),

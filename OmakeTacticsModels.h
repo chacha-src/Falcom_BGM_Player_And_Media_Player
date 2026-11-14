@@ -10,6 +10,7 @@ enum ClipId {
 	CL_CAST_SHOOT, CL_CAST_RAISE, CL_CAST_LONG, CL_HIT_A, CL_HIT_B, CL_DEATH, CL_CHEER, CL_BLOCK, CL_DODGE, CL_2H_IDLE,
 	CL_THROW, CL_PUNCH, CL_JUMP, CL_INTERACT, CL_TAUNT, CL_SPAWN, CL_USE,
 	CL_IDLE_GLANCE_L, CL_IDLE_GLANCE_R, CL_IDLE_LOOK, CL_IDLE_STRETCH, CL_IDLE_SHIFT, CL_IDLE_CROSS,
+	CL_STUN, CL_CONFUSE,
 	CL_COUNT
 };
 
@@ -28,6 +29,7 @@ struct Library {
 	GpuMesh crown;
 	GpuMesh ring;
 	GpuMesh pyr;
+	GpuMesh sq;
 	GpuMesh orb;
 	GpuMesh ice;
 	int ready;
@@ -90,6 +92,9 @@ struct Actor {
 	const void* modelPtr;   // ActorPose 時に設定
 	int poseHold;           // 0なし 1座り 2寝 3凍結（動き止め）
 	float blinkSave;        // 0未満は未保存。凍結中は瞬きを止める
+	int fallKind;           // 0未決 1.. 死亡の倒れ方。倒れたままでは変えない
+	int riseKind;           // 起き上がりの種類
+	int motPick;            // 回避・被弾・攻撃の型を振る番号
 };
 
 void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c);

@@ -558,6 +558,8 @@ private:
 	int m_shopPage;
 	int m_shopSellPage;
 	int m_shopKind;
+	wchar_t m_shopFind[32];
+	unsigned m_shopStat;
 	int m_shopSuper;   // 技珠店: 0=通常戦技 1=奥義
 	int m_shopBack;
 	int m_shopFit;
@@ -783,7 +785,7 @@ inline void AppendStatBit(wchar_t* dst, int cap, int stat, int v)
 	swprintf_s(one, L" %s%+d", TT(StatNameTx(stat)), v);
 	if ((int)wcslen(dst) + (int)wcslen(one) + 1 < cap) wcscat_s(dst, cap, one);
 }
-inline void GearTipText(const GearDef* g, wchar_t* out, int cap)
+inline void GearTipText(const GearDef* g, wchar_t* out, int cap, int id)
 {
 	if (!out || cap < 2) return;
 	out[0] = 0;
@@ -792,10 +794,121 @@ inline void GearTipText(const GearDef* g, wchar_t* out, int cap)
 	AppendStatBit(out, cap, S_MAG, g->mag);
 	AppendStatBit(out, cap, S_DEF, g->def);
 	AppendStatBit(out, cap, S_RES, g->res);
-	const wchar_t* role = GearRole(g);
-	if (role && role[0]) {
+	const wchar_t* nm = id > 0 ? GearName(id) : L"";
+	const wchar_t* job = TacLineWord(g->line);
+	if (!job) job = L"";
+	const wchar_t* e1 = TacElemWord(g->elem);
+	const wchar_t* e2 = TacElemWord(g->elem2);
+	int req = g->req > 0 ? g->req : 1;
+	wchar_t line[768];
+	line[0] = 0;
+	if (g->kind == 0) {
+		if (e1 && e1[0] && e2 && e2[0])
+			swprintf_s(line, LangPick14(
+				L"%sは%sの武器。攻撃は%sと%s。職階%dから装備できる。",
+				L"%s is a %s weapon. The attack is %s and %s. Wearable from tier %d.",
+				L"%s est une arme de %s. L'attaque est %s et %s. Portée dès le rang %d.",
+				L"%s è un'arma da %s. L'attacco è %s e %s. Si indossa dal grado %d.",
+				L"%s es un arma de %s. El ataque es %s y %s. Se equipa desde el grado %d.",
+				L"%s는 %s의 무기다. 공격은 %s와 %s. 직계 %d부터 장비할 수 있다.",
+				L"%s是%s的武器。攻击为%s和%s。职阶%d起可装备。",
+				L"%s سلاح %s. الهجوم %s و%s. يُلبس من الرتبة %d.",
+				L"%s — оружие (%s). Атака: %s и %s. С ступени %d.",
+				L"%s ist eine Waffe des %s. Angriff ist %s und %s. Ab Stufe %d.",
+				L"%s é uma arma de %s. O ataque é %s e %s. Equipável do grau %d.",
+				L"%s is een wapen van %s. De aanval is %s en %s. Draagbaar vanaf rang %d.",
+				L"%s to broń (%s). Atak: %s i %s. Od stopnia %d.",
+				L"%s, %s silahı. Saldırı %s ve %s. Kademe %d'den kuşanılır."),
+				nm, job, e1, e2, req);
+		else if (e1 && e1[0])
+			swprintf_s(line, LangPick14(
+				L"%sは%sの武器。攻撃は%s。職階%dから装備できる。",
+				L"%s is a %s weapon. The attack is %s. Wearable from tier %d.",
+				L"%s est une arme de %s. L'attaque est %s. Portée dès le rang %d.",
+				L"%s è un'arma da %s. L'attacco è %s. Si indossa dal grado %d.",
+				L"%s es un arma de %s. El ataque es %s. Se equipa desde el grado %d.",
+				L"%s는 %s의 무기다. 공격은 %s. 직계 %d부터 장비할 수 있다.",
+				L"%s是%s的武器。攻击为%s。职阶%d起可装备。",
+				L"%s سلاح %s. الهجوم %s. يُلبس من الرتبة %d.",
+				L"%s — оружие (%s). Атака: %s. С ступени %d.",
+				L"%s ist eine Waffe des %s. Angriff ist %s. Ab Stufe %d.",
+				L"%s é uma arma de %s. O ataque é %s. Equipável do grau %d.",
+				L"%s is een wapen van %s. De aanval is %s. Draagbaar vanaf rang %d.",
+				L"%s to broń (%s). Atak: %s. Od stopnia %d.",
+				L"%s, %s silahı. Saldırı %s. Kademe %d'den kuşanılır."),
+				nm, job, e1, req);
+		else
+			swprintf_s(line, LangPick14(
+				L"%sは%sの武器。攻撃に属性はない。職階%dから装備できる。",
+				L"%s is a %s weapon. The attack has no element. Wearable from tier %d.",
+				L"%s est une arme de %s. L'attaque n'a pas d'élément. Portée dès le rang %d.",
+				L"%s è un'arma da %s. L'attacco non ha elemento. Si indossa dal grado %d.",
+				L"%s es un arma de %s. El ataque no tiene elemento. Se equipa desde el grado %d.",
+				L"%s는 %s의 무기다. 공격에 속성은 없다. 직계 %d부터 장비할 수 있다.",
+				L"%s是%s的武器。攻击没有属性。职阶%d起可装备。",
+				L"%s سلاح %s. الهجوم بلا عنصر. يُلبس من الرتبة %d.",
+				L"%s — оружие (%s). Атака без стихии. С ступени %d.",
+				L"%s ist eine Waffe des %s. Der Angriff hat kein Element. Ab Stufe %d.",
+				L"%s é uma arma de %s. O ataque não tem elemento. Equipável do grau %d.",
+				L"%s is een wapen van %s. De aanval heeft geen element. Draagbaar vanaf rang %d.",
+				L"%s to broń (%s). Atak bez żywiołu. Od stopnia %d.",
+				L"%s, %s silahı. Saldırının elementi yok. Kademe %d'den kuşanılır."),
+				nm, job, req);
+	} else if (e1 && e1[0] && e2 && e2[0]) {
+		swprintf_s(line, LangPick14(
+			L"%sは%sの防具。%sと%sのダメージをそれぞれ28%%減らす。職階%dから装備できる。",
+			L"%s is %s armor. %s damage and %s damage each fall by 28%%. Wearable from tier %d.",
+			L"%s est une armure de %s. Les dégâts de %s et de %s baissent chacun de 28 %%. Portée dès le rang %d.",
+			L"%s è un'armatura da %s. I danni di %s e di %s calano ciascuno del 28%%. Si indossa dal grado %d.",
+			L"%s es una armadura de %s. El daño de %s y el de %s bajan cada uno un 28%%. Se equipa desde el grado %d.",
+			L"%s는 %s의 방어구다. %s와 %s의 피해를 각각 28%% 줄인다. 직계 %d부터 장비할 수 있다.",
+			L"%s是%s的防具。%s和%s的伤害各减少28%%。职阶%d起可装备。",
+			L"%s درع %s. ضرر %s وضرر %s ينخفض كل منهما 28%%. يُلبس من الرتبة %d.",
+			L"%s — броня (%s). Урон от %s и от %s ниже на 28%% каждый. С ступени %d.",
+			L"%s ist eine Rüstung des %s. %s-Schaden und %s-Schaden sinken je um 28%%. Ab Stufe %d.",
+			L"%s é uma armadura de %s. O dano de %s e o de %s caem 28%% cada. Equipável do grau %d.",
+			L"%s is een harnas van %s. %s-schade en %s-schade dalen elk met 28%%. Draagbaar vanaf rang %d.",
+			L"%s to zbroja (%s). Obrażenia od %s i od %s maleją o 28%% każde. Od stopnia %d.",
+			L"%s, %s zırhı. %s hasarı ve %s hasarı her biri %%28 azalır. Kademe %d'den kuşanılır."),
+			nm, job, e1, e2, req);
+	} else if (e1 && e1[0]) {
+		swprintf_s(line, LangPick14(
+			L"%sは%sの防具。%sのダメージを28%%減らす。職階%dから装備できる。",
+			L"%s is %s armor. %s damage taken falls by 28%%. Wearable from tier %d.",
+			L"%s est une armure de %s. Les dégâts de %s baissent de 28 %%. Portée dès le rang %d.",
+			L"%s è un'armatura da %s. I danni di %s calano del 28%%. Si indossa dal grado %d.",
+			L"%s es una armadura de %s. El daño de %s baja un 28%%. Se equipa desde el grado %d.",
+			L"%s는 %s의 방어구다. %s 피해를 28%% 줄인다. 직계 %d부터 장비할 수 있다.",
+			L"%s是%s的防具。%s伤害减少28%%。职阶%d起可装备。",
+			L"%s درع %s. ضرر %s ينخفض 28%%. يُلبس من الرتبة %d.",
+			L"%s — броня (%s). Урон от %s ниже на 28%%. С ступени %d.",
+			L"%s ist eine Rüstung des %s. %s-Schaden sinkt um 28%%. Ab Stufe %d.",
+			L"%s é uma armadura de %s. O dano de %s cai 28%%. Equipável do grau %d.",
+			L"%s is een harnas van %s. %s-schade daalt met 28%%. Draagbaar vanaf rang %d.",
+			L"%s to zbroja (%s). Obrażenia od %s maleją o 28%%. Od stopnia %d.",
+			L"%s, %s zırhı. %s hasarı %%28 azalır. Kademe %d'den kuşanılır."),
+			nm, job, e1, req);
+	} else {
+		swprintf_s(line, LangPick14(
+			L"%sは%sの防具。属性ダメージは減らない。職階%dから装備できる。",
+			L"%s is %s armor. It does not cut elemental damage. Wearable from tier %d.",
+			L"%s est une armure de %s. Elle ne réduit pas les dégâts élémentaires. Portée dès le rang %d.",
+			L"%s è un'armatura da %s. Non riduce i danni elementali. Si indossa dal grado %d.",
+			L"%s es una armadura de %s. No reduce el daño elemental. Se equipa desde el grado %d.",
+			L"%s는 %s의 방어구다. 속성 피해는 줄지 않는다. 직계 %d부터 장비할 수 있다.",
+			L"%s是%s的防具。不减少属性伤害。职阶%d起可装备。",
+			L"%s درع %s. لا يقلل الضرر العنصري. يُلبس من الرتبة %d.",
+			L"%s — броня (%s). Стихийный урон не режется. С ступени %d.",
+			L"%s ist eine Rüstung des %s. Elementarer Schaden sinkt nicht. Ab Stufe %d.",
+			L"%s é uma armadura de %s. Não reduz dano elemental. Equipável do grau %d.",
+			L"%s is een harnas van %s. Elementaire schade daalt niet. Draagbaar vanaf rang %d.",
+			L"%s to zbroja (%s). Nie zmniejsza obrażeń żywiołowych. Od stopnia %d.",
+			L"%s, %s zırhı. Element hasarını kesmez. Kademe %d'den kuşanılır."),
+			nm, job, req);
+	}
+	if (line[0]) {
 		if (out[0] && (int)wcslen(out) + 2 < cap) wcscat_s(out, cap, L"\n");
-		if ((int)wcslen(out) + (int)wcslen(role) + 1 < cap) wcscat_s(out, cap, role);
+		if ((int)wcslen(out) + (int)wcslen(line) + 1 < cap) wcscat_s(out, cap, line);
 	}
 }
 inline void AccTipText(int id, wchar_t* out, int cap)
@@ -803,8 +916,34 @@ inline void AccTipText(int id, wchar_t* out, int cap)
 	if (!out || cap < 2) return;
 	out[0] = 0;
 	if (id <= 0) { wcsncpy_s(out, cap, TT(TX_PT_NONE), _TRUNCATE); return; }
-	wcsncpy_s(out, cap, AccName(id), _TRUNCATE);
-	for (int st = 0; st < S_COUNT; st++) AppendStatBit(out, cap, st, AccStat(id, st));
+	wchar_t bits[240];
+	bits[0] = 0;
+	for (int st = 0; st < S_COUNT; st++) {
+		int v = AccStat(id, st);
+		if (!v) continue;
+		wchar_t one[40];
+		swprintf_s(one, L"%s+%d", TT(StatNameTx(st)), v);
+		if (bits[0] && (int)wcslen(bits) + 2 < 240) wcscat_s(bits, L" ");
+		if ((int)wcslen(bits) + (int)wcslen(one) + 1 < 240) wcscat_s(bits, one);
+	}
+	wchar_t sentence[768];
+	swprintf_s(sentence, LangPick14(
+		L"%sは、%sを上げる。",
+		L"%s raises %s.",
+		L"%s augmente %s.",
+		L"%s alza %s.",
+		L"%s sube %s.",
+		L"%s는 %s를 올린다.",
+		L"%s提高%s。",
+		L"%s يرفع %s.",
+		L"%s повышает %s.",
+		L"%s erhöht %s.",
+		L"%s sobe %s.",
+		L"%s verhoogt %s.",
+		L"%s podnosi %s.",
+		L"%s şunları yükseltir: %s."),
+		AccName(id), bits[0] ? bits : L"-");
+	wcsncpy_s(out, cap, sentence, _TRUNCATE);
 }
 // ホバーした枠の隣に、文章が収まる大きさで説明を出す。
 inline void DrawHoverNote(Renderer& r, float ax, float ay, float aw, float ah, float ui, int sw, int sh, const wchar_t* text)

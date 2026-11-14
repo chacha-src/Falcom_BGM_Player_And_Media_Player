@@ -926,7 +926,7 @@ void COmakeTacticsDlg::PullImeToGame()
 	wcsncpy_s(prev, buf, _TRUNCATE);
 	wcsncpy_s(buf, maxLen, t, _TRUNCATE);
 	m_game.SetTextCaret(caret);
-	if (m_game.TextFocus() == 4 && wcscmp(prev, buf) != 0)
+	if ((m_game.TextFocus() == 4 || m_game.TextFocus() == 5) && wcscmp(prev, buf) != 0)
 		m_game.NotifyFindChanged();
 }
 

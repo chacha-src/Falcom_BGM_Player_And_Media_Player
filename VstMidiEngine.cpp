@@ -8037,10 +8037,10 @@ extern "C" int VstMidiGetChannels(void) { return 2; }
 extern "C" int VstMidiGetBits(void) { return 16; }
 extern "C" __int64 VstMidiGetLengthSamples(void) { return g_eng.lengthSamples; }
 
-static unsigned VstMidiTickAtSampleUnlocked(__int64 sample)
+static double VstMidiTickAtSampleFUnlocked(__int64 sample)
 {
 	if (!g_eng.events || g_eng.eventCount <= 0) return 0;
-	if (sample <= 0) return (unsigned)g_eng.events[0].tick;
+	if (sample <= 0) return (double)g_eng.events[0].tick;
 	int lo = 0, hi = g_eng.eventCount - 1, best = 0;
 	while (lo <= hi) {
 		const int mid = (lo + hi) >> 1;
@@ -8053,14 +8053,20 @@ static unsigned VstMidiTickAtSampleUnlocked(__int64 sample)
 	}
 	const MidiItem& a = g_eng.events[best];
 	if (best + 1 >= g_eng.eventCount)
-		return (unsigned)a.tick;
+		return (double)a.tick;
 	const MidiItem& b = g_eng.events[best + 1];
 	if (b.sample <= a.sample)
-		return (unsigned)a.tick;
+		return (double)a.tick;
 	const double tt = (double)(sample - a.sample) / (double)(b.sample - a.sample);
-	const double tick = (double)a.tick + ((double)b.tick - (double)a.tick) * tt;
-	if (tick < 0.0) return 0;
-	if (tick > 4000000000.0) return 4000000000u;
+	double tick = (double)a.tick + ((double)b.tick - (double)a.tick) * tt;
+	if (tick < 0.0) tick = 0;
+	if (tick > 4000000000.0) tick = 4000000000.0;
+	return tick;
+}
+
+static unsigned VstMidiTickAtSampleUnlocked(__int64 sample)
+{
+	const double tick = VstMidiTickAtSampleFUnlocked(sample);
 	return (unsigned)(tick + 0.5);
 }
 
@@ -8073,6 +8079,19 @@ extern "C" int VstMidiTickAtSample(__int64 sample, unsigned* outTick)
 		return 0;
 	}
 	*outTick = VstMidiTickAtSampleUnlocked(sample);
+	LeaveCriticalSection(&g_eng.cs);
+	return 1;
+}
+
+extern "C" int VstMidiTickAtSampleF(__int64 sample, double* outTick)
+{
+	if (!outTick) return 0;
+	EnterCriticalSection(&g_eng.cs);
+	if (!g_eng.events || g_eng.eventCount <= 0) {
+		LeaveCriticalSection(&g_eng.cs);
+		return 0;
+	}
+	*outTick = VstMidiTickAtSampleFUnlocked(sample);
 	LeaveCriticalSection(&g_eng.cs);
 	return 1;
 }

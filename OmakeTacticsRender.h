@@ -111,7 +111,7 @@ struct GpuMesh {
 	void Release();
 };
 
-enum { MAXJ = 64 };
+enum { MAXJ = 64, TAC_CLIPN = 96 };
 // 物を持つ手の指の型。人体の Grip クリップのコマ（値 − 1）と同じ並び（pack_mon.py の UAL_GRIPS）。
 // GRIP_NONE は持たない手で、クリップに捕った指の動きのまま。
 enum { GRIP_NONE, GRIP_FIST, GRIP_STAFF, GRIP_WAND, GRIP_BOW, GRIP_TRIGGER, GRIP_BOOK, GRIP_SHIELD, GRIP_PINCH };
@@ -132,7 +132,7 @@ struct Rig {
 	char names[MAXJ][24];
 	int parent[MAXJ];
 	int hips;
-	Fix<Clip, 40> clips;
+	Fix<Clip, TAC_CLIPN> clips;
 	int Find(const char* n) const;
 	int FindClip(const char* n) const;
 	Rig() : nJ(0), hips(0) { memset(names, 0, sizeof(names)); memset(parent, 0, sizeof(parent)); }
@@ -298,8 +298,8 @@ public:
 	const BYTE* m_monBytes;
 	DWORD m_monBytesN;
 	void LoadBattleCreatures(const int* pack, int n);
-	Fix<GpuMesh, 256> m_gear;
-	Fix<BYTE, 256> m_gearGrip;   // GRIP_*。名前から読込時に決める
+	Fix<GpuMesh, 1024> m_gear;
+	Fix<BYTE, 1024> m_gearGrip;   // GRIP_*。名前から読込時に決める
 	struct CSkinV { float p[3], n[3]; DWORD c; unsigned char j[4], w[4]; };
 	struct CreatureSkin {
 		int model; Buf<CSkinV> bind; Buf<BYTE> cloth;

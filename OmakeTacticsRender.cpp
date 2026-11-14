@@ -354,7 +354,7 @@ void Renderer::Release()
 	for (auto& a : attaches) a.mesh.Release();
 	attaches.clear();
 	for (int i = 0; i < 192; i++) {
-		for (int c = 0; c < 40; c++) {
+		for (int c = 0; c < TAC_CLIPN; c++) {
 			if (rigs.v[i].clips.v[c].q.arena == 2) rigs.v[i].clips.v[c].q.reset();
 			else rigs.v[i].clips.v[c].q.clear();
 			if (rigs.v[i].clips.v[c].hips.arena == 2) rigs.v[i].clips.v[c].hips.reset();
@@ -2375,7 +2375,7 @@ int Renderer::CountGearMeshes() const
 	UINT n = 0;
 	memcpy(&n, data + 4, 4);
 	if (n < 1) return 1;
-	if (n > 256) n = 256;
+	if (n > 1024) n = 1024;
 	return (int)n;
 }
 
@@ -2935,8 +2935,8 @@ static BOOL SkipTackRec(Reader& rd, char* name, float* foot)
 	static M4 inv[MAXJ];
 	for (UINT j = 0; j < nJ; j++) { char tmp[24]; rd.Name(tmp, 24); parent[j] = rd.I32(); }
 	UINT nc = rd.U32();
-	// 人体はモーションキャプチャのスキル別クリップまで持つ。上限は Rig::clips と同じ。
-	if (nc > 40) return FALSE;
+	// 人体は死亡・回避・攻撃・状態の型まで持つ。Rig の枠と同じ上限。
+	if (nc > TAC_CLIPN) return FALSE;
 	for (UINT c = 0; c < nc; c++) {
 		char cn[32];
 		rd.Name(cn, 32);
@@ -3214,7 +3214,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 			g.hips = 0;
 			for (UINT j = 0; j < nJ; j++) { rd.Name(g.names[j], 24); g.parent[j] = rd.I32(); }
 			UINT nc = rd.U32();
-			if (nc > 40) return Bail();
+			if (nc > TAC_CLIPN) return Bail();
 			g.clips.resize(nc);
 			for (UINT c = 0; c < nc; c++) {
 				Clip& cl = g.clips[c];
@@ -3841,7 +3841,7 @@ void Renderer::LoadBattleCreatures(const int* pack, int n)
 		sk.meshHair.arena = 2; sk.meshHair.reset();
 	}
 	for (int i = m_keepRigs; i < 192; i++) {
-		for (int c = 0; c < 40; c++) {
+		for (int c = 0; c < TAC_CLIPN; c++) {
 			rigs[i].clips.v[c].q.arena = 2; rigs[i].clips.v[c].q.reset();
 			rigs[i].clips.v[c].hips.arena = 2; rigs[i].clips.v[c].hips.reset();
 		}
@@ -4650,7 +4650,7 @@ void Renderer::LoadGearPack()
 	if (!packed && memcmp(data, "TACG", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT n = rd.U32();
-	if (n > 256) return;
+	if (n > 1024) return;
 	m_gear.reserve(n);
 	static Buf<VtxS> v;
 	static Buf<WORD> idx;
@@ -4662,7 +4662,7 @@ void Renderer::LoadGearPack()
 		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) { LoadPulse((int)i + 1, (int)n); continue; }
 		gm.tex = TEX_WHITE;
 		gm.mat = TacMatOfName(name);
-		if ((int)m_gear.size() >= 256) { gm.Release(); break; }
+		if ((int)m_gear.size() >= 1024) { gm.Release(); break; }
 		m_gear.push_back(gm);
 		// 持つ手の指の型。弩は引き金、弓は握り、矢と投げ矢は摘まむ。冠や鎧は手に持たない。
 		BYTE grip = GRIP_NONE;
@@ -4673,6 +4673,7 @@ void Renderer::LoadGearPack()
 		else if (strstr(name, "Arrow") || strstr(name, "Dart")) grip = GRIP_PINCH;
 		else if (strstr(name, "Wand")) grip = GRIP_WAND;
 		else if (strstr(name, "Staff") || strstr(name, "Spear") || strstr(name, "Scythe")) grip = GRIP_STAFF;
+		else if (strstr(name, "Pistol") || strstr(name, "Shotgun") || strstr(name, "Sniper") || strstr(name, "SMG") || strstr(name, "Flare") || strstr(name, "AR_")) grip = GRIP_TRIGGER;
 		else if (strstr(name, "Sword") || strstr(name, "Claymore") || strstr(name, "Axe") || strstr(name, "Hammer") || strstr(name, "Dagger") || strstr(name, "Knife") || strstr(name, "Blade")) grip = GRIP_FIST;
 		m_gearGrip.push_back(grip);
 		LoadPulse((int)i + 1, (int)n);
@@ -9471,7 +9472,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		{
 			int hipBone = md.hipsJ;
 			for (int s = 0; s < ns; s++) if (!strcmp(m_avaSeg[s], "Hips")) { hipBone = segJ[s]; break; }
-			nc.brief = strcmp(cos.name, "swim") != 0 && !nc.pants;
+			nc.brief = strncmp(cos.name, "swim", 4) != 0 && strncmp(cos.name, "msw", 3) != 0 && !nc.pants;
 			if (nc.brief) AppendBrief(sk, idx, nc.jig, (int)nb, hipBone);
 		}
 		if (sk.bind.size() > 65535 || idx.size() < 3) return FALSE;

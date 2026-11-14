@@ -169,7 +169,9 @@ def main():
             fo.write(gb.body_tri.astype("<u2").tobytes())
             fo.write(gb.extra_tri.astype("<u2").tobytes())
             print("body", "F" if gb.female else "M", "v", len(gb.pos), "tri", len(gb.body_tri), "+", len(gb.extra_tri))
-        L = [(0, k, p) for k, p in M.AVATARS_M] + [(1, k, p) for k, p in M.AVATARS_F]
+        men = list(M.AVATARS_M) + list(M.AVATARS_M_MORE)
+        women = list(M.AVATARS_F) + list(M.AVATARS_F_MORE)
+        L = [(0, k, p) for k, p in men] + [(1, k, p) for k, p in women]
         fo.write(struct.pack("<I", len(L)))
         for g, key, parts in L:
             gb = gbs[g]

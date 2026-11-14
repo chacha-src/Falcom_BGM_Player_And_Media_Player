@@ -85,6 +85,7 @@ __int64 VstMidiGetLengthSamples(void);
 int VstMidiSongHasLoop(void);
 /* Song engine sample → tick (for score playhead). 1 if events loaded. */
 int VstMidiTickAtSample(__int64 sample, unsigned* outTick);
+int VstMidiTickAtSampleF(__int64 sample, double* outTick);
 int VstMidiGetDivision(void);
 __int64 VstMidiGetPlaySample(void);
 // 曲長に含まれる残響用の余白（秒）。最終イベント以降は音楽としては終わっている。

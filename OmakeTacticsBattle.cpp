@@ -4256,7 +4256,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			m_dispHp[d] = min((float)du.ch.stat[S_HP], m_dispHp[d] - h.dmg);
 			swprintf_s(s, L"+%s", TacNum(-h.dmg));
 			pop(s, RGBA8(120, 255, 150), 0, MSG_RISE, 0);
-			if (sd && sd->effect == EF_RAISE && h.hit) {
+			if (sd && sd->effect == EF_RAISE && h.hit && m_dieT[d] >= 0.f) {
 				m_dieT[d] = -1;
 				du.dissolve = 0;
 				du.flash = 1.f;
@@ -5209,7 +5209,29 @@ void Game::UpdateUnitsVisual(float dt)
 		}
 		if (m_ailBlend[i] > 0.f) m_ailBlend[i] = max(0.f, m_ailBlend[i] - dt);
 		BOOL bodyUp = u.alive && ((m_phase == PH_ACTION) ? (m_dispHp[i] > 0.5f) : (u.hp > 0));
+		BOOL hum = FALSE;
+		if (a.proc == 3 && a.model >= 0 && a.model < (int)m_r.models.size()) {
+			const char* nm = m_r.models[a.model].name;
+			hum = nm && strncmp(nm, "Hum", 3) == 0 && nm[3] >= 'A' && nm[3] <= 'Z';
+		}
 		if (bodyUp && !moving && a.clip != CL_DEATH && a.clip != CL_SPAWN && a.clip != CL_HIT_A && a.clip != CL_HIT_B) {
+			BOOL ailClip = a.clip == CL_STUN || a.clip == CL_CONFUSE;
+			if (hum && av.freeze <= 0 && av.sleep <= 0 && av.stun > 0) {
+				a.poseHold = 0;
+				a.animSpeed = 0.85f;
+				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
+				if (a.clip != CL_STUN) ActorPlay(a, CL_STUN, 1, .16f);
+			} else if (hum && av.freeze <= 0 && av.sleep <= 0 && av.confuse > 0 && (loco || ailClip)) {
+				a.poseHold = 0;
+				a.animSpeed = 1.05f;
+				if (a.blinkSave >= 0.f) { a.blinkSeed = a.blinkSave; a.blinkSave = -1.f; }
+				if (a.clip != CL_CONFUSE) ActorPlay(a, CL_CONFUSE, 1, .18f);
+			} else if (hum && ailClip) {
+				int idleClip = (UnitMotionStyle(u, -1) == AS_CHOP2) ? CL_2H_IDLE : CL_IDLE;
+				ActorPlay(a, idleClip, 1, .2f);
+				a.poseHold = 0;
+				a.animSpeed = av.slow > 0 ? 0.55f : 1.f;
+			} else {
 			int hold = 0;
 			if (av.freeze > 0) hold = 3;
 			else if (av.sleep > 0) hold = 2;
@@ -5232,6 +5254,7 @@ void Game::UpdateUnitsVisual(float dt)
 				if (av.slow > 0) a.animSpeed = 0.55f;
 				else if (av.confuse > 0) a.animSpeed = 1.35f;
 				else a.animSpeed = 1.f;
+			}
 			}
 		}
 		if (bodyUp && m_parts.size() < 2600) {
@@ -5500,6 +5523,56 @@ void Game::ClearRipples()
 	for (int i = 0; i < MAX_UNITS; i++) {
 		m_ripSeen[i][0] = m_ripSeen[i][1] = 0.f;
 		m_ripSeenT[i] = -100.f;
+	}
+}
+
+// スキルや通常攻撃に加わって打つ味方。手番の三角とは別の印にする。
+static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int layer, BYTE* link)
+{
+	memset(link, 0, MAX_UNITS);
+	if (cur < 0 || cur >= b.nUnits) return;
+	int foes[16];
+	int nf = 0;
+	auto addFoe = [&](int id) {
+		if (id < 0 || id >= b.nUnits || nf >= 16) return;
+		const Unit& e = b.u[id];
+		if (e.team == TEAM_PLAYER || !e.alive || e.hp <= 0) return;
+		for (int i = 0; i < nf; i++) if (foes[i] == id) return;
+		foes[nf++] = id;
+	};
+	if (skill >= 0) {
+		const SkillDef& sd = SkillInfo(skill);
+		BOOL offensive = sd.kind != SK_HEAL && sd.kind != SK_BUFF && sd.kind != SK_PASSIVE;
+		if (offensive) {
+			int tg[MAX_UNITS];
+			int n = SkillTargets(b, cur, skill, cx, cz, tg, MAX_UNITS);
+			for (int k = 0; k < n; k++) addFoe(tg[k]);
+		}
+		if (IsFormSkill(skill)) {
+			int mem[8];
+			int nm = FormMembers(b, cur, skill, cx, cz, mem, 8);
+			for (int i = 0; i < nm; i++) {
+				int id = mem[i];
+				if (id < 0 || id >= b.nUnits || id == cur) continue;
+				const Unit& m = b.u[id];
+				if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
+				if (m.sleep > 0 || m.stun > 0) continue;
+				link[id] = 1;
+			}
+		}
+	} else {
+		addFoe(b.UnitAt(cx, cz, layer));
+	}
+	for (int i = 0; i < b.nUnits; i++) {
+		if (i == cur || link[i]) continue;
+		const Unit& m = b.u[i];
+		if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
+		if (m.sleep > 0 || m.stun > 0) continue;
+		for (int f = 0; f < nf; f++) {
+			if (!InRangeOfUnit(b, m, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), b.u[foes[f]], true)) continue;
+			link[i] = 1;
+			break;
+		}
 	}
 }
 
@@ -5894,7 +5967,9 @@ void Game::DrawBattle3D()
 		return RGBA8((int)(r * 255.f), (int)(g * 255.f), (int)(b * 255.f), 255);
 	};
 	BYTE mark[MAX_UNITS];
+	BYTE link[MAX_UNITS];
 	memset(mark, 0, sizeof(mark));
+	memset(link, 0, sizeof(link));
 	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cur < m_b.nUnits && CursorInAttackRange()) {
 		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
 			int tg[MAX_UNITS];
@@ -5902,9 +5977,11 @@ void Game::DrawBattle3D()
 			if (SkillInfo(m_cmdSkill).rMax == 0) { ax = m_b.u[m_cur].x; az = m_b.u[m_cur].z; }
 			int n = SkillTargets(m_b, m_cur, m_cmdSkill, ax, az, tg, MAX_UNITS);
 			for (int k = 0; k < n; k++) if (tg[k] >= 0 && tg[k] < MAX_UNITS) mark[tg[k]] = 1;
+			MarkJoiners(m_b, m_cur, m_cmdSkill, ax, az, m_cLayer, link);
 		} else {
 			int t = m_b.UnitAt(m_cx, m_cz, m_cLayer);
 			if (t >= 0 && CanTarget(m_cur, t, -1)) mark[t] = 1;
+			if (t >= 0) MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, link);
 		}
 	}
 	// 足元リング。敵は未発見でも出す。今見ている床と違う階は半透明で、床に隠さない。
@@ -5973,7 +6050,9 @@ void Game::DrawBattle3D()
 		m_r.BeginInstBatch();
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
-			int show = (u.alive && u.team == TEAM_PLAYER) || mark[i];
+			int mine = (i == m_cur && u.alive && u.team == TEAM_PLAYER);
+			int join = link[i] && !mine;
+			int show = mine || mark[i] || join;
 			if (!show) continue;
 			if (u.team != TEAM_PLAYER && u.dissolve >= 1.f) continue;
 			int sp = UnitSpan(u);
@@ -5984,14 +6063,17 @@ void Game::DrawBattle3D()
 			if (!onScreen) continue;
 			float hh = m_act[i].height > 0.4f ? m_act[i].height : 1.3f;
 			float bob = sinf(m_time * 4.2f + (float)i * 0.7f) * 0.06f;
-			float spin = m_time * (mark[i] ? 2.6f : 1.7f);
-			float sc = (mark[i] ? 0.62f : 0.5f) * (0.92f + 0.08f * sinf(m_time * 6.f + (float)i));
+			float spin = m_time * (join ? 1.15f : (mine ? 1.7f : 2.6f));
+			float sc = (join ? 0.46f : (mine ? 0.5f : 0.62f)) * (0.92f + 0.08f * sinf(m_time * 6.f + (float)i));
 			DrawParams mp;
 			mp.noTess = 1;
 			mp.twoSided = 1;
 			mp.rim = 0;
-			mp.emissive = mark[i] ? 3.2f : 2.6f;
-			if (mark[i]) mp.tint = hueCycle(m_time * 0.42f + (float)i * 0.07f);
+			mp.emissive = join ? 2.4f : (mine ? 2.6f : 3.2f);
+			if (join) {
+				float p = 0.5f + 0.5f * sinf(m_time * 5.f + (float)i);
+				mp.tint = RGBA8((int)(150.f + 40.f * p), 255, (int)(210.f + 40.f * p), 255);
+			} else if (!mine) mp.tint = hueCycle(m_time * 0.42f + (float)i * 0.07f);
 			else {
 				float p = 0.5f + 0.5f * sinf(m_time * 6.f + (float)i);
 				mp.tint = RGBA8(255, (int)(168.f + 70.f * p), (int)(40.f + 190.f * p), 255);
@@ -6002,7 +6084,8 @@ void Game::DrawBattle3D()
 				otherFloor = fabsf(u.py - focusY) > 1.05f;
 			if (otherFloor) m_r.SetDepthWant(FALSE);
 			V3 g = v3(u.px, u.py + hh + 0.06f + bob, u.pz);
-			m_r.DrawStatic(m_lib.pyr, MMul(MMul(MScale(sc, sc * 0.85f, sc), MRotY(spin)), MTrans(g.x, g.y, g.z)), mp);
+			const GpuMesh& shape = (join && m_lib.sq.vb) ? m_lib.sq : m_lib.pyr;
+			m_r.DrawStatic(shape, MMul(MMul(MScale(sc, join ? sc * 0.55f : sc * 0.85f, sc), MRotY(spin)), MTrans(g.x, g.y, g.z)), mp);
 			if (otherFloor) m_r.SetDepthWant(TRUE);
 		}
 		m_r.EndInstBatch();
@@ -6152,14 +6235,7 @@ void Game::DrawBattle3D()
 // 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
 // 攻撃の型だけ獣ごとに変える。入り口と退場は属性（炎・津波・地割れ・雨など）で分かれる。
 // 0息 1突進 2叩き 3急降下 4飛びかかり 5咆哮 6薙ぎ 7跳躍 8周回 9突進の溜め
-static const unsigned char kSumAt[SUMMON_N] = {
-	0, 2, 3, 1, 6, 9, 1, 0, 8, 9, 4, 3,
-	5, 9, 6, 2, 5, 6, 7, 0, 8, 4, 2, 7,
-	3, 9, 6, 0, 5, 6, 5, 1, 0, 6, 2, 3,
-	0, 2, 4, 6, 8, 1, 3, 5, 7, 9, 2, 4, 6, 8, 0, 3, 5, 7, 9, 1,
-	4, 6, 8, 0, 2, 5, 7, 9, 1, 3, 6, 8, 0, 2, 4, 7, 9, 1, 3, 5,
-};
-static_assert(sizeof(kSumAt) / sizeof(kSumAt[0]) == SUMMON_N, "summon attack");
+// 召喚の攻撃の型。表を SUMMON_N に合わせて伸ばさなくてよい。
 
 static const float kSumTau = 6.2831853f;
 static const float kSumPi = 3.14159265f;
@@ -6168,7 +6244,7 @@ static int SumAtOf(int skill)
 {
 	int i = skill - SUMMON_BASE;
 	if (i < 0 || i >= SUMMON_N) i = 0;
-	return kSumAt[i];
+	return (i * 3 + i / 5) % 10;
 }
 static int SumIndexOf(int skill)
 {
@@ -8509,9 +8585,14 @@ void Game::DrawForecast(float* ox, float* oy, float* ow, float* oh)
 
 static const int kItemThrow = 3;
 
+static int VaultKind(const GoodDef* g)
+{
+	if (!g || g->extra < 200) return -1;
+	return (g->extra - 200) % 8;
+}
 static BOOL ItemHarms(const GoodDef* g)
 {
-	return g && (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == IX_VENOM || g->extra == 107 || g->extra == 108 || g->extra == 117);
+	return g && (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == IX_VENOM || g->extra == 107 || g->extra == 108 || g->extra == 117 || VaultKind(g) == 3);
 }
 
 static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
@@ -8523,7 +8604,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 		for (int dz = 0; dz < st; dz++) for (int dx = 0; dx < st; dx++)
 			dist = min(dist, max(abs((src.x + ax) - (t.x + dx)), abs((src.z + az) - (t.z + dz))));
 	if (dist > kItemThrow) return FALSE;
-	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116)
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2)
 		return t.team == src.team && !t.alive && t.hp <= 0 && dist >= 0;
 	if (ItemHarms(g))
 		return t.team != src.team && t.alive && dist >= 1;
@@ -8533,7 +8614,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t)
 {
 	if (!ItemThrowOk(g, src, t)) return FALSE;
-	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) return TRUE;
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) return TRUE;
 	BOOL hurt = t.alive && t.hp < t.ch.stat[S_HP];
 	BOOL mana = t.alive && t.mp < t.ch.stat[S_MP];
 	BOOL ail = t.poison > 0 || t.slow > 0 || t.sleep > 0 || t.stun > 0 || t.confuse > 0 || t.defDown > 0
@@ -8566,6 +8647,14 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	if (g->extra == 117) return (!noPoi && t.poison <= 0) || (!noSlow && (t.ct > 0 || t.slow < 4));
 	if (g->extra == 118) return hurt || ail || t.buffDef < 6;
 	if (g->extra == 119) return mana || t.buffAgi < 6 || t.ct < 900;
+	int vk = VaultKind(g);
+	if (vk == 0) return hurt || mana || ail;
+	if (vk == 1) return t.buffAtk < 6 || t.buffDef < 6 || t.buffAgi < 6;
+	if (vk == 3) return (!noPoi && t.poison <= 0) || (!noSlow && (t.ct > 0 || t.slow < 4));
+	if (vk == 4) return hurt || t.buffDef < 6;
+	if (vk == 5) return t.buffAgi < 6 || t.ct < 900;
+	if (vk == 6) return hurt || mana;
+	if (vk == 7) return ail;
 	return FALSE;
 }
 
@@ -8595,7 +8684,7 @@ void Game::UseConsumable(int good, int target)
 	if (target < 0 || target >= m_b.nUnits) return;
 	Unit& self = m_b.u[m_cur];
 	if (!ItemThrowOk(g, self, m_b.u[target])) return;
-	if ((g->item == IT_RAISE || g->extra == 106 || g->extra == 116) && !RaisePlaceable(m_b, m_b.u[target])) {
+	if ((g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) && !RaisePlaceable(m_b, m_b.u[target])) {
 		AddBanner(RaiseNoRoomWord(), NULL, RGBA8(255, 180, 160), 2, 1.8f, MSG_DROP);
 		return;
 	}
@@ -8609,14 +8698,14 @@ void Game::UseConsumable(int good, int target)
 		dst->mulTurns = max(dst->mulTurns, 3);
 	} else if (g->item == IT_DELAY) {
 		if (!UnitHasPas(*dst, PAS_NOSLOW) && !UnitAilmentHeld(*dst)) dst->ct = max(0, dst->ct - 800);
-	} else if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) {
+	} else if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) {
 		if (SettleRaised(m_b, *dst)) {
 			dst->alive = 1;
 			dst->killed = 0;
-			dst->hp = max(1, dst->ch.stat[S_HP] * (g->extra == 116 ? 100 : g->extra == 106 ? 80 : 45) / 100);
+			dst->hp = max(1, dst->ch.stat[S_HP] * (g->extra == 116 || VaultKind(g) == 2 ? 100 : g->extra == 106 ? 80 : 45) / 100);
 			dst->dissolve = 0;
-			dst->ct = max(dst->ct, g->extra == 116 ? 400 : 200);
-			if (g->extra == 116) {
+			dst->ct = max(dst->ct, g->extra == 116 || VaultKind(g) == 2 ? 400 : 200);
+			if (g->extra == 116 || VaultKind(g) == 2) {
 				dst->poison = dst->slow = dst->sleep = dst->stun = dst->confuse = dst->defDown = 0;
 				dst->freeze = dst->burn = dst->bleed = dst->blind = dst->silence = 0;
 			}
@@ -8711,12 +8800,29 @@ void Game::UseConsumable(int good, int target)
 		dst->mp = dst->ch.stat[S_MP];
 		dst->buffAgi = 6;
 		dst->ct += 280;
+	} else if (g->extra >= 200) {
+		int vk = VaultKind(g);
+		if (vk == 0 || vk == 7) {
+			dst->poison = dst->slow = dst->sleep = dst->stun = dst->confuse = dst->defDown = 0;
+			dst->freeze = dst->burn = dst->bleed = dst->blind = dst->silence = 0;
+		}
+		if (vk == 0) { dst->hp = dst->ch.stat[S_HP]; dst->mp = dst->ch.stat[S_MP]; }
+		else if (vk == 1) { dst->buffAtk = 6; dst->buffDef = 6; dst->buffAgi = 6; }
+		else if (vk == 3) {
+			if (!UnitHasPas(*dst, PAS_NOPOISON) && dst->poison <= 0) dst->poison = 5;
+			if (!UnitHasPas(*dst, PAS_NOSLOW) && !UnitAilmentHeld(*dst)) { dst->ct = max(0, dst->ct - 700); dst->slow = 4; }
+		} else if (vk == 4) { dst->hp = dst->ch.stat[S_HP]; dst->buffDef = 6; }
+		else if (vk == 5) { dst->buffAgi = 6; dst->ct += 280; }
+		else if (vk == 6) {
+			dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] / 2));
+			dst->mp = min(dst->ch.stat[S_MP], dst->mp + max(1, dst->ch.stat[S_MP] / 2));
+		}
 	}
 	if (dst->hp != hpBefore || dst->alive != aliveBefore) m_bgmTick++;
 	dst->flash = 1.f;
-	AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), TT(g->nameTx), RGBA8(140, 230, 170), 1, MSG_FACE);
-	AddLog(TT(g->nameTx), RGBA8(140, 230, 170));
-	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116) TacSfx(TS_RAISE);
+	AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), GoodFace(good), RGBA8(140, 230, 170), 1, MSG_FACE);
+	AddLog(GoodFace(good), RGBA8(140, 230, 170));
+	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) TacSfx(TS_RAISE);
 	else if (g->item == IT_ELIXIR) TacSfx(TS_HEAL);
 	else if (g->item == IT_MIGHT) TacSfx(TS_BUFF);
 	else if (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == 108 || g->extra == 117) TacSfx(TS_SLOW);
@@ -8792,10 +8898,10 @@ void Game::DrawBattleStatus(BOOL edit)
 	if (edit && (m_statEq == 5 || m_statEq == 6)) {
 		int slot = m_statEq - 5;
 		m_r.HudText(TT(TX_PAS), px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
-		int ids[32], n = 0;
+		int ids[2048], n = 0;
 		int other = EquippedPasId(u.ch, slot ^ 1);
 		int cur = EquippedPasId(u.ch, slot);
-		for (int i = 0; i < PasCount() && n < 32; i++) {
+		for (int i = 0; i < PasCount() && n < 2048; i++) {
 			if (i + 1 == other) continue;
 			if (PasSpare(u.ch, slot, i) > 0 || cur == i + 1) ids[n++] = i + 1;
 		}
@@ -8849,10 +8955,10 @@ void Game::DrawBattleStatus(BOOL edit)
 		BOOL summon = m_statEq >= 11;
 		int slot = summon ? m_statEq - 11 : m_statEq - 9;
 		m_r.HudText(summon ? SummonWord() : TT(TX_ACC), px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
-		int ids[96], n = 0;
+		int ids[2048], n = 0;
 		int cur = summon ? EquippedSummonId(u.ch, slot) : EquippedAccId(u.ch, slot);
 		int capN = summon ? SummonCount() : AccCount();
-		for (int i = 0; i < capN && n < 96; i++) {
+		for (int i = 0; i < capN && n < 2048; i++) {
 			int spare = summon ? SummonSpare(u.ch, slot, i) : AccSpare(u.ch, slot, i);
 			if (spare > 0 || cur == i + 1) ids[n++] = i + 1;
 		}
@@ -8936,16 +9042,16 @@ void Game::DrawBattleStatus(BOOL edit)
 		int gearKind = (m_statEq == 1 || m_statEq == 2) ? (m_statEq == 1 ? 0 : 1) : -1;
 		const wchar_t* title = gearKind >= 0 ? TT(gearKind ? TX_GEAR_ARM : TX_GEAR_WPN) : (beadSlot == 3 ? TT(TX_OUGI) : TT(TX_BEAD));
 		m_r.HudText(title, px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
-		int ids[96], n = 0;
+		int ids[2048], n = 0;
 		if (gearKind >= 0) {
-			for (int i = 0; i < m_save.gearN && n < 96; i++) {
+			for (int i = 0; i < m_save.gearN && n < 2048; i++) {
 				const GearDef* g = GearOf(m_save.gearId[i]);
 				if (!g || g->kind != gearKind || !GearCanWear(u.ch.cls, g)) continue;
 				ids[n++] = i;
 			}
 		} else {
 			int cur = EquippedBeadId(u.ch, beadSlot);
-			for (int i = 0; i < CRAFT_N && n < 96; i++) {
+			for (int i = 0; i < CRAFT_N && n < 2048; i++) {
 				if (BeadSpare(u.ch, beadSlot, i) > 0 || cur == i + 1) ids[n++] = i + 1;
 			}
 		}
@@ -8990,7 +9096,7 @@ void Game::DrawBattleStatus(BOOL edit)
 					const GearDef* gg = GearOf(m_save.gearId[ids[ix]]);
 					wchar_t body[360];
 					body[0] = 0;
-					if (gg) GearTipText(gg, body, 360);
+					if (gg) GearTipText(gg, body, 360, m_save.gearId[ids[ix]]);
 					swprintf_s(rowTip, L"%s%s%s", row, body[0] ? L"\n" : L"", body);
 				} else wcsncpy_s(rowTip, CraftDesc(ids[ix] - 1), _TRUNCATE);
 				rowHot = rowTip[0] != 0;
@@ -9047,11 +9153,11 @@ void Game::DrawBattleStatus(BOOL edit)
 			slotBuf[0] = 0;
 			if (eq == 1 && wpn) {
 				wchar_t body[360];
-				GearTipText(wpn, body, 360);
+				GearTipText(wpn, body, 360, u.ch.reserved[6]);
 				swprintf_s(slotBuf, L"%s%s%s", GearName(u.ch.reserved[6]), body[0] ? L"\n" : L"", body);
 			} else if (eq == 2 && arm) {
 				wchar_t body[360];
-				GearTipText(arm, body, 360);
+				GearTipText(arm, body, 360, u.ch.reserved[7]);
 				swprintf_s(slotBuf, L"%s%s%s", GearName(u.ch.reserved[7]), body[0] ? L"\n" : L"", body);
 			} else if (eq == 9 || eq == 10) AccTipText(EquippedAccId(u.ch, eq == 9 ? 0 : 1), slotBuf, 520);
 			else if (eq == 3 || eq == 4 || eq == 7 || eq == 8) {
@@ -9323,7 +9429,7 @@ void Game::DrawCommandMenu()
 			for (int k = a; k < b; k++) {
 				const GoodDef* gd = GoodAt(list[k]);
 				wchar_t lb[80];
-				swprintf_s(lb, L"%s  x%d", TT(gd->nameTx), GoodHave(m_save, list[k]));
+				swprintf_s(lb, L"%s  x%d", GoodFace(list[k]), GoodHave(m_save, list[k]));
 				BOOL hot = (m_navMode && m_focusId == ID_BT_IT0 + (k - a)) || (!m_navMode && m_mouseSeen && Hit(x, yy, iw, bh));
 				if (hot) hovGood = list[k];
 				BOOL useful = FALSE;
@@ -9391,7 +9497,7 @@ void Game::DrawCommandMenu()
 			x = Clampf(x, margin, xMax);
 			Panel(x - U(8), y - U(8), iw + U(16), ph);
 		}
-		m_r.HudText(gd ? TT(gd->nameTx) : L"?", x + U(8), y + U(14), U(15), RGBA8(255, 226, 150), 0, 1);
+		m_r.HudText(gd ? GoodFace(m_itemAim) : L"?", x + U(8), y + U(14), U(15), RGBA8(255, 226, 150), 0, 1);
 		m_r.HudTextBox(gd ? GoodDesc(m_itemAim) : L"", x + U(8), y + U(30), iw - U(16), descH, U(12), RGBA8(214, 222, 234));
 		float yy = y + U(30) + descH + gap;
 		for (int k = a; k < b; k++) {
@@ -9800,6 +9906,12 @@ void Game::DrawCommandMenu()
 				if (m_skillTab == 1 && sd.kind != SK_HEAL && sd.kind != SK_BUFF) continue;
 				if ((m_skillTab == 0 || m_skillTab == 1) && m_skillShape && atkShape(sd) != m_skillShape) continue;
 				if ((m_skillTab == 0 || m_skillTab == 1) && m_skillEl > 0 && sd.element != m_skillEl) continue;
+				int dup = -1;
+				for (int i = 0; i < n; i++) if (SkillSameMenu(list[i], s)) { dup = i; break; }
+				if (dup >= 0) {
+					if (sd.power > SkillInfo(list[dup]).power) list[dup] = s;
+					continue;
+				}
 				list[n++] = s;
 			}
 		}
@@ -10767,6 +10879,15 @@ void Game::DrawBattleUi()
 		aimTotal = n;
 		for (int k = 0; k < n; k++) if (tg[k] >= 0 && tg[k] < MAX_UNITS) aimMark[tg[k]] = k + 1;
 	}
+	BYTE linkMark[MAX_UNITS];
+	memset(linkMark, 0, sizeof(linkMark));
+	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cur < m_b.nUnits && CursorInAttackRange()) {
+		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
+			int ax = m_cx, az = m_cz;
+			if (SkillInfo(m_cmdSkill).rMax == 0) { ax = m_b.u[m_cur].x; az = m_b.u[m_cur].z; }
+			MarkJoiners(m_b, m_cur, m_cmdSkill, ax, az, m_cLayer, linkMark);
+		} else MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, linkMark);
+	}
 	float usedSx[MAX_UNITS], usedSy[MAX_UNITS];
 	int usedN = 0;
 	float barBx[48], barBy[48], barBw[48], barBh[48];
@@ -10787,6 +10908,11 @@ void Game::DrawBattleUi()
 		if (u.team != TEAM_PLAYER && dx * dx + dz * dz > barFar * barFar) continue;
 		float sx, sy;
 		if (!m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + .12f, u.pz), sx, sy)) continue;
+		if (linkMark[i] && i != m_cur) {
+			float lx, ly;
+			if (m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + 0.72f, u.pz), lx, ly))
+				m_r.HudText(TT(TX_MK_LINK), lx, ly, U(16), RGBA8(170, 255, 230), 1, 1);
+		}
 		float bw = U(36);
 		int cells = 0;
 		int noPath = 0;

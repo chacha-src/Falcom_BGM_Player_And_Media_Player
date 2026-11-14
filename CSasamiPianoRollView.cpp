@@ -316,7 +316,8 @@ static void ScPianoRollPaintInner(CDC& dc, const CRect& rc, ScPianoRollView* v,
 		dc.FillSolidRect(mx, markLane.top, 2, markLane.Height() + grid.Height(), RGB(220, 60, 60));
 	}
 	if (u->previewActive) {
-		const int px = gridLeft + ((int)u->playheadTick * pxBeat) / SC_PPQN - scrollX;
+		const double ph = u->playheadPos > 0.0 ? u->playheadPos : (double)u->playheadTick;
+		const int px = gridLeft + (int)(ph * (double)pxBeat / (double)SC_PPQN + 0.5) - scrollX;
 		if (px >= grid.left && px <= grid.right)
 			dc.FillSolidRect(px, markLane.top, 2, markLane.Height() + grid.Height(), RGB(80, 220, 120));
 	}

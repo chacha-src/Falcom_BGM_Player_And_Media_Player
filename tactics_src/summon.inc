@@ -49,6 +49,7 @@ static const SumRow kSum[SUMMON_N] = {
 	{ L"SumMushnub", EL_EARTH, 18, 12, 15, 1, 6, 3, 1, EF_NONE, SUM_FX_SPIKE, 1000, 0, S14("地精ノーム","Gnome","Gnome","Gnomo","Gnomo","놈","地精","جنوم","Гном","Gnom","Gnomo","Gnoom","Gnom","Gnom") },
 	{ L"SumBlueDemon", EL_THUNDER, 34, 16, 20, 2, 7, 4, 2, EF_STUN, SUM_FX_BOLT, 4600, 0, S14("雷獣ライジュウ","Thunder Beast","Bête du tonnerre","Bestia del tuono","Bestia del trueno","뇌수","雷兽","وحش الرعد","Зверь грома","Donnerbestie","Fera do trovão","Donderbeest","Bestia gromu","Gök gürültüsü canavarı") },
 #include "tactics_src/summon_high.inc"
+#include "tactics_src/summon_vault.inc"
 };
 
 #undef S14
@@ -119,30 +120,41 @@ static int SummonCpOf(const SumRow& r)
 	return 100;
 }
 
+static const wchar_t* SumStatusLine(int eff)
+{
+	switch (eff) {
+	case EF_DEFDOWN: return LangPick14(L"当たると防御が下がる。", L"A hit lowers defense. ", L"Un coup baisse la défense. ", L"Un colpo cala la difesa. ", L"Un golpe baja la defensa. ", L"맞으면 방어가 떨어진다. ", L"命中会降低防御。", L"الضربة تخفض الدفاع. ", L"Попадание снижает защиту. ", L"Ein Treffer senkt die Abwehr. ", L"Um acerto baixa a defesa. ", L"Een treffer verlaagt de verdediging. ", L"Trafienie obniża obronę. ", L"İsabet savunmayı düşürür. ");
+	case EF_STUN: return LangPick14(L"当たるとスタンする。", L"A hit stuns. ", L"Un coup étourdit. ", L"Un colpo stordisce. ", L"Un golpe aturde. ", L"맞으면 기절한다. ", L"命中会造成硬直。", L"الضربة تصعق. ", L"Попадание оглушает. ", L"Ein Treffer betäubt. ", L"Um acerto atordoa. ", L"Een treffer verdooft. ", L"Trafienie ogłusza. ", L"İsabet sersemletir. ");
+	case EF_SLOW: return LangPick14(L"当たると行動が遅れる。", L"A hit delays the turn. ", L"Un coup retarde le tour. ", L"Un colpo ritarda il turno. ", L"Un golpe retrasa el turno. ", L"맞으면 행동이 늦어진다. ", L"命中会推迟行动。", L"الضربة تؤخر الدور. ", L"Попадание откладывает ход. ", L"Ein Treffer verzögert den Zug. ", L"Um acerto atrasa o turno. ", L"Een treffer vertraagt de beurt. ", L"Trafienie opóźnia turę. ", L"İsabet sırayı geciktirir. ");
+	case EF_POISON: return LangPick14(L"当たると毒になる。", L"A hit poisons. ", L"Un coup empoisonne. ", L"Un colpo avvelena. ", L"Un golpe envenena. ", L"맞으면 독에 걸린다. ", L"命中会造成中毒。", L"الضربة تسمم. ", L"Попадание отравляет. ", L"Ein Treffer vergiftet. ", L"Um acerto envenena. ", L"Een treffer vergiftigt. ", L"Trafienie zatruwa. ", L"İsabet zehirler. ");
+	case EF_BURN: return LangPick14(L"当たると炎上する。", L"A hit burns. ", L"Un coup brûle. ", L"Un colpo brucia. ", L"Un golpe quema. ", L"맞으면 불탄다. ", L"命中会造成炎上。", L"الضربة تحرق. ", L"Попадание поджигает. ", L"Ein Treffer entzündet. ", L"Um acerto queima. ", L"Een treffer doet branden. ", L"Trafienie podpala. ", L"İsabet yakar. ");
+	case EF_SLEEP: return LangPick14(L"当たると眠る。", L"A hit puts foes to sleep. ", L"Un coup endort. ", L"Un colpo fa dormire. ", L"Un golpe duerme. ", L"맞으면 잠든다. ", L"命中会造成睡眠。", L"الضربة تُنام. ", L"Попадание усыпляет. ", L"Ein Treffer schläfert ein. ", L"Um acerto faz dormir. ", L"Een treffer doet slapen. ", L"Trafienie usypia. ", L"İsabet uyutur. ");
+	default: return LangPick14(L"追加の状態異常はない。", L"It adds no ailment. ", L"Aucun état en plus. ", L"Nessun malus in più. ", L"No añade estado. ", L"추가 상태 이상은 없다. ", L"没有额外异常。", L"لا حالة إضافية. ", L"Без дополнительного состояния. ", L"Kein zusätzlicher Zustand. ", L"Sem estado extra. ", L"Geen extra toestand. ", L"Bez dodatkowego stanu. ", L"Ek durum yok. ");
+	}
+}
 const wchar_t* SummonDesc(int id)
 {
-	static wchar_t buf[480];
+	static wchar_t buf[768];
 	if (id < 1 || id > SUMMON_N) return L"";
 	const SumRow& r = kSum[id - 1];
-	const wchar_t* tier = L"";
-	if (r.rank >= 2) tier = LangPick14(L"最上位精霊。", L"Supreme spirit. ", L"Esprit suprême. ", L"Spirito supremo. ", L"Espíritu supremo. ", L"최상위 정령. ", L"最上位精灵。", L"روح أسمى. ", L"Верховный дух. ", L"Höchster Geist. ", L"Espírito supremo. ", L"Oppergeest. ", L"Najwyższy duch. ", L"Yüce ruh. ");
-	else if (r.rank == 1) tier = LangPick14(L"上位精霊。", L"Higher spirit. ", L"Esprit majeur. ", L"Spirito maggiore. ", L"Espíritu mayor. ", L"상위 정령. ", L"上位精灵。", L"روح أعلى. ", L"Высший дух. ", L"Hoher Geist. ", L"Espírito maior. ", L"Hogere geest. ", L"Wyższy duch. ", L"Yüksek ruh. ");
+	const wchar_t* el = TacElemWord(r.el);
+	if (!el || !el[0]) el = LangPick14(L"無", L"plain", L"neutre", L"neutro", L"neutro", L"무", L"无", L"بلا", L"без", L"neutral", L"neutro", L"neutraal", L"neutralny", L"yalın");
 	const wchar_t* fmt = LangPick14(
-		L"%s%s 射程%d〜%d 範囲%d。MP %d、最大HPの%d%%、CP %d。",
-		L"%s%s Range %d-%d, area %d. MP %d, %d%% of max HP, CP %d.",
-		L"%s%s Portée %d-%d, zone %d. PM %d, %d%% des PV max, CP %d.",
-		L"%s%s Gittata %d-%d, area %d. PM %d, %d%% dei PV max, CP %d.",
-		L"%s%s Alcance %d-%d, área %d. PM %d, %d%% de PV máx., CP %d.",
-		L"%s%s 사거리 %d~%d, 범위 %d. MP %d, 최대 HP %d%%, CP %d.",
-		L"%s%s 射程%d～%d，范围%d。MP %d，最大HP的%d%%，CP %d。",
-		L"%s%s مدى %d-%d، مساحة %d. MP %d، %d%% من أقصى HP، CP %d.",
-		L"%s%s Дальность %d–%d, область %d. MP %d, %d%% макс. HP, CP %d.",
-		L"%s%s Reichweite %d–%d, Fläche %d. MP %d, %d%% max. HP, CP %d.",
-		L"%s%s Alcance %d-%d, área %d. MP %d, %d%% do HP máx., CP %d.",
-		L"%s%s Bereik %d-%d, gebied %d. MP %d, %d%% max HP, CP %d.",
-		L"%s%s Zasięg %d–%d, obszar %d. MP %d, %d%% maks. HP, CP %d.",
-		L"%s%s Menzil %d-%d, alan %d. MP %d, maks HP'nin %d%%'i, CP %d.");
-	swprintf_s(buf, fmt, tier, SumFxLine(r.fx), r.rMin, r.rMax, r.area, SummonMpOf(r), SummonHpPctOf(r), SummonCpOf(r));
+		L"%sを呼ぶ。%s属性、威力%d、%d回命中、射程%d〜%d、範囲%d。%s支払うのは MP %d、最大HPの%d%%、CP %d。%s",
+		L"Calls %s. %s, power %d, %d hits, range %d-%d, area %d. %sYou pay MP %d, %d%% of max HP, and CP %d. %s",
+		L"Appelle %s. %s, puissance %d, %d coups, portée %d-%d, zone %d. %sCoût : PM %d, %d%% des PV max, PC %d. %s",
+		L"Chiama %s. %s, potenza %d, %d colpi, gittata %d-%d, area %d. %sCosto: PM %d, %d%% dei PV max, CP %d. %s",
+		L"Invoca %s. %s, potencia %d, %d golpes, alcance %d-%d, área %d. %sCuesta PM %d, %d%% de PV máx. y CP %d. %s",
+		L"%s를 부른다. %s 속성, 위력 %d, %d회 명중, 사거리 %d~%d, 범위 %d. %s지불은 MP %d, 최대 HP %d%%, CP %d. %s",
+		L"召唤%s。%s属性，威力%d，命中%d次，射程%d～%d，范围%d。%s消耗 MP %d、最大HP的%d%%、CP %d。%s",
+		L"يستدعي %s. %s، القوة %d، %d ضربات، المدى %d-%d، المساحة %d. %sالتكلفة MP %d و%d%% من أقصى HP وCP %d. %s",
+		L"Призывает %s. %s, сила %d, %d удара, дальность %d–%d, область %d. %sПлата: MP %d, %d%% макс. HP, CP %d. %s",
+		L"Ruft %s. %s, Stärke %d, %d Treffer, Reichweite %d–%d, Fläche %d. %sKosten: MP %d, %d%% max. HP, CP %d. %s",
+		L"Chama %s. %s, poder %d, %d golpes, alcance %d-%d, área %d. %sCusta PM %d, %d%% do HP máx. e CP %d. %s",
+		L"Roept %s. %s, kracht %d, %d treffers, bereik %d-%d, gebied %d. %sKost MP %d, %d%% max HP en CP %d. %s",
+		L"Przyzywa %s. %s, siła %d, %d trafienia, zasięg %d–%d, obszar %d. %sKoszt: MP %d, %d%% maks. HP i CP %d. %s",
+		L"%s çağırır. %s, güç %d, %d vuruş, menzil %d-%d, alan %d. %sBedel MP %d, azami HP'nin %d%%'i ve CP %d. %s");
+	swprintf_s(buf, fmt, SumPick(r.nm), el, r.power, r.hits, r.rMin, r.rMax, r.area, SumStatusLine(r.effect), SummonMpOf(r), SummonHpPctOf(r), SummonCpOf(r), SumFxLine(r.fx));
 	return buf;
 }
 

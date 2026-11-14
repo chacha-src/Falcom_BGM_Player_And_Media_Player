@@ -12,7 +12,8 @@ static const char* const kClipNames[CL_COUNT] = {
 	"2H_Melee_Attack_Chop", "2H_Melee_Attack_Spin", "1H_Ranged_Shoot", "2H_Ranged_Shoot",
 	"Spellcast_Shoot", "Spellcast_Raise", "Spellcast_Long", "Hit_A", "Hit_B", "Death_A", "Cheer", "Block", "Dodge_Backward", "2H_Melee_Idle",
 	"Throw", "Unarmed_Melee_Attack_Punch_A", "Jump_Full_Short", "Interact", "Taunt", "Spawn_Ground", "Use_Item",
-	"Idle_GlanceL", "Idle_GlanceR", "Idle_Look", "Idle_Stretch", "Idle_Shift", "Idle_Cross"
+	"Idle_GlanceL", "Idle_GlanceR", "Idle_Look", "Idle_Stretch", "Idle_Shift", "Idle_Cross",
+	"Stun_Loop", "Confuse_Loop"
 };
 
 static int Pal(int row, int col) { return row * 16 + col; }
@@ -1043,6 +1044,15 @@ static void BuildPyr(Renderer& r, GpuMesh& out)
 	GeoToStatic(r, g, out);
 }
 
+static void BuildSq(Renderer& r, GpuMesh& out)
+{
+	Geo& g = g_procGeo;
+	g.Clear();
+	g.curCol = 0xFFFFFFFF;
+	g.Box(v3(0, 0.42f, 0), v3(0.48f, 0.07f, 0.48f));
+	GeoToStatic(r, g, out);
+}
+
 static void BuildOrb(Renderer& r, GpuMesh& out)
 {
 	Geo& g = g_procGeo;
@@ -1122,6 +1132,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	BuildCrown(r, lib.crown); step();
 	BuildRing(r, lib.ring); step();
 	BuildPyr(r, lib.pyr); step();
+	BuildSq(r, lib.sq); step();
 	BuildOrb(r, lib.orb); step();
 	BuildIce(r, lib.ice); step();
 	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
@@ -1146,6 +1157,7 @@ void ReleaseLibrary(Library& lib)
 	lib.crown.Release();
 	lib.ring.Release();
 	lib.pyr.Release();
+	lib.sq.Release();
 	lib.orb.Release();
 	lib.ice.Release();
 	lib.ready = 0;
@@ -1304,11 +1316,17 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		a.gearJ[a.nGear] = j;
 		a.nGear++;
 	};
-	auto addGearPiece = [&](const GearDef* g, int slot) {
+	auto addGearPiece = [&](const GearDef* g, int slot, int id) {
 		if (!g) return;
 		const char* att = slot ? g->att1 : g->att0;
 		int mesh = slot ? g->mesh1 : g->mesh0;
 		int joint = slot ? g->joint1 : g->joint0;
+		int vis = GearVisual(g, id, slot);
+		if (gearMeshOk(vis)) {
+			joint = g->kind == 1 ? (slot ? 2 : 3) : (slot ? 1 : 0);
+			addGearMesh(vis, joint);
+			return;
+		}
 		if (att && att[0]) AddAtt(a, r, att);
 		else addGearMesh(mesh, joint);
 	};
@@ -1319,7 +1337,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		return att && (strstr(att, "Helmet") || strstr(att, "Hat") || strstr(att, "Crown"));
 	};
 	bool customWep = gw && (gw->att0 || gw->att1 || gearMeshOk(gw->mesh0) || gearMeshOk(gw->mesh1));
-	if (customWep) { addGearPiece(gw, 0); addGearPiece(gw, 1); }
+	if (customWep) { addGearPiece(gw, 0, c.reserved[6]); addGearPiece(gw, 1, c.reserved[6]); }
 	else AddWeapons(a, r, cd.weaponLook);
 	bool namedHead = ga && ga->att1 && (strstr(ga->att1, "Helmet") || strstr(ga->att1, "Hat") || strstr(ga->att1, "Crown"));
 	bool helm = namedHead || (ga && ga->joint1 == 2 && gearMeshOk(ga->mesh1));
@@ -1336,8 +1354,8 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	a.wepGear = a.nGear;
 	// アバターの服を着ているあいだは、兜・鎧・体型マントを重ねない。帽子とマントの切替は残す。
 	if (ga && !a.avatar) {
-		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0);
-		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1);
+		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0, c.reserved[7]);
+		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1, c.reserved[7]);
 	}
 	if (cd.moveType == MV_FLY || CharHasPas(c, PAS_FLY) || c.cls == C_SKYKNIGHT) a.wings = 1;
 	if (c.cls == C_DRAGONLORD) a.wings = 2;
@@ -1558,6 +1576,14 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 void ActorPlay(Actor& a, int clip, int loop, float blendTime)
 {
 	if (clip == a.clip && loop && a.loop) return;
+	static unsigned roll = 1;
+	roll = roll * 1664525u + 1013904223u;
+	a.motPick = 1 + (int)(roll % 8);
+	if (clip == CL_DEATH) {
+		if (a.fallKind <= 0) a.fallKind = 1 + (int)(roll % 5);
+	} else if (clip == CL_SPAWN) {
+		a.riseKind = 1 + (int)(roll % 4);
+	} else a.fallKind = 0;
 	a.prev = a.clip; a.pt = a.t; a.ploop = a.loop; a.prevSkill = a.skillPose;
 	a.clip = clip; a.t = 0; a.loop = loop;
 	a.blendDur = max(.001f, blendTime);
@@ -1673,38 +1699,84 @@ void ActorUpdate(Actor& a, float dt)
 	}
 }
 
-static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
+static const char* MotN(const char* const* n, int count, int pick)
+{
+	if (!n || count <= 0) return NULL;
+	int i = pick > 0 ? (pick - 1) % count : 0;
+	return n[i];
+}
+
+static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill, int fallKind, int riseKind, int motPick)
 {
 	if (m.rig < 0 || m.rig >= (int)r.rigs.size()) return -1;
 	const Rig& g = r.rigs[m.rig];
 	// 人体はモーションキャプチャで全部の型を持つので名前どおりに引き、スキルの範囲・効果・威力・属性で別の型に替える。
 	if (strncmp(m.name, "Hum", 3) == 0 && m.name[3] >= 'A' && m.name[3] <= 'Z' && clip >= 0 && clip < CL_COUNT) {
 		const char* alt = NULL;
-		if (skill >= 0 && (skill < SKL_COUNT || IsCraftId(skill) || IsSummonId(skill))) {
+		BOOL melee = clip == CL_1H_SLICE || clip == CL_1H_STAB || clip == CL_1H_CHOP || clip == CL_2H_CHOP || clip == CL_2H_SPIN || clip == CL_PUNCH;
+		if (clip == CL_DEATH) {
+			const char* n[] = { "Death_A", "Death_Tumble", "Death_Collapse", "Death_Slide", "Death_Kneel" };
+			alt = MotN(n, 5, fallKind);
+		} else if (clip == CL_SPAWN) {
+			const char* n[] = { "Spawn_Ground", "Spawn_Lay", "Spawn_Side", "Spawn_Roll" };
+			alt = MotN(n, 4, riseKind);
+		} else if (clip == CL_DODGE) {
+			const char* n[] = { "Dodge_Backward", "Dodge_Roll", "Dodge_Hop", "Dodge_Slide" };
+			alt = MotN(n, 4, motPick);
+		} else if (clip == CL_BLOCK) {
+			const char* n[] = { "Block", "Block_Shield", "Block_Break" };
+			alt = MotN(n, 3, motPick);
+		} else if (clip == CL_HIT_A || clip == CL_HIT_B) {
+			const char* n[] = { "Hit_A", "Hit_B", "Hit_Knock" };
+			alt = MotN(n, 3, motPick + (clip == CL_HIT_B ? 1 : 0));
+		} else if (clip == CL_TAUNT) {
+			const char* n[] = { "Taunt", "Taunt_Dance", "Taunt_Call" };
+			alt = MotN(n, 3, motPick);
+		} else if (clip == CL_STUN) {
+			alt = (motPick & 1) ? "Stun_Crouch" : "Stun_Loop";
+		} else if (clip == CL_CONFUSE) {
+			alt = (motPick & 1) ? "Confuse_Shamble" : "Confuse_Loop";
+		} else if (clip == CL_RUN && (motPick & 1)) alt = "Running_Sprint";
+		else if (clip == CL_WALK && (motPick % 3) == 0) alt = "Walking_Formal";
+		else if (clip == CL_JUMP && (motPick & 1)) alt = "Jump_Ninja";
+		else if (clip == CL_INTERACT && (motPick & 1)) alt = "Interact_Pickup";
+		else if (skill >= 0 && (skill < SKL_COUNT || IsCraftId(skill) || IsSummonId(skill))) {
 			const SkillDef& sd = SkillInfo(skill);
-			BOOL melee = clip == CL_1H_SLICE || clip == CL_1H_STAB || clip == CL_1H_CHOP || clip == CL_2H_CHOP || clip == CL_2H_SPIN || clip == CL_PUNCH;
 			BOOL cast = clip == CL_CAST_SHOOT || clip == CL_CAST_RAISE || clip == CL_CAST_LONG || clip == CL_THROW || clip == CL_TAUNT || clip == CL_USE;
 			if (sd.kind == SK_PHYS && melee) {
-				if (sd.shape == SH_LINE) alt = "Skill_Dash";
-				else if (sd.shape == SH_FAN) alt = "2H_Melee_Attack_Spin";
-				else if (sd.effect == EF_STUN || sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN || sd.effect == EF_IGNDEF) alt = "Skill_Bash";
-				else if (sd.power >= 150 || sd.hits >= 3) alt = "Skill_Heavy";
+				if (sd.shape == SH_LINE) {
+					const char* n[] = { "Skill_Dash", "Skill_Combo", "Atk_Upper", "Skill_Jab" };
+					alt = MotN(n, 4, skill + motPick);
+				} else if (sd.shape == SH_FAN) alt = (motPick & 1) ? "2H_Melee_Attack_Spin" : "Atk_ComboB";
+				else if (sd.effect == EF_STUN || sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN || sd.effect == EF_IGNDEF)
+					alt = (motPick & 1) ? "Skill_Bash" : "Skill_Hook";
+				else if (sd.power >= 150 || sd.hits >= 3) {
+					const char* n[] = { "Skill_Heavy", "Atk_HeavyB", "Atk_Chop" };
+					alt = MotN(n, 3, skill + motPick);
+				} else {
+					const char* n[] = { NULL, "Skill_Hook", "Skill_Jab", "Skill_Combo", "Atk_Chop", "Atk_Push", "Atk_Upper", "Atk_ComboB" };
+					alt = MotN(n, 8, skill + motPick + clip);
+				}
 			} else if (sd.kind == SK_MAGIC && cast) {
-				if (sd.element == EL_FIRE) alt = "Cast_Throw";
-				else if (sd.element == EL_EARTH || sd.element == EL_ICE) alt = "Cast_Ground";
+				if (sd.element == EL_FIRE) alt = (motPick & 1) ? "Cast_Throw" : "Cast_Point";
+				else if (sd.element == EL_EARTH) alt = (motPick & 1) ? "Cast_Kneel" : "Cast_Ground";
+				else if (sd.element == EL_ICE) alt = (motPick & 1) ? "Cast_Chant" : "Cast_Ground";
 				else if (sd.element == EL_THUNDER) alt = "Cast_Point";
-				else if (sd.element == EL_DARK || sd.element == EL_POISON) alt = "Cast_Claw";
-				else if (sd.element == EL_HOLY) alt = "Cast_Heal";
+				else if (sd.element == EL_DARK || sd.element == EL_POISON) alt = (motPick & 1) ? "Cast_Claw" : "Cast_Chant";
+				else if (sd.element == EL_HOLY) alt = (motPick & 1) ? "Cast_Chant" : "Cast_Heal";
 				else if (sd.element == EL_WIND) alt = "Spellcast_Long";
 			} else if (sd.kind == SK_HEAL && cast) {
-				if (sd.effect == EF_RAISE) alt = "Cast_Heal";
+				if (sd.effect == EF_RAISE) alt = (motPick & 1) ? "Cast_Chant" : "Cast_Heal";
 				else if (sd.area >= 3 || sd.shape == SH_FAN) alt = "Spellcast_Long";
-				else alt = "Cast_Heal";
+				else alt = (motPick & 1) ? "Cast_Kneel" : "Cast_Heal";
 			} else if (sd.kind == SK_BUFF && cast) {
 				if (sd.effect == EF_CLEANSE) alt = "Use_Item";
-				else if (sd.area >= 2) alt = "Spellcast_Long";
-				else alt = "Spellcast_Raise";
+				else if (sd.area >= 2) alt = (motPick & 1) ? "Cast_Chant" : "Spellcast_Long";
+				else alt = (motPick & 1) ? "Spellcast_Raise" : "Cast_Heal";
 			}
+		} else if (melee) {
+			const char* n[] = { NULL, "Skill_Hook", "Skill_Jab", "Atk_Upper", "Atk_Chop", "Atk_Push", "Skill_Combo", "Atk_HeavyB" };
+			alt = MotN(n, 8, motPick + clip);
 		}
 		int c = alt ? g.FindClip(alt) : -1;
 		if (c < 0) c = g.FindClip(kClipNames[clip]);
@@ -1735,7 +1807,7 @@ float ActorWindup(const Actor& a, const Renderer& r, int clip)
 {
 	if (a.proc == 3 && a.skillPose >= 0 && a.model >= 0 && a.model < (int)r.models.size()) {
 		const Model& m = r.models[a.model];
-		int ci = MonsterClip(r, m, clip, a.skillPose);
+		int ci = MonsterClip(r, m, clip, a.skillPose, a.fallKind, a.riseKind, a.motPick);
 		if (ci >= 0) {
 			const char* nm = r.rigs[m.rig].clips[ci].name;
 			if (strncmp(nm, "Skill_", 6) == 0) return 0.24f;
@@ -1756,7 +1828,7 @@ float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int cl
 {
 	if (a.proc == 3) {
 		if (a.model < 0 || a.model >= (int)r.models.size()) return 1.f;
-		int ci = MonsterClip(r, r.models[a.model], clip, a.skillPose);
+		int ci = MonsterClip(r, r.models[a.model], clip, a.skillPose, a.fallKind, a.riseKind, a.motPick);
 		if (ci < 0) return 1.f;
 		return r.rigs[r.models[a.model].rig].clips[ci].Duration();
 	}
@@ -1847,7 +1919,7 @@ static int HumanJoint(const Renderer& r, const Model& m, const char* a, const ch
 static void ApplyFlyTrail(Actor& a, const Renderer& r)
 {
 	if (!a.legOk || a.proc != 3 || !a.poseValid || a.poseHold) return;
-	if (a.clip == CL_DEATH || a.clip == CL_BLOCK || a.clip == CL_DODGE) return;
+	if (a.clip == CL_DEATH || a.clip == CL_BLOCK || a.clip == CL_DODGE || a.clip == CL_STUN || a.clip == CL_CONFUSE) return;
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	const Model& m = r.models[a.model];
 	if (strncmp(m.name, "Hum", 3) != 0) return;
@@ -1908,8 +1980,8 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		if (a.model < 0 || a.model >= (int)r.models.size()) return;
 		const Model& m = r.models[a.model];
 		a.modelPtr = &m;
-		int ca = MonsterClip(r, m, a.clip, a.skillPose);
-		int cb = MonsterClip(r, m, a.prev, a.prevSkill);
+		int ca = MonsterClip(r, m, a.clip, a.skillPose, a.fallKind, a.riseKind, a.motPick);
+		int cb = MonsterClip(r, m, a.prev, a.prevSkill, a.fallKind, a.riseKind, a.motPick);
 		r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
 		// 持ち物のある手の指だけ握りの型に替える。素手の指はクリップに捕った動きのまま。
 		if (a.gripClip >= 0 && m.rig >= 0 && m.rig < (int)r.rigs.size() && a.gripClip < (int)r.rigs[m.rig].clips.size() && (a.grip[0] || a.grip[1])) {

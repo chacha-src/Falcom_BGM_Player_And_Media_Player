@@ -28343,13 +28343,15 @@ __int64 OggGetHeardPcmFrames()
 	}
 
 	OggRefreshDsQueuedSamplesCache();
+	static __int64 s_lastPlayb = 0;
 	__int64 pb = 0;
 	{
 		std::unique_lock<std::mutex> lk(cl2, std::try_to_lock);
 		if (!lk.owns_lock())
-			return 0;
+			return s_lastPlayb;
 		pb = playb;
 	}
+	s_lastPlayb = pb;
 	const long q = g_dsQueuedSamplesCache;
 	if (q > 0 && pb > q)
 		pb -= q;

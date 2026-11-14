@@ -520,6 +520,8 @@ void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap);
 void MonsterWeakText(int monster, wchar_t* out, int cap);
 const SkillDef& SkillInfo(int s);
 const wchar_t* SkillLabel(int s);
+// 表示名と効果範囲が同じ技。威力だけ違うときは呼び側が強い方を残す。
+bool SkillSameMenu(int a, int b);
 int PaceRoleOfLv(int lv);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
@@ -1249,12 +1251,18 @@ struct GearDef {
 	const char* att1;
 	int elem;     // 0=なし。EL_FIRE..EL_POISON。武器は攻撃属性、防具はその属性を軽減
 	int shop;     // 1=店売りのみ。敵ドロップしない
+	int elem2;    // 0=なし。武器は第二属性、防具は第二の軽減
 };
 int GearCount();
 const GearDef* GearOf(int id);
+// 装備 id ごとに別の見た目。0 は右手か胴、1 は左手か頭。無いときは -1。
+int GearVisual(const GearDef* g, int id, int slot);
 const wchar_t* GearName(int id);
 const wchar_t* GearRole(const GearDef* g);
+const wchar_t* TacElemWord(int el);
+const wchar_t* TacLineWord(int line);
 const wchar_t* GoodDesc(int i);
+const wchar_t* GoodFace(int i);
 int ClassLine(int cls);
 int ClassTier(int cls);
 int JobFamOf(int cls);
@@ -1292,8 +1300,8 @@ int GoodHoldMax(int good);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 10, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 798, CP_MAX = 200, CRAFT_SLOT_N = 4 };
-enum { SUMMON_BASE = 250000, SUMMON_N = 76 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 10, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 1113, CP_MAX = 200, CRAFT_SLOT_N = 4 };
+enum { SUMMON_BASE = 250000, SUMMON_N = 396 };
 enum { SUM_FX_FIRE = 0, SUM_FX_ICE, SUM_FX_BOLT, SUM_FX_SPIKE, SUM_FX_WIND, SUM_FX_WAVE, SUM_FX_HOLY, SUM_FX_DARK, SUM_FX_MIASMA, SUM_FX_ROAR, SUM_FX_SLEEP, SUM_FX_WEB };
 inline bool IsSummonId(int skill) { return skill >= SUMMON_BASE && skill < SUMMON_BASE + SUMMON_N; }
 bool IsCraftId(int skill);
@@ -1348,6 +1356,7 @@ enum PasFx {
 int PasCount();
 const wchar_t* PasName(int id);
 const wchar_t* PasDesc(int id);
+bool CatalogRaises(int kind, int id, int stat);
 int PasPrice(int index);
 int PasHave(int index);
 int PasFree(int index);

@@ -4397,6 +4397,20 @@ const wchar_t* SkillLabel(int s)
 	return TT(SkillInfo(s).nameTx);
 }
 
+bool SkillSameMenu(int a, int b)
+{
+	if (a == b) return true;
+	const wchar_t* na = SkillLabel(a);
+	const wchar_t* nb = SkillLabel(b);
+	if (!na || !nb || wcscmp(na, nb) != 0) return false;
+	const SkillDef& da = SkillInfo(a);
+	const SkillDef& db = SkillInfo(b);
+	return da.kind == db.kind && da.mp == db.mp && da.rMin == db.rMin && da.rMax == db.rMax
+		&& da.area == db.area && da.element == db.element && da.hits == db.hits
+		&& da.critBonus == db.critBonus && da.effect == db.effect && da.enemyOnly == db.enemyOnly
+		&& da.shape == db.shape && da.form == db.form;
+}
+
 // ============================================================ モンスター
 // name, look, model, wlook, move, jump, rMin, rMax, mag, pow, style, base, grow, skills, minStage, weight, scale, tint
 static MonsterDef kMon[M_COUNT] = {
@@ -4424,6 +4438,32 @@ static MonsterDef kMon[M_COUNT] = {
 	{ 70, 30, 18, 14, 14, 12, 8, 10, 8, 6 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 80, 1, 1.75f, 0xE05040, 0, -1 },
 };
 
+const wchar_t* TacElemWord(int el)
+{
+	switch (el) {
+	case EL_FIRE: return LangPick14(L"炎", L"fire", L"feu", L"fuoco", L"fuego", L"화염", L"火", L"نار", L"огонь", L"Feuer", L"fogo", L"vuur", L"ogień", L"ateş");
+	case EL_ICE: return LangPick14(L"氷", L"ice", L"glace", L"ghiaccio", L"hielo", L"냉기", L"冰", L"جليد", L"лёд", L"Eis", L"gelo", L"ijs", L"lód", L"buz");
+	case EL_THUNDER: return LangPick14(L"雷", L"thunder", L"tonnerre", L"tuono", L"trueno", L"번개", L"雷", L"رعد", L"гром", L"Donner", L"trovão", L"donder", L"grom", L"yıldırım");
+	case EL_HOLY: return LangPick14(L"聖", L"holy", L"sacré", L"sacro", L"sagrado", L"신성", L"圣", L"مقدس", L"свет", L"Heilig", L"sagrado", L"heilig", L"świętość", L"kutsal");
+	case EL_DARK: return LangPick14(L"闇", L"dark", L"ténèbres", L"oscurità", L"oscuridad", L"암흑", L"暗", L"ظلام", L"тьма", L"Dunkel", L"trevas", L"duister", L"mrok", L"karanlık");
+	case EL_WIND: return LangPick14(L"風", L"wind", L"vent", L"vento", L"viento", L"바람", L"风", L"ريح", L"ветер", L"Wind", L"vento", L"wind", L"wiatr", L"rüzgar");
+	case EL_EARTH: return LangPick14(L"地", L"earth", L"terre", L"terra", L"tierra", L"대지", L"地", L"أرض", L"земля", L"Erde", L"terra", L"aarde", L"ziemia", L"toprak");
+	case EL_POISON: return LangPick14(L"毒", L"poison", L"poison", L"veleno", L"veneno", L"독", L"毒", L"سم", L"яд", L"Gift", L"veneno", L"gif", L"trucizna", L"zehir");
+	default: return L"";
+	}
+}
+const wchar_t* TacLineWord(int line)
+{
+	switch (line) {
+	case 0: return LangPick14(L"兵士", L"soldier", L"soldat", L"soldato", L"soldado", L"병사", L"士兵", L"جندي", L"солдат", L"Soldat", L"soldado", L"soldaat", L"żołnierz", L"asker");
+	case 1: return LangPick14(L"戦士", L"fighter", L"guerrier", L"guerriero", L"guerrero", L"전사", L"战士", L"محارب", L"воин", L"Krieger", L"guerreiro", L"krijger", L"wojownik", L"savaşçı");
+	case 2: return LangPick14(L"射手", L"archer", L"archer", L"arciere", L"arquero", L"궁수", L"射手", L"رامي", L"лучник", L"Schütze", L"arqueiro", L"boogschutter", L"łucznik", L"okçu");
+	case 3: return LangPick14(L"盗賊", L"thief", L"voleur", L"ladro", L"ladrón", L"도적", L"盗贼", L"لص", L"вор", L"Dieb", L"ladrão", L"dief", L"złodziej", L"hırsız");
+	case 4: return LangPick14(L"魔術師", L"mage", L"mage", L"mago", L"mago", L"마법사", L"魔法使", L"ساحر", L"маг", L"Magier", L"mago", L"magiër", L"mag", L"büyücü");
+	case 5: return LangPick14(L"聖職者", L"cleric", L"prêtre", L"chierico", L"clérigo", L"성직자", L"圣职者", L"كاهن", L"жрец", L"Priester", L"clérigo", L"priester", L"kapłan", L"rahip");
+	default: return L"";
+	}
+}
 #include "tactics_src/mon_species.inc"
 #include "tactics_src/mon_names.inc"
 #include "tactics_src/summon.inc"
@@ -4441,11 +4481,37 @@ static const wchar_t* ImportLocName(int model)
 	return ImportLocAt(model, lang);
 }
 
-enum { IMP_CAP = 2048, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
+enum { IMP_CAP = 2048, POOL_CAP = 8192, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
 static MonsterDef s_monImp[IMP_CAP];
 static int s_monImpOk = 0;
 static int s_poolN[4];
-static int s_poolI[4][IMP_CAP];
+static int s_poolI[4][POOL_CAP];
+#include "tactics_src/foe_vault.inc"
+static MonsterDef s_foeEx[4096];
+static_assert(kFoeExN <= 4096, "追加敵は 4096 まで");
+static const wchar_t* FoeExName(int ex, int lang)
+{
+	if (ex < 0 || ex >= kFoeExN) return L"?";
+	if (lang < 0 || lang > 13) lang = 1;
+	int suf = ex % kFoeSufN;
+	int t = ex / kFoeSufN;
+	int stem = t % kFoeStemN;
+	int cat = t / kFoeStemN;
+	if (cat < 0 || cat >= kFoeCatN || stem < 0 || stem >= kFoeStemN) return L"?";
+	static wchar_t mem[4096][14][64];
+	static unsigned char done[4096][14];
+	if (!done[ex][lang]) {
+		const wchar_t* c = kFoeCat[cat][lang];
+		const wchar_t* a = kFoeStem[stem][lang];
+		const wchar_t* b = kFoeSuf[suf][lang];
+		if (lang == 0 || lang == 5 || lang == 6)
+			swprintf_s(mem[ex][lang], 64, L"%s・%s%s", c, a, b);
+		else
+			swprintf_s(mem[ex][lang], 64, L"%s %s %s", c, a, b);
+		done[ex][lang] = 1;
+	}
+	return mem[ex][lang];
+}
 
 static int HasW(const wchar_t* n, const wchar_t* k)
 {
@@ -4703,7 +4769,47 @@ static void EnsureMonsters()
 		d.scale = 1.f;
 		d.tint = 0xFFFFFF;
 		int pool = ImportPool(nm);
-		if (!summonOnly && pool != POOL_HUM && s_poolN[pool] < IMP_CAP) s_poolI[pool][s_poolN[pool]++] = M_COUNT + i;
+		if (!summonOnly && pool != POOL_HUM && s_poolN[pool] < POOL_CAP) s_poolI[pool][s_poolN[pool]++] = M_COUNT + i;
+	}
+	{
+		int donors[IMP_CAP];
+		int nd = 0;
+		for (int i = 0; i < nImp && nd < IMP_CAP; i++) {
+			const wchar_t* nm = kImportName[i];
+			if (!nm || wcsncmp(nm, L"Sum", 3) == 0) continue;
+			if (ImportPool(nm) == POOL_HUM) continue;
+			donors[nd++] = i;
+		}
+		int nEx = kFoeExN < 4096 ? kFoeExN : 4096;
+		if (nd < 1) nd = 1, donors[0] = 0;
+		for (int i = 0; i < nEx; i++) {
+			int src = donors[i % nd];
+			MonsterDef& d = s_foeEx[i];
+			d = s_monImp[src];
+			d.model = src;
+			d.look = LK_MESH;
+			d.nameTx = -1;
+			d.nameB = -1;
+			int slot = i % 10;
+			int start = 1;
+			if (slot < 4) start = 1 + (i * 17) % 999;
+			else if (slot < 7) start = 1000 + (i * 13) % 2001;
+			else if (slot < 9) start = 3001 + (i * 11) % 3000;
+			else start = 6001 + (i * 7) % 3999;
+			int end = start + 400 + (i % 500);
+			if (end > TAC_STAGE_MAX) end = TAC_STAGE_MAX;
+			d.minStage = start;
+			d.maxStage = end >= TAC_STAGE_MAX ? 0 : end;
+			d.weight = 6;
+			d.scale = 0.86f + (float)(i % 7) * 0.04f;
+			int rr = 150 + (i * 37) % 106;
+			int gg = 130 + (i * 53) % 126;
+			int bb = 140 + (i * 71) % 116;
+			d.tint = ((DWORD)rr << 16) | ((DWORD)gg << 8) | (DWORD)bb;
+			int pool = ImportPool(kImportName[src]);
+			int id = M_COUNT + kImportN + i;
+			if (pool != POOL_HUM && s_poolN[pool] < POOL_CAP) s_poolI[pool][s_poolN[pool]++] = id;
+		}
 	}
 	}
 	s_monImpOk = 1;
@@ -4714,12 +4820,18 @@ const MonsterDef& MonsterInfo(int m)
 	EnsureSheets();
 	EnsureMonsters();
 	if (m >= M_COUNT && m < M_COUNT + kImportN && (m - M_COUNT) < IMP_CAP) return s_monImp[m - M_COUNT];
+	if (m >= M_COUNT + kImportN) {
+		int ex = m - (M_COUNT + kImportN);
+		if (ex >= 0 && ex < kFoeExN && ex < 4096) return s_foeEx[ex];
+	}
 	if (m < 0 || m >= M_COUNT) m = 0;
 	return kMon[m];
 }
 
 const wchar_t* MonsterLabel(int m)
 {
+	int ex = m - (M_COUNT + kImportN);
+	if (ex >= 0 && ex < kFoeExN) return FoeExName(ex, savedata.lang);
 	const MonsterDef& d = MonsterInfo(m);
 	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return ImportLocName(d.model);
 	return TT(d.nameTx);
@@ -4727,6 +4839,8 @@ const wchar_t* MonsterLabel(int m)
 
 const wchar_t* MonsterLabelAt(int m, int lang)
 {
+	int ex = m - (M_COUNT + kImportN);
+	if (ex >= 0 && ex < kFoeExN) return FoeExName(ex, lang);
 	const MonsterDef& d = MonsterInfo(m);
 	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return ImportLocAt(d.model, lang);
 	return TTAt(d.nameTx, lang);
@@ -4787,10 +4901,12 @@ bool MonsterKnown(int id, int cleared)
 {
 	if (cleared < 1 || id < 0) return false;
 	EnsureMonsters();
-	if (id >= M_COUNT) {
+	if (id >= M_COUNT + kImportN) {
+		if (id >= M_COUNT + kImportN + kFoeExN) return false;
+	} else if (id >= M_COUNT) {
 		int model = id - M_COUNT;
 		if (model < 0 || model >= kImportN || wcsncmp(kImportName[model], L"Sum", 3) == 0 || ImportPool(kImportName[model]) == POOL_HUM) return false;
-	} else if (id >= M_COUNT) return false;
+	}
 	const MonsterDef& d = MonsterInfo(id);
 	int lo = MonsterFirstStage(id);
 	int view = StageFoeViewHi(cleared);
@@ -4802,30 +4918,37 @@ bool MonsterKnown(int id, int cleared)
 	return lo <= top;
 }
 
+struct MonCatKey { int id; int debut; };
+static int MonCatCmp(const void* pa, const void* pb)
+{
+	const MonCatKey* a = (const MonCatKey*)pa;
+	const MonCatKey* b = (const MonCatKey*)pb;
+	if (a->debut != b->debut) return a->debut < b->debut ? -1 : 1;
+	if (a->id != b->id) return a->id < b->id ? -1 : 1;
+	return 0;
+}
 int MonsterCatalog(int* out, int cap)
 {
 	EnsureMonsters();
-	int n = 0;
-	if (!out || cap <= 0) return 0;
-	for (int i = 0; i < M_COUNT && n < cap; i++) out[n++] = i;
-	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
-	for (int i = 0; i < nImp && n < cap; i++) {
-		if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
-		out[n++] = M_COUNT + i;
-	}
-	for (int i = 1; i < n; i++) {
-		int v = out[i];
-		int j = i;
-		while (j > 0) {
-			int a = out[j - 1];
-			int da = MonsterFirstStage(a), dv = MonsterFirstStage(v);
-			if (da < dv || (da == dv && a <= v)) break;
-			out[j] = a;
-			--j;
+	static MonCatKey keys[8192];
+	static int sn = -1;
+	if (sn < 0) {
+		int n = 0;
+		for (int i = 0; i < M_COUNT && n < 8192; i++) keys[n++].id = i;
+		int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+		for (int i = 0; i < nImp && n < 8192; i++) {
+			if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
+			keys[n++].id = M_COUNT + i;
 		}
-		out[j] = v;
+		for (int i = 0; i < kFoeExN && n < 8192; i++) keys[n++].id = M_COUNT + kImportN + i;
+		for (int i = 0; i < n; i++) keys[i].debut = MonsterFirstStage(keys[i].id);
+		qsort(keys, (size_t)n, sizeof(MonCatKey), MonCatCmp);
+		sn = n;
 	}
-	return n;
+	if (!out || cap <= 0) return sn;
+	int w = sn < cap ? sn : cap;
+	for (int i = 0; i < w; i++) out[i] = keys[i].id;
+	return w;
 }
 
 
@@ -5493,6 +5616,8 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 // ============================================================ ユニット
 static bool IsMon(const Unit& u) { return u.monster >= 0; }
 
+static int PasScale(const Unit& u, int fx, int base, int span);
+
 int UnitStat(const Unit& u, int s)
 {
 	int v = u.ch.stat[s];
@@ -5515,14 +5640,26 @@ int UnitStat(const Unit& u, int s)
 	if ((s == S_STR || s == S_MAG) && u.buffAtk > 0) v = v * 125 / 100;
 	if (u.mulTurns > 0 && (s == S_STR || s == S_MAG || s == S_DEF || s == S_RES || s == S_AGI)) v *= 2;
 	if (s == S_DEF && UnitHasSkill(u, SKL_P_IRON)) v = v * 115 / 100;
-	if (s == S_STR && UnitHasPas(u, PAS_STR2)) v = v * 120 / 100;
-	else if (s == S_STR && UnitHasPas(u, PAS_STR)) v = v * 110 / 100;
-	if (s == S_MAG && UnitHasPas(u, PAS_MAG2)) v = v * 120 / 100;
-	else if (s == S_MAG && UnitHasPas(u, PAS_MAG)) v = v * 110 / 100;
-	if (s == S_DEF && UnitHasPas(u, PAS_DEF2)) v = v * 120 / 100;
-	else if (s == S_DEF && UnitHasPas(u, PAS_DEF)) v = v * 110 / 100;
-	if (s == S_RES && UnitHasPas(u, PAS_RES2)) v = v * 120 / 100;
-	else if (s == S_RES && UnitHasPas(u, PAS_RES)) v = v * 110 / 100;
+	if (s == S_STR) {
+		int p = PasScale(u, PAS_STR2, 20, 80);
+		if (p >= 0) v = v * (100 + p) / 100;
+		else if (UnitHasPas(u, PAS_STR)) v = v * 110 / 100;
+	}
+	if (s == S_MAG) {
+		int p = PasScale(u, PAS_MAG2, 20, 80);
+		if (p >= 0) v = v * (100 + p) / 100;
+		else if (UnitHasPas(u, PAS_MAG)) v = v * 110 / 100;
+	}
+	if (s == S_DEF) {
+		int p = PasScale(u, PAS_DEF2, 20, 80);
+		if (p >= 0) v = v * (100 + p) / 100;
+		else if (UnitHasPas(u, PAS_DEF)) v = v * 110 / 100;
+	}
+	if (s == S_RES) {
+		int p = PasScale(u, PAS_RES2, 20, 80);
+		if (p >= 0) v = v * (100 + p) / 100;
+		else if (UnitHasPas(u, PAS_RES)) v = v * 110 / 100;
+	}
 	if (s == S_AGI && UnitHasPas(u, PAS_AGI)) v = v * 110 / 100;
 	if (s == S_LUK && UnitHasPas(u, PAS_LUK)) v += 4;
 	if (s == S_RCV && UnitHasPas(u, PAS_RCV)) v += 4;
@@ -5673,8 +5810,14 @@ void UnitHeldText(const Unit& u, wchar_t* out, int cap)
 	wchar_t luck[160] = L"";
 	if (UnitIsLucky(u)) wcsncpy_s(luck, TT(TX_BT_LUCKY), _TRUNCATE);
 	wchar_t act[160] = L"", pas[80] = L"", cr[160] = L"";
+	int seen[96];
+	int nSeen = 0;
 	for (int s = 0; s < SKL_COUNT; s++) {
 		if (!UnitHasSkill(u, s)) continue;
+		int dup = 0;
+		for (int i = 0; i < nSeen; i++) if (SkillSameMenu(seen[i], s)) { dup = 1; break; }
+		if (dup) continue;
+		if (nSeen < 96) seen[nSeen++] = s;
 		const wchar_t* nm = SkillLabel(s);
 		if (SkillInfo(s).kind == SK_PASSIVE) HeldPush(pas, 80, nm);
 		else HeldPush(act, 160, nm);
@@ -6722,6 +6865,11 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	int magic = sd ? (sd->kind == SK_MAGIC) : (UnitMagAttack(a) != 0);
 	int el = AttackElem(a, skill);
+	int el2 = EL_NONE;
+	if (!sd || sd->element == EL_NONE) {
+		const GearDef* wpn = GearOf(a.ch.reserved[6]);
+		if (wpn && wpn->kind == 0) el2 = wpn->elem2;
+	}
 	int ranged;
 	if (magic) ranged = 1;
 	else if (sd && sd->rMax >= 0) ranged = (sd->rMin >= 2 || sd->rMax >= 2) ? 1 : 0;
@@ -6735,7 +6883,7 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 		for (int j = 0; j < i; j++) if (md.weak[j] == w) dup = 1;
 		if (dup) continue;
 		int hit = 0;
-		if (w >= EL_FIRE && w <= EL_POISON && w == el) hit = 1;
+		if (w >= EL_FIRE && w <= EL_POISON && (w == el || w == el2)) hit = 1;
 		else if (w == EL_MAGIC && magic) hit = 1;
 		else if (w == EL_PHYS && !magic) hit = 1;
 		else if (w == EL_RANGE && ranged) hit = 1;
@@ -6829,11 +6977,13 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 				if (dm < floorv) dm = floorv;
 			}
 		}
-		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (UnitHasPas(d, PAS_EVADE2) ? 16 : 0);
+		int evade2 = PasScale(d, PAS_EVADE2, 16, 44);
+		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (evade2 > 0 ? evade2 : 0);
 		hit = 90 + UnitStat(a, S_DEX) + UnitStat(a, S_LUK) / 4 - evade + (sd ? 6 : 0);
 		if (a.blind > 0) hit -= 28;
+		int crit2 = PasScale(a, PAS_CRIT2, 18, 22);
 		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
-			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT2) ? 18 : 0);
+			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? 10 : 0) + (crit2 > 0 ? crit2 : 0);
 		crit = Clampi(crit, 0, sd ? 80 : 50);
 	}
 	dm *= HeightMod(b, a, d) * DirMod(a, d);
@@ -6908,7 +7058,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		dm *= AilmentBreak(d, el);
 		{
 			const GearDef* arm = GearOf(d.ch.reserved[7]);
-			if (arm && arm->kind == 1 && el != EL_NONE && arm->elem == el) dm *= 0.72f;
+			if (arm && arm->kind == 1 && el != EL_NONE && (arm->elem == el || arm->elem2 == el)) dm *= 0.72f;
 		}
 		if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE2)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE2))
 			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER2)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY2))
@@ -7851,7 +8001,8 @@ static int HealAmount(const Unit& a, const Unit& d, const SkillDef& sd, int skil
 	int hp = d.ch.stat[S_HP];
 	if (hp < 1) hp = 1;
 	int amt = pot + hp * pct / 100;
-	if (UnitHasPas(a, PAS_HEAL2)) amt = amt * 150 / 100;
+	int heal2 = PasScale(a, PAS_HEAL2, 50, 50);
+	if (heal2 >= 0) amt = amt * (100 + heal2) / 100;
 	else if (UnitHasPas(a, PAS_HEAL)) amt = amt * 125 / 100;
 	if (amt < 1) amt = 1;
 	return amt;
@@ -8424,10 +8575,10 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 
 static int PickPool(int pool, int stage, Rng& r)
 {
-	int ids[IMP_CAP];
+	int ids[POOL_CAP];
 	int n = 0;
 	int src = s_poolN[pool];
-	for (int i = 0; i < src && n < IMP_CAP; i++) {
+	for (int i = 0; i < src && n < POOL_CAP; i++) {
 		int id = s_poolI[pool][i];
 		const MonsterDef& d = MonsterInfo(id);
 		if (d.minStage > stage) continue;
@@ -8491,9 +8642,9 @@ static int StageMod(int stage, int mod)
 static int PickAnyFoe(Rng& r)
 {
 	EnsureMonsters();
-	int ids[IMP_CAP + M_COUNT];
+	int ids[POOL_CAP];
 	int n = 0;
-	int cap = IMP_CAP + M_COUNT;
+	int cap = POOL_CAP;
 	for (int i = 0; i < M_COUNT && n < cap; i++)
 		if (kMon[i].weight > 0) ids[n++] = i;
 	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
@@ -8501,6 +8652,10 @@ static int PickAnyFoe(Rng& r)
 		if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
 		if (s_monImp[i].weight <= 0) continue;
 		ids[n++] = M_COUNT + i;
+	}
+	for (int i = 0; i < kFoeExN && n < cap; i++) {
+		if (s_foeEx[i].weight <= 0) continue;
+		ids[n++] = M_COUNT + kImportN + i;
 	}
 	if (n <= 0) return M_SLIME;
 	return ids[r.Range(0, n - 1)];
@@ -8550,11 +8705,11 @@ static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 		cacheKey = key;
 		for (int s = 0; s < 6; s++) pn[s] = 0;
 		int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
-		int hiId = M_COUNT + nImp;
+		int hiId = M_COUNT + nImp + kFoeExN;
 		for (int pass = 0; pass < 2; pass++) {
 			int band = pass == 0 ? 48 : 0;
 			for (int id = 0; id < hiId; id++) {
-				if (id >= M_COUNT) {
+				if (id >= M_COUNT && id < M_COUNT + kImportN) {
 					int model = id - M_COUNT;
 					const wchar_t* nm = kImportName[model];
 					if (!nm || wcsncmp(nm, L"Sum", 3) == 0) continue;
@@ -8966,7 +9121,8 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		}
 		u.face = faceToE;
 		u.ct = r.Range(0, 420) + UnitStat(u, S_AGI) * 6;
-		if (UnitHasPas(u, PAS_OPEN2)) u.ct += 400;
+		int open2 = PasScale(u, PAS_OPEN2, 400, 800);
+		if (open2 > 0) u.ct += open2;
 		else if (UnitHasPas(u, PAS_OPEN)) u.ct += 250;
 		u.hpShow = (float)u.hp;
 		u.grp = -1;
@@ -9446,10 +9602,12 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	*healOut = 0; *poisonOut = 0;
 	if (burnOut) *burnOut = 0;
 	if (bleedOut) *bleedOut = 0;
-	int regenPct = 0;
-	if (UnitHasPas(u, PAS_REGEN2)) regenPct = 15;
-	else if (UnitHasSkill(u, SKL_P_REGEN)) regenPct = 10;
-	else if (UnitHasPas(u, PAS_REGEN)) regenPct = 8;
+	int regenPct = PasScale(u, PAS_REGEN2, 15, 13);
+	if (regenPct < 0) regenPct = 0;
+	if (!regenPct) {
+		if (UnitHasSkill(u, SKL_P_REGEN)) regenPct = 10;
+		else if (UnitHasPas(u, PAS_REGEN)) regenPct = 8;
+	}
 	if (regenPct && u.hp < u.ch.stat[S_HP]) {
 		int h = max(1, u.ch.stat[S_HP] * regenPct / 100);
 		int before = u.hp;
@@ -9465,7 +9623,8 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 			*healOut += u.hp - before;
 		}
 		int mpr = UnitStat(u, S_MPR);
-		if (UnitHasPas(u, PAS_MP2)) mpr += 8;
+		int mp2 = PasScale(u, PAS_MP2, 8, 112);
+		if (mp2 > 0) mpr += mp2;
 		else if (UnitHasPas(u, PAS_MP)) mpr += 4;
 		if (UnitHasPas(u, PAS_WAKE)) {
 			if (u.sleep > 0) u.sleep--;
@@ -10405,7 +10564,12 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 // ============================================================ 武具（生成表: tactics_src/gear_catalog.inc）
 #include "tactics_src/gear_catalog.inc"
 #include "tactics_src/gear_extra.inc"
+#include "tactics_src/gear_vault.inc"
+#include "tactics_src/gear_ex_nm.inc"
+static_assert(sizeof(kGearExNm) / sizeof(kGearExNm[0]) == GEAR_EX_N, "高額品の14言語");
+static_assert(sizeof(kGearVaultNm) / sizeof(kGearVaultNm[0]) == GEAR_VAULT_N, "店装備の14言語");
 static GearDef s_gearEx[GEAR_EX_N];
+static GearDef s_gearVault[GEAR_VAULT_N];
 static int s_gearExOk = 0;
 static void EnsureGearEx()
 {
@@ -10424,6 +10588,35 @@ static void EnsureGearEx()
 		d.stage = 40;
 		d.req = e.req;
 		d.elem = e.elem;
+		d.elem2 = e.elem2;
+		d.shop = 1;
+		d.joint0 = e.kind ? 3 : 0;
+		d.joint1 = e.kind ? 2 : 1;
+		if (e.kind) { d.mesh0 = 26; d.mesh1 = 38; }
+		else switch (e.line) {
+		case 0: d.mesh0 = 20; d.mesh1 = 17; break;
+		case 1: d.mesh0 = 1; d.mesh1 = 18; break;
+		case 2: d.mesh0 = 4; d.mesh1 = 47; break;
+		case 3: d.mesh0 = 9; d.mesh1 = 50; break;
+		case 4: d.mesh0 = -1; d.mesh1 = 32; d.att0 = "2H_Staff"; break;
+		default: d.mesh0 = 44; d.mesh1 = 33; break;
+		}
+	}
+	for (int i = 0; i < GEAR_VAULT_N; i++) {
+		const GearExSpec& e = kGearVault[i];
+		GearDef& d = s_gearVault[i];
+		memset(&d, 0, sizeof(d));
+		d.line = e.line;
+		d.kind = e.kind;
+		d.price = e.price;
+		d.str = e.str;
+		d.mag = e.mag;
+		d.def = e.def;
+		d.res = e.res;
+		d.stage = 80;
+		d.req = e.req;
+		d.elem = e.elem;
+		d.elem2 = e.elem2;
 		d.shop = 1;
 		d.joint0 = e.kind ? 3 : 0;
 		d.joint1 = e.kind ? 2 : 1;
@@ -10439,15 +10632,60 @@ static void EnsureGearEx()
 	}
 	s_gearExOk = 1;
 }
-int GearCount() { EnsureGearEx(); return kGearN + GEAR_EX_N; }
+#include "tactics_src/gear_bank.inc"
+static int MeshBank(const int* a, int n, int id, int slot)
+{
+	if (!a || n < 1) return -1;
+	unsigned h = (unsigned)id * 17u + (unsigned)slot * 13u + 1u;
+	return a[h % (unsigned)n];
+}
+int GearVisual(const GearDef* g, int id, int slot)
+{
+	if (!g || id < 1) return -1;
+	const int* a = NULL;
+	int n = 0;
+	if (g->kind == 1) {
+		if (slot == 0) { a = kMesh_armor; n = kMeshN_armor; }
+		else { a = kMesh_crown; n = kMeshN_crown; }
+	} else if (slot == 1) {
+		if (g->line == 4) { a = kMesh_book; n = kMeshN_book; }
+		else if (g->line == 2 || g->line == 3) { a = kMesh_dagger; n = kMeshN_dagger; }
+		else { a = kMesh_shield; n = kMeshN_shield; }
+	} else if (g->line == 1) {
+		a = (id % 5 == 0) ? kMesh_hammer : kMesh_axe;
+		n = (id % 5 == 0) ? kMeshN_hammer : kMeshN_axe;
+	} else if (g->line == 2) {
+		a = (id % 3 == 2) ? kMesh_gun : kMesh_bow;
+		n = (id % 3 == 2) ? kMeshN_gun : kMeshN_bow;
+	} else if (g->line == 3) {
+		a = (id % 4 == 3) ? kMesh_gun : kMesh_dagger;
+		n = (id % 4 == 3) ? kMeshN_gun : kMeshN_dagger;
+	} else if (g->line == 4) {
+		int k = id % 4;
+		if (k == 0) { a = kMesh_book; n = kMeshN_book; }
+		else if (k == 1) { a = kMesh_pole; n = kMeshN_pole; }
+		else { a = kMesh_sword; n = kMeshN_sword; }
+	} else if (g->line == 5) {
+		int k = id % 4;
+		if (k == 0) { a = kMesh_hammer; n = kMeshN_hammer; }
+		else if (k == 1) { a = kMesh_pole; n = kMeshN_pole; }
+		else { a = kMesh_sword; n = kMeshN_sword; }
+	} else {
+		a = kMesh_sword; n = kMeshN_sword;
+	}
+	return MeshBank(a, n, id, slot);
+}
+int GearCount() { EnsureGearEx(); return kGearN + GEAR_EX_N + GEAR_VAULT_N; }
 const GearDef* GearOf(int id)
 {
 	if (id < 1) return NULL;
 	if (id <= kGearN) return &kGear[id - 1];
 	EnsureGearEx();
 	int x = id - kGearN - 1;
-	if (x < 0 || x >= GEAR_EX_N) return NULL;
-	return &s_gearEx[x];
+	if (x < GEAR_EX_N) return &s_gearEx[x];
+	int v = x - GEAR_EX_N;
+	if (v >= 0 && v < GEAR_VAULT_N) return &s_gearVault[v];
+	return NULL;
 }
 const wchar_t* GearName(int id)
 {
@@ -10457,10 +10695,13 @@ const wchar_t* GearName(int id)
 		return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
 	}
 	int x = id - kGearN - 1;
-	if (x < 0 || x >= GEAR_EX_N) return L"?";
-	const wchar_t* ja = kGearExSpec[x].ja;
-	const wchar_t* en = kGearExSpec[x].en;
-	return LangPick14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en);
+	const wchar_t* const* s = NULL;
+	if (x >= 0 && x < GEAR_EX_N) s = kGearExNm[x];
+	else if (x >= GEAR_EX_N && x < GEAR_EX_N + GEAR_VAULT_N) s = kGearVaultNm[x - GEAR_EX_N];
+	else return L"?";
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	return (s[lang] && s[lang][0]) ? s[lang] : s[0];
 }
 const wchar_t* GearRole(const GearDef* g)
 {
@@ -10471,10 +10712,15 @@ const wchar_t* GearRole(const GearDef* g)
 	if (g->kind == 1) return TT(arm[g->line]);
 	return L"";
 }
+static const wchar_t* GoodVaultDs(int v);
 const wchar_t* GoodDesc(int i)
 {
 	const GoodDef* g = GoodAt(i);
 	if (!g) return L"";
+	if (g->extra >= 200) {
+		const wchar_t* owned = GoodVaultDs(g->extra - 200);
+		if (owned && owned[0]) return owned;
+	}
 	if (g->item == IT_ELIXIR) return TT(TX_ITD_ELIXIR);
 	if (g->item == IT_MIGHT) return TT(TX_ITD_MIGHT);
 	if (g->item == IT_DELAY) return TT(TX_ITD_DELAY);
@@ -10788,13 +11034,13 @@ bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name, int nameN)
 	int a = r.Range(0, n - 1);
 	int cashed = GoodGrant(s, a);
 	wchar_t buf[160];
-	wcscpy_s(buf, TT(GoodAt(a)->nameTx));
+	wcscpy_s(buf, GoodFace(a));
 	if (n > 1 && r.Chance(45)) {
 		int b = r.Range(0, n - 2);
 		if (b >= a) b++;
 		cashed += GoodGrant(s, b);
 		wcscat_s(buf, L"  ");
-		wcscat_s(buf, TT(GoodAt(b)->nameTx));
+		wcscat_s(buf, GoodFace(b));
 	}
 	if (cashed > 0) {
 		wchar_t g[32];
@@ -10838,8 +11084,47 @@ static const GoodDef kGood[] = {
 	{ 22000, -1, 118, TX_GD_BULWARK, 0 },
 	{ 20000, -1, 119, TX_GD_GALEPH, 0 },
 };
-int GoodCount() { return (int)(sizeof(kGood) / sizeof(kGood[0])); }
-const GoodDef* GoodAt(int i) { return (i >= 0 && i < GoodCount()) ? &kGood[i] : NULL; }
+static const GoodDef kGoodVault[] = {
+#include "tactics_src/good_vault.inc"
+};
+#include "tactics_src/good_vault_nm.inc"
+#include "tactics_src/good_vault_ds.inc"
+static_assert(sizeof(kGoodVaultDs) / sizeof(kGoodVaultDs[0]) == (size_t)kGoodVaultN, "good blurbs");
+static const wchar_t* GoodVaultDs(int v)
+{
+	if (v < 0 || v >= kGoodVaultN) return L"";
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	return kGoodVaultDs[v][lang];
+}
+int GoodCount()
+{
+	return (int)(sizeof(kGood) / sizeof(kGood[0])) + (int)(sizeof(kGoodVault) / sizeof(kGoodVault[0]));
+}
+const GoodDef* GoodAt(int i)
+{
+	int n0 = (int)(sizeof(kGood) / sizeof(kGood[0]));
+	if (i < 0) return NULL;
+	if (i < n0) return &kGood[i];
+	int v = i - n0;
+	if (v >= 0 && v < (int)(sizeof(kGoodVault) / sizeof(kGoodVault[0]))) return &kGoodVault[v];
+	return NULL;
+}
+const wchar_t* GoodFace(int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g) return L"";
+	if (g->extra >= 200) {
+		int v = g->extra - 200;
+		if (v >= 0 && v < kGoodVaultN) {
+			int lang = savedata.lang;
+			if (lang < 0 || lang > 13) lang = 1;
+			return kGoodVaultNm[v][lang];
+		}
+	}
+	if (g->nameTx > 0) return TT(g->nameTx);
+	return L"";
+}
 int GoodHave(const SaveData& s, int i)
 {
 	const GoodDef* g = GoodAt(i);
@@ -10852,7 +11137,7 @@ int GoodHoldMax(int i)
 {
 	const GoodDef* g = GoodAt(i);
 	if (!g) return TAC_HOLD_WIDE;
-	if (g->extra >= 100) return TAC_HOLD_BYTE;
+	if (g->extra >= 100) return TAC_HOLD_WIDE;
 	return TAC_HOLD_WIDE;
 }
 static int ExtraSell(int extra)
@@ -10889,7 +11174,7 @@ static const DWORD kSaveMagic = 0x31434154; // 'TAC1'
 // 敵部位と討伐数。セーブ本体の大きさは変えず、部位ファイルに積む。
 static const int kTrophyN = 40;
 static unsigned short g_trophy[40];
-enum { FOE_KILL_N = M_COUNT + 1024 };
+enum { FOE_KILL_N = 20000 };
 static unsigned short g_foeKill[FOE_KILL_N];
 static const DWORD kTrophyMagic = 0x54525054u;
 
@@ -11349,7 +11634,7 @@ static void TrophyLoad()
 	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kTrophyMagic && (ver == 1 || ver == 2)) {
 		if (fread(g_trophy, sizeof(g_trophy), 1, fp) == 1 && ver == 2) {
 			int n = 0;
-			if (fread(&n, 4, 1, fp) == 1 && n > 0 && n <= 4096) {
+			if (fread(&n, 4, 1, fp) == 1 && n > 0 && n <= 65536) {
 				int take = n < FOE_KILL_N ? n : FOE_KILL_N;
 				fread(g_foeKill, sizeof(unsigned short), (size_t)take, fp);
 			}
@@ -12523,6 +12808,112 @@ void UnitWeakText(const Unit& u, wchar_t* out, int cap)
 	wchar_t add[128];
 	swprintf_s(add, L"  %s %s", tag, extra);
 	if ((int)wcslen(out) + (int)wcslen(add) < cap) wcscat_s(out, cap, add);
+}
+
+static int PasScale(const Unit& u, int fx, int base, int span)
+{
+	int best = -1;
+	for (int k = 0; k < 2; k++) {
+		int id = u.pasEq[k];
+		if (id < 1 || id > kPasN) continue;
+		if (!PasRowHas(kPasRow[id - 1], fx)) continue;
+		int a = kPasRow[id - 1].amp;
+		if (a < 0) a = 0;
+		if (a > 100) a = 100;
+		int v = base + a * span / 100;
+		if (v > best) best = v;
+	}
+	return best;
+}
+
+static int FxRaises(int fx)
+{
+	switch (fx) {
+	case PAS_STR: case PAS_STR2: return S_STR;
+	case PAS_MAG: case PAS_MAG2: return S_MAG;
+	case PAS_DEF: case PAS_DEF2: return S_DEF;
+	case PAS_RES: case PAS_RES2: return S_RES;
+	case PAS_AGI: return S_AGI;
+	case PAS_LUK: return S_LUK;
+	case PAS_HIT: return S_HIT;
+	case PAS_AVO: case PAS_EVADE: case PAS_EVADE2: return S_AVO;
+	case PAS_PEN: return S_PEN;
+	case PAS_MOV: case PAS_MOV2: return S_MOV;
+	case PAS_JMP: case PAS_JMP2: return S_JMP;
+	case PAS_RNG: case PAS_RNG2: return S_RNG;
+	case PAS_REGEN: case PAS_REGEN2: case PAS_HEAL: case PAS_HEAL2: case PAS_RCV: return S_HP;
+	case PAS_MP: case PAS_MP2: return S_MP;
+	case PAS_CRIT: case PAS_CRIT2: return S_CRT;
+	case PAS_CPL: case PAS_CP: case PAS_CP2: return S_CPL;
+	default: return -1;
+	}
+}
+
+static void MarkGood(const GoodDef* g, int on[S_COUNT])
+{
+	if (!g) return;
+	if (g->item == IT_ELIXIR || g->item == IT_RAISE) on[S_HP] = 1;
+	if (g->item == IT_MIGHT) { on[S_STR] = on[S_MAG] = on[S_DEF] = on[S_RES] = on[S_AGI] = 1; }
+	int x = g->extra;
+	if (x == IX_FULL || x == 105 || x == 114) { on[S_HP] = on[S_MP] = 1; }
+	if (x == IX_ATK || x == 115) { on[S_STR] = on[S_MAG] = 1; }
+	if (x == IX_DEF || x == 110) on[S_DEF] = 1;
+	if (x == IX_AGI || x == 111) on[S_AGI] = 1;
+	if (x == IX_ETHER || x == 104) on[S_MP] = 1;
+	if (x == IX_CURE || x == 100 || x == 103 || x == 109 || x == 112 || x == 106 || x == 116) on[S_HP] = 1;
+	if (x == 115) on[S_DEF] = on[S_AGI] = 1;
+	if (x == 118) { on[S_HP] = on[S_DEF] = 1; }
+	if (x == 119) { on[S_MP] = on[S_AGI] = 1; }
+	if (x >= 200) {
+		switch ((x - 200) % 8) {
+		case 0: on[S_HP] = on[S_MP] = 1; break;
+		case 1: on[S_STR] = on[S_MAG] = on[S_DEF] = on[S_AGI] = 1; break;
+		case 2: on[S_HP] = 1; break;
+		case 4: on[S_HP] = on[S_DEF] = 1; break;
+		case 5: on[S_AGI] = 1; break;
+		case 6: on[S_HP] = on[S_MP] = 1; break;
+		default: break;
+		}
+	}
+}
+
+bool CatalogRaises(int kind, int id, int stat)
+{
+	if (stat < 0 || stat >= S_COUNT) return false;
+	if (kind == 0 || kind == 1) {
+		const GearDef* g = GearOf(id + 1);
+		if (!g) return false;
+		if (stat == S_STR) return g->str > 0;
+		if (stat == S_MAG) return g->mag > 0;
+		if (stat == S_DEF) return g->def > 0;
+		if (stat == S_RES) return g->res > 0;
+		return false;
+	}
+	if (kind == 4) return AccStat(id + 1, stat) > 0;
+	if (kind == 6) {
+		if (id < 0 || id >= kPasN) return false;
+		const PasRow& row = kPasRow[id];
+		int f[5] = { row.fx, row.more[0], row.more[1], row.more[2], row.more[3] };
+		for (int i = 0; i < 5; i++) if (FxRaises(f[i]) == stat) return true;
+		return false;
+	}
+	if (kind == 2) {
+		const GoodDef* g = GoodAt(id);
+		int on[S_COUNT];
+		memset(on, 0, sizeof(on));
+		MarkGood(g, on);
+		return on[stat] != 0;
+	}
+	if (kind == 5) {
+		if (id < 0 || id >= CRAFT_N) return false;
+		const SkillDef& sd = SkillInfo(CRAFT_BASE + id);
+		if (sd.kind == SK_HEAL) return stat == S_HP;
+		if (sd.effect == EF_BUFF_ATK) return stat == S_STR || stat == S_MAG;
+		if (sd.effect == EF_BUFF_DEF) return stat == S_DEF;
+		if (sd.effect == EF_BUFF_AGI) return stat == S_AGI;
+		return false;
+	}
+	return false;
 }
 
 } // namespace otac

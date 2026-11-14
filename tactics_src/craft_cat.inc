@@ -315,6 +315,7 @@ static const CraftRow kCraftRow[] = {
 	{ SK_PHYS, 230, 1, 1, 8, EL_HOLY, 1, 12, EF_NONE, 190, { L"聖断線", L"Holy Severing Line", L"Ligne de rupture sainte", L"Linea di rottura sacra", L"Línea de corte santa", L"성단선", L"圣断线", L"خط القطع المقدس", L"Святая линия разрыва", L"Heilige Bruchlinie", L"Linha de corte santa", L"Heilige breeklijn", L"Święta linia przecięcia", L"Kutsal kesme çizgisi" }, SH_LINE },
 	{ SK_MAGIC, 36, 0, 0, 10, EL_DARK, 1, 0, EF_CONFUSE, 200, { L"烈闇散", L"Dark Spray Raging", L"Ombre Volée Déchaîné", L"Oscuro Spruzzo Furente", L"Oscuro Rociada Furioso", L"암흑 분사 작열", L"烈暗喷射", L"رش ظلام هائج", L"Тёмный Россыпь Яростный", L"Dunkel Sprüh Rasend", L"Trevas Borrifo Furioso", L"Duister Sproei Razend", L"Mroku Rozprysk Szalony", L"Karanlık Saçılım Çılgın" }, SH_FAN },
 #include "tactics_src/craft_extra.inc"
+#include "tactics_src/craft_vault.inc"
 };
 static_assert(sizeof(kCraftRow) / sizeof(kCraftRow[0]) == CRAFT_N, "戦技表は CRAFT_N 行");
 
@@ -369,6 +370,7 @@ static const AccRow kAccRow[] = {
 	{ 4500, { { S_DEF, 6 }, { S_RES, 6 }, { S_GRD, 4 } }, { L"堅守霊符", L"Sturdy Talisman", L"Robuste talisman", L"Robusto talismano", L"Robusto talismán", L"견고 영부", L"坚守灵符", L"طلسم صلب", L"Крепкий талисман", L"Robust Talisman", L"Robusto talismã", L"Stevig talisman", L"Twardy talizman", L"Sağlam muska" } },
 #include "tactics_src/acc_extra.inc"
 #include "tactics_src/acc_high.inc"
+#include "tactics_src/acc_vault.inc"
 };
 static const int kAccN = (int)(sizeof(kAccRow) / sizeof(kAccRow[0]));
-static_assert(sizeof(kAccRow) / sizeof(kAccRow[0]) <= 1024, "CraftStore.accN は 1024 枠");
+static_assert(sizeof(kAccRow) / sizeof(kAccRow[0]) <= 4096, "装飾は 4096 まで");

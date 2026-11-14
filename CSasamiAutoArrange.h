@@ -138,6 +138,7 @@ struct ScAutoArrangeOpt {
 	uint8_t partRole[32]; /* 対象 ch ごとの役割 ScPartRole（AUTO=自動判定） */
 	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16、音程は C4 として扱う） */
 	int loopBars;         /* 同じ形に戻るまでの小節。0=スタイル（16〜64） */
+	int form;             /* 0=伴奏（メロディなし） … 100=BGM（メロディ入り） */
 	int* docTempoT;       /* 非NULLならスタイル BPM を譜面の tempoT へ */
 	int gsMap;            /* 0自動 1=55 2=88 3=88Pro 4=8820/8850 5=XG */
 };
