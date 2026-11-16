@@ -14,6 +14,19 @@ cbuffer Frame : register(b0)
 	float4 SkyAmb;
 	float4 GndAmb;
 	float4 Q; // x=段 y=係数 z=変位 w=被写界
+	float4 Sight;
+	float4 Ally[16];
+	float4 CamNear;
+	float4 CamFwd;
+	float4 Wx;
+	row_major float4x4 ReflectVP;
+	float4 ReflectInfo;
+	row_major float4x4 InvVP;
+	float4 Hole0;
+	float4 Hole1;
+	float4 Hole2;
+	float4 FxNow;
+	float4 FxMore;
 };
 cbuffer Obj : register(b1)
 {
@@ -25,8 +38,8 @@ cbuffer Obj : register(b1)
 };
 
 struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv : TEXCOORD0; float4 c : COLOR0; };
-struct TC { float3 w : POSITION; float3 n : NORMAL; float2 uv : TEXCOORD0; float4 c : COLOR0; };
-struct PSIn { float4 pos : SV_POSITION; float3 w : TEXCOORD0; float3 n : TEXCOORD1; float2 uv : TEXCOORD2; float4 c : TEXCOORD3; };
+struct TC { float3 w : POSITION; float3 n : NORMAL; float2 uv : TEXCOORD0; float4 c : COLOR0; float2 mapxz : TEXCOORD1; };
+struct PSIn { float4 pos : SV_POSITION; float3 w : TEXCOORD0; float3 n : TEXCOORD1; float2 uv : TEXCOORD2; float4 c : TEXCOORD3; float2 mapxz : TEXCOORD4; };
 struct TF { float e[3] : SV_TessFactor; float i : SV_InsideTessFactor; };
 
 float hash21(float2 p) { return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453); }
@@ -124,7 +137,7 @@ TC VST(VSIn v)
 			w.y -= 0.04 * sin(Eye.w * 0.4 + w.x);
 		}
 	}
-	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c;
+	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c; o.mapxz = v.p.xz;
 	return o;
 }
 
@@ -241,6 +254,7 @@ PSIn DST(TF factors, float3 b : SV_DomainLocation, const OutputPatch<TC, 3> p)
 	o.n = n;
 	o.uv = p[0].uv * b.x + p[1].uv * b.y + p[2].uv * b.z;
 	o.c = p[0].c * b.x + p[1].c * b.y + p[2].c * b.z;
+	o.mapxz = p[0].mapxz * b.x + p[1].mapxz * b.y + p[2].mapxz * b.z;
 	o.pos = mul(float4(w, 1), VP);
 	return o;
 }

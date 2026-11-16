@@ -237,9 +237,10 @@ struct Particle {
 	int shape;
 	int add;
 	float grav;
-	float stretch;      // 速度方向に伸ばす
+	float stretch;      // 速度方向に伸ばす。羽根は回転速度
+	float spin;         // 羽根のひねり
 	float drag;
-	int wxHit;          // 0=床と判定しない。1雨 2豪雨 3雪 4灰 5雹 6砂 7花
+	int wxHit;          // 0=床と判定しない。1雨 2豪雨 3雪 4灰 5雹 6砂 7花 9羽根
 	int nHit;
 };
 
@@ -339,7 +340,7 @@ public:
 		}
 	};
 	Fix<CreatureSkin, 160> m_skins;
-	enum { TAC_SKIN_OUT = 96, TAC_HAIR_OUT = 40 };
+	enum { TAC_SKIN_OUT = 128, TAC_HAIR_OUT = 72 };
 	struct SkinOut {
 		const void* owner;
 		CreatureSkin* src;
@@ -380,7 +381,7 @@ public:
 	// 衣装の布を押し出す脚の形。太もも・すね・足の左右 6 本。骨に沿って CLOTH_PT 段・まわり CLOTH_PF 分割の半径。
 	// スカートは腰を囲む格子（周 CLOTH_SECT × 縦およそ 5cm）。点は CLOTH_NODES まで（シェーダの NMAX）。
 	// 胸と袖は別の SOFT_MAX 点。髪の案内は髪型ごとに HAIR_G 点。
-	enum { CLOTH_SEGS = 6, CLOTH_PT = 10, CLOTH_PF = 16, CLOTH_INST = 48, CLOTH_SECT = 32, CLOTH_NODES = 512, SOFT_MAX = 96, HAIR_A = 24, HAIR_L = 8, HAIR_G = 192, HAIR_INST = 48 };
+	enum { CLOTH_SEGS = 6, CLOTH_PT = 10, CLOTH_PF = 16, CLOTH_INST = 80, CLOTH_SECT = 32, CLOTH_NODES = 512, SOFT_MAX = 96, HAIR_A = 24, HAIR_L = 8, HAIR_G = 192, HAIR_INST = 80 };
 	// cup は胸の大きさ（0=A〜7=H）。形は作るときに焼き、jig は焼いた差分（胸の揺れの重み）。
 	struct AvaCache {
 		int model, cos, cup; CreatureSkin skin; Buf<float> jig; GpuMesh gm;
@@ -499,6 +500,18 @@ public:
 	void SetSight(const float* xz, int n, float radius);
 	void SetTheme(int theme) { m_theme = theme; }
 	void SetSky(int wx, int hour) { m_wx = wx; m_hour = hour; }
+	void SetScreenFx(float crit, float fairy, float lightning, float quake, float wet, BOOL cutScene, BOOL hasMarks)
+	{
+		m_fcb.fxNow[0] = crit;
+		m_fcb.fxNow[1] = fairy;
+		m_fcb.fxNow[2] = lightning;
+		m_fcb.fxNow[3] = hasMarks ? 1.f : 0.f;
+		m_fcb.fxMore[0] = wet;
+		m_fcb.fxMore[1] = quake;
+		m_fcb.fxMore[2] = cutScene ? 1.f : 0.f;
+		m_fcb.fxMore[3] = m_inPortrait ? 1.f : 0.f;
+	}
+	void UploadGroundMarks(const BYTE* rgba256);
 	void SetAmbient(DWORD sky, DWORD ground, float strength, float hard);
 	void BeginShadowPass();
 	void BeginMainPass();
@@ -561,6 +574,8 @@ public:
 
 	// 地形
 	BOOL BuildTerrain(Map& m);
+	float SolidTop(float x, float z) const;
+	BOOL SolidBumpy(int x, int z, float floorY) const;
 	void BuildMinimap(const Map& m);
 	// 拠点の地形を戦闘の地形と別に残す。段・気候・種が同じなら、帰るときに作り直さない。
 	void ParkHomeLand(int stage, int theme, DWORD seed);
@@ -675,17 +690,20 @@ private:
 		DWORD frame; float time; M4 world; int valid;
 		float limbPrev[CLOTH_SEGS][3];
 		float handPrev[2][3];
+		float clothHandPrev[2][3];
 		float vel[3];
 		int limbOk;
+		int clothHandOk;
 		int slot;
 		float prevFly, prevGait;
 		// そよ風・強風・暴風・上風・下風は足す前に別々に覚える。ゲートが落ちても数十フレーム残す。
 		struct Chan { float d[3]; float amp; float env; int hold; };
 		Chan breeze, strong, gale, up, down;
-		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0), slot(-1), prevFly(-1.f), prevGait(-1.f) {
+		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0), clothHandOk(0), slot(-1), prevFly(-1.f), prevGait(-1.f) {
 			world = MIdent();
 			memset(limbPrev, 0, sizeof(limbPrev));
 			memset(handPrev, 0, sizeof(handPrev));
+			memset(clothHandPrev, 0, sizeof(clothHandPrev));
 			vel[0] = vel[1] = vel[2] = 0.f;
 			memset(&breeze, 0, sizeof(breeze));
 			memset(&strong, 0, sizeof(strong));
@@ -837,6 +855,8 @@ private:
 	ID3D11ShaderResourceView* m_skinArrSrv;
 	ID3D11Texture2D* m_gndX;
 	ID3D11ShaderResourceView* m_gndXSrv;
+	ID3D11Texture2D* m_marksTex;
+	ID3D11ShaderResourceView* m_marksSrv;
 	ID3D11ComputeShader* m_csSkin;
 	ID3D11ComputeShader* m_csCloth[3];   // 格子を進める・辺を保って押し出す・頂点へ書く
 	ID3D11ComputeShader* m_csSoft[2];    // 胸と袖を進める・頂点へ書く
@@ -1024,6 +1044,8 @@ private:
 		float hole0[4]; // xyz=キャラ世界座標 w=半径（0でオフ）
 		float hole1[4]; // xyz=カーソル世界座標 w=1なら有効
 		float hole2[4]; // x=不透明帯の下端 y=他レイヤー透かし z=ゴーストパス w=周辺半径
+		float fxNow[4]; // x=クリティカル画面 y=妖精画面 z=稲妻光 w=地面跡有効
+		float fxMore[4]; // x=地面濡れ y=地震 z=カット中 w=ポートレート
 	} m_fcb;
 	M4 m_lightVP;
 	M4 m_refSavedInv;

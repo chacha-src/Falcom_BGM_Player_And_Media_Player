@@ -192,6 +192,8 @@ private:
 	void ProbeSuspend();
 	void QueueSuspend(int kind);
 	void ResumeBattle(int kind);
+	void SnapUiStore(int* ex) const;
+	void SnapUiLoad(const int* ex);
 	void DropSuspend(int kind);
 	void WaitSuspend();
 	void ShutdownSnap();
@@ -234,7 +236,9 @@ private:
 	void DrawCreate3D();
 	void RefreshPreview();
 	void PlayShown(Actor& a, int& mot, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart);
-	int DrawMotRow(int id0, float cx, float y, float avail, int mot, BOOL alt);
+	void QueuePreviewRise(int mot);
+	void AdvancePreviewMot();
+	int DrawMotRow(int id0, float cx, float y, float avail, int mot, BOOL alt, BOOL allowFall = FALSE, BOOL allowRise = FALSE, BOOL riseEn = TRUE, float* tipRect = NULL, int* tipMot = NULL);
 	int CreateClassList(int* out) const;
 
 	// 編成
@@ -369,8 +373,16 @@ private:
 
 	// 演出
 	void Burst(V3 p, int n, float spd, float size, float life, float r, float g, float b, int shape, int add, float grav, float stretch = 0, float upBias = 0, float size1 = -1);
+	void ShedFeathers(const Actor& a, V3 origin, float face, BOOL hard);
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
+	void SpawnDebris(V3 p, V3 vel, int kind, int n, float sc, DWORD tint);
+	void UpdateDebris(float dt);
+	void DrawDebris(const M4* mapXform = NULL);
+	void ResetGroundMarks(BOOL home);
+	void StampGroundDrag(float x0, float z0, float x1, float z1, float width, float strength, int kind, BOOL home = FALSE);
+	void StampGroundRing(float cx, float cz, float rad, float strength, int kind, BOOL home = FALSE);
+	void SyncGroundMarks(BOOL home, float dt);
 	void UpdateParticles(float dt);
 	void UpdateWeatherEvents(float dt);
 	void TickGust(float dt);
@@ -514,14 +526,24 @@ private:
 	// 強風・雨で折れて飛ぶ地形物。セーブしない。水面には生えない。
 	struct GustBit {
 		int on, phase, kind, prop, plant, hit, leave, noLand, bounces, hx, hz;
-		float rest, sc, x, y, z, vx, vy, vz, yaw, spin, t, prevY;
+		float rest, sc, x, y, z, vx, vy, vz, yaw, spin, t, prevY, chip;
 	};
-	enum { GUST_N = 6, GUST_HIDE = 4 };
+	struct DebrisBit {
+		int on, kind, bounces;
+		float x, y, z, vx, vy, vz, rx, ry, rz, srx, sry, srz, sc, life, maxLife;
+		DWORD tint;
+	};
+	enum { GUST_N = 6, GUST_HIDE = 4, DEBRIS_N = 96 };
 	GustBit m_gust[GUST_N];
+	DebrisBit m_debris[DEBRIS_N];
 	int m_gustHx[GUST_HIDE], m_gustHz[GUST_HIDE], m_gustHN;
 	float m_gustCool;
 	float m_wxFlash;       // 稲妻フラッシュの強さ 0..1
 	float m_wxFlashCol[3]; // フラッシュの色（寒色の白）
+	float m_wetGlobal;
+	float m_hurtT[MAX_UNITS];
+	float m_showHurtT[MAX_PARTY];
+	float m_lungeY[MAX_UNITS];
 	unsigned char m_cover[MAPN * MAPN];
 	V3 m_eye;
 
@@ -620,7 +642,9 @@ private:
 	int m_lineage;
 	BOOL m_previewDrag;
 	BOOL m_previewPanDrag;
-	int m_previewMot;  // 0待機 1歩き 2走り 3構え 4攻撃 5別技
+	int m_previewMot;     // 0待機 1歩き 2走り 3構え 4攻撃 5別技 6倒れる 7起きる
+	int m_previewHold;    // 倒れる前のモーション。起きるとここへ戻る
+	int m_previewRiseTo;  // 0以上なら起き上がりのあとでこのモーションへつなぐ。-1はなし
 	BOOL m_previewWing;   // 見本だけ。0で翼を描かない
 	BOOL m_previewGround; // 見本だけ。1で翼のない地上の動き
 	BOOL m_previewNight;  // 見本だけ。1で夜の空と光
@@ -744,8 +768,16 @@ private:
 	Actor m_sumAct;
 	V3 m_cutAllyPos[CUT_ALLY_MAX];
 	V3 m_cutFoePos[CUT_FOE_MAX];
+	unsigned char m_cutAllyPlinth[CUT_ALLY_MAX];
+	unsigned char m_cutFoePlinth[CUT_FOE_MAX];
 	V3 m_cutPosA, m_cutPosD;
+	V3 m_cutAnchor;
+	float m_cutYaw;
 	float m_flashWhite;
+	float m_critScreenT, m_critScreenMax;
+	float m_fairyScreenT, m_fairyScreenMax;
+	float m_fairyFxT;
+	V3 m_fairyPosA, m_fairyPosD;
 	Fix<Popup, 64> m_deferPopups;
 	int m_expGain[MAX_UNITS];
 	LevelUpInfo m_lvq[MAX_PARTY * 4];

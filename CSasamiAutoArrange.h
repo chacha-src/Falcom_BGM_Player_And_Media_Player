@@ -139,6 +139,7 @@ struct ScAutoArrangeOpt {
 	int genBars;          /* 本体の小節数。0=既存の長さ（無音時は16、音程は C4 として扱う） */
 	int loopBars;         /* 同じ形に戻るまでの小節。0=スタイル（16〜64） */
 	int loopTimes;        /* そのループを何回入れるか。1〜20。24小節×3回=72小節 */
+	int melBars;          /* メロディの長さ（16〜256小節。0=本体/ループに合わせる） */
 	int form;             /* 0=伴奏（メロディなし） … 100=BGM（メロディ入り） */
 	int* docTempoT;       /* 非NULLならスタイル BPM を譜面の tempoT へ */
 	int gsMap;            /* 0自動 1=55 2=88 3=88Pro 4=8820/8850 5=XG */
@@ -149,7 +150,8 @@ struct ScAutoArrangeResult {
 	int added;
 	int removed;      /* 書き換えで消した既存ノート数 */
 	int chDrum, chBass, chChord, chHarm;
-	uint32_t usedMask; /* 実際に書き込んだ ch */
+	uint32_t usedMask; /* 実際に鳴った通常 ch */
+	uint32_t usedDrum; /* 実際に鳴ったドラム ch */
 	wchar_t msg[256];
 };
 

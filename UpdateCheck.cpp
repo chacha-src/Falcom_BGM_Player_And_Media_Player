@@ -49,6 +49,9 @@ static const TCHAR* kTacOggNames[] = {
 	_T("tacticsgamestation.ogg"),
 	_T("tacticsgamecitadel.ogg"),
 	_T("tacticsgamelantern.ogg"),
+	_T("tacticsgamemirror.ogg"),
+	_T("tacticsgameheaven.ogg"),
+	_T("tacticsgamemarchen.ogg"),
 	_T("tacticsgamedanger.ogg"),
 	_T("tacticsgameclear.ogg"),
 };
@@ -1183,8 +1186,6 @@ static bool WriteTacOggBytes(const CString& dir, const wchar_t* fileOnly, const 
 	return ok;
 }
 
-// 書庫に無かった曲は、後段で https://ppp.oohara.jp/download/ の単体ファイルを足す。
-static void FillMissingTacOggs(const CString& destDir);
 static time_t FileWriteTimeUtc(const CString& path);
 static void SetFileWriteTimeUtc(const CString& path, time_t t);
 
@@ -1391,7 +1392,6 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, destDir);
-	FillMissingTacOggs(destDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), destDir);
@@ -2037,7 +2037,6 @@ bool DoUpdateAndRestart()
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, extractDir);
-	FillMissingTacOggs(extractDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), extractDir);
@@ -2173,7 +2172,7 @@ bool DoUpdateAndRestart()
 	}
 
 	// 宛先を「フォルダ\」にすると \" が引用を壊し、フォルダ新設時に曲がコピーされない。
-	// 曲ごとにファイル名まで指定する。書庫にあれば展開済み、無ければ単体取得済み。
+	// 曲ごとにファイル名まで指定する。書庫に入っている分だけ後でコピーする。単体の取得はしない。
 	CStringA tacCopyA;
 	tacCopyA.Format(
 		"if not exist \"%s\\tacticsbgm\" mkdir \"%s\\tacticsbgm\" >nul 2>&1\r\n",
@@ -2381,38 +2380,6 @@ static void SetFileWriteTimeUtc(const CString& path, time_t t)
 	ft.dwHighDateTime = ull.HighPart;
 	SetFileTime(h, &ft, &ft, &ft);
 	CloseHandle(h);
-}
-
-// 書庫側に曲が無い（旧 zip/7z）とき、download/ の単体ファイルで埋める。ある曲は書庫のまま。
-static void FillMissingTacOggs(const CString& destDir)
-{
-	if (destDir.IsEmpty()) return;
-	CString bgm = destDir;
-	if (bgm.Right(1) != _T("\\"))
-		bgm += _T("\\");
-	bgm += _T("tacticsbgm");
-	CreateDirectory(bgm, NULL);
-	TCHAR tempPath[MAX_PATH] = { 0 };
-	GetTempPath(MAX_PATH, tempPath);
-	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i) {
-		const CString dest = bgm + _T("\\") + kTacOggNames[i];
-		if (FileStartsWithOggS(dest))
-			continue;
-		const CString url = CString(TACTICS_OGG_URL_BASE) + kTacOggNames[i];
-		CString tmp;
-		tmp.Format(_T("%stacbgm_fill_%d.ogg"), tempPath, i);
-		if (!HttpDownloadToFile(url, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
-			DeleteFile(tmp);
-			continue;
-		}
-		SetFileWriteTimeUtc(tmp, HttpGetLastModified(url));
-		SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
-		DeleteFile(dest);
-		if (!MoveFile(tmp, dest)) {
-			if (CopyFile(tmp, dest, FALSE))
-				DeleteFile(tmp);
-		}
-	}
 }
 
 static void EnsureTacticsBgmFolder()
@@ -3032,7 +2999,7 @@ bool EnsureBonusImages(int kind)
 	const __int64 saved = BonusReadUtc(utcPath);
 	static bool s_bonusChecked[3] = { false, false, false };
 	if (have && saved > 0 && s_bonusChecked[kind]) {
-		if (kind == 2) EnsureTacticsOggAvailable(false);
+		if (kind == 2) EnsureTacticsOggAvailable(true);
 		return true;
 	}
 	const __int64 remote = (__int64)HttpGetLastModified(url);
@@ -3059,7 +3026,7 @@ bool EnsureBonusImages(int kind)
 	}
 	if (have && saved > 0 && remote <= saved) {
 		s_bonusChecked[kind] = true;
-		if (kind == 2) EnsureTacticsOggAvailable(false);
+		if (kind == 2) EnsureTacticsOggAvailable(true);
 		return true;
 	}
 	CString tmp = root + _T("\\_fetch.7z");

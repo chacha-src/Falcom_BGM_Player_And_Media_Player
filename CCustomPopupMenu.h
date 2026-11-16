@@ -150,6 +150,7 @@ struct CCustomPopupItem {
 	BOOL enabled;
 	BOOL checked;             // CHECK のレ点。描画方法／MIDI優先の排他にも使う
 	BOOL hasTip;
+	BOOL bold;                // この行だけ太字で描く
 	int sliderMin;            // Slider / Range / Progress 共用
 	int sliderMax;
 	int sliderPos;
@@ -195,6 +196,7 @@ public:
 	// --- 基本項目 ---
 	BOOL AddCommand(UINT id, LPCTSTR text, LPCTSTR tip = NULL, BOOL enabled = TRUE);
 	BOOL AddCheck(UINT id, LPCTSTR text, BOOL checked, LPCTSTR tip = NULL, BOOL enabled = TRUE);
+	void SetLastItemBold(BOOL bold = TRUE);
 	BOOL AddSeparator();
 	CCustomPopupMenu* AddSubMenu(LPCTSTR text, LPCTSTR tip = NULL);
 

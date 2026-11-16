@@ -14,3 +14,7 @@ int SasamiToneBankUsed(int isXg, int mapId, int bankMsb, int bankLsb, int isDrum
 
 /* Score / composer: bank from @BANK or paired @n:m; prefers GS then XG then GM English. */
 void SasamiToneLookupAuto(int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
+
+/* Score chips: variation first (LSB 1..4 = 55/88/88Pro/8850, bank = MSB).
+   Does not replace a real variation with the capital / XG name. */
+void SasamiToneLookupVariation(int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);

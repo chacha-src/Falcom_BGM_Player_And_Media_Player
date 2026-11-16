@@ -594,6 +594,7 @@ int ScStaffMapHorzScrollDrag(const ScStaffUi* u, int pageW, const CRect& client,
 /* Multi-select / clipboard helpers */
 void ScStaffSelClear(ScStaffUi* u);
 void ScStaffSelAdd(ScStaffUi* u, int evIdx);
+void ScStaffSelRemove(ScStaffUi* u, int evIdx);
 int ScStaffSelHas(const ScStaffUi* u, int evIdx);
 void ScStaffSelSetPrimary(ScStaffUi* u, int evIdx);
 int ScStaffSelCopy(const ScEvent* ev, int evCount, const ScStaffUi* u, ScEvent* out, int outMax, uint32_t* outBaseTick);

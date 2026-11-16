@@ -13,6 +13,20 @@
 #include "CMediaPlayerDlg.h"
 #include "oggDlg.h"
 #include <math.h>
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
+
+static ULONG_PTR s_scStaffGdipToken = 0;
+static void ScStaffEnsureGdip(void)
+{
+	if (s_scStaffGdipToken) return;
+	Gdiplus::GdiplusStartupInput in;
+	Gdiplus::GdiplusStartup(&s_scStaffGdipToken, &in, NULL);
+}
+static inline Gdiplus::Color ScGdipCol(COLORREF c, BYTE a = 255)
+{
+	return Gdiplus::Color(a, GetRValue(c), GetGValue(c), GetBValue(c));
+}
 
 extern CPlayList* pl;
 extern COggDlg* og;
@@ -3101,16 +3115,31 @@ static void ScStaffBezierSample(POINT p0, POINT p1, POINT p2, POINT p3, POINT* p
  */
 static void ScStaffDrawOvalHead(CDC& dc, int x, int y, int hollow, COLORREF col, int dotted)
 {
-	const int x0 = x, y0 = y - 4, x1 = x + 13, y1 = y + 5;
-	CPen pen(PS_SOLID, hollow ? 2 : 1, col);
-	CBrush br(hollow ? RGB(248, 248, 252) : col);
-	CPen* op = dc.SelectObject(&pen);
-	CBrush* ob = dc.SelectObject(&br);
-	dc.Ellipse(x0, y0, x1, y1);
-	dc.SelectObject(ob);
-	dc.SelectObject(op);
+	ScStaffEnsureGdip();
+	Gdiplus::Graphics g(dc.GetSafeHdc());
+	g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+	const Gdiplus::REAL cx = (Gdiplus::REAL)(x + 6.0);
+	const Gdiplus::REAL cy = (Gdiplus::REAL)y;
+	Gdiplus::SolidBrush br(ScGdipCol(col));
+	Gdiplus::GraphicsState st = g.Save();
+	g.TranslateTransform(cx, cy);
+	g.RotateTransform(-24.0f);
+	if (!hollow) {
+		g.FillEllipse(&br, -6.4f, -4.3f, 12.8f, 8.6f);
+	} else {
+		Gdiplus::GraphicsPath path(Gdiplus::FillModeAlternate);
+		path.AddEllipse(-6.8f, -4.5f, 13.6f, 9.0f);
+		Gdiplus::Matrix innerM;
+		innerM.Rotate(-14.0f);
+		Gdiplus::GraphicsPath inner;
+		inner.AddEllipse(-4.2f, -2.5f, 8.4f, 5.0f);
+		inner.Transform(&innerM);
+		path.AddPath(&inner, FALSE);
+		g.FillPath(&br, &path);
+	}
+	g.Restore(st);
 	if (dotted)
-		dc.FillSolidRect(x + 15, y - 1, 3, 3, col);
+		g.FillEllipse(&br, (Gdiplus::REAL)(x + 15.5f), (Gdiplus::REAL)(y - 2.2f), 4.2f, 4.2f);
 }
 
 /* GM percussion noteheads when the part is a known drum channel (GS/XG/GM
@@ -3186,38 +3215,26 @@ static void ScStaffDrawHeadKind(CDC& dc, int x, int y, int kind, int hollow, COL
 static void ScStaffDrawCurvedFlag(CDC& dc, int stemX, int tipY, int stemUp, int flags, COLORREF col)
 {
 	if (flags <= 0) return;
-	CBrush br(col);
-	CPen pen(PS_SOLID, 1, col);
-	CBrush* ob = dc.SelectObject(&br);
-	CPen* op = dc.SelectObject(&pen);
+	ScStaffEnsureGdip();
+	Gdiplus::Graphics g(dc.GetSafeHdc());
+	g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+	Gdiplus::SolidBrush br(ScGdipCol(col));
 	for (int f = 0; f < flags && f < 4; f++) {
-		const int fy = stemUp ? (tipY + 2 + f * 6) : (tipY - 2 - f * 6);
-		POINT c0, c1, c2, c3;
-		if (stemUp) {
-			c0 = { stemX + 1, fy };
-			c1 = { stemX + 8, fy + 2 };
-			c2 = { stemX + 13, fy + 9 };
-			c3 = { stemX + 4, fy + 16 };
-		} else {
-			c0 = { stemX + 1, fy };
-			c1 = { stemX + 8, fy - 2 };
-			c2 = { stemX + 13, fy - 9 };
-			c3 = { stemX + 4, fy - 16 };
-		}
-		POINT spine[9];
-		ScStaffBezierSample(c0, c1, c2, c3, spine, 8);
-		POINT poly[20];
-		int n = 0;
-		for (int i = 0; i <= 8; i++) poly[n++] = spine[i];
-		for (int i = 8; i >= 0; i--) {
-			poly[n].x = spine[i].x;
-			poly[n].y = spine[i].y + (stemUp ? 3 : -3);
-			n++;
-		}
-		dc.Polygon(poly, n);
+		const Gdiplus::REAL x0 = (Gdiplus::REAL)(stemX + 1.0f);
+		const Gdiplus::REAL fy = stemUp ? (Gdiplus::REAL)(tipY + f * 5.2f) : (Gdiplus::REAL)(tipY - f * 5.2f);
+		const Gdiplus::REAL s = stemUp ? 1.0f : -1.0f;
+		Gdiplus::GraphicsPath path;
+		path.AddBezier(x0, fy,
+			x0 + 5.0f, fy + 2.5f * s,
+			x0 + 11.5f, fy + 7.5f * s,
+			x0 + 6.5f, fy + 16.5f * s);
+		path.AddBezier(x0 + 6.5f, fy + 16.5f * s,
+			x0 + 9.2f, fy + 9.0f * s,
+			x0 + 4.5f, fy + 5.2f * s,
+			x0, fy + 3.4f * s);
+		path.CloseFigure();
+		g.FillPath(&br, &path);
 	}
-	dc.SelectObject(op);
-	dc.SelectObject(ob);
 }
 
 /* One complete note: head + stem + curved flags (ghost / palette / lone notes). */
@@ -3232,11 +3249,32 @@ static void ScStaffDrawCompleteNote(CDC& dc, int x, int y, int dur, COLORREF col
 	if (selected)
 		dc.Draw3dRect(x - 3, y - 22, 22, 34, RGB(220, 140, 40), RGB(220, 140, 40));
 
-	ScStaffDrawHeadKind(dc, x, y, headKind, hollow, col, dotted);
+	if (headKind == 0 && whole && hollow) {
+		ScStaffEnsureGdip();
+		Gdiplus::Graphics g(dc.GetSafeHdc());
+		g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+		Gdiplus::SolidBrush br(ScGdipCol(col));
+		Gdiplus::GraphicsState st = g.Save();
+		g.TranslateTransform((Gdiplus::REAL)(x + 6.5f), (Gdiplus::REAL)y);
+		Gdiplus::GraphicsPath path(Gdiplus::FillModeAlternate);
+		path.AddEllipse(-7.5f, -4.8f, 15.0f, 9.6f);
+		Gdiplus::Matrix m;
+		m.Rotate(-32.0f);
+		Gdiplus::GraphicsPath inner;
+		inner.AddEllipse(-3.6f, -3.1f, 7.2f, 6.2f);
+		inner.Transform(&m);
+		path.AddPath(&inner, FALSE);
+		g.FillPath(&br, &path);
+		g.Restore(st);
+		if (dotted)
+			g.FillEllipse(&br, (Gdiplus::REAL)(x + 16.5f), (Gdiplus::REAL)(y - 2.2f), 4.2f, 4.2f);
+	} else {
+		ScStaffDrawHeadKind(dc, x, y, headKind, hollow, col, dotted);
+	}
 
 	if (!whole) {
 		const int stemX = stemUp ? (x + 11) : x;
-		const int tipY = stemUp ? (y - 22) : (y + 22);
+		const int tipY = stemUp ? (y - 23) : (y + 23);
 		const int y0 = min(y, tipY), y1 = max(y, tipY);
 		dc.FillSolidRect(stemX, y0, 2, max(1, y1 - y0), col);
 		ScStaffDrawCurvedFlag(dc, stemX, tipY, stemUp, flags, col);
@@ -3250,15 +3288,37 @@ void ScStaffDrawSymbol(CDC& dc, int x, int y, int durTicks, int rest, COLORREF c
 
 enum { SC_MARGIN_CLEF_W = 28, SC_MARGIN_ACC_W = 13, SC_MARGIN_TS_PAD = 10, SC_MARGIN_TS_W = 22, SC_MARGIN_TAIL = 8 };
 
+static CFont* ScStaffCachedFont(int px, int weight, const wchar_t* face)
+{
+	struct Slot { CFont font; int px; int weight; const wchar_t* face; int ok; };
+	static Slot slots[16];
+	static int n = 0;
+	if (px < 8) px = 8;
+	if (px > 96) px = 96;
+	if (!face) face = L"Segoe UI";
+	for (int i = 0; i < n; i++) {
+		if (slots[i].ok && slots[i].px == px && slots[i].weight == weight && slots[i].face == face)
+			return &slots[i].font;
+	}
+	Slot* s = NULL;
+	if (n < 16) s = &slots[n++];
+	else s = &slots[0];
+	if (s->ok) s->font.DeleteObject();
+	s->font.CreateFont(px, 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, face);
+	s->px = px;
+	s->weight = weight;
+	s->face = face;
+	s->ok = 1;
+	return &s->font;
+}
+
 static void ScStaffDrawAccidentalGlyph(CDC& dc, int cx, int cy, int accidental, COLORREF col, int fontPx)
 {
 	if (accidental == 0) return;
 	dc.SetBkMode(TRANSPARENT);
 	dc.SetTextColor(col);
-	CFont f;
-	f.CreateFont(max(12, fontPx), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
-	CFont* of = dc.SelectObject(&f);
+	CFont* of = dc.SelectObject(ScStaffCachedFont(max(12, fontPx), FW_NORMAL, L"Segoe UI Symbol"));
 	const wchar_t* g = L"";
 	if (accidental >= 2) g = L"♯♯";
 	else if (accidental == 1) g = L"♯";
@@ -3325,42 +3385,58 @@ static void ScStaffDrawTieArc(CDC& dc, int x0, int y0, int x1, int y1, int archU
 void ScStaffDrawRestGlyph(CDC& dc, int x, int y, int durTicks, COLORREF col)
 {
 	dc.SetBkMode(TRANSPARENT);
+	ScStaffEnsureGdip();
+	Gdiplus::Graphics g(dc.GetSafeHdc());
+	g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+	Gdiplus::SolidBrush br(ScGdipCol(col));
+	Gdiplus::Pen pen(ScGdipCol(col), 1.8f);
+	pen.SetStartCap(Gdiplus::LineCapRound);
+	pen.SetEndCap(Gdiplus::LineCapRound);
 	const int base = ScStaffBaseDurUndot(durTicks);
 	const int dotted = ScStaffDurIsDotted(durTicks);
 	if (base >= SC_PPQN * 4) {
-		dc.FillSolidRect(x + 2, y - 10, 12, 5, col);
+		dc.FillSolidRect(x - 1, y - 8, 18, 1, col);
+		dc.FillSolidRect(x + 2, y - 7, 12, 5, col);
 	} else if (base >= SC_PPQN * 2) {
-		dc.FillSolidRect(x + 2, y - 2, 12, 5, col);
+		dc.FillSolidRect(x - 1, y + 2, 18, 1, col);
+		dc.FillSolidRect(x + 2, y - 3, 12, 5, col);
 	} else if (base >= SC_PPQN) {
-		POINT pts[6] = {
-			{ x + 8, y - 14 }, { x + 4, y - 6 }, { x + 10, y - 2 },
-			{ x + 4, y + 6 }, { x + 8, y + 12 }, { x + 6, y + 14 }
-		};
-		CPen pen(PS_SOLID, 2, col);
-		CPen* op = dc.SelectObject(&pen);
-		dc.Polyline(pts, 6);
-		dc.SelectObject(op);
+		Gdiplus::GraphicsPath p;
+		p.AddBezier((Gdiplus::REAL)(x + 5), (Gdiplus::REAL)(y - 13),
+			(Gdiplus::REAL)(x + 11), (Gdiplus::REAL)(y - 8),
+			(Gdiplus::REAL)(x + 4), (Gdiplus::REAL)(y - 4),
+			(Gdiplus::REAL)(x + 9), (Gdiplus::REAL)(y + 1));
+		p.AddBezier((Gdiplus::REAL)(x + 9), (Gdiplus::REAL)(y + 1),
+			(Gdiplus::REAL)(x + 3), (Gdiplus::REAL)(y + 2),
+			(Gdiplus::REAL)(x + 3), (Gdiplus::REAL)(y + 8),
+			(Gdiplus::REAL)(x + 8), (Gdiplus::REAL)(y + 12));
+		p.AddBezier((Gdiplus::REAL)(x + 8), (Gdiplus::REAL)(y + 12),
+			(Gdiplus::REAL)(x + 1), (Gdiplus::REAL)(y + 8),
+			(Gdiplus::REAL)(x + 1), (Gdiplus::REAL)(y + 1),
+			(Gdiplus::REAL)(x + 5), (Gdiplus::REAL)(y - 1));
+		p.AddBezier((Gdiplus::REAL)(x + 5), (Gdiplus::REAL)(y - 1),
+			(Gdiplus::REAL)(x + 2), (Gdiplus::REAL)(y - 5),
+			(Gdiplus::REAL)(x + 7), (Gdiplus::REAL)(y - 8),
+			(Gdiplus::REAL)(x + 5), (Gdiplus::REAL)(y - 13));
+		p.CloseFigure();
+		g.FillPath(&br, &p);
 	} else {
 		const int hooks = ScStaffFlagCount(durTicks);
-		dc.FillSolidRect(x + 8, y - 14, 2, 22, col);
-		CPen pen(PS_SOLID, 2, col);
-		CPen* op = dc.SelectObject(&pen);
+		const Gdiplus::REAL sx = (Gdiplus::REAL)(x + 10);
+		const Gdiplus::REAL sy = (Gdiplus::REAL)(y - 9);
+		const Gdiplus::REAL ex = (Gdiplus::REAL)(x + 4);
+		const Gdiplus::REAL ey = (Gdiplus::REAL)(y + 8 + (hooks > 2 ? (hooks - 2) * 4 : 0));
+		g.DrawLine(&pen, sx, sy, ex, ey);
 		for (int h = 0; h < hooks; h++) {
-			const int hy = y - 12 + h * 6;
-			POINT pts[4] = {
-				{ x + 10, hy }, { x + 16, hy + 2 },
-				{ x + 17, hy + 7 }, { x + 11, hy + 9 }
-			};
-			dc.PolyBezier(pts, 4);
+			const Gdiplus::REAL t = (Gdiplus::REAL)h * 0.25f;
+			const Gdiplus::REAL hx = sx - (sx - ex) * t - 4.0f;
+			const Gdiplus::REAL hy = sy + (ey - sy) * t;
+			g.FillEllipse(&br, hx - 2.6f, hy - 2.2f, 5.4f, 4.4f);
+			g.DrawBezier(&pen, hx + 1.5f, hy + 1.2f, hx + 4.5f, hy + 1.8f, sx - h * 1.4f, hy - 1.0f, sx - h * 1.4f, hy);
 		}
-		dc.SelectObject(op);
 	}
-	if (dotted) {
-		CBrush br(col);
-		CBrush* ob = dc.SelectObject(&br);
-		dc.Ellipse(x + 16, y - 1, x + 20, y + 3);
-		dc.SelectObject(ob);
-	}
+	if (dotted)
+		g.FillEllipse(&br, (Gdiplus::REAL)(x + 15.5f), (Gdiplus::REAL)(y - 2.0f), 4.2f, 4.2f);
 }
 
 void ScStaffDrawNoteGlyph(CDC& dc, const CRect& rc, int durTicks, int rest, int selected)
@@ -3372,10 +3448,7 @@ void ScStaffDrawNoteGlyph(CDC& dc, const CRect& rc, int durTicks, int rest, int 
 	dc.SetBkMode(TRANSPARENT);
 	if (rest) {
 		ScStaffDrawRestGlyph(dc, cx - 6, cy, durTicks, RGB(20, 20, 40));
-		CFont tiny;
-		tiny.CreateFont(11, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-			OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-		CFont* of = dc.SelectObject(&tiny);
+		CFont* of = dc.SelectObject(ScStaffCachedFont(11, FW_NORMAL, L"Segoe UI"));
 		dc.SetTextColor(RGB(80, 80, 100));
 		wchar_t lab[16];
 		const int b = ScStaffBaseDurUndot(durTicks);
@@ -3394,10 +3467,7 @@ void ScStaffDrawNoteGlyph(CDC& dc, const CRect& rc, int durTicks, int rest, int 
 	const int whole = (ScStaffBaseDurUndot(durTicks) >= SC_PPQN * 4);
 	const int hx = cx - 6, hy = cy + (whole ? 0 : 4);
 	ScStaffDrawSymbol(dc, hx, hy, durTicks, 0, RGB(20, 20, 35), 0, 1);
-	CFont tiny;
-	tiny.CreateFont(11, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-	CFont* oldF = dc.SelectObject(&tiny);
+	CFont* oldF = dc.SelectObject(ScStaffCachedFont(11, FW_NORMAL, L"Segoe UI"));
 	dc.SetTextColor(RGB(80, 80, 100));
 	wchar_t lab[16];
 	const int b = ScStaffBaseDurUndot(durTicks);
@@ -3419,14 +3489,9 @@ void ScStaffDrawPalCell(CDC& dc, const CRect& rc, int selected)
 	const COLORREF top = selected ? RGB(80, 150, 230) : RGB(50, 85, 155);
 	const COLORREF bot = selected ? RGB(35, 90, 165) : RGB(25, 40, 85);
 	const int h = max(1, rc.Height());
-	for (int y = 0; y < h; y++) {
-		const int t = y * 256 / h;
-		const COLORREF c = RGB(
-			GetRValue(top) + (GetRValue(bot) - GetRValue(top)) * t / 256,
-			GetGValue(top) + (GetGValue(bot) - GetGValue(top)) * t / 256,
-			GetBValue(top) + (GetBValue(bot) - GetBValue(top)) * t / 256);
-		dc.FillSolidRect(rc.left, rc.top + y, rc.Width(), 1, c);
-	}
+	/* 1行ずつ塗ると音符パレットの初回描画だけで数千回の GDI になり、字が出るまで固まる。 */
+	dc.FillSolidRect(rc, bot);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), h / 2, top);
 	if (h > 4)
 		dc.FillSolidRect(rc.left + 1, rc.top + 1, rc.Width() - 2, 2, RGB(170, 200, 245));
 	dc.Draw3dRect(rc, RGB(110, 145, 200), RGB(12, 18, 38));
@@ -3438,18 +3503,11 @@ void ScStaffDrawPalTab(CDC& dc, const CRect& rc, const wchar_t* label, int selec
 	const COLORREF top = selected ? RGB(100, 160, 235) : RGB(55, 70, 105);
 	const COLORREF bot = selected ? RGB(60, 110, 190) : RGB(35, 42, 68);
 	const int h = max(1, rc.Height());
-	for (int y = 0; y < h; y++) {
-		const int t = y * 256 / h;
-		dc.FillSolidRect(rc.left, rc.top + y, rc.Width(), 1, RGB(
-			GetRValue(top) + (GetRValue(bot) - GetRValue(top)) * t / 256,
-			GetGValue(top) + (GetGValue(bot) - GetGValue(top)) * t / 256,
-			GetBValue(top) + (GetBValue(bot) - GetBValue(top)) * t / 256));
-	}
+	dc.FillSolidRect(rc, bot);
+	dc.FillSolidRect(rc.left, rc.top, rc.Width(), h / 2, top);
 	dc.SetBkMode(TRANSPARENT);
-	CFont f;
-	f.CreateFont(max(11, rc.Height() - 8), 0, 0, 0, selected ? FW_BOLD : FW_NORMAL, 0, 0, 0,
-		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
-	CFont* of = dc.SelectObject(&f);
+	CFont* of = dc.SelectObject(ScStaffCachedFont(max(11, rc.Height() - 8),
+		selected ? FW_BOLD : FW_NORMAL, L"Meiryo UI"));
 	dc.SetTextColor(selected ? RGB(255, 255, 255) : RGB(200, 210, 230));
 	CRect tr = rc;
 	dc.DrawText(label ? label : L"", tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -3469,10 +3527,8 @@ void ScStaffDrawPalRadioCell(CDC& dc, const CRect& rc, const wchar_t* label, int
 		dc.FillSolidRect(cx - 2, cy - 2, 4, 4, RGB(80, 150, 230));
 	}
 	dc.SetBkMode(TRANSPARENT);
-	CFont f;
-	f.CreateFont(max(12, min(rc.Width(), rc.Height()) - 8), 0, 0, 0, FW_BOLD, 0, 0, 0,
-		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
-	CFont* of = dc.SelectObject(&f);
+	CFont* of = dc.SelectObject(ScStaffCachedFont(max(12, min(rc.Width(), rc.Height()) - 8),
+		FW_BOLD, L"Meiryo UI"));
 	dc.SetTextColor(RGB(245, 248, 255));
 	CRect tr = rc;
 	tr.left += selected ? 10 : 0;
@@ -3494,10 +3550,8 @@ void ScStaffDrawPalRadioRow(CDC& dc, const CRect& rc, const wchar_t* label, int 
 	if (selected)
 		dc.FillSolidRect(rx - 2, cy - 2, 4, 4, RGB(70, 140, 220));
 	dc.SetBkMode(TRANSPARENT);
-	CFont f;
-	f.CreateFont(max(12, rc.Height() - 6), 0, 0, 0, selected ? FW_BOLD : FW_NORMAL, 0, 0, 0,
-		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
-	CFont* of = dc.SelectObject(&f);
+	CFont* of = dc.SelectObject(ScStaffCachedFont(max(12, rc.Height() - 6),
+		selected ? FW_BOLD : FW_NORMAL, L"Meiryo UI"));
 	dc.SetTextColor(selected ? RGB(255, 255, 255) : RGB(220, 228, 240));
 	CRect tr = rc;
 	tr.left = rx + 12;
@@ -3635,15 +3689,16 @@ void ScStaffDrawNoteGlyphPal(CDC& dc, const CRect& rc, int durTicks, int rest, i
 {
 	ScStaffDrawPalCell(dc, rc, selected);
 	const int cx = (rc.left + rc.right) / 2;
-	const int cy = (rc.top + rc.bottom) / 2 - 2;
+	const int cy = (rc.top + rc.bottom) / 2 - 1;
 	const COLORREF sym = RGB(245, 248, 255);
 	dc.SetBkMode(TRANSPARENT);
 	if (rest) {
-		ScStaffDrawRestGlyph(dc, cx - 6, cy, durTicks, sym);
+		ScStaffDrawRestGlyph(dc, cx - 7, cy, durTicks, sym);
 	} else {
 		const int whole = (ScStaffBaseDurUndot(durTicks) >= SC_PPQN * 4);
-		const int hx = cx - 6, hy = cy + (whole ? 0 : 4);
-		ScStaffDrawSymbolEx(dc, hx, hy, durTicks, 0, sym, selected, 1, accidental);
+		const int hx = cx - 6 + (accidental ? 5 : 0);
+		const int hy = cy + (whole ? 0 : 7);
+		ScStaffDrawSymbolEx(dc, hx, hy, durTicks, 0, sym, 0, 1, accidental);
 	}
 }
 
@@ -3933,9 +3988,19 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			dc.FillSolidRect(toneBox, toneBg);
 			dc.Draw3dRect(toneBox, toneEdge, toneEdge);
 			dc.SetTextColor(toneCfg ? RGB(24, 90, 50) : RGB(120, 90, 50));
-			wchar_t tone[96];
+			wchar_t tone[120];
+			const int progReal = u->progLabel[i][0]
+				&& wcsncmp(u->progLabel[i], L"Prog  —", 7) != 0
+				&& wcsncmp(u->progLabel[i], L"Prog  -", 7) != 0
+				&& wcscmp(u->progLabel[i], u->vstLabel[i]) != 0;
+			wchar_t shown[96];
+			shown[0] = 0;
+			if (u->vstLabel[i][0] && progReal)
+				_snwprintf_s(shown, _TRUNCATE, L"%s   %s", u->vstLabel[i], u->progLabel[i]);
+			else if (u->vstLabel[i][0])
+				wcsncpy_s(shown, u->vstLabel[i], _TRUNCATE);
 			if (u->vstLabel[i][0])
-				_snwprintf_s(tone, _TRUNCATE, LL14(L"音色  %s", L"Tone  %s", L"Timbre  %s", L"Timbro  %s", L"Timbre  %s", L"음색  %s", L"音色  %s", L"طابع  %s", L"Тембр  %s", L"Klang  %s", L"Timbre  %s", L"Klank  %s", L"Barwa  %s", L"Tını  %s"), u->vstLabel[i]);
+				_snwprintf_s(tone, _TRUNCATE, LL14(L"音色  %s", L"Tone  %s", L"Timbre  %s", L"Timbro  %s", L"Timbre  %s", L"음색  %s", L"音色  %s", L"طابع  %s", L"Тембр  %s", L"Klang  %s", L"Timbre  %s", L"Klank  %s", L"Barwa  %s", L"Tını  %s"), shown);
 			else if (u->progLabel[i][0] && wcsncmp(u->progLabel[i], L"Prog  —", 7) != 0)
 				_snwprintf_s(tone, _TRUNCATE, LL14(
 					L"音色 %s（クリックで赤バー位置へ）",
@@ -3970,36 +4035,75 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 
 static void DrawClefG(CDC& dc, int x, int staffTop, int staffH)
 {
-	dc.SetTextColor(RGB(30, 30, 40));
-	CFont font;
-	font.CreateFont(staffH - 8, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
-	CFont* old = dc.SelectObject(&font);
-	dc.TextOut(x, staffTop - 2, L"𝄞");
-	dc.SelectObject(old);
+	ScStaffEnsureGdip();
+	Gdiplus::Graphics g(dc.GetSafeHdc());
+	g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+	const Gdiplus::REAL gap = max(4.0f, (Gdiplus::REAL)(staffH - 16) / 4.0f);
+	const Gdiplus::REAL gLineY = (Gdiplus::REAL)(staffTop + 8) + gap * 3.0f;
+	const Gdiplus::REAL cx = (Gdiplus::REAL)(x + 9);
+	Gdiplus::Pen pen(ScGdipCol(RGB(28, 30, 42)), max(1.6f, gap * 0.28f));
+	pen.SetStartCap(Gdiplus::LineCapRound);
+	pen.SetEndCap(Gdiplus::LineCapRound);
+	Gdiplus::SolidBrush br(ScGdipCol(RGB(28, 30, 42)));
+	/* 中心線（縦の背骨）と上の輪、G線上の渦巻き */
+	Gdiplus::GraphicsPath p;
+	p.AddBezier(cx - 1.0f, gLineY + gap * 0.3f,
+		cx - 4.5f, gLineY - gap * 0.9f,
+		cx + 4.8f, gLineY - gap * 1.1f,
+		cx + 5.2f, gLineY + gap * 0.1f);
+	p.AddBezier(cx + 5.2f, gLineY + gap * 0.1f,
+		cx + 5.4f, gLineY + gap * 1.25f,
+		cx - 6.2f, gLineY + gap * 1.3f,
+		cx - 6.5f, gLineY - gap * 0.3f);
+	p.AddBezier(cx - 6.5f, gLineY - gap * 0.3f,
+		cx - 6.8f, gLineY - gap * 2.1f,
+		cx + 4.5f, gLineY - gap * 3.4f,
+		cx + 3.0f, gLineY - gap * 4.3f);
+	p.AddBezier(cx + 3.0f, gLineY - gap * 4.3f,
+		cx + 1.2f, gLineY - gap * 5.0f,
+		cx - 1.2f, gLineY - gap * 3.8f,
+		cx + 0.5f, gLineY + gap * 1.9f);
+	p.AddBezier(cx + 0.5f, gLineY + gap * 1.9f,
+		cx + 1.2f, gLineY + gap * 2.6f,
+		cx - 2.6f, gLineY + gap * 2.7f,
+		cx - 3.6f, gLineY + gap * 2.1f);
+	g.DrawPath(&pen, &p);
+	g.FillEllipse(&br, cx - 4.6f, gLineY + gap * 1.7f, 2.8f, 2.8f);
 }
 
 static void DrawClefF(CDC& dc, int x, int staffTop, int staffH)
 {
-	dc.SetTextColor(RGB(30, 30, 40));
-	CFont font;
-	font.CreateFont(staffH - 10, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
-	CFont* old = dc.SelectObject(&font);
-	dc.TextOut(x, staffTop + 2, L"𝄢");
-	dc.SelectObject(old);
+	ScStaffEnsureGdip();
+	Gdiplus::Graphics g(dc.GetSafeHdc());
+	g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+	const Gdiplus::REAL gap = max(4.0f, (Gdiplus::REAL)(staffH - 16) / 4.0f);
+	const Gdiplus::REAL fLineY = (Gdiplus::REAL)(staffTop + 8) + gap * 1.0f;
+	const Gdiplus::REAL cx = (Gdiplus::REAL)(x + 7);
+	Gdiplus::Pen pen(ScGdipCol(RGB(28, 30, 42)), max(1.8f, gap * 0.34f));
+	pen.SetStartCap(Gdiplus::LineCapRound);
+	pen.SetEndCap(Gdiplus::LineCapRound);
+	Gdiplus::SolidBrush br(ScGdipCol(RGB(28, 30, 42)));
+	g.FillEllipse(&br, cx - 5.0f, fLineY - 2.4f, 4.8f, 4.8f);
+	Gdiplus::GraphicsPath p;
+	p.AddBezier(cx - 2.6f, fLineY,
+		cx - 3.0f, fLineY - gap * 1.4f,
+		cx + 6.5f, fLineY - gap * 1.4f,
+		cx + 6.8f, fLineY);
+	p.AddBezier(cx + 6.8f, fLineY,
+		cx + 7.0f, fLineY + gap * 1.5f,
+		cx - 1.5f, fLineY + gap * 2.6f,
+		cx - 5.2f, fLineY + gap * 2.9f);
+	g.DrawPath(&pen, &p);
+	g.FillEllipse(&br, cx + 8.5f, fLineY - gap * 0.5f - 1.8f, 3.4f, 3.4f);
+	g.FillEllipse(&br, cx + 8.5f, fLineY + gap * 0.5f - 1.8f, 3.4f, 3.4f);
 }
 
 static void DrawClefDr(CDC& dc, int x, int staffTop, int staffH)
 {
-	/* Percussion/kit staff — label is clearer than a missing glyph. */
-	dc.SetTextColor(RGB(30, 30, 40));
-	CFont font;
-	font.CreateFont(max(12, staffH / 2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-	CFont* old = dc.SelectObject(&font);
-	dc.TextOut(x, staffTop + staffH / 3, L"Dr");
-	dc.SelectObject(old);
+	const int gap = max(4, (staffH - 16) / 4);
+	const int cy = staffTop + 8 + gap * 2;
+	dc.FillSolidRect(x + 5, cy - gap - 1, 4, gap * 2 + 2, RGB(28, 30, 42));
+	dc.FillSolidRect(x + 12, cy - gap - 1, 4, gap * 2 + 2, RGB(28, 30, 42));
 }
 
 static void DrawFiveLines(CDC& dc, int x0, int w, int staffTop, int gap)
@@ -4389,27 +4493,36 @@ static void ScStaffProgLabel(const ScEvent& e, const ScEvent* ev, int evCount, i
 	wchar_t name[48];
 	name[0] = 0;
 	int msb = 0, lsb = 0, pc = (int)e.a & 127;
-	if (e.c == 1) {
-		msb = (int)e.b & 127;
-		lsb = 0;
-	} else {
-		ScStaffBankAt(ev, evCount, tr, e.tick, &msb, &lsb);
+	int haveBank = 0;
+	if (ev) {
+		for (int i = 0; i < evCount; i++) {
+			if ((int)ev[i].ch != tr || ev[i].kind != SC_EV_BANK) continue;
+			if (ev[i].tick > e.tick) continue;
+			msb = (int)ev[i].a;
+			lsb = (int)ev[i].b;
+			haveBank = 1;
+		}
 	}
+	/* Paired @n:m stores the bank in b and has no SC_EV_BANK. A real bank
+	   event (24/4 and the like) wins, so the variation name stays correct. */
+	if (!haveBank && e.c == 1)
+		msb = (int)e.b & 127;
 
 	const wchar_t* tip = (u && tr >= 0 && tr < 32 && u->vstLabel[tr][0]) ? u->vstLabel[tr] : NULL;
 	/* VST part loaded / labeled → live name or Plugin:hash (HALion MediaBay etc.) */
 	if (tip || VstLivePartIsLoaded(tr + 1)) {
 		if (ScStaffVstProgName(tr + 1, pc, tip, name, 48) && name[0]) {
-			_snwprintf_s(label, labelCch, _TRUNCATE, L"%s %s", tpos, name);
+			_snwprintf_s(label, labelCch, _TRUNCATE, L"%s %d %s", tpos, (pc & 127) + 1, name);
 			return;
 		}
 	}
 
 	const int isDrum = ScMidiPartIsDrum(ev, evCount, tr, e.tick);
-	SasamiToneLookupAuto(msb, lsb, pc, isDrum, name, 48);
+	SasamiToneLookupVariation(msb, lsb, pc, isDrum, name, 48);
 	if (!name[0])
 		_snwprintf_s(name, _TRUNCATE, L"PC%u", (unsigned)(pc + 1));
-	_snwprintf_s(label, labelCch, _TRUNCATE, L"%s %s", tpos, name);
+	/* 0:0:0 49 Velo Strings — tick, PC (1-based, same as the tone map), variation name. */
+	_snwprintf_s(label, labelCch, _TRUNCATE, L"%s %d %s", tpos, (pc & 127) + 1, name);
 }
 
 static void ScStaffFormatMidiNoteName(int note, wchar_t* out, size_t outCch)
@@ -4578,7 +4691,7 @@ static void ScStaffDrawRhythmHit(CDC& dc, int x, int y, COLORREF col, int select
 	dc.SelectObject(ob);
 }
 
-enum { SC_BEAM_COL_MAX = 768, SC_BEAM_HEAD_MAX = 12 };
+enum { SC_BEAM_COL_MAX = 4096, SC_BEAM_HEAD_MAX = 12 };
 
 struct ScBeamHead {
 	int evIdx;
@@ -4881,12 +4994,16 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 			}
 			const int acc = hd.flags & SC_EF_ACC_MASK;
 			if (acc) {
-				dc.SetTextColor(hd.col);
-				dc.SetBkMode(TRANSPARENT);
-				const wchar_t* g =
-					(acc == SC_EF_ACC_SHARP) ? L"♯" :
-					(acc == SC_EF_ACC_FLAT) ? L"♭" : L"♮";
-				dc.TextOut(hx - 12, hd.y - 8, g);
+				int aVal = (acc == SC_EF_ACC_SHARP) ? 1 : (acc == SC_EF_ACC_FLAT) ? -1 : 0;
+				if (aVal)
+					ScStaffDrawAccidentalGlyph(dc, hx - 12, hd.y, aVal, hd.col, 16);
+				else {
+					dc.SetTextColor(hd.col);
+					dc.SetBkMode(TRANSPARENT);
+					CFont* of = dc.SelectObject(ScStaffCachedFont(15, FW_NORMAL, L"Segoe UI Symbol"));
+					dc.TextOut(hx - 13, hd.y - 8, L"♮");
+					dc.SelectObject(of);
+				}
 			}
 		}
 		const int anyWhole = (col.flags == 0 && ScStaffBaseDurUndot(col.heads[0].dur) >= SC_PPQN * 4
@@ -5001,10 +5118,7 @@ static void ScStaffPaintTrackNotes(CDC& dc, const ScStaffUi* u, const ScEvent* e
 				dc.LineTo(xR, yBr);
 				dc.LineTo(xR, yBr + (cols[g0].stemUp ? 4 : -4));
 				dc.SelectObject(op);
-				CFont f;
-				f.CreateFont(12, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-					OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-				CFont* of = dc.SelectObject(&f);
+				CFont* of = dc.SelectObject(ScStaffCachedFont(12, FW_BOLD, L"Segoe UI"));
 				dc.SetBkMode(TRANSPARENT);
 				dc.SetTextColor(RGB(40, 40, 60));
 				wchar_t num[8];
@@ -5542,10 +5656,7 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 		}
 		/* Q / J / |:n / :| / Ped. / ＊ — marks through the staff */
 		{
-			CFont mf;
-			mf.CreateFont(12, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-				OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-			CFont* om = dc.SelectObject(&mf);
+			CFont* om = dc.SelectObject(ScStaffCachedFont(12, FW_BOLD, L"Segoe UI"));
 			dc.SetBkMode(TRANSPARENT);
 			for (int i = 0; i < evCount; i++) {
 				const ScEvent& e = ev[i];
@@ -5996,6 +6107,8 @@ int ScStaffHitNote(const CRect& grid, const ScStaffUi* u, const ScEvent* ev, int
 			if (outTrack) *outTrack = tr;
 			return -1;
 		}
+		int best = -1;
+		int bestD = 1 << 30;
 		for (int i = evCount - 1; i >= 0; i--) {
 			const ScEvent& e = ev[i];
 			if ((int)e.ch != tr) continue;
@@ -6007,10 +6120,16 @@ int ScStaffHitNote(const CRect& grid, const ScStaffUi* u, const ScEvent* ev, int
 			int x0 = ScStaffTickToX(e.tick, u->scrollX, ScStaffGridLeftPx(grid.left, u, ev, evCount), pxBeat, u, ev, evCount);
 			int y = isRest ? (staffTop + 8 + ScStaffLineGap(u) * 2)
 				: ScStaffMidiNoteYTrack(u, tr, staffTop, note, e.tick, ev, evCount);
-			CRect head(x0 - 2, y - 8, x0 + 16, y + 10);
-			if (head.PtInRect(pt)) return i;
+			/* Head + stem. A tiny head box missed the click and the marquee
+			   then expanded into the whole bar. Closest head wins in a chord. */
+			CRect head(x0 - 8, y - 26, x0 + 22, y + 16);
+			if (!head.PtInRect(pt)) continue;
+			const int dx = pt.x - (x0 + 8);
+			const int dy = pt.y - y;
+			const int d = dx * dx + dy * dy;
+			if (d < bestD) { bestD = d; best = i; }
 		}
-		return -2;
+		return (best >= 0) ? best : -2;
 	}
 	return -1;
 }
@@ -8121,6 +8240,19 @@ void ScStaffSelAdd(ScStaffUi* u, int evIdx)
 	u->selEv = evIdx;
 }
 
+void ScStaffSelRemove(ScStaffUi* u, int evIdx)
+{
+	if (!u || evIdx < 0) return;
+	int w = 0;
+	for (int i = 0; i < u->nSel; i++) {
+		if (u->selList[i] == evIdx) continue;
+		u->selList[w++] = u->selList[i];
+	}
+	u->nSel = w;
+	if (u->selEv == evIdx)
+		u->selEv = (w > 0) ? u->selList[w - 1] : -1;
+}
+
 int ScStaffSelHas(const ScStaffUi* u, int evIdx)
 {
 	if (!u || evIdx < 0) return 0;
@@ -8486,7 +8618,7 @@ int ScStaffSelectInRect(const CRect& grid, ScStaffUi* u, const ScEvent* ev, int 
 			: ScStaffEvWrittenMidi(ev, evCount, e, isFm, e.ch);
 		int y = (e.kind == SC_EV_REST || e.kind == SC_EV_FM_REST)
 			? (st + 8) : ScStaffMidiNoteYTrack(u, e.ch, st, midi, e.tick, ev, evCount);
-		CRect nr(min(x0, x1), y - 4, max(x0 + 2, x1), y + 8);
+		CRect nr(min(x0, x1) - 6, y - 26, max(x0 + 8, x1), y + 16);
 		CRect inter;
 		if (!inter.IntersectRect(&nr, &r)) continue;
 		ScStaffSelAdd(u, i);

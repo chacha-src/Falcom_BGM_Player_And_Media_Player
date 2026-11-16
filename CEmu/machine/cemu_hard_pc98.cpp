@@ -10135,6 +10135,20 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	PlantPc98BiosMap(mem);
 	MaterializeDosFiles(fs, ge);
 	{
+		/* U4.EXE の再生は INT D2 AH=19 で [cc]=FF を立ててから AH=2 でタイマを開ける。
+		   OPN ISR は [cc]=FF の最初の tick で reg 0x27 の IRQ を落とし、1 音で止まる。
+		   この AH=19 は停止要求なので、曲番号が 0 でない再生では呼ばせない。 */
+		CEmuDos98File* u4 = const_cast<CEmuDos98File*>(dos_.FindFile("U4.EXE"));
+		if (u4 && u4->data && u4->size == 68084u
+			&& u4->data[0x81EBu] == 0xE8 && u4->data[0x81ECu] == 0xDBu
+			&& u4->data[0x81EDu] == 0x08 && u4->data[0x81EEu] == 0xE8
+			&& u4->data[0x81EFu] == 0xF9 && u4->data[0x81F0u] == 0x06) {
+			u4->data[0x81EBu] = 0x90;
+			u4->data[0x81ECu] = 0x90;
+			u4->data[0x81EDu] = 0x90;
+		}
+	}
+	{
 		static const char* kOlteusMap[] = { "olteus", NULL };
 		if (DosShellStarts(ge, kOlteusMap)) {
 			const unsigned n = titleCode & 0x0fu;

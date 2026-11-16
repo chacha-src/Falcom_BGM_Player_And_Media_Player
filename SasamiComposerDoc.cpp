@@ -5337,15 +5337,16 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 	memcpy(xPart, d->trackPart, sizeof(xPart));
 	ScMidiExpandChordVoices(work, &nWork, SC_EV_MAX, xPart);
 
-	int used[SC_MIDI_CH];
-	memset(used, 0, sizeof(used));
-	for (int i = 0; i < nWork; i++)
-		if (work[i].ch < SC_MIDI_CH) used[work[i].ch] = 1;
+	/* A part with no notes is not a part. Bank / VST / FX alone do not emit MML. */
+	int noteCh[SC_MIDI_CH];
+	memset(noteCh, 0, sizeof(noteCh));
+	for (int i = 0; i < nWork; i++) {
+		if (work[i].ch >= SC_MIDI_CH) continue;
+		const uint8_t k = work[i].kind;
+		if (k == SC_EV_NOTE || k == SC_EV_TIE) noteCh[work[i].ch] = 1;
+	}
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
-		if (d->bind.vstPath[ch][0] || d->bind.vstProg[ch] >= 0) used[ch] = 1;
-		for (int sl = 0; sl < ScMidiFxBind::SC_FX_SLOTS; ++sl)
-			if (d->fxBind.fxPath[ch][sl][0]) used[ch] = 1;
-		if (!used[ch]) continue;
+		if (!noteCh[ch]) continue;
 		if (len >= cap - 64) return 0;
 		int part = xPart[ch];
 		if (part == 0xFF) part = (uint8_t)ch;

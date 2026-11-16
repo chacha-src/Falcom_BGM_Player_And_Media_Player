@@ -312,10 +312,16 @@ void CSasamiNotePaletteDlg::OnPaint()
 				|| (k == -34 && m_markStack == 0) || (k == -35 && m_markStack != 0);
 			ScStaffDrawPalCell(mem, c, selCmd);
 			mem.SetBkMode(TRANSPARENT);
-			CFont font;
-			font.CreateFont(max(12, c.Height() / 2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-				OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
-			CFont* of = mem.SelectObject(&font);
+			static CFont palFont;
+			static int palFontPx = 0;
+			const int px = max(12, c.Height() / 2);
+			if (palFontPx != px) {
+				if (palFontPx) palFont.DeleteObject();
+				palFont.CreateFont(px, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+					OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
+				palFontPx = px;
+			}
+			CFont* of = mem.SelectObject(&palFont);
 			mem.SetTextColor(RGB(245, 248, 255));
 			const wchar_t* lab = L"";
 			if (k == -2) lab = L"·";

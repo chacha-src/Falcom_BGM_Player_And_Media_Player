@@ -1478,6 +1478,12 @@ BOOL CCustomPopupMenu::AddCommand(UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabl
 BOOL CCustomPopupMenu::AddCheck(UINT id, LPCTSTR text, BOOL checked, LPCTSTR tip, BOOL enabled)
 { return AddItemBase(CCUSTOM_POPUP_CHECK, id, text, tip, enabled, checked); }
 
+void CCustomPopupMenu::SetLastItemBold(BOOL bold)
+{
+	if (m_itemCount > 0)
+		m_items[m_itemCount - 1].bold = bold ? TRUE : FALSE;
+}
+
 // 区切り線。連続セパレータは二重線になるので弾く（成功扱い）。
 // 高さは CCUSTOM_POPUP_SEP_H（DPI スケール）。
 BOOL CCustomPopupMenu::AddSeparator()
@@ -2266,10 +2272,20 @@ void CCustomPopupMenu::MeasureLayout()
 	CDC dc; dc.Attach(::GetDC(NULL));
 	HFONT font = m_font ? m_font : (HFONT)::GetStockObject(DEFAULT_GUI_FONT);
 	HFONT old = (HFONT)dc.SelectObject(font);
+	HFONT boldFont = NULL;
+	if (!savedata.popupMenuBold) {
+		LOGFONTW lf; ZeroMemory(&lf, sizeof(lf));
+		if (::GetObjectW(font, sizeof(lf), &lf) > 0) {
+			lf.lfWeight = FW_BOLD;
+			boldFont = ::CreateFontIndirectW(&lf);
+		}
+	}
 	int maxTw = 0;
 	for (int i = 0; i < m_itemCount; ++i) {
 		const CCustomPopupItem& it = m_items[i];
 		if (it.kind == CCUSTOM_POPUP_SEP) continue;
+		if (it.bold && boldFont) dc.SelectObject(boldFont);
+		else dc.SelectObject(font);
 		CSize sz = dc.GetTextExtent(it.text, (int)wcslen(it.text));
 		int w = sz.cx;
 		// レ点列は常に確保（チェック無し行もラベル位置を揃える）
@@ -2279,6 +2295,7 @@ void CCustomPopupMenu::MeasureLayout()
 		if (w > maxTw) maxTw = w;
 	}
 	dc.SelectObject(old);
+	if (boldFont) ::DeleteObject(boldFont);
 	::ReleaseDC(NULL, dc.Detach());
 
 	m_menuW = max(SH(CCUSTOM_POPUP_MIN_W),
@@ -4142,13 +4159,21 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			LOGFONTW lf; ZeroMemory(&lf, sizeof(lf));
 			HDC hdc = dc.GetSafeHdc();
 			lf.lfHeight = -MulDiv(max(9, savedata.popupMenuPoint), ::GetDeviceCaps(hdc, LOGPIXELSY), 72);
-			lf.lfWeight = savedata.popupMenuBold ? FW_BOLD : FW_NORMAL;
+			lf.lfWeight = (savedata.popupMenuBold || it.bold) ? FW_BOLD : FW_NORMAL;
 			lf.lfItalic = savedata.popupMenuItalic ? 1 : 0;
 			lf.lfCharSet = DEFAULT_CHARSET;
 			lf.lfQuality = CLEARTYPE_QUALITY;
 			lstrcpynW(lf.lfFaceName, it.text, LF_FACESIZE);
 			rowFont = ::CreateFontIndirectW(&lf);
 			if (rowFont) prev = (HFONT)dc.SelectObject(rowFont);
+		} else if (it.bold && !savedata.popupMenuBold) {
+			LOGFONTW lf; ZeroMemory(&lf, sizeof(lf));
+			HFONT curF = m_font ? m_font : (HFONT)::GetStockObject(DEFAULT_GUI_FONT);
+			if (::GetObjectW(curF, sizeof(lf), &lf) > 0) {
+				lf.lfWeight = FW_BOLD;
+				rowFont = ::CreateFontIndirectW(&lf);
+				if (rowFont) prev = (HFONT)dc.SelectObject(rowFont);
+			}
 		}
 
 		UINT dt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;

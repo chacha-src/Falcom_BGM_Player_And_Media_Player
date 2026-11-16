@@ -58,6 +58,16 @@ enum {
 	IDC_SAE_OUT      = 0x5F5A,
 	IDC_SAE_GSMAPLBL = 0x5F5B,
 	IDC_SAE_GSMAP    = 0x5F5C,
+	IDC_SAE_QK_LBL   = 0x5F5D,
+	IDC_SAE_QK_VEL   = 0x5F5E,
+	IDC_SAE_QK_GATE  = 0x5F5F,
+	IDC_SAE_QK_PAN   = 0x5F60,
+	IDC_SAE_QK_VOL   = 0x5F61,
+	IDC_SAE_QK_APPLY = 0x5F62,
+	IDC_SAE_QK_VELL  = 0x5F63,
+	IDC_SAE_QK_GATEL = 0x5F64,
+	IDC_SAE_QK_PANL  = 0x5F65,
+	IDC_SAE_QK_VOLL  = 0x5F66,
 };
 
 static void ScMidiSetVstLabel(ScStaffUi* u, int part0, const wchar_t* path)
@@ -98,6 +108,7 @@ CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
 	, m_pendingEdClosePart(0), m_pendingEdCloseProg(-1), m_pendingEdOpenPart(0)
 	, m_clipN(0), m_clipBase(0), m_clipSpan(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
 	, m_metroBeat(0), m_metroTimer(0), m_chromeDetail(0), m_outBusy(0), m_outSel(0)
+	, m_qkShown(0), m_qkFill(0), m_qkVelDirty(0), m_qkGateDirty(0), m_qkPanDirty(0), m_qkVolDirty(0)
 {
 	m_drawCursors.pencil = NULL;
 	m_drawCursors.line = NULL;
@@ -267,6 +278,8 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SAE_MUTE, OnBnClickedMute)
 	ON_BN_CLICKED(IDC_SAE_SOLO, OnBnClickedSolo)
 	ON_BN_CLICKED(IDC_SAE_MORE, OnBnClickedMore)
+	ON_BN_CLICKED(IDC_SAE_QK_APPLY, OnQkApply)
+	ON_CONTROL_RANGE(EN_CHANGE, IDC_SAE_QK_VEL, IDC_SAE_QK_VOL, OnQkEditChange)
 	ON_MESSAGE(WM_SASAMI_PAL_DUR, OnPalDur)
 	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, OnPalQueryState)
 	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, OnPalLayout)
@@ -357,6 +370,16 @@ void CSasamiMidiScoreDlg::ApplyLang()
 		m_btnMore.SetWindowText(m_chromeDetail
 			? LL14(L"詳細▲", L"More ▲", L"Plus ▲", L"Altro ▲", L"Más ▲", L"상세▲", L"详细▲", L"المزيد▲", L"Ещё▲", L"Mehr▲", L"Mais▲", L"Meer▲", L"Więcej▲", L"Daha▲")
 			: LL14(L"詳細▼", L"More ▼", L"Plus ▼", L"Altro ▼", L"Más ▼", L"상세▼", L"详细▼", L"المزيد▼", L"Ещё▼", L"Mehr▼", L"Mais▼", L"Meer▼", L"Więcej▼", L"Daha▼"));
+	if (m_qkVelL.GetSafeHwnd())
+		m_qkVelL.SetWindowText(LL14(L"強さ", L"Vel", L"Vel", L"Vel", L"Vel", L"세기", L"力度", L"قوة", L"Сила", L"Stärke", L"Vel", L"Sterkte", L"Siła", L"Güç"));
+	if (m_qkGateL.GetSafeHwnd())
+		m_qkGateL.SetWindowText(LL14(L"長さ%", L"Gate", L"Durée", L"Durata", L"Duración", L"길이", L"长度", L"مدة", L"Длина", L"Länge", L"Duração", L"Duur", L"Długość", L"Süre"));
+	if (m_qkPanL.GetSafeHwnd())
+		m_qkPanL.SetWindowText(LL14(L"パン", L"Pan", L"Pan", L"Pan", L"Pan", L"팬", L"声像", L"تموضع", L"Пан", L"Pan", L"Pan", L"Pan", L"Pan", L"Pan"));
+	if (m_qkVolL.GetSafeHwnd())
+		m_qkVolL.SetWindowText(LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol", L"음량", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Głośn.", L"Ses"));
+	if (m_qkApply.GetSafeHwnd())
+		m_qkApply.SetWindowText(LL14(L"適用", L"Apply", L"OK", L"OK", L"OK", L"적용", L"应用", L"تطبيق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Uygula"));
 	/* 譜面2①: ツールバーの言語化。音価/臨時記号は記号固定、休符/タイ/調号は言語化。 */
 	if (m_dvRest.GetSafeHwnd())
 		m_dvRest.SetWindowText(LL14(L"休", L"R", L"S", L"P", L"S", L"쉼", L"休", L"سك", L"П", L"P", L"P", L"R", L"P", L"S"));
@@ -400,6 +423,8 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	ScStaffSetPreviewPump(MidiScorePumpThunk, this);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
+	/* 子を作っている最中に描くと、字の無いボタンが見えたまま固まる。 */
+	::SendMessage(m_hWnd, WM_SETREDRAW, FALSE, 0);
 
 	auto flatBtn = [](CCustomStandardButton& b) {
 		if (!b.GetSafeHwnd()) return;
@@ -558,6 +583,39 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	if (!m_infoBar.GetSafeHwnd())
 		m_infoBar.Create(L"", WS_CHILD | WS_VISIBLE, CRect(0, 0, 10, 10), this, IDC_SAE_INFO);
 	m_infoBar.SetAeroMode(FALSE);
+	{
+		auto mkLab = [&](CCustomStatic& s, int id) {
+			if (!s.GetSafeHwnd())
+				s.Create(L"", WS_CHILD | WS_CLIPSIBLINGS | SS_RIGHT | SS_CENTERIMAGE,
+					CRect(0, 0, 40, 18), this, id);
+			s.SetAeroMode(FALSE);
+			s.SetKeepFontHeight(TRUE);
+			s.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+			s.ShowWindow(SW_HIDE);
+		};
+		auto mkEd = [&](CCustomEdit& e, int id) {
+			if (!e.GetSafeHwnd())
+				e.Create(WS_CHILD | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER,
+					CRect(0, 0, 40, 20), this, id);
+			e.SetAeroMode(FALSE);
+			e.ShowWindow(SW_HIDE);
+		};
+		mkLab(m_qkLbl, IDC_SAE_QK_LBL);
+		m_qkLbl.ModifyStyle(SS_RIGHT, SS_LEFT);
+		mkLab(m_qkVelL, IDC_SAE_QK_VELL);
+		mkEd(m_qkVel, IDC_SAE_QK_VEL);
+		mkLab(m_qkGateL, IDC_SAE_QK_GATEL);
+		mkEd(m_qkGate, IDC_SAE_QK_GATE);
+		mkLab(m_qkPanL, IDC_SAE_QK_PANL);
+		mkEd(m_qkPan, IDC_SAE_QK_PAN);
+		mkLab(m_qkVolL, IDC_SAE_QK_VOLL);
+		mkEd(m_qkVol, IDC_SAE_QK_VOL);
+		if (!m_qkApply.GetSafeHwnd())
+			m_qkApply.Create(L"適用", WS_CHILD | BS_PUSHBUTTON, CRect(0, 0, 52, 22), this, IDC_SAE_QK_APPLY);
+		m_qkApply.SetAeroMode(FALSE);
+		m_qkApply.SetFlat(TRUE);
+		m_qkApply.ShowWindow(SW_HIDE);
+	}
 
 	ApplyLang();
 	RefreshChComboLabels();
@@ -603,8 +661,9 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	LayoutChrome();
 	RestoreUiGeom();
 	RefreshPartEnabled();
-	SetupTooltips();
 	UpdateHelpBar();
+	::SendMessage(m_hWnd, WM_SETREDRAW, TRUE, 0);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
 	return TRUE;
 }
 
@@ -617,6 +676,14 @@ BOOL CSasamiMidiScoreDlg::PreTranslateMessage(MSG* pMsg)
 		&& pMsg->wParam == VK_RETURN) {
 		OnBnClickedBarGo();
 		return TRUE;
+	}
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
+		HWND h = pMsg->hwnd;
+		if (h && (h == m_qkVel.GetSafeHwnd() || h == m_qkGate.GetSafeHwnd()
+			|| h == m_qkPan.GetSafeHwnd() || h == m_qkVol.GetSafeHwnd())) {
+			ApplyQuickBar();
+			return TRUE;
+		}
 	}
 	if (pMsg->message == WM_KEYDOWN) {
 		const int ctrlNow = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
@@ -947,8 +1014,9 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
 	y += 22;
 	const int helpH = 48;
+	const int qkH = m_qkShown ? 28 : 0;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
-	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
+	const int bodyBotLimit = rc.Height() - pad - helpH - rollH - qkH;
 	const int chromeBottom = y;
 	m_bodyRc.SetRect(pad, chromeBottom, max(pad + 40, rc.Width()), max(chromeBottom + 40, bodyBotLimit));
 	/* H-scroll track reserved at bottom of body; strip sits above it (not crushed). */
@@ -970,6 +1038,26 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	else
 		m_rollRc.SetRect(0, 0, 0, 0);
 	m_ui.followViewW = max(1, m_gridRc.Width());
+	{
+		const int qkTop = rc.Height() - pad - helpH - qkH;
+		auto placeQk = [&](CWnd& w, int x, int wid, int show) {
+			if (!w.GetSafeHwnd()) return;
+			if (!show) { w.ShowWindow(SW_HIDE); return; }
+			w.MoveWindow(x, qkTop + 3, wid, 22);
+			w.ShowWindow(SW_SHOW);
+		};
+		int qx = pad;
+		placeQk(m_qkLbl, qx, 88, m_qkShown); qx += 92;
+		placeQk(m_qkVelL, qx, 44, m_qkShown); qx += 46;
+		placeQk(m_qkVel, qx, 44, m_qkShown); qx += 50;
+		placeQk(m_qkGateL, qx, 48, m_qkShown); qx += 50;
+		placeQk(m_qkGate, qx, 44, m_qkShown); qx += 50;
+		placeQk(m_qkPanL, qx, 44, m_qkShown); qx += 46;
+		placeQk(m_qkPan, qx, 44, m_qkShown); qx += 50;
+		placeQk(m_qkVolL, qx, 44, m_qkShown); qx += 46;
+		placeQk(m_qkVol, qx, 44, m_qkShown); qx += 50;
+		placeQk(m_qkApply, qx, 56, m_qkShown);
+	}
 	if (m_helpBar.GetSafeHwnd())
 		m_helpBar.MoveWindow(pad, rc.Height() - pad - helpH, max(200, rc.Width() - pad * 2), helpH);
 	UpdateScrollBars();
@@ -1238,8 +1326,182 @@ void CSasamiMidiScoreDlg::RefreshStrip()
 	UpdateScrollBars();
 }
 
+static void ScAuditionSelection(const ScEvent* ev, int n, const ScStaffUi* u);
+
+static int QkChanAt(const ScEvent* ev, int n, int ch, uint32_t tick, uint8_t kind, int deflt)
+{
+	int v = deflt;
+	if (!ev) return v;
+	for (int i = 0; i < n; i++) {
+		if ((int)ev[i].ch != ch || ev[i].kind != kind) continue;
+		if (ev[i].tick > tick) continue;
+		v = (int)ev[i].a;
+	}
+	return v;
+}
+
+static void QkUpsertChan(ScEvent* ev, int* n, int ch, uint32_t tick, uint8_t kind, int value)
+{
+	if (!ev || !n || ch < 0 || ch >= SC_MIDI_CH) return;
+	if (value < 0) value = 0;
+	if (value > 127) value = 127;
+	for (int i = 0; i < *n; i++) {
+		if ((int)ev[i].ch == ch && ev[i].kind == kind && ev[i].tick == tick) {
+			ev[i].a = (uint8_t)value;
+			return;
+		}
+	}
+	if (*n >= SC_EV_MAX) return;
+	ScEvent& e = ev[(*n)++];
+	e = ScEvent{};
+	e.tick = tick;
+	e.seq = (uint32_t)(*n);
+	e.ch = (uint8_t)ch;
+	e.kind = kind;
+	e.a = (uint8_t)value;
+}
+
+void CSasamiMidiScoreDlg::SyncQuickBar()
+{
+	if (!m_qkVel.GetSafeHwnd()) return;
+	int nNote = 0;
+	int vel = -1, gate = -1, pan = -1, vol = -1;
+	int velMix = 0, gateMix = 0, panMix = 0, volMix = 0;
+	const int nSel = m_ui.nSel;
+	for (int s = 0; s < nSel; s++) {
+		const int ix = m_ui.selList[s];
+		if (ix < 0 || ix >= m_doc.evCount) continue;
+		const ScEvent& e = m_doc.ev[ix];
+		if (e.kind != SC_EV_NOTE && e.kind != SC_EV_TIE) continue;
+		const int ev = (int)e.b;
+		const int eg = (e.c >= 1 && e.c <= 100) ? (int)e.c : 100;
+		const int ep = QkChanAt(m_doc.ev, m_doc.evCount, (int)e.ch, e.tick, SC_EV_PAN, 64);
+		const int eo = QkChanAt(m_doc.ev, m_doc.evCount, (int)e.ch, e.tick, SC_EV_VOL, 100);
+		if (nNote == 0) { vel = ev; gate = eg; pan = ep; vol = eo; }
+		else {
+			if (vel != ev) velMix = 1;
+			if (gate != eg) gateMix = 1;
+			if (pan != ep) panMix = 1;
+			if (vol != eo) volMix = 1;
+		}
+		nNote++;
+	}
+	const int show = nNote > 0 ? 1 : 0;
+	if (show != m_qkShown) {
+		m_qkShown = show;
+		if (!m_bInLayout)
+			LayoutChrome();
+	}
+	if (!show) {
+		m_qkVelDirty = m_qkGateDirty = m_qkPanDirty = m_qkVolDirty = 0;
+		return;
+	}
+	CString cap;
+	cap.Format(LL14(L"選択 %d音", L"Sel %d", L"Sél %d", L"Sel %d", L"Sel %d",
+		L"선택 %d", L"选择 %d", L"%d", L"Выбр %d", L"Wahl %d", L"Sel %d", L"Sel %d", L"Zazn %d", L"Seç %d"), nNote);
+	if (m_qkLbl.GetSafeHwnd()) m_qkLbl.SetWindowText(cap);
+	m_qkFill = 1;
+	auto put = [&](CCustomEdit& ed, int* dirty, int val, int mix) {
+		if (GetFocus() == &ed) return;
+		CString s;
+		if (!mix && val >= 0) s.Format(L"%d", val);
+		ed.SetWindowText(s);
+		*dirty = 0;
+	};
+	put(m_qkVel, &m_qkVelDirty, vel, velMix);
+	put(m_qkGate, &m_qkGateDirty, gate, gateMix);
+	put(m_qkPan, &m_qkPanDirty, pan, panMix);
+	put(m_qkVol, &m_qkVolDirty, vol, volMix);
+	m_qkFill = 0;
+}
+
+void CSasamiMidiScoreDlg::OnQkEditChange(UINT id)
+{
+	if (m_qkFill) return;
+	if (id == IDC_SAE_QK_VEL) m_qkVelDirty = 1;
+	else if (id == IDC_SAE_QK_GATE) m_qkGateDirty = 1;
+	else if (id == IDC_SAE_QK_PAN) m_qkPanDirty = 1;
+	else if (id == IDC_SAE_QK_VOL) m_qkVolDirty = 1;
+}
+
+void CSasamiMidiScoreDlg::OnQkApply()
+{
+	ApplyQuickBar();
+}
+
+void CSasamiMidiScoreDlg::ApplyQuickBar()
+{
+	if (!m_qkVelDirty && !m_qkGateDirty && !m_qkPanDirty && !m_qkVolDirty) return;
+	auto read = [](CCustomEdit& ed, int lo, int hi, int* out) -> int {
+		if (!ed.GetSafeHwnd()) return 0;
+		CString t; ed.GetWindowText(t); t.Trim();
+		if (t.IsEmpty()) return 0;
+		int v = _wtoi(t);
+		if (v < lo) v = lo;
+		if (v > hi) v = hi;
+		*out = v;
+		return 1;
+	};
+	int vel = 100, gate = 100, pan = 64, vol = 100;
+	const int doVel = m_qkVelDirty && read(m_qkVel, 1, 127, &vel);
+	const int doGate = m_qkGateDirty && read(m_qkGate, 1, 100, &gate);
+	const int doPan = m_qkPanDirty && read(m_qkPan, 0, 127, &pan);
+	const int doVol = m_qkVolDirty && read(m_qkVol, 0, 127, &vol);
+	if (!doVel && !doGate && !doPan && !doVol) return;
+	HistPush();
+	uint8_t seen[SC_MIDI_CH];
+	uint32_t tick0[SC_MIDI_CH];
+	memset(seen, 0, sizeof(seen));
+	int nTouch = 0;
+	for (int s = 0; s < m_ui.nSel; s++) {
+		const int ix = m_ui.selList[s];
+		if (ix < 0 || ix >= m_doc.evCount) continue;
+		ScEvent& e = m_doc.ev[ix];
+		if (e.kind != SC_EV_NOTE && e.kind != SC_EV_TIE) continue;
+		if (doVel) e.b = (uint8_t)vel;
+		if (doGate) e.c = (uint8_t)gate;
+		const int ch = (int)e.ch;
+		if (ch < 0 || ch >= SC_MIDI_CH) continue;
+		if (!seen[ch] || e.tick < tick0[ch]) tick0[ch] = e.tick;
+		seen[ch] = 1;
+		nTouch++;
+	}
+	if (!nTouch) return;
+	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
+		if (!seen[ch]) continue;
+		if (doPan) {
+			QkUpsertChan(m_doc.ev, &m_doc.evCount, ch, tick0[ch], SC_EV_PAN, pan);
+			VstLiveMidiToPart(ch + 1, (DWORD)(0xB0 | (ch & 15)) | (10u << 8) | ((DWORD)pan << 16));
+		}
+		if (doVol) {
+			QkUpsertChan(m_doc.ev, &m_doc.evCount, ch, tick0[ch], SC_EV_VOL, vol);
+			VstLiveMidiToPart(ch + 1, (DWORD)(0xB0 | (ch & 15)) | (7u << 8) | ((DWORD)vol << 16));
+		}
+	}
+	m_qkVelDirty = m_qkGateDirty = m_qkPanDirty = m_qkVolDirty = 0;
+	PushDocToText();
+	InvalidateRect(m_bodyRc, FALSE);
+	if (doVel) ScAuditionSelection(m_doc.ev, m_doc.evCount, &m_ui);
+	m_status.SetWindowText(LL14(
+		L"選択ノートへ反映しました",
+		L"Applied to the selected notes",
+		L"Appliqué aux notes",
+		L"Applicato alle note",
+		L"Aplicado a las notas",
+		L"선택 음표에 적용",
+		L"已应用到选中音符",
+		L"طُبّق على النغمات",
+		L"Применено к нотам",
+		L"Auf die Noten angewendet",
+		L"Aplicado às notas",
+		L"Toegepast op de noten",
+		L"Zastosowano do nut",
+		L"Seçili notalara uygulandı"));
+}
+
 void CSasamiMidiScoreDlg::SyncPropFromSel()
 {
+	SyncQuickBar();
 	m_propMode = 0;
 	if (m_ui.selEv < 0 || m_ui.selEv >= m_doc.evCount) {
 		m_edNote.SetWindowText(L"");
@@ -1417,6 +1679,34 @@ void CSasamiMidiScoreDlg::UpdateHoverStatus(CPoint pt)
 		m_status.SetWindowText(st);
 }
 
+static void ScAuditionSelection(const ScEvent* ev, int n, const ScStaffUi* u)
+{
+	if (!ev || !u || n <= 0) return;
+	int parts[12], notes[12], vels[12], c = 0;
+	auto take = [&](int ix) {
+		if (c >= 12 || ix < 0 || ix >= n) return;
+		const ScEvent& e = ev[ix];
+		if (e.kind != SC_EV_NOTE && e.kind != SC_EV_TIE) return;
+		const int part = (int)e.ch + 1;
+		const int note = ScStaffEvWrittenMidi(ev, n, e, 0, (int)e.ch) & 127;
+		for (int i = 0; i < c; i++) {
+			if (parts[i] == part && notes[i] == note) return;
+		}
+		parts[c] = part;
+		notes[c] = note;
+		int vel = e.b ? (int)e.b : 100;
+		if (vel < 1) vel = 100;
+		vels[c] = vel;
+		c++;
+	};
+	if (u->nSel > 0) {
+		for (int i = 0; i < u->nSel; i++) take(u->selList[i]);
+	} else if (u->selEv >= 0) {
+		take(u->selEv);
+	}
+	if (c > 0) VstLiveAuditionHits(parts, notes, vels, c, 280);
+}
+
 void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 {
 	int snapTr = -1;
@@ -1507,14 +1797,17 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			m_ui.markerSolidTrack = ch;
 			m_curCh = ch;
 			if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
-			if (ScStaffSelHas(&m_ui, hit) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
-				/* keep existing selection */
-			} else if (GetKeyState(VK_SHIFT) & 0x8000) {
-				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 0);
+			const int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if (shift) {
+				if (ScStaffSelHas(&m_ui, hit)) ScStaffSelRemove(&m_ui, hit);
+				else ScStaffSelAdd(&m_ui, hit);
+			} else if (ScStaffSelHas(&m_ui, hit) && m_ui.nSel > 1) {
+				/* keep the group so the chord can be dragged */
 			} else {
 				ScStaffSelClear(&m_ui);
-				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 0);
+				ScStaffSelAdd(&m_ui, hit);
 			}
+			m_ui.selRangeValid = 0;
 			m_ui.dragEv = hit;
 			m_ui.dragMode = 2;
 			m_dragLastX = pt.x;
@@ -1522,6 +1815,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 			m_histDragPushed = 0;
 			SyncPropFromSel();
 			RefreshStrip();
+			ScAuditionSelection(m_doc.ev, m_doc.evCount, &m_ui);
 			m_status.SetWindowText(LL14(L"選択中 — Delete/Backspace で削除。Exp/Vol/Pitch はこの MIDI ch のみ。", L"Selected — Delete/Backspace removes. Exp/Vol/Pitch apply to this MIDI ch only.", L"Sélection — Suppr. Exp/Vol/Pitch = ce canal MIDI seulement.", L"Selezione — Canc. Exp/Vol/Pitch solo su questo ch MIDI.", L"Selección — Supr. Exp/Vol/Pitch solo en este ch MIDI.", L"선택됨 — Delete/Backspace 삭제. Exp/Vol/Pitch는 이 MIDI ch만.", L"已选 — Delete/Backspace 删除。Exp/Vol/Pitch 仅本 MIDI 通道。", L"محدد — Delete/Backspace. Exp/Vol/Pitch لهذه قناة MIDI فقط.", L"Выбрано — Delete/Backspace. Exp/Vol/Pitch только для этого MIDI ch.", L"Auswahl — Entf. Exp/Vol/Pitch nur für diesen MIDI-Kanal.", L"Selecionado — Del. Exp/Vol/Pitch só neste ch MIDI.", L"Geselecteerd — Del. Exp/Vol/Pitch alleen dit MIDI-kanaal.", L"Zaznaczono — Del. Exp/Vol/Pitch tylko ten kanał MIDI.", L"Seçili — Del. Exp/Vol/Pitch yalnızca bu MIDI ch."));
 			InvalidateRect(m_bodyRc, FALSE);
 		} else {
@@ -1580,6 +1874,7 @@ void CSasamiMidiScoreDlg::PlaceOrEditAt(CPoint pt)
 		m_dragLastY = pt.y;
 		m_histDragPushed = 0;
 		SyncPropFromSel();
+		ScAuditionSelection(m_doc.ev, m_doc.evCount, &m_ui);
 		m_status.SetWindowText(LL14(L"音符選択 — Delete/Backspace で削除。Exp/Pitch はチャンネル単位。", L"Note selected — Delete/Backspace to remove. Exp/Pitch are per-channel.", L"Note sélectionnée — Suppr. Exp/Pitch par canal.", L"Nota selezionata — Canc. Exp/Pitch per canale.", L"Nota seleccionada — Supr. Exp/Pitch por canal.", L"음표 선택 — Delete/Backspace 삭제. Exp/Pitch는 채널별.", L"已选音符 — Delete/Backspace 删除。Exp/Pitch 按通道。", L"نغمة محددة — Delete/Backspace. Exp/Pitch لكل قناة.", L"Нота выбрана — Delete/Backspace. Exp/Pitch по каналам.", L"Note gewählt — Entf. Exp/Pitch pro Kanal.", L"Nota selecionada — Del. Exp/Pitch por canal.", L"Noot geselecteerd — Del. Exp/Pitch per kanaal.", L"Zaznaczono nutę — Del. Exp/Pitch per kanał.", L"Nota seçili — Del. Exp/Pitch kanal bazlı."));
 		InvalidateRect(m_bodyRc, FALSE);
 		return;
@@ -1736,11 +2031,15 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 		   the UI on tone-map return (and after preview). GS/XG table + tip only. */
 		if (m_ui.vstLabel[i][0] && prog < 0)
 			wcsncpy_s(name, m_ui.vstLabel[i], _TRUNCATE);
+		int fromMap = 0;
 		if (!name[0]) {
 			const int isDrum = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, i, 0);
-			SasamiToneLookupAuto(msb, lsb, pc, isDrum, name, 48);
+			SasamiToneLookupVariation(msb, lsb, pc, isDrum, name, 48);
+			fromMap = name[0] ? 1 : 0;
 		}
-		if (name[0])
+		if (fromMap)
+			_snwprintf_s(m_ui.progLabel[i], _TRUNCATE, L"%d %s", (pc & 127) + 1, name);
+		else if (name[0])
 			_snwprintf_s(m_ui.progLabel[i], _TRUNCATE, L"%s", name);
 		else if (prog >= 0)
 			_snwprintf_s(m_ui.progLabel[i], _TRUNCATE, L"Prog  %d", prog);
@@ -1784,10 +2083,10 @@ void CSasamiMidiScoreDlg::ApplyBindProgToScore(int ch0, uint32_t atTick)
 
 	wchar_t name[48];
 	name[0] = 0;
-	SasamiToneLookupAuto(msb, lsb, prog,
+	SasamiToneLookupVariation(msb, lsb, prog,
 		ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, ch0, tick) ? 1 : 0, name, 48);
 	if (name[0])
-		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"%s", name);
+		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"%d %s", (prog & 127) + 1, name);
 	else
 		_snwprintf_s(m_ui.progLabel[ch0], _TRUNCATE, L"Prog  %d", prog);
 
@@ -1930,6 +2229,7 @@ LRESULT CSasamiMidiScoreDlg::OnDeferredSession(WPARAM, LPARAM)
 
 LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 {
+	SetupTooltips();
 	__try {
 		SyncVstBindsFromLive();
 		SyncFxBindsToLive();
@@ -2506,6 +2806,7 @@ void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 				m_dragLastX = point.x;
 				m_dragLastY = point.y;
 				SyncPropFromSel();
+				if (dSemi) ScAuditionSelection(m_doc.ev, m_doc.evCount, &m_ui);
 				InvalidateRect(m_gridRc, FALSE);
 			}
 		}
@@ -2556,6 +2857,7 @@ void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 	if (m_ui.rulerDragOn) {
 		ScStaffSelectTickRange(&m_ui, m_doc.ev, m_doc.evCount, 0, m_ui.rulerT0, m_ui.rulerT1, -1);
 		m_ui.rulerDragOn = 0;
+		SyncQuickBar();
 		InvalidateRect(m_bodyRc, FALSE);
 	}
 	if (m_ui.marqueeOn) {
@@ -2563,8 +2865,12 @@ void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_ui.marqueeY1 = point.y;
 		CRect r(min(m_ui.marqueeX0, m_ui.marqueeX1), min(m_ui.marqueeY0, m_ui.marqueeY1),
 			max(m_ui.marqueeX0, m_ui.marqueeX1), max(m_ui.marqueeY0, m_ui.marqueeY1));
-		ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, r, 1);
+		if (r.Width() < 5 && r.Height() < 5)
+			ScStaffSelClear(&m_ui);
+		else
+			ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, r, 0);
 		m_ui.marqueeOn = 0;
+		SyncQuickBar();
 		InvalidateRect(m_bodyRc, FALSE);
 	}
 	m_ui.eraseDrag = 0;
@@ -2587,7 +2893,10 @@ void CSasamiMidiScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_ui.dragEv = -1;
 	}
 	m_ui.dragMode = 0;
-	if (m_histDragPushed) PushDocToText();
+	if (m_histDragPushed) {
+		ScAuditionSelection(m_doc.ev, m_doc.evCount, &m_ui);
+		PushDocToText();
+	}
 	m_histDragPushed = 0;
 	ReleaseCapture();
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
@@ -5579,6 +5888,7 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
 			RefreshStrip();
 			PushDocToText();
+			SyncQuickBar();
 			InvalidateRect(m_bodyRc, FALSE);
 			m_status.SetWindowText(LL14(L"選択を削除しました。", L"Deleted selection.", L"Sélection supprimée.", L"Selezione eliminata.", L"Selección eliminada.", L"선택 삭제됨.", L"已删除选区。", L"تم حذف التحديد.", L"Выделение удалено.", L"Auswahl gelöscht.", L"Seleção apagada.", L"Selectie verwijderd.", L"Usunięto zaznaczenie.", L"Seçim silindi."));
 		} else {
@@ -5661,6 +5971,7 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (nChar == VK_ESCAPE) {
 		ScStaffEnterSelectTool(&m_ui);
 		ScStaffSelClear(&m_ui);
+		SyncQuickBar();
 		UpdateNoteCursor();
 		InvalidateRect(m_bodyRc, FALSE);
 		return;

@@ -209,6 +209,8 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 			L"Partia %d\nKlik — odsłuch, podwójny — zatwierdź. VST3… dla własnego instrumentu.",
 			L"Parti %d\nTıkla dinle, çift tıkla onayla. VST3… özel çalgı için."), m_part);
 	m_hint.SetWindowText(h);
+	if (!ToneIsEmpty(m_prog))
+		ApplyTone(m_prog, 0);
 	CCC_BringDialogToForeground(this);
 	return TRUE;
 }
@@ -319,6 +321,19 @@ void CSasamiToneMapDlg::RebuildGrid()
 		if (!m_names[pc][0])
 			wcsncpy_s(m_names[pc], L"------", _TRUNCATE);
 	}
+	/* Keep the current program on screen. A gold row off the top looks like "nothing selected". */
+	{
+		const int cellH = m_cellH > 0 ? m_cellH : 18;
+		const int row = (m_prog & 127) / 4;
+		const int y = row * cellH;
+		const int viewH = m_gridRc.Height();
+		const int maxScroll = max(0, 32 * cellH - viewH);
+		if (viewH > cellH && (y < m_scroll || y + cellH > m_scroll + viewH)) {
+			m_scroll = y - (viewH - cellH) / 2;
+			if (m_scroll < 0) m_scroll = 0;
+			if (m_scroll > maxScroll) m_scroll = maxScroll;
+		}
+	}
 	InvalidateRect(m_gridRc, FALSE);
 }
 
@@ -344,7 +359,7 @@ void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 	if (ToneIsEmpty(pc)) return;
 	m_prog = pc;
 	CString h;
-	h.Format(L"PC#%d  %s  (Bank %d/%d)", m_prog + 1, m_names[m_prog], m_bankMsb, m_bankLsb);
+	h.Format(L"選択  %d  %s    Bank %d/%d", m_prog + 1, m_names[m_prog], m_bankMsb, m_bankLsb);
 	m_hint.SetWindowText(h);
 	InvalidateRect(m_gridRc, FALSE);
 	if (!audition || !TonePortLive(m_part)) return;
@@ -382,29 +397,57 @@ void CSasamiToneMapDlg::OnPaint()
 	const int cols = 4;
 	const int cellW = max(8, m_gridRc.Width() / cols);
 	const int cellH = m_cellH > 0 ? m_cellH : 18;
-	dc.SetBkMode(TRANSPARENT);
-	CFont* old = dc.SelectObject(CFont::FromHandle((HFONT)GetStockObject(DEFAULT_GUI_FONT)));
-	dc.IntersectClipRect(m_gridRc);
+	/* Glass GDI fills are alpha 0, so the selection wash never showed.
+	   Paint the grid opaquely, and mark the current program in bold + gold. */
+	CDC mem;
+	CBitmap bmp;
+	const int gw = m_gridRc.Width();
+	const int gh = m_gridRc.Height();
+	if (!mem.CreateCompatibleDC(&dc) || !bmp.CreateCompatibleBitmap(&dc, gw, gh)) {
+		dc.FillSolidRect(m_gridRc, RGB(250, 250, 252));
+		return;
+	}
+	CBitmap* oldBmp = mem.SelectObject(&bmp);
+	mem.FillSolidRect(0, 0, gw, gh, RGB(250, 250, 252));
+	mem.SetBkMode(TRANSPARENT);
+	HFONT gui = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+	LOGFONT lf = {};
+	GetObject(gui, sizeof(lf), &lf);
+	lf.lfWeight = FW_BOLD;
+	HFONT bold = CreateFontIndirect(&lf);
+	CFont* oldFont = mem.SelectObject(CFont::FromHandle(gui));
 	for (int pc = 0; pc < 128; ++pc) {
 		const int col = pc % cols;
 		const int row = pc / cols;
 		CRect cell(
-			m_gridRc.left + col * cellW,
-			m_gridRc.top + row * cellH - m_scroll,
-			m_gridRc.left + (col + 1) * cellW - 1,
-			m_gridRc.top + (row + 1) * cellH - 1 - m_scroll);
-		if (cell.bottom < m_gridRc.top || cell.top > m_gridRc.bottom) continue;
+			col * cellW,
+			row * cellH - m_scroll,
+			(col + 1) * cellW - 1,
+			(row + 1) * cellH - 1 - m_scroll);
+		if (cell.bottom < 0 || cell.top > gh) continue;
 		const int empty = ToneIsEmpty(pc);
 		const int sel = (!empty && pc == m_prog);
-		dc.FillSolidRect(cell, sel ? RGB(80, 200, 220) : (empty ? RGB(230, 230, 234) : RGB(250, 250, 252)));
-		dc.Draw3dRect(cell, RGB(180, 180, 190), RGB(180, 180, 190));
+		mem.FillSolidRect(cell, sel ? RGB(255, 214, 90) : (empty ? RGB(232, 232, 236) : RGB(255, 255, 255)));
+		if (sel)
+			mem.FillSolidRect(cell.left, cell.top, 5, cell.Height(), RGB(180, 90, 0));
+		mem.Draw3dRect(cell, sel ? RGB(160, 80, 0) : RGB(190, 190, 198),
+			sel ? RGB(160, 80, 0) : RGB(190, 190, 198));
+		if (sel)
+			mem.Draw3dRect(cell.left + 1, cell.top + 1, cell.Width() - 2, cell.Height() - 2,
+				RGB(120, 60, 0), RGB(120, 60, 0));
 		CString s;
-		s.Format(L"%d:%s", pc + 1, m_names[pc]);
-		dc.SetTextColor(empty ? RGB(150, 150, 160) : RGB(20, 20, 30));
-		CRect tr = cell; tr.DeflateRect(3, 1);
-		dc.DrawText(s, tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+		s.Format(sel ? L"● %d  %s" : L"%d  %s", pc + 1, m_names[pc]);
+		mem.SetTextColor(empty ? RGB(150, 150, 160) : (sel ? RGB(60, 30, 0) : RGB(20, 20, 30)));
+		if (sel && bold) mem.SelectObject(CFont::FromHandle(bold));
+		else mem.SelectObject(CFont::FromHandle(gui));
+		CRect tr = cell; tr.DeflateRect(sel ? 8 : 4, 1);
+		mem.DrawText(s, tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 	}
-	dc.SelectObject(old);
+	if (oldFont) mem.SelectObject(oldFont);
+	if (bold) DeleteObject(bold);
+	CCC_BlitStretchOpaque(dc.GetSafeHdc(), m_gridRc.left, m_gridRc.top, gw, gh,
+		mem.GetSafeHdc(), 0, 0, gw, gh);
+	if (oldBmp) mem.SelectObject(oldBmp);
 }
 
 BOOL CSasamiToneMapDlg::OnEraseBkgnd(CDC*) { return TRUE; }

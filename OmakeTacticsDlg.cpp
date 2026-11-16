@@ -14,6 +14,7 @@
 #pragma comment(lib, "imm32.lib")
 
 using namespace otac;
+namespace otac { void TacShopSerReset(); }
 
 extern COggDlg* og;
 
@@ -409,6 +410,7 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 	ShowWindow(SW_SHOW);
 	SetForegroundWindow();
 	SetFocus();
+	SyncBorderlessZ();
 	return FALSE;
 }
 
@@ -460,12 +462,37 @@ BOOL COmakeTacticsDlg::MonitorSize(RECT* rc, int* pxW, int* pxH) const
 	return w > 0 && h > 0;
 }
 
+static BOOL TacInFamily(HWND h, HWND root)
+{
+	if (!h || !root) return FALSE;
+	for (int i = 0; h && i < 12; i++) {
+		if (h == root || ::IsChild(root, h)) return TRUE;
+		HWND owner = ::GetWindow(h, GW_OWNER);
+		if (!owner || owner == h) break;
+		h = owner;
+	}
+	return FALSE;
+}
+
 void COmakeTacticsDlg::SyncBorderlessZ()
 {
-	if (!m_gameOk || !GetSafeHwnd()) return;
-	if (otac::TacWinMode(m_game.Save()) != 1) return;
-	::SetWindowPos(m_hWnd, m_fg ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	if (!GetSafeHwnd() || m_destroying || IsIconic() || !::IsWindowVisible(m_hWnd)) return;
+	if (!::IsWindowEnabled(m_hWnd)) return;
+	if (m_gameOk && otac::TacWinMode(m_game.Save()) == 2 && m_game.Exclusive()) return;
+	HWND fg = ::GetForegroundWindow();
+	DWORD pid = 0;
+	if (fg) ::GetWindowThreadProcessId(fg, &pid);
+	const BOOL otherApp = (fg && pid != ::GetCurrentProcessId());
+	const LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
+	if (otherApp) {
+		if (ex & WS_EX_TOPMOST)
+			::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		return;
+	}
+	if (!(ex & WS_EX_TOPMOST))
+		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	if (fg && !TacInFamily(fg, m_hWnd))
+		::SetForegroundWindow(m_hWnd);
 }
 
 void COmakeTacticsDlg::ApplyWinMode()
@@ -473,7 +500,7 @@ void COmakeTacticsDlg::ApplyWinMode()
 	if (!m_gameOk || !GetSafeHwnd() || m_sizing) return;
 	int mode = otac::TacWinMode(m_game.Save());
 	if (m_winApplied == mode) {
-		if (mode == 1) SyncBorderlessZ();
+		SyncBorderlessZ();
 		if (mode == 2 && m_fg && !IsIconic() && !m_exclFail && !m_game.Exclusive()) {
 			if (!m_game.SetExclusive(TRUE)) m_exclFail = TRUE;
 		}
@@ -504,6 +531,7 @@ void COmakeTacticsDlg::ApplyWinMode()
 		saved.winSizeVer = 3;
 		m_winApplied = 0;
 		LayoutView();
+		SyncBorderlessZ();
 		return;
 	}
 	ApplyChrome(FALSE);
@@ -1224,6 +1252,7 @@ void COmakeTacticsDlg::RequestDestroyWindow()
 	HideImeEdit();
 	if (GetSafeHwnd()) {
 		HWND parent = ::GetParent(m_hWnd);
+		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		ShowWindow(SW_HIDE);
 		if (parent && ::IsWindow(parent) && ::IsWindowVisible(parent) && !::IsIconic(parent))
 			::SetForegroundWindow(parent);
@@ -1246,6 +1275,7 @@ LRESULT COmakeTacticsDlg::OnTacDestroy(WPARAM, LPARAM)
 	TacAudioStop();
 	if (m_gameOk) {
 		StoreWindowRect();
+		otac::TacShopSerReset();
 		m_game.Persist();
 		m_game.Shutdown();
 		m_gameOk = FALSE;

@@ -37,6 +37,8 @@ enum {
 	IDC_SAA_FORMVAL = 4950,
 	IDC_SAA_LTIMES = 4951,
 	IDC_SAA_TIMES = 4952,
+	IDC_SAA_LMELB = 4953,
+	IDC_SAA_MELB = 4954,
 	IDC_SAA_TGT_BASE = 4960,   /* +ch */
 	IDC_SAA_DRM_BASE = 5000    /* +ch */
 };
@@ -54,7 +56,10 @@ protected:
 	virtual void OnOK();
 	virtual void OnCancel();
 	afx_msg void OnPreview();
+	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+	afx_msg void OnClose();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	void FitToWorkArea();
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -85,10 +90,10 @@ protected:
 	int m_heard;
 	int m_vis[32], m_mute[32], m_solo[32], m_clef[32];
 	CCustomStatic m_styleLbl, m_pitchLbl, m_introLbl, m_breakLbl, m_endLbl, m_hint, m_status;
-	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl, m_loopLbl, m_timesLbl;
+	CCustomStatic m_progLbl, m_progDesc, m_targetLbl, m_drumLbl, m_groupLbl, m_genLbl, m_melBarsLbl, m_loopLbl, m_timesLbl;
 	CCustomStatic m_patLbl, m_accLbl, m_melLbl, m_formLbl, m_formVal;
 	CCustomSliderCtrl m_form;
-	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_loopBars, m_loopTimes, m_pat;
+	CCustomComboBox m_style, m_pitch, m_introBars, m_breakBars, m_endBars, m_prog, m_genBars, m_melBars, m_loopBars, m_loopTimes, m_pat;
 	CCustomCheckBox m_drum, m_bass, m_chord, m_melVol, m_melPitch, m_intro, m_brk, m_ending, m_vary;
 	CCustomRadioButton m_modeOver, m_modeRw;
 	CCustomCheckBox m_tgt[32], m_drm[32];
@@ -108,6 +113,8 @@ BEGIN_MESSAGE_MAP(CSasamiAutoArrangeDlg, CCustomBlurDialogExBase)
 	ON_WM_HSCROLL()
 	ON_BN_CLICKED(IDOK, OnOK)
 	ON_BN_CLICKED(IDCANCEL, OnCancel)
+	ON_WM_SYSCOMMAND()
+	ON_WM_CLOSE()
 END_MESSAGE_MAP()
 
 CSasamiAutoArrangeDlg::CSasamiAutoArrangeDlg(const ScAutoArrangeHost* host, CWnd* parent)
@@ -154,8 +161,11 @@ void CSasamiAutoArrangeDlg::ReadOpt(ScAutoArrangeOpt* o)
 	o->endBars = kLen[(ei >= 0 && ei < 11) ? ei : 2];
 	o->genBars = kGen[(gi >= 0 && gi < 9) ? gi : 0];
 	static const int kLoop[] = { 0, 16, 24, 32, 48, 64 };
+	static const int kMelB[] = { 16, 24, 32, 48, 64, 96, 128, 192, 256 };
 	int li = m_loopBars.GetSafeHwnd() ? m_loopBars.GetCurSel() : 0;
 	o->loopBars = kLoop[(li >= 0 && li < 6) ? li : 0];
+	int mi = m_melBars.GetSafeHwnd() ? m_melBars.GetCurSel() : 0;
+	o->melBars = kMelB[(mi >= 0 && mi < 9) ? mi : 0];
 	int times = m_loopTimes.GetSafeHwnd() ? m_loopTimes.GetCurSel() + 1 : 1;
 	if (times < 1) times = 1;
 	if (times > 20) times = 20;
@@ -236,7 +246,18 @@ int CSasamiAutoArrangeDlg::ApplyNow(ScAutoArrangeResult* r)
 	Restore();
 	ScAutoArrangeOpt opt;
 	ReadOpt(&opt);
-	return ScAutoArrangeApply(m_host->ev, m_host->evCount, m_host->evMax, &opt, r);
+	int had = (opt.targetMask != 0 || opt.drumMask != 0);
+	int err = ScAutoArrangeApply(m_host->ev, m_host->evCount, m_host->evMax, &opt, r);
+	if (had && r && err == SC_AE_OK) {
+		const int nCh = NumCh();
+		for (int ch = 0; ch < nCh && ch < 32; ch++) {
+			if (m_tgt[ch].GetSafeHwnd())
+				m_tgt[ch].SetCheck((r->usedMask & (1u << ch)) ? BST_CHECKED : BST_UNCHECKED);
+			if (m_drm[ch].GetSafeHwnd())
+				m_drm[ch].SetCheck((r->usedDrum & (1u << ch)) ? BST_CHECKED : BST_UNCHECKED);
+		}
+	}
+	return err;
 }
 
 void CSasamiAutoArrangeDlg::ShowResult(const ScAutoArrangeResult& r)
@@ -271,9 +292,8 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		memcpy(m_clef, m_host->ui->clef, sizeof(m_clef));
 		m_uiSnap = 1;
 	}
-	/* コントロールを作る前に枠を出す。ロックしたままだと全部できるまで何も見えない。 */
-	ShowWindow(SW_SHOW);
-	UpdateWindow();
+	/* 先に出すと、字の無いボタンが1個ずつ描かれて本体が止まる。揃ってから一度だけ描く。 */
+	::SendMessage(m_hWnd, WM_SETREDRAW, FALSE, 0);
 
 	CRect z(0, 0, 10, 10);
 	m_styleLbl.Create(LL14(L"パターン", L"Pattern", L"Motif", L"Schema", L"Patrón", L"패턴", L"型", L"نمط", L"Рисунок", L"Muster", L"Padrão", L"Patroon", L"Wzór", L"Kalıp"),
@@ -381,8 +401,8 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	m_ending.Create(LL14(L"エンディング", L"Ending", L"Fin", L"Finale", L"Final", L"엔딩", L"结尾", L"خاتمة", L"Концовка", L"Schluss", L"Final", L"Slot", L"Zakończenie", L"Bitiş"),
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_ENDING);
 	m_intro.SetCheck(BST_UNCHECKED);
-	m_brk.SetCheck(BST_CHECKED);
-	m_ending.SetCheck(BST_CHECKED);
+	m_brk.SetCheck(BST_UNCHECKED);
+	m_ending.SetCheck(BST_UNCHECKED);
 
 	const DWORD stStyle = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT | SS_ENDELLIPSIS;
 	auto addBarItem = [](CCustomComboBox& c, int n) {
@@ -406,6 +426,15 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	{
 		m_genBars.SetCurSel(4); /* 伴奏の本体は最初から 16小節 */
 	}
+	m_melBarsLbl.Create(LL14(L"メロディの長さ（16〜256小節）", L"Melody length (16–256 bars)", L"Longueur mélodie (16–256)", L"Lunghezza melodia (16–256)", L"Longitud melodía (16–256)", L"멜로디 길이(16–256마디)", L"旋律长度（16–256小节）", L"طول اللحن (16–256)", L"Длина мелодии (16–256)", L"Melodielänge (16–256)", L"Comprimento da melodia (16–256)", L"Melodielengte (16–256)", L"Długość melodii (16–256)", L"Melodi uzunluğu (16–256)"),
+		stStyle, z, this, IDC_SAA_LMELB);
+	m_melBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_MELB);
+	m_melBars.SetAeroMode(FALSE);
+	{
+		static const int kM[] = { 16, 24, 32, 48, 64, 96, 128, 192, 256 };
+		for (int i = 0; i < 9; i++) addBarItem(m_melBars, kM[i]);
+	}
+	m_melBars.SetCurSel(0); /* 16小節 */
 	m_loopLbl.Create(LL14(L"ループの長さ（同じ形に戻るまで）", L"Loop length (bars before the phrase returns)", L"Longueur de boucle", L"Lunghezza del ciclo", L"Longitud del ciclo", L"루프 길이", L"循环长度", L"طول الحلقة", L"Длина петли", L"Schleifenlänge", L"Comprimento do ciclo", L"Looplengte", L"Długość pętli", L"Döngü uzunluğu"),
 		stStyle, z, this, IDC_SAA_LLOOP);
 	m_loopBars.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_LOOP);
@@ -493,7 +522,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	/* --- v2: ジャンル見出し / コード進行 / 書き換え・重ね / 対象パート / ドラム ch --- */
 	m_groupLbl.Create(L"", stStyle, z, this, IDC_SAA_LGROUP);
 
-	m_progLbl.Create(LL14(L"コード進行", L"Chord progression", L"Progression", L"Progressione", L"Progresión", L"코드 진행", L"和弦进行", L"تتابع الأكوردات", L"Последовательность", L"Akkordfolge", L"Progressão", L"Akkoordenschema", L"Progresja", L"Akor dizisi"),
+	m_progLbl.Create(LL14(L"曲の運び", L"Shape of the song", L"Allure du morceau", L"Andamento del brano", L"Curso de la pieza", L"곡의 흐름", L"曲子的走向", L"سير اللحن", L"Ход пьесы", L"Gang des Stücks", L"Andamento da peça", L"Gang van het stuk", L"Bieg utworu", L"Parçanın gidişi"),
 		stStyle, z, this, IDC_SAA_LPROG);
 	m_prog.Create(WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP | CBS_DROPDOWNLIST, CRect(0, 0, 10, 24), this, IDC_SAA_PROG);
 	m_prog.SetAeroMode(FALSE);
@@ -563,7 +592,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 			_snwprintf_s(cap, _TRUNCATE, L"%d", ch + 1);
 			m_tgt[ch].Create(cap, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_TGT_BASE + ch);
 			m_drm[ch].Create(cap, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_AUTOCHECKBOX, z, this, IDC_SAA_DRM_BASE + ch);
-			if (ch >= 1 && ch <= 5) m_tgt[ch].SetCheck(BST_CHECKED);
+			if (ch >= 1 && ch <= 8) m_tgt[ch].SetCheck(BST_CHECKED);
 			if (ch == 9) m_drm[ch].SetCheck(BST_CHECKED);
 		}
 	}
@@ -579,7 +608,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	CWnd* kids[] = { &m_styleLbl, &m_style, &m_groupLbl, &m_patLbl, &m_pat, &m_formLbl, &m_formVal, &m_form, &m_progLbl, &m_prog, &m_progDesc,
 		&m_modeOver, &m_modeRw, &m_vary, &m_targetLbl, &m_drumLbl, &m_accLbl, &m_melLbl,
 		&m_drum, &m_bass, &m_chord, &m_melVol, &m_melPitch,
-		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars, &m_loopLbl, &m_loopBars, &m_timesLbl, &m_loopTimes,
+		&m_intro, &m_brk, &m_ending, &m_genLbl, &m_genBars, &m_melBarsLbl, &m_melBars, &m_loopLbl, &m_loopBars, &m_timesLbl, &m_loopTimes,
 		&m_introLbl, &m_breakLbl, &m_endLbl, &m_introBars, &m_breakBars, &m_endBars,
 		&m_pitchLbl, &m_pitch, &m_hint, &m_status, &m_preview, &m_reroll, &m_ok, &m_cancel };
 	for (int i = 0; i < (int)(sizeof(kids) / sizeof(kids[0])); i++)
@@ -598,7 +627,7 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 	};
 	prepLbl(m_styleLbl); prepLbl(m_pitchLbl); prepLbl(m_introLbl); prepLbl(m_breakLbl); prepLbl(m_endLbl);
 	prepLbl(m_hint); prepLbl(m_status); prepLbl(m_progLbl); prepLbl(m_progDesc);
-	prepLbl(m_targetLbl); prepLbl(m_drumLbl); prepLbl(m_groupLbl); prepLbl(m_genLbl);
+	prepLbl(m_targetLbl); prepLbl(m_drumLbl); prepLbl(m_groupLbl); prepLbl(m_genLbl); prepLbl(m_melBarsLbl);
 	prepLbl(m_patLbl); prepLbl(m_accLbl); prepLbl(m_melLbl); prepLbl(m_loopLbl); prepLbl(m_timesLbl);
 	prepLbl(m_formLbl); prepLbl(m_formVal);
 	{
@@ -617,10 +646,23 @@ BOOL CSasamiAutoArrangeDlg::OnInitDialog()
 		int h = 1008 + grows * 48;
 		if (h < 1048) h = 1048;
 		if (h > 1168) h = 1168;
-		SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
+		RECT work = {};
+		if (SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0)) {
+			int maxH = (work.bottom - work.top) - 24;
+			int maxW = (work.right - work.left) - 24;
+			if (maxH > 480 && h > maxH) h = maxH;
+			int w = 720;
+			if (maxW > 360 && w > maxW) w = maxW;
+			SetWindowPos(NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
+		} else {
+			SetWindowPos(NULL, 0, 0, 720, h, SWP_NOMOVE | SWP_NOZORDER);
+		}
 	}
+	FitToWorkArea();
 	UpdateFormCaption();
 	LayoutChrome();
+	::SendMessage(m_hWnd, WM_SETREDRAW, TRUE, 0);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
 	SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	SetForegroundWindow();
 	return TRUE;
@@ -705,12 +747,12 @@ void CSasamiAutoArrangeDlg::UpdateFormCaption()
 	if (f < 0) f = 0;
 	if (f > 100) f = 100;
 	const wchar_t* name;
-	if (f < 22)
+	if (f <= 0)
 		name = LL14(L"伴奏（メロディなし）", L"Backing (no melody)", L"Accompagnement (sans mélodie)", L"Solo accompagnamento", L"Acompañamiento (sin melodía)", L"반주(멜로디 없음)", L"伴奏（无旋律）", L"مرافقة بلا لحن", L"Аккомпанемент (без мелодии)", L"Begleitung (ohne Melodie)", L"Acompanhamento (sem melodia)", L"Begeleiding (geen melodie)", L"Akompaniament (bez melodii)", L"Eşlik (melodi yok)");
-	else if (f < 55)
-		name = LL14(L"伴奏寄り（短い動機）", L"Backing-leaning (short motif)", L"Plutôt accompagnement", L"Più accompagnamento", L"Más acompañamiento", L"반주 쪽(짧은 동기)", L"偏伴奏（短动机）", L"أقرب للمرافقة", L"Ближе к аккомпанементу", L"Eher Begleitung", L"Mais acompanhamento", L"Eerder begeleiding", L"Bliżej akompaniamentu", L"Eşliğe yakın");
-	else if (f < 80)
-		name = LL14(L"中間（フレーズあり）", L"Middle (with a phrase)", L"Intermédiaire", L"A metà", L"Intermedio", L"중간(프레이즈 있음)", L"中间（有乐句）", L"وسط", L"Середина", L"Mitte", L"Meio", L"Midden", L"Środek", L"Orta");
+	else if (f < 40)
+		name = LL14(L"伴奏＋メロディ風アレンジ", L"Backing + melodic line", L"Accompagnement + ligne mélodique", L"Accompagnamento + linea melodica", L"Acompañamiento + línea melódica", L"반주+멜로디 라인", L"伴奏＋旋律化编配", L"مرافقة + خط لحني", L"Аккомпанемент + мелодия", L"Begleitung + Melodielinie", L"Acompanhamento + linha melódica", L"Begeleiding + melodielijn", L"Akompaniament + linia melodyczna", L"Eşlik + melodi hattı");
+	else if (f < 75)
+		name = LL14(L"中間（伴奏も歌う）", L"Middle (singing backing)", L"Intermédiaire", L"A metà", L"Intermedio", L"중간(반주도 노래함)", L"中间（伴奏歌唱）", L"وسط", L"Середина", L"Mitte", L"Meio", L"Midden", L"Środek", L"Orta");
 	else
 		name = LL14(L"BGM（メロディ入り）", L"BGM (with a melody)", L"BGM (avec mélodie)", L"BGM (con melodia)", L"BGM (con melodía)", L"BGM(멜로디 있음)", L"BGM（有旋律）", L"BGM مع لحن", L"BGM (с мелодией)", L"BGM (mit Melodie)", L"BGM (com melodia)", L"BGM (met melodie)", L"BGM (z melodią)", L"BGM (melodili)");
 	wchar_t buf[96];
@@ -805,17 +847,18 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 	m_brk.MoveWindow(x + 130, y, 120, 22);
 	m_ending.MoveWindow(x + 260, y, max(80, w - 260), 22);
 	y += 28;
-	m_genLbl.MoveWindow(x, y, w, labH);
+	const int halfW = (w - 8) / 2;
+	m_genLbl.MoveWindow(x, y, halfW, labH);
+	m_melBarsLbl.MoveWindow(x + halfW + 8, y, halfW, labH);
 	y += labH + 2;
-	placeCombo(m_genBars, x, y, w);
+	placeCombo(m_genBars, x, y, halfW);
+	placeCombo(m_melBars, x + halfW + 8, y, halfW);
 	y += comboH + 8;
-	m_loopLbl.MoveWindow(x, y, w, labH);
+	m_loopLbl.MoveWindow(x, y, halfW, labH);
+	m_timesLbl.MoveWindow(x + halfW + 8, y, halfW, labH);
 	y += labH + 2;
-	placeCombo(m_loopBars, x, y, w);
-	y += comboH + 8;
-	m_timesLbl.MoveWindow(x, y, w, labH);
-	y += labH + 2;
-	placeCombo(m_loopTimes, x, y, w);
+	placeCombo(m_loopBars, x, y, halfW);
+	placeCombo(m_loopTimes, x + halfW + 8, y, halfW);
 	y += comboH + 10;
 	const int lw = (w - 16) / 3;
 	m_introLbl.MoveWindow(x, y, lw, labH);
@@ -865,15 +908,20 @@ void CSasamiAutoArrangeDlg::LayoutChrome()
 
 	int bx = rc.Width() - 16 - (bw * 3 + gap * 2);
 	if (bx < 16) bx = 16;
+	/* 内容が窓より高くても、試し聴き・決定・キャンセルはクライアント内に残す。 */
 	int by = footerTop;
-	if (by < y + statusH + 4) by = y + statusH + 4;
+	if (by + bh > rc.Height() - 8) by = rc.Height() - 8 - bh;
+	if (by < cap + 8) by = cap + 8;
 	m_preview.MoveWindow(bx, by, bw, bh);
 	m_ok.MoveWindow(bx + bw + gap, by, bw, bh);
 	m_cancel.MoveWindow(bx + (bw + gap) * 2, by, bw, bh);
+	raise(m_preview);
+	raise(m_ok);
+	raise(m_cancel);
 
 	raise(m_styleLbl); raise(m_groupLbl); raise(m_progLbl); raise(m_progDesc);
 	raise(m_patLbl); raise(m_formLbl); raise(m_formVal); raise(m_accLbl); raise(m_melLbl);
-	raise(m_genLbl); raise(m_loopLbl); raise(m_timesLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
+	raise(m_genLbl); raise(m_melBarsLbl); raise(m_loopLbl); raise(m_timesLbl); raise(m_introLbl); raise(m_breakLbl); raise(m_endLbl); raise(m_pitchLbl);
 	raise(m_targetLbl); raise(m_drumLbl);
 	ScStaffForceOpaqueKids(this);
 }
@@ -977,6 +1025,43 @@ void CSasamiAutoArrangeDlg::OnOK()
 	if (m_host && m_host->refresh) m_host->refresh(m_host->ctx);
 	m_keep = 1;
 	EndDialog(IDOK);
+}
+
+void CSasamiAutoArrangeDlg::FitToWorkArea()
+{
+	if (!GetSafeHwnd()) return;
+	CRect rc;
+	GetWindowRect(&rc);
+	HMONITOR mon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi;
+	mi.cbSize = sizeof(mi);
+	if (!::GetMonitorInfo(mon, &mi)) return;
+	CRect work(mi.rcWork);
+	work.DeflateRect(8, 8);
+	if (work.Width() < 200 || work.Height() < 200) return;
+	int w = rc.Width();
+	int h = rc.Height();
+	if (w > work.Width()) w = work.Width();
+	if (h > work.Height()) h = work.Height();
+	int x = work.left + (work.Width() - w) / 2;
+	int y = work.top + (work.Height() - h) / 2;
+	SetWindowPos(NULL, x, y, w, h, SWP_NOZORDER);
+}
+
+void CSasamiAutoArrangeDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	/* カスタム帯は WS_SYSMENU を外す。SC_CLOSE を素通しすると窓だけ消えて
+	   DoModal が戻らず、親が無効のままプロセスが残る。 */
+	if ((nID & 0xFFF0) == SC_CLOSE) {
+		OnCancel();
+		return;
+	}
+	CCustomBlurDialogExBase::OnSysCommand(nID, lParam);
+}
+
+void CSasamiAutoArrangeDlg::OnClose()
+{
+	OnCancel();
 }
 
 void CSasamiAutoArrangeDlg::OnCancel()

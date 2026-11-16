@@ -1383,31 +1383,43 @@ public:
 		}
 	}
 
-	void SetPos(int nPos)
+	/* 読み込み窓自身の描画だけ回す。他の窓の WM_PAINT / Create をここで消化すると、
+	   TOPMOST の「読み込み中」と本画面の生成が互いを待ち、窓が降りない。 */
+	void PumpOwnMessages()
+	{
+		HWND mine = GetSafeHwnd();
+		if (!mine) return;
+		MSG msg;
+		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				break;
+			}
+			if (msg.message == WM_TIMER)
+				continue;
+			const int ours = msg.hwnd && (msg.hwnd == mine || ::IsChild(mine, msg.hwnd));
+			if (!ours) {
+				if (msg.message == WM_PAINT && msg.hwnd)
+					::InvalidateRect(msg.hwnd, NULL, FALSE);
+				else if (msg.hwnd)
+					::PostMessage(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+				else
+					::PostThreadMessage(::GetCurrentThreadId(), msg.message, msg.wParam, msg.lParam);
+				break;
+			}
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+	}
+
+	void SetPos(int nPos, int pump = 1)
 	{
 		if (m_progress.GetSafeHwnd()) {
 			m_progress.SetPos(nPos);
 			m_progress.UpdateWindow();
 			UpdateWindow();
-
-			// Pump messages to keep it responsive
-			// WM_TIMER は絶対にディスパッチしない（plugloop 側のポンプと同じ理由）。
-			// 親 COggDlg の WM_INITDIALOG 中にタイマー 9998(関連付け起動の dp(ndd) 再生)
-			// や 5211(プレイリスト Create)が発火すると、KPI 読み込み中に play() が
-			// ネスト実行され「読み込み中のまま固まる+裏で再生+メモリエラー」になる。
-			// (淫女タイマーもここで止まるが、SetPos ごとの再描画で GetTickCount 演出は進む)
-			// ※ WM_TIMERP_VSYNC_TICK 等の Posted oneshot は捨てない（フラグ固着で再生UI死）
-			MSG msg;
-			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-				if (msg.message == WM_QUIT) {
-					::PostQuitMessage((int)msg.wParam);
-					break;
-				}
-				if (msg.message == WM_TIMER)
-					continue;
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
-			}
+			if (pump)
+				PumpOwnMessages();
 		}
 	}
 
@@ -1572,7 +1584,7 @@ void OggStartupLoadPos(int pos)
 	CKpiLoadingWnd* w = g_pActiveLoadingWnd;
 	if (!w || !w->GetSafeHwnd()) return;
 	w->SetRange(0, 100);
-	w->SetPos(pos);
+	w->SetPos(pos, 0);
 }
 
 void OggFinishStartupLoading()
@@ -1603,18 +1615,8 @@ void OggPluginLoadOnOneFileDone()
 	}
 	if ((g_nCurrentKpiIndex & 3) != 0)
 		return;
-	MSG msg;
-	while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-		if (msg.message == WM_QUIT) {
-			::PostQuitMessage((int)msg.wParam);
-			break;
-		}
-		// InitDialog 中のネスト Create 防止のため TIMER は捨てる
-		if (msg.message == WM_TIMER)
-			continue;
-		::TranslateMessage(&msg);
-		::DispatchMessage(&msg);
-	}
+	if (g_pActiveLoadingWnd && g_pActiveLoadingWnd->GetSafeHwnd())
+		g_pActiveLoadingWnd->PumpOwnMessages();
 }
 
 #include "KpiPluginInstall.h"

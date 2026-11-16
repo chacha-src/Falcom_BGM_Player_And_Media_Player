@@ -52,6 +52,8 @@ struct Actor {
 	int hair;
 	DWORD hairCol;
 	int wings;
+	int wingGrade;      // 0通常 1改 2聖 3女神。羽ばたきで羽根を散らす
+	float wingPh;       // 羽ばたきの位相。降りた拍で羽根を出す
 	int female;
 	int face;           // 顔の型
 	int avatar;         // アバター (0=なし)
@@ -113,6 +115,8 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r);
 void ActorPose(Actor& a, const Library& lib, const Renderer& r);
 BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time);
 M4 ActorWorld(const Actor& a, V3 pos, float face);
+// 翼の羽根が付いている位置。along は 0 が根元、1 が先端。outDir は翼の外向き。
+BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir);
 V3 ActorJointWorld(const Actor& a, const M4& world, int which);   // 0=頭 1=右手 2=胸
 
 int AttackClipFor(int style, int variant, int skill = -1);

@@ -7,6 +7,7 @@
 #include "Soft3DGpuInfo.h"
 #include <stdio.h>
 #include <math.h>
+#include <xmmintrin.h>
 #include <zstd.h>
 #include <bcrypt.h>
 #pragma comment(lib, "libzstd_static.lib")
@@ -136,10 +137,18 @@ M4 MIdent() { M4 r = {}; r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1; return r; }
 M4 MMul(const M4& a, const M4& b)
 {
 	M4 r;
-	for (int i = 0; i < 4; i++)
-		for (int j = 0; j < 4; j++)
-			r.m[i * 4 + j] = a.m[i * 4 + 0] * b.m[0 * 4 + j] + a.m[i * 4 + 1] * b.m[1 * 4 + j]
-				+ a.m[i * 4 + 2] * b.m[2 * 4 + j] + a.m[i * 4 + 3] * b.m[3 * 4 + j];
+	const __m128 b0 = _mm_loadu_ps(b.m + 0);
+	const __m128 b1 = _mm_loadu_ps(b.m + 4);
+	const __m128 b2 = _mm_loadu_ps(b.m + 8);
+	const __m128 b3 = _mm_loadu_ps(b.m + 12);
+	for (int i = 0; i < 4; i++) {
+		const float* ar = a.m + i * 4;
+		__m128 x = _mm_mul_ps(_mm_set1_ps(ar[0]), b0);
+		x = _mm_add_ps(x, _mm_mul_ps(_mm_set1_ps(ar[1]), b1));
+		x = _mm_add_ps(x, _mm_mul_ps(_mm_set1_ps(ar[2]), b2));
+		x = _mm_add_ps(x, _mm_mul_ps(_mm_set1_ps(ar[3]), b3));
+		_mm_storeu_ps(r.m + i * 4, x);
+	}
 	return r;
 }
 
@@ -224,18 +233,28 @@ M4 MInverse(const M4& a)
 V3 MXformPt(const M4& a, V3 p)
 {
 	const float* m = a.m;
-	float x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
-	float y = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
-	float z = p.x * m[2] + p.y * m[6] + p.z * m[10] + m[14];
-	float w = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
-	if (fabsf(w) > 1e-8f && fabsf(w - 1) > 1e-6f) { x /= w; y /= w; z /= w; }
-	return v3(x, y, z);
+	__m128 r = _mm_mul_ps(_mm_set1_ps(p.x), _mm_loadu_ps(m + 0));
+	r = _mm_add_ps(r, _mm_mul_ps(_mm_set1_ps(p.y), _mm_loadu_ps(m + 4)));
+	r = _mm_add_ps(r, _mm_mul_ps(_mm_set1_ps(p.z), _mm_loadu_ps(m + 8)));
+	r = _mm_add_ps(r, _mm_loadu_ps(m + 12));
+	alignas(16) float v[4];
+	_mm_store_ps(v, r);
+	if (fabsf(v[3]) > 1e-8f && fabsf(v[3] - 1.f) > 1e-6f) {
+		const float inv = 1.f / v[3];
+		return v3(v[0] * inv, v[1] * inv, v[2] * inv);
+	}
+	return v3(v[0], v[1], v[2]);
 }
 
 V3 MXformDir(const M4& a, V3 d)
 {
 	const float* m = a.m;
-	return v3(d.x * m[0] + d.y * m[4] + d.z * m[8], d.x * m[1] + d.y * m[5] + d.z * m[9], d.x * m[2] + d.y * m[6] + d.z * m[10]);
+	__m128 r = _mm_mul_ps(_mm_set1_ps(d.x), _mm_loadu_ps(m + 0));
+	r = _mm_add_ps(r, _mm_mul_ps(_mm_set1_ps(d.y), _mm_loadu_ps(m + 4)));
+	r = _mm_add_ps(r, _mm_mul_ps(_mm_set1_ps(d.z), _mm_loadu_ps(m + 8)));
+	alignas(16) float v[4];
+	_mm_store_ps(v, r);
+	return v3(v[0], v[1], v[2]);
 }
 
 // ============================================================ 地形・テーマ
@@ -259,6 +278,16 @@ static const TerrainDef kTerrain[T_COUNT] = {
 	{ TX_TER_VOID,     99, 0, 0, 0 },
 };
 const TerrainDef& TerrainInfo(int t) { return kTerrain[Clampi(t, 0, T_COUNT - 1)]; }
+
+// 一歩で登れる段。units は通常マップの段数（1段=kHStep）。
+// 立体は高さ12を超えると1段が4.5cmになる。整数のまま比べると、描画がつなぐ床を越えられない。
+static int SameStep(int h0, int h1, int units)
+{
+	if (units < 1) units = 1;
+	float dy = TacHToY(h0) - TacHToY(h1);
+	if (dy < 0.f) dy = -dy;
+	return dy <= (float)units * kHStep + 0.02f;
+}
 int ThemeNameTx(int th) { return TX_TH_PLAINS + Clampi(th, 0, TH_COUNT - 1); }
 int StatNameTx(int s) { return TX_ST_HP + Clampi(s, 0, S_COUNT - 1); }
 
@@ -642,7 +671,7 @@ static bool FootReachable(const Map& m, int sx, int sz, int tx, int tz)
 				int tTr = LayerTr(t, NL);
 				if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
 				// 水・溶岩でも滝の段差は越えない。川面のさざ波だけ通す。
-				if (abs(LayerHt(t, NL) - h) > 2) continue;
+				if (!SameStep(LayerHt(t, NL), h, 2)) continue;
 				g_laySeen[NL][nz][nx] = 1;
 				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 			}
@@ -857,6 +886,11 @@ static int CellStandH(const Map& m, int x, int z, int prefH)
 {
 	memset(g_laySeen, 0, sizeof(g_laySeen));
 	int qh = 0, qt = 0, got = 0;
+	auto usedCell = [&](int x, int z) -> bool {
+		if (taken && taken[z][x]) return true;
+		for (int i = 0; i < got; i++) if (outX[i] == x && outZ[i] == z) return true;
+		return false;
+	};
 	for (int L = 0; L < CellLayN(m.c[az][ax]); L++) {
 		int tr = LayerTr(m.c[az][ax], L);
 		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
@@ -885,6 +919,22 @@ static int CellStandH(const Map& m, int x, int z, int prefH)
 		g_layQx[qt] = ax; g_layQz[qt] = az; g_layQL[qt] = 0; qt++; g_laySeen[0][az][ax] = 1;
 	}
 	if (qt == 0) {
+		for (int rad = 1; rad < MAPN && qt == 0; rad++) {
+			for (int dz = -rad; dz <= rad && qt == 0; dz++) for (int dx = -rad; dx <= rad && qt == 0; dx++) {
+				int nx = ax + dx, nz = az + dz;
+				if (!Map::In(nx, nz)) continue;
+				int nL = CellLayN(m.c[nz][nx]);
+				for (int L = 0; L < nL; L++) {
+					int tr = LayerTr(m.c[nz][nx], L);
+					if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+					g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = L; qt++;
+					g_laySeen[L][nz][nx] = 1;
+					break;
+				}
+			}
+		}
+	}
+	if (qt == 0) {
 		for (int i = 0; i < want; i++) { outX[i] = ax; outZ[i] = az; }
 		return;
 	}
@@ -893,7 +943,7 @@ static int CellStandH(const Map& m, int x, int z, int prefH)
 		int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
 		const Cell& c = m.c[z][x];
 		int tr = LayerTr(c, L);
-		bool ok = TerrainInfo(tr).costFoot < 99 && tr != T_VOID && tr != T_CHASM && !(taken && taken[z][x]);
+		bool ok = TerrainInfo(tr).costFoot < 99 && tr != T_VOID && tr != T_CHASM && !usedCell(x, z);
 		for (int i = 0; i < got && ok; i++)
 			if (Dist(outX[i], outZ[i], x, z) < spacing) ok = false;
 		if (ok) { outX[got] = x; outZ[got] = z; got++; }
@@ -911,6 +961,66 @@ static int CellStandH(const Map& m, int x, int z, int prefH)
 				if (prefH >= 0 && abs(LayerHt(t, NL) - prefH) > 4) continue;
 				g_laySeen[NL][nz][nx] = 1;
 				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
+			}
+		}
+	}
+	// スパイラルや狭い高台で高さ差制限内に人数分入らない場合は、連結な通行可能マスへ広げて重複を防ぐ。
+	if (got < want) {
+		memset(g_laySeen, 0, sizeof(g_laySeen));
+		qh = 0; qt = 0;
+		for (int L = 0; L < CellLayN(m.c[az][ax]); L++) {
+			int tr = LayerTr(m.c[az][ax], L);
+			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+			g_layQx[qt] = ax; g_layQz[qt] = az; g_layQL[qt] = L; qt++; g_laySeen[L][az][ax] = 1;
+		}
+		if (qt == 0 && got > 0) {
+			for (int L = 0; L < CellLayN(m.c[outZ[0]][outX[0]]); L++) {
+				int tr = LayerTr(m.c[outZ[0]][outX[0]], L);
+				if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+				g_layQx[qt] = outX[0]; g_layQz[qt] = outZ[0]; g_layQL[qt] = L; qt++; g_laySeen[L][outZ[0]][outX[0]] = 1;
+			}
+		}
+		while (qh < qt && got < want) {
+			int x = g_layQx[qh], z = g_layQz[qh], L = g_layQL[qh]; qh++;
+			const Cell& c = m.c[z][x];
+			int tr = LayerTr(c, L);
+			bool ok = TerrainInfo(tr).costFoot < 99 && tr != T_VOID && tr != T_CHASM && !usedCell(x, z);
+			if (ok) { outX[got] = x; outZ[got] = z; got++; }
+			int h = LayerHt(c, L);
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (!Map::In(nx, nz)) continue;
+				const Cell& t = m.c[nz][nx];
+				int nL = CellLayN(t);
+				for (int NL = 0; NL < nL; NL++) {
+					if (g_laySeen[NL][nz][nx]) continue;
+					int tTr = LayerTr(t, NL);
+					if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
+					if (abs(LayerHt(t, NL) - h) > 3) continue;
+					g_laySeen[NL][nz][nx] = 1;
+					if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
+				}
+			}
+		}
+	}
+	// それでも足りない場合は近傍の通行可能マス（重複無し）を拾う。
+	if (got < want) {
+		for (int rad = 1; rad < MAPN && got < want; rad++) {
+			for (int dz2 = -rad; dz2 <= rad && got < want; dz2++) {
+				for (int dx2 = -rad; dx2 <= rad && got < want; dx2++) {
+					if (max(abs(dx2), abs(dz2)) != rad) continue;
+					int nx = ax + dx2, nz = az + dz2;
+					if (!Map::In(nx, nz) || usedCell(nx, nz)) continue;
+					const Cell& t = m.c[nz][nx];
+					int nL = CellLayN(t);
+					for (int NL = 0; NL < nL; NL++) {
+						int tTr = LayerTr(t, NL);
+						if (tTr != T_VOID && tTr != T_CHASM && TerrainInfo(tTr).costFoot < 99) {
+							outX[got] = nx; outZ[got] = nz; got++;
+							break;
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1401,7 +1511,9 @@ static void CutLooseIslands(Map& m)
 	}
 	for (int i = 0; i < m.nP; i++) {
 		int x = m.pStartX[i], z = m.pStartZ[i];
-		if (Map::In(x, z) && seen[z][x]) continue;
+		bool dup = false;
+		for (int p = 0; p < i; p++) if (m.pStartX[p] == x && m.pStartZ[p] == z) { dup = true; break; }
+		if (!dup && Map::In(x, z) && seen[z][x]) { seen[z][x] = 2; continue; }
 		for (int r = 1; r < MAPN; r++) {
 			int found = 0;
 			for (int dz = -r; dz <= r && !found; dz++) for (int dx = -r; dx <= r; dx++) {
@@ -2409,7 +2521,7 @@ static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
 			int nL = CellLayN(t);
 			for (int NL = 0; NL < nL; NL++) {
 				if (seen[NL][nz][nx] || !CellStand(t, NL)) continue;
-				if (abs(LayerHt(t, NL) - h) > 2) continue;
+				if (!SameStep(LayerHt(t, NL), h, 2)) continue;
 				seen[NL][nz][nx] = 1;
 				if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 			}
@@ -2968,7 +3080,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 						if (g_laySeen[NL][nz][nx]) continue;
 						int tTr = LayerTr(t, NL);
 						if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
-						if (abs(LayerHt(t, NL) - h) > 2) continue;
+						if (!SameStep(LayerHt(t, NL), h, 2)) continue;
 						g_laySeen[NL][nz][nx] = 1;
 						if (stepFromP[nz][nx] < 0 || d0 + 1 < stepFromP[nz][nx]) {
 							stepFromP[nz][nx] = (short)(d0 + 1);
@@ -5713,6 +5825,22 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 static bool IsMon(const Unit& u) { return u.monster >= 0; }
 
 static int PasScale(const Unit& u, int fx, int base, int span);
+static int MagOf(const Unit& u, int fx)
+{
+	int m = PasMag(u, fx);
+	return m < 100 ? 100 : m;
+}
+static int ScaleFlat(int base, int mag)
+{
+	if (base <= 0) return 0;
+	if (mag < 100) mag = 100;
+	if (mag == 100) return base;
+	int n = base * mag / 100;
+	int bump = (mag - 100) / 50;
+	if (bump < 1) bump = 1;
+	if (n < base + bump) n = base + bump;
+	return n;
+}
 
 int UnitStat(const Unit& u, int s)
 {
@@ -5739,46 +5867,53 @@ int UnitStat(const Unit& u, int s)
 	if (s == S_STR) {
 		int p = PasScale(u, PAS_STR2, 20, 80);
 		if (p >= 0) v = v * (100 + p) / 100;
-		else if (UnitHasPas(u, PAS_STR)) v = v * 110 / 100;
+		else if (UnitHasPas(u, PAS_STR)) v = v * (100 + 10 * MagOf(u, PAS_STR) / 100) / 100;
 	}
 	if (s == S_MAG) {
 		int p = PasScale(u, PAS_MAG2, 20, 80);
 		if (p >= 0) v = v * (100 + p) / 100;
-		else if (UnitHasPas(u, PAS_MAG)) v = v * 110 / 100;
+		else if (UnitHasPas(u, PAS_MAG)) v = v * (100 + 10 * MagOf(u, PAS_MAG) / 100) / 100;
 	}
 	if (s == S_DEF) {
 		int p = PasScale(u, PAS_DEF2, 20, 80);
 		if (p >= 0) v = v * (100 + p) / 100;
-		else if (UnitHasPas(u, PAS_DEF)) v = v * 110 / 100;
+		else if (UnitHasPas(u, PAS_DEF)) v = v * (100 + 10 * MagOf(u, PAS_DEF) / 100) / 100;
 	}
 	if (s == S_RES) {
 		int p = PasScale(u, PAS_RES2, 20, 80);
 		if (p >= 0) v = v * (100 + p) / 100;
-		else if (UnitHasPas(u, PAS_RES)) v = v * 110 / 100;
+		else if (UnitHasPas(u, PAS_RES)) v = v * (100 + 10 * MagOf(u, PAS_RES) / 100) / 100;
 	}
-	if (s == S_AGI && UnitHasPas(u, PAS_AGI)) v = v * 110 / 100;
-	if (s == S_LUK && UnitHasPas(u, PAS_LUK)) v += 4;
-	if (s == S_RCV && UnitHasPas(u, PAS_RCV)) v += 4;
-	if (s == S_CPL && UnitHasPas(u, PAS_CPL)) v += 4;
-	if (s == S_HIT && UnitHasPas(u, PAS_HIT)) v += 6;
-	if (s == S_AVO && UnitHasPas(u, PAS_AVO)) v += 6;
-	if (s == S_PEN && UnitHasPas(u, PAS_PEN)) v += 4;
-	if (s == S_MOV && UnitHasPas(u, PAS_MOV2)) v += 2;
-	else if (s == S_MOV && UnitHasPas(u, PAS_MOV)) v += 1;
-	if (s == S_JMP && UnitHasPas(u, PAS_JMP2)) v += 3;
-	else if (s == S_JMP && UnitHasPas(u, PAS_JMP)) v += 2;
-	if (s == S_RNG && UnitHasPas(u, PAS_RNG2)) v += 2;
-	else if (s == S_RNG && UnitHasPas(u, PAS_RNG)) v += 1;
+	if (s == S_AGI && UnitHasPas(u, PAS_AGI)) v = v * (100 + 10 * MagOf(u, PAS_AGI) / 100) / 100;
+	if (s == S_LUK && UnitHasPas(u, PAS_LUK)) v += ScaleFlat(4, MagOf(u, PAS_LUK));
+	if (s == S_RCV && UnitHasPas(u, PAS_RCV)) v += ScaleFlat(4, MagOf(u, PAS_RCV));
+	if (s == S_CPL && UnitHasPas(u, PAS_CPL)) v += ScaleFlat(4, MagOf(u, PAS_CPL));
+	if (s == S_HIT && UnitHasPas(u, PAS_HIT)) v += ScaleFlat(6, MagOf(u, PAS_HIT));
+	if (s == S_AVO && UnitHasPas(u, PAS_AVO)) v += ScaleFlat(6, MagOf(u, PAS_AVO));
+	if (s == S_PEN && UnitHasPas(u, PAS_PEN)) v += ScaleFlat(4, MagOf(u, PAS_PEN));
+	if (s == S_MOV && UnitHasPas(u, PAS_MOV2)) v += ScaleFlat(2, MagOf(u, PAS_MOV2));
+	else if (s == S_MOV && UnitHasPas(u, PAS_MOV)) v += ScaleFlat(1, MagOf(u, PAS_MOV));
+	if (s == S_MOV) v += UnitBonusMov(u);
+	if (s == S_JMP && UnitHasPas(u, PAS_JMP2)) v += ScaleFlat(3, MagOf(u, PAS_JMP2));
+	else if (s == S_JMP && UnitHasPas(u, PAS_JMP)) v += ScaleFlat(2, MagOf(u, PAS_JMP));
+	if (s == S_RNG && UnitHasPas(u, PAS_RNG2)) v += ScaleFlat(2, MagOf(u, PAS_RNG2));
+	else if (s == S_RNG && UnitHasPas(u, PAS_RNG)) v += ScaleFlat(1, MagOf(u, PAS_RNG));
 	if (s == S_MOV) {
-		int cap = MoveCap(UnitMoveType(u));
+		int cap = MoveCap(UnitMoveType(u)) + UnitBonusMov(u);
+		if (UnitHasPas(u, PAS_MOV2)) cap += ScaleFlat(2, MagOf(u, PAS_MOV2)) - 2;
+		else if (UnitHasPas(u, PAS_MOV)) cap += ScaleFlat(1, MagOf(u, PAS_MOV)) - 1;
 		if (v > cap) v = cap;
 		if (v < 1) v = 1;
 	} else if (s == S_JMP) {
 		int cap = UnitHasPas(u, PAS_JMP2) ? 16 : (UnitHasPas(u, PAS_JMP) ? 14 : 12);
+		if (UnitHasPas(u, PAS_JMP2)) cap += ScaleFlat(3, MagOf(u, PAS_JMP2)) - 3;
+		else if (UnitHasPas(u, PAS_JMP)) cap += ScaleFlat(2, MagOf(u, PAS_JMP)) - 2;
 		if (v > cap) v = cap;
 		if (v < 1) v = 1;
 	} else if (s == S_RNG) {
 		int cap = UnitHasPas(u, PAS_RNG2) ? 5 : (UnitHasPas(u, PAS_RNG) ? 4 : 3);
+		if (UnitHasPas(u, PAS_RNG2)) cap += ScaleFlat(2, MagOf(u, PAS_RNG2)) - 2;
+		else if (UnitHasPas(u, PAS_RNG)) cap += ScaleFlat(1, MagOf(u, PAS_RNG)) - 1;
 		if (v > cap) v = cap;
 		if (v < 0) v = 0;
 	}
@@ -5971,6 +6106,28 @@ static int SpanFromHalf(float half)
 	if (half > 1.05f) return 2;
 	return 1;
 }
+// 実装している最大は 5x5。1マスあたりの足の半幅。これを越す胴はここまで縮める。
+static const int kSpanMax = 5;
+static const float kFootFill = 0.46f;
+static void FitFootToSpan(float foot, float tall, float& scale, int& span)
+{
+	if (span < 1) span = 1;
+	if (span > kSpanMax) span = kSpanMax;
+	static const float kHCap[6] = { 0.f, 2.6f, 3.6f, 4.6f, 5.6f, 6.6f };
+	for (;;) {
+		float want = (float)span * kFootFill;
+		float sc = want / foot;
+		if (tall > 0.02f && tall * sc > kHCap[span]) sc = kHCap[span] / tall;
+		float vis = foot * sc;
+		if (vis + 0.001f >= want * 0.72f || span <= 1) {
+			if (sc < 0.04f) sc = 0.04f;
+			if (sc > 24.f) sc = 24.f;
+			scale = sc;
+			return;
+		}
+		span--;
+	}
+}
 static int HumanoidImport(const wchar_t* nm)
 {
 	if (!nm || wcsncmp(nm, L"Hum", 3) != 0 || !nm[3]) return 0;
@@ -5990,27 +6147,52 @@ static void FitExtraDef(MonsterDef& d)
 		return;
 	}
 	int span = SpanFromHalf(foot);
-	if (span < 1) span = 1;
-	if (span > 5) span = 5;
-	static const float kHCap[6] = { 0.f, 2.6f, 3.6f, 4.6f, 5.6f, 6.6f };
-	for (;;) {
-		float want = (float)span * 0.46f;
-		float sc = want / foot;
-		if (tall > 0.02f && tall * sc > kHCap[span]) sc = kHCap[span] / tall;
-		float vis = foot * sc;
-		if (vis + 0.001f >= want * 0.72f || span <= 1) {
-			if (sc < 0.04f) sc = 0.04f;
-			if (sc > 24.f) sc = 24.f;
-			d.scale = sc;
-			d.footSpan = span;
-			return;
-		}
-		span--;
+	float sc = 1.f;
+	FitFootToSpan(foot, tall, sc, span);
+	float wide = TacMonsterWide(d.model);
+	if (wide < foot) wide = foot;
+	float limit = (float)span * 0.5f;
+	if (wide > 0.02f && wide * sc > limit) sc *= limit / (wide * sc);
+	if (sc < 0.04f) sc = 0.04f;
+	d.scale = sc;
+	d.footSpan = span;
+}
+
+// 取り込み種は倍率が 1 のままなので、5x5 を越す胴（10x10 前後）がマスより大きく残る。最大マスまで縮める。
+static void ClampImportFoot(MonsterDef& d)
+{
+	if (d.look != LK_MESH || d.model < 0 || !TacMonsterReady(d.model)) return;
+	if (d.model < kImportN && HumanoidImport(kImportName[d.model])) return;
+	float foot = TacMonsterFoot(d.model);
+	float tall = TacMonsterTall(d.model);
+	float wide = TacMonsterWide(d.model);
+	if (wide < foot) wide = foot;
+	if (wide < 0.02f) return;
+	float sc = d.scale > 0.02f ? d.scale : 1.f;
+	int span = (d.footSpan >= 1 && d.footSpan <= kSpanMax) ? d.footSpan : SpanFromHalf(foot);
+	BOOL fitted = FALSE;
+	if (foot * sc > 4.05f && !(d.footSpan >= 1 && foot * sc <= (float)kSpanMax * kFootFill + 0.05f)) {
+		span = kSpanMax;
+		FitFootToSpan(foot, tall, sc, span);
+		fitted = TRUE;
 	}
+	float limit = (float)span * 0.5f;
+	if (wide * sc > limit + 0.02f) {
+		sc *= limit / (wide * sc);
+		fitted = TRUE;
+	}
+	if (!fitted) return;
+	if (sc < 0.04f) sc = 0.04f;
+	d.scale = sc;
+	d.footSpan = span;
 }
 
 void MonsterPrepareScale(int monster)
 {
+	if (monster >= M_COUNT && monster < M_COUNT + kImportN && (monster - M_COUNT) < IMP_CAP) {
+		ClampImportFoot(s_monImp[monster - M_COUNT]);
+		return;
+	}
 	if (monster < M_COUNT + kImportN) return;
 	int ex = monster - (M_COUNT + kImportN);
 	if (ex < 0 || ex >= kFoeExN || ex >= 4096) return;
@@ -6019,6 +6201,8 @@ void MonsterPrepareScale(int monster)
 
 static int MonsterSpan(const MonsterDef& md, int boss)
 {
+	if (md.look == LK_MESH && &md >= s_monImp && &md < s_monImp + IMP_CAP)
+		ClampImportFoot(const_cast<MonsterDef&>(md));
 	if (md.look == LK_MESH && md.scale <= 0.02f && &md >= s_foeEx && &md < s_foeEx + 4096)
 		FitExtraDef(const_cast<MonsterDef&>(md));
 	if (md.footSpan >= 1 && md.footSpan <= 5) return md.footSpan;
@@ -6297,11 +6481,11 @@ bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jum
 		for (int Lt = 0; Lt < nT; Lt++) {
 			int trT = LayerTr(t, Lt), hT = LayerHt(t, Lt);
 			if (TerrainInfo(trT).costFoot >= 99) {
-				if ((trF == T_MOUNTAIN || trF == T_ROCK) && (trT == T_MOUNTAIN || trT == T_ROCK) && abs(hT - hF) <= jump)
+				if ((trF == T_MOUNTAIN || trF == T_ROCK) && (trT == T_MOUNTAIN || trT == T_ROCK) && SameStep(hT, hF, jump))
 					return true;
 				continue;
 			}
-			if (abs(hT - hF) <= jump) return true;
+			if (SameStep(hT, hF, jump)) return true;
 		}
 	}
 	return false;
@@ -6353,17 +6537,17 @@ static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, in
 	int fromL = LayerOn(from, fromLayer) ? fromLayer : 0;
 	int fromH = LayerHt(from, fromL);
 	int toH = LayerHt(to, L);
-	int dh = abs(toH - fromH);
 	int dl = L - fromL;
 	if (dl < 0) dl = -dl;
 	int hop = LayerHopMax(moveType);
 	int rise = StepRise(moveType);
 	// いちばん近い高さ＝同じリボン／連続した段。1歩の登り降りに収まるなら、層番号がずれても進める。
 	// 水・溶岩も滝の段差は降りられない。川面の連続した歩幅だけ通す。
+	// 立体の段は世界高さで見る。整数2段はそこでは9cmしかなく、描画がつなぐ床を拒む。
 	int closest = ClosestOpenLayer(to, fromH, moveType);
-	if (L == closest && dh <= rise) return 1;
-	// 徒歩は隣の層まで、飛行は2層まで。高さが離れすぎる立体交差の別アームへは飛ばない。
-	if (dl <= hop && dh <= rise * hop) return 1;
+	if (L == closest && SameStep(fromH, toH, rise)) return 1;
+	// 徒歩は隣の層まで、飛行は2層まで。世界高さで離れすぎる別アームへは飛ばない。
+	if (dl <= hop && SameStep(fromH, toH, rise * hop)) return 1;
 	return 0;
 }
 
@@ -6410,13 +6594,13 @@ static void FillNoticeSteps(const Battle& b, int ei, int limit)
 			const Cell& t = b.map.At(nx, nz);
 			int nL = CellLayN(t);
 			int dest = -1;
-			if (L < nL && LayerOpen(t, L, mt) && abs(LayerHt(t, L) - h) <= rise) dest = L;
+			if (L < nL && LayerOpen(t, L, mt) && SameStep(LayerHt(t, L), h, rise)) dest = L;
 			if (dest < 0) {
 				int best = 99999;
 				for (int NL = 0; NL < nL; NL++) {
 					if (!LayerOpen(t, NL, mt)) continue;
 					int dh = abs(LayerHt(t, NL) - h);
-					if (dh > rise) continue;
+					if (!SameStep(LayerHt(t, NL), h, rise)) continue;
 					if (dh < best) { best = dh; dest = NL; }
 				}
 			}
@@ -7118,12 +7302,12 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			}
 		}
 		int evade2 = PasScale(d, PAS_EVADE2, 16, 44);
-		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? 6 : 0) + (evade2 > 0 ? evade2 : 0);
+		int evade = UnitStat(d, S_AGI) / 2 + UnitStat(d, S_LUK) / 4 + tavo / 2 + (UnitHasSkill(d, SKL_P_EVADE) ? 8 : 0) + (UnitHasPas(d, PAS_EVADE) ? ScaleFlat(6, MagOf(d, PAS_EVADE)) : 0) + (evade2 > 0 ? evade2 : 0);
 		hit = 90 + UnitStat(a, S_DEX) + UnitStat(a, S_LUK) / 4 - evade + (sd ? 6 : 0);
 		if (a.blind > 0) hit -= 28;
 		int crit2 = PasScale(a, PAS_CRIT2, 18, 22);
 		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
-			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? 10 : 0) + (crit2 > 0 ? crit2 : 0);
+			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? ScaleFlat(10, MagOf(a, PAS_CRIT)) : 0) + (crit2 > 0 ? crit2 : 0);
 		crit = Clampi(crit, 0, sd ? 80 : 50);
 	}
 	dm *= HeightMod(b, a, d) * DirMod(a, d);
@@ -7200,14 +7384,19 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			const GearDef* arm = GearOf(d.ch.reserved[7]);
 			if (arm && arm->kind == 1 && el != EL_NONE && (arm->elem == el || arm->elem2 == el)) dm *= 0.72f;
 		}
-		if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE2)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE2))
-			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER2)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY2))
-			|| (el == EL_DARK && UnitHasPas(d, PAS_DARK2)))
-			dm *= .5f;
-		else if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE))
-			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY))
-			|| (el == EL_DARK && UnitHasPas(d, PAS_DARK)))
-			dm *= .7f;
+		{
+			int fx2 = 0, fx1 = 0;
+			if (el == EL_FIRE) { fx2 = PAS_FIRE2; fx1 = PAS_FIRE; }
+			else if (el == EL_ICE) { fx2 = PAS_ICE2; fx1 = PAS_ICE; }
+			else if (el == EL_THUNDER) { fx2 = PAS_THUNDER2; fx1 = PAS_THUNDER; }
+			else if (el == EL_HOLY) { fx2 = PAS_HOLY2; fx1 = PAS_HOLY; }
+			else if (el == EL_DARK) { fx2 = PAS_DARK2; fx1 = PAS_DARK; }
+			float cut = 0.f;
+			if (fx2 && UnitHasPas(d, fx2)) cut = 0.5f * MagOf(d, fx2) / 100.f;
+			else if (fx1 && UnitHasPas(d, fx1)) cut = 0.3f * MagOf(d, fx1) / 100.f;
+			if (cut > 0.8f) cut = 0.8f;
+			if (cut > 0.f) dm *= (1.f - cut);
+		}
 	}
 	dmg = max(1, (int)roundf(dm));
 }
@@ -8108,8 +8297,8 @@ static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
 static void AddCp(Unit& u, int n)
 {
 	if (n < 1) return;
-	if (UnitHasPas(u, PAS_CP2)) n *= 2;
-	else if (UnitHasPas(u, PAS_CP)) n = n * 3 / 2;
+	if (UnitHasPas(u, PAS_CP2)) n = n * (100 + MagOf(u, PAS_CP2)) / 100;
+	else if (UnitHasPas(u, PAS_CP)) n = n * (100 + 50 * MagOf(u, PAS_CP) / 100) / 100;
 	n += max(0, UnitStat(u, S_CPL) / 8);
 	if (u.cp < 0) u.cp = 0;
 	int c = u.cp + n;
@@ -8143,7 +8332,7 @@ static int HealAmount(const Unit& a, const Unit& d, const SkillDef& sd, int skil
 	int amt = pot + hp * pct / 100;
 	int heal2 = PasScale(a, PAS_HEAL2, 50, 50);
 	if (heal2 >= 0) amt = amt * (100 + heal2) / 100;
-	else if (UnitHasPas(a, PAS_HEAL)) amt = amt * 125 / 100;
+	else if (UnitHasPas(a, PAS_HEAL)) amt = amt * (100 + 25 * MagOf(a, PAS_HEAL) / 100) / 100;
 	if (amt < 1) amt = 1;
 	return amt;
 }
@@ -8619,6 +8808,7 @@ static int Speed(const Battle& b, const Unit& u)
 {
 	int s = 10 + UnitStat(u, S_AGI);
 	if (UnitHasSkill(u, SKL_P_SWIFT)) s = s * 12 / 10;
+	s = s * UnitActMul(u) / 100;
 	if (u.team == TEAM_ENEMY) {
 		int np = 0, ne = 0;
 		for (int i = 0; i < b.nUnits; i++) {
@@ -8945,7 +9135,7 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 			}
 		}
 	}
-	if (mt != MV_FLY && hmax - hmin > jp) return false;
+	if (mt != MV_FLY && !SameStep(hmin, hmax, jp)) return false;
 	if (s > 1 && mt != MV_FLY && room < s) return false;
 	return true;
 }
@@ -9161,7 +9351,7 @@ static bool DeckSpanOpen(const Battle& b, int x, int z, int layer, int span)
 		if (h < hmin) hmin = h;
 		if (h > hmax) hmax = h;
 	}
-	return hmax - hmin <= 2;
+	return SameStep(hmin, hmax, 2) != 0;
 }
 
 // 拠点マスを含むように、原点をずらして span が収まるか。
@@ -9203,7 +9393,7 @@ static int RibbonCells(const Battle& b, int ax, int az, int aLayer, int* xs, int
 				int tr = LayerTr(t, NL);
 				if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
 				int dh = abs(LayerHt(t, NL) - h);
-				if (dh > 2) continue;
+				if (!SameStep(LayerHt(t, NL), h, 2)) continue;
 				int score = dh * 10 + (NL == L ? 0 : 1);
 				if (score < best) { best = score; dest = NL; }
 			}
@@ -9243,7 +9433,30 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		CraftBindUnit(u);
 		u.cp = 0;
 		u.span = 1;
+		auto hasPlaced = [&](int px, int pz) -> bool {
+			for (int p = 0; p < n; p++) if (b.u[p].x == px && b.u[p].z == pz) return true;
+			return false;
+		};
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
+		if (hasPlaced(u.x, u.z)) {
+			int bx = u.x, bz = u.z, found = 0;
+			for (int rad = 1; rad < MAPN && !found; rad++) {
+				for (int dz = -rad; dz <= rad && !found; dz++) for (int dx = -rad; dx <= rad && !found; dx++) {
+					if (max(abs(dx), abs(dz)) != rad) continue;
+					int nx = u.x + dx, nz = u.z + dz;
+					if (!Map::In(nx, nz) || hasPlaced(nx, nz)) continue;
+					const Cell& nc = b.map.At(nx, nz);
+					int nL = CellLayN(nc);
+					for (int L = 0; L < nL; L++) {
+						int tr = LayerTr(nc, L);
+						if (tr != T_VOID && tr != T_CHASM && TerrainInfo(tr).costFoot < 99) {
+							bx = nx; bz = nz; found = 1; break;
+						}
+					}
+				}
+			}
+			u.x = bx; u.z = bz;
+		}
 		u.deck = 0;
 		if (Map::In(u.x, u.z)) {
 			const Cell& sc = b.map.At(u.x, u.z);
@@ -9263,7 +9476,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.ct = r.Range(0, 420) + UnitStat(u, S_AGI) * 6;
 		int open2 = PasScale(u, PAS_OPEN2, 400, 800);
 		if (open2 > 0) u.ct += open2;
-		else if (UnitHasPas(u, PAS_OPEN)) u.ct += 250;
+		else if (UnitHasPas(u, PAS_OPEN)) u.ct += 250 * MagOf(u, PAS_OPEN) / 100;
 		u.hpShow = (float)u.hp;
 		u.grp = -1;
 		u.alert = 1;
@@ -9746,7 +9959,7 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	if (regenPct < 0) regenPct = 0;
 	if (!regenPct) {
 		if (UnitHasSkill(u, SKL_P_REGEN)) regenPct = 10;
-		else if (UnitHasPas(u, PAS_REGEN)) regenPct = 8;
+		else if (UnitHasPas(u, PAS_REGEN)) regenPct = 8 * MagOf(u, PAS_REGEN) / 100;
 	}
 	if (regenPct && u.hp < u.ch.stat[S_HP]) {
 		int h = max(1, u.ch.stat[S_HP] * regenPct / 100);
@@ -9765,7 +9978,7 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 		int mpr = UnitStat(u, S_MPR);
 		int mp2 = PasScale(u, PAS_MP2, 8, 112);
 		if (mp2 > 0) mpr += mp2;
-		else if (UnitHasPas(u, PAS_MP)) mpr += 4;
+		else if (UnitHasPas(u, PAS_MP)) mpr += ScaleFlat(4, MagOf(u, PAS_MP));
 		if (UnitHasPas(u, PAS_WAKE)) {
 			if (u.sleep > 0) u.sleep--;
 			if (u.stun > 0) u.stun--;
@@ -10779,9 +10992,16 @@ static int MeshBank(const int* a, int n, int id, int slot)
 	unsigned h = (unsigned)id * 17u + (unsigned)slot * 13u + 1u;
 	return a[h % (unsigned)n];
 }
+static int GearBaseN()
+{
+	EnsureGearEx();
+	return kGearN + GEAR_EX_N + GEAR_VAULT_N;
+}
 int GearVisual(const GearDef* g, int id, int slot)
 {
 	if (!g || id < 1) return -1;
+	int baseN = GearBaseN();
+	if (baseN > 0 && id > baseN) id = (id - 1) % baseN + 1;
 	const int* a = NULL;
 	int n = 0;
 	if (g->kind == 1) {
@@ -10815,8 +11035,20 @@ int GearVisual(const GearDef* g, int id, int slot)
 	}
 	return MeshBank(a, n, id, slot);
 }
-int GearCount() { EnsureGearEx(); return kGearN + GEAR_EX_N + GEAR_VAULT_N; }
-const GearDef* GearOf(int id)
+int GearCount() { return GearBaseN() * 4; }
+int GearTierOf(int id)
+{
+	int b = GearBaseN();
+	if (id < 1 || b < 1) return 0;
+	return (id - 1) / b;
+}
+int GearRootId(int id)
+{
+	int b = GearBaseN();
+	if (id < 1 || b < 1) return id;
+	return (id - 1) % b + 1;
+}
+static const GearDef* GearBaseOf(int id)
 {
 	if (id < 1) return NULL;
 	if (id <= kGearN) return &kGear[id - 1];
@@ -10827,21 +11059,67 @@ const GearDef* GearOf(int id)
 	if (v >= 0 && v < GEAR_VAULT_N) return &s_gearVault[v];
 	return NULL;
 }
+const GearDef* GearOf(int id)
+{
+	int baseN = GearBaseN();
+	if (id < 1 || baseN < 1 || id > baseN * 4) return NULL;
+	int tier = (id - 1) / baseN;
+	const GearDef* src = GearBaseOf((id - 1) % baseN + 1);
+	if (!src || tier <= 0) return src;
+	static GearDef* tab = NULL;
+	static unsigned char* fill = NULL;
+	static int cap = 0;
+	int need = baseN * 3;
+	if (!tab || cap != need) {
+		delete[] tab;
+		delete[] fill;
+		tab = new GearDef[need];
+		fill = new unsigned char[need];
+		memset(tab, 0, sizeof(GearDef) * (size_t)need);
+		memset(fill, 0, (size_t)need);
+		cap = need;
+	}
+	int ix = (tier - 1) * baseN + ((id - 1) % baseN);
+	if (!fill[ix]) {
+		GearDef d = *src;
+		auto bump = [](int v, int mul) {
+			if (v <= 0) return 0;
+			int n = v * mul / 100;
+			if (n <= v) n = v + 1;
+			return n;
+		};
+		static const int sm[4] = { 100, 125, 150, 180 };
+		d.str = bump(src->str, sm[tier]);
+		d.mag = bump(src->mag, sm[tier]);
+		d.def = bump(src->def, sm[tier]);
+		d.res = bump(src->res, sm[tier]);
+		d.price = SeriesPriceOf(src->price, tier);
+		tab[ix] = d;
+		fill[ix] = 1;
+	}
+	return &tab[ix];
+}
 const wchar_t* GearName(int id)
 {
-	if (id < 1) return L"?";
-	if (id <= kGearN) {
-		const wchar_t* const* s = kGearNm[id - 1];
-		return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	int baseN = GearBaseN();
+	if (id < 1 || baseN < 1 || id > baseN * 4) return L"?";
+	int tier = (id - 1) / baseN;
+	int base = (id - 1) % baseN + 1;
+	const wchar_t* nm = NULL;
+	if (base <= kGearN) {
+		const wchar_t* const* s = kGearNm[base - 1];
+		nm = LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	} else {
+		int x = base - kGearN - 1;
+		const wchar_t* const* s = NULL;
+		if (x >= 0 && x < GEAR_EX_N) s = kGearExNm[x];
+		else if (x >= GEAR_EX_N && x < GEAR_EX_N + GEAR_VAULT_N) s = kGearVaultNm[x - GEAR_EX_N];
+		if (!s) return L"?";
+		int lang = savedata.lang;
+		if (lang < 0 || lang > 13) lang = 1;
+		nm = (s[lang] && s[lang][0]) ? s[lang] : s[0];
 	}
-	int x = id - kGearN - 1;
-	const wchar_t* const* s = NULL;
-	if (x >= 0 && x < GEAR_EX_N) s = kGearExNm[x];
-	else if (x >= GEAR_EX_N && x < GEAR_EX_N + GEAR_VAULT_N) s = kGearVaultNm[x - GEAR_EX_N];
-	else return L"?";
-	int lang = savedata.lang;
-	if (lang < 0 || lang > 13) lang = 1;
-	return (s[lang] && s[lang][0]) ? s[lang] : s[0];
+	return SeriesName(nm, tier);
 }
 const wchar_t* GearRole(const GearDef* g)
 {
@@ -11033,13 +11311,54 @@ void StashRemoveAt(SaveData& s, int index)
 	s.gearN--;
 	s.gearId[s.gearN] = 0;
 }
+static bool GearHeld(const SaveData& s, int id)
+{
+	if (id < 1) return false;
+	for (int i = 0; i < s.gearN && i < GEAR_STASH; i++) if (s.gearId[i] == id) return true;
+	for (int i = 0; i < MAX_ROSTER; i++) if (s.roster[i].used) {
+		if (s.roster[i].reserved[6] == id || s.roster[i].reserved[7] == id) return true;
+	}
+	return false;
+}
+bool GearGrading(const SaveData& s, int id)
+{
+	int baseN = GearBaseN();
+	if (baseN < 1 || id <= baseN || id > baseN * 4) return false;
+	return GearHeld(s, id - baseN);
+}
+int GearDeal(const SaveData& s, int id)
+{
+	const GearDef* g = GearOf(id);
+	if (!g) return 0;
+	if (!GearGrading(s, id)) return g->price;
+	const GearDef* lo = GearOf(id - GearBaseN());
+	return SeriesGap(g->price, lo ? lo->price : 0);
+}
 bool GearBuy(SaveData& s, int index)
 {
 	if (index < 0 || index >= GearCount()) return false;
-	const GearDef* g = GearOf(index + 1);
-	if (!g || s.gold < g->price) return false;
-	if (!StashAdd(s, index + 1)) return false;
-	s.gold -= g->price;
+	int id = index + 1;
+	const GearDef* g = GearOf(id);
+	if (!g) return false;
+	int cost = GearDeal(s, id);
+	if (s.gold < cost) return false;
+	if (GearGrading(s, id)) {
+		int prev = id - GearBaseN();
+		for (int i = 0; i < s.gearN && i < GEAR_STASH; i++) if (s.gearId[i] == prev) {
+			s.gearId[i] = id;
+			s.gold -= cost;
+			return true;
+		}
+		for (int i = 0; i < MAX_ROSTER; i++) if (s.roster[i].used) {
+			for (int slot = 6; slot <= 7; slot++) if (s.roster[i].reserved[slot] == prev) {
+				s.roster[i].reserved[slot] = id;
+				s.gold -= cost;
+				return true;
+			}
+		}
+	}
+	if (!StashAdd(s, id)) return false;
+	s.gold -= cost;
 	return true;
 }
 bool GearSellAt(SaveData& s, int index)
@@ -11133,7 +11452,7 @@ int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r)
 		int reqLo = 1, reqHi = cap;
 		if (pass == 0 || pass == 2) reqLo = cap;
 		else if (pass == 1) reqLo = cap > 1 ? cap - 1 : 1;
-		for (int i = 0; i < GearCount() && n < 512; i++) {
+		for (int i = 0; i < GearBaseN() && n < 512; i++) {
 			const GearDef* g = GearOf(i + 1);
 			if (!g || g->shop) continue; // 属性・ユニークは店のみ
 			int req = g->req > 0 ? g->req : 1;
@@ -12955,12 +13274,20 @@ static int PasScale(const Unit& u, int fx, int base, int span)
 	int best = -1;
 	for (int k = 0; k < 2; k++) {
 		int id = u.pasEq[k];
-		if (id < 1 || id > kPasN) continue;
-		if (!PasRowHas(kPasRow[id - 1], fx)) continue;
-		int a = kPasRow[id - 1].amp;
+		if (id < 1 || id > PasCount() || kPasN < 1) continue;
+		int tier = (id - 1) / kPasN;
+		int bi = (id - 1) % kPasN;
+		if (tier < 0) tier = 0;
+		if (tier > 3) tier = 3;
+		if (!PasRowHas(kPasRow[bi], fx)) continue;
+		int a = kPasRow[bi].amp;
 		if (a < 0) a = 0;
 		if (a > 100) a = 100;
 		int v = base + a * span / 100;
+		if (!PasRowHas(kPasRow[bi], PAS_FLY)) {
+			static const int m[4] = { 100, 150, 200, 250 };
+			v = v * m[tier] / 100;
+		}
 		if (v > best) best = v;
 	}
 	return best;
@@ -13031,8 +13358,8 @@ bool CatalogRaises(int kind, int id, int stat)
 	}
 	if (kind == 4) return AccStat(id + 1, stat) > 0;
 	if (kind == 6) {
-		if (id < 0 || id >= kPasN) return false;
-		const PasRow& row = kPasRow[id];
+		if (id < 0 || id >= PasCount() || kPasN < 1) return false;
+		const PasRow& row = kPasRow[id % kPasN];
 		int f[5] = { row.fx, row.more[0], row.more[1], row.more[2], row.more[3] };
 		for (int i = 0; i < 5; i++) if (FxRaises(f[i]) == stat) return true;
 		return false;

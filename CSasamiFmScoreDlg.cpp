@@ -305,6 +305,7 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	ScStaffSetPreviewPump(FmScorePumpThunk, this);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	EnableAero(FALSE);
+	::SendMessage(m_hWnd, WM_SETREDRAW, FALSE, 0);
 
 	auto flatBtn = [](CCustomStandardButton& b) {
 		if (!b.GetSafeHwnd()) return;
@@ -409,6 +410,8 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	RestoreUiGeom();
 	RefreshPartEnabled();
 	UpdateHelpBar();
+	::SendMessage(m_hWnd, WM_SETREDRAW, TRUE, 0);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN);
 	return TRUE;
 }
 
@@ -1298,14 +1301,17 @@ void CSasamiFmScoreDlg::PlaceOrEditAt(CPoint pt)
 			m_ui.markerSolidTrack = ch;
 			m_curCh = ch;
 			if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
-			if (ScStaffSelHas(&m_ui, hit) && !(GetKeyState(VK_SHIFT) & 0x8000)) {
-				/* keep existing selection */
-			} else if (GetKeyState(VK_SHIFT) & 0x8000) {
-				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 1);
+			const int shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if (shift) {
+				if (ScStaffSelHas(&m_ui, hit)) ScStaffSelRemove(&m_ui, hit);
+				else ScStaffSelAdd(&m_ui, hit);
+			} else if (ScStaffSelHas(&m_ui, hit) && m_ui.nSel > 1) {
+				/* keep the group so the chord can be dragged */
 			} else {
 				ScStaffSelClear(&m_ui);
-				ScStaffSelAddTieChain(m_doc.ev, m_doc.evCount, &m_ui, hit, 1);
+				ScStaffSelAdd(&m_ui, hit);
 			}
+			m_ui.selRangeValid = 0;
 			m_ui.dragEv = hit;
 			m_ui.dragMode = 2;
 			m_dragLastX = pt.x;
@@ -2001,7 +2007,10 @@ void CSasamiFmScoreDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_ui.marqueeY1 = point.y;
 		CRect r(min(m_ui.marqueeX0, m_ui.marqueeX1), min(m_ui.marqueeY0, m_ui.marqueeY1),
 			max(m_ui.marqueeX0, m_ui.marqueeX1), max(m_ui.marqueeY0, m_ui.marqueeY1));
-		ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, r, 1);
+		if (r.Width() < 5 && r.Height() < 5)
+			ScStaffSelClear(&m_ui);
+		else
+			ScStaffSelectInRect(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, r, 0);
 		m_ui.marqueeOn = 0;
 		InvalidateRect(m_bodyRc, FALSE);
 	}

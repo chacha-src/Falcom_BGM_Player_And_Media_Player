@@ -469,7 +469,6 @@ void CSasamiLayoutPaletteDlg::OnMove(int x, int y)
 	if (GetSafeHwnd() && IsWindowVisible()) {
 		ScSaveWndGeom(this, &savedata.sasamiLayPalX, &savedata.sasamiLayPalY,
 			&savedata.sasamiLayPalW, &savedata.sasamiLayPalH);
-		MpPersistSavedataQuick();
 	}
 }
 
@@ -480,7 +479,6 @@ void CSasamiLayoutPaletteDlg::OnSize(UINT nType, int cx, int cy)
 	if (GetSafeHwnd() && IsWindowVisible()) {
 		ScSaveWndGeom(this, &savedata.sasamiLayPalX, &savedata.sasamiLayPalY,
 			&savedata.sasamiLayPalW, &savedata.sasamiLayPalH);
-		MpPersistSavedataQuick();
 	}
 	InvalidateBody();
 }
@@ -554,9 +552,16 @@ void CSasamiLayoutPaletteDlg::OnPaint()
 		if (m_items[i].kind == LAY_ITEM_TR_ACT || m_items[i].kind == LAY_ITEM_ACTION) {
 			ScStaffDrawPalCell(mem, r, hot);
 			mem.SetBkMode(TRANSPARENT);
-			CFont f; f.CreateFont(max(11, r.Height() - 8), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
-				OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
-			CFont* of = mem.SelectObject(&f);
+			static CFont layFont;
+			static int layFontPx = 0;
+			const int px = max(11, r.Height() - 8);
+			if (layFontPx != px) {
+				if (layFontPx) layFont.DeleteObject();
+				layFont.CreateFont(px, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+					OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
+				layFontPx = px;
+			}
+			CFont* of = mem.SelectObject(&layFont);
 			mem.SetTextColor(RGB(245, 248, 255));
 			mem.DrawText(m_items[i].label, r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 			mem.SelectObject(of);

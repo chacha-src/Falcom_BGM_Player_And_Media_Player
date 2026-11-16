@@ -10975,6 +10975,11 @@ static int g_auditionPart = 0;
 static int g_auditionCh = 0;
 static int g_auditionViaPort = 0;
 static DWORD g_auditionOff = 0;
+enum { kAudHitMax = 12 };
+static int g_audHitN = 0;
+static int g_audHitPart[kAudHitMax];
+static int g_audHitVia[kAudHitMax];
+static DWORD g_audHitOff[kAudHitMax];
 static HWND g_auditionWnd = NULL;
 static UINT_PTR g_auditionTimer = 0;
 
@@ -10989,6 +10994,15 @@ static void AuditionKillTimer()
 extern "C" void VstLiveAuditionStop(void)
 {
 	AuditionKillTimer();
+	const int nHit = g_audHitN;
+	int hitPart[kAudHitMax], hitVia[kAudHitMax];
+	DWORD hitOff[kAudHitMax];
+	for (int i = 0; i < nHit; i++) {
+		hitPart[i] = g_audHitPart[i];
+		hitVia[i] = g_audHitVia[i];
+		hitOff[i] = g_audHitOff[i];
+	}
+	g_audHitN = 0;
 	const int part = g_auditionPart;
 	const int ch = g_auditionCh & 15;
 	const DWORD off = g_auditionOff;
@@ -10997,17 +11011,31 @@ extern "C" void VstLiveAuditionStop(void)
 	g_auditionCh = 0;
 	const int via = g_auditionViaPort;
 	g_auditionViaPort = 0;
+	auto pushAt = [&](int p, int v, DWORD msg) {
+		if (p < 1 || p > 32 || !msg) return;
+		if (v) VstLiveMidiToPart(p, msg);
+		else LivePartPushShort(p, msg);
+	};
+	for (int i = 0; i < nHit; i++)
+		pushAt(hitPart[i], hitVia[i], hitOff[i]);
 	if (part < 1 || part > 32) return;
 	auto push = [&](DWORD msg) {
-		if (via) VstLiveMidiToPart(part, msg);
-		else LivePartPushShort(part, msg);
+		pushAt(part, via, msg);
 	};
-	if (off)
+	if (off && nHit == 0)
 		push(off);
 	/* Soft panic on the audition channel (remote-safe MIDI, no local PumpSilent). */
 	push((DWORD)(0xb0 | ch) | (64u << 8));
 	push((DWORD)(0xb0 | ch) | (120u << 8));
 	push((DWORD)(0xb0 | ch) | (123u << 8));
+	for (int i = 0; i < nHit; i++) {
+		if (hitPart[i] == part) continue;
+		int seen = 0;
+		for (int j = 0; j < i; j++) if (hitPart[j] == hitPart[i]) seen = 1;
+		if (seen) continue;
+		const int pch = (hitPart[i] - 1) & 15;
+		pushAt(hitPart[i], hitVia[i], (DWORD)(0xb0 | pch) | (123u << 8));
+	}
 }
 
 static LRESULT CALLBACK AuditionWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
@@ -11075,6 +11103,65 @@ extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, i
 	g_auditionCh = ch;
 	g_auditionViaPort = self ? 0 : 1;
 	g_auditionOff = noteOff;
+	HWND wnd = AuditionEnsureWnd();
+	if (wnd) {
+		g_auditionTimer = 1;
+		SetTimer(wnd, 1, (UINT)durMs, NULL);
+	}
+}
+
+extern "C" void VstLiveAuditionHits(const int* parts, const int* notes, const int* vels, int n, int durMs)
+{
+	if (!parts || !notes || n < 1) return;
+	if (n > kAudHitMax) n = kAudHitMax;
+	int part1 = 0;
+	for (int i = 0; i < n; i++) {
+		if (parts[i] >= 1 && parts[i] <= 32) { part1 = parts[i]; break; }
+	}
+	if (!part1) return;
+	if (durMs < 40) durMs = 40;
+	if (durMs > 2000) durMs = 2000;
+	if (playf == 0 || endflg != 0) {
+		if (VstSongUseLiveBinds())
+			VstSongUseLiveBindsSet(0);
+		VstLiveMonitorEnsure();
+	}
+	VstLiveAuditionStop();
+	g_audHitN = 0;
+	g_auditionPart = part1;
+	g_auditionOff = 0;
+	for (int i = 0; i < n && g_audHitN < kAudHitMax; i++) {
+		const int part = parts[i];
+		if (part < 1 || part > 32) continue;
+		int note = notes[i];
+		if (note < 0) note = 60;
+		if (note > 127) note = 127;
+		int vel = vels ? vels[i] : 100;
+		if (vel < 1) vel = 100;
+		if (vel > 127) vel = 127;
+		int dup = 0;
+		for (int j = 0; j < g_audHitN; j++) {
+			if (g_audHitPart[j] == part && (int)((g_audHitOff[j] >> 8) & 0x7F) == note)
+				dup = 1;
+		}
+		if (dup) continue;
+		const int self = VstLivePartIsLoaded(part);
+		LivePart& p = LiveEng().live[part - 1];
+		const int ch = self ? (LivePartSendCh(p, part) & 15) : ((part - 1) & 15);
+		const DWORD noteOn = (DWORD)(0x90 | ch) | ((DWORD)note << 8) | ((DWORD)vel << 16);
+		const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)note << 8);
+		if (self) LivePartPushShort(part, noteOn);
+		else VstLiveMidiToPart(part, noteOn);
+		g_audHitPart[g_audHitN] = part;
+		g_audHitVia[g_audHitN] = self ? 0 : 1;
+		g_audHitOff[g_audHitN] = noteOff;
+		g_audHitN++;
+		if (part == part1) {
+			g_auditionCh = ch;
+			g_auditionViaPort = self ? 0 : 1;
+		}
+	}
+	if (g_audHitN < 1) return;
 	HWND wnd = AuditionEnsureWnd();
 	if (wnd) {
 		g_auditionTimer = 1;

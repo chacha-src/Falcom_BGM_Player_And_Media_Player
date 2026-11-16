@@ -1,5 +1,5 @@
-/* ループは 16〜64 小節。8 小節で同じ形に戻さない。 */
-static int s_loopBars = 32;
+/* ループは 16〜64 小節。8 小節で同じ形に戻さない。 s_loopBars は cpp 側。 */
+#include "CSasamiArrangeForm.inl"
 
 static int StyleLoopBars(int style)
 {
@@ -796,63 +796,57 @@ static void ApplyPatGroove(int style, int pat, int bar, int div, int section,
 	case 15: kick = 0x1511; hat = 0xAAAA; bassHit = 0x1515; deg = deg8; nd = 8; compM = 0x4545; stabM = 0x1010; break;
 	default: break;
 	}
-	if (fam == FAM_WALTZ) {
+	uint8_t formDeg[8];
+	int useForm = 0;
+	if (section == SEC_BODY && !StyleQuiet(style)) {
+		/* 指定小節の中は冊の別の小節。最後の小節だけつなぎ用で、次の周の1小節目と同じ入りに戻る。 */
+		const ScFormHit* h = FormHit(fam, v, bar);
+		if (h && (h->kick || h->bass)) {
+			kick = h->kick;
+			snare = h->snare;
+			hat = h->hat;
+			ohat = 0;
+			ride = 0;
+			if (FormBook(fam, v) == 8) {
+				ride = hat;
+				hat = 0;
+			}
+			compM = h->comp;
+			arpM = h->arp;
+			bassHit = h->bass;
+			padM = (uint16_t)(kick & 0x0101);
+			harmM = compM;
+			cntM = (uint16_t)(arpM & 0x5555);
+			stabM = (uint16_t)(compM & 0x1010);
+			for (int i = 0; i < 8; i++)
+				formDeg[i] = (uint8_t)((h->deg >> (i * 4)) & 0xFu);
+			/* A〜L は冊が違う。M〜P は同じ冊を1拍ずらして、A〜D のコピーにしない。 */
+			if (v >= 12) {
+				hat = (uint16_t)((hat >> 2) | (uint16_t)(hat << 14));
+				snare = (uint16_t)((snare & 0x1010) | (uint16_t)((snare & (uint16_t)~0x1010) >> 1));
+				uint8_t tail = formDeg[7];
+				for (int i = 7; i > 1; i--) formDeg[i] = formDeg[i - 1];
+				formDeg[1] = tail;
+				formDeg[0] = 1;
+			}
+			useForm = 1;
+			int loop = s_loopBars;
+			if (loop < 16) loop = 16;
+			if (loop > 64) loop = 64;
+			int at = bar % loop;
+			if (at < 0) at = 0;
+			if (at == 0 && bar > 0)
+				drm[DV_CRASH] = 1;
+			if (at == loop - 1)
+				stabM = 0;
+		}
+	}
+	if (!useForm && fam == FAM_WALTZ) {
 		kick = (uint16_t)(kick & 0x0111);
 		snare = (uint16_t)(snare & 0x0110);
 		hat = (uint16_t)((hat | ride) & 0x0111);
 		compM = (uint16_t)(compM & 0x0111);
 		bassHit = (uint16_t)(bassHit & 0x0111);
-	} else if (section == SEC_BODY && !StyleQuiet(style)) {
-		/* ループ全長を 8 小節ごとの節に分ける。節ごとに打点を変え、
-		   48 小節が同じ 8 小節のコピーにならないようにする。 */
-		int loop = s_loopBars;
-		if (loop < 16 || loop > 64) loop = 32;
-		const int at = (bar % loop);
-		const int sec = at / 8;
-		const int w = at - sec * 8;
-		switch (sec % 6) {
-		case 0:
-			arpM = (uint16_t)(arpM & 0x1111);
-			if (hat) hat = (uint16_t)(hat & 0x5555);
-			break;
-		case 1:
-			hat = (uint16_t)(hat | 0x2222);
-			bassHit = (uint16_t)(bassHit | 0x0505);
-			compM = (uint16_t)(compM | 0x1111);
-			break;
-		case 2:
-			ohat = (uint16_t)(ohat | 0x4444);
-			compM = (uint16_t)(compM | 0x4444);
-			arpM = (uint16_t)(arpM | 0x0A0A);
-			break;
-		case 3:
-			kick = (uint16_t)(kick & 0x0101);
-			hat = (uint16_t)(hat & 0x1111);
-			arpM = 0;
-			compM = (uint16_t)(compM & 0x0001);
-			bassHit = (uint16_t)(bassHit & 0x0101);
-			break;
-		case 4:
-			hat = (uint16_t)(0xFFFF);
-			bassHit = (uint16_t)(bassHit | 0x5555);
-			arpM = (uint16_t)(arpM | 0x5555);
-			break;
-		default:
-			hat = (uint16_t)(hat | 0xAAAA);
-			compM = (uint16_t)(compM | 0x2222);
-			if (w >= 4) arpM = (uint16_t)(arpM | 0x0F0F);
-			break;
-		}
-		if (w & 1)
-			compM = (uint16_t)(compM ^ 0x0100);
-		if (w == 0 && sec > 0)
-			drm[DV_CRASH] = 1;
-		if (w == 7) {
-			static const uint16_t fill[6] = { 0x00F0, 0x0FF0, 0x5550, 0x3330, 0x0F00, 0x00FF };
-			snare = (uint16_t)(snare | fill[sec % 6]);
-			hat = (uint16_t)(hat & (uint16_t)~fill[sec % 6]);
-			arpM = 0;
-		}
 	}
 	drm[DV_KICK] = Fit16(kick, div);
 	drm[DV_SNARE] = Fit16(snare, div);
@@ -870,14 +864,20 @@ static void ApplyPatGroove(int style, int pat, int bar, int div, int section,
 	int n = div < 16 ? div : 16;
 	uint16_t bh = Fit16(bassHit, div);
 	int rot = 0;
-	if (section == SEC_BODY && nd > 0) {
+	if (!useForm && section == SEC_BODY && nd > 0) {
 		int loop = s_loopBars;
 		if (loop < 16 || loop > 64) loop = 32;
 		rot = (bar % loop) % nd;
 	}
 	for (int i = 0; i < n; i++) {
 		if (bh & (uint16_t)(1u << i)) {
-			bass[i] = deg[(k + rot) % nd];
+			if (useForm) {
+				int d = formDeg[k % 8];
+				if (d < 1) d = 1;
+				bass[i] = (uint8_t)d;
+			} else {
+				bass[i] = deg[(k + rot) % nd];
+			}
 			k++;
 		}
 	}

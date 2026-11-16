@@ -99,6 +99,7 @@ protected:
 	afx_msg LRESULT OnPalLayout(WPARAM w, LPARAM l);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg LRESULT OnNcHitTest(CPoint point);
 
 	void LayoutChrome();
 	void CreateChrome();
@@ -159,6 +160,7 @@ protected:
 	CPoint m_marquee0, m_marquee1;
 	BOOL m_bInLayout;
 	int m_sbDrag; /* 0 none, 1 vert, 2 horz */
+	int m_nativeSbGone;
 	int m_sbDragScroll0, m_sbDragAnchor;
 	int m_chromeDetail;
 	static CSasamiPianoRollDlg* s_midi;

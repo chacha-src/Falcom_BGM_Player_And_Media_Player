@@ -456,25 +456,195 @@ static int TrkCap(int t)
 	return TRK2_CAP;
 }
 
+/* トラック名は SASAMI_GS/XG/EX.DAT（20バイト: mapまたはMSB, bankまたはLSB, PC, SJIS名）。
+   55/88/88Pro/8820 は CC32=1..4 がマップ、CC0 がバリエーション。XG は CC0/CC32 そのまま。 */
+static const unsigned char* g_nmGs;
+static int g_nmGsN;
+static const unsigned char* g_nmXg;
+static int g_nmXgN;
+static const unsigned char* g_nmEx;
+static int g_nmExN;
+static int g_nmReady;
+
+static const unsigned char* NmLockRes(HMODULE mod, int id, int* n)
+{
+	if (n) *n = 0;
+	HRSRC hr = FindResourceW(mod, MAKEINTRESOURCEW(id), RT_RCDATA);
+	if (!hr) return 0;
+	HGLOBAL hg = LoadResource(mod, hr);
+	DWORD sz = SizeofResource(mod, hr);
+	const unsigned char* p = (const unsigned char*)LockResource(hg);
+	if (!p || sz < 20) return 0;
+	if (n) *n = (int)sz;
+	return p;
+}
+
+static unsigned char* NmLoadFile(const wchar_t* path, int* n)
+{
+	if (n) *n = 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz < 20 || sz > 8 * 1024 * 1024) { CloseHandle(f); return 0; }
+	unsigned char* buf = new unsigned char[sz];
+	if (!ReadFile(f, buf, sz, &got, NULL) || got != sz) {
+		CloseHandle(f);
+		delete[] buf;
+		return 0;
+	}
+	CloseHandle(f);
+	if (n) *n = (int)sz;
+	return buf;
+}
+
+static void NmEnsure()
+{
+	if (g_nmReady) return;
+	g_nmReady = 1;
+	HMODULE mods[2];
+	mods[0] = g_hKpi ? g_hKpi : NULL;
+	mods[1] = NULL;
+	for (int m = 0; m < 2; m++) {
+		if (!g_nmGs) g_nmGs = NmLockRes(mods[m], 279, &g_nmGsN);
+		if (!g_nmGs) g_nmGs = NmLockRes(mods[m], 101, &g_nmGsN);
+		if (!g_nmXg) g_nmXg = NmLockRes(mods[m], 280, &g_nmXgN);
+		if (!g_nmEx) g_nmEx = NmLockRes(mods[m], 346, &g_nmExN);
+	}
+	if (g_nmGs && g_nmXg) return;
+	wchar_t base[2][MAX_PATH];
+	base[0][0] = base[1][0] = 0;
+	if (g_hKpi) GetModuleFileNameW(g_hKpi, base[0], MAX_PATH);
+	GetModuleFileNameW(NULL, base[1], MAX_PATH);
+	for (int m = 0; m < 2 && (!g_nmGs || !g_nmXg); m++) {
+		wchar_t dir[MAX_PATH];
+		wcsncpy_s(dir, base[m], _TRUNCATE);
+		for (int up = 0; up < 8 && dir[0] && (!g_nmGs || !g_nmXg); up++) {
+			wchar_t* sl = wcsrchr(dir, L'\\');
+			if (!sl) break;
+			*sl = 0;
+			wchar_t cand[MAX_PATH];
+			if (!g_nmGs) {
+				_snwprintf_s(cand, _TRUNCATE, L"%s\\SASAMI_GS.DAT", dir);
+				g_nmGs = NmLoadFile(cand, &g_nmGsN);
+				if (!g_nmGs) {
+					_snwprintf_s(cand, _TRUNCATE, L"%s\\res\\SASAMI_GS.DAT", dir);
+					g_nmGs = NmLoadFile(cand, &g_nmGsN);
+				}
+			}
+			if (!g_nmXg) {
+				_snwprintf_s(cand, _TRUNCATE, L"%s\\SASAMI_XG.DAT", dir);
+				g_nmXg = NmLoadFile(cand, &g_nmXgN);
+				if (!g_nmXg) {
+					_snwprintf_s(cand, _TRUNCATE, L"%s\\res\\SASAMI_XG.DAT", dir);
+					g_nmXg = NmLoadFile(cand, &g_nmXgN);
+				}
+			}
+		}
+	}
+	if (!g_nmGs) g_nmGs = NmLoadFile(L"C:\\Windows\\SASAMI_GS.DAT", &g_nmGsN);
+	if (!g_nmXg) g_nmXg = NmLoadFile(L"C:\\Windows\\SASAMI_XG.DAT", &g_nmXgN);
+}
+
+static int NmHit(const unsigned char* d, int n, int a, int b, int pc, char* dst, int cap)
+{
+	if (!d || n < 20 || !dst || cap < 2) return 0;
+	if (a < 0 || b < 0 || pc < 0) return 0;
+	for (int i = 0; i + 20 <= n; i += 20) {
+		if ((int)d[i] != a || (int)d[i + 1] != b || (int)d[i + 2] != pc) continue;
+		int k = 0;
+		while (k < 16 && k + 1 < cap && d[i + 3 + k]) {
+			dst[k] = (char)d[i + 3 + k];
+			k++;
+		}
+		while (k > 0 && (dst[k - 1] == ' ' || dst[k - 1] == ':')) k--;
+		dst[k] = 0;
+		return dst[0] != 0;
+	}
+	return 0;
+}
+
+/* Cubase のパート名。音色名は DAT、役割は音域と PC から。 */
+static void SmfTrackTitle(int port, int ch, int nports, char* dst, int cap)
+{
+	if (!dst || cap < 8) return;
+	int pc = 0, msb = 0, lsb = 0, havePc = 0, sum = 0, cnt = 0;
+	for (int i = 0; i < s_evCount; i++) {
+		const MidiEv& e = s_evs[i];
+		if (e.len < 2) continue;
+		if ((e.port ? 1 : 0) != port) continue;
+		const uint8_t st = e.bytes[0];
+		if (st < 0x80 || st >= 0xF0) continue;
+		if ((st & 0x0F) != ch) continue;
+		if ((st & 0xF0) == 0xB0 && e.len >= 3) {
+			if (e.bytes[1] == 0) msb = e.bytes[2] & 127;
+			else if (e.bytes[1] == 32) lsb = e.bytes[2] & 127;
+		} else if ((st & 0xF0) == 0xC0 && !havePc) {
+			pc = e.bytes[1] & 127;
+			havePc = 1;
+		} else if ((st & 0xF0) == 0x90 && e.len >= 3 && e.bytes[2] > 0) {
+			sum += e.bytes[1];
+			cnt++;
+		}
+	}
+	const int drum = (ch == 9) || (msb == 127);
+	const char* role = "Chord";
+	if (drum) role = "Drum";
+	else if ((pc >= 32 && pc <= 39) || (cnt > 0 && sum / cnt < 50)) role = "Bass";
+	else if (pc >= 88 && pc <= 95) role = "Pad";
+	else if (cnt > 0 && sum / cnt >= 74) role = "Lead";
+	else if (pc >= 24 && pc <= 31) role = "Guitar";
+	char tone[24];
+	tone[0] = 0;
+	NmEnsure();
+	if (drum) {
+		if (!NmHit(g_nmGs, g_nmGsN, 0, 0, pc, tone, (int)sizeof(tone)))
+			NmHit(g_nmXg, g_nmXgN, msb ? msb : 127, lsb, pc, tone, (int)sizeof(tone));
+	} else if (msb == 0 && lsb >= 1 && lsb <= 4) {
+		NmHit(g_nmGs, g_nmGsN, lsb, 0, pc, tone, (int)sizeof(tone));
+	} else if (lsb >= 1 && lsb <= 4) {
+		if (!NmHit(g_nmGs, g_nmGsN, lsb, msb, pc, tone, (int)sizeof(tone)))
+			NmHit(g_nmGs, g_nmGsN, lsb, 0, pc, tone, (int)sizeof(tone));
+	}
+	if (!tone[0]) NmHit(g_nmXg, g_nmXgN, msb, lsb, pc, tone, (int)sizeof(tone));
+	if (!tone[0] && lsb >= 1 && lsb <= 4)
+		NmHit(g_nmGs, g_nmGsN, lsb, msb, pc, tone, (int)sizeof(tone));
+	if (!tone[0]) NmHit(g_nmGs, g_nmGsN, 4, msb, pc, tone, (int)sizeof(tone));
+	if (!tone[0]) NmHit(g_nmEx, g_nmExN, msb, lsb, pc, tone, (int)sizeof(tone));
+	if (!tone[0]) sprintf_s(tone, "PC %d", pc + 1);
+	const char* side = (nports > 1) ? (port ? "B " : "A ") : "";
+	sprintf_s(dst, (size_t)cap, "%s%s / %s", side, tone, role);
+}
+
 /* 書き出しだけ。Cubase は MTrk 1本を1パートにする。SSW は1本の中の
    チャンネルを分解するので、同じファイルでも向こうでは分かれて見えた。
    テンポと拍子は先頭トラック。各チャンネルは自分のノートと、そのポートの
    SysEx（GS Reset がテンポトラックだけだと Cubase が送らない）。 */
+/* Channels that never play a note-on stay out of the file. Setup CC/PC
+   on an empty part used to mint an MTrk for every channel. */
+static void SmfNoteMask(int noted[2])
+{
+	noted[0] = noted[1] = 0;
+	for (int i = 0; i < s_evCount; i++) {
+		const MidiEv& e = s_evs[i];
+		if (e.len < 3 || e.bytes[0] >= 0xF0) continue;
+		if ((e.bytes[0] & 0xF0) != 0x90 || e.bytes[2] == 0) continue;
+		const int p = e.port ? 1 : 0;
+		noted[p] |= 1 << (e.bytes[0] & 0x0F);
+	}
+}
+
 static void WriteSmfByChannel(int nports, uint8_t* out, int outCap, int* outSize)
 {
 	if (nports < 1) nports = 1;
 	if (nports > 2) nports = 2;
+	int noted[2];
+	SmfNoteMask(noted);
 	int used[2][16];
 	memset(used, 0, sizeof(used));
-	for (int i = 0; i < s_evCount; i++) {
-		const MidiEv& e = s_evs[i];
-		if (e.len < 1) continue;
-		const uint8_t st = e.bytes[0];
-		if (st < 0x80 || st >= 0xF0) continue;
-		const int p = e.port ? 1 : 0;
-		if (p >= nports) continue;
-		used[p][st & 0x0F] = 1;
-	}
+	for (int p = 0; p < nports; p++)
+		for (int ch = 0; ch < 16; ch++)
+			if (noted[p] & (1 << ch)) used[p][ch] = 1;
 	int ntr = 1;
 	for (int p = 0; p < nports; p++)
 		for (int ch = 0; ch < 16; ch++)
@@ -549,11 +719,8 @@ static void WriteSmfByChannel(int nports, uint8_t* out, int outCap, int* outSize
 			uint8_t* tb = s_trk1;
 			int tl = 0;
 			const int tc = TRK1_CAP;
-			char name[16];
-			if (nports > 1)
-				sprintf_s(name, p ? "B Ch %d" : "A Ch %d", ch + 1);
-			else
-				sprintf_s(name, "Ch %d", ch + 1);
+			char name[80];
+			SmfTrackTitle(p, ch, nports, name, (int)sizeof(name));
 			const int nl = (int)strlen(name);
 			PutVlq(tb, &tl, tc, 0);
 			if (tl + 3 + nl <= tc) {
@@ -605,6 +772,8 @@ static void WriteSmf(int nports, uint8_t* out, int outCap, int* outSize, int spl
 		WriteSmfByChannel(nports, out, outCap, outSize);
 		return;
 	}
+	int noted[2];
+	SmfNoteMask(noted);
 
 	if (nports < 1) nports = 1;
 	if (nports > 2) nports = 2;
@@ -635,6 +804,11 @@ static void WriteSmf(int nports, uint8_t* out, int outCap, int* outSize, int spl
 		else
 			tr = 1 + (e.port ? 1 : 0);
 		if (tr < 0 || tr >= ntr) continue;
+		if (e.bytes[0] >= 0x80 && e.bytes[0] < 0xF0) {
+			const int p = e.port ? 1 : 0;
+			const int ch = e.bytes[0] & 0x0F;
+			if (!(noted[p] & (1 << ch))) continue;
+		}
 		uint8_t* tb = TrkPtr(tr);
 		int* tl = &s_trkLen[tr];
 		const int tc = TrkCap(tr);
@@ -1755,7 +1929,7 @@ struct SasamiTempCache {
 	int exportLoops;
 };
 static SasamiTempCache s_tempCache;
-enum { SASAMI_SMF_CACHE_VER = 25 };
+enum { SASAMI_SMF_CACHE_VER = 28 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -2093,6 +2267,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					if (!tr[i].chordOpen)
 						releaseChordNotes(i);
 					if (note > 0 && note < 128) {
+						if (ch >= 0 && ch <= 15 && chOn[port ? 1 : 0][ch][note] > 0)
+							PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)note, 0);
 						PushShort(tick, port, (uint8_t)(0x90 | ch), (uint8_t)note, (uint8_t)tr[i].vel);
 						if (ch >= 0 && ch <= 15) {
 							uint8_t& c = chOn[port ? 1 : 0][ch][note];

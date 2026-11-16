@@ -121,6 +121,8 @@ protected:
 	afx_msg void OnBnClickedMute();
 	afx_msg void OnBnClickedSolo();
 	afx_msg void OnBnClickedMore();
+	afx_msg void OnQkApply();
+	afx_msg void OnQkEditChange(UINT id);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg LRESULT OnPalDur(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnPalQueryState(WPARAM w, LPARAM l);
@@ -147,6 +149,8 @@ protected:
 	int StampMapTones(int xg, int forceBank);
 	void ApplyLang();
 	void SyncPropFromSel();
+	void SyncQuickBar();
+	void ApplyQuickBar();
 	void UpdateInfoBar();
 	void JumpBar(int deltaBars);
 	void JumpToBarNumber(int bar1);
@@ -208,6 +212,10 @@ protected:
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
 	CCustomComboBox m_pasteMode;
 	CCustomEdit m_edNote, m_edGt, m_edVel;
+	/* Shown under the score while notes are selected. */
+	CCustomStatic m_qkLbl, m_qkVelL, m_qkGateL, m_qkPanL, m_qkVolL;
+	CCustomEdit m_qkVel, m_qkGate, m_qkPan, m_qkVol;
+	CCustomStandardButton m_qkApply;
 	CCustomStatic m_status;
 	CCustomStatic m_helpBar;
 	CToolTipCtrl m_tooltip;
@@ -239,6 +247,9 @@ protected:
 	int m_metroBeat;
 	UINT_PTR m_metroTimer;
 	int m_chromeDetail; /* 1=MIDI In/CC/プロパティ行を表示 */
+	int m_qkShown;
+	int m_qkFill;
+	int m_qkVelDirty, m_qkGateDirty, m_qkPanDirty, m_qkVolDirty;
 	int m_outBusy;
 	int m_outSel;
 	wchar_t m_autoPlug[520];

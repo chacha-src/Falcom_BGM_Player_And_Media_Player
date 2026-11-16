@@ -81,9 +81,104 @@ static int sBlandiaVramOn = 0;
 static uint8_t sStg900[0x10000];
 static uint8_t sStgSeq[0x10000];
 static int sStg900On = 0;
+/* Gaia はスプライトとタイルとパレットを読み戻す。捨てると初期化が終わらない。 */
+static uint8_t sGaia400[0x10000];
+static uint8_t sGaia500[0x10000];
+static uint8_t sGaia600[0x10000];
+static uint8_t sGaia700[0x10000];
+static uint8_t sGaiaC00[0x10000];
+static int sGaiaVramOn = 0;
+static int sGaiaCmd = -1;
+static int sGaiaQueued = 0;
+/* Uo Poko はスプライト 400000、タイル 500000、パレット 800000 を読み戻す。
+   IRQ 要因 600000 は bit0=0 でゲーム、0x0003 で YMZ 更新。1 回の VBlank で両方入れる。 */
+static uint8_t sUo400[0x10000];
+static uint8_t sUo500[0x10000];
+static uint8_t sUo600[0x100];
+static uint8_t sUo700[0x10];
+static uint8_t sUo800[0x10000];
+static int sUoOn = 0;
+static int sUoPhase = 0;
+static unsigned sUoCause = 0x0003u;
+/* Guwange も要因ワードが 0x0003 のときだけ YMZ を回す。スプライトと 3 枚のタイルを返す。 */
+static uint8_t sGw400[0x10000];
+static uint8_t sGw500[0x8000];
+static uint8_t sGw600[0x8000];
+static uint8_t sGw700[0x8000];
+static uint8_t sGwC00[0x10000];
+static uint8_t sGw300[0x80];
+static uint8_t sGw900[0x10];
+static uint8_t sGwA00[0x10];
+static uint8_t sGwB00[0x10];
+static int sGwOn = 0;
 static uint8_t sPopeyeProt0 = 0;
 static uint8_t sPopeyeProt1 = 0;
 static uint8_t sPopeyeShift = 0;
+
+static uint8_t* GaiaExtra(unsigned addr)
+{
+	if (!sGaiaVramOn) return 0;
+	if (addr >= 0x400000u && addr < 0x410000u) return sGaia400 + (addr - 0x400000u);
+	if (addr >= 0x500000u && addr < 0x510000u) return sGaia500 + (addr - 0x500000u);
+	if (addr >= 0x600000u && addr < 0x610000u) return sGaia600 + (addr - 0x600000u);
+	if (addr >= 0x700000u && addr < 0x710000u) return sGaia700 + (addr - 0x700000u);
+	if (addr >= 0xc00000u && addr < 0xc10000u) return sGaiaC00 + (addr - 0xc00000u);
+	return 0;
+}
+
+static uint8_t* UoExtra(unsigned addr)
+{
+	if (!sUoOn) return 0;
+	if (addr >= 0x400000u && addr < 0x410000u) return sUo400 + (addr - 0x400000u);
+	if (addr >= 0x500000u && addr < 0x510000u) return sUo500 + (addr - 0x500000u);
+	if (addr >= 0x600000u && addr < 0x600100u) return sUo600 + (addr - 0x600000u);
+	if (addr >= 0x700000u && addr < 0x700010u) return sUo700 + (addr - 0x700000u);
+	if (addr >= 0x800000u && addr < 0x810000u) return sUo800 + (addr - 0x800000u);
+	return 0;
+}
+
+static int YmzTwoPhase()
+{
+	return sUoOn || sGwOn;
+}
+
+static uint8_t* GwExtra(unsigned addr)
+{
+	if (!sGwOn) return 0;
+	if (addr >= 0x300000u && addr < 0x300080u) return sGw300 + (addr - 0x300000u);
+	if (addr >= 0x400000u && addr < 0x410000u) return sGw400 + (addr - 0x400000u);
+	if (addr >= 0x500000u && addr < 0x508000u) return sGw500 + (addr - 0x500000u);
+	if (addr >= 0x600000u && addr < 0x608000u) return sGw600 + (addr - 0x600000u);
+	if (addr >= 0x700000u && addr < 0x708000u) return sGw700 + (addr - 0x700000u);
+	if (addr >= 0x900000u && addr < 0x900010u) return sGw900 + (addr - 0x900000u);
+	if (addr >= 0xa00000u && addr < 0xa00010u) return sGwA00 + (addr - 0xa00000u);
+	if (addr >= 0xb00000u && addr < 0xb00010u) return sGwB00 + (addr - 0xb00000u);
+	if (addr >= 0xc00000u && addr < 0xc10000u) return sGwC00 + (addr - 0xc00000u);
+	return 0;
+}
+
+static unsigned GaiaLoadW(const uint8_t* r, unsigned off)
+{
+	return ((unsigned)r[off] << 8) | r[off + 1];
+}
+
+static void GaiaStoreW(uint8_t* r, unsigned off, unsigned v)
+{
+	r[off] = (uint8_t)(v >> 8);
+	r[off + 1] = (uint8_t)v;
+}
+
+/* 2B74 と同じリング。D0 が曲番号で、$10ED34 が立つまでは積まない。 */
+static void GaiaQueue(uint8_t* r, unsigned cmd)
+{
+	if (!GaiaLoadW(r, 0xED34u)) return;
+	unsigned cnt = GaiaLoadW(r, 0xED32u);
+	if (cnt >= 0x3fu) return;
+	unsigned idx = GaiaLoadW(r, 0xED2Eu) & 0x7eu;
+	GaiaStoreW(r, 0xECAEu + idx, cmd & 0xffffu);
+	GaiaStoreW(r, 0xED2Eu, (idx + 2u) & 0x7eu);
+	GaiaStoreW(r, 0xED32u, cnt + 1u);
+}
 
 static uint8_t* StgExtra(unsigned addr)
 {
@@ -868,6 +963,8 @@ static const CEmuAcM68kPcmSpec kAcM68kPcmSpecs[] = {
 	/* --- Cave の YMZ280B --- */
 	{ "ddonpach", 2, 0x300000u, 4u, 0x100000u, 0x10000u, 0x800000u },
 	{ "uopoko",   2, 0x300000u, 4u, 0x100000u, 0x10000u, 0x600000u },
+	/* SP=110000、YMZ280B は 300000 と 300002。 */
+	{ "gaia",     2, 0x300000u, 4u, 0x100000u, 0x10000u, 0x800000u },
 	{ "guwange",  2, 0x800000u, 4u, 0x200000u, 0x10000u, 0x300000u },
 	{ "korokoro", 2, 0x240000u, 4u, 0x300000u, 0x10000u, 0x1c0000u }
 };
@@ -1057,6 +1154,7 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "ddonpach",   CEMU_AC_BOARD_M68K_PCM },
 	{ "guwange",    CEMU_AC_BOARD_M68K_PCM },
 	{ "uopoko",     CEMU_AC_BOARD_M68K_PCM },
+	{ "gaia",       CEMU_AC_BOARD_M68K_PCM },
 	{ "korokoro",   CEMU_AC_BOARD_M68K_PCM },
 	/* --- Konami: Z80 + AY×2（timeplt 音源基板） --- */
 	{ "megazone",   CEMU_AC_BOARD_KONAMI_TIMEPLT },
@@ -1208,7 +1306,6 @@ static const CEmuAcAliasEntry kAcAliases[] = {
 	{ "metmqstr",   CEMU_AC_BOARD_TECMO16 },
 	{ "mazinger",   CEMU_AC_BOARD_TECMO16 },
 	{ "hotdogst",   CEMU_AC_BOARD_TECMO16 },
-	{ "gaia",       CEMU_AC_BOARD_TECMO16 },
 	{ "dadandan",   CEMU_AC_BOARD_TECMO16 },
 	{ "pwrinst1",   CEMU_AC_BOARD_TECMO16 },
 	{ "pwrinst2",   CEMU_AC_BOARD_TECMO16 },
@@ -4118,6 +4215,38 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			sBlandiaVramOn = (sp->kind == 1 && sp->ramAddr == 0x300000u
 				&& sp->chipAddr == 0xc00000u) ? 1 : 0;
 			sStg900On = (sp->sub[0] && _stricmp(sp->sub, "stg") == 0) ? 1 : 0;
+			sGaiaVramOn = (sp->sub[0] && _stricmp(sp->sub, "gaia") == 0) ? 1 : 0;
+			sGaiaCmd = -1;
+			sGaiaQueued = 0;
+			sUoOn = (sp->sub[0] && _stricmp(sp->sub, "uopoko") == 0) ? 1 : 0;
+			sGwOn = (sp->sub[0] && _stricmp(sp->sub, "guwange") == 0) ? 1 : 0;
+			sUoPhase = 0;
+			sUoCause = 0x0003u;
+			if (sGwOn) {
+				memset(sGw400, 0, sizeof(sGw400));
+				memset(sGw500, 0, sizeof(sGw500));
+				memset(sGw600, 0, sizeof(sGw600));
+				memset(sGw700, 0, sizeof(sGw700));
+				memset(sGwC00, 0, sizeof(sGwC00));
+				memset(sGw300, 0, sizeof(sGw300));
+				memset(sGw900, 0, sizeof(sGw900));
+				memset(sGwA00, 0, sizeof(sGwA00));
+				memset(sGwB00, 0, sizeof(sGwB00));
+			}
+			if (sUoOn) {
+				memset(sUo400, 0, sizeof(sUo400));
+				memset(sUo500, 0, sizeof(sUo500));
+				memset(sUo600, 0, sizeof(sUo600));
+				memset(sUo700, 0, sizeof(sUo700));
+				memset(sUo800, 0, sizeof(sUo800));
+			}
+			if (sGaiaVramOn) {
+				memset(sGaia400, 0, sizeof(sGaia400));
+				memset(sGaia500, 0, sizeof(sGaia500));
+				memset(sGaia600, 0, sizeof(sGaia600));
+				memset(sGaia700, 0, sizeof(sGaia700));
+				memset(sGaiaC00, 0, sizeof(sGaiaC00));
+			}
 			if (sStg900On) {
 				memset(sStg900, 0, sizeof(sStg900));
 				memset(sStgSeq, 0, sizeof(sStgSeq));
@@ -4130,7 +4259,8 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			}
 			cpuHz_ = 16000000;
 			if (sp->kind == 2) {
-				opmHz_ = 16934400;
+				/* Gaia と Theroes の YMZ は 16 MHz。他の Cave は 16.9344 MHz。 */
+				opmHz_ = sGaiaVramOn ? 16000000 : 16934400;
 				m68kVblankLevel_ = 1; /* INPUT_MERGER_ANY_HIGH を inputline 1 へ */
 				chip_ = CEmuChipYmz280bCreate((uint32_t)opmHz_, sampleRate_);
 			} else {
@@ -5628,6 +5758,22 @@ unsigned CHardAc::M68kPcmRead8(unsigned addr)
 	/* MAME cave_state::irq_cause_r: 保留中ソースのビットを Low にした 0x0003。+4 / +6 読がそのソースを ACK。 */
 	if (m68kIrqAddr_ && addr - m68kIrqAddr_ < 8u) {
 		const unsigned off = addr - m68kIrqAddr_;
+		if (YmzTwoPhase()) {
+			/* ワードの上位を先に読む。phase 1 はゲーム、その RTE の直後に音。 */
+			if (off == 0u) {
+				if (sUoPhase == 1) {
+					sUoCause = 0x0002u;
+					sUoPhase = 2;
+				} else {
+					sUoCause = 0x0003u;
+					sUoPhase = 0;
+				}
+				return (uint8_t)(sUoCause >> 8);
+			}
+			if (off == 1u)
+				return (uint8_t)sUoCause;
+			return 0;
+		}
 		unsigned res = 0x0003u;
 		if (m68kVblankPending_) res ^= 0x01u;
 		if (off == 5u || off == 4u) {
@@ -5642,6 +5788,12 @@ unsigned CHardAc::M68kPcmRead8(unsigned addr)
 	if (uint8_t* extra = BlandiaExtra(addr))
 		return *extra;
 	if (uint8_t* extra = StgExtra(addr))
+		return *extra;
+	if (uint8_t* extra = GaiaExtra(addr))
+		return *extra;
+	if (uint8_t* extra = UoExtra(addr))
+		return *extra;
+	if (uint8_t* extra = GwExtra(addr))
 		return *extra;
 	return 0xff;
 }
@@ -5671,7 +5823,13 @@ void CHardAc::M68kPcmWrite8(unsigned addr, uint8_t v)
 	}
 	if (ms1Rom_ && addr < ms1RomSize_) return;
 	if (m68kRamSize_ && addr - m68kRamAddr_ < m68kRamSize_) {
-		if (ms1Ram_) ms1Ram_[addr - m68kRamAddr_] = v;
+		if (ms1Ram_) {
+			unsigned off = addr - m68kRamAddr_;
+			/* ゲームが積む曲番号を、選んだ曲へ差し替える。 */
+			if (sGaiaVramOn && sGaiaCmd >= 0 && off >= 0xECAEu && off < 0xED2Eu)
+				v = (off & 1u) ? (uint8_t)sGaiaCmd : 0;
+			ms1Ram_[off] = v;
+		}
 		return;
 	}
 	if (uint8_t* extra = BlandiaExtra(addr)) {
@@ -5679,6 +5837,18 @@ void CHardAc::M68kPcmWrite8(unsigned addr, uint8_t v)
 		return;
 	}
 	if (uint8_t* extra = StgExtra(addr)) {
+		*extra = v;
+		return;
+	}
+	if (uint8_t* extra = GaiaExtra(addr)) {
+		*extra = v;
+		return;
+	}
+	if (uint8_t* extra = UoExtra(addr)) {
+		*extra = v;
+		return;
+	}
+	if (uint8_t* extra = GwExtra(addr)) {
 		*extra = v;
 		return;
 	}
@@ -5694,6 +5864,14 @@ void CHardAc::M68kPcmTickVblank(int cycles)
 		m68kVblankAcc_ %= period;
 		m68kVblankPending_ = 1;
 		ms1LatchIrq_ = 1;
+		if (YmzTwoPhase() && sUoPhase == 0)
+			sUoPhase = 1;
+		if (sGaiaVramOn && sGaiaCmd >= 0 && !sGaiaQueued && ms1Ram_) {
+			unsigned before = GaiaLoadW(ms1Ram_, 0xED32u);
+			GaiaQueue(ms1Ram_, (unsigned)sGaiaCmd);
+			if (GaiaLoadW(ms1Ram_, 0xED32u) != before)
+				sGaiaQueued = 1;
+		}
 	}
 }
 
@@ -5915,8 +6093,11 @@ void CHardAc::Ms1Write8(unsigned addr, uint8_t v)
 /* IRQ 配送 */
 int CHardAc::Ms1IrqLevel() const
 {
-	if (board_ == CEMU_AC_BOARD_M68K_PCM)
+	if (board_ == CEMU_AC_BOARD_M68K_PCM) {
+		if (YmzTwoPhase() && sUoPhase)
+			return m68kVblankLevel_ ? m68kVblankLevel_ : 1;
 		return ms1LatchIrq_ ? m68kVblankLevel_ : 0;
+	}
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP && segaM1Audio_)
 		return segaMidiIrq_ ? 2 : 0; /* 8251 RxRDY を IRQ2 へ */
 	if (board_ == CEMU_AC_BOARD_SEGA_SCSP)
@@ -6212,11 +6393,15 @@ void CHardAc::SetSoundCommand(uint8_t cmd)
 		soundCmd_ = cmd;
 		soundCmdPending_ = 1;
 		/* HACK: サウンドコマンド番地はゲームで違う。トレースが M68K のスピン位置を教える。当面は先頭数バイトへ書いてみる。 */
-		if (m68kRamSize_ >= 4 && ms1Ram_) {
+		if (m68kRamSize_ >= 4 && ms1Ram_ && !YmzTwoPhase()) {
 			ms1Ram_[0] = cmd;
 			ms1Ram_[1] = cmd;
 			ms1Ram_[2] = cmd;
 			ms1Ram_[3] = cmd;
+		}
+		if (sGaiaVramOn && sGaiaCmd != (int)cmd) {
+			sGaiaCmd = (int)cmd;
+			sGaiaQueued = 0;
 		}
 		return;
 	}

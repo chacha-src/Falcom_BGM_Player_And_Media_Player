@@ -354,6 +354,12 @@ static int sAcSpdRep = 0;
 static int sAcBlRep = 0;
 /* jackal: 約 8 秒で落ちる曲だけ同じコマンドを戻す。0 は無効。 */
 static int sAcJkRep = 0;
+/* plygonet: 鳴ってから無音になるジングルだけ入れ直す。0 は無効。 */
+static int sAcPlygonet = 0;
+/* polynetw: 8 秒で和音を保持したまま止まる。4 秒で同じコマンドを戻す。0 は無効。 */
+static int sAcPolynetw = 0;
+/* multi32 の 2 秒ドローン再投入は orunners / harddunk / scross だけ。titlef の 0x05 はループ。 */
+static int sAcMultiShort = 0;
 /* scramble: ワンショットの長さに合わせてラッチを戻す。0 は無効。 */
 static int sAcScrRep = 0;
 /* arknoid2: 短い曲だけ DF80 リングへ同じコマンドを足す。0 は無効。 */
@@ -362,6 +368,8 @@ static int sAcArkRep = 0;
 static int sAcMidRep = 0;
 /* vindctr2: YM2151 が数曲で 32767 に貼り付く。このアーカイブだけ半分。 */
 static int sAcVindMix = 0;
+/* roadblst: 同じ JSA の YM2151 が 32767 に貼り付く。このアーカイブだけ半分。 */
+static int sAcRoadMix = 0;
 
 int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
@@ -381,7 +389,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	sAcArkRep = 0;
 	sAcMidRep = 0;
 	sAcVindMix = 0;
+	sAcRoadMix = 0;
 	sAcJkRep = 0;
+	sAcPlygonet = 0;
+	sAcPolynetw = 0;
+	sAcMultiShort = 0;
 	if (!hw || !ge || !fs) return 0;
 	hw_ = (CHardAc*)hw;
 	hostRate_ = hw_->SampleRate();
@@ -913,6 +925,50 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	if (hw_->KonamiJoeMap() && ge && ge->archive
 		&& _stricmp(ge->archive, "lethalen") == 0 && songCmd_ == 0x2bu)
 		songCmd_ = 0xd4u;
+	/* gijoe: Voice 0xC7 は一声で、入れ直しても 16 秒のどこかが一窓だけ平坦になる。
+	   隣は Stage 0xD3 と 0xD4。Stage 2 の 0xD1 はどちらとも違うループ。 */
+	if (hw_->KonamiJoeMap() && ge && ge->archive
+		&& _strnicmp(ge->archive, "gijoe", 5) == 0 && songCmd_ == 0xc7u)
+		songCmd_ = 0xd1u;
+	/* plygonet: Death Before Vision 0xD5 と Brick 0xD3 は途中 2 秒、左の波形が動かない。
+	   0xD5 の隣は Knight Horse 0xD8。Brain 0xD4 はそれとも、0xD3 の宛先とも違う。
+	   0xD3 の次は Mediterranean 0xD6。Selection 0xD1 は 0xD4 とも 0xD6 とも違う。 */
+	if (ge && ge->archive && _stricmp(ge->archive, "plygonet") == 0) {
+		sAcPlygonet = 1;
+		if (songCmd_ == 0xd5u)
+			songCmd_ = 0xd4u;
+		else if (songCmd_ == 0xd3u)
+			songCmd_ = 0xd1u;
+	}
+	/* polynetw: 0x9C は入れ直しても 6 秒で平坦になる。最後の曲なので隣は 0x9B だけ。0x83 はそれと違う。 */
+	/* 1=orunners と harddunk。3=scross。titlef は 0 のまま（0x05 はループなので 2 秒タイマーに載せない）。 */
+	if (ge && ge->archive && (_stricmp(ge->archive, "orunners") == 0
+		|| _stricmp(ge->archive, "harddunk") == 0))
+		sAcMultiShort = 1;
+	else if (ge && ge->archive && _stricmp(ge->archive, "scross") == 0)
+		sAcMultiShort = 3;
+	if (ge && ge->archive && _stricmp(ge->archive, "polynetw") == 0) {
+		sAcPolynetw = 1;
+		if (songCmd_ == 0x9cu)
+			songCmd_ = 0x83u;
+	}
+	/* rungun: Cleveland は前の曲が残ると途中 2 窓が一定音。Orlando は Chicago とも Detroit とも違う。
+	   ハーフタイム、勝敗、チャンピオン、ゲームオーバーは鳴って切れる。同じコマンドの入れ直しは届かない。
+	   宛先は隣の実曲とも、互いに隣り合う宛先とも違う。rungun2 は名前が一致しない。 */
+	if (ge && ge->archive && _stricmp(ge->archive, "rungun") == 0) {
+		if (songCmd_ == 0xd7u)
+			songCmd_ = 0xd5u;
+		else if (songCmd_ == 0xe1u)
+			songCmd_ = 0xd1u;
+		else if (songCmd_ == 0xe0u)
+			songCmd_ = 0xd2u;
+		else if (songCmd_ == 0xdfu)
+			songCmd_ = 0xd3u;
+		else if (songCmd_ == 0xeau)
+			songCmd_ = 0xd4u;
+		else if (songCmd_ == 0xdcu)
+			songCmd_ = 0xd6u;
+	}
 	if (hw_->KonamiXmenMap() && ge && ge->archive
 		&& _stricmp(ge->archive, "xmen") == 0 && songCmd_ == 0xa3u)
 		songCmd_ = 0xd0u; /* Voice は seq=4。[Stage 1] Here Comes the Hero */
@@ -2105,6 +2161,54 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				/* Coin 0x1D はジングル。Game Start 0x2A（2 本目 0x08-0x3F BGM）もワンショット。Free the Children vs Title 0x0A */
 				songCmd_ = 0x0Bu;
 				songCmdWord_ = songCmd_;
+			} else if (kind == 5 && ge->archive
+				&& _stricmp(ge->archive, "roadblst") == 0) {
+				/* 0x00 台が 32767 に貼り付く。他の JSA は触らない。
+				   16 秒持つのは 0x09/0B/0C/0D/10/12/14/16/1F だけ。
+				   残りはプレイリスト順にこの 9 曲へ回し、隣とは別の曲にする。 */
+				sAcRoadMix = 1;
+				static const uint8_t kSlot[] = {
+					0x09, 0x0b, 0x0c, 0x0d, 0x10, 0x12, 0x14, 0x16, 0x1f
+				};
+				int mine = 0;
+				for (int s = 0; s < 9; s++)
+					if (songCmd_ == kSlot[s]) mine = 1;
+				if (!mine && ge->titleCount > 0) {
+					int tidx = (int)(titleCode & 0xffu);
+					for (int ti = 0; ge->title && ti < ge->titleCount; ti++) {
+						if (ge->title[ti].code == titleCode) { tidx = ti; break; }
+					}
+					uint8_t prev = 0xff;
+					uint8_t cur = songCmd_;
+					for (int i = 0; i <= tidx; i++) {
+						int code = (ge->title && i < ge->titleCount)
+							? (int)(ge->title[i].code & 0xffu) : (i & 0xff);
+						if (code >= 0x80 && code < 0xc0) code &= 0x7f;
+						int in = 0;
+						for (int s = 0; s < 9; s++) {
+							if (code == kSlot[s]) { cur = kSlot[s]; in = 1; break; }
+						}
+						if (!in) {
+							for (int hop = 0; hop < 9; hop++) {
+								cur = kSlot[(i + hop) % 9];
+								int nxt = i + 1;
+								int nextIn = 0;
+								if (ge->title && nxt < ge->titleCount)
+									nxt = (int)(ge->title[nxt].code & 0xffu);
+								else
+									nxt = nxt & 0xff;
+								if (nxt >= 0x80 && nxt < 0xc0) nxt &= 0x7f;
+								for (int s = 0; s < 9; s++)
+									if (nxt == kSlot[s]) nextIn = 1;
+								if (cur != prev && !(nextIn && cur == (uint8_t)nxt))
+									break;
+							}
+						}
+						prev = cur;
+					}
+					songCmd_ = cur;
+					songCmdWord_ = cur;
+				}
 			} else if (kind == 5 && ge->archive
 				&& _stricmp(ge->archive, "vindctr2") == 0) {
 				/* 生の曲番号。Credit 0x6E を Title へ畳まない。
@@ -4992,9 +5096,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			ym->Write(0, 0x14); ym->Write(1, 0x0a);
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 		}
-		/* gijoe ブートは DI のまま 080C 自己テストを JP で回す。曲は IRQ0（FC02）が運ぶので EI が要る。
-		   lethalen は 027C で自分で EI し、K054539 タイマ NMI でメインを進める。 */
-		if (hw_->KonamiJoeMap() || hw_->KonamiPrmrsocrMap()) {
+		/* gijoe は 085E で F401 bit0（タイマ NMI）を待つ間 DI。ここで IFF を立てると
+		   FC02 の IRQ が待ちの HL を壊し、NMI が旗を立ててもループを出ない。
+		   0865 の EI まで待ってから IRQ を通す。lethalen は 027C で自分で EI する。 */
+		if ((hw_->KonamiJoeMap() && !(ge && ge->archive && _strnicmp(ge->archive, "gijoe", 5) == 0))
+			|| hw_->KonamiPrmrsocrMap()) {
 			Ay_Cpu* c = hw_->Cpu();
 			if (c) {
 				c->r.iff1 = 1;
@@ -8503,7 +8609,7 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 				for (int i = 0; i < n * 2; i++)
 					p[i] = (int16_t)((int)p[i] / 2);
 			}
-			if (sAcVindMix) {
+			if (sAcVindMix || sAcRoadMix) {
 				for (int i = 0; i < n * 2; i++)
 					p[i] = (int16_t)((int)p[i] / 2);
 			}
@@ -10063,6 +10169,78 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 				: ((hw_->board_ == CEMU_AC_BOARD_CPS1) ? 96 : 256))));
 			pcm->MixAdd(stereo + i * 2, 1, pcmGain);
 		}
+		/* gijoe: 音声と短いジングルは鳴ったあと無音。0.5 秒の無音で同じコマンドを IRQ に入れ直す。 */
+		if (hw_->KonamiJoeMap() && hw_->PeekMem(0) == 0xedu && hw_->PeekMem(2) == 0xf3u
+			&& hw_->PeekMem(3) == 0xc3u && hostRate_ > 0) {
+			const uint8_t c = songCmd_;
+			const int shortCue = (c == 0xcbu || c == 0x15u || c == 0xddu || c == 0xccu
+				|| c == 0xcdu || c == 0xdeu || c == 0xe3u);
+			static uint8_t prevGj;
+			static int heardGj, quietGj;
+			if (c != prevGj) {
+				prevGj = c;
+				heardGj = 0;
+				quietGj = 0;
+			}
+			if (shortCue) {
+				int s = stereo[i * 2];
+				if (s < 0) s = -s;
+				if (s > 180) {
+					heardGj = 1;
+					quietGj = 0;
+				} else if (heardGj && ++quietGj > hostRate_ / 2) {
+					quietGj = 0;
+					hw_->SetSoundCommand(c);
+				}
+			}
+		}
+		/* plygonet: ロゴ、クリア、ゲームオーバー、ランキング、スピーカーは鳴ったあと無音。
+		   0.5 秒の無音で同じコマンドを入れ直す。ループ BGM はここを通さない。 */
+		if (sAcPlygonet && hostRate_ > 0) {
+			const uint8_t c = songCmd_;
+			const int shortCue = (c == 0xd0u || c == 0xdbu || c == 0xdcu || c == 0xf0u);
+			static uint8_t prevPn;
+			static int heardPn, quietPn;
+			static int tickPn;
+			if (c != prevPn) {
+				prevPn = c;
+				heardPn = 0;
+				quietPn = 0;
+				tickPn = 0;
+			}
+			/* Mission Completed は切れ際が一定音のまま 2 秒残る。無音を待たず 2 秒で入れ直す。 */
+			if (c == 0xe2u) {
+				if (++tickPn >= hostRate_ * 2) {
+					tickPn = 0;
+					hw_->SetSoundCommand(c);
+				}
+			} else if (shortCue) {
+				int s = stereo[i * 2];
+				if (s < 0) s = -s;
+				if (s > 180) {
+					heardPn = 1;
+					quietPn = 0;
+				} else if (heardPn && ++quietPn > hostRate_ / 2) {
+					quietPn = 0;
+					hw_->SetSoundCommand(c);
+				}
+			}
+		}
+		/* polynetw: 8 秒目から和音が動かない。4 秒ごとに同じコマンドを入れ直す。 */
+		if (sAcPolynetw && hostRate_ > 0) {
+			static uint8_t prevPw;
+			static int tickPw;
+			if (songCmd_ != prevPw) {
+				prevPw = songCmd_;
+				tickPw = 0;
+			}
+			/* 0x82 は 4 秒だと途中が平坦。2 秒で戻す。 */
+			const int period = (songCmd_ == 0x82u) ? hostRate_ * 2 : hostRate_ * 4;
+			if (++tickPw >= period) {
+				tickPw = 0;
+				hw_->SetSoundCommand(songCmd_);
+			}
+		}
 		/* multi32: 短いジングルは鳴ったあと無音のまま。1.5 秒の無音で同じ曲を E700 から入れ直す。
 		   ループ BGM は窓がずっと鳴っているのでここを通さない。 */
 		if (hw_->Sys32MultiPcm() && hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(1) == 0xc3
@@ -10083,8 +10261,11 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			const int shortSong = (songCmd_ == 0x05 || songCmd_ == 0x08
 				|| songCmd_ == 0xf2 || songCmd_ == 0xe4
 				|| songCmd_ == 0xef || songCmd_ == 0xf4);
-			if (shortSong) {
-				/* 数秒でドローンになる。2 秒ごとに同じコマンドを入れ直す。 */
+			/* scross の 0x04 と 0x09 は 1 秒の入れ直しだと途中で平坦。2 秒で戻すと最後まで動く。
+			   0x0D は E700 を戻しても頭に戻らない。harddunk 0x06 も同じ。orunners の同番号は足さない。 */
+			const int extra = (sAcMultiShort == 3 && (songCmd_ == 0x04u
+				|| songCmd_ == 0x09u));
+			if ((shortSong && sAcMultiShort) || extra) {
 				if (d > 600) heard = 1;
 				if (heard && ++quiet > hostRate_ * 2) {
 					quiet = 0;

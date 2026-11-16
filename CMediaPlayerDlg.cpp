@@ -13951,12 +13951,13 @@ void CMediaPlayerDlg::AddOmakeMenuItems(CCustomPopupMenu* menu)
 			L"크기로 미로 생성. 아이템이 템포·피치·다음 곡·EQ에 개입", L"按大小生成迷宫；道具干预速度、音高、下一曲、EQ", L"متاهة حسب الحجم؛ العناصر تؤثر على الإيقاع والطبقة والمسار وEQ", L"Лабиринт по размеру; предметы влияют на темп, высоту, трек, EQ", L"Labyrinth nach Größe; Items greifen in Tempo, Tonhöhe, Titel, EQ ein",
 			L"Labirinto por tamanho; itens afetam tempo, tom, faixa, EQ", L"Doolhof op grootte; items grijpen in op tempo, toon, nummer, EQ", L"Labirynt wg rozmiaru; przedmioty wpływają na tempo, wysokość, utwór, EQ", L"Boyuta göre labirent; öğeler tempo, perde, parça, EQ’ye müdahale eder"));
 	menu->AddCommand(ID_MP_OMAKETACTICS,
-		LL14(L"おまけタクティクスゲーム…", L"Bonus tactics game…", L"Jeu de tactique bonus…", L"Gioco tattico extra…", L"Juego táctico extra…",
-			L"보너스 택틱스 게임…", L"附赠战棋游戏…", L"لعبة تكتيكات إضافية…", L"Бонусная тактика…", L"Bonus-Taktikspiel…",
-			L"Jogo tático extra…", L"Bonus-tactiekspel…", L"Gra taktyczna dodatkowa…", L"Ekstra taktik oyunu…"),
+		LL14(L"タクティクスRPG「らいらX」", L"Tactics RPG \"Raira X\"", L"RPG tactique « Raira X »", L"RPG tattico \"Raira X\"", L"RPG táctico \"Raira X\"",
+			L"택틱스 RPG \"라이라 X\"", L"战棋RPG「莱拉X」", L"تكتيك RPG \"رايرا X\"", L"Тактическая RPG «Райра X»", L"Taktik-RPG „Raira X“",
+			L"RPG tático \"Raira X\"", L"Tactische RPG \"Raira X\"", L"Taktyczne RPG „Raira X”", L"Taktik RYO \"Raira X\""),
 		LL14(L"ファンタジー風のターン制シミュレーション。キャラを育てて全100ステージに挑みます", L"Fantasy turn-based tactics; train characters and take on 100 stages", L"Tactique au tour par tour fantasy ; entraînez vos héros sur 100 niveaux", L"Tattica a turni fantasy; allena i personaggi in 100 livelli", L"Táctica por turnos de fantasía; entrena personajes en 100 fases",
 			L"판타지 턴제 시뮬레이션. 캐릭터를 키워 100스테이지에 도전", L"奇幻回合制战棋；培养角色挑战全100关", L"تكتيكات فانتازيا بالأدوار؛ درّب الشخصيات وتحدَّ 100 مرحلة", L"Фэнтезийная пошаговая тактика; развивайте героев и пройдите 100 этапов", L"Rundenbasierte Fantasy-Taktik; Figuren trainieren, 100 Stufen meistern",
 			L"Tática por turnos de fantasia; treine personagens em 100 fases", L"Fantasy-tactiek in beurten; train personages in 100 levels", L"Fantastyczna taktyka turowa; rozwijaj postacie przez 100 etapów", L"Fantastik sıra tabanlı taktik; karakter geliştir, 100 bölüme meydan oku"));
+	menu->SetLastItemBold(TRUE);
 }
 
 void CMediaPlayerDlg::OnBotOmake()
@@ -15087,6 +15088,10 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 	// イコライザー/簡易ピアノロールはオプション窓なので閉じない(そのまま維持)
 	::ShowWindow(og->m_hWnd, SW_HIDE);
 
+	/* TOPMOST の読込窓を残したまま MP を前面にすると、降りないまま本画面の描画と喧嘩する。
+	   生成が終わった時点で閉じてから出す。 */
+	OggFinishStartupLoading();
+
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
 		mp->ShowWindow(SW_SHOW);
 		if (og && ::IsWindow(og->GetSafeHwnd()))
@@ -15115,8 +15120,6 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 			pl->GetWindowRect(&pr);
 			playbase->MoveWindow(&pr);
 		}
-		// 準備が終わってから読込窓を閉じる。Cemu の曲名は裏で直す。
-		OggFinishStartupLoading();
 		::SetCursor(::LoadCursor(NULL, IDC_ARROW));
 		PlStartCemuTitleRefresh();
 	}

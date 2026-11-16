@@ -409,6 +409,8 @@ static void CraftFixBeads()
 			for (int j = 0; j < k; j++) if (r.bead[j] == r.bead[k]) r.bead[k] = 0;
 	}
 }
+static int AccShown();
+static int PasShown();
 void CraftLoad()
 {
 	memset(&g_craft, 0, sizeof(g_craft));
@@ -560,15 +562,15 @@ void CraftLoad()
 		r.cp = (short)Clampi(r.cp, 0, CP_MAX);
 		for (int k = 0; k < CRAFT_SLOT_N; k++) if (r.bead[k] > CRAFT_N) r.bead[k] = 0;
 		for (int k = 0; k < 2; k++) {
-			if (r.acc[k] > kAccN) r.acc[k] = 0;
-			if (r.pas[k] > kPasN) r.pas[k] = 0;
+			if (r.acc[k] > AccShown()) r.acc[k] = 0;
+			if (r.pas[k] > PasShown()) r.pas[k] = 0;
 			if (g_craft.sumEq[i][k] > SUMMON_N) g_craft.sumEq[i][k] = 0;
 		}
 	}
 	for (int i = 0; i < SUMMON_N && i < CRAFT_SUM_OWN; i++) if (g_craft.sumN[i] > kWideMax) g_craft.sumN[i] = (unsigned short)kWideMax;
-	for (int i = 0; i < kPasN && i < CRAFT_PAS_OWN; i++) if (g_craft.pasN[i] > kWideMax) g_craft.pasN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < PasShown() && i < CRAFT_PAS_OWN; i++) if (g_craft.pasN[i] > kWideMax) g_craft.pasN[i] = (unsigned short)kWideMax;
 	for (int i = 0; i < CRAFT_GOOD_OWN; i++) if (g_craft.goodN[i] > kWideMax) g_craft.goodN[i] = (unsigned short)kWideMax;
-	for (int i = 0; i < kAccN && i < CRAFT_ACC_OWN; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
+	for (int i = 0; i < AccShown() && i < CRAFT_ACC_OWN; i++) if (g_craft.accN[i] > kWideMax) g_craft.accN[i] = (unsigned short)kWideMax;
 	CraftFixBeads();
 }
 void CraftSave()
@@ -625,9 +627,9 @@ void CraftBindUnit(Unit& u)
 	}
 	for (int k = 0; k < 2; k++) {
 		int a = r->acc[k];
-		if (a >= 1 && a <= kAccN) u.accEq[k] = a;
+		if (a >= 1 && a <= AccShown()) u.accEq[k] = a;
 		int p = r->pas[k];
-		if (p >= 1 && p <= kPasN) u.pasEq[k] = p;
+		if (p >= 1 && p <= PasShown()) u.pasEq[k] = p;
 	}
 }
 void CraftSaveUnit(const Unit& u)
@@ -697,7 +699,7 @@ void EquipNextAcc(CharData& c, int slot)
 	if (!r) return;
 	int cur = r->acc[slot];
 	int next = 0;
-	for (int v = cur + 1; v <= kAccN; v++) {
+	for (int v = cur + 1; v <= AccShown(); v++) {
 		if (g_craft.accN[v - 1] <= AccInUse(v - 1, r, slot)) continue;
 		next = v;
 		break;
@@ -731,7 +733,7 @@ int EquippedAccId(const CharData& c, int slot)
 // この枠に付けられる残り数。今この枠に付いている分は使用中に数えない。
 int AccSpare(const CharData& c, int slot, int index)
 {
-	if (slot < 0 || slot > 1 || index < 0 || index >= kAccN) return 0;
+	if (slot < 0 || slot > 1 || index < 0 || index >= AccShown()) return 0;
 	const CraftRec* r = FindRec(c.uid, false);
 	return max(0, (int)g_craft.accN[index] - AccInUse(index, r, slot));
 }
@@ -749,7 +751,7 @@ bool EquipAccId(CharData& c, int slot, int id)
 	CraftRec* r = FindRec(c.uid, true);
 	if (!r) return false;
 	if (id <= 0) { r->acc[slot] = 0; return true; }
-	if (id > kAccN || (r->acc[slot] != id && AccSpare(c, slot, id - 1) < 1)) return false;
+	if (id > AccShown() || (r->acc[slot] != id && AccSpare(c, slot, id - 1) < 1)) return false;
 	r->acc[slot] = (unsigned short)id;
 	return true;
 }
@@ -847,60 +849,215 @@ bool BeadSell(int index)
 	return true;
 }
 
+// ---------------- 改・聖・女神 ----------------
+// 表は増やさない。id は 基本、その次に全員の改、聖、女神。所持枠の中で段数を切る。
+const wchar_t* SeriesUpWord()
+{
+	return LangPick14(L"昇級", L"Upgrade", L"Améliorer", L"Migliora", L"Mejora", L"승급", L"升级", L"ترقية", L"Улучш.", L"Aufstieg", L"Melhora", L"Opwaard.", L"Awans", L"Yükselt");
+}
+const wchar_t* SeriesName(const wchar_t* base, int tier)
+{
+	if (!base || !base[0] || tier <= 0) return base ? base : L"?";
+	if (tier > 3) tier = 3;
+	static wchar_t buf[8][192];
+	static int slot = 0;
+	wchar_t* b = buf[slot++ & 7];
+	const wchar_t* suf = tier == 1
+		? LangPick14(L"改", L"Rev", L"Rév", L"Rev", L"Rev", L"개", L"改", L"تعديل", L"Изм", L"Rev", L"Rev", L"Rev", L"Popr", L"Ek")
+		: tier == 2
+		? LangPick14(L"聖", L"Holy", L"Sacré", L"Sacro", L"Santo", L"성", L"圣", L"مقدس", L"Свят", L"Heilig", L"Sacro", L"Heilig", L"Święty", L"Kutsal")
+		: LangPick14(L"女神", L"Goddess", L"Déesse", L"Dea", L"Diosa", L"여신", L"女神", L"إلهة", L"Богиня", L"Göttin", L"Deusa", L"Godin", L"Bogini", L"Tanrıça");
+	swprintf_s(b, 192, L"%s・%s", base, suf);
+	return b;
+}
+static const wchar_t* SeriesNote(int tier, int kind)
+{
+	if (tier < 1) return L"";
+	if (tier > 3) tier = 3;
+	if (kind == 0 && tier == 1) return LangPick14(L"飛行は3倍。移動+2。行動速度+30%。", L"Flight x3. Move +2. Action speed +30%.", L"Vol ×3. Déplacement +2. Vitesse d'action +30 %.", L"Volo ×3. Movimento +2. Velocità d'azione +30%.", L"Vuelo ×3. Movimiento +2. Velocidad de acción +30%.", L"비행 3배. 이동 +2. 행동 속도 +30%.", L"飞行3倍。移动+2。行动速度+30%。", L"طيران ×3. حركة +2. سرعة الفعل +30٪.", L"Полёт ×3. Ход +2. Скорость действия +30%.", L"Flug ×3. Zug +2. Aktionstempo +30 %.", L"Voo ×3. Movimento +2. Velocidade de ação +30%.", L"Vlucht ×3. Zet +2. Actietempo +30%.", L"Lot ×3. Ruch +2. Szybkość akcji +30%.", L"Uçuş ×3. Hamle +2. Eylem hızı +%30.");
+	if (kind == 0 && tier == 2) return LangPick14(L"飛行は5倍。移動+4。移動速度+40%。", L"Flight x5. Move +4. Travel speed +40%.", L"Vol ×5. Déplacement +4. Vitesse de trajet +40 %.", L"Volo ×5. Movimento +4. Velocità di spostamento +40%.", L"Vuelo ×5. Movimiento +4. Velocidad de viaje +40%.", L"비행 5배. 이동 +4. 이동 속도 +40%.", L"飞行5倍。移动+4。移动速度+40%。", L"طيران ×5. حركة +4. سرعة التنقل +40٪.", L"Полёт ×5. Ход +4. Скорость хода +40%.", L"Flug ×5. Zug +4. Lauftempo +40 %.", L"Voo ×5. Movimento +4. Velocidade de deslocamento +40%.", L"Vlucht ×5. Zet +4. Loopsnelheid +40%.", L"Lot ×5. Ruch +4. Szybkość ruchu +40%.", L"Uçuş ×5. Hamle +4. Yürüyüş hızı +%40.");
+	if (kind == 0) return LangPick14(L"飛行は8倍。移動+6。行動速度+50%。移動速度+60%。", L"Flight x8. Move +6. Action speed +50%. Travel speed +60%.", L"Vol ×8. Déplacement +6. Vitesse d'action +50 %. Vitesse de trajet +60 %.", L"Volo ×8. Movimento +6. Velocità d'azione +50%. Velocità di spostamento +60%.", L"Vuelo ×8. Movimiento +6. Velocidad de acción +50%. Velocidad de viaje +60%.", L"비행 8배. 이동 +6. 행동 속도 +50%. 이동 속도 +60%.", L"飞行8倍。移动+6。行动速度+50%。移动速度+60%。", L"طيران ×8. حركة +6. سرعة الفعل +50٪. سرعة التنقل +60٪.", L"Полёт ×8. Ход +6. Скорость действия +50%. Скорость хода +60%.", L"Flug ×8. Zug +6. Aktionstempo +50 %. Lauftempo +60 %.", L"Voo ×8. Movimento +6. Velocidade de ação +50%. Velocidade de deslocamento +60%.", L"Vlucht ×8. Zet +6. Actietempo +50%. Loopsnelheid +60%.", L"Lot ×8. Ruch +6. Szybkość akcji +50%. Szybkość ruchu +60%.", L"Uçuş ×8. Hamle +6. Eylem hızı +%50. Yürüyüş hızı +%60.");
+	if (kind == 1 && tier == 1) return LangPick14(L"数値の効果は1.5倍。", L"Numeric effects are 1.5 times.", L"Les valeurs de l'effet sont ×1,5.", L"I valori dell'effetto sono ×1,5.", L"Los valores del efecto son ×1,5.", L"수치 효과는 1.5배.", L"数值效果为1.5倍。", L"قيم الأثر ×1.5.", L"Числовые эффекты ×1,5.", L"Zahlenwerte ×1,5.", L"Os valores do efeito são ×1,5.", L"Getalwaarden ×1,5.", L"Wartości liczbowe ×1,5.", L"Sayısal etkiler 1,5 kat.");
+	if (kind == 1 && tier == 2) return LangPick14(L"数値の効果は2倍。", L"Numeric effects are 2 times.", L"Les valeurs de l'effet sont ×2.", L"I valori dell'effetto sono ×2.", L"Los valores del efecto son ×2.", L"수치 효과는 2배.", L"数值效果为2倍。", L"قيم الأثر ×2.", L"Числовые эффекты ×2.", L"Zahlenwerte ×2.", L"Os valores do efeito são ×2.", L"Getalwaarden ×2.", L"Wartości liczbowe ×2.", L"Sayısal etkiler 2 kat.");
+	if (kind == 1) return LangPick14(L"数値の効果は2.5倍。", L"Numeric effects are 2.5 times.", L"Les valeurs de l'effet sont ×2,5.", L"I valori dell'effetto sono ×2,5.", L"Los valores del efecto son ×2,5.", L"수치 효과는 2.5배.", L"数值效果为2.5倍。", L"قيم الأثر ×2.5.", L"Числовые эффекты ×2,5.", L"Zahlenwerte ×2,5.", L"Os valores do efeito são ×2,5.", L"Getalwaarden ×2,5.", L"Wartości liczbowe ×2,5.", L"Sayısal etkiler 2,5 kat.");
+	if (tier == 1) return LangPick14(L"行動速度+10%。", L"Action speed +10%.", L"Vitesse d'action +10 %.", L"Velocità d'azione +10%.", L"Velocidad de acción +10%.", L"행동 속도 +10%.", L"行动速度+10%。", L"سرعة الفعل +10٪.", L"Скорость действия +10%.", L"Aktionstempo +10 %.", L"Velocidade de ação +10%.", L"Actietempo +10%.", L"Szybkość akcji +10%.", L"Eylem hızı +%10.");
+	if (tier == 2) return LangPick14(L"行動速度+20%。移動+1。", L"Action speed +20%. Move +1.", L"Vitesse d'action +20 %. Déplacement +1.", L"Velocità d'azione +20%. Movimento +1.", L"Velocidad de acción +20%. Movimiento +1.", L"행동 속도 +20%. 이동 +1.", L"行动速度+20%。移动+1。", L"سرعة الفعل +20٪. حركة +1.", L"Скорость действия +20%. Ход +1.", L"Aktionstempo +20 %. Zug +1.", L"Velocidade de ação +20%. Movimento +1.", L"Actietempo +20%. Zet +1.", L"Szybkość akcji +20%. Ruch +1.", L"Eylem hızı +%20. Hamle +1.");
+	return LangPick14(L"行動速度+30%。移動+2。", L"Action speed +30%. Move +2.", L"Vitesse d'action +30 %. Déplacement +2.", L"Velocità d'azione +30%. Movimento +2.", L"Velocidad de acción +30%. Movimiento +2.", L"행동 속도 +30%. 이동 +2.", L"行动速度+30%。移动+2。", L"سرعة الفعل +30٪. حركة +2.", L"Скорость действия +30%. Ход +2.", L"Aktionstempo +30 %. Zug +2.", L"Velocidade de ação +30%. Movimento +2.", L"Actietempo +30%. Zet +2.", L"Szybkość akcji +30%. Ruch +2.", L"Eylem hızı +%30. Hamle +2.");
+}
+static const wchar_t* SeriesDesc(const wchar_t* base, int tier, int kind)
+{
+	if (tier <= 0) return base ? base : L"";
+	static wchar_t buf[4][480];
+	static int slot = 0;
+	wchar_t* b = buf[slot++ & 3];
+	swprintf_s(b, 480, L"%s %s", base ? base : L"", SeriesNote(tier, kind));
+	return b;
+}
+static int AccShown()
+{
+	if (kAccN < 1) return 0;
+	int t = 4;
+	if (t > CRAFT_ACC_OWN / kAccN) t = CRAFT_ACC_OWN / kAccN;
+	if (t < 1) t = 1;
+	return kAccN * t;
+}
+static int PasShown()
+{
+	if (kPasN < 1) return 0;
+	int t = 4;
+	if (t > CRAFT_PAS_OWN / kPasN) t = CRAFT_PAS_OWN / kPasN;
+	if (t < 1) t = 1;
+	return kPasN * t;
+}
+static bool PasFxNumeric(int fx)
+{
+	switch (fx) {
+	case PAS_STR: case PAS_MAG: case PAS_DEF: case PAS_RES: case PAS_MOV: case PAS_JMP: case PAS_RNG:
+	case PAS_REGEN: case PAS_MP: case PAS_CRIT: case PAS_EVADE: case PAS_EXP: case PAS_HEAL:
+	case PAS_FIRE: case PAS_ICE: case PAS_THUNDER: case PAS_HOLY: case PAS_DARK:
+	case PAS_CP: case PAS_OPEN:
+	case PAS_STR2: case PAS_MAG2: case PAS_DEF2: case PAS_RES2: case PAS_MOV2: case PAS_JMP2: case PAS_RNG2:
+	case PAS_REGEN2: case PAS_MP2: case PAS_CRIT2: case PAS_EVADE2: case PAS_EXP2: case PAS_HEAL2:
+	case PAS_FIRE2: case PAS_ICE2: case PAS_THUNDER2: case PAS_HOLY2: case PAS_DARK2:
+	case PAS_CP2: case PAS_OPEN2: case PAS_AGI: case PAS_LUK: case PAS_RCV: case PAS_CPL: case PAS_HIT: case PAS_AVO: case PAS_PEN:
+		return true;
+	default: return false;
+	}
+}
+static int AccScale(int v, int tier)
+{
+	if (v <= 0 || tier <= 0) return v;
+	if (tier > 3) tier = 3;
+	static const int m[4] = { 100, 125, 150, 180 };
+	int n = v * m[tier] / 100;
+	if (n <= v) n = v + 1;
+	return n;
+}
+
 // ---------------- 装飾品 ----------------
-int AccCount() { return kAccN; }
-int AccHave(int index) { return (index < 0 || index >= kAccN) ? 0 : (int)g_craft.accN[index]; }
+int AccCount() { return AccShown(); }
+int AccHave(int index) { return (index < 0 || index >= AccShown()) ? 0 : (int)g_craft.accN[index]; }
 int AccFree(int index)
 {
-	if (index < 0 || index >= kAccN) return 0;
+	if (index < 0 || index >= AccShown()) return 0;
 	return max(0, (int)g_craft.accN[index] - AccInUse(index, NULL, -1));
 }
 bool AccSell(int index)
 {
-	if (index < 0 || index >= kAccN || g_craft.accN[index] < 1) return false;
+	if (index < 0 || index >= AccShown() || g_craft.accN[index] < 1) return false;
 	if (g_craft.accN[index] <= AccInUse(index, NULL, -1)) return false;
 	g_craft.accN[index]--;
 	return true;
 }
 const wchar_t* AccName(int id)
 {
-	if (id < 1 || id > kAccN) return TT(TX_PT_NONE);
-	const wchar_t* const* s = kAccRow[id - 1].nm;
-	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (id < 1 || id > AccShown() || kAccN < 1) return TT(TX_PT_NONE);
+	int tier = (id - 1) / kAccN;
+	const wchar_t* const* s = kAccRow[(id - 1) % kAccN].nm;
+	return SeriesName(LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]), tier);
 }
-int AccPrice(int index) { return (index < 0 || index >= kAccN) ? 0 : kAccRow[index].price; }
+int AccPrice(int index) { return (index < 0 || index >= AccShown() || kAccN < 1) ? 0 : SeriesPriceOf(kAccRow[index % kAccN].price, index / kAccN); }
 int AccStat(int id, int stat)
 {
-	if (id < 1 || id > kAccN) return 0;
+	if (id < 1 || id > AccShown() || kAccN < 1) return 0;
+	int tier = (id - 1) / kAccN;
 	int v = 0;
-	for (int k = 0; k < 4; k++) if (kAccRow[id - 1].s[k][1] && kAccRow[id - 1].s[k][0] == stat) v += kAccRow[id - 1].s[k][1];
-	return v;
+	const AccRow& row = kAccRow[(id - 1) % kAccN];
+	for (int k = 0; k < 4; k++) if (row.s[k][1] && row.s[k][0] == stat) v += row.s[k][1];
+	return AccScale(v, tier);
+}
+int AccTierOf(int index)
+{
+	if (index < 0 || kAccN < 1) return 0;
+	return index / kAccN;
+}
+int AccRoot(int index)
+{
+	if (index < 0 || kAccN < 1) return 0;
+	return index % kAccN;
+}
+bool AccGrading(int index)
+{
+	return index >= kAccN && index < AccShown() && AccHave(index - kAccN) >= 1;
+}
+int AccDeal(int index)
+{
+	int price = AccPrice(index);
+	if (!AccGrading(index)) return price;
+	return SeriesGap(price, AccPrice(index - kAccN));
 }
 bool AccBuy(SaveData& s, int index)
 {
-	if (index < 0 || index >= kAccN) return false;
-	if (s.gold < kAccRow[index].price || g_craft.accN[index] >= kWideMax) return false;
-	s.gold -= kAccRow[index].price;
+	if (index < 0 || index >= AccShown()) return false;
+	if (g_craft.accN[index] >= kWideMax) return false;
+	int cost = AccDeal(index);
+	if (s.gold < cost) return false;
+	if (AccGrading(index)) {
+		int prev = index - kAccN;
+		g_craft.accN[prev]--;
+		if (AccInUse(prev, NULL, -1) > (int)g_craft.accN[prev]) {
+			int oldId = prev + 1, newId = index + 1;
+			for (int i = 0; i < 128; i++) {
+				CraftRec& r = g_craft.rec[i];
+				if (!r.uid) continue;
+				bool moved = false;
+				for (int k = 0; k < 2; k++) if (r.acc[k] == oldId) { r.acc[k] = (unsigned short)newId; moved = true; break; }
+				if (moved) break;
+			}
+		}
+	}
+	s.gold -= cost;
 	g_craft.accN[index]++;
 	return true;
 }
 
 // ---------------- パッシブ ----------------
-int PasCount() { return kPasN; }
+int PasCount() { return PasShown(); }
 const wchar_t* PasName(int id)
 {
-	if (id < 1 || id > kPasN) return TT(TX_PT_NONE);
-	const wchar_t* const* s = kPasRow[id - 1].nm;
-	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (id < 1 || id > PasShown() || kPasN < 1) return TT(TX_PT_NONE);
+	int tier = (id - 1) / kPasN;
+	const wchar_t* const* s = kPasRow[(id - 1) % kPasN].nm;
+	return SeriesName(LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]), tier);
 }
 const wchar_t* PasDesc(int id)
 {
-	if (id < 1 || id > kPasN) return L"";
-	const wchar_t* const* s = kPasRow[id - 1].ds;
-	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (id < 1 || id > PasShown() || kPasN < 1) return L"";
+	int tier = (id - 1) / kPasN;
+	const PasRow& row = kPasRow[(id - 1) % kPasN];
+	const wchar_t* const* s = row.ds;
+	const wchar_t* base = LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+	if (tier <= 0) return base;
+	int f[5] = { row.fx, row.more[0], row.more[1], row.more[2], row.more[3] };
+	bool fly = false, num = false;
+	for (int i = 0; i < 5; i++) {
+		if (f[i] == PAS_FLY) fly = true;
+		if (PasFxNumeric(f[i])) num = true;
+	}
+	return SeriesDesc(base, tier, fly ? 0 : (num ? 1 : 2));
 }
-int PasPrice(int index) { return (index < 0 || index >= kPasN) ? 0 : kPasRow[index].price; }
-int PasHave(int index) { return (index < 0 || index >= kPasN) ? 0 : g_craft.pasN[index]; }
+int PasPrice(int index) { return (index < 0 || index >= PasShown() || kPasN < 1) ? 0 : SeriesPriceOf(kPasRow[index % kPasN].price, index / kPasN); }
+int PasHave(int index) { return (index < 0 || index >= PasShown()) ? 0 : g_craft.pasN[index]; }
+int PasTierOf(int index)
+{
+	if (index < 0 || kPasN < 1) return 0;
+	return index / kPasN;
+}
+int PasRoot(int index)
+{
+	if (index < 0 || kPasN < 1) return 0;
+	return index % kPasN;
+}
+bool PasGrading(int index)
+{
+	return index >= kPasN && index < PasShown() && PasHave(index - kPasN) >= 1;
+}
+int PasDeal(int index)
+{
+	int price = PasPrice(index);
+	if (!PasGrading(index)) return price;
+	return SeriesGap(price, PasPrice(index - kPasN));
+}
 static int PasInUse(int index, const CraftRec* skipRec, int skipSlot)
 {
 	int n = 0;
@@ -916,15 +1073,31 @@ static int PasInUse(int index, const CraftRec* skipRec, int skipSlot)
 }
 bool PasBuy(SaveData& s, int index)
 {
-	if (index < 0 || index >= kPasN) return false;
-	if (s.gold < kPasRow[index].price || g_craft.pasN[index] >= kWideMax) return false;
-	s.gold -= kPasRow[index].price;
+	if (index < 0 || index >= PasShown()) return false;
+	if (g_craft.pasN[index] >= kWideMax) return false;
+	int cost = PasDeal(index);
+	if (s.gold < cost) return false;
+	if (PasGrading(index)) {
+		int prev = index - kPasN;
+		g_craft.pasN[prev]--;
+		if (PasInUse(prev, NULL, -1) > (int)g_craft.pasN[prev]) {
+			int oldId = prev + 1, newId = index + 1;
+			for (int i = 0; i < 128; i++) {
+				CraftRec& r = g_craft.rec[i];
+				if (!r.uid) continue;
+				bool moved = false;
+				for (int k = 0; k < 2; k++) if (r.pas[k] == oldId) { r.pas[k] = (unsigned short)newId; moved = true; break; }
+				if (moved) break;
+			}
+		}
+	}
+	s.gold -= cost;
 	g_craft.pasN[index]++;
 	return true;
 }
 bool PasSell(int index)
 {
-	if (index < 0 || index >= kPasN || g_craft.pasN[index] < 1) return false;
+	if (index < 0 || index >= PasShown() || g_craft.pasN[index] < 1) return false;
 	if (g_craft.pasN[index] <= PasInUse(index, NULL, -1)) return false;
 	g_craft.pasN[index]--;
 	return true;
@@ -942,14 +1115,14 @@ const wchar_t* EquippedPasName(const CharData& c, int slot)
 }
 int PasSpare(const CharData& c, int slot, int index)
 {
-	if (slot < 0 || slot > 1 || index < 0 || index >= kPasN) return 0;
+	if (slot < 0 || slot > 1 || index < 0 || index >= PasShown()) return 0;
 	const CraftRec* r = FindRec(c.uid, false);
 	if (r && r->pas[slot ^ 1] == (unsigned short)(index + 1)) return 0;
 	return max(0, (int)g_craft.pasN[index] - PasInUse(index, r, slot));
 }
 int PasFree(int index)
 {
-	if (index < 0 || index >= kPasN) return 0;
+	if (index < 0 || index >= PasShown()) return 0;
 	return max(0, (int)g_craft.pasN[index] - PasInUse(index, NULL, -1));
 }
 bool EquipPasId(CharData& c, int slot, int id)
@@ -959,7 +1132,7 @@ bool EquipPasId(CharData& c, int slot, int id)
 	if (!r) return false;
 	if (id <= 0) { r->pas[slot] = 0; return true; }
 	if (r->pas[slot ^ 1] == (unsigned short)id) return false;
-	if (id > kPasN || (r->pas[slot] != id && PasSpare(c, slot, id - 1) < 1)) return false;
+	if (id > PasShown() || (r->pas[slot] != id && PasSpare(c, slot, id - 1) < 1)) return false;
 	r->pas[slot] = (unsigned short)id;
 	return true;
 }
@@ -973,13 +1146,26 @@ static bool PasRowHas(const PasRow& row, int fx)
 	}
 	return false;
 }
+static bool PasSplit(int id, int* base, int* tier)
+{
+	if (id < 1 || id > PasShown() || kPasN < 1) return false;
+	*tier = (id - 1) / kPasN;
+	*base = (id - 1) % kPasN;
+	return true;
+}
+static bool PasRowNumeric(const PasRow& row)
+{
+	int f[5] = { row.fx, row.more[0], row.more[1], row.more[2], row.more[3] };
+	for (int i = 0; i < 5; i++) if (PasFxNumeric(f[i])) return true;
+	return false;
+}
 bool CharHasPas(const CharData& c, int fx)
 {
 	if (fx <= PAS_NONE) return false;
 	for (int k = 0; k < 2; k++) {
-		int id = EquippedPasId(c, k);
-		if (id < 1 || id > kPasN) continue;
-		if (PasRowHas(kPasRow[id - 1], fx)) return true;
+		int base = 0, tier = 0;
+		if (!PasSplit(EquippedPasId(c, k), &base, &tier)) continue;
+		if (PasRowHas(kPasRow[base], fx)) return true;
 	}
 	return false;
 }
@@ -987,11 +1173,73 @@ bool UnitHasPas(const Unit& u, int fx)
 {
 	if (fx <= PAS_NONE) return false;
 	for (int k = 0; k < 2; k++) {
-		int id = u.pasEq[k];
-		if (id < 1 || id > kPasN) continue;
-		if (PasRowHas(kPasRow[id - 1], fx)) return true;
+		int base = 0, tier = 0;
+		if (!PasSplit(u.pasEq[k], &base, &tier)) continue;
+		if (PasRowHas(kPasRow[base], fx)) return true;
 	}
 	return false;
+}
+int PasMag(const Unit& u, int fx)
+{
+	int best = 0;
+	static const int m[4] = { 100, 150, 200, 250 };
+	for (int k = 0; k < 2; k++) {
+		int base = 0, tier = 0;
+		if (!PasSplit(u.pasEq[k], &base, &tier)) continue;
+		if (!PasRowHas(kPasRow[base], fx)) continue;
+		if (PasRowHas(kPasRow[base], PAS_FLY)) { if (best < 100) best = 100; continue; }
+		if (tier < 0) tier = 0;
+		if (tier > 3) tier = 3;
+		if (m[tier] > best) best = m[tier];
+	}
+	return best;
+}
+static void PasPace(const Unit& u, int* flyMul, int* act, int* move, int* bonusMov, int* wing)
+{
+	int fly = 1000, ac = 100, mv = 100, bFly = 0, bWard = 0, wg = 0;
+	static const int fm[4] = { 1000, 2000, 3333, 5333 };
+	for (int k = 0; k < 2; k++) {
+		int base = 0, tier = 0;
+		if (!PasSplit(u.pasEq[k], &base, &tier)) continue;
+		if (tier < 0) tier = 0;
+		if (tier > 3) tier = 3;
+		const PasRow& row = kPasRow[base];
+		bool isFly = PasRowHas(row, PAS_FLY);
+		if (isFly) {
+			if (fm[tier] > fly) fly = fm[tier];
+			int a = tier == 1 ? 130 : tier == 3 ? 150 : 100;
+			int add = tier == 1 ? 2 : tier == 2 ? 4 : tier == 3 ? 6 : 0;
+			int tr = tier == 2 ? 140 : tier == 3 ? 160 : 100;
+			if (a > ac) ac = a;
+			if (add > bFly) bFly = add;
+			if (tr > mv) mv = tr;
+			if (tier > wg) wg = tier;
+		} else if (tier > 0 && !PasRowNumeric(row)) {
+			int a = tier == 1 ? 110 : tier == 2 ? 120 : 130;
+			int add = tier >= 3 ? 2 : tier == 2 ? 1 : 0;
+			if (a > ac) ac = a;
+			if (add > bWard) bWard = add;
+		}
+	}
+	if (flyMul) *flyMul = fly;
+	if (act) *act = ac;
+	if (move) *move = mv;
+	if (bonusMov) *bonusMov = bFly + bWard;
+	if (wing) *wing = wg;
+}
+int UnitFlyMul(const Unit& u) { int v = 1000; PasPace(u, &v, NULL, NULL, NULL, NULL); return v; }
+int UnitActMul(const Unit& u) { int v = 100; PasPace(u, NULL, &v, NULL, NULL, NULL); return v; }
+int UnitMoveMul(const Unit& u) { int v = 100; PasPace(u, NULL, NULL, &v, NULL, NULL); return v; }
+int UnitBonusMov(const Unit& u) { int v = 0; PasPace(u, NULL, NULL, NULL, &v, NULL); return v; }
+int PasWingGrade(const CharData& c)
+{
+	Unit u{};
+	u.monster = -1;
+	u.ch = c;
+	CraftBindUnit(u);
+	int v = 0;
+	PasPace(u, NULL, NULL, NULL, NULL, &v);
+	return v;
 }
 bool UnitResistsEffect(const Unit& u, int effect)
 {

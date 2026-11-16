@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4773; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4780; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -186,6 +186,7 @@
                   + byakuya68snd/gpara68snd/imitat68snd/marpara68snd (X68k IOCS $6B timer hook; three songs stay audible for 8s)
                   + syvalion68snd (X68k HD63450 CSR reads idle; Main / Universe / Fine stay audible for 8s)
                   + hnova68snd (X68k OPMSNS returns the YM2151 status; MUSIC 01-03 stay audible for 8s)
+                  + ultima4_98 (PC-98 play skips the AH=19 stop; opening / field / combat stay audible for 8s)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -1765,6 +1766,7 @@ static const char* const kSupported[] = {
 	"gigandes",
 	"gigaten_98",
 	"gigawing",
+	"gijoe",
 	"ginei2",
 	"ginei2dx",
 	"ginei3_98",
@@ -3239,6 +3241,7 @@ static const char* const kSupported[] = {
 	"plsmaswd",
 	"plumppop",
 	"plusalph",
+	"plygonet",
 	"plymodel_98",
 	"pm2_98",
 	"pm2_at",
@@ -3258,6 +3261,7 @@ static const char* const kSupported[] = {
 	"poison_98",
 	"poison_n_98",
 	"pokonyan",
+	"polynetw",
 	"polyshu_98",
 	"ponkan_98",
 	"pontoon",
@@ -3552,6 +3556,7 @@ static const char* const kSupported[] = {
 	"riskyw_at",
 	"rnnyotai_98",
 	"roabod_at",
+	"roadblst",
 	"roadf_msx",
 	"roadrunn",
 	"roast_at",
@@ -3634,6 +3639,7 @@ static const char* const kSupported[] = {
 	"runemst3_msx",
 	"runew",
 	"runewjb",
+	"rungun",
 	"rungun2",
 	"runrun_98",
 	"ruriiro_98",
@@ -4355,6 +4361,7 @@ static const char* const kSupported[] = {
 	"tirnan88",
 	"tirnan98",
 	"tirnan_msx",
+	"titlef",
 	"tkfuzoku_98",
 	"tkmmpzdm",
 	"tlove12_98",
@@ -4483,6 +4490,7 @@ static const char* const kSupported[] = {
 	"ulamanda_98",
 	"ultima1_msx",
 	"ultima4",
+	"ultima4_98",
 	"ultima4_msx",
 	"ultima6_at",
 	"ultima8_at",

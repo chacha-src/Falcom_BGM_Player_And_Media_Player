@@ -24,7 +24,7 @@ CSasamiPianoRollDlg::CSasamiPianoRollDlg(CWnd* pParent)
 	, m_midiScore(NULL), m_fmScore(NULL)
 	, m_dragMode(0), m_dragLastX(0), m_dragLastY(0), m_histDragPushed(0)
 	, m_resizeEv(-1), m_marquee(0), m_bInLayout(FALSE)
-	, m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_chromeDetail(0)
+	, m_sbDrag(0), m_sbDragScroll0(0), m_sbDragAnchor(0), m_nativeSbGone(0), m_chromeDetail(0)
 {
 	ScPianoRollInit(&m_roll);
 	m_marquee0 = m_marquee1 = CPoint(0, 0);
@@ -130,7 +130,11 @@ void CSasamiPianoRollDlg::BindFm(CSasamiFmScoreDlg* score)
 void CSasamiPianoRollDlg::Refresh()
 {
 	if (!::IsWindow(m_hWnd)) return;
-	ScStaffInvalidateBodyRect(this, m_gridRc);
+	/* Body includes the gutter. Grid-only invalidate left the thumb stuck. */
+	if (m_bodyRc.Width() > 0)
+		ScStaffInvalidateBodyRect(this, m_bodyRc);
+	else
+		ScStaffInvalidateBodyRect(this, m_gridRc);
 	if (m_stripRc.Height() > 0)
 		InvalidateRect(m_stripRc, FALSE);
 }
@@ -153,6 +157,7 @@ BEGIN_MESSAGE_MAP(CSasamiPianoRollDlg, CCustomBlurDialogExBase)
 	ON_WM_MOUSEWHEEL()
 	ON_WM_HSCROLL()
 	ON_WM_VSCROLL()
+	ON_WM_NCHITTEST()
 	ON_WM_TIMER()
 	ON_WM_CONTEXTMENU()
 	ON_WM_KEYDOWN()
@@ -446,6 +451,10 @@ BOOL CSasamiPianoRollDlg::OnInitDialog()
 		m_ui->markerSolidTrack = m_curPart ? *m_curPart : 0;
 	}
 	LayoutChrome();
+	/* NcCalcSize does not inset WS_VSCROLL, so the system bars draw on the
+	   glass client with an alpha-0 track. The gutter bars are the real ones.
+	   Once, after layout — not from OnSize (that re-enters and crashes). */
+	ModifyStyle(WS_VSCROLL | WS_HSCROLL, 0, SWP_FRAMECHANGED);
 	SetTimer(1, 50, NULL);
 	SetTimer(9125, 1, NULL);
 	return TRUE;
@@ -1181,52 +1190,33 @@ void CSasamiPianoRollDlg::UpdateScrollBars()
 	int maxY = ScPianoRollMaxScrollY(&m_roll, keysH);
 	if (m_roll.scrollY > maxY) m_roll.scrollY = maxY;
 	if (m_roll.scrollY < 0) m_roll.scrollY = 0;
-
-	SCROLLINFO si = {};
-	si.cbSize = sizeof(si);
-	si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
-	si.nMin = 0;
-	si.nMax = max(0, contentW);
-	si.nPage = (UINT)max(1, pageW);
-	si.nPos = m_ui->scrollX;
-	SetScrollInfo(SB_HORZ, &si, TRUE);
-	si.nMax = max(0, contentH);
-	si.nPage = (UINT)max(1, keysH);
-	si.nPos = m_roll.scrollY;
-	SetScrollInfo(SB_VERT, &si, TRUE);
+	/* Do not SetScrollInfo. SIF_DISABLENOSCROLL (and any range past the page)
+	   puts WS_VSCROLL back, and that bar is transparent on the glass frame. */
 }
 
 void CSasamiPianoRollDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	(void)nPos; (void)pScrollBar;
+	(void)pScrollBar;
 	if (m_sbDrag || !m_ui) return;
-	SCROLLINFO si = { sizeof(si), SIF_ALL };
-	GetScrollInfo(SB_HORZ, &si);
-	int pos = si.nPos;
+	const int pageW = max(1, ScPianoRollTimePageW(m_gridRc));
+	const int contentW = ScPianoRollContentWidthPx(m_ui, m_ev, m_evCount ? *m_evCount : 0);
+	const int maxPos = max(0, contentW - pageW);
 	const int pxBeat = m_ui->pxBeat > 0 ? m_ui->pxBeat : SC_PX_BEAT_DEFAULT;
+	int pos = m_ui->scrollX;
 	switch (nSBCode) {
-	case SB_LEFT: pos = si.nMin; break;
-	case SB_RIGHT: pos = max(0, (int)si.nMax - (int)si.nPage + 1); break;
+	case SB_LEFT: pos = 0; break;
+	case SB_RIGHT: pos = maxPos; break;
 	case SB_LINELEFT: pos -= pxBeat; break;
 	case SB_LINERIGHT: pos += pxBeat; break;
-	case SB_PAGELEFT: pos -= (int)si.nPage; break;
-	case SB_PAGERIGHT: pos += (int)si.nPage; break;
+	case SB_PAGELEFT: pos -= pageW; break;
+	case SB_PAGERIGHT: pos += pageW; break;
 	case SB_THUMBTRACK:
-	case SB_THUMBPOSITION: {
-		SCROLLINFO ti = { sizeof(ti), SIF_TRACKPOS };
-		GetScrollInfo(SB_HORZ, &ti);
-		pos = ti.nTrackPos;
-		break;
+	case SB_THUMBPOSITION: pos = (int)nPos; break;
+	default: return;
 	}
-	default: break;
-	}
-	int maxPos = max(0, (int)si.nMax - (int)si.nPage + 1);
-	if (pos < si.nMin) pos = si.nMin;
+	if (pos < 0) pos = 0;
 	if (pos > maxPos) pos = maxPos;
 	m_ui->scrollX = pos;
-	si.fMask = SIF_POS;
-	si.nPos = pos;
-	SetScrollInfo(SB_HORZ, &si, TRUE);
 	if (m_midiScore) ScStaffInvalidateBelowCaption(m_midiScore);
 	if (m_fmScore) ScStaffInvalidateBelowCaption(m_fmScore);
 	Refresh();
@@ -1234,37 +1224,38 @@ void CSasamiPianoRollDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScroll
 
 void CSasamiPianoRollDlg::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	(void)nPos; (void)pScrollBar;
+	(void)pScrollBar;
 	if (m_sbDrag) return;
-	SCROLLINFO si = { sizeof(si), SIF_ALL };
-	GetScrollInfo(SB_VERT, &si);
-	int pos = si.nPos;
+	const int keysH = max(1, m_gridRc.Height() - SC_ROLL_MARK_H);
+	const int maxPos = ScPianoRollMaxScrollY(&m_roll, keysH);
 	const int rowH = max(1, m_roll.rowH);
+	int pos = m_roll.scrollY;
 	switch (nSBCode) {
-	case SB_TOP: pos = si.nMin; break;
-	case SB_BOTTOM: pos = max(0, (int)si.nMax - (int)si.nPage + 1); break;
+	case SB_TOP: pos = 0; break;
+	case SB_BOTTOM: pos = maxPos; break;
 	case SB_LINEUP: pos -= rowH; break;
 	case SB_LINEDOWN: pos += rowH; break;
-	case SB_PAGEUP: pos -= (int)si.nPage; break;
-	case SB_PAGEDOWN: pos += (int)si.nPage; break;
+	case SB_PAGEUP: pos -= keysH; break;
+	case SB_PAGEDOWN: pos += keysH; break;
 	case SB_THUMBTRACK:
-	case SB_THUMBPOSITION: {
-		SCROLLINFO ti = { sizeof(ti), SIF_TRACKPOS };
-		GetScrollInfo(SB_VERT, &ti);
-		pos = ti.nTrackPos;
-		break;
+	case SB_THUMBPOSITION: pos = (int)nPos; break;
+	default: return;
 	}
-	default: break;
-	}
-	int maxPos = max(0, (int)si.nMax - (int)si.nPage + 1);
-	if (pos < si.nMin) pos = si.nMin;
+	if (pos < 0) pos = 0;
 	if (pos > maxPos) pos = maxPos;
 	m_roll.scrollY = pos;
 	FitRollKeys();
-	si.fMask = SIF_POS;
-	si.nPos = m_roll.scrollY;
-	SetScrollInfo(SB_VERT, &si, TRUE);
 	Refresh();
+}
+
+LRESULT CSasamiPianoRollDlg::OnNcHitTest(CPoint point)
+{
+	const LRESULT hit = CWnd::OnNcHitTest(point);
+	/* Caption NC calc does not inset WS_*SCROLL, so the system bar is drawn
+	   where hover never lands. Treat that strip as the client gutter. */
+	if (hit == HTHSCROLL || hit == HTVSCROLL)
+		return HTCLIENT;
+	return hit;
 }
 
 void CSasamiPianoRollDlg::ApplyDurationPal(WPARAM w, LPARAM l)
@@ -1581,8 +1572,32 @@ void CSasamiPianoRollDlg::OnPaint()
 			ScPianoRollPaintSelectionMarquee(dc, mr);
 		}
 	}
-	if (m_ui && m_bodyRc.Width() > 24)
-		ScPianoRollPaintBars(dc, ScrollOuter(), &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0);
+	if (m_ui && m_bodyRc.Width() > 24) {
+		const CRect outer = ScrollOuter();
+		CDC mem;
+		CBitmap bmp;
+		const int ow = outer.Width();
+		const int oh = outer.Height();
+		const int gw = ScStaffScrollGutterW();
+		const int gh = ScStaffScrollGutterH();
+		if (ow >= 8 && oh >= 8 && gw > 4 && gh > 4
+			&& mem.CreateCompatibleDC(&dc) && bmp.CreateCompatibleBitmap(&dc, ow, oh)) {
+			CBitmap* old = mem.SelectObject(&bmp);
+			mem.FillSolidRect(0, 0, ow, oh, RGB(32, 34, 40));
+			ScPianoRollPaintBars(mem, CRect(0, 0, ow, oh), &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0);
+			auto blitStrip = [&](int x, int y, int w, int h) {
+				if (w < 2 || h < 2) return;
+				CCC_BlitStretchOpaque(dc.GetSafeHdc(), outer.left + x, outer.top + y, w, h,
+					mem.GetSafeHdc(), x, y, w, h);
+			};
+			/* Gutter only. Blitting the whole outer covered the keys and the grid. */
+			blitStrip(ow - gw, 0, gw, oh);
+			blitStrip(0, oh - gh, ow - gw, gh);
+			mem.SelectObject(old);
+		} else {
+			ScPianoRollPaintBars(dc, outer, &m_roll, m_ui, m_ev, m_evCount ? *m_evCount : 0);
+		}
+	}
 	if (m_stripRc.Height() >= 8 && m_ui && m_ev && m_evCount) {
 		CDC mem;
 		if (mem.CreateCompatibleDC(&dc)) {
@@ -1716,6 +1731,13 @@ void CSasamiPianoRollDlg::OnMouseMove(UINT nFlags, CPoint point)
 		Refresh();
 		return;
 	}
+	{
+		int sbPos = 0;
+		const int sbHit = ScPianoRollHitBar(ScrollOuter(), &m_roll, m_ui, m_ev, *m_evCount, point, &sbPos);
+		if (sbHit == 1) { ::SetCursor(::LoadCursor(NULL, IDC_SIZENS)); return; }
+		if (sbHit == 2) { ::SetCursor(::LoadCursor(NULL, IDC_SIZEWE)); return; }
+		if (sbHit >= 3) { ::SetCursor(::LoadCursor(NULL, IDC_HAND)); return; }
+	}
 	if (m_dragMode == 5 && (nFlags & MK_LBUTTON)) {
 		ApplyStripAt(point, m_ui->tool == SC_TOOL_ERASER ? 1 : 0);
 		return;
@@ -1786,6 +1808,13 @@ void CSasamiPianoRollDlg::OnTimer(UINT_PTR nIDEvent)
 		return;
 	}
 	if (nIDEvent == 1) {
+		if (!m_nativeSbGone) {
+			m_nativeSbGone = 1;
+			/* Template WS_VSCROLL draws a bar the caption NC calc never insets,
+			   so hover never hits it. The gutter bars are the ones that scroll. */
+			if (GetStyle() & (WS_VSCROLL | WS_HSCROLL))
+				ShowScrollBar(SB_BOTH, FALSE);
+		}
 		if (m_ui && m_ui->previewActive) {
 			ScStaffInvalidateBodyRect(this, m_gridRc);
 			if (m_stripRc.Height() > 0)

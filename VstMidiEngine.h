@@ -270,6 +270,8 @@ int VstLivePartIsMulti(int part1to32);
 void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, int prog0to127);
 /* Fire a short preview note (MIDI only; auto note-off). */
 void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, int durMs);
+/* Several notes at once (a chord). parts/notes/vels are parallel, n is clamped. */
+void VstLiveAuditionHits(const int* parts, const int* notes, const int* vels, int n, int durMs);
 /* Cut any pending audition (call before closing tone map). */
 void VstLiveAuditionStop(void);
 

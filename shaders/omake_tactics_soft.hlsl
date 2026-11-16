@@ -244,37 +244,44 @@ void CSSoft(uint id : SV_GroupIndex)
 		St[SMAX + id] = float4(p, 0);
 		if (c.p.w > 0.5 && c.p.w < 1.5) p += HandDrag(p, c);
 	}
-	gT[id] = t;
-	gP[id] = p;
-	GroupMemoryBarrierWithGroupSync();
+	float3 off0 = p - t;
+	float invCnt = 0.0;
+	if (on && !pinned) {
+		float cnt = 0.0;
+		[unroll] for (int e = 0; e < 4; e++) if (c.nb[e] < n) cnt += 1.0;
+		if (cnt > 0.0) invCnt = 1.0 / cnt;
+	}
+	const float maxR = max(c.p.x, 0.01) * Sim.w;
+	gT[id] = off0;
 	[loop] for (int it = 0; it < 8; it++) {
-		p = gP[id];
+		GroupMemoryBarrierWithGroupSync();
+		float3 offCur = gT[id];
 		if (on && !pinned) {
-			float3 d = p - t;
-			float3 acc = float3(0, 0, 0);
-			float cnt = 0;
-			[unroll] for (int e = 0; e < 4; e++) {
-				uint j = c.nb[e];
-				if (j >= n) continue;
-				acc += gP[j] - gT[j];
-				cnt += 1;
+			float3 d = offCur;
+			if (invCnt > 0.0) {
+				float3 acc = float3(0, 0, 0);
+				[unroll] for (int e = 0; e < 4; e++) {
+					uint j = c.nb[e];
+					if (j < n) acc += gT[j];
+				}
+				d = lerp(d, acc * invCnt, 0.45);
 			}
-			if (cnt > 0) d = lerp(d, acc / cnt, 0.45);
-			float r = max(c.p.x, 0.01) * Sim.w;
-			float l = length(d);
-			if (l > r) d *= r / l;
+			float l2 = dot(d, d);
+			if (l2 > maxR * maxR) d *= maxR * rsqrt(l2);
 			p = t + d;
 			// 袖の点は袖の輪の重心で腕の軸の上にある。腕のカプセルで押すと軸から半径ぶん飛び、袖ごとこぶになる。
 			// 袖の当たりは頂点ごとに CSSoftWrite で取る。
-			if (c.p.w < 0.5) p = TorsoKeep(BustPush(p, c.q.x));
-			else if (c.p.w > 1.5) p = TorsoKeep(p);
+			if ((it & 1) == 1) {
+				if (c.p.w < 0.5) p = TorsoKeep(BustPush(p, c.q.x));
+				else if (c.p.w > 1.5) p = TorsoKeep(p);
+			}
+			offCur = p - t;
 		}
 		GroupMemoryBarrierWithGroupSync();
-		gP[id] = p;
-		GroupMemoryBarrierWithGroupSync();
+		gT[id] = offCur;
 	}
 	if (!on) return;
-	St[id] = float4(gP[id], 0);
+	St[id] = float4(t + gT[id], 0);
 }
 
 [numthreads(64, 1, 1)]

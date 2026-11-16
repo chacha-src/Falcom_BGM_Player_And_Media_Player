@@ -313,6 +313,53 @@ int SasamiToneBankUsed(int isXg, int mapId, int bankMsb, int bankLsb, int isDrum
 	return 0;
 }
 
+void SasamiToneLookupVariation(int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
+{
+	if (!out || outN <= 0) return;
+	out[0] = 0;
+	EnsureDat();
+	pc &= 127;
+	bankMsb &= 127;
+	bankLsb &= 127;
+	if (isDrum) {
+		if (bankLsb >= 1 && bankLsb <= 4)
+			SasamiToneLookupStrict(0, bankLsb, 0, bankLsb, pc, 1, out, outN);
+		if (!out[0])
+			SasamiToneLookupStrict(0, 0, 0, 0, pc, 1, out, outN);
+		if (!out[0])
+			SasamiToneLookupAuto(bankMsb, bankLsb, pc, 1, out, outN);
+		return;
+	}
+	/* LSB 1..4 is the SC map (55/88/88Pro/8850). The variation number is MSB.
+	   24/4 → 8850 bank 24 (Velo Strings), not capital "Strings". */
+	if (bankLsb >= 1 && bankLsb <= 4) {
+		SasamiToneLookupStrict(0, bankLsb, bankMsb, bankLsb, pc, 0, out, outN);
+		if (out[0]) return;
+	}
+	if (bankMsb == 121) {
+		SasamiToneLookupStrict(0, 9, bankMsb, bankLsb, pc, 0, out, outN);
+		if (out[0]) return;
+	}
+	if (bankMsb == 126 || bankMsb == 127) {
+		SasamiToneLookupStrict(0, 8, bankMsb, bankLsb, pc, 0, out, outN);
+		if (out[0]) return;
+	}
+	if (bankMsb != 0) {
+		for (int map = 4; map >= 1; --map) {
+			SasamiToneLookupStrict(0, map, bankMsb, bankLsb, pc, 0, out, outN);
+			if (out[0]) return;
+		}
+	}
+	SasamiToneLookupStrict(1, 0, bankMsb, bankLsb, pc, 0, out, outN);
+	if (out[0]) return;
+	if (bankLsb >= 1 && bankLsb <= 4)
+		SasamiToneLookupStrict(0, bankLsb, 0, bankLsb, pc, 0, out, outN);
+	if (!out[0])
+		SasamiToneLookupStrict(0, 4, 0, 0, pc, 0, out, outN);
+	if (!out[0])
+		SasamiToneLookupAuto(bankMsb, bankLsb, pc, 0, out, outN);
+}
+
 void SasamiToneLookupAuto(int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN)
 {
 	if (!out || outN <= 0) return;

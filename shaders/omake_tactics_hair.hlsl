@@ -471,48 +471,47 @@ void CSHair(uint id : SV_GroupIndex)
 		gP[id] = p;
 	}
 	GroupMemoryBarrierWithGroupSync();
+	const uint ia = id % HA;
+	const uint il = id / HA;
+	const uint parent = (il > 0) ? ((il - 1) * HA + ia) : id;
+	const uint iL = il * HA + (ia + HA - 1) % HA;
+	const uint iR = il * HA + (ia + 1) % HA;
+	const float grow = StrandFree(rest);
+	const float loK = lerp(0.94, 0.78, grow);
+	const float hiK = lerp(1.0, 1.06, grow);
+	const float L0 = (il > 0) ? length(rest - gR[parent]) : 0.0;
+	const float flopBlend = (flop < 0.34) ? smoothstep(0.10, 0.34, flop) : 1.0;
 	[loop] for (int it = 0; it < 6; it++) {
 		float3 p0 = gP[id];
 		float3 p = p0;
-		uint ia = id % HA;
-		uint il = id / HA;
 		if (flop >= 0.08 && Sim.z < 0.5) {
 			if (il > 0) {
-				uint parent = (il - 1) * HA + ia;
 				float3 q = gP[parent];
 				float3 d = p - q;
-				float L0 = length(gR[id] - gR[parent]);
 				float L = length(d);
 				if (L0 > 1e-4 && L > 1e-5) {
-				float grow = StrandFree(rest);
-				float lo = L0 * lerp(0.94, 0.78, grow);
-				float hi = L0 * lerp(1.0, 1.06, grow);
-					float L1 = clamp(L, lo, hi);
+					float L1 = clamp(L, L0 * loK, L0 * hiK);
 					p = q + d * (L1 / L);
 				}
 			}
 			if (il == 0) p = rest;
 			else {
 				float3 home = gH[id];
-				float3 acc = p - home;
-				float cnt = 1;
-				uint iL = il * HA + (ia + HA - 1) % HA;
-				uint iR = il * HA + (ia + 1) % HA;
-				acc += gP[iL] - gH[iL];
-				acc += gP[iR] - gH[iR];
-				cnt += 2;
-				p = home + lerp(p - home, acc / cnt, 0.28);
+				float3 acc = (p - home) + (gP[iL] - gH[iL]) + (gP[iR] - gH[iR]);
+				p = home + lerp(p - home, acc * (1.0 / 3.0), 0.28);
 			}
 		}
 		// 頭に近い束は静止位置へ戻してから、顔と胴の外へ出す。戻したあとに押さないと、毛が顔へ戻る。
-		if (flop < 0.34) p = lerp(rest, p, smoothstep(0.10, 0.34, flop));
+		if (flop < 0.34) p = lerp(rest, p, flopBlend);
 		float3 dlt = p - p0;
-		float dl2 = length(dlt);
-		if (dl2 > stepLim) p = p0 + dlt * (stepLim / dl2);
+		float dl2 = dot(dlt, dlt);
+		if (dl2 > stepLim * stepLim) p = p0 + dlt * (stepLim * rsqrt(dl2));
 		// 1 フレーム前が顔側に抜けていても、静止位置（頭の付いていた側）へ戻す。p0 を残すと顔に固定される。
-		if (il > 0) p = BodyHit(SkullPush(p, keep), pick);
-		// 胴の押し出しが最後だと、舞台の風で肩へ寄った毛が頭蓋の中に残る。
 		p = SkullPush(p, keep);
+		if (il > 0) {
+			float3 bh = BodyHit(p, pick);
+			if (dot(bh - p, bh - p) > 1e-8) p = SkullPush(bh, keep);
+		}
 		GroupMemoryBarrierWithGroupSync();
 		gP[id] = p;
 		GroupMemoryBarrierWithGroupSync();
@@ -530,18 +529,23 @@ void CSHairWrite(uint id : SV_DispatchThreadID, uint gid : SV_GroupIndex)
 	HairV c = Hv[Cnt.x + id];
 	uint o = c.a.x * 36u;
 	float3 rest = mul(float4(c.p.xyz, 1), Head).xyz;
-	uint4 k4 = uint4(c.a.y & 0xFFFFu, c.a.y >> 16, c.a.z & 0xFFFFu, c.a.z >> 16);
-	float3 d = float3(0, 0, 0);
-	[unroll] for (int k = 0; k < 4; k++) {
-		uint gi = min(k4[k], (uint)(HG - 1));
-		d += St[4 * HG + gi].xyz * c.w[k];
-	}
 	// 頭頂の殻（揺れ 0.40 未満）は案内点の風を受けない。顎から下の毛先だけ混ぜる。
 	float w = saturate((c.p.w - 0.40) / 0.22) * StrandFree(rest);
-	float3 p = rest + d * w;
-	float3 keep = SkullPush(rest, rest);
-	p = BodyHit(SkullPush(p, keep), StrandFace(k4[0]));
-	p = SkullPush(p, keep);
+	float3 p;
+	if (w <= 0.001) {
+		p = SkullPush(rest, rest);
+	} else {
+		uint4 k4 = uint4(c.a.y & 0xFFFFu, c.a.y >> 16, c.a.z & 0xFFFFu, c.a.z >> 16);
+		float3 d = float3(0, 0, 0);
+		[unroll] for (int k = 0; k < 4; k++) {
+			uint gi = min(k4[k], (uint)(HG - 1));
+			d += St[4 * HG + gi].xyz * c.w[k];
+		}
+		float3 keep = SkullPush(rest, rest);
+		p = SkullPush(rest + d * w, keep);
+		float3 bh = BodyHit(p, StrandFace(k4[0]));
+		if (dot(bh - p, bh - p) > 1e-8) p = SkullPush(bh, keep);
+	}
 	float3 nrm = asfloat(Vout.Load3(o + 12));
 	float nl = dot(nrm, nrm);
 	if (nl > 1e-8) nrm *= rsqrt(nl);

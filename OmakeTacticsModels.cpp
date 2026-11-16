@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "OmakeTacticsModels.h"
 #include "OmakeTacticsData.h"
 #include <math.h>
@@ -1359,6 +1359,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	}
 	if (cd.moveType == MV_FLY || CharHasPas(c, PAS_FLY) || c.cls == C_SKYKNIGHT) a.wings = 1;
 	if (c.cls == C_DRAGONLORD) a.wings = 2;
+	a.wingGrade = PasWingGrade(c);
 	if (cd.tier >= 3) a.scale *= 1.06f;
 	const Model& m = r.models[a.model];
 	a.mods.Reset(m.nJ);
@@ -1600,11 +1601,11 @@ void ActorPlay(Actor& a, int clip, int loop, float blendTime)
 
 void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart)
 {
-	if (kind < 0 || kind > 5) kind = 0;
+	if (kind < 0 || kind > 6) kind = 0;
 	a.animSpeed = kind == 2 ? 1.15f : 1.f;
 	a.skillPose = -1;
 	a.flap = 0.f;
-	if (fly && giveWings && a.wings <= 0) {
+	if (fly && giveWings && a.wings <= 0 && kind != 6) {
 		a.wings = 1;
 		if (a.hover < 0.2f) a.hover = 0.35f;
 	}
@@ -1615,6 +1616,15 @@ void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int
 	if (kind == 1 || kind == 2) {
 		clip = kind == 2 ? CL_RUN : CL_WALK;
 		if (fly) a.flap = 1.f;
+	} else if (kind == 6) {
+		clip = CL_DEATH;
+		loop = 0;
+		blend = .10f;
+		a.hover = 0.f;
+		a.legOk = 0;
+		a.flyLean = 0.f;
+		if (a.clip == CL_DEATH && restart) a.fallKind = (a.fallKind % 5) + 1;
+		else if (a.clip != CL_DEATH || a.fallKind <= 0) a.fallKind = 1;
 	} else if (kind >= 3) {
 		clip = AttackClipFor(style, kind == 5 ? 1 : 0);
 		if (kind == 3) { loop = 0; blend = .05f; hold = TRUE; }
@@ -1854,6 +1864,13 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r)
 static void SpinJointBack(const Model& m, Pose& pose, int j, float pitch);
 static int HumanJoint(const Renderer& r, const Model& m, const char* a, const char* b);
 // スタンは膝を折って座らせ、睡眠は腰を倒して寝かせる。凍結は姿勢を変えず動きだけ止める。
+static void UpdateJointGlobal(const Model& m, Pose& pose, int j)
+{
+	if (j < 0 || j >= m.nJ || j >= pose.nJ) return;
+	int pa = m.parent[j];
+	pose.global[j] = MMul(pose.local[j], pa >= 0 ? pose.global[pa] : m.top);
+}
+
 static void ApplyDownPose(Actor& a, const Renderer& r)
 {
 	if (!a.poseValid || (a.poseHold != 1 && a.poseHold != 2)) return;
@@ -1865,14 +1882,20 @@ static void ApplyDownPose(Actor& a, const Renderer& r)
 	if (a.poseHold == 1) {
 		SpinJointBack(m, a.pose, ul, 1.15f);
 		SpinJointBack(m, a.pose, ur, 1.15f);
-		r.FinishPose(m, a.pose, &a.mods);
+		UpdateJointGlobal(m, a.pose, ul);
+		UpdateJointGlobal(m, a.pose, ur);
 		int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
 		int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+		UpdateJointGlobal(m, a.pose, ll);
+		UpdateJointGlobal(m, a.pose, lr);
 		SpinJointBack(m, a.pose, ll, -1.35f);
 		SpinJointBack(m, a.pose, lr, -1.35f);
-		r.FinishPose(m, a.pose, &a.mods);
+		UpdateJointGlobal(m, a.pose, ll);
+		UpdateJointGlobal(m, a.pose, lr);
 		int fl = HumanJoint(r, m, "Foot.L", "foot.l");
 		int fr = HumanJoint(r, m, "Foot.R", "foot.r");
+		UpdateJointGlobal(m, a.pose, fl);
+		UpdateJointGlobal(m, a.pose, fr);
 		SpinJointBack(m, a.pose, fl, 0.55f);
 		SpinJointBack(m, a.pose, fr, 0.55f);
 		int chest = HumanJoint(r, m, "Chest", "chest");
@@ -1884,9 +1907,12 @@ static void ApplyDownPose(Actor& a, const Renderer& r)
 		r.FinishPose(m, a.pose, &a.mods);
 		SpinJointBack(m, a.pose, ul, 0.4f);
 		SpinJointBack(m, a.pose, ur, 0.4f);
-		r.FinishPose(m, a.pose, &a.mods);
+		UpdateJointGlobal(m, a.pose, ul);
+		UpdateJointGlobal(m, a.pose, ur);
 		int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
 		int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+		UpdateJointGlobal(m, a.pose, ll);
+		UpdateJointGlobal(m, a.pose, lr);
 		SpinJointBack(m, a.pose, ll, -0.5f);
 		SpinJointBack(m, a.pose, lr, -0.5f);
 		r.FinishPose(m, a.pose, &a.mods);
@@ -1943,7 +1969,6 @@ static void ApplyFlyTrail(Actor& a, const Renderer& r)
 		if (a.mods.any) { s.x *= a.mods.scale[j].x; s.y *= a.mods.scale[j].y; s.z *= a.mods.scale[j].z; }
 		a.pose.local[j] = MTRS(m.restT[j], m.restR[j], s);
 	}
-	r.FinishPose(m, a.pose, &a.mods);
 	int hips = HumanJoint(r, m, "Hips", "hips");
 	if (hips >= 0) {
 		const float bobW = a.legT * (a.flap > 0.5f ? 10.5f : 4.8f);
@@ -1952,12 +1977,26 @@ static void ApplyFlyTrail(Actor& a, const Renderer& r)
 		a.pose.local[hips].m[13] += bobY;
 		a.pose.local[hips].m[14] += bobZ;
 		if (fabsf(a.legQ[6]) > 1e-4f) SpinJointBack(m, a.pose, hips, a.legQ[6]);
-		r.FinishPose(m, a.pose, &a.mods);
+	}
+	// 腰と脚の global だけを親子順に更新し、最後に 1 回だけ FinishPose で palette を確定する。
+	for (int j = 0; j < m.nJ && j < a.pose.nJ; j++) {
+		int pa = m.parent[j];
+		a.pose.global[j] = MMul(a.pose.local[j], pa >= 0 ? a.pose.global[pa] : m.top);
 	}
 	for (int k = 0; k < 3; k++) {
-		for (int s = 0; s < 2; s++) SpinJointBack(m, a.pose, jt[s][k], a.legQ[s * 3 + k]);
-		r.FinishPose(m, a.pose, &a.mods);
+		for (int s = 0; s < 2; s++) {
+			int jj = jt[s][k];
+			if (jj < 0 || jj >= m.nJ) continue;
+			if (k > 0) {
+				int pa = m.parent[jj];
+				a.pose.global[jj] = MMul(a.pose.local[jj], pa >= 0 ? a.pose.global[pa] : m.top);
+			}
+			SpinJointBack(m, a.pose, jj, a.legQ[s * 3 + k]);
+			int pa = m.parent[jj];
+			a.pose.global[jj] = MMul(a.pose.local[jj], pa >= 0 ? a.pose.global[pa] : m.top);
+		}
 	}
+	r.FinishPose(m, a.pose, &a.mods);
 }
 
 void ActorPose(Actor& a, const Library& lib, const Renderer& r)
@@ -2502,13 +2541,16 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 			dw.noTess = 1;
 			dw.mode = 0.f;
 			dw.sway = 0.f;
+			if (a.wingGrade == 1) { dw.tint = RGBA8(255, 228, 170, 255); dw.hue = 0.08f; }
+			else if (a.wingGrade == 2) { dw.tint = RGBA8(255, 248, 220, 255); dw.hue = 0.16f; dw.emissive += 0.12f; }
+			else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
 			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(hit->l[side], world), dw);
 		}
 		return;
 	}
 	int dr = a.wings == 2 ? 1 : 0;
 	float flapSp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
-	float ph = sinf(time * flapSp);
+	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : sinf(time * flapSp);
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
 	float y = human ? 1.32f : 1.12f;
@@ -2548,6 +2590,9 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		dw.noTess = 1;
 		dw.mode = 0.f;
 		dw.sway = 0.f;
+		if (a.wingGrade == 1) { dw.tint = RGBA8(255, 228, 170, 255); dw.hue = 0.08f; }
+		else if (a.wingGrade == 2) { dw.tint = RGBA8(255, 248, 220, 255); dw.hue = 0.16f; dw.emissive += 0.12f; }
+		else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
 		r.DrawStatic(lib.wing[dr][1 - side], MMul(l, world), dw);
 		hit->l[side] = l;
@@ -2555,6 +2600,55 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		hit->n++;
 	}
 	if (hit) { hit->frame = a.poseFrame; hit->th = th; }
+}
+
+BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir)
+{
+	if (!a.wings || !a.poseValid || !a.modelPtr) return FALSE;
+	if (side < 0 || side > 1) return FALSE;
+	const Model& m = *(const Model*)a.modelPtr;
+	int cj = m.chestJ;
+	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return FALSE;
+	BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
+	int dr = a.wings == 2 ? 1 : 0;
+	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : 0.f;
+	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
+	float y = human ? 1.32f : 1.12f;
+	float z = human ? 0.10f : 0.32f;
+	float x = human ? 0.10f : 0.18f;
+	float yaw = human ? -0.40f : -0.55f;
+	if (human) {
+		int ava = a.avatar;
+		if (ava <= 0) {
+			const BOOL mal = strncmp(m.name, "HumM", 4) == 0 || !strcmp(m.name, "HumAdventurer") || !strcmp(m.name, "HumKing");
+			const BOOL fem = strncmp(m.name, "HumF", 4) == 0 || !strcmp(m.name, "HumMedieval") || !strcmp(m.name, "HumWitch");
+			if (mal) ava = 9;
+			else if (fem) ava = 12;
+		}
+		float back = ava > 0 ? r.AvatarClothBack(a.model, ava, y) : -1e9f;
+		if (back < -10.f && ava > 0) back = r.AvatarClothBack(a.model, ava, y - 0.10f);
+		if (back > -10.f) z = back - 0.025f;
+		else z = MInverse(m.invBind[cj]).m[14] + 0.045f;
+	}
+	float rest = human ? 0.20f : 0.35f;
+	float s = side == 0 ? 1.f : -1.f;
+	M4 fl = MRotZ(s * flap);
+	M4 base = MMul(MMul(MRotY(s * yaw), MRotZ(s * rest)), MTrans(s * x, y, z));
+	M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
+	M4 l = MMul(ex, a.pose.global[cj]);
+	M4 wm = MMul(l, world);
+	if (along < 0.f) along = 0.f;
+	if (along > 1.f) along = 1.f;
+	float span = 0.42f + along * (dr ? 0.95f : 1.28f);
+	V3 local = side == 0 ? v3(span, 0.05f, 0.04f) : v3(-span, 0.05f, 0.04f);
+	V3 root = side == 0 ? v3(0.12f, 0.02f, 0.02f) : v3(-0.12f, 0.02f, 0.02f);
+	pos = MXformPt(wm, local);
+	outDir = pos - MXformPt(wm, root);
+	float ln = Len(outDir);
+	if (ln < 1e-4f) return FALSE;
+	outDir = outDir * (1.f / ln);
+	return TRUE;
 }
 
 static M4 CachedBind(const Model& m, int j)
@@ -2581,7 +2675,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (!a.poseValid) return TRUE;
 	DrawParams d = dp;
 	// 戦闘・カット・拠点。作成プレビューと顔枠は、今の布の見え方のまま。
-	if (r.StageWind() && !r.InPortrait() && d.sway < 1.f) d.sway = 1.f;
+	if (r.StageWind() && d.sway < 1.f) d.sway = 1.f;
 	// 見本は足が地面に付いたままなので、移動の速度は出ない。歩き・走り・飛行の羽根で向かい風を足す。
 		d.gait = 0.f;
 		if (a.clip == CL_RUN) d.gait = 0.72f;
@@ -2596,6 +2690,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			d.clothHue = a.hue;
 			d.face = a.face;
 			d.blink = HumanBlink(time, a.blinkSeed);
+			if (a.recoil > 0.08f) d.blink = max(d.blink, Clampf(a.recoil * 1.45f, 0.f, 0.94f));
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 			d.noTess = 1;
@@ -2646,7 +2741,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 		const int nAtt = (ava && !bareBase) ? a.wepAtt : a.nAtt, nGear = (ava && !bareBase) ? a.wepGear : a.nGear;
 		DrawParams da = dp;
-		if (r.StageWind() && !r.InPortrait()) da.sway = 1.f;
+		if (r.StageWind()) da.sway = 1.f;
 		da.noTess = 1;
 		if (hum) da.rim = 0.06f;
 		auto bindOf = [&](int j) -> M4 {
@@ -2698,15 +2793,15 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		};
 		struct GItem { int kind, idx, twoSided; M4 l; };
 		struct GBag { const Actor* a; unsigned frame; GItem it[16]; int n, ready; };
-		static GBag gbagTab[64];
+		static GBag gbagTab[128];
 		GBag* gbag = NULL;
 		int gfree = -1;
-		for (int gi = 0; gi < 64; gi++) {
+		for (int gi = 0; gi < 128; gi++) {
 			if (gbagTab[gi].a == &a) { gbag = &gbagTab[gi]; break; }
 			if (gfree < 0 && gbagTab[gi].a == NULL) gfree = gi;
 		}
 		if (!gbag) {
-			if (gfree < 0) gfree = (int)(r.m_frame % 64u);
+			if (gfree < 0) gfree = (int)(r.m_frame % 128u);
 			gbag = &gbagTab[gfree];
 			gbag->a = &a;
 			gbag->ready = 0;

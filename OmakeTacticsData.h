@@ -790,6 +790,7 @@ inline int LayerRangeCost(int fromL, int toL)
 	return 0;
 }
 float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
+float TacMonsterWide(int packIndex);   // 同じ姿勢で翼や胴を含む全身の半幅。未計測は 0
 float TacMonsterTall(int packIndex);   // 同じ姿勢の身長。未計測は 0
 int TacMonsterReady(int packIndex);    // パックを測り終えた。未ロードは 0
 void MonsterPrepareScale(int monster); // 追加敵の倍率を、占有マスに合わせて確定する
@@ -1258,6 +1259,8 @@ struct GearDef {
 	int elem2;    // 0=なし。武器は第二属性、防具は第二の軽減
 };
 int GearCount();
+int GearTierOf(int id);
+int GearRootId(int id);
 const GearDef* GearOf(int id);
 // 装備 id ごとに別の見た目。0 は右手か胴、1 は左手か頭。無いときは -1。
 int GearVisual(const GearDef* g, int id, int slot);
@@ -1357,9 +1360,46 @@ enum PasFx {
 	PAS_FIRE2, PAS_ICE2, PAS_THUNDER2, PAS_HOLY2, PAS_DARK2,
 	PAS_CP2, PAS_OPEN2, PAS_AGI, PAS_LUK, PAS_RCV, PAS_CPL, PAS_HIT, PAS_AVO, PAS_PEN, PAS_WAKE
 };
+inline int SeriesPriceOf(int base, int tier)
+{
+	if (base < 0) base = 0;
+	if (tier < 0) tier = 0;
+	if (tier > 3) tier = 3;
+	static const int mul[4] = { 1, 4, 9, 16 };
+	long long p = (long long)base * (long long)mul[tier];
+	if (p > 1000000000LL) p = 1000000000LL;
+	return (int)p;
+}
+inline int SeriesGap(int hi, int lo)
+{
+	long long d = (long long)hi - (long long)lo;
+	if (d < 1) d = 1;
+	d = d * 80 / 100;
+	if (d < 1) d = 1;
+	if (d > 1000000000LL) d = 1000000000LL;
+	return (int)d;
+}
+const wchar_t* SeriesName(const wchar_t* base, int tier);
+const wchar_t* SeriesUpWord();
 int PasCount();
 const wchar_t* PasName(int id);
 const wchar_t* PasDesc(int id);
+int PasDeal(int index);
+int AccDeal(int index);
+int PasTierOf(int index);
+int AccTierOf(int index);
+int PasRoot(int index);
+int AccRoot(int index);
+bool PasGrading(int index);
+bool AccGrading(int index);
+int GearDeal(const SaveData& s, int id);
+bool GearGrading(const SaveData& s, int id);
+int PasMag(const Unit& u, int fx);
+int UnitFlyMul(const Unit& u);
+int UnitActMul(const Unit& u);
+int UnitMoveMul(const Unit& u);
+int UnitBonusMov(const Unit& u);
+int PasWingGrade(const CharData& c);
 bool CatalogRaises(int kind, int id, int stat);
 int PasPrice(int index);
 int PasHave(int index);
