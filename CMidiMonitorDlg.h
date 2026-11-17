@@ -253,6 +253,7 @@ private:
 	int m_sampleRate;
 	__int64 m_loopStartSample;
 	__int64 m_loopEndSample;
+	int m_loopRewindPend; /* J を検知済み。可聴位置が Q に届いてからノートを描き直す */
 	__int64 m_lastPlayb;
 	wchar_t m_loadedPath[520];
 	wchar_t m_sourcePath[520];

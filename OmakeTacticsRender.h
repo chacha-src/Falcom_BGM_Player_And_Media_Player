@@ -210,13 +210,17 @@ struct DrawParams {
 	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
 	int skinTone;        // 0無し 1白人 2アジア人 3黒人 4ラテン系 5中東系 6南アジア系 7ポリネシア系。服と髪は変えない
 	float blink;         // 0開 1閉。人間のまぶた
+	float mouth;         // -1への字 0閉じ 1開き。詠唱・叫び・被弾
+	float brow;          // -1寄せる 1上げる
+	float squint;        // 0..1 狙い・痛みで目を細める
+	int sex;             // 0不明 1男 2女。肌の質感
 	int noTess;          // 1 ならテッセレーションしない。重ね着や髪は数 mm の隙間しかなく、曲面化と変位で層が入れ替わる
 	float fly;           // 0〜1。宙に浮いている人間。スカートは脚から離れて世界の下へ垂れる
 	int cape;            // 1 なら背中にマントがある。髪はマントの厚みの外を流す
 	float girth;         // 体型の胴の太さ（標準 1）。髪は太った胴・首・腕の外を流す
 	float gait;          // 0=止まっている 歩き・走り・飛行移動。その場の見本でも向かい風を足す
 	int matSlice;        // Skin 配列。-1=使わない。noTess の武具・敵で OutlineColor.a に載せる
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), noTess(0), fly(0), cape(0), girth(1.f), gait(0), matSlice(-1) {}
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0), blink(0), mouth(0), brow(0), squint(0), sex(0), noTess(0), fly(0), cape(0), girth(1.f), gait(0), matSlice(-1) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -337,6 +341,10 @@ public:
 			crown[0] = crown[1] = crown[2] = 0;
 			skullC[0] = skullC[1] = skullC[2] = 0;
 			memset(skullR, 0, sizeof(skullR));
+			memset(faceEye, 0, sizeof(faceEye));
+			memset(faceNose, 0, sizeof(faceNose));
+			memset(faceChin, 0, sizeof(faceChin));
+			memset(faceLin, 0, sizeof(faceLin));
 		}
 	};
 	Fix<CreatureSkin, 160> m_skins;
@@ -569,7 +577,7 @@ public:
 	void DrawRibbon(const Buf<VtxP>& v);
 	enum { WX_GPU_MAX = 8192, WX_GPU_ACT = 80 };
 	BOOL WxGpuReady() const { return m_csWx != NULL && m_wxGpuUAV != NULL && m_vsPWx != NULL && m_gsP != NULL; }
-	void TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64);
+	void TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64, float heat);
 	void DrawWxGpu();
 
 	// 地形
@@ -597,7 +605,7 @@ public:
 	}
 
 	// ポートレート
-	enum { PORTRAIT_N = 24, PORTRAIT_PX = 256 };
+	enum { PORTRAIT_N = 24, PORTRAIT_PX = 512 };
 	BOOL BeginPortrait(int slot);
 	void EndPortrait();
 	void FinishPortraits();
@@ -891,6 +899,7 @@ private:
 	ID3D11Buffer* m_cbWx;
 	int m_wxGpuN;
 	int m_wxGpuWx;
+	float m_wxHeat;
 	ID3D11Buffer* m_hairGuideSB;
 	ID3D11ShaderResourceView* m_hairGuide;
 	ID3D11Buffer* m_hairVertSB;

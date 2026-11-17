@@ -1054,42 +1054,99 @@ float RainAmt()
 	return 0.0;
 }
 
-// 雨のとき、服・肌・髪に水膜と、重力に沿って滑る滴。上面は膜、縦の面は筋になって落ちる。
+// 昼の暑い地図、または熱波。雨と雪では汗を残さない。
+float HotAmt()
+{
+	float theme = FogColor.a;
+	float hour = Wx.y;
+	float day = 0.0;
+	if (hour < 0.5) day = 1.0;
+	else if (hour > 1.5 && hour < 2.5) day = 0.72;
+	else if (hour > 2.5 && hour < 3.5) day = 0.28;
+	float hot = 0.0;
+	if (theme > 0.5 && theme < 1.5) hot = 0.62 * day;
+	else if (theme > 3.5 && theme < 4.5) hot = day;
+	else if (theme > 4.5 && theme < 5.5) hot = max(0.75, day);
+	if (Wx.x > 8.5 && Wx.x < 9.5) hot = max(hot, 0.9);
+	if (Wx.x > 0.5 && Wx.x < 1.5) hot *= 0.12;
+	if (Wx.x > 4.5 && Wx.x < 5.5) hot = 0.0;
+	if (Wx.x > 1.5 && Wx.x < 2.5) hot = 0.0;
+	if (Wx.x > 6.5 && Wx.x < 7.5) hot = 0.0;
+	return saturate(hot);
+}
+
+// 雨・強雨・雹は下へ筋を引き、裾と下向きの面で溜まる。雪は上面に残り、灰は上面から筋になって落ちる。暑い昼は肌を汗が伝う。
 float3 RainSlide(float3 col, float3 albedo, float3 n, float3 v, float3 w, float sh, float hairAmt, float flesh)
 {
 	float rain = RainAmt();
-	if (rain < 0.01) return col;
+	float wx = Wx.x;
+	float snow = (wx > 1.5 && wx < 2.5) ? 1.0 : 0.0;
+	float ash = (wx > 2.5 && wx < 3.5) ? 1.0 : 0.0;
+	float hail = (wx > 6.5 && wx < 7.5) ? 0.7 : 0.0;
+	float hot = HotAmt();
+	float water = max(rain, hail);
+	if (water < 0.01 && snow < 0.5 && ash < 0.5 && hot < 0.04) return col;
 	float3 up = float3(0, 1, 0);
-	float3 slopeV = up - n * dot(n, up);
-	float sl = length(slopeV);
-	slopeV = sl > 1e-3 ? slopeV / sl : float3(0, 0, 1);
-	float3 across = cross(n, slopeV);
+	float ny = dot(n, up);
+	float3 upHill = up - n * ny;
+	float sl = length(upHill);
+	float3 downV = sl > 1e-3 ? -upHill / sl : float3(0, -1, 0);
+	float3 across = cross(n, downV);
 	float al = length(across);
 	across = al > 1e-3 ? across / al : float3(1, 0, 0);
 	float side = dot(w, across);
-	float down = dot(w, slopeV);
-	float sky = saturate(n.y);
+	float along = dot(w, downV);
+	float sky = saturate(ny);
 	float wall = saturate(sl);
-	float shelter = saturate(n.y * 0.85 + 0.35);
-	float laneN = lerp(7.5, 16.0, saturate(hairAmt + flesh * 0.25));
-	float lane = abs(frac(side * laneN + fbm2(w.xz * 2.4 + w.y * 0.15) * 0.3) - 0.5);
-	float path = smoothstep(0.42, 0.5, 0.5 - lane);
-	float spd = lerp(1.15, 2.35, hairAmt) * lerp(0.55, 1.0, wall);
-	float flow = down * lerp(10.0, 22.0, hairAmt) - Eye.w * spd * rain;
-	float bead = pow(saturate(sin(flow) * 0.5 + 0.5), lerp(5.5, 9.0, hairAmt));
-	float run = pow(saturate(sin(flow * 0.62 + side * 28.0) * 0.5 + 0.5), 4.5) * path;
-	float drip = path * bead * wall;
-	float film = sky * (0.35 + 0.65 * fbm2(w.xz * 5.5 + float2(0.0, -Eye.w * 0.12)));
-	float wet = saturate((film * 0.9 + drip * 1.35 + run * 0.55 + wall * 0.22) * shelter) * saturate(rain);
-	col *= lerp(1.0, lerp(float3(0.62, 0.70, 0.78), float3(0.72, 0.78, 0.84), flesh), saturate(wet * 0.8));
+	float hang = saturate(-ny);
+	float laneN = lerp(10.0, 20.0, saturate(hairAmt + flesh * 0.3));
+	float lane = abs(frac(side * laneN + fbm2(w.xz * 1.6) * 0.22) - 0.5);
+	float path = smoothstep(0.455, 0.5, 0.5 - lane);
+	float spd = lerp(1.35, 2.6, saturate(water)) * lerp(0.85, 1.35, hairAmt);
+	float flow = along * lerp(16.0, 28.0, hairAmt) - Eye.w * spd;
+	float bead = pow(saturate(sin(flow) * 0.5 + 0.5), lerp(7.0, 11.0, hairAmt));
+	float tail = pow(saturate(sin(flow + 0.7) * 0.5 + 0.5), 2.4) * path;
+	float run = bead * path * wall;
+	float tip = hang * (0.35 + bead) * (0.45 + path);
+	float film = sky * (0.3 + 0.7 * fbm2(w.xz * 5.2 + float2(0.0, -Eye.w * 0.08)));
 	float3 l = normalize(LightDir.xyz);
 	float3 h = normalize(l + v);
 	float ndl = saturate(dot(n, l));
 	float ndh = saturate(dot(n, h));
-	float gloss = pow(ndh, lerp(40.0, 88.0, max(hairAmt, flesh)));
-	col += float3(0.72, 0.86, 1.0) * gloss * ndl * sh * wet * 0.7;
-	col += float3(0.84, 0.93, 1.0) * (drip * 0.62 + run * 0.38) * rain * shelter;
-	col += albedo * pow(1.0 - saturate(dot(n, v)), 2.4) * wet * 0.16;
+	if (water > 0.01) {
+		float wet = saturate((film * 0.75 + run * 1.5 + tail * 0.7 + tip * 0.8 + wall * 0.12) * water);
+		col *= lerp(1.0, lerp(float3(0.64, 0.72, 0.80), float3(0.74, 0.80, 0.86), flesh), saturate(wet * 0.72));
+		float gloss = pow(ndh, lerp(48.0, 96.0, max(hairAmt, flesh)));
+		col += float3(0.72, 0.88, 1.0) * gloss * ndl * sh * wet * 0.55;
+		col += float3(0.86, 0.94, 1.0) * (run * 0.85 + tail * 0.42 + tip * 1.05) * water * (0.55 + 0.45 * sh);
+		col += albedo * pow(1.0 - saturate(dot(n, v)), 2.2) * wet * 0.12;
+	}
+	if (snow > 0.5) {
+		float cling = sky * (0.4 + 0.6 * fbm2(w.xz * 5.5));
+		col = lerp(col, float3(0.93, 0.96, 1.0), cling * 0.5);
+		float meltSpd = 0.42;
+		float mf = along * 12.0 - Eye.w * meltSpd;
+		float melt = pow(saturate(sin(mf) * 0.5 + 0.5), 6.0) * path * wall;
+		col += float3(0.92, 0.96, 1.0) * (melt * 0.7 + tip * cling * 0.45);
+		col *= lerp(1.0, float3(0.82, 0.88, 0.94), melt * 0.35);
+	}
+	if (ash > 0.5) {
+		float dust = sky * (0.45 + 0.55 * fbm2(w.xz * 3.6 + float2(Eye.w * 0.02, 0.0)));
+		col = lerp(col, col * float3(0.32, 0.28, 0.26), dust * 0.62);
+		float af = along * 9.0 - Eye.w * 0.28;
+		float smear = pow(saturate(sin(af) * 0.5 + 0.5), 3.0) * path * wall;
+		col = lerp(col, float3(0.20, 0.16, 0.14), smear * 0.72 + tip * dust * 0.4);
+	}
+	if (hot > 0.04 && flesh > 0.4 && hairAmt < 0.5) {
+		float sLane = abs(frac(side * 7.0 + fbm2(w.xy * 2.4)) - 0.5);
+		float sPath = smoothstep(0.47, 0.5, 0.5 - sLane);
+		float sf = along * 13.0 - Eye.w * 0.48;
+		float drop = pow(saturate(sin(sf) * 0.5 + 0.5), 16.0) * sPath;
+		float sheen = (sky * 0.55 + wall * 0.25) * fbm2(w.xz * 7.0 + w.y * 3.0);
+		col *= lerp(1.0, float3(0.84, 0.72, 0.66), (sheen * 0.28 + drop * 0.22) * hot);
+		col += float3(1.0, 0.95, 0.90) * (drop * wall * 0.9 + tip * drop * 0.7 + sheen * sky * 0.12) * hot * (0.45 + 0.55 * sh);
+		col += float3(1.0, 0.97, 0.94) * pow(ndh, 70.0) * ndl * drop * hot * 0.35;
+	}
 	return col;
 }
 
@@ -1180,9 +1237,51 @@ GOut PSM(PSIn i)
 	float3 emis = albedo * Params.z;
 	float skin = SkinMask(albedo);
 	float hair = (Params.y > 6.5 && Params.y < 7.5) ? 1 : 0;
+	// CSSkin が体へ書いた整数。x=質感 y=1男 2女。髪と地形の UV は小数なのでここでは読まない。
+	float matKind = 0;
+	float sex = 0;
+	if (person > 0.5 && hair < 0.5 && matSlice < 0.0) {
+		float ux = round(i.uv.x);
+		float uy = round(i.uv.y);
+		if (abs(i.uv.x - ux) < 0.02 && abs(i.uv.y - uy) < 0.02 && uy > 0.5 && uy < 2.5 && ux >= -0.1 && ux < 8.5) {
+			matKind = ux;
+			sex = uy;
+		}
+	}
+	if (matKind < 0.5 && sex > 0.5) {
+		skin = max(skin, sex > 1.5 ? 0.94 : 0.80);
+		float pore = fbm2(i.w.xz * 46.0 + i.w.y * 34.0);
+		albedo *= lerp(sex > 1.5 ? 0.975 : 0.988, sex > 1.5 ? 1.022 : 1.010, pore);
+	} else if (matKind > 0.5)
+		skin = 0;
 	float sh = ShadowAt(i.w, n);
 	float rough = lerp(0.46, 0.66, skin);
 	float3 f0 = lerp(float3(0.04, 0.04, 0.04), float3(0.03, 0.02, 0.015), skin);
+	if (sex > 0.5 && matKind < 0.5) {
+		if (sex > 1.5) {
+			rough = 0.30;
+			f0 = float3(0.040, 0.034, 0.030);
+		} else {
+			rough = 0.44;
+			f0 = float3(0.032, 0.032, 0.031);
+		}
+	} else if (matKind > 0.5 && matKind < 1.5) {
+		rough = 0.18; f0 = float3(0.052, 0.050, 0.048);
+	} else if (matKind < 2.5 && matKind > 0.5) {
+		rough = 0.40; f0 = float3(0.042, 0.034, 0.028);
+	} else if (matKind < 3.5 && matKind > 0.5) {
+		rough = 0.24; f0 = albedo * 0.62 + float3(0.06, 0.06, 0.065);
+	} else if (matKind < 4.5 && matKind > 0.5) {
+		rough = 0.74; f0 = float3(0.028, 0.028, 0.028);
+	} else if (matKind < 5.5 && matKind > 0.5) {
+		rough = 0.17; f0 = lerp(albedo, float3(0.74, 0.75, 0.78), 0.5);
+	} else if (matKind < 6.5 && matKind > 0.5) {
+		rough = 0.55; f0 = float3(0.038, 0.032, 0.034);
+	} else if (matKind < 7.5 && matKind > 0.5) {
+		rough = 0.15; f0 = float3(0.058, 0.058, 0.062);
+	} else if (matKind > 0.5) {
+		rough = 0.60; f0 = float3(0.032, 0.032, 0.032);
+	}
 	if (matSlice >= 0.0 && matSlice < 16.0) {
 		rough = lerp(rough, 0.16, 0.72);
 		f0 = lerp(f0, float3(0.68, 0.70, 0.74), 0.58);
@@ -1208,13 +1307,58 @@ GOut PSM(PSIn i)
 			f0 = lerp(f0, lerp(float3(0.055, 0.06, 0.07), float3(0.08, 0.085, 0.09), hair), k);
 		}
 	}
-	float3 col = Lit(albedo, n, v, rough, f0, sh, skin * 0.85);
+	float skinLit = skin * 0.85;
+	if (matKind < 0.5 && sex > 1.5) skinLit = min(skin * 1.05, 1.0);
+	else if (matKind < 0.5 && sex > 0.5) skinLit = skin * 0.70;
+	float3 col = Lit(albedo, n, v, rough, f0, sh, skinLit);
 	const float3 lLight = normalize(LightDir.xyz);
 	// 布ベルベット光沢（服）と二段アニソ髪ハイライト
-	if (person > 0.5 && hair < 0.5 && skin < 0.25 && matSlice < 0.0) {
+	if (person > 0.5 && hair < 0.5 && skin < 0.25 && matSlice < 0.0 && matKind < 0.5 && sex < 0.5) {
 		float ndvC = saturate(dot(n, v));
 		float sheen = pow(1.0 - ndvC, 3.2) * (0.45 + 0.55 * saturate(dot(n, lLight) * 0.5 + 0.5));
 		col += lerp(albedo, float3(1, 1, 1), 0.35) * sheen * 0.14 * (0.45 + 0.55 * sh);
+	}
+	if (person > 0.5 && hair < 0.5 && sex > 0.5) {
+		float3 hS = normalize(lLight + v);
+		float ndlS = saturate(dot(n, lLight) * 0.65 + 0.35);
+		float ndvS = saturate(dot(n, v));
+		float ndhS = saturate(dot(n, hS));
+		float3 tngS = normalize(cross(abs(n.y) > 0.85 ? float3(1, 0, 0) : float3(0, 1, 0), n));
+		float ahS = saturate(1.0 - dot(tngS, hS) * dot(tngS, hS));
+		if (matKind < 0.5) {
+			if (sex > 1.5) {
+				float edge = pow(1.0 - ndvS, 2.0);
+				col += albedo * float3(1.12, 0.58, 0.46) * edge * 0.20 * (0.55 + 0.45 * sh);
+				col += float3(1.0, 0.97, 0.94) * pow(ndhS, 16.0) * ndlS * sh * 0.055;
+				col += float3(1.0, 0.99, 0.97) * pow(ndhS, 96.0) * ndlS * sh * 0.075;
+			} else {
+				float edge = pow(1.0 - ndvS, 2.8);
+				col += albedo * float3(1.02, 0.70, 0.58) * edge * 0.07 * (0.6 + 0.4 * sh);
+				col += float3(1.0, 0.98, 0.96) * pow(ndhS, 24.0) * ndlS * sh * 0.038;
+			}
+		} else if (matKind < 1.5) {
+			float silk = pow(saturate(sqrt(ahS) * ndhS), 28.0);
+			float damp = saturate(1.2 - dot(albedo, float3(0.25, 0.55, 0.20)));
+			col += albedo * silk * ndlS * sh * 0.30;
+			col += float3(1.0, 0.98, 0.95) * silk * ndlS * sh * 0.09 * damp;
+			col += albedo * pow(1.0 - ndvS, 2.6) * sh * 0.08;
+		} else if (matKind < 2.5) {
+			col += float3(1.0, 0.96, 0.90) * pow(ndhS, 20.0) * ndlS * sh * 0.14;
+		} else if (matKind < 3.5 || (matKind > 4.5 && matKind < 5.5)) {
+			col += albedo * pow(ndhS, 52.0) * ndlS * sh * 0.32;
+		} else if (matKind < 4.5) {
+			col += albedo * pow(1.0 - ndvS, 4.2) * sh * 0.05;
+		} else if (matKind < 6.5) {
+			float sheen = pow(1.0 - ndvS, 2.2);
+			col += lerp(albedo, float3(1.0, 0.90, 0.94), 0.45) * sheen * ndlS * sh * 0.26;
+		} else if (matKind < 7.5) {
+			col += float3(1, 1, 1) * pow(1.0 - ndvS, 1.7) * sh * 0.16;
+			col += albedo * pow(ndhS, 36.0) * ndlS * sh * 0.10;
+		} else {
+			float fuzz = fbm2(i.w.xz * 38.0 + i.w.y * 26.0);
+			col *= lerp(0.95, 1.03, fuzz);
+			col += albedo * pow(1.0 - ndvS, 3.2) * sh * 0.07;
+		}
 	}
 	if (hair > 0.5) {
 		float3 hH = normalize(lLight + v);
@@ -1268,8 +1412,20 @@ GOut PSM(PSIn i)
 		}
 	}
 	col = lerp(col, DewShade(col, albedo, n, v, sh, skin, hair), rain > 0.01 ? 1.0 : (1. - person * 0.6));
-	if (rain > 0.01 && (person > 0.5 || hair > 0.5))
-		col = RainSlide(col, albedo, n, v, i.w, sh, hair, skin);
+	if (person > 0.5 || hair > 0.5) {
+		float runWx = rain;
+		float wxx = Wx.x;
+		if (wxx > 1.5 && wxx < 3.5) runWx = 1.0;
+		if (wxx > 6.5 && wxx < 7.5) runWx = 1.0;
+		if (wxx > 8.5 && wxx < 9.5) runWx = 1.0;
+		float thm = FogColor.a;
+		if ((thm > 0.5 && thm < 1.5) || (thm > 3.5 && thm < 5.5)) {
+			float hr = Wx.y;
+			if (hr < 0.5 || (hr > 1.5 && hr < 3.5)) runWx = 1.0;
+		}
+		if (runWx > 0.01)
+			col = RainSlide(col, albedo, n, v, i.w, sh, hair, skin);
+	}
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
@@ -3782,7 +3938,7 @@ void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, floa
 	o.sz.z = span * (0.05 + WxRnd(seed) * 0.95);
 }
 
-void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm)
+void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm, float kind)
 {
 	uint n = (uint)max(WxCnt.y, 1.0);
 	float4 a = WxAct[seed % n];
@@ -3790,20 +3946,60 @@ void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm)
 		WxBirthSky(o, seed, WxMix.y, Eye.xyz, WxFwd.xyz, WxSide.xyz, wind, gust);
 		return;
 	}
-	float fromHair = WxRnd(seed) < 0.45 ? 1.0 : 0.0;
+	float pick = WxRnd(seed);
 	float ht = a.w;
-	float3 pos = a.xyz + float3(WxRnd(seed) * 0.24 - 0.12, ht * (fromHair ? (0.78 + WxRnd(seed) * 0.24) : (0.38 + WxRnd(seed) * 0.34)), WxRnd(seed) * 0.24 - 0.12);
-	float w = lerp(2.4, 6.5, storm) * (0.7 + gust * 1.4);
+	float ang = WxRnd(seed) * 6.2831853;
+	if (pick < 0.34) ang += 3.14159265;
+	float3 side = float3(cos(ang), 0.0, sin(ang));
+	float yk = 0.45;
+	float rad = 0.28;
+	float fall = 1.8;
+	if (pick < 0.46) {
+		yk = 0.40 + WxRnd(seed) * 0.10;
+		rad = 0.24 + WxRnd(seed) * 0.12;
+		fall = lerp(1.6, 2.6, storm);
+	} else if (pick < 0.78) {
+		yk = 0.04 + WxRnd(seed) * 0.20;
+		rad = 0.12 + WxRnd(seed) * 0.16;
+		fall = lerp(1.1, 1.8, storm);
+	} else if (pick < 0.90) {
+		yk = 0.90 + WxRnd(seed) * 0.10;
+		rad = 0.05 + WxRnd(seed) * 0.08;
+		fall = 0.7 + storm * 0.6;
+	} else {
+		yk = 0.72 + WxRnd(seed) * 0.06;
+		rad = 0.04 + WxRnd(seed) * 0.05;
+		fall = 0.55;
+	}
+	float3 pos = a.xyz + float3(0.0, ht * yk, 0.0) + side * rad;
+	float shed = kind;
 	o.p = float4(pos, 1);
-	o.vel = float4(wind * w + float3(WxRnd(seed) * 1.6 - 0.8, 0.4 + WxRnd(seed) * 1.8, WxRnd(seed) * 1.6 - 0.8), 0.03);
-	o.sz = float4(0.016, 0, 0.28 + WxRnd(seed) * 0.27, 0.45);
-	o.sz.w = o.sz.z;
-	o.c = float4(0.78, 0.88, 1, 0.85);
-	o.extra = float4(14.0, 0.45, 10.0, 0.008);
-	float span = max(o.sz.w, 0.2);
-	span *= 0.6 + WxRnd(seed) * 0.8;
-	o.sz.w = span;
-	o.sz.z = span * WxRnd(seed);
+	float down = fall + WxRnd(seed) * 0.7;
+	o.vel = float4(side * 0.18 + wind * (0.15 + gust * 0.25) + float3(0.0, -down, 0.0), 0.045);
+	float life = 0.9 + WxRnd(seed) * 0.6;
+	o.sz = float4(0.014, 0, life, life);
+	o.c = float4(0.78, 0.90, 1.0, 0.9);
+	o.extra = float4(12.0, 0.2, 1.0, 0.008);
+	if (shed > 1.5 && shed < 2.5) {
+		o.c = float4(0.96, 0.98, 1.0, 0.95);
+		o.sz.x = 0.02;
+		o.vel.y *= 0.45;
+		o.extra = float4(1.2, 0.35, 3.0, 0.012);
+		o.sz.z = 2.4; o.sz.w = 2.4;
+	} else if (shed > 2.5 && shed < 3.5) {
+		o.c = float4(0.45, 0.34, 0.28, 0.9);
+		o.sz.x = 0.018;
+		o.vel.y *= 0.55;
+		o.extra = float4(2.2, 0.3, 4.0, 0.01);
+		o.sz.z = 2.2; o.sz.w = 2.2;
+	} else if (shed > 3.5) {
+		o.c = float4(0.98, 0.94, 0.88, 0.75);
+		o.sz.x = 0.01;
+		o.vel.y = -0.35 - WxRnd(seed) * 0.25;
+		o.extra = float4(6.0, 0.15, 1.0, 0.006);
+		o.sz.z = 1.3 + WxRnd(seed) * 0.5;
+		o.sz.w = o.sz.z;
+	}
 }
 
 [numthreads(64, 1, 1)]
@@ -3818,17 +4014,24 @@ void CSWx(uint3 dtid : SV_DispatchThreadID)
 	float gust = WxWind.w;
 	uint seed = id * 1973u + (uint)(Eye.w * 4096.0) * 17u + 1u;
 	WxGpu o = WxSim[id];
-	if (wx < 0.5) {
+	if (wx < 0.5 && WxMix.z < 0.28) {
 		o.sz.x = 0; o.c.a = 0; o.sz.z = 0;
 		WxSim[id] = o;
 		return;
 	}
 	uint dripN = (uint)WxMix.x;
 	int reset = WxCnt.w > 0.5;
+	float shed = 0.0;
+	if ((wx > 0.5 && wx < 1.5) || (wx > 4.5 && wx < 5.5) || (wx > 6.5 && wx < 7.5)) shed = 1.0;
+	else if (wx > 1.5 && wx < 2.5) shed = 2.0;
+	else if (wx > 2.5 && wx < 3.5) shed = 3.0;
+	else if (WxMix.z > 0.28) shed = 4.0;
 	if (reset || o.sz.z <= 0.0 || o.sz.x < 0.0005) {
-		if (id < dripN && ((wx > 0.5 && wx < 1.5) || (wx > 4.5 && wx < 5.5)) && WxCnt.y > 0.5)
-			WxBirthDrip(o, seed, wind, gust, wx > 4.5 ? 1.0 : 0.0);
-		else
+		if (id < dripN && shed > 0.5 && WxCnt.y > 0.5)
+			WxBirthDrip(o, seed, wind, gust, wx > 4.5 && wx < 5.5 ? 1.0 : 0.0, shed);
+		else if (wx < 0.5) {
+			o.sz.x = 0; o.c.a = 0; o.sz.z = 0;
+		} else
 			WxBirthSky(o, seed, wx, Eye.xyz, WxFwd.xyz, WxSide.xyz, wind, gust);
 		WxSim[id] = o;
 		return;

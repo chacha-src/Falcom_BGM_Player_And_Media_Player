@@ -1350,6 +1350,7 @@ void EvoBrief(int cls, wchar_t* out, int cap)
 {
 	if (!out || cap < 8) return;
 	out[0] = 0;
+	if (cls >= C_JOB0 + TAC_JOB_N && cls < C_JOB0 + TAC_JOB_N + TAC_HID_N) return;
 	const ClassDef& d = ClassInfo(cls);
 	if (cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
 		int sk0 = -1, lv0 = 0, sk1 = -1, lv1 = 0;

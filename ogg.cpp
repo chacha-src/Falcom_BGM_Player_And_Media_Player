@@ -1379,7 +1379,7 @@ BOOL COggApp::InitInstance()
 		}
 		savedata.s3r_show_map = savedata.s3r_show_map ? 1 : 0;
 	}
-	savedata.mpBotToolsFlags |= 1024 | 2048 | 4096; // VSTホスト・MIDIモニタ・CDボタンは常時表示
+	MpBotToolsMigrate(); // rev 0 の一度だけ。以降は短縮ボタン設定の表示切替を残す
 	if (datFileSize < (int)(offsetof(save, s3r_invert_y) + sizeof(savedata.s3r_invert_y))) {
 		savedata.s3r_invert_y = 0;
 	} else {

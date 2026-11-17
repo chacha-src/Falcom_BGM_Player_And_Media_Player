@@ -229,9 +229,12 @@ public:
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
 	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botMidi, m_botFm, m_botCd, m_botOmake;
+	// 左端の表示切替、すぐ右のらいらX、ささみコンポーザ、既定OFFの設定/フォルダ/歌詞/EQ。
+	CCustomStandardButton m_botShortCfg, m_botRairaX, m_botSasami;
+	CCustomStandardButton m_botSet, m_botFolder, m_botLrc, m_botEq;
 	// m_botMidi: VST と CD のあいだ。FM/MIDIモニタ開閉（savedata.midimonwindow / fmmonwindow）。bit 4096。
 	// m_botFm: 未使用（FM は MIDI ボタンに統合）。
-	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
+	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
@@ -597,6 +600,16 @@ protected:
 	afx_msg void OnBotVisRemote();
 	afx_msg void OnBotVisMaze();
 	afx_msg void OnBotVisVst();
+	afx_msg void OnBotVisRec();
+	afx_msg void OnBotVisCap();
+	afx_msg void OnBotVisRairaX();
+	afx_msg void OnBotVisSasami();
+	afx_msg void OnBotVisMidi();
+	afx_msg void OnBotVisCd();
+	afx_msg void OnBotVisSet();
+	afx_msg void OnBotVisFolder();
+	afx_msg void OnBotVisLrc();
+	afx_msg void OnBotVisEq();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
@@ -685,6 +698,11 @@ protected:
 	afx_msg void OnMpSoft3DRace();
 	afx_msg void OnMpOmakeTactics();
 	afx_msg void OnBotOmake();
+	afx_msg void OnBotShortCfg();
+	afx_msg void OnBotRairaX();
+	afx_msg void OnBotSasami();
+	void EnsureBotToolsFlags();
+	void AddBotVisChecks(class CCustomPopupMenu* menu);
 	void AddOmakeMenuItems(class CCustomPopupMenu* menu);
 	afx_msg void OnMpVstHost();
 	afx_msg void OnMpSasamiText();

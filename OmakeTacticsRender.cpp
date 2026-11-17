@@ -255,7 +255,7 @@ Renderer::Renderer()
 	m_csWx = NULL; m_vsPWx = NULL;
 	m_wxGpuSB = NULL; m_wxGpuUAV = NULL; m_wxGpuSRV = NULL;
 	m_wxActSB = NULL; m_wxActSRV = NULL; m_wxHgtSB = NULL; m_wxHgtSRV = NULL;
-	m_cbWx = NULL; m_wxGpuN = 0; m_wxGpuWx = -1;
+	m_cbWx = NULL; m_wxGpuN = 0; m_wxGpuWx = -1; m_wxHeat = 0.f;
 	m_hairGuideSB = NULL; m_hairGuide = NULL; m_hairVertSB = NULL; m_hairVert = NULL;
 	m_hairScratchSB = NULL; m_hairScratchUAV = NULL; m_hairScratchSRV = NULL;
 	memset(m_hairV0, 0, sizeof(m_hairV0));
@@ -1125,7 +1125,7 @@ BOOL Renderer::CreateShaders()
 		bd.ByteWidth = 64 * MAXJ;
 		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSkinBone))) { TAC_REL(m_csSkin); }
 		else TacCbRingMake(m_dev, g_skinBoneR, bd.ByteWidth);
-		bd.ByteWidth = 96;
+		bd.ByteWidth = 112;
 		if (m_csSkin && FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSkinParm))) { TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TacCbRingFree(g_skinBoneR); }
 		else if (m_csSkin) TacCbRingMake(m_dev, g_skinParmR, bd.ByteWidth);
 		bd.ByteWidth = (9 + 1 + SKULL_NA * SKULL_NE / 4) * 16;
@@ -1952,12 +1952,20 @@ static void ShadeEnv(int theme, float x, float y, float z, float& r, float& g, f
 		if (band > 0.92f) { r += 0.25f; g += 0.3f; b += 0.4f; }
 	}
 	if (theme == TH_HEAVEN && y > -0.05f) {
-		float ray = expf(-fabsf(x * 2.2f) * 1.4f) * Clampf(y * 0.5f + 0.5f, 0, 1);
-		r += ray * 0.7f; g += ray * 0.5f; b += ray * 0.12f;
-		r = Lerpf(r, 1.f, 0.45f); g = Lerpf(g, 0.92f, 0.35f); b = Lerpf(b, 0.62f, 0.2f);
+		float ray = expf(-fabsf(x * 1.4f) * 1.1f) * Clampf(y * 0.35f + 0.25f, 0, 1);
+		r += ray * 0.16f; g += ray * 0.11f; b += ray * 0.04f;
+		float upv = Clampf(0.35f + y * 0.25f, 0.f, 1.f);
+		r = Lerpf(r, 0.62f, 0.16f + upv * 0.08f);
+		g = Lerpf(g, 0.5f, 0.14f);
+		b = Lerpf(b, 0.38f, 0.18f);
 	}
-	if (theme == TH_MARCHEN && y > 0.05f && TNoise(19, x * 5.f, z * 5.f) > 0.72f) {
-		r = Lerpf(r, 1.f, 0.25f); g = Lerpf(g, 0.7f, 0.18f); b = Lerpf(b, 0.85f, 0.22f);
+	if (theme == TH_MARCHEN && y > 0.05f) {
+		float band = TNoise(19, x * 5.f, z * 5.f);
+		if (band > 0.72f) {
+			r = Lerpf(r, 0.55f, 0.16f); g = Lerpf(g, 0.28f, 0.12f); b = Lerpf(b, 0.42f, 0.14f);
+		} else {
+			r = Lerpf(r, 0.42f, 0.1f); g = Lerpf(g, 0.48f, 0.08f); b = Lerpf(b, 0.58f, 0.1f);
+		}
 	}
 }
 
@@ -2947,7 +2955,7 @@ int TacMonsterReady(int id)
 }
 
 // バインド座標は数センチ。描画は休息姿勢の骨スケールで身長約 1.7 まで伸びる。
-// その姿勢で、高さの下 45%（腹や足。翼や腕は入らない）の半幅を返す。
+// 返り値は高さの下 45%（足下）の半幅。outWide は同じ姿勢の全身（胴・翼・腕）の半幅。
 static float PosedFootHalf(UINT nJ, const int* parent, const V3* restT, const Q4* restR, const V3* restS,
 	const M4& top, const M4* inv, UINT nv, const short* ps, const BYTE* jj, const BYTE* ww,
 	float mid0, float mid1, float mid2, float hx, float hy, float hz, float* outTall, float* outWide)
@@ -3990,7 +3998,7 @@ BOOL Renderer::EnsureSkinGpu(CreatureSkin& src, const float* jig)
 		const CSkinV& s = src.bind[(size_t)i];
 		GpuSkinIn& g = rec[(size_t)i];
 		g.p[0] = s.p[0]; g.p[1] = s.p[1]; g.p[2] = s.p[2];
-		g.p[3] = (i < (int)src.cloth.size() && src.cloth[(size_t)i]) ? 1.f : 0.f;
+		g.p[3] = (i < (int)src.cloth.size() && src.cloth[(size_t)i]) ? (float)src.cloth[(size_t)i] : 0.f;
 		g.n[0] = s.n[0]; g.n[1] = s.n[1]; g.n[2] = s.n[2]; g.n[3] = 0.f;
 		if (jig) { g.bx[0] = jig[(size_t)i * 3]; g.bx[1] = jig[(size_t)i * 3 + 1]; g.bx[2] = jig[(size_t)i * 3 + 2]; }
 		else g.bx[0] = g.bx[1] = g.bx[2] = 0.f;
@@ -4042,6 +4050,7 @@ void Renderer::BindFaceSynth(CreatureSkin& s, int first, int count)
 	s.faceSet = -1;
 	s.faceN = 0;
 	s.faceSynth = 0;
+	memset(s.faceEye, 0, sizeof(s.faceEye));
 	const int headJ = models[s.model].headJ;
 	if (headJ < 0) return;
 	const int nv = (int)s.bind.size();
@@ -4057,7 +4066,7 @@ void Renderer::BindFaceSynth(CreatureSkin& s, int first, int count)
 		const CSkinV& b = s.bind[k];
 		int best = 0, bw = -1;
 		for (int c = 0; c < 4; c++) if ((int)b.w[c] > bw) { bw = (int)b.w[c]; best = b.j[c]; }
-		if (best != headJ || bw < 200) continue;
+		if (best != headJ || bw < 120) continue;
 		hv.push_back(k);
 		if (b.p[1] > yTop) yTop = b.p[1];
 		sx += b.p[0];
@@ -4435,6 +4444,9 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	unsigned key = TacPoseKey(pose);
 	key ^= (unsigned)dp.face * 0x9E3779B1u;
 	key ^= (unsigned)(dp.blink * 1024.f);
+	key ^= (unsigned)(dp.mouth * 512.f);
+	key ^= (unsigned)(dp.brow * 512.f);
+	key ^= (unsigned)(dp.squint * 512.f);
 	key ^= (unsigned)dp.hideMeshHair;
 	key ^= dp.clothTint;
 	key ^= (unsigned)dp.skinTone;
@@ -4481,8 +4493,8 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 	if (nj) memcpy(ms.pData, pose.palette, sizeof(M4) * (size_t)nj);
 	if (nj < MAXJ) memset((M4*)ms.pData + nj, 0, sizeof(M4) * (size_t)(MAXJ - nj));
 	m_ctx->Unmap(skinBone, 0);
-	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; };
-	static_assert(sizeof(Parm) == 96, "SkinParm");
+	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; float expr[4]; };
+	static_assert(sizeof(Parm) == 112, "SkinParm");
 	Parm prm;
 	memset(&prm, 0, sizeof(prm));
 	if (jig && src.model >= 0 && src.model < (int)models.size()) {
@@ -4525,7 +4537,11 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		prm.jig[0] = src.bustLag[0]; prm.jig[1] = src.bustLag[1]; prm.jig[2] = src.bustLag[2];
 	}
 	prm.jig[3] = (float)dp.skinTone;
-	if (dp.blink > 0.001f && src.faceN > 0) {
+	prm.expr[0] = dp.mouth;
+	prm.expr[1] = dp.brow;
+	prm.expr[2] = dp.squint;
+	prm.expr[3] = (float)dp.sex;
+	if (src.faceN > 0) {
 		float ex = src.faceEye[0][0], ey = src.faceEye[0][1], ez = src.faceEye[0][2];
 		float rx = src.faceEye[1][0], ry = src.faceEye[1][1], rz = src.faceEye[1][2];
 		float el = ex * ex + ey * ey + ez * ez;
@@ -5899,10 +5915,7 @@ static void FillClothBack(Renderer::AvaCache& nc, const Renderer::CreatureSkin& 
 	int any = 0;
 	for (int i = 0; i < N; i++) if (cnt[i]) any = 1;
 	if (!any) return;
-	for (int i = 1; i < N - 1; i++) {
-		float env = z[i - 1] > z[i + 1] ? z[i - 1] : z[i + 1];
-		if (z[i] < env - 0.03f) z[i] = env;
-	}
+	// 隣の最大Zで埋めない。裾やマントの張りが一段ずつ肩まで上がり、翼の根が背中から離れる。
 	nc.backY0 = y0;
 	nc.backDy = dy;
 	nc.backN = N;
@@ -8658,6 +8671,20 @@ static void AppendBrief(Renderer::CreatureSkin& sk, Buf<WORD>& idx, Buf<float>& 
 	}
 }
 
+// 0肌 1絹 2革 3金属 4綿 5板金 6別珍 7薄布 8編地。名前が読めない服は絹。
+static int AvaClothKind(const char* nm)
+{
+	if (!nm || !nm[0]) return 1;
+	if (strstr(nm, "swim") || strstr(nm, "msw") || strstr(nm, "bikini") || strstr(nm, "lace") || strstr(nm, "sheer") || strstr(nm, "chiffon")) return 7;
+	if (strstr(nm, "plate") || strstr(nm, "armor") || strstr(nm, "armour") || strstr(nm, "mail") || strstr(nm, "knight")
+		|| strstr(nm, "helm") || strstr(nm, "iron") || strstr(nm, "steel") || strstr(nm, "chain")) return 5;
+	if (strstr(nm, "leather") || strstr(nm, "jean") || strstr(nm, "denim") || strstr(nm, "glove")) return 2;
+	if (strstr(nm, "velvet")) return 6;
+	if (strstr(nm, "knit") || strstr(nm, "sweater") || strstr(nm, "wool") || strstr(nm, "maid") || strstr(nm, "card") || !strncmp(nm, "jk", 2)) return 8;
+	if (strstr(nm, "shirt") || strstr(nm, "cotton") || strstr(nm, "linen") || strstr(nm, "dbsuit") || strstr(nm, "suit")) return 4;
+	return 1;
+}
+
 BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner)
 {
 	m_avaHide = 0;
@@ -9811,15 +9838,49 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 			if (nc.brief) AppendBrief(sk, idx, nc.jig, (int)nb, hipBone);
 		}
 		if (sk.bind.size() > 65535 || idx.size() < 3) return FALSE;
-		// 頭を載せてから骨の倍率で頂点が動く。目印を先に取ると、唇も瞬きも空を撫でる。
-		for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
-			sk.faceSet = hs.faceSet;
-			sk.faceStart = 0;
-			sk.faceN = body.nFace;
-			memcpy(sk.faceLin, hs.faceLin, sizeof(sk.faceLin));
-			break;
+		{
+			const int kind0 = AvaClothKind(cos.name);
+			const int nTag = (int)sk.cloth.size() < (int)sk.bind.size() ? (int)sk.cloth.size() : (int)sk.bind.size();
+			for (int k = 0; k < nTag; k++) {
+				int kind = 0;
+				if (sk.cloth[k]) {
+					kind = kind0;
+					const DWORD c = sk.bind[k].c;
+					const float r = (c & 255) / 255.f;
+					const float g = ((c >> 8) & 255) / 255.f;
+					const float b = ((c >> 16) & 255) / 255.f;
+					const float mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+					const float mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+					const float lum = (r + g + b) / 3.f;
+					const float sat = mx > 1e-4f ? (mx - mn) / mx : 0.f;
+					if (kind0 == 5) {
+						if (sat < 0.14f && lum > 0.22f && lum < 0.88f) kind = 3;
+						else if (r >= g && g >= b && sat < 0.42f && lum < 0.48f) kind = 2;
+						else kind = 4;
+					} else if (sk.bind[k].p[1] < 0.12f && sat < 0.28f && lum < 0.38f && r + 0.02f >= b)
+						kind = 2;
+				} else if (k >= nbA)
+					kind = 4;
+				if (kind > 0) sk.cloth[k] = (unsigned char)kind;
+			}
 		}
-		if (sk.faceSet < 0 && body.nFace > 30) BindFaceSynth(sk, 0, body.nFace);
+		// 服を載せたあとの頭で目を測る。素体の目印だけだと、プレビューの顔では瞬きが当たらない。
+		BindFaceSynth(sk, 0, nbA);
+		if (sk.faceN <= 0) {
+			for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN > 30 && hs.faceEye[0][1] != 0.f) {
+				sk.faceSet = hs.faceSet;
+				sk.faceStart = 0;
+				sk.faceN = hs.faceN < nbA ? hs.faceN : nbA;
+				sk.faceSynth = hs.faceSynth;
+				memcpy(sk.faceLin, hs.faceLin, sizeof(sk.faceLin));
+				memcpy(sk.faceEye, hs.faceEye, sizeof(sk.faceEye));
+				memcpy(sk.faceNose, hs.faceNose, sizeof(sk.faceNose));
+				memcpy(sk.faceChin, hs.faceChin, sizeof(sk.faceChin));
+				sk.faceHalf = hs.faceHalf;
+				sk.faceCx = hs.faceCx;
+				break;
+			}
+		}
 		static Buf<VtxS> pv;
 		pv.resize((int)sk.bind.size());
 		if (!pv.data() || pv.size() < (int)sk.bind.size()) return FALSE;
@@ -11442,7 +11503,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	if (!hairCloth) return FALSE;
 	memcpy(ms.pData, cloth, sizeof(cloth));
 	m_ctx->Unmap(hairCloth, 0);
-	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; };
+	struct Parm { float nip0[4], nip1[4], bust[4], info[4]; unsigned extra[4]; float jig[4]; float expr[4]; };
 	Parm prm;
 	memset(&prm, 0, sizeof(prm));
 	prm.nip0[0] = (float)style;
@@ -13423,16 +13484,19 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
-void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64)
+void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64, float heat)
 {
 	if (!WxGpuReady() || !m_ctx) return;
+	if (heat < 0.f) heat = 0.f;
+	if (heat > 1.f) heat = 1.f;
+	m_wxHeat = heat;
 	int n = 4096;
 	if (m_quality <= 0 || m_quality == 4) n = 2048;
 	else if (m_quality >= 5) n = 8192;
 	else if (m_quality >= 3) n = 6144;
 	if (n > WX_GPU_MAX) n = WX_GPU_MAX;
 	float dens = 0.55f;
-	if (wx == WX_CLEAR) dens = 0.f;
+	if (wx == WX_CLEAR) dens = heat > 0.28f ? 0.12f : 0.f;
 	else if (wx == WX_RAIN) dens = 0.4f;
 	else if (wx == WX_STORM) dens = 0.72f;
 	n = (int)(n * dens);
@@ -13462,12 +13526,16 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 		cb[8] = wind.x; cb[9] = wind.y; cb[10] = wind.z; cb[11] = gust;
 		cb[12] = dt; cb[13] = (float)nAct; cb[14] = (float)n; cb[15] = reset ? 1.f : 0.f;
 		int drip = 0;
-		if ((wx == WX_RAIN || wx == WX_STORM) && nAct > 0) {
-			drip = nAct * 6;
-			if (drip > n / 8) drip = n / 8;
+		BOOL shed = (wx == WX_RAIN || wx == WX_STORM || wx == WX_HAIL || wx == WX_SNOW || wx == WX_ASH || heat > 0.28f);
+		if (shed && nAct > 0) {
+			int per = 4;
+			if (wx == WX_STORM) per = 10;
+			else if (wx == WX_RAIN || wx == WX_HAIL) per = 7;
+			drip = nAct * per;
+			if (drip > n / 5) drip = n / 5;
 			if (drip < 8) drip = 8;
 		}
-		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = 0; cb[19] = 0;
+		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = heat; cb[19] = 0;
 		memcpy(ms.pData, cb, sizeof(cb));
 		m_ctx->Unmap(m_cbWx, 0);
 	}
@@ -13498,7 +13566,7 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 void Renderer::DrawWxGpu()
 {
 	if (!WxGpuReady() || !m_ctx || m_pass == PASS_SHADOW || m_wxGpuN <= 0) return;
-	if (m_wxGpuWx == WX_CLEAR) return;
+	if (m_wxGpuWx == WX_CLEAR && m_wxHeat < 0.28f) return;
 	FlushQueuedDraws();
 	ClearTess();
 	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
@@ -13615,8 +13683,8 @@ static DWORD ThemeTint(int theme, float var)
 	case TH_SEABED: r = .62f; g = .88f; b = 1.0f; break;
 	case TH_FALLS: r = .92f; g = .98f; b = 1.0f; break;
 	case TH_MIRROR: r = .86f; g = .9f; b = .98f; break;
-	case TH_HEAVEN: r = 1.04f; g = 1.0f; b = .9f; break;
-	case TH_MARCHEN: r = 1.02f; g = .94f; b = .98f; break;
+	case TH_HEAVEN: r = .82f; g = .74f; b = .64f; break;
+	case TH_MARCHEN: r = .86f; g = .68f; b = .78f; break;
 	default: break;
 	}
 	return RGBAf(Clampf(r * var, 0, 1), Clampf(g * var, 0, 1), Clampf(b * var, 0, 1));
@@ -13904,14 +13972,30 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if ((h % 7) == 0) AddPuff(puff, puffN, 10, px, py + 0.7f, pz, 8.f);
 			break;
 		case TH_HEAVEN:
-			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.9f, pz), v3(0.08f, 0.9f, 0.08f), RGBA8(255, 250, 236), -1);
-			if ((h % 2) == 0) AddBox(mb, v3(px, py + 1.85f, pz), v3(0.28f, 0.06f, 0.28f), RGBA8(255, 196, 70), -1);
-			if ((h % 2) == 0) AddPuff(puff, puffN, 3, px, py + 2.3f, pz, 14.f);
+			if ((h % 9) == 0) {
+				AddBox(mb, v3(px, py + 0.72f, pz), v3(0.07f, 0.72f, 0.07f), RGBA8(186, 174, 154), -1);
+				AddBox(mb, v3(px, py + 1.48f, pz), v3(0.16f, 0.035f, 0.16f), RGBA8(158, 116, 48), -1);
+				AddBox(mb, v3(px + 0.2f, py + 0.82f, pz), v3(0.012f, 0.26f, 0.1f), RGBA8(78, 102, 150), -1);
+			} else if ((h % 9) == 4) {
+				AddBox(mb, v3(px - 0.22f, py + 0.52f, pz), v3(0.035f, 0.52f, 0.035f), RGBA8(168, 156, 138), -1);
+				AddBox(mb, v3(px + 0.22f, py + 0.52f, pz), v3(0.035f, 0.52f, 0.035f), RGBA8(168, 156, 138), -1);
+				AddBox(mb, v3(px, py + 1.08f, pz), v3(0.28f, 0.03f, 0.05f), RGBA8(142, 104, 42), -1);
+			} else if ((h % 13) == 2)
+				AddBox(mb, v3(px, py + 0.02f, pz), v3(0.32f, 0.015f, 0.07f), RGBA8(132, 100, 44), -1);
 			break;
 		case TH_MARCHEN:
-			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.16f, pz), v3(0.07f, 0.16f, 0.07f), RGBA8(255, 244, 220), -1);
-			if ((h % 2) == 0) AddBox(mb, v3(px, py + 0.4f, pz), v3(0.26f, 0.1f, 0.26f), RGBA8(230, 40, 90), -1);
-			AddPuff(puff, puffN, 2, px, py + 0.7f, pz, 12.f);
+			if ((h % 7) == 0) {
+				AddBox(mb, v3(px, py + 0.1f, pz), v3(0.045f, 0.1f, 0.045f), RGBA8(156, 122, 88), -1);
+				AddBox(mb, v3(px, py + 0.28f, pz), v3(0.15f, 0.07f, 0.15f), RGBA8(142, 40, 72), -1);
+				AddBox(mb, v3(px, py + 0.36f, pz), v3(0.07f, 0.028f, 0.07f), RGBA8(186, 148, 78), -1);
+			} else if ((h % 7) == 3) {
+				AddBox(mb, v3(px, py + 0.16f, pz), v3(0.15f, 0.16f, 0.12f), RGBA8(138, 100, 80), -1);
+				AddBox(mb, v3(px, py + 0.36f, pz), v3(0.19f, 0.055f, 0.15f), RGBA8(104, 40, 58), -1);
+				AddBox(mb, v3(px, py + 0.22f, pz + 0.12f), v3(0.03f, 0.04f, 0.01f), RGBA8(150, 176, 188), -1);
+			} else if ((h % 11) == 5) {
+				AddBox(mb, v3(px, py + 0.28f, pz), v3(0.012f, 0.28f, 0.012f), RGBA8(112, 68, 90), -1);
+				AddBox(mb, v3(px + 0.08f, py + 0.48f, pz), v3(0.08f, 0.012f, 0.018f), RGBA8(160, 64, 102), -1);
+			}
 			break;
 		default: break;
 		}
@@ -13992,14 +14076,13 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 				AddBox(mb, v3(px, cy + 0.22f, pz), v3(0.04f, 0.22f, 0.012f), RGBA8(236, 244, 255), -1);
 				break;
 			case TH_HEAVEN:
-				AddBox(mb, v3(px, cy + 0.8f, pz), v3(0.05f, 0.8f, 0.05f), RGBA8(255, 250, 236), -1);
-				AddBox(mb, v3(px, cy + 1.62f, pz), v3(0.14f, 0.04f, 0.14f), RGBA8(255, 210, 110), -1);
-				AddPuff(puff, puffN, 3, px, cy + 2.0f, pz, 6.f);
+				AddBox(mb, v3(px, cy + 0.62f, pz), v3(0.045f, 0.62f, 0.045f), RGBA8(176, 164, 146), -1);
+				AddBox(mb, v3(px, cy + 1.28f, pz), v3(0.12f, 0.03f, 0.12f), RGBA8(148, 108, 46), -1);
+				AddBox(mb, v3(px + 0.14f, cy + 0.7f, pz), v3(0.01f, 0.18f, 0.07f), RGBA8(72, 96, 140), -1);
 				break;
 			case TH_MARCHEN:
-				AddBox(mb, v3(px, cy + 0.1f, pz), v3(0.04f, 0.1f, 0.04f), RGBA8(245, 236, 214), -1);
-				AddBox(mb, v3(px, cy + 0.24f, pz), v3(0.12f, 0.07f, 0.12f), RGBA8(230, 70, 110), -1);
-				AddPuff(puff, puffN, 2, px, cy + 0.5f, pz, 5.f);
+				AddBox(mb, v3(px, cy + 0.08f, pz), v3(0.035f, 0.08f, 0.035f), RGBA8(148, 116, 84), -1);
+				AddBox(mb, v3(px, cy + 0.2f, pz), v3(0.1f, 0.05f, 0.1f), RGBA8(132, 38, 66), -1);
 				break;
 			default: break;
 			}
@@ -14851,8 +14934,8 @@ BOOL Renderer::BuildTerrain(Map& m)
 	case TH_CITADEL: m_waterColor = RGBA8(90, 62, 130); break;
 	case TH_LANTERN: m_waterColor = RGBA8(170, 186, 220); break;
 	case TH_MIRROR: m_waterColor = RGBA8(190, 205, 220); break;
-	case TH_HEAVEN: m_waterColor = RGBA8(255, 236, 200); break;
-	case TH_MARCHEN: m_waterColor = RGBA8(255, 170, 200); break;
+	case TH_HEAVEN: m_waterColor = RGBA8(148, 126, 96); break;
+	case TH_MARCHEN: m_waterColor = RGBA8(150, 96, 124); break;
 	default: m_waterColor = RGBA8(55, 125, 190); break;
 	}
 
@@ -15006,8 +15089,8 @@ static void MiniRgb(const Map& m, int t, int bridgeFloor, int& r, int& g, int& b
 		else if (m.theme == TH_CITADEL) { r = 158; g = 140; b = 172; }
 		else if (m.theme == TH_LANTERN) { r = 190; g = 196; b = 214; }
 		else if (m.theme == TH_MIRROR) { r = 176; g = 186; b = 198; }
-		else if (m.theme == TH_HEAVEN) { r = 255; g = 244; b = 220; }
-		else if (m.theme == TH_MARCHEN) { r = 236; g = 170; b = 196; }
+		else if (m.theme == TH_HEAVEN) { r = 176; g = 158; b = 132; }
+		else if (m.theme == TH_MARCHEN) { r = 168; g = 112; b = 136; }
 			else { r = 105; g = 165; b = 80; }
 			break;
 	case T_FOREST:

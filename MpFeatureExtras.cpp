@@ -147,16 +147,13 @@ void MpFeatApplyFocusMode(CWnd* mpDlg, BOOL on)
 	CMediaPlayerDlg* d = DYNAMIC_DOWNCAST(CMediaPlayerDlg, mpDlg);
 	if (!d) return;
 	if (on) {
-		// 下部ツールを最小化し、リスト以外を畳むヒント
-		if (!savedata.mpBotToolsInited) {
-			savedata.mpBotToolsInited = 1;
-			savedata.mpBotToolsFlags = 0x0F;
-		}
-		savedata.mpBotToolsFlags = 0; // hide bot shortcuts
+		// 下部ショートカットを畳む。世代上げの前に migrate しないと、次のレイアウトがボタンを戻してしまう。
+		MpBotToolsMigrate();
+		savedata.mpBotToolsFlags = 0;
 		savedata.mpToolsOpen = 0;
 	} else {
 		if (savedata.mpBotToolsFlags == 0)
-			savedata.mpBotToolsFlags = 0x0F;
+			savedata.mpBotToolsFlags = MpBotToolsDefaultFlags();
 	}
 	d->DoLayout();
 	d->Invalidate(FALSE);

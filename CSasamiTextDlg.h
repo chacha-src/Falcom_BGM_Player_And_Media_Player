@@ -12,6 +12,7 @@ public:
 	enum { IDD = IDD_SASAMI_TEXT };
 	static CSasamiTextDlg* Instance();
 	static void OpenOwned(CWnd* owner);
+	void UseMode(int fm);
 	CString GetMmlText() const;
 	void SetMmlFromScore(const wchar_t* mml);
 	void SetFmTextFromScore(const wchar_t* text);

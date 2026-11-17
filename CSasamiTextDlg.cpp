@@ -1155,8 +1155,10 @@ void CSasamiTextDlg::SetMmlFromScore(const wchar_t* mml)
 {
 	if (!mml || !m_edit.GetSafeHwnd()) return;
 	KillTimer(kTextScoreSyncTimer);
+	m_modeFm = 0;
 	m_textFull = mml;
 	m_b64Expanded = 0;
+	ApplyLang();
 	ApplyB64ViewToEdit();
 	m_textDirty = 0;
 	int tracks = 0;
@@ -1341,10 +1343,16 @@ void CSasamiTextDlg::PushTextToScore()
 	}
 }
 
-void CSasamiTextDlg::OnBnClickedMode()
+void CSasamiTextDlg::UseMode(int fm)
 {
+	if (!m_edit.GetSafeHwnd()) return;
+	const int want = fm ? 1 : 0;
+	if (m_modeFm == want) {
+		ApplyLang();
+		return;
+	}
 	SyncTextFullFromEdit();
-	m_modeFm = m_modeFm ? 0 : 1;
+	m_modeFm = want;
 	if (m_modeFm)
 		m_b64Expanded = 1;
 	else if (ScMmlContainsVstB64(m_textFull))
@@ -1355,4 +1363,9 @@ void CSasamiTextDlg::OnBnClickedMode()
 	s.Format(L"Mode: %s  (compile uses this)", m_modeFm ? L"FM/OPNA -> .fpy" : L"MIDI/MICP -> .mpw2/3");
 	m_status.SetWindowText(s);
 	RefreshChromeOpaque();
+}
+
+void CSasamiTextDlg::OnBnClickedMode()
+{
+	UseMode(m_modeFm ? 0 : 1);
 }

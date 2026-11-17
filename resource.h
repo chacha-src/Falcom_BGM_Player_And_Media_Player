@@ -2413,12 +2413,30 @@
 #define IDR_CSO_TAC_PSGK                5004
 #define IDR_GS_WOPN                     399
 
+#define IDC_MP_BOT_SHORTCFG             5100
+#define IDC_MP_BOT_RAIRAX               5101
+#define IDC_MP_BOT_SASAMI               5102
+#define IDC_MP_BOT_SET                  5103
+#define IDC_MP_BOT_FOLDER               5104
+#define IDC_MP_BOT_LRC                  5105
+#define IDC_MP_BOT_EQ                   5106
+#define ID_MP_BOTVIS_REC                33340
+#define ID_MP_BOTVIS_CAP                33341
+#define ID_MP_BOTVIS_RAIRAX             33342
+#define ID_MP_BOTVIS_SASAMI             33343
+#define ID_MP_BOTVIS_MIDI               33344
+#define ID_MP_BOTVIS_CD                 33345
+#define ID_MP_BOTVIS_SET                33346
+#define ID_MP_BOTVIS_FOLDER             33347
+#define ID_MP_BOTVIS_LRC                33348
+#define ID_MP_BOTVIS_EQ                 33349
+
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        400
-#define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4962
+#define _APS_NEXT_COMMAND_VALUE         33350
+#define _APS_NEXT_CONTROL_VALUE         5107
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

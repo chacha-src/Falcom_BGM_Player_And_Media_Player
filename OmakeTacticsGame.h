@@ -357,6 +357,7 @@ private:
 	void DrawCutInUi();
 	void LayoutSpecialCut();
 	void PoseFormAllies();
+	void PoseLinkAllies();
 	void CutDressFx();
 	float CutIntroLen() const;
 	void ActorForUnit(int ui);
@@ -757,6 +758,7 @@ private:
 	int m_cutStage;      // 0=覆う 1=技名 2=攻防 3=覆う 4=マップへ
 	float m_cutStageT;
 	int m_cutA, m_cutD;
+	int m_cutAimX, m_cutAimZ;
 	enum { CUT_ALLY_MAX = MAX_PARTY, CUT_FOE_MAX = 96 };
 	int m_cutAlly[CUT_ALLY_MAX], m_cutFoe[CUT_FOE_MAX];
 	int m_cutAllyN, m_cutFoeN;

@@ -164,6 +164,10 @@ static void OpenShm()
 
 static __int64 s_lastHeard = 0;
 static int s_haveHeard = 0;
+static __int64 s_lastPlaySample = -1;
+static int s_lagMs = 1700;
+static int s_sawStop = 0;
+static int s_held = 0;
 
 void KbsHostMonPull()
 {
@@ -183,14 +187,42 @@ void KbsHostMonPull()
 		wcsncpy_s(g_path, c.path, _TRUNCATE);
 		filen = c.path;
 		s_haveHeard = 0;
+		s_sawStop = 1;
 	}
 	if (!c.show || !c.playf) {
 		playf = 0;
 		playy = 0;
+		s_sawStop = 1;
 		return;
 	}
 	playf = 1;
 	playy = 1;
+	const int sr = (c.sampleRate >= 8000) ? c.sampleRate : 44100;
+	/* 本家が Render を止めても、前回の時刻から壁時計を足すとモニタだけ進む。
+	   更新が 250ms 途切れたら、その位置で止める。 */
+	int stale = 0;
+	if (c.qpcFreq > 0 && c.qpc > 0) {
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		const __int64 ageMs = (now.QuadPart - c.qpc) * 1000 / c.qpcFreq;
+		if (ageMs > 250) stale = 1;
+	}
+	if (stale) {
+		s_held = 1;
+		s_sawStop = 1;
+		if (s_haveHeard) playb = s_lastHeard;
+		return;
+	}
+	if (c.deviceLagMs >= 0 && c.deviceLagMs <= 10000)
+		s_lagMs = (int)c.deviceLagMs;
+	const int restarted = (s_sawStop || s_held
+		|| (s_lastPlaySample > (__int64)sr && c.playSample + (__int64)sr / 2 < s_lastPlaySample)) ? 1 : 0;
+	if (restarted) {
+		s_haveHeard = 0;
+		s_sawStop = 0;
+		s_held = 0;
+	}
+	s_lastPlaySample = c.playSample;
 	/* playSample はデコード終端。スピーカは lag だけ後ろで、Render が空いても壁時計で進む。 */
 	__int64 heard = c.playSample - c.lagSamples;
 	if (heard < 0) heard = 0;
@@ -199,11 +231,31 @@ void KbsHostMonPull()
 		QueryPerformanceCounter(&now);
 		__int64 dt = now.QuadPart - c.qpc;
 		if (dt < 0) dt = 0;
+		if (dt > c.qpcFreq / 4) dt = c.qpcFreq / 4;
 		heard += dt * (__int64)c.sampleRate / c.qpcFreq;
 	}
 	if (heard > c.playSample) heard = c.playSample;
-	const int sr = (c.sampleRate >= 8000) ? c.sampleRate : 44100;
-	if (s_haveHeard && heard < s_lastHeard) {
+	{
+		const __int64 devLag = (__int64)sr * s_lagMs / 1000;
+		if (heard > devLag) heard -= devLag;
+		else heard = 0;
+	}
+	/* デコード位置は J の先へ進む。聞こえている位置が J を過ぎたら Q へ戻す。
+	   戻さないと譜面のイベントが尽きて、モニタが J で止まったままになる。 */
+	if (c.loopEndSample > c.loopStartSample + 1) {
+		const __int64 ls = c.loopStartSample;
+		const __int64 le = c.loopEndSample;
+		const __int64 span = le - ls;
+		if (heard >= le)
+			heard = ls + (heard - le) % span;
+	}
+	int loopBack = 0;
+	if (s_haveHeard && heard < s_lastHeard && c.loopEndSample > c.loopStartSample + 1) {
+		const __int64 slack = (__int64)sr / 5;
+		if (s_lastHeard + slack >= c.loopEndSample && heard <= c.loopStartSample + slack)
+			loopBack = 1;
+	}
+	if (s_haveHeard && heard < s_lastHeard && !loopBack) {
 		const __int64 back = s_lastHeard - heard;
 		/* 200ms 級の lag 再計算で針が戻ると、前の音と次の音が交互になる。
 		   曲頭シーク／ループだけ通す。 */

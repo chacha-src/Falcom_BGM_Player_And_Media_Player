@@ -15,6 +15,9 @@ struct KbsMonShm {
 	int64_t lagSamples; /* playSample よりスピーカが遅れている量 */
 	int64_t qpc;
 	int64_t qpcFreq;
+	int32_t deviceLagMs; /* kbsasami.lag。スピーカがデコードより遅れるミリ秒 */
+	int64_t loopStartSample; /* Q。0 かつ loopEnd 以下ならループ無し */
+	int64_t loopEndSample; /* 最後の J */
 	wchar_t path[520];
 };
 

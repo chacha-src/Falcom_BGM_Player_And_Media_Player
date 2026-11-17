@@ -637,7 +637,6 @@ namespace Cfg
 
     // オンセットの裏付けが無い新規ノートは 2 フレーム続いたときだけ点灯する。
     // 1 フレームの単発ピックを点けると VisGap で数フレーム引き延ばされ、細切れの棒になる。
-    // 立ち上がりのある 16 分は呼び出し側の strongMidOnset で 1 フレーム点灯のまま。
     static int AttackFramesForKey(int keyIndex)
     {
         (void)keyIndex;
@@ -1953,13 +1952,9 @@ void CPianoRoll::UpdateNoteStates()
         else {
             m_onsetBoostStreak[i] = 0;
         }
-        // メロディ帯(C3〜C7)はオンセットがあれば即時点灯（16分）。ノイズは PickNotes 側で落とす。
-        const bool strongMidOnset = onsetBoost &&
-            (i >= PianoRoll108::BASS_END && i < PianoRoll108::EDGE_HI) &&
-            (sigStrength >= absFloor * 3.0f);
-        // 高音は1フレームでも点ける。2フレーム待ちだと単音・短い高音が消える。
-        const bool highPick = picked[i] && i >= 72 && sigStrength >= absFloor;
-        const int attackNeed = (strongMidOnset || highPick) ? 1 : AttackFramesForKey(i);
+        // 1フレームの高音・オンセット即時点灯は倍音の閃光も同じ長さで塗る。
+        // 16分は欠けることがあり、8分以上は2フレームで残る。
+        const int attackNeed = AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
         if (!cur) {

@@ -22,6 +22,9 @@ static __int64 g_lag = 0;
 static __int64 g_lastDecode = 0;
 static __int64 g_qpc = 0;
 static int g_holdPlay = 0;
+static int g_deviceLagMs = 1700;
+static __int64 g_loopStart = 0;
+static __int64 g_loopEnd = 0;
 
 static void ClockReset(__int64 sample)
 {
@@ -90,6 +93,9 @@ static void Publish(int show, __int64 sample)
 	g_shm->lagSamples = g_lag;
 	g_shm->qpc = g_qpc;
 	g_shm->qpcFreq = g_freq.QuadPart;
+	g_shm->deviceLagMs = g_deviceLagMs;
+	g_shm->loopStartSample = g_loopStart;
+	g_shm->loopEndSample = g_loopEnd;
 	wcsncpy_s(g_shm->path, g_path, _TRUNCATE);
 	MemoryBarrier();
 	g_shm->seq = s + 2;
@@ -98,6 +104,24 @@ static void Publish(int show, __int64 sample)
 int KbsMonIsOn()
 {
 	return g_enable ? 1 : 0;
+}
+
+void KbsMonSetDeviceLag(int ms)
+{
+	if (ms < 0) ms = 0;
+	if (ms > 10000) ms = 10000;
+	g_deviceLagMs = ms;
+}
+
+void KbsMonSetLoop(__int64 startSample, __int64 endSample)
+{
+	if (startSample < 0 || endSample <= startSample + 1) {
+		g_loopStart = 0;
+		g_loopEnd = 0;
+		return;
+	}
+	g_loopStart = startSample;
+	g_loopEnd = endSample;
 }
 
 void KbsMonConfigure(int enable)
@@ -115,22 +139,26 @@ void KbsMonConfigure(int enable)
 void KbsMonBegin(void* owner, int fm, const wchar_t* path, const char*)
 {
 	if (!g_enable) return;
-	const int keep = (g_path[0] && path && path[0] && _wcsicmp(g_path, path) == 0
-		&& g_lastDecode > 0) ? 1 : 0;
-	const __int64 keepAt = g_lastDecode;
 	g_owner = owner;
 	g_fm = fm ? 1 : 0;
 	if (path && path[0])
 		wcsncpy_s(g_path, path, _TRUNCATE);
-	else if (!keep)
+	else
 		g_path[0] = 0;
-	if (keep)
-		Publish(1, keepAt);
-	else if (g_lastDecode <= 0) {
-		ClockReset(0);
-		Publish(1, 0);
+	/* 前曲の位置は残さない。時計は最初の Render で合わせる。
+	   ここで止めて後の Seek に原点を置くと、再演奏だけモニタが遅れる。 */
+	QueryPerformanceFrequency(&g_freq);
+	{
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		g_qpc = now.QuadPart;
 	}
-	g_holdPlay = 1;
+	g_origin = 0;
+	g_lag = 0;
+	g_lastDecode = 0;
+	g_clock = 0;
+	g_holdPlay = 0;
+	Publish(1, 0);
 	KbVstMonCmd(1);
 }
 
@@ -161,6 +189,9 @@ void KbsMonPlay(__int64 sample, int rate)
 {
 	if (!g_enable || !g_owner || g_holdPlay) return;
 	if (rate >= 8000) g_rate = rate;
+	/* 原点は音を渡し始めた瞬間。Begin の時刻だと、開く前の待ちがモニタに入る。 */
+	if (!g_clock)
+		ClockReset(0);
 	ClockNote(sample, g_rate);
 	Publish(1, sample);
 }
@@ -171,7 +202,11 @@ void KbsMonSeek(__int64 sample, int rate)
 	if (rate >= 8000) g_rate = rate;
 	if (sample < 0) sample = 0;
 	g_holdPlay = 0;
-	ClockReset(sample);
+	const int sr = (g_rate >= 8000) ? g_rate : 44100;
+	/* 開始直後の Seek(0) で原点を今にすると、先に渡したバッファ分だけモニタが遅れる。 */
+	const int startup = (g_clock && sample < (__int64)sr && g_lastDecode < (__int64)sr) ? 1 : 0;
+	if (!g_clock || !startup)
+		ClockReset(sample);
 	Publish(1, sample);
 }
 

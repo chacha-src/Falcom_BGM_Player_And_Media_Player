@@ -146,6 +146,7 @@ static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
 static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
+static const wchar_t KEY_LAG[] = L"lag";
 static const wchar_t KEY_GIMIC[] = L"gimic";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
@@ -461,6 +462,51 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 				L"Yalnızca kbsasami.raira=0 (özgün KbMedia Player) iken okunur.\r\n"
 				L"raira=1 iken bu uygulama kendi izleyicisini kullanır ve bu anahtarı okumaz.\r\n"
 				L"Fazladan pencere istemezseniz özgün oynatıcıda kapatın.") },
+		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_LAG, L"kbsasami.lag",
+			L"1700", NULL, NULL, NULL, NULL,
+			KbsPick14(
+				L"本家（raira=0）の FM/MIDI モニタを、音より何ミリ秒遅らせるか。\r\n"
+				L"初期値は 1700。モニタが音より早いときは増やし、遅いときは減らす。\r\n"
+				L"0 から 10000。ogg（raira=1）のモニタには使わない。",
+				L"How many milliseconds the original player's FM/MIDI monitor waits behind the sound.\r\n"
+				L"Default 1700. Increase if the monitor is early, decrease if it is late.\r\n"
+				L"0 to 10000. Not used by the ogg (raira=1) monitor.",
+				L"De combien de millisecondes le moniteur FM/MIDI du lecteur d'origine suit le son.\r\n"
+				L"Défaut 1700. Augmentez s'il est en avance, diminuez s'il est en retard.\r\n"
+				L"0 à 10000. Ignoré par le moniteur ogg (raira=1).",
+				L"Di quanti millisecondi il monitor FM/MIDI del lettore originale segue il suono.\r\n"
+				L"Predefinito 1700. Aumentare se è in anticipo, diminuire se è in ritardo.\r\n"
+				L"Da 0 a 10000. Non usato dal monitor ogg (raira=1).",
+				L"Cuántos milisegundos espera el monitor FM/MIDI del reproductor original tras el sonido.\r\n"
+				L"Predeterminado 1700. Súbelo si se adelanta, bájalo si se atrasa.\r\n"
+				L"De 0 a 10000. El monitor ogg (raira=1) no lo usa.",
+				L"원래 플레이어의 FM/MIDI 모니터를 소리보다 몇 밀리초 늦출지.\r\n"
+				L"초기값 1700. 모니터가 빠르면 늘리고, 느리면 줄이세요.\r\n"
+				L"0부터 10000. ogg(raira=1) 모니터에는 쓰지 않습니다.",
+				L"原本播放器的 FM/MIDI 监视器比声音晚多少毫秒。\r\n"
+				L"默认 1700。监视器偏快就加大，偏慢就减小。\r\n"
+				L"0 到 10000。ogg（raira=1）的监视器不用此项。",
+				L"كم مللي ثانية يتأخر مراقب FM/MIDI في المشغّل الأصلي عن الصوت.\r\n"
+				L"الافتراضي 1700. زِده إن سبق الصوت، وأنقصه إن تأخر.\r\n"
+				L"من 0 إلى 10000. لا يستخدمه مراقب ogg (raira=1).",
+				L"На сколько миллисекунд монитор FM/MIDI исходного плеера отстаёт от звука.\r\n"
+				L"По умолчанию 1700. Увеличьте, если монитор спешит, уменьшите, если отстаёт.\r\n"
+				L"От 0 до 10000. Монитор ogg (raira=1) это не читает.",
+				L"Um wie viele Millisekunden der FM/MIDI-Monitor des ursprünglichen Players dem Ton folgt.\r\n"
+				L"Vorgabe 1700. Erhöhen, wenn der Monitor voraus ist, verringern, wenn er hinterher ist.\r\n"
+				L"0 bis 10000. Der ogg-Monitor (raira=1) benutzt dies nicht.",
+				L"Quantos milissegundos o monitor FM/MIDI do leitor original fica atrás do som.\r\n"
+				L"Padrão 1700. Aumente se estiver adiantado, diminua se estiver atrasado.\r\n"
+				L"De 0 a 10000. O monitor ogg (raira=1) não usa isto.",
+				L"Hoeveel milliseconden de FM/MIDI-monitor van de oorspronkelijke speler achter het geluid blijft.\r\n"
+				L"Standaard 1700. Verhoog als de monitor voorloopt, verlaag als hij achterloopt.\r\n"
+				L"0 tot 10000. De ogg-monitor (raira=1) gebruikt dit niet.",
+				L"O ile milisekund monitor FM/MIDI oryginalnego odtwarzacza jest za dźwiękiem.\r\n"
+				L"Domyślnie 1700. Zwiększ, gdy monitor wyprzedza, zmniejsz, gdy zostaje w tyle.\r\n"
+				L"Od 0 do 10000. Monitor ogg (raira=1) tego nie używa.",
+				L"Özgün oynatıcının FM/MIDI izleyicisi sesten kaç milisaniye geride kalsın.\r\n"
+				L"Varsayılan 1700. Öndeyse artırın, gerideyse azaltın.\r\n"
+				L"0 ile 10000. ogg (raira=1) izleyicisi bunu kullanmaz.") },
 		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_GIMIC, L"kbsasami.gimic",
 			L"0", NULL, NULL, NULL, NULL,
 			KbsPick14(

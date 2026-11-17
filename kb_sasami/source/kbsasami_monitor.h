@@ -3,6 +3,10 @@
    raira=1 は ogg 側のモニタ。fmmidimonitor は見ない。 */
 
 void KbsMonConfigure(int enable);
+/* 本家モニタの待ち。0..10000。既定 1700。 */
+void KbsMonSetDeviceLag(int ms);
+/* 最後の J と Q。無ければ 0,0。音が J を過ぎたときモニタを Q へ戻す。 */
+void KbsMonSetLoop(__int64 startSample, __int64 endSample);
 int KbsMonIsOn();
 void KbsMonBegin(void* owner, int fm, const wchar_t* path, const char* titleSjis);
 void KbsMonEnd(void* owner);

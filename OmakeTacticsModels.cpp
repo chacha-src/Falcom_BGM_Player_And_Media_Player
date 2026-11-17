@@ -1531,6 +1531,13 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 		a.model = md.model;
 		float sc = md.scale > 0.02f ? md.scale : 1.f;
 		a.scale = sc * bs;
+		{
+			float body = TacMonsterWide(md.model);
+			float foot = TacMonsterFoot(md.model);
+			if (body < foot) body = foot;
+			if (body > 0.02f && body * a.scale > 2.5f)
+				a.scale = 2.5f / body;
+		}
 		a.height = 1.7f * a.scale;
 		if (md.footSpan >= 1 && md.footSpan <= 5) {
 			float tall = TacMonsterTall(md.model);
@@ -1543,6 +1550,9 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 			a.model = mi;
 			a.rig = r.models[mi].rig;
 			a.mods.Reset(r.models[mi].nJ);
+			const char* nm = r.models[mi].name;
+			if (nm && strncmp(nm, "Hum", 3) == 0)
+				a.blinkSeed = HumanBlinkSeed(mi, 0, 0, 0);
 		} else {
 			a.proc = 2;
 			a.model = -1;
@@ -1646,22 +1656,28 @@ float HumanBlinkSeed(int model, int face, int gender, int bust)
 float HumanBlink(float time, float seed)
 {
 	if (seed <= 0.f) return 0.f;
-	float cycle = 26.f;
+	float cycle = 11.f;
 	float t = fmodf(time + seed * 9.4f, cycle);
 	if (t < 0.f) t += cycle;
 	unsigned s = (unsigned)(seed * 4096.f + 19.f);
 	if (!s) s = 1u;
-	float cursor = 0.8f + (s % 180) * 0.005f;
-	for (int i = 0; i < 6; i++) {
+	float cursor = 0.4f + (s % 90) * 0.004f;
+	for (int i = 0; i < 8; i++) {
 		s = s * 1664525u + 1013904223u;
-		float gap = 2.6f + (s % 1000) * (4.6f / 1000.f);
+		float gap = 1.7f + (s % 1000) * (1.8f / 1000.f);
 		cursor += gap;
 		if (cursor >= cycle) break;
 		float dt = t - cursor;
-		if (dt < 0.f || dt > 0.26f) continue;
-		if (dt < 0.07f) return dt / 0.07f;
-		if (dt < 0.13f) return 1.f;
-		return 1.f - (dt - 0.13f) / 0.13f;
+		if (dt < 0.f || dt > 0.38f) {
+			if ((s & 3u) != 0u) continue;
+			dt = t - (cursor + 0.42f);
+			if (dt < 0.f || dt > 0.22f) continue;
+		}
+		if (dt < 0.06f) return dt / 0.06f;
+		if (dt < 0.20f) return 1.f;
+		float u = (dt - 0.20f) / 0.18f;
+		if (u > 1.f) u = 1.f;
+		return 1.f - u;
 	}
 	return 0.f;
 }
@@ -2517,9 +2533,48 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 	return FitWorld(g, Norm(carry(Norm(face + v3(0, -0.6f, 0)))), carry(up), grip, 0.36f, 0.36f, 0.36f);
 }
 
+static M4 WingTear(const M4& local, int side, float tear)
+{
+	if (tear <= 0.001f) return local;
+	float s = side == 0 ? 1.f : -1.f;
+	M4 off = MMul(MRotX(tear * 1.25f), MMul(MRotZ(s * tear * -0.85f), MTrans(s * tear * 0.48f, -tear * tear * 1.45f, tear * 0.22f)));
+	return MMul(local, off);
+}
+
+// 翼の根は胸ボーンの直後。服の背面を使うが、裾やマントで骨から 16cm 以上離れた点には付けない。
+static void WingMount(Renderer& r, const Actor& a, const Model& m, int cj, BOOL human, float& y, float& z, float& x, float& yaw)
+{
+	y = human ? 1.32f : 1.12f;
+	z = human ? 0.10f : 0.32f;
+	x = human ? 0.10f : 0.18f;
+	yaw = human ? -0.40f : -0.55f;
+	if (!human || cj < 0 || cj >= m.nJ) return;
+	M4 bind = MInverse(m.invBind[cj]);
+	float by = bind.m[13], bz = bind.m[14];
+	if (by > 0.90f && by < 1.60f) y = by;
+	int ava = a.avatar;
+	if (ava <= 0) {
+		const BOOL mal = strncmp(m.name, "HumM", 4) == 0 || !strcmp(m.name, "HumAdventurer") || !strcmp(m.name, "HumKing");
+		const BOOL fem = strncmp(m.name, "HumF", 4) == 0 || !strcmp(m.name, "HumMedieval") || !strcmp(m.name, "HumWitch");
+		if (mal) ava = 9;
+		else if (fem) ava = 12;
+	}
+	float back = ava > 0 ? r.AvatarClothBack(a.model, ava, y) : -1e9f;
+	if (back < -10.f && ava > 0) back = r.AvatarClothBack(a.model, ava, y - 0.08f);
+	float zc = (back > -10.f) ? back - 0.02f : bz + 0.05f;
+	if (zc > bz + 0.16f) zc = bz + 0.10f;
+	if (zc < bz + 0.01f) zc = bz + 0.05f;
+	z = zc;
+}
+
 static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time, BOOL human)
 {
 	if (!a.wings || !a.poseValid) return;
+	float tear = a.wingTear;
+	if (tear < 0.f) tear = 0.f;
+	if (tear > 1.f) tear = 1.f;
+	if (tear >= 0.97f && a.wingHop <= 0.f) return;
+	BOOL torn = tear > 0.001f;
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	const Model& m = r.models[a.model];
 	int cj = m.chestJ;
@@ -2533,7 +2588,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		if (tab[i].a == &a) { hit = &tab[i]; break; }
 		if (freeSlot < 0 && tab[i].a == NULL) freeSlot = i;
 	}
-	if (hit && hit->frame == a.poseFrame && hit->th == th && hit->n == 2) {
+	if (!torn && hit && hit->frame == a.poseFrame && hit->th == th && hit->n == 2) {
 		for (int side = 0; side < 2; side++) {
 			DrawParams dw = dp;
 			dw.hue = 0;
@@ -2544,7 +2599,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 			if (a.wingGrade == 1) { dw.tint = RGBA8(255, 228, 170, 255); dw.hue = 0.08f; }
 			else if (a.wingGrade == 2) { dw.tint = RGBA8(255, 248, 220, 255); dw.hue = 0.16f; dw.emissive += 0.12f; }
 			else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
-			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(hit->l[side], world), dw);
+			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(WingTear(hit->l[side], side, tear), world), dw);
 		}
 		return;
 	}
@@ -2553,24 +2608,8 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : sinf(time * flapSp);
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
-	float y = human ? 1.32f : 1.12f;
-	float z = human ? 0.10f : 0.32f;
-	float x = human ? 0.10f : 0.18f;
-	float yaw = human ? -0.40f : -0.55f;
-	if (human) {
-		// 根元の球を背中の面へ埋める。固定の +Z だと服との間に隙間が残る。
-		int ava = a.avatar;
-		if (ava <= 0) {
-			const BOOL mal = strncmp(m.name, "HumM", 4) == 0 || !strcmp(m.name, "HumAdventurer") || !strcmp(m.name, "HumKing");
-			const BOOL fem = strncmp(m.name, "HumF", 4) == 0 || !strcmp(m.name, "HumMedieval") || !strcmp(m.name, "HumWitch");
-			if (mal) ava = 9;
-			else if (fem) ava = 12;
-		}
-		float back = ava > 0 ? r.AvatarClothBack(a.model, ava, y) : -1e9f;
-		if (back < -10.f && ava > 0) back = r.AvatarClothBack(a.model, ava, y - 0.10f);
-		if (back > -10.f) z = back - 0.025f;
-		else z = MInverse(m.invBind[cj]).m[14] + 0.045f;
-	}
+	float y, z, x, yaw;
+	WingMount(r, a, m, cj, human, y, z, x, yaw);
 	float rest = human ? 0.20f : 0.35f;
 	if (!hit) {
 		if (freeSlot < 0) freeSlot = (int)(r.m_frame & 63);
@@ -2594,7 +2633,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		else if (a.wingGrade == 2) { dw.tint = RGBA8(255, 248, 220, 255); dw.hue = 0.16f; dw.emissive += 0.12f; }
 		else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
-		r.DrawStatic(lib.wing[dr][1 - side], MMul(l, world), dw);
+		r.DrawStatic(lib.wing[dr][1 - side], MMul(WingTear(l, side, tear), world), dw);
 		hit->l[side] = l;
 		hit->mesh[side] = dr * 2 + (1 - side);
 		hit->n++;
@@ -2602,7 +2641,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	if (hit) { hit->frame = a.poseFrame; hit->th = th; }
 }
 
-BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir)
+BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir, float phase)
 {
 	if (!a.wings || !a.poseValid || !a.modelPtr) return FALSE;
 	if (side < 0 || side > 1) return FALSE;
@@ -2611,26 +2650,12 @@ BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return FALSE;
 	BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
 	int dr = a.wings == 2 ? 1 : 0;
-	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : 0.f;
+	float use = phase > 1e8f ? a.wingPh : phase;
+	float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
-	float y = human ? 1.32f : 1.12f;
-	float z = human ? 0.10f : 0.32f;
-	float x = human ? 0.10f : 0.18f;
-	float yaw = human ? -0.40f : -0.55f;
-	if (human) {
-		int ava = a.avatar;
-		if (ava <= 0) {
-			const BOOL mal = strncmp(m.name, "HumM", 4) == 0 || !strcmp(m.name, "HumAdventurer") || !strcmp(m.name, "HumKing");
-			const BOOL fem = strncmp(m.name, "HumF", 4) == 0 || !strcmp(m.name, "HumMedieval") || !strcmp(m.name, "HumWitch");
-			if (mal) ava = 9;
-			else if (fem) ava = 12;
-		}
-		float back = ava > 0 ? r.AvatarClothBack(a.model, ava, y) : -1e9f;
-		if (back < -10.f && ava > 0) back = r.AvatarClothBack(a.model, ava, y - 0.10f);
-		if (back > -10.f) z = back - 0.025f;
-		else z = MInverse(m.invBind[cj]).m[14] + 0.045f;
-	}
+	float y, z, x, yaw;
+	WingMount(r, a, m, cj, human, y, z, x, yaw);
 	float rest = human ? 0.20f : 0.35f;
 	float s = side == 0 ? 1.f : -1.f;
 	M4 fl = MRotZ(s * flap);
@@ -2648,6 +2673,20 @@ BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float
 	float ln = Len(outDir);
 	if (ln < 1e-4f) return FALSE;
 	outDir = outDir * (1.f / ln);
+	return TRUE;
+}
+
+BOOL WingSweepDir(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir, V3& sweep)
+{
+	if (!WingSpanPoint(r, a, world, side, along, pos, outDir, a.wingPh)) return FALSE;
+	const float back = 0.16f;
+	V3 prev, prevOut;
+	if (!WingSpanPoint(r, a, world, side, along, prev, prevOut, a.wingPh - back)) {
+		sweep = v3(0.f, -1.4f, 0.f);
+		return TRUE;
+	}
+	float sp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
+	sweep = (pos - prev) * (sp / back);
 	return TRUE;
 }
 
@@ -2689,8 +2728,61 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			d.hue = 0;
 			d.clothHue = a.hue;
 			d.face = a.face;
-			d.blink = HumanBlink(time, a.blinkSeed);
+			float blinkSeed = a.blinkSeed;
+			if (blinkSeed <= 0.f && a.poseHold == 0) blinkSeed = 0.31f + a.idleSeed;
+			d.blink = HumanBlink(time, blinkSeed);
 			if (a.recoil > 0.08f) d.blink = max(d.blink, Clampf(a.recoil * 1.45f, 0.f, 0.94f));
+			{
+				float mouth = 0.f, brow = 0.f, squint = 0.f;
+				int c = a.clip;
+				BOOL cast = c == CL_CAST_SHOOT || c == CL_CAST_RAISE || c == CL_CAST_LONG || c == CL_THROW || c == CL_USE;
+				BOOL bow = c == CL_1H_SHOOT || c == CL_2H_SHOOT;
+				BOOL melee = c == CL_1H_CHOP || c == CL_1H_SLICE || c == CL_1H_STAB || c == CL_2H_CHOP || c == CL_2H_SPIN || c == CL_PUNCH;
+				BOOL heal = c == CL_CAST_RAISE;
+				if (a.skillPose >= 0) {
+					const SkillDef& sd = SkillInfo(a.skillPose);
+					if (sd.kind == SK_HEAL) heal = TRUE;
+					if (sd.kind == SK_MAGIC || sd.kind == SK_BUFF) cast = TRUE;
+				}
+				if (c == CL_DEATH || a.poseHold == 2) {
+					d.blink = max(d.blink, 0.96f);
+					mouth = 0.42f; brow = -0.25f;
+				} else if (a.poseHold == 3) {
+					d.blink = max(d.blink, 0.92f);
+				} else if (c == CL_HIT_A || c == CL_HIT_B) {
+					d.blink = max(d.blink, 0.55f);
+					squint = 0.8f; mouth = -0.2f; brow = -0.75f;
+				} else if (c == CL_STUN || c == CL_CONFUSE) {
+					squint = 0.4f; mouth = 0.28f; brow = 0.1f;
+				} else if (c == CL_TAUNT || c == CL_CHEER) {
+					mouth = 0.5f + 0.28f * sinf(a.t * 7.5f);
+					brow = 0.42f;
+				} else if (bow) {
+					squint = 0.78f; brow = -0.62f; mouth = -0.18f;
+				} else if (cast) {
+					float talk = 0.5f + 0.5f * sinf(time * 10.5f + a.idleSeed * 5.f);
+					float word = 0.5f + 0.5f * sinf(time * 6.2f + 1.3f);
+					mouth = 0.12f + talk * word * (heal ? 0.42f : 0.62f);
+					squint = heal ? 0.12f : (c == CL_CAST_SHOOT ? 0.48f : 0.28f);
+					brow = heal ? 0.38f : (c == CL_CAST_LONG ? 0.22f : -0.08f);
+				} else if (melee) {
+					float swing = sinf(a.t * 7.f);
+					mouth = swing > 0.15f ? 0.5f : -0.06f;
+					brow = -0.7f; squint = 0.3f;
+				} else if (c == CL_BLOCK) {
+					brow = -0.45f; squint = 0.4f; mouth = -0.12f;
+				} else if (c == CL_DODGE || c == CL_JUMP || a.wingHop > 0.05f) {
+					brow = 0.18f; mouth = 0.22f; squint = 0.12f;
+				} else if (c == CL_WALK || c == CL_RUN) {
+					brow = -0.12f; squint = 0.1f;
+					mouth = 0.05f * sinf(time * 2.2f + a.idleSeed);
+				} else {
+					mouth = 0.035f * sinf(time * 1.6f + a.idleSeed * 3.f);
+					if (c == CL_IDLE_LOOK || c == CL_IDLE_GLANCE_L || c == CL_IDLE_GLANCE_R) brow = 0.22f;
+				}
+				d.mouth = mouth; d.brow = brow; d.squint = squint;
+			d.sex = a.female ? 2 : 1;
+			}
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 			d.noTess = 1;

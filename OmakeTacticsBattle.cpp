@@ -80,6 +80,7 @@ static void HoldCorpse(Actor& a)
 	a.t = 8.f;
 	a.blend = 1.f;
 	a.animSpeed = 1.f;
+	if (a.wings > 0) a.wingTear = 1.f;
 }
 
 // 手番の選択中だけ足下と輪郭を光らせる。移動・攻撃が始まったら消す。
@@ -1671,15 +1672,37 @@ void Game::DemoDrive(float dt)
 		m_demoStep = 0;
 		int gx = m_ai.moveX, gz = m_ai.moveZ;
 		if (!Map::In(gx, gz)) { gx = u.x; gz = u.z; }
-		int n = ReachPath(m_reach, u.x, u.z, gx, gz, m_path, MAPN * 4, u.deck);
+		// 開始レイヤーにコストが残っているだけだと、止まれない段を選んで移動が消える。止まれる段を優先する。
+		int wantL = m_ai.moveL;
+		if (wantL < 0 || wantL >= LAY_N || !ReachCanStopLayer(m_reach, gx, gz, wantL)) {
+			wantL = -1;
+			int best = 99999;
+			for (int L = 0; L < LAY_N; L++) {
+				if (!ReachCanStopLayer(m_reach, gx, gz, L)) continue;
+				int c = ReachCostAt(m_reach, L, gx, gz);
+				if (c >= 0 && c < best) { best = c; wantL = L; }
+			}
+		}
+		int prefer = wantL >= 0 ? wantL : u.deck;
+		int n = ReachPath(m_reach, u.x, u.z, gx, gz, m_path, MAPN * 4, prefer);
 		auto arrive = [&]() {
-			if ((m_cx != u.x || m_cz != u.z) && ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
+			if (wantL >= 0) m_cLayer = wantL;
+			else if (!ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
+				for (int L = 0; L < LAY_N; L++) if (ReachCanStopLayer(m_reach, m_cx, m_cz, L)) { m_cLayer = L; break; }
+			}
+			BOOL moved = (m_cx != u.x || m_cz != u.z || m_cLayer != u.deck);
+			if (moved && ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
 				m_moved = 1;
 				StartMove(m_cur, m_cx, m_cz, PH_P_CMD);
 			} else OpenCommand();
 			m_demoAct = 2;
 		};
-		if (n <= 1 || (m_cx == gx && m_cz == gz)) { arrive(); return; }
+		if (n <= 1) {
+			if (wantL >= 0) { m_cx = gx; m_cz = gz; m_cLayer = wantL; }
+			arrive();
+			return;
+		}
+		if (m_cx == gx && m_cz == gz) { arrive(); return; }
 		int at = -1;
 		for (int i = 0; i < n; i++) if (PackX(m_path[i]) == m_cx && PackZ(m_path[i]) == m_cz) { at = i; break; }
 		int nxt = at >= 0 ? at + 1 : 1;
@@ -3638,9 +3661,14 @@ void Game::UpdateMove(float dt)
 	float pace = TacPaceTime(m_save);
 	if (pace < 0.05f) pace = 0.05f;
 	float speed = 2.6f * 1.5f / pace;
-	// 徒歩はそのまま。翼の飛行は一マスを速くするが、時間は半分まで縮めない。
-	if (fly) speed *= 1.35f * (UnitFlyMul(u) / 1000.f);
-	speed *= UnitMoveMul(u) / 100.f;
+	// 徒歩はそのまま。飛行は無印 1.3、改 2、聖 3、女神 4。
+	if (fly) {
+		int g = m_act[ui].wingGrade;
+		if (g < 0) g = 0;
+		if (g > 3) g = 3;
+		static const float kFlySp[4] = { 1.3f, 2.f, 3.f, 4.f };
+		speed *= kFlySp[g];
+	} else speed *= UnitMoveMul(u) / 100.f;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	{
@@ -3859,6 +3887,7 @@ void Game::PickSkillCursor(int skill)
 
 // ============================================================ アクション
 static int CutPatFor(const Unit& u, int skill);
+static int CutClipFor(const Unit& u, int skill, int variant);
 void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 {
 	Unit& a = m_b.u[ui];
@@ -3893,6 +3922,8 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		TacSfx(TS_WARP);
 	}
 	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 96);
+	m_cutAimX = cx;
+	m_cutAimZ = cz;
 	m_seqN = 0;
 	for (int i = 0; i < m_strkN && m_seqN < 24; i++) {
 		const Strike& s = m_strk[i];
@@ -4038,7 +4069,7 @@ void Game::GatherCut()
 	for (int k = 0; k < m_strkN; k++) { add(m_strk[k].attacker); add(m_strk[k].defender); }
 	if (m_cutKind == 2 && m_seqSkill >= 0 && m_cutA >= 0) {
 		int ax = m_b.u[m_cutA].x, az = m_b.u[m_cutA].z;
-		if (m_cutD >= 0) { ax = m_b.u[m_cutD].x; az = m_b.u[m_cutD].z; }
+		if (SkillInfo(m_seqSkill).rMax != 0 && Map::In(m_cutAimX, m_cutAimZ)) { ax = m_cutAimX; az = m_cutAimZ; }
 		int mem[8];
 		int nm = FormMembers(m_b, m_cutA, m_seqSkill, ax, az, mem, 8);
 		for (int i = 0; i < nm; i++) add(mem[i]);
@@ -4258,6 +4289,25 @@ void Game::PoseFormAllies()
 		ac.skillPose = m_seqSkill;
 		// 技名のあいだは構えで止め、攻防に入ったら主役と同時に振り下ろす。
 		float wind = ActorClipLen(ac, m_lib, m_r, allyClip) * ActorWindup(ac, m_r, allyClip);
+		ac.animSpeed = Clampf(wind / max(0.25f, CutIntroLen()), 0.12f, 1.15f);
+		m_b.u[id].flash = 1.f;
+	}
+}
+
+void Game::PoseLinkAllies()
+{
+	if (m_cutKind == 2 || m_cutA < 0) return;
+	for (int i = 0; i < m_cutAllyN; i++) {
+		int id = m_cutAlly[i];
+		if (id == m_cutA || id < 0 || PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) continue;
+		BOOL join = FALSE;
+		for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+		if (!join) continue;
+		int clip = CutClipFor(m_b.u[id], -1, i & 1);
+		Actor& ac = m_act[id];
+		ActorPlay(ac, clip, 0, .12f);
+		ac.skillPose = -1;
+		float wind = ActorClipLen(ac, m_lib, m_r, clip) * ActorWindup(ac, m_r, clip);
 		ac.animSpeed = Clampf(wind / max(0.25f, CutIntroLen()), 0.12f, 1.15f);
 		m_b.u[id].flash = 1.f;
 	}
@@ -4756,6 +4806,7 @@ void Game::UpdateSeq(float dt)
 				}
 				if (m_cutD >= 0 && !PoseKeep(m_act[m_cutD], m_b.u[m_cutD], m_dieT[m_cutD], m_dispHp[m_cutD])) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
 				PoseFormAllies();
+				PoseLinkAllies();
 				if (m_cutKind == 3) BindSummonCut();
 				if (m_seqSkill >= 0) {
 					const SkillDef& sd = SkillInfo(m_seqSkill);
@@ -5052,6 +5103,17 @@ void Game::UpdateSeq(float dt)
 				if (id != A && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) m_lunge[id] = m_lunge[A] * .8f;
 				else if (id != A) m_lunge[id] = 0;
 			}
+		} else if (m_seqCut && m_cutStage == 2 && A == m_cutA) {
+			for (int i = 0; i < m_cutAllyN; i++) {
+				int id = m_cutAlly[i];
+				if (id == A) continue;
+				BOOL join = FALSE;
+				for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+				if (join && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) m_lunge[id] = m_lunge[A] * .8f;
+				else m_lunge[id] = 0;
+			}
+		} else if (m_seqCut && m_cutStage == 2) {
+			for (int i = 0; i < m_cutAllyN; i++) if (m_cutAlly[i] != A) m_lunge[m_cutAlly[i]] = 0;
 		}
 	}
 	if (m_proj.active) {
@@ -5447,12 +5509,44 @@ void Game::UpdateUnitsVisual(float dt)
 		Unit& u = m_b.u[i];
 		Actor& a = m_act[i];
 		ActorUpdate(a, dt);
-		if (a.wings > 0 && a.wingGrade > 0 && u.alive) {
+		if (a.wings > 0 && a.clip == CL_DEATH && a.t < 4.f) {
+			if (a.wingTear < 0.03f) {
+				ShedFeathers(a, ActorPos(i), ActorFace(i), TRUE);
+				a.wingTear = 0.03f;
+				a.hover = 0.f;
+				a.flap = 0.f;
+			}
+			a.wingTear = min(1.f, a.wingTear + dt * 1.35f);
+		} else if (a.wings > 0 && a.clip == CL_SPAWN) {
+			a.wingTear = 1.f;
+			a.hover = 0.f;
+			a.flap = 0.f;
+			a.wingHop = 0.f;
+		} else if (a.wingHop > 0.f) {
+			float dur = 0.72f;
+			float uHop = 1.f - a.wingHop / dur;
+			if (uHop < 0.f) uHop = 0.f;
+			if (uHop > 1.f) uHop = 1.f;
+			float arc = sinf(uHop * 3.14159265f);
+			a.hover = arc * 0.9f;
+			a.wingTear = 1.f - Clampf((uHop - 0.12f) / 0.5f, 0.f, 1.f);
+			if (uHop > 0.28f) {
+				a.flap = 1.f;
+				a.wingPh += dt * 11.f;
+			}
+			a.wingHop -= dt;
+			if (a.wingHop <= 0.f) {
+				a.wingHop = 0.f;
+				a.wingTear = 0.f;
+				a.hover = 0.35f;
+				if (a.clip != CL_WALK && a.clip != CL_RUN) a.flap = 0.f;
+			}
+		} else if (a.wings > 0 && a.wingGrade > 0 && u.alive && a.wingTear <= 0.001f) {
 			float sp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
 			float prev = sinf(a.wingPh);
 			a.wingPh += dt * sp;
 			float now = sinf(a.wingPh);
-			if (prev > 0.15f && now <= 0.15f)
+			if (prev > 0.55f && now <= 0.55f)
 				ShedFeathers(a, ActorPos(i), ActorFace(i), a.flap > 0.5f);
 		}
 		if (i == 0 && m_sumOn) ActorUpdate(m_sumAct, dt);
@@ -5607,8 +5701,15 @@ void Game::UpdateUnitsVisual(float dt)
 		if (shownDead && a.clip != CL_DEATH && a.clip != CL_SPAWN) HoldCorpse(a);
 		else if (!a.loop && a.clip != CL_DEATH && ActorClipDone(a, m_lib, m_r) && !(m_phase == PH_ACTION && i == (m_seqCur < m_seqN ? m_seq[m_seqCur].attacker : -1))) {
 			if (u.alive && u.hp > 0 && (m_dieT[i] < 0 || a.clip == CL_SPAWN)) {
+				BOOL wasRise = a.clip == CL_SPAWN && a.wings > 0;
 				a.animSpeed = 1.f;
 				ActorPlay(a, (m_phase == PH_OVER && m_victory && u.team == TEAM_PLAYER && m_dieT[i] < 0) ? CL_CHEER : CL_IDLE, 1, .2f);
+				if (wasRise && (UnitMoveType(u) == MV_FLY || a.wingGrade > 0)) {
+					a.wingHop = 0.72f;
+					a.wingTear = 1.f;
+					a.hover = 0.f;
+					a.flap = 0.f;
+				}
 			}
 		}
 	}
@@ -10418,7 +10519,7 @@ void Game::DrawCommandMenu()
 				wchar_t est[160];
 				if (EstimateText(u, hov, est, 160)) footLine(est, RGBA8(186, 230, 255), ly);
 			}
-			m_r.HudTextBox(TT(sd.descTx), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
+			m_r.HudTextBox(SkillBlurb(hov), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 			if (IsFormSkill(hov)) DrawFormGuide(hov, u.x, u.z, x - U(8), y - U(8), sw + U(16), ph);
 		}
 		m_skillPreview = hov >= 0 ? hov : hovCraft;
@@ -10437,7 +10538,7 @@ void Game::DrawPromoteOffer()
 	int nt = 0;
 	int revert = -1;
 	EvoOption opt[4];
-	int no = EvoOptions(grace ? u.ch.trialFrom : u.ch.cls, opt);
+	int no = EvoOptions(grace ? u.ch.trialFrom : u.ch.cls, opt, 1);
 	for (int k = 0; k < no && nt < 4; k++) {
 		if (grace && opt[k].target == u.ch.cls) continue;
 		tgt[nt++] = opt[k].target;
@@ -10595,7 +10696,7 @@ void Game::AdvanceLevelUp()
 			const CharData& c = m_b.u[L.unit].ch;
 			int gate = PromoteLevel(ClassInfo(c.cls).tier);
 			EvoOption opt[4];
-			if (L.oldLv < gate && L.newLv >= gate && EvoOptions(c.cls, opt) > 0) {
+			if (L.oldLv < gate && L.newLv >= gate && EvoOptions(c.cls, opt, 1) > 0) {
 				m_promoAsk = 1;
 				m_navMode = TRUE;
 				m_focusId = ID_BT_PROMO0;

@@ -4149,15 +4149,19 @@ static void BuildJobs()
 	}
 	s_jobOk = 1;
 }
+static const ClassDef& HidClassRef(int c);
+static const wchar_t* HidTitle(int cls);
 int JobCount() { return TAC_JOB_N; }
 const wchar_t* ClassTitle(int cls)
 {
+	if (cls >= C_JOB0 + TAC_JOB_N && cls < C_JOB0 + TAC_JOB_N + TAC_HID_N) return HidTitle(cls);
 	if (cls < C_JOB0 || cls >= C_JOB0 + TAC_JOB_N) return NULL;
 	const wchar_t* const* s = kJobNm[cls - C_JOB0];
 	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
 }
 const wchar_t* ClassBlurb(int cls)
 {
+	if (cls >= C_JOB0 + TAC_JOB_N && cls < C_JOB0 + TAC_JOB_N + TAC_HID_N) return L"";
 	return TT(ClassInfo(cls).descTx);
 }
 const ClassDef& ClassInfo(int c)
@@ -4171,16 +4175,21 @@ const ClassDef& ClassInfo(int c)
 		BuildJobs();
 		return s_job[c - C_JOB0];
 	}
+	if (c >= C_JOB0 + TAC_JOB_N && c < C_JOB0 + TAC_JOB_N + TAC_HID_N)
+		return HidClassRef(c);
 	int i = c - C_PLAYER_COUNT;
 	if (i < 0 || i >= TAC_RANK_LINES * TAC_RANK_N) return kClass[0];
 	return s_ext[i];
 }
 int PromoteLevel(int tier)
 {
-	// 10次で止めない。最後の段だけが門を閉じる。
-	static const int k[12] = { 0, 15, 35, 55, 78, 105, 140, 180, 230, 290, 370, 470 };
+	// 1〜12次は公開のまま。13次は470の次、16次は2100、20次は9500。21次は門を閉じる。
+	static const int k[20] = {
+		0, 15, 35, 55, 78, 105, 140, 180, 230, 290, 370, 470,
+		640, 920, 1400, 2100, 3400, 5200, 7500, 9500
+	};
 	if (tier < 1) return 15;
-	if (tier >= 12) return 9999;
+	if (tier >= 20) return 9999;
 	return k[tier];
 }
 int ExpToNext(int lv)
@@ -4484,8 +4493,10 @@ static void BuildAreaSupport()
 }
 static const SkillDef& CraftSkillRef(int index);
 const SkillDef& SummonSkillRef(int index);
+#include "tactics_src/job_hidden.inc"
 const SkillDef& SkillInfo(int s)
 {
+	if (s >= SKL_HID0 && s < SKL_COUNT) return HidSkillRef(s);
 	if (IsSummonId(s)) return SummonSkillRef(s - SUMMON_BASE);
 	if (s >= CRAFT_BASE && s < CRAFT_BASE + CRAFT_N) return CraftSkillRef(s - CRAFT_BASE);
 	if (s == SKL_RAISE) {
@@ -4497,7 +4508,7 @@ const SkillDef& SkillInfo(int s)
 		return s_art[s - SKL_ART0];
 	}
 	if (s >= SKL_FORM0 && s < SKL_FORMN) return kForm[s - SKL_FORM0];
-	if (s >= SKL_WARP0 && s < SKL_COUNT) {
+	if (s >= SKL_WARP0 && s < SKL_WARP0 + 8) {
 		static SkillDef warp[8];
 		static int ready = 0;
 		if (!ready) {
@@ -4554,12 +4565,18 @@ const SkillDef& SkillInfo(int s)
 #include "tactics_src/area_names.inc"
 const wchar_t* SkillLabel(int s)
 {
+	if (s >= SKL_HID0 && s < SKL_COUNT) return HidSkillName(s);
 	if (IsSummonId(s)) return SummonName(s - SUMMON_BASE + 1);
 	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0) {
 		const wchar_t* const* row = kAreaNm[s - SKL_AREAHEAL0];
 		return LangPick14(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12], row[13]);
 	}
 	return TT(SkillInfo(s).nameTx);
+}
+const wchar_t* SkillBlurb(int s)
+{
+	if (s >= SKL_HID0 && s < SKL_COUNT) return HidSkillText(s);
+	return TT(SkillInfo(s).descTx);
 }
 
 bool SkillSameMenu(int a, int b)
@@ -5446,9 +5463,13 @@ static int WarpSkillFor(int cls)
 	return SKL_WARP0 + line;
 }
 
-int EvoOptions(int cls, EvoOption out[4])
+int EvoOptions(int cls, EvoOption out[4], int secret)
 {
 	int n = 0;
+	if (cls >= C_JOB0 + TAC_JOB_N && cls < C_JOB0 + TAC_JOB_N + TAC_HID_N) {
+		if (!secret) return 0;
+		return HidOffer(cls, out);
+	}
 	if (cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
 		int i = cls - C_JOB0;
 		for (int k = 0; k < 4; k++) {
@@ -5458,6 +5479,7 @@ int EvoOptions(int cls, EvoOption out[4])
 			out[n].needGroup = -1;
 			n++;
 		}
+		if (n == 0 && secret) return HidOffer(cls, out);
 		return n;
 	}
 	int line = LegacyLine(cls);
@@ -5486,7 +5508,7 @@ bool EvoMainEligible(const CharData& c)
 	if (!c.used) return false;
 	const ClassDef& cd = ClassInfo(c.cls);
 	EvoOption o[4];
-	if (EvoOptions(c.cls, o) == 0) return false;
+	if (EvoOptions(c.cls, o, 1) == 0) return false;
 	return c.lv >= PromoteLevel(cd.tier);
 }
 
@@ -5537,7 +5559,7 @@ static bool EvoTrialAllows(const CharData& c, int target)
 	if (c.trialLv <= 0 || c.lv > c.trialLv + 3 || c.trialFrom < 0) return false;
 	if (target == c.trialFrom) return true;
 	EvoOption o[4];
-	int n = EvoOptions(c.trialFrom, o);
+	int n = EvoOptions(c.trialFrom, o, 1);
 	for (int k = 0; k < n; k++) if (o[k].target == target) return true;
 	return false;
 }
@@ -5560,14 +5582,29 @@ bool EvoGroupSatisfied(int g, const CharData* ps, int n)
 	return false;
 }
 
+static int JobSlot(const CharData& c, int i)
+{
+	if (i < 0 || i >= JOB_STEP_N) return -1;
+	if (i < JOB_PATH_N) return c.jobPath[i];
+	int v = c.skillPad[i - JOB_PATH_N];
+	if (v < C_JOB0 + TAC_JOB_N || v >= C_JOB0 + TAC_JOB_N + TAC_HID_N) return -1;
+	return v;
+}
+static void JobSlotSet(CharData& c, int i, int v)
+{
+	if (i < 0 || i >= JOB_STEP_N) return;
+	if (i < JOB_PATH_N) { c.jobPath[i] = v; return; }
+	c.skillPad[i - JOB_PATH_N] = (v < 0) ? 0 : v;
+}
 void JobPathClear(CharData& c)
 {
 	for (int i = 0; i < JOB_PATH_N; i++) c.jobPath[i] = -1;
+	for (int i = 0; i < 8; i++) c.skillPad[i] = 0;
 }
 int JobPathCount(const CharData& c)
 {
 	int n = 0;
-	for (; n < JOB_PATH_N; n++) if (c.jobPath[n] < 0) break;
+	for (; n < JOB_STEP_N; n++) if (JobSlot(c, n) < 0) break;
 	return n;
 }
 void JobPathText(const CharData& c, wchar_t* out, int cap)
@@ -5578,11 +5615,11 @@ void JobPathText(const CharData& c, wchar_t* out, int cap)
 	int steps = JobStepsForLevel(c.lv);
 	if (steps < 1) steps = 1;
 	if (n > steps) n = steps;
-	int cls[JOB_PATH_N];
+	int cls[JOB_STEP_N];
 	int cn = 0;
-	for (int i = 0; i < n && cn < JOB_PATH_N; i++) cls[cn++] = c.jobPath[i];
+	for (int i = 0; i < n && cn < JOB_STEP_N; i++) cls[cn++] = JobSlot(c, i);
 	if (cn == 0 || cls[cn - 1] != c.cls) {
-		if (cn < JOB_PATH_N) cls[cn++] = c.cls;
+		if (cn < JOB_STEP_N) cls[cn++] = c.cls;
 		else cls[cn - 1] = c.cls;
 	}
 	for (int i = 0; i < cn; i++) {
@@ -5597,11 +5634,11 @@ void JobPathText(const CharData& c, wchar_t* out, int cap)
 int JobStepsForLevel(int lv)
 {
 	int steps = 1;
-	for (int tier = 1; tier < 12; tier++) {
+	for (int tier = 1; tier < 20; tier++) {
 		if (lv >= PromoteLevel(tier)) steps = tier + 1;
 		else break;
 	}
-	if (steps > JOB_PATH_N) steps = JOB_PATH_N;
+	if (steps > JOB_STEP_N) steps = JOB_STEP_N;
 	if (steps < 1) steps = 1;
 	return steps;
 }
@@ -5611,18 +5648,18 @@ static void JobPathNote(CharData& c, int from, int to, int replaceTip)
 	int n = JobPathCount(c);
 	if (replaceTip) {
 		if (n <= 0) {
-			if (from >= 0) c.jobPath[0] = from;
-			if (to != from) c.jobPath[from >= 0 ? 1 : 0] = to;
-		} else c.jobPath[n - 1] = to;
+			if (from >= 0) JobSlotSet(c, 0, from);
+			if (to != from) JobSlotSet(c, from >= 0 ? 1 : 0, to);
+		} else JobSlotSet(c, n - 1, to);
 		return;
 	}
 	if (n <= 0) {
-		if (from >= 0) c.jobPath[0] = from;
-		if (to != from) c.jobPath[from >= 0 ? 1 : 0] = to;
+		if (from >= 0) JobSlotSet(c, 0, from);
+		if (to != from) JobSlotSet(c, from >= 0 ? 1 : 0, to);
 		return;
 	}
-	if (c.jobPath[n - 1] == to) return;
-	if (n < JOB_PATH_N) c.jobPath[n] = to;
+	if (JobSlot(c, n - 1) == to) return;
+	if (n < JOB_STEP_N) JobSlotSet(c, n, to);
 }
 // CharLevelUp と同じく成長率を2倍し、端数はレベルをまたいで積む。画面を開くたびに振らない。
 static void JobGrowOnce(CharData& c, int acc[S_COUNT])
@@ -6133,29 +6170,59 @@ static int HumanoidImport(const wchar_t* nm)
 	if (!nm || wcsncmp(nm, L"Hum", 3) != 0 || !nm[3]) return 0;
 	return nm[3] >= L'A' && nm[3] <= L'Z';
 }
+// 足下ではなく胴の半幅。5x5（中心から 2.5）に収まるならそのマスを使い、超える胴だけ 5x5 へ縮める。
+static void ClampBodyToFive(MonsterDef& d)
+{
+	if (d.look != LK_MESH || d.model < 0 || !TacMonsterReady(d.model)) return;
+	if (d.model < kImportN && HumanoidImport(kImportName[d.model])) return;
+	float foot = TacMonsterFoot(d.model);
+	float wide = TacMonsterWide(d.model);
+	if (wide < foot) wide = foot;
+	if (wide < 0.02f) return;
+	float sc = d.scale > 0.02f ? d.scale : 1.f;
+	int span = (d.footSpan >= 1 && d.footSpan <= kSpanMax) ? d.footSpan : 1;
+	const float cap = (float)kSpanMax * 0.5f;
+	float half = wide * sc;
+	if (half > cap) {
+		sc = cap / wide;
+		if (sc < 0.04f) sc = 0.04f;
+		d.scale = sc;
+		d.footSpan = kSpanMax;
+		return;
+	}
+	int need = 1;
+	if (half > 0.50f) need = 2;
+	if (half > 1.00f) need = 3;
+	if (half > 1.50f) need = 4;
+	if (half > 2.00f) need = 5;
+	if (span < need) d.footSpan = need;
+}
 // 追加敵は、測った足幅の階級に合わせ、そのマスを実際に埋める倍率へ縮める。
 // 背が高すぎるときはマスを落として、足下より胴が何マスもはみ出さないようにする。
+// 倍率が既にある種も、胴が 5x5 を超えていればここでも縮める。
 static void FitExtraDef(MonsterDef& d)
 {
-	if (d.look != LK_MESH || d.scale > 0.02f) return;
+	if (d.look != LK_MESH) return;
 	if (d.model < 0 || !TacMonsterReady(d.model)) return;
+	if (d.scale > 0.02f) {
+		ClampBodyToFive(d);
+		return;
+	}
 	float foot = TacMonsterFoot(d.model);
 	float tall = TacMonsterTall(d.model);
 	if (foot < 0.02f) {
 		d.scale = 1.f;
 		d.footSpan = 1;
+		ClampBodyToFive(d);
 		return;
 	}
 	int span = SpanFromHalf(foot);
 	float sc = 1.f;
 	FitFootToSpan(foot, tall, sc, span);
-	float wide = TacMonsterWide(d.model);
-	if (wide < foot) wide = foot;
-	float limit = (float)span * 0.5f;
-	if (wide > 0.02f && wide * sc > limit) sc *= limit / (wide * sc);
 	if (sc < 0.04f) sc = 0.04f;
 	d.scale = sc;
 	d.footSpan = span;
+	ClampBodyToFive(d);
 }
 
 // 取り込み種は倍率が 1 のままなので、5x5 を越す胴（10x10 前後）がマスより大きく残る。最大マスまで縮める。
@@ -6176,15 +6243,12 @@ static void ClampImportFoot(MonsterDef& d)
 		FitFootToSpan(foot, tall, sc, span);
 		fitted = TRUE;
 	}
-	float limit = (float)span * 0.5f;
-	if (wide * sc > limit + 0.02f) {
-		sc *= limit / (wide * sc);
-		fitted = TRUE;
+	if (fitted) {
+		if (sc < 0.04f) sc = 0.04f;
+		d.scale = sc;
+		d.footSpan = span;
 	}
-	if (!fitted) return;
-	if (sc < 0.04f) sc = 0.04f;
-	d.scale = sc;
-	d.footSpan = span;
+	ClampBodyToFive(d);
 }
 
 void MonsterPrepareScale(int monster)
@@ -6203,7 +6267,7 @@ static int MonsterSpan(const MonsterDef& md, int boss)
 {
 	if (md.look == LK_MESH && &md >= s_monImp && &md < s_monImp + IMP_CAP)
 		ClampImportFoot(const_cast<MonsterDef&>(md));
-	if (md.look == LK_MESH && md.scale <= 0.02f && &md >= s_foeEx && &md < s_foeEx + 4096)
+	if (md.look == LK_MESH && &md >= s_foeEx && &md < s_foeEx + 4096)
 		FitExtraDef(const_cast<MonsterDef&>(md));
 	if (md.footSpan >= 1 && md.footSpan <= 5) return md.footSpan;
 	float sc = md.scale * (boss ? 1.15f : 1.f);
@@ -8753,7 +8817,6 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 			break;
 		}
 		if (di < 0) continue;
-		if ((r.Next() & 1u) != 0) continue;
 		Unit& y = b.u[di];
 		if (y.hp <= 0) continue;
 		int dmg, hit, crit;
@@ -9022,6 +9085,44 @@ static int BossMonster(int stage, Rng& r)
 	return PickClassic(stage, r);
 }
 
+// 0ファンタジー 1SF 2家具 3昆虫 4その他。見た目のモデル名で分ける。
+static int MeshKind(const wchar_t* nm)
+{
+	if (!nm) return 4;
+	if (HasW(nm, L"Chair") || HasW(nm, L"Desk") || HasW(nm, L"Table") || HasW(nm, L"Couch")
+		|| HasW(nm, L"Shelf") || HasW(nm, L"Crate") || HasW(nm, L"Barrel") || HasW(nm, L"Bed")
+		|| HasW(nm, L"Mirror") || HasW(nm, L"Door") || HasW(nm, L"Lamp") || HasW(nm, L"Pillow")
+		|| HasW(nm, L"Cabinet") || HasW(nm, L"Stool") || HasW(nm, L"Dresser") || HasW(nm, L"Wardrobe")
+		|| HasW(nm, L"Rug") || HasW(nm, L"Carpet") || HasW(nm, L"Clock") || HasW(nm, L"Candle"))
+		return 2;
+	if (HasW(nm, L"Mech") || HasW(nm, L"Drone") || HasW(nm, L"Robot") || HasW(nm, L"Satellite")
+		|| HasW(nm, L"Quantum") || HasW(nm, L"Cyborg") || HasW(nm, L"Android") || HasW(nm, L"Laser")
+		|| HasW(nm, L"Plasma") || HasW(nm, L"Circuit") || HasW(nm, L"Turret") || HasW(nm, L"UFO")
+		|| HasW(nm, L"Hover"))
+		return 1;
+	if (HasW(nm, L"Beetle") || HasW(nm, L"Weevil") || HasW(nm, L"Mantis") || HasW(nm, L"Moth")
+		|| HasW(nm, L"Aphid") || HasW(nm, L"Cockroach") || HasW(nm, L"Earwig") || HasW(nm, L"Flea")
+		|| HasW(nm, L"Cricket") || HasW(nm, L"Termite") || HasW(nm, L"Spider") || HasW(nm, L"Scorpion")
+		|| HasW(nm, L"Wasp") || HasW(nm, L"Hornet") || HasW(nm, L"Centipede") || HasW(nm, L"Larva")
+		|| HasW(nm, L"Grub") || HasW(nm, L"Insect") || HasW(nm, L"Antlion") || HasW(nm, L"Bee")
+		|| HasW(nm, L"Fly"))
+		return 3;
+	if (ImportPool(nm) == POOL_FAN) return 0;
+	return 4;
+}
+
+static int SpawnKind(int id)
+{
+	if (id < 0) return 4;
+	if (id < M_COUNT) return 0;
+	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	int model = -1;
+	if (id < M_COUNT + nImp) model = id - M_COUNT;
+	else model = MonsterInfo(id).model;
+	if (model < 0 || model >= nImp) return 4;
+	return MeshKind(kImportName[model]);
+}
+
 // その大きさの別の敵。近いレベル帯を先に使い、いなければ同じステージに出るもの。
 static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 {
@@ -9036,6 +9137,11 @@ static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 		for (int s = 0; s < 6; s++) pn[s] = 0;
 		int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
 		int hiId = M_COUNT + nImp + kFoeExN;
+		const BOOL late = stage >= 40;
+		static const int kCap[5] = { 80, 32, 20, 14, 8 };
+		static const int kMin[5] = { 24, 8, 4, 3, 2 };
+		int kn[6][5];
+		if (late) for (int s = 0; s < 6; s++) for (int knd = 0; knd < 5; knd++) kn[s][knd] = 0;
 		for (int pass = 0; pass < 2; pass++) {
 			int band = pass == 0 ? 48 : 0;
 			for (int id = 0; id < hiId; id++) {
@@ -9049,18 +9155,48 @@ static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 				if (md.weight <= 0) continue;
 				int s = MonsterSpan(md, boss ? 1 : 0);
 				if (s < 1 || s > 5) continue;
-				if (pass == 1 && pn[s] > 0) continue;
 				int lo = MonsterFirstStage(id);
 				if (lo > stage) continue;
 				int top = md.maxStage > 0 ? md.maxStage : TAC_STAGE_MAX;
 				if (stage > top) continue;
-				if (band > 0 && stage - lo > band) continue;
+				int kind = 0;
+				if (late) {
+					kind = SpawnKind(id);
+					if (kind < 0 || kind > 4) kind = 4;
+					if (kn[s][kind] >= kCap[kind]) continue;
+					int fresh = stage - lo <= 48;
+					if (pass == 0 && !fresh) continue;
+					if (pass == 1 && fresh) continue;
+					if (pass == 1 && kn[s][kind] >= kMin[kind]) continue;
+				} else {
+					if (pass == 1 && pn[s] > 0) continue;
+					if (band > 0 && stage - lo > band) continue;
+				}
 				if (pn[s] >= 160) continue;
 				pool[s][pn[s]++] = id;
+				if (late) kn[s][kind]++;
 			}
 		}
 	}
 	if (pn[span] <= 0) return -1;
+	if (stage >= 40) {
+		static const int wgt[5] = { 20, 10, 4, 2, 1 };
+		int tot = 0;
+		for (int i = 0; i < pn[span]; i++) {
+			int knd = SpawnKind(pool[span][i]);
+			if (knd < 0 || knd > 4) knd = 4;
+			tot += wgt[knd];
+		}
+		if (tot > 0) {
+			int roll = r.Range(0, tot - 1);
+			for (int i = 0; i < pn[span]; i++) {
+				int knd = SpawnKind(pool[span][i]);
+				if (knd < 0 || knd > 4) knd = 4;
+				roll -= wgt[knd];
+				if (roll < 0) return pool[span][i];
+			}
+		}
+	}
 	return pool[span][r.Range(0, pn[span] - 1)];
 }
 
@@ -10582,23 +10718,46 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 	BOOL allowSkill = level >= 2 || (r.Next() % 100) < 18;
 	// 攻撃スキルと奥義は約半分の手番だけ。残りは通常攻撃。回復と、追い詰められた防御は残す。
 	BOOL halfOff = level < 2 || (r.Next() % 100) < 50;
-	float noise = level <= 1 ? 2.8f : (level == 2 ? 1.f : (level == 3 ? 0.35f : 0.06f));
+	float noise = level <= 1 ? 2.8f : (level == 2 ? 2.2f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
 	const int ox = u.x, oz = u.z, oDeck = u.deck;
 	int focus = -1;
-	if (level >= 5) {
+	const BOOL hunt = level >= 3;
+	auto hurtBias = [&](const Unit& t, int kill, float killW) -> float {
+		if (!hunt) return 0.f;
+		float ratio = (float)t.hp / (float)max(1, t.ch.stat[S_HP]);
+		float w = 5.f + (float)(level - 3) * 3.5f;
+		return (1.f - ratio) * w + (kill ? killW + (float)(level - 3) * 6.f : 0.f);
+	};
+	auto spread = [&](const Unit& t) -> float {
+		if (hunt) return 0.f;
+		int pile = 0;
+		for (int k = 0; k < b.nUnits; k++) {
+			if (k == ui || !b.u[k].alive || b.u[k].team != u.team) continue;
+			if (FootDist(b.u[k].x, b.u[k].z, UnitSpan(b.u[k]), t.x, t.z, UnitSpan(t)) <= 2) pile++;
+		}
+		return (float)pile * 16.f;
+	};
+	auto focusBias = [&](int i, float hi, float mid, float lo) -> float {
+		if (!hunt || focus < 0) return 0.f;
+		float on = level >= 5 ? hi : (level >= 4 ? mid : lo);
+		float off = level >= 5 ? -10.f : (level >= 4 ? -6.f : -3.f);
+		return i == focus ? on : off;
+	};
+	if (hunt) {
 		float bf = -1e9f;
 		for (int i = 0; i < b.nUnits; i++) {
 			const Unit& t = b.u[i];
 			if (!t.alive || t.team == u.team) continue;
-			float sc = (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 60.f + t.ch.lv * .4f;
+			float hpW = level >= 5 ? 60.f : (level >= 4 ? 36.f : 22.f);
+			float sc = (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * hpW + t.ch.lv * .4f;
 			int nAdj = 0;
 			for (int k = 0; k < b.nUnits; k++) {
 				if (k == ui || !b.u[k].alive || b.u[k].team != u.team) continue;
 				if (FootDist(b.u[k].x, b.u[k].z, UnitSpan(b.u[k]), t.x, t.z, UnitSpan(t)) <= 4) nAdj++;
 			}
-			sc += nAdj * 12.f;
+			sc += nAdj * (level >= 5 ? 12.f : 3.f);
 			if (sc > bf) { bf = sc; focus = i; }
 		}
 	}
@@ -10676,11 +10835,14 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			if (!AimFoot(b, u, x, z, UnitRangeMin(u), UnitRangeMax(u), t, true, ax, az)) continue;
 			Forecast f;
 			CalcForecast(b, ui, i, -1, f);
-			// トドメと残HPだけでは選ばない。近い相手、手強い相手、その場の揺らぎも同じ重さで見る。
+			// 普通以下は残HPを見ず、すでに味方が寄っている相手を避ける。強以上は低いHPを狙う。
 			float exp = f.dmg * f.hits * f.hit / 100.f;
-			float sc = exp * .55f + (f.dmg * f.hits >= t.hp ? 12.f : 0.f);
+			float sc = exp * .55f;
 			sc += t.ch.lv * .35f;
-			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 4.f;
+			if (!cornered) {
+				sc += hurtBias(t, f.dmg * f.hits >= t.hp, 12.f);
+				sc -= spread(t);
+			}
 			sc -= (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .35f : 0.f);
 			int gap = LayPath(x, z, bestStopL);
 			if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
@@ -10698,7 +10860,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 				if (kill && !suicide) sc += 110.f;
 				if (suicide) sc -= 50.f;
 			}
-			if (level >= 5 && focus >= 0) sc += (i == focus) ? 48.f : -10.f;
+			sc += focusBias(i, 48.f, 30.f, 18.f);
 			sc += place + r.F(0, 14.f * noise);
 			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
@@ -10752,7 +10914,11 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						Forecast f;
 						CalcForecast(b, ui, targets[k], s, f);
 						const Unit& q = b.u[targets[k]];
-						tot += f.dmg * f.hits * f.hit / 100.f * .55f + (f.dmg * f.hits >= q.hp ? 12.f : 0.f);
+						tot += f.dmg * f.hits * f.hit / 100.f * .55f;
+						if (!cornered) {
+							tot += hurtBias(q, f.dmg * f.hits >= q.hp, 8.f);
+							tot -= spread(q) * 0.45f;
+						}
 						if (f.dmg * f.hits >= q.hp) kill = 1;
 						if (!cornered) {
 							int fromMe = WalkStepsAt(q.x, q.z, q.deck);
@@ -10772,7 +10938,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						if (kill) sc += 110.f;
 					}
 				}
-				if (level >= 5 && focus >= 0 && sd.kind != SK_HEAL && sd.kind != SK_BUFF) sc += (i == focus) ? 36.f : -8.f;
+				if (sd.kind != SK_HEAL && sd.kind != SK_BUFF) sc += focusBias(i, 36.f, 22.f, 14.f);
 				sc += r.F(0, 10.f * noise);
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
 			}
@@ -10822,6 +10988,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						int fromMe = WalkStepsAt(t.x, t.z, t.deck);
 						if (fromMe >= 30000) fromMe = Dist(ox, oz, t.x, t.z);
 						sc += t.ch.lv * .25f - fromMe * 1.8f;
+						sc += hurtBias(t, f.dmg * f.hits >= t.hp, ougi ? 14.f : 10.f);
+						sc -= spread(t);
 					} else {
 						int gap = LayPath(x, z, bestStopL);
 						if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
@@ -10830,7 +10998,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						else if (gap >= 2) sc += 36.f;
 						if (f.dmg * f.hits >= t.hp && !(f.canCounter && f.cdmg * f.chits >= u.hp)) sc += 110.f;
 					}
-					if (level >= 5 && focus >= 0) sc += (i == focus) ? 28.f : -6.f;
+					sc += focusBias(i, 28.f, 18.f, 12.f);
 					sc += r.F(0, 10.f * noise);
 				}
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
@@ -10870,7 +11038,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			nearTy = Map::In(t.x, t.z) ? b.map.WalkY(t.x, t.z, t.deck) : nearTy;
 		}
 	}
-	if (level >= 5 && focus >= 0) FillWalkSteps(b, focus);
+	if (hunt && focus >= 0) FillWalkSteps(b, focus);
 	float bs = -1e9f;
 	int bestX = u.x, bestZ = u.z, bestL = u.deck, bestD = bd;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
@@ -10896,7 +11064,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			sc = -fabsf(y - nearTy) * 22.f - xz * 4.f - (float)stopC * .05f;
 			if (x == u.x && z == u.z) sc -= 8.f;
 		}
-		if (level >= 5 && focus >= 0) {
+		if (hunt && focus >= 0) {
 			int fd = WalkStepsAt(x, z, preferL);
 			if (fd >= 30000) {
 				const Unit& ft = b.u[focus];
@@ -12740,10 +12908,11 @@ static void JobFixTrial(CharData& c)
 	}
 	if (c.trialLv > 0 && c.trialFrom >= 0 && c.cls != c.trialFrom) {
 		EvoOption o[4];
-		int n = EvoOptions(c.trialFrom, o);
+		int n = EvoOptions(c.trialFrom, o, 1);
 		bool listed = false;
 		for (int k = 0; k < n; k++) if (o[k].target == c.cls) listed = true;
-		if (listed && ClassInfo(c.trialFrom).magic == ClassInfo(c.cls).magic) return;
+		bool hidden = c.cls >= C_JOB0 + TAC_JOB_N && c.cls < C_JOB0 + TAC_JOB_N + TAC_HID_N;
+		if (listed && (hidden || ClassInfo(c.trialFrom).magic == ClassInfo(c.cls).magic)) return;
 		int keep = c.trialLv;
 		c.trialLv = 0;
 		c.trialFrom = -1;
@@ -12783,6 +12952,8 @@ int JobLineOf(int cls)
 		if (f < 0 || f >= 8) return -1;
 		return kMap[f];
 	}
+	if (cls >= C_JOB0 + TAC_JOB_N && cls < C_JOB0 + TAC_JOB_N + TAC_HID_N)
+		return (cls - (C_JOB0 + TAC_JOB_N)) / 16;
 	return -1;
 }
 
@@ -12801,15 +12972,15 @@ int JobWrongStep(const CharData& c)
 	int root = c.jobPath[0];
 	if (root < 0 || JobLineOf(root) < 0) return -1;
 	int steps = JobStepsForLevel(c.lv);
-	if (steps > JOB_PATH_N) steps = JOB_PATH_N;
+	if (steps > JOB_STEP_N) steps = JOB_STEP_N;
 	if (steps < 2) return -1;
 	int n = 0;
-	for (; n < JOB_PATH_N && c.jobPath[n] >= 0; n++) {}
+	for (; n < JOB_STEP_N && JobSlot(c, n) >= 0; n++) {}
 	int limit = n < steps ? n : steps;
 	for (int i = 1; i < limit; i++)
-		if (JobLineFar(root, c.jobPath[i])) return i;
+		if (JobLineFar(root, JobSlot(c, i))) return i;
 	if (!JobLineFar(root, c.cls)) return -1;
-	for (int i = 0; i < limit; i++) if (c.jobPath[i] == c.cls) return -1;
+	for (int i = 0; i < limit; i++) if (JobSlot(c, i) == c.cls) return -1;
 	int at = n;
 	if (at >= steps) at = steps - 1;
 	if (at < 1) at = 1;
@@ -12901,14 +13072,14 @@ static bool JobLevelClamp(CharData& c)
 	int maxTier = JobStepsForLevel(c.lv);
 	if (ClassInfo(c.cls).tier <= maxTier) return false;
 	int newCls = -1, cut = -1;
-	for (int i = 0; i < JOB_PATH_N; i++) {
-		int v = c.jobPath[i];
+	for (int i = 0; i < JOB_STEP_N; i++) {
+		int v = JobSlot(c, i);
 		if (v < 0) break;
 		if (ClassInfo(v).tier <= maxTier) { newCls = v; cut = i; }
 	}
 	if (newCls < 0 || newCls == c.cls) return false;
 	c.cls = newCls;
-	for (int i = cut + 1; i < JOB_PATH_N; i++) c.jobPath[i] = -1;
+	for (int i = cut + 1; i < JOB_STEP_N; i++) JobSlotSet(c, i, i < JOB_PATH_N ? -1 : 0);
 	c.trialFrom = -1;
 	c.trialLv = 0;
 	return true;

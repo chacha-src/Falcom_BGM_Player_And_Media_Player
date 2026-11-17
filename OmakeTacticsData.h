@@ -485,7 +485,8 @@ enum SkillId {
 	SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELHOLY, SKL_ELDARK, SKL_ELWIND, SKL_ELEATH, SKL_ELPOISON,
 	SKL_MORE0,
 	SKL_WARP0 = SKL_MORE0 + 96,
-	SKL_COUNT = SKL_WARP0 + 8
+	SKL_HID0 = SKL_WARP0 + 8,          // 隠し職 13〜20。系統×枝×段×4
+	SKL_COUNT = SKL_HID0 + 96 * 4
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 enum FormKind {
@@ -520,6 +521,7 @@ void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap);
 void MonsterWeakText(int monster, wchar_t* out, int cap);
 const SkillDef& SkillInfo(int s);
 const wchar_t* SkillLabel(int s);
+const wchar_t* SkillBlurb(int s);
 // 表示名と効果範囲が同じ技。威力だけ違うときは呼び側が強い方を残す。
 bool SkillSameMenu(int a, int b);
 int PaceRoleOfLv(int lv);
@@ -549,7 +551,7 @@ struct CharData {
 	int jobPath[12]; // 1次職から順。-1 は空。version 6
 	int jobDone;     // 1=振り直し済み、または新規。0 は一度だけの案内が残っている
 	int skillBits[24]; // version 7。1語32技、0..767。reserved[6][7] は武具のまま
-	int skillPad[16];  // まだ未使用。次の拡張用
+	int skillPad[16];  // [0..7] は 13〜20次の職。0 は空。セーブサイズは変えない
 };
 #pragma pack(pop)
 
@@ -596,7 +598,7 @@ void CharGiveSkill(CharData& c, int s);
 
 // 進化
 struct EvoOption { int target; int needGroup; };   // needGroup=-1 で不問
-int EvoOptions(int cls, EvoOption out[4]);
+int EvoOptions(int cls, EvoOption out[4], int secret = 0); // secret=1 で 13次以降。ジョブツリーは 0
 int JobLineOf(int cls);                            // 0剣 1拳 2弓 3盗 4魔 5聖。不明は -1
 bool JobLineFar(int root, int cls);                // 起点の系統から大きく外れている
 int JobWrongStep(const CharData& c);               // 振り直しを始める段。0始まり。無しは -1
@@ -608,7 +610,7 @@ int EvoPartnersNeeded(const CharData& main);
 bool EvoGroupSatisfied(int needGroup, const CharData* partners, int n);
 void EvoApply(CharData& main, int target, const CharData* partners, int n);
 void EvoBrief(int cls, wchar_t* out, int cap);     // 進化先の説明。役割が分かる3行
-enum { JOB_PATH_N = 12 };
+enum { JOB_PATH_N = 12, JOB_STEP_N = 20, TAC_HID_N = 96 };
 int JobPathCount(const CharData& c);
 void JobPathText(const CharData& c, wchar_t* out, int cap);
 int JobStepsForLevel(int lv);
@@ -642,7 +644,7 @@ struct MonsterDef {
 	int nameB;         // 0未満なら nameTx だけ。0以上なら「形容 + 種族」
 	int weak[4];       // 弱点 1〜4。0 は空き。属性か、物理・魔法・近距離・遠距離
 	int ailWeak[2];    // 状態異常の弱点。0 は空き。EF_*
-	int footSpan;      // 追加敵の占有マス。0 は未確定。1..5 は足下に合わせた大きさ
+	int footSpan;      // 占有マス。0 は未確定。1..5 は胴が収まる大きさ。5 を超える胴は 5 に縮める
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);

@@ -92,8 +92,8 @@ void ThemeEnv(int th, Env& e)
 		{ { 48, 32, 72 }, { 140, 110, 150 }, { 90, 70, 110 }, { 130, 100, 150 }, { 70, 55, 78 }, .4f, .62f, .65f, .52f, .52f, { 168, 158, 176 } },
 		{ { 40, 48, 90 }, { 210, 200, 230 }, { 160, 170, 200 }, { 180, 190, 220 }, { 90, 90, 110 }, .25f, .8f, .4f, .5f, .45f, { 186, 190, 210 } },
 		{ { 150, 170, 200 }, { 220, 228, 236 }, { 190, 200, 214 }, { 180, 190, 210 }, { 140, 150, 160 }, .4f, .9f, .25f, .7f, .35f, { 176, 186, 198 } },
-		{ { 255, 214, 120 }, { 255, 248, 220 }, { 255, 230, 170 }, { 255, 220, 150 }, { 255, 236, 190 }, .2f, .98f, .15f, .85f, .28f, { 255, 236, 170 } },
-		{ { 255, 120, 176 }, { 186, 230, 255 }, { 255, 190, 220 }, { 255, 160, 200 }, { 255, 200, 220 }, .35f, .9f, .25f, .7f, .4f, { 255, 150, 190 } },
+		{ { 86, 72, 138 }, { 196, 158, 108 }, { 150, 124, 92 }, { 176, 146, 104 }, { 112, 88, 64 }, .42f, .7f, .34f, .46f, .58f, { 168, 146, 108 } },
+		{ { 96, 54, 118 }, { 142, 176, 204 }, { 150, 108, 140 }, { 168, 112, 142 }, { 108, 64, 88 }, .4f, .66f, .34f, .44f, .56f, { 158, 88, 118 } },
 	};
 	const T& t = k[Clampi(th, 0, TH_COUNT - 1)];
 	e.skyTop = RGBA8(t.top[0], t.top[1], t.top[2]);
@@ -2211,6 +2211,32 @@ void Game::UiOk()
 	TacSfx(id);
 }
 
+static void UiRoleRgb(int id, int& r, int& g, int& b)
+{
+	r = 58; g = 78; b = 128;
+	auto set = [&](int rr, int gg, int bb) { r = rr; g = gg; b = bb; };
+	if (id == ID_PT_DELETE || id == ID_SLOT_DEL || id == ID_SHOP_SELLALL || id == ID_SHOP_SELLJUNK || id == ID_SHOP_ARM_SELL)
+		set(156, 58, 52);
+	else if (id == ID_BASE_CLOSE || id == ID_HELP_CLOSE || id == ID_CR_BACK || id == ID_PT_NO || id == ID_PT_BACK || id == ID_EV_BACK
+		|| id == ID_SORTIE_CANCEL || id == ID_SHOP_CLOSE || id == ID_EQ_CLOSE || id == ID_SLOT_BACK || id == ID_SLOT_NO
+		|| id == ID_JOB_NO || id == ID_JOB_BACK || id == ID_JOB_SKIP || id == ID_GROW_BACK || id == ID_SHOP_ASK_NO || id == ID_SHOP_FIT_NO
+		|| id == ID_SHOP_SLOT_NO || id == ID_SELL_NO || id == ID_EQ_NONE || id == ID_RS_BASE || id == ID_SHOP_ARM_NO)
+		set(118, 90, 62);
+	else if (id == ID_CR_OK || id == ID_PT_YES || id == ID_PT_DEPLOY || id == ID_SORTIE_START || id == ID_EV_DO || id == ID_JOB_GO
+		|| id == ID_JOB_YES || id == ID_SLOT_YES || id == ID_SELL_OK || id == ID_RS_NEXT || id == ID_SHOP_ASK_YES)
+		set(42, 124, 78);
+	else if (id == ID_RS_RETRY || id == ID_BASE_REROLL)
+		set(168, 112, 42);
+	else if (id == ID_BASE_SORTIE) set(32, 118, 138);
+	else if (id == ID_BASE_CREATE || id == ID_PT_NEW) set(168, 116, 46);
+	else if (id == ID_BASE_PARTY) set(58, 96, 176);
+	else if (id == ID_BASE_EVOLVE || id == ID_PT_EVO) set(118, 72, 158);
+	else if (id == ID_BASE_SHOP || id == ID_PT_SHOP) set(158, 122, 40);
+	else if (id == ID_BASE_CODEX || id == ID_CDX_GROW || id == ID_CDX_ALCH || id == ID_CDX_SKILL || id == ID_CDX_BRANCH || id == ID_MON_TAB)
+		set(72, 78, 158);
+	else if (id == ID_BASE_HELP) set(48, 112, 124);
+}
+
 BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label, BOOL en, BOOL sel, float px, DWORD tint)
 {
 	int sfx = m_btnSfx;
@@ -2241,8 +2267,13 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 		bot = RGBA8(r / 2, g / 2, b / 2, en ? 235 : 210);
 	} else if (!en) { top = RGBA8(58, 58, 66, 210); bot = RGBA8(38, 38, 46, 210); }
 	else if (sel) { top = RGBA8(240, 200, 100); bot = RGBA8(176, 122, 40); }
-	else if (hov || foc) { top = RGBA8(96, 118, 186); bot = RGBA8(52, 64, 120); }
-	else { top = RGBA8(58, 66, 104, 238); bot = RGBA8(30, 34, 62, 238); }
+	else {
+		int r, g, b;
+		UiRoleRgb(id, r, g, b);
+		if (hov || foc) { r = min(255, r + 36); g = min(255, g + 32); b = min(255, b + 18); }
+		top = RGBA8(r, g, b, 238);
+		bot = RGBA8(r * 45 / 100, g * 45 / 100, b * 45 / 100, 235);
+	}
 	DWORD fill = RGBA8(
 		((top & 255) + (bot & 255)) / 2,
 		(((top >> 8) & 255) + ((bot >> 8) & 255)) / 2,
@@ -2809,7 +2840,7 @@ void Game::DrawSkillTip()
 	if (m_skillTip == 0) {
 		const SkillDef& sd = SkillInfo(m_skillTipId);
 		wcscpy_s(title, SkillLabel(m_skillTipId));
-		wcscpy_s(body, TT(sd.descTx));
+		wcscpy_s(body, SkillBlurb(m_skillTipId));
 		if (sd.kind != SK_PASSIVE) {
 			wchar_t tag[32];
 			if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(tag, L"%s%d", CraftShapeName(sd.area, sd.shape), sd.area);
@@ -2943,6 +2974,91 @@ void Game::InvalidatePortraits()
 	}
 }
 
+static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, int slot, BOOL live, float dt)
+{
+	struct Bit { V3 p, v; float life, max, spin, stretch, size; float cr, cg, cb; int on; int add; };
+	static Bit mote[Renderer::PORTRAIT_N][16];
+	static float held[Renderer::PORTRAIT_N];
+	static unsigned frame[Renderer::PORTRAIT_N];
+	static int who[Renderer::PORTRAIT_N];
+	if (slot < 0 || slot >= Renderer::PORTRAIT_N) return;
+	if (a.wings <= 0 || a.wingGrade <= 0) return;
+	int id = a.model * 17 + a.wingGrade * 3 + a.wings + (live ? 100000 : 0);
+	if (who[slot] != id) {
+		who[slot] = id;
+		held[slot] = a.wingPh;
+		for (int i = 0; i < 16; i++) mote[slot][i].on = 0;
+	}
+	if (frame[slot] != r.m_frame) {
+		frame[slot] = r.m_frame;
+		if (dt < 0.f) dt = 0.f;
+		if (dt > 0.05f) dt = 0.05f;
+		if (!live) {
+			float sp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
+			a.wingPh += dt * sp;
+		}
+		float prev = sinf(held[slot]);
+		float now = sinf(a.wingPh);
+		held[slot] = a.wingPh;
+		if (a.wingTear < 0.2f && prev > 0.55f && now <= 0.55f) {
+			int per = a.flap > 0.5f ? 4 : 3;
+			for (int side = 0; side < 2; side++) for (int k = 0; k < per; k++) {
+				float sgn = side ? -1.f : 1.f;
+				float along = 0.4f + (float)k * 0.18f;
+				V3 pos, out, sweep;
+				if (!WingSweepDir(r, a, world, side, along, pos, out, sweep)) {
+					pos = v3(sgn * (0.35f + along * 0.7f), a.height * 0.62f, -0.05f);
+					out = v3(sgn, 0.f, 0.f);
+					sweep = v3(0.f, -1.5f, 0.f);
+				}
+				int slotB = -1;
+				for (int i = 0; i < 16; i++) if (!mote[slot][i].on) { slotB = i; break; }
+				if (slotB < 0) slotB = (side * per + k) % 16;
+				Bit& b = mote[slot][slotB];
+				b.on = 1;
+				b.p = pos + out * 0.1f;
+				b.v = sweep + out * 0.2f;
+				if (b.v.y > 0.05f) b.v.y = -0.4f;
+				b.max = 1.8f;
+				b.life = 1.45f;
+				b.size = 0.26f + along * 0.12f;
+				b.spin = along * 4.f;
+				b.stretch = side ? 5.f : -5.f;
+				b.add = a.wingGrade >= 2 ? 1 : 0;
+				if (a.wingGrade >= 3) { b.cr = 0.98f; b.cg = 0.7f; b.cb = 0.86f; }
+				else if (a.wingGrade == 2) { b.cr = 1.f; b.cg = 0.94f; b.cb = 0.76f; }
+				else { b.cr = 0.96f; b.cg = 0.8f; b.cb = 0.52f; }
+			}
+		}
+		for (int i = 0; i < 16; i++) {
+			Bit& b = mote[slot][i];
+			if (!b.on) continue;
+			b.life -= dt;
+			if (b.life <= 0.f) { b.on = 0; continue; }
+			b.v.y -= 4.6f * dt;
+			float drag = expf(-0.4f * dt);
+			b.v.x *= drag; b.v.y *= drag; b.v.z *= drag;
+			b.p = b.p + b.v * dt;
+			b.spin += b.stretch * dt;
+		}
+	}
+	Particle ps[16];
+	int n = 0;
+	for (int i = 0; i < 16; i++) {
+		const Bit& b = mote[slot][i];
+		if (!b.on) continue;
+		Particle& q = ps[n++];
+		memset(&q, 0, sizeof(q));
+		q.p = b.p; q.v = b.v;
+		q.life = b.life; q.max = b.max;
+		q.size = b.size; q.size1 = b.size * 0.75f;
+		q.r = b.cr; q.g = b.cg; q.b = b.cb; q.a = 1.f;
+		q.shape = 8; q.spin = b.spin; q.stretch = b.stretch; q.add = b.add;
+	}
+	if (n > 0) r.DrawParticles(ps, n, NULL);
+	(void)g;
+}
+
 BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody, BOOL live)
 {
 	if (!live) {
@@ -2996,8 +3112,8 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		float ht = a.htScale > 0.05f ? a.htScale : 1.f;
 		look.x *= ht; look.y *= ht; look.z *= ht;
 		chest.x *= ht; chest.y *= ht; chest.z *= ht;
-		look.y = Lerpf(look.y, chest.y, a.wings > 0 ? .55f : .28f);
-		d = (a.height / ht) * (a.wings > 0 ? 1.05f : .78f);
+		look.y = Lerpf(look.y, chest.y, a.wings > 0 ? .12f : .06f);
+		d = (a.height / ht) * (a.wings > 0 ? .46f : .34f);
 		eye = look + v3(d * .06f, d * .02f, -d);
 	} else if (!a.proc) {
 		look = ActorJointWorld(a, world, 0);
@@ -3027,8 +3143,37 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	}
 	m_r.BeginMainPass();
 	BOOL drew = ActorDraw(m_r, m_lib, a, world, dp, m_time);
+	PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
 	m_r.EndPortrait();
 	return drew;
+}
+
+static void PortraitJobBg(int cls, DWORD& bg0, DWORD& bg1)
+{
+	int line = JobLineOf(cls);
+	if (line < 0 || line > 5) line = 0;
+	int tier = 1;
+	if (cls >= 0) {
+		int t = ClassInfo(cls).tier;
+		if (t >= 1 && t <= 20) tier = t;
+	}
+	static const int k[6][3] = {
+		{ 86, 118, 176 },
+		{ 184, 82, 66 },
+		{ 62, 138, 88 },
+		{ 124, 82, 164 },
+		{ 78, 90, 188 },
+		{ 184, 152, 70 }
+	};
+	float u = (tier - 1) / 19.f;
+	int r = (int)(k[line][0] * (0.78f + u * 0.34f) + u * 18.f);
+	int g = (int)(k[line][1] * (0.78f + u * 0.30f) + u * 12.f);
+	int b = (int)(k[line][2] * (0.80f + u * 0.24f) + (1.f - u) * 8.f);
+	if (r < 28) r = 28; if (r > 214) r = 214;
+	if (g < 24) g = 24; if (g > 200) g = 200;
+	if (b < 24) b = 24; if (b > 206) b = 206;
+	bg0 = RGBA8(r, g, b);
+	bg1 = RGBA8(r, g, b);
 }
 
 void Game::RenderPortraits()
@@ -3079,13 +3224,19 @@ void Game::RenderPortraits()
 			int ui = want - 100;
 			const Unit& u = m_b.u[ui];
 			if (ui >= 0 && ui < MAX_UNITS && m_act[ui].model >= 0) {
-				DWORD bg0 = u.team == TEAM_PLAYER ? RGBA8(70, 110, 190) : (UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60)));
-				DWORD bg1 = u.team == TEAM_PLAYER ? RGBA8(20, 30, 70) : (UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20));
+				DWORD bg0, bg1;
+				if (u.team == TEAM_PLAYER) PortraitJobBg(u.ch.cls, bg0, bg1);
+				else {
+					bg0 = UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60));
+					bg1 = UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20);
+				}
 				return RenderActorPortrait(s, m_act[ui], bg0, bg1, u.team != TEAM_PLAYER, TRUE);
 			}
 			if (u.team == TEAM_PLAYER) {
 				fillChar(s, want, u.ch);
-				return RenderActorPortrait(s, m_ptCache[s], RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
+				DWORD bg0, bg1;
+				PortraitJobBg(u.ch.cls, bg0, bg1);
+				return RenderActorPortrait(s, m_ptCache[s], bg0, bg1, 0, FALSE);
 			}
 			const MonsterDef& md = MonsterInfo(u.monster);
 			if (m_ptCacheWant[s] != want || m_ptCacheLook[s] != u.monster) {
@@ -3100,11 +3251,13 @@ void Game::RenderPortraits()
 			const CharData& c = m_save.roster[want - 1];
 			if (!c.used) return FALSE;
 			Actor* sh = showOf(want - 1);
+			DWORD bg0, bg1;
+			PortraitJobBg(c.cls, bg0, bg1);
 			if (sh && sh->model >= 0 && sh->poseValid) {
-				return RenderActorPortrait(s, *sh, RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, TRUE);
+				return RenderActorPortrait(s, *sh, bg0, bg1, 0, TRUE);
 			}
 			fillChar(s, want, c);
-			return RenderActorPortrait(s, m_ptCache[s], RGBA8(70, 110, 190), RGBA8(20, 30, 70), 0, FALSE);
+			return RenderActorPortrait(s, m_ptCache[s], bg0, bg1, 0, FALSE);
 		}
 		return FALSE;
 	};
@@ -3197,6 +3350,11 @@ void Game::Burst(V3 p, int n, float spd, float size, float life, float r, float 
 	}
 }
 
+static BOOL WingDownbeat(float prev, float now)
+{
+	return prev > 0.55f && now <= 0.55f;
+}
+
 void Game::ShedFeathers(const Actor& a, V3 origin, float face, BOOL hard)
 {
 	if (m_parts.size() > 4800) return;
@@ -3205,39 +3363,43 @@ void Game::ShedFeathers(const Actor& a, V3 origin, float face, BOOL hard)
 		float hs = a.htScale > 0.05f ? a.htScale : 1.f;
 		if (hs < 0.999f || hs > 1.001f) world = MMul(MScale(hs, hs, hs), world);
 	}
-	int per = hard ? 4 : 2;
-	float drop = hard ? 1.55f : 0.65f;
+	int per = hard ? 8 : 5;
 	float fx = sinf(face), fz = cosf(face);
 	float rx = fz, rz = -fx;
 	for (int side = 0; side < 2; side++) {
 		float s = side ? -1.f : 1.f;
 		for (int i = 0; i < per; i++) {
-			float along = m_rng.F(0.58f, 1.f);
-			V3 pos, out;
-			if (!WingSpanPoint(m_r, a, world, side, along, pos, out)) {
-				float span = m_rng.F(0.32f, 0.85f);
+			float along = m_rng.F(0.42f, 1.f);
+			V3 pos, out, sweep;
+			if (!WingSweepDir(m_r, a, world, side, along, pos, out, sweep)) {
+				float span = m_rng.F(0.35f, 1.05f);
 				pos = v3(origin.x + rx * s * span, origin.y + a.height * 0.62f, origin.z + rz * s * span);
 				out = v3(rx * s, 0.f, rz * s);
+				sweep = v3(0.f, -1.6f, 0.f);
 			}
 			Particle q = {};
-			q.p = pos;
-			q.v = out * m_rng.F(0.22f, 0.75f);
-			q.v.y -= drop * m_rng.F(0.65f, 1.15f);
-			q.v.x += m_rng.F(-0.18f, 0.18f);
-			q.v.z += m_rng.F(-0.18f, 0.18f);
-			q.life = q.max = m_rng.F(1.5f, 2.5f);
-			q.size = m_rng.F(0.10f, 0.16f);
-			q.size1 = q.size * 0.82f;
-			if (a.wingGrade >= 3) { q.r = 0.95f; q.g = m_rng.F(0.58f, 0.74f); q.b = m_rng.F(0.72f, 0.86f); }
-			else if (a.wingGrade == 2) { q.r = 0.98f; q.g = m_rng.F(0.88f, 0.96f); q.b = m_rng.F(0.68f, 0.80f); }
-			else { q.r = m_rng.F(0.78f, 0.90f); q.g = m_rng.F(0.66f, 0.78f); q.b = m_rng.F(0.42f, 0.55f); }
-			q.a = 0.94f;
+			q.p = pos + out * 0.1f;
+			// 初速は翼がその瞬間に動いている向き。上には足さない。
+			V3 v = sweep + out * (hard ? 0.85f : 0.22f);
+			if (hard) v.y -= 1.3f;
+			if (v.y > 0.05f) v.y = -0.35f;
+			q.v = v * m_rng.F(0.88f, 1.12f);
+			q.v.x += m_rng.F(-0.12f, 0.12f);
+			q.v.z += m_rng.F(-0.12f, 0.12f);
+			q.max = m_rng.F(hard ? 1.8f : 1.6f, hard ? 3.1f : 2.6f);
+			q.life = q.max * 0.82f;
+			q.size = m_rng.F(hard ? 0.28f : 0.22f, hard ? 0.52f : 0.40f);
+			q.size1 = q.size * 0.72f;
+			if (a.wingGrade >= 3) { q.r = 0.98f; q.g = m_rng.F(0.62f, 0.78f); q.b = m_rng.F(0.78f, 0.92f); }
+			else if (a.wingGrade == 2) { q.r = 1.f; q.g = m_rng.F(0.9f, 0.98f); q.b = m_rng.F(0.7f, 0.84f); }
+			else { q.r = m_rng.F(0.9f, 1.f); q.g = m_rng.F(0.74f, 0.86f); q.b = m_rng.F(0.46f, 0.6f); }
+			q.a = 1.f;
 			q.shape = 8;
-			q.add = 0;
-			q.grav = m_rng.F(1.7f, 2.5f);
-			q.stretch = m_rng.F(-6.5f, 6.5f);
+			q.add = a.wingGrade >= 2 ? 1 : 0;
+			q.grav = m_rng.F(4.2f, 5.4f);
+			q.stretch = m_rng.F(-7.5f, 7.5f);
 			q.spin = m_rng.F(0.f, 6.2832f);
-			q.drag = m_rng.F(0.95f, 1.4f);
+			q.drag = m_rng.F(0.28f, 0.48f);
 			q.wxHit = 9;
 			q.nHit = 0;
 			m_parts.push_back(q);
@@ -3815,11 +3977,11 @@ void Game::UpdateParticles(float dt)
 						if (!onLand(16.f, 0.6f, 2.2f, at)) continue;
 						born(10, at, v3(m_rng.F(-0.15f, 0.15f), 0.35f, m_rng.F(-0.12f, 0.12f)), 2.4f, 0.02f, 0.82f, 0.9f, 1.f, 1, 0.05f, 0.35f);
 					} else if (theme == TH_HEAVEN) {
-						if (!onLand(16.f, 1.2f, 4.8f, at)) continue;
-						born(3, at, v3(wx * 0.18f, m_rng.F(0.15f, 0.55f), wz * 0.18f), 3.8f, 0.04f, 1.f, 0.96f, 0.82f, 1, -0.2f, 0.7f);
+						if (!onLand(16.f, 2.6f, 7.2f, at)) continue;
+						born(3, at, v3(wx * 0.12f, m_rng.F(0.08f, 0.28f), wz * 0.12f), 3.2f, 0.026f, 0.78f, 0.64f, 0.38f, 0, -0.08f, 0.4f);
 					} else if (theme == TH_MARCHEN) {
-						if (!onLand(16.f, 0.4f, 2.4f, at)) continue;
-						born(2, at, v3(wx * 0.16f, m_rng.F(-0.15f, 0.2f), wz * 0.16f), 3.2f, 0.045f, 1.f, 0.62f, 0.78f, 2, 0.4f, 0.9f);
+						if (!onLand(16.f, 1.6f, 4.2f, at)) continue;
+						born(2, at, v3(wx * 0.12f, m_rng.F(-0.08f, 0.12f), wz * 0.12f), 2.8f, 0.03f, 0.68f, 0.34f, 0.5f, 0, 0.22f, 0.55f);
 					} else {
 						if (!onLand(16.f, 1.8f, 4.f, at)) continue;
 						born(0, at, v3(wx * 0.2f, 0.2f, wz * 0.2f), 2.4f, 0.038f, 0.9f, 0.92f, 1.f, 1, 0.3f, 0.8f);
@@ -4189,9 +4351,9 @@ void Game::UpdateParticles(float dt)
 		} else if (p.wxHit == 9) {
 			if (p.nHit == 0) {
 				float seed = p.size * 47.f + p.p.x;
-				p.v.x += sinf(m_time * 6.2f + seed) * dt * 1.7f;
-				p.v.z += cosf(m_time * 5.1f + seed * 1.2f) * dt * 1.4f;
-				p.v.y += sinf(m_time * 7.4f + seed) * dt * 0.75f;
+				p.v.x += sinf(m_time * 6.2f + seed) * dt * 0.55f;
+				p.v.z += cosf(m_time * 5.1f + seed * 1.2f) * dt * 0.45f;
+				p.v.y += sinf(m_time * 7.4f + seed) * dt * 0.18f;
 			}
 			p.spin += p.stretch * dt;
 			p.stretch *= expf((p.nHit == 0 ? -0.35f : -2.5f) * dt);
@@ -4336,7 +4498,7 @@ void Game::UpdateParticles(float dt)
 				}
 			}
 		}
-		if (p.wxHit == 9 && p.nHit == 0 && p.v.y <= 0.f && (m_screen == SC_BATTLE || m_showBuilt)) {
+		if (p.wxHit == 9 && p.nHit == 0 && p.v.y <= 0.f && p.p.y > -20.f && (m_screen == SC_BATTLE || m_showBuilt)) {
 			const Map& gm = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
 			int ix = (int)floorf(p.p.x), iz = (int)floorf(p.p.z);
 			if (Map::In(ix, iz)) {
@@ -4358,6 +4520,13 @@ void Game::UpdateParticles(float dt)
 					}
 				}
 			}
+		} 
+		if (p.wxHit == 9 && p.nHit == 0 && p.v.y <= 0.f && p.p.y < -20.f && prev.y > -49.98f && p.p.y <= -49.97f) {
+			p.p.y = -49.96f;
+			p.v.x *= 0.12f; p.v.z *= 0.12f; p.v.y = 0.f;
+			p.grav = 0.f;
+			p.nHit = 1;
+			if (p.life > 0.7f) p.life = 0.7f;
 		}
 		++i;
 	}
@@ -4427,7 +4596,28 @@ void Game::UpdateParticles(float dt)
 		float windAng = 0.6f + sinf(m_time * 0.13f) * 0.4f;
 		V3 wind = v3(cosf(windAng), 0, sinf(windAng));
 		float gust = (wxG == WX_RAIN || wxG == WX_STORM) ? TacBurst(m_time) : 0.f;
-		m_r.TickWxGpu(dt, wxG, fwd, side, wind, gust, nAct, act, hgt);
+		float heat = 0.f;
+		{
+			int theme = -1, hour = HR_NOON, wHeat = wxG;
+			if (m_screen == SC_BATTLE) { theme = m_b.map.theme; hour = TacHour(m_b.weather); }
+			else if (m_screen == SC_BASE && m_showBuilt) {
+				int hw = 0, hr = 0;
+				HomeSky(hw, hr);
+				theme = m_showMap.theme;
+				hour = hr;
+			}
+			float day = 0.f;
+			if (hour == HR_NOON) day = 1.f;
+			else if (hour == HR_MORNING) day = 0.72f;
+			else if (hour == HR_DUSK) day = 0.28f;
+			if (theme == TH_CANYON) heat = 0.62f * day;
+			else if (theme == TH_DESERT) heat = day;
+			else if (theme == TH_VOLCANO) heat = day > 0.75f ? day : 0.75f;
+			if (wHeat == WX_HEAT && heat < 0.9f) heat = 0.9f;
+			if (wHeat == WX_RAIN) heat *= 0.12f;
+			if (wHeat == WX_STORM || wHeat == WX_SNOW || wHeat == WX_HAIL) heat = 0.f;
+		}
+		m_r.TickWxGpu(dt, wxG, fwd, side, wind, gust, nAct, act, hgt, heat);
 	}
 	if (m_wxMesh && m_screen == SC_BATTLE) {
 		m_wxMeshWait -= dt;
@@ -5633,12 +5823,12 @@ void Game::UpdateBase(float dt)
 	for (int i = 0; i < m_showN; i++) {
 		Actor& a = m_showAct[i];
 		ActorUpdate(a, dt);
-		if (a.wings <= 0 || a.wingGrade <= 0) continue;
+		if (a.wings <= 0 || a.wingGrade <= 0 || a.wingTear > 0.2f) continue;
 		float sp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
 		float prev = sinf(a.wingPh);
 		a.wingPh += dt * sp;
 		float now = sinf(a.wingPh);
-		if (prev > 0.15f && now <= 0.15f) {
+		if (WingDownbeat(prev, now)) {
 			float face = 0.f;
 			if (m_showMap.nE > 0)
 				face = atan2f((m_showMap.eStartX[0] + .5f) - m_showPos[i].x, (m_showMap.eStartZ[0] + .5f) - m_showPos[i].z);
@@ -5647,6 +5837,46 @@ void Game::UpdateBase(float dt)
 	}
 	if (m_screen == SC_CREATE) {
 		ActorUpdate(m_preview, dt);
+		Actor& pv = m_preview;
+		V3 pvPos = v3(0.f, -50.f + pv.hover, 0.f);
+		if (pv.wings > 0 && m_previewWing && !m_previewGround && pv.clip == CL_DEATH && pv.t < 4.f) {
+			if (pv.wingTear < 0.03f) {
+				ShedFeathers(pv, pvPos, m_previewYaw, TRUE);
+				pv.wingTear = 0.03f;
+				pv.hover = 0.f;
+				pv.flap = 0.f;
+			}
+			pv.wingTear = min(1.f, pv.wingTear + dt * 1.35f);
+		} else if (pv.wings > 0 && pv.clip == CL_SPAWN) {
+			pv.wingTear = 1.f;
+			pv.hover = 0.f;
+			pv.flap = 0.f;
+		} else if (pv.wingHop > 0.f) {
+			float dur = 0.72f;
+			float uHop = 1.f - pv.wingHop / dur;
+			if (uHop < 0.f) uHop = 0.f;
+			if (uHop > 1.f) uHop = 1.f;
+			pv.hover = sinf(uHop * 3.14159265f) * 0.9f;
+			pv.wingTear = 1.f - Clampf((uHop - 0.12f) / 0.5f, 0.f, 1.f);
+			if (uHop > 0.28f) {
+				pv.flap = 1.f;
+				pv.wingPh += dt * 11.f;
+			}
+			pv.wingHop -= dt;
+			if (pv.wingHop <= 0.f) {
+				pv.wingHop = 0.f;
+				pv.wingTear = 0.f;
+				pv.hover = 0.35f;
+				if (pv.clip != CL_WALK && pv.clip != CL_RUN) pv.flap = 0.f;
+			}
+		} else if (pv.wings > 0 && pv.wingGrade > 0 && m_previewWing && pv.wingTear <= 0.001f) {
+			float sp = pv.flap > 0.5f ? 11.f : (pv.hover > 0.f ? 5.2f : 2.2f);
+			float prev = sinf(pv.wingPh);
+			pv.wingPh += dt * sp;
+			float now = sinf(pv.wingPh);
+			if (WingDownbeat(prev, now))
+				ShedFeathers(pv, v3(0.f, -50.f + pv.hover, 0.f), m_previewYaw, pv.flap > 0.5f);
+		}
 		AdvancePreviewMot();
 	}
 	if (m_zoomHold) ApplyZoomHold(dt);
@@ -6625,6 +6855,7 @@ void Game::DrawCodex()
 		if (jPages > 1 && Btn(ID_CDX_JNEXT, x + w - U(24) - arrowW, jy, arrowW, jh, L"▶")) m_codexJobPage = (m_codexJobPage + 1) % jPages;
 		auto jobHas = [&](int s) -> BOOL {
 			if (SkillInfo(s).enemyOnly) return FALSE;
+			if (s >= SKL_HID0) return FALSE;
 			if (m_codexJob == -1) return IsFormSkill(s);
 			if (IsFormSkill(s)) return m_codexFam == 0 && m_codexJob == 0;
 			if (m_codexJob > 0) return CodexLearnLv(m_codexJob, s) > 0;
@@ -6734,7 +6965,7 @@ void Game::DrawCodex()
 			if (attr[0]) m_r.HudText(attr, x + U(24), yy + U(12), FitTextPx(attr, textW, U(13), 1), RGBA8(255, 214, 140), 0, 1);
 			swprintf_s(row, L"%s   MP%d   %s", hits[i].name, hits[i].mp, hits[i].how);
 			m_r.HudText(row, x + U(24), yy + U(32), FitTextPx(row, textW, U(15), 1), RGBA8(240, 240, 245), 0, 1);
-			m_r.HudText(TT(sd.descTx), x + U(36), yy + U(52), FitTextPx(TT(sd.descTx), textW - U(12), U(12), 0), RGBA8(190, 200, 220), 0, 0);
+			m_r.HudText(SkillBlurb(hits[i].skill), x + U(36), yy + U(52), FitTextPx(SkillBlurb(hits[i].skill), textW - U(12), U(12), 0), RGBA8(190, 200, 220), 0, 0);
 			yy += rowH;
 		}
 		wchar_t pg[32];
@@ -6844,6 +7075,7 @@ void Game::DrawCodex()
 				EvoOption o[4];
 				for (int k = 0; k < nr && n < 4; k++) {
 					if (raw[k].target < 0) continue;
+					if (ClassInfo(raw[k].target).tier >= 13) continue;
 					if (m_growPath[0] >= 0 && JobLineFar(m_growPath[0], raw[k].target)) continue;
 					o[n++] = raw[k];
 				}
@@ -9895,7 +10127,12 @@ void Game::AdvancePreviewMot()
 	if (m_previewGround) fly = FALSE;
 	PlayShown(a, m_previewMot, style, idle, fly, TRUE, TRUE);
 	if (a.blendDur < 0.30f) a.blendDur = 0.30f;
-	if (fly && m_previewWing && a.hover < 0.2f) a.hover = 0.35f;
+	if (fly && m_previewWing && !m_previewGround && a.wings > 0) {
+		a.wingHop = 0.72f;
+		a.wingTear = 1.f;
+		a.hover = 0.f;
+		a.flap = 0.f;
+	} else if (fly && m_previewWing && a.hover < 0.2f) a.hover = 0.35f;
 	ApplyCreatePreview(a, m_previewWing, m_previewGround);
 }
 
@@ -10003,6 +10240,16 @@ void Game::DrawCreate3D()
 	m_r.BeginInstBatch();
 	ActorDraw(m_r, m_lib, a, aw, dp, m_time);
 	m_r.EndInstBatch();
+	{
+		Particle feather[96];
+		int nf = 0;
+		for (size_t i = 0; i < m_parts.size() && nf < 96; i++) {
+			const Particle& q = m_parts[i];
+			if (q.life <= 0.f || q.shape != 8 || q.p.y > -20.f) continue;
+			feather[nf++] = q;
+		}
+		if (nf > 0) m_r.DrawParticles(feather, nf);
+	}
 	if (m_previewRain) m_r.DrawWxGpu();
 	m_r.SetStageWind(TRUE);
 	m_r.SetPreviewPost(TRUE);
@@ -11117,7 +11364,7 @@ void Game::DoEvolve()
 	}
 	if (EvoTrialOpen(mc)) {
 		EvoOption allow[4];
-		int na = EvoOptions(mc.trialFrom, allow);
+		int na = EvoOptions(mc.trialFrom, allow, 1);
 		bool ok = m_evTarget == mc.trialFrom;
 		for (int k = 0; k < na; k++) if (allow[k].target == m_evTarget) ok = true;
 		if (!ok) return;
@@ -11657,7 +11904,7 @@ void Game::DrawEvolveUi()
 		if (!c.used || (!EvoMainEligible(c) && !EvoTrialOpen(c))) continue;
 		if (!EvoTrialOpen(c)) {
 			EvoOption opt[4];
-			if (EvoOptions(c.cls, opt) == 0) continue;
+			if (EvoOptions(c.cls, opt, 1) == 0) continue;
 		}
 		mains[nElig++] = i;
 	}
@@ -11723,7 +11970,7 @@ void Game::DrawEvolveUi()
 		stayLb[0] = 0;
 		if (stayCls >= 0) swprintf_s(stayLb, L"%s(%s)", TT(TX_EV_REVERT), ClassName(mc.cls));
 		EvoOption opt[4];
-		int no = EvoOptions(trial ? mc.trialFrom : mc.cls, opt);
+		int no = EvoOptions(trial ? mc.trialFrom : mc.cls, opt, 1);
 		for (int k = 0; k < no && nt < 4; k++) {
 			if (trial && opt[k].target == mc.cls) continue;
 			tgt[nt++] = opt[k].target;
@@ -11801,7 +12048,7 @@ void Game::DrawEvolveUi()
 		int need = EvoPartnersNeeded(mc);
 		int needGroup = -1;
 		EvoOption opt[4];
-		int no = EvoOptions(mc.cls, opt);
+		int no = EvoOptions(mc.cls, opt, 1);
 		for (int k = 0; k < no; k++) if (opt[k].target == m_evTarget) needGroup = opt[k].needGroup;
 		int needLv = ClassInfo(mc.cls).tier >= 2 ? 15 : 5;
 		wchar_t hdr[96];

@@ -684,7 +684,8 @@ struct save{
 	int mpTempOpen;
 
 	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
-	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote/VST(1024・常時)/MIDI(4096・常時)/CD(2048・常時)/Maze/Race
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。ビットは MpBotToolBit。
+	// 旧Race(512)はおまけ(256)へ統合。VST/MIDI/CD は mpBotToolsRev>=1 以降、常時強制しない。
 	int mpBotToolsInited;
 	int mpBotToolsFlags;
 
@@ -1015,8 +1016,60 @@ struct save{
 	};
 	UiSubGeomBank uiFc;
 	UiSubGeomBank uiMp;
+
+	// --- 底バー短縮ボタンの世代(末尾追記。旧.datは0) ---
+	// 0→1 の一度だけ、らいらX・ささみ・録音・キャプチャを既定ONにし、VST/CD/MIDI の常時強制をやめる。
+	int mpBotToolsRev;
 };
 extern save savedata;
+
+// メディアプレイヤー底バーの表示ビット。savedata.mpBotToolsFlags。
+enum MpBotToolBit {
+	kMpBotDj = 1,
+	kMpBotTag = 2,
+	kMpBotBpm = 4,
+	kMpBotSleep = 8,
+	kMpBotMirror = 16,
+	kMpBotSs = 32,
+	kMpBotAlarm = 64,
+	kMpBotRemote = 128,
+	kMpBotOmake = 256,
+	kMpBotRaceLegacy = 512,
+	kMpBotVst = 1024,
+	kMpBotCd = 2048,
+	kMpBotMidi = 4096,
+	kMpBotRairaX = 1 << 13,
+	kMpBotSasami = 1 << 14,
+	kMpBotRec = 1 << 15,
+	kMpBotCap = 1 << 16,
+	kMpBotSettings = 1 << 17,
+	kMpBotFolder = 1 << 18,
+	kMpBotLyrics = 1 << 19,
+	kMpBotEq = 1 << 20
+};
+
+inline int MpBotToolsDefaultFlags()
+{
+	return kMpBotDj | kMpBotTag | kMpBotBpm | kMpBotSleep
+		| kMpBotOmake | kMpBotVst | kMpBotCd | kMpBotMidi
+		| kMpBotRairaX | kMpBotSasami | kMpBotRec | kMpBotCap;
+}
+
+// 旧.dat（rev 0）は起動のたびに VST/CD/MIDI を 1 に戻していた。世代を上げたあとはユーザーの表示切替を残す。
+inline void MpBotToolsMigrate()
+{
+	if (!savedata.mpBotToolsInited) {
+		savedata.mpBotToolsInited = 1;
+		savedata.mpBotToolsFlags = MpBotToolsDefaultFlags();
+		savedata.mpBotToolsRev = 1;
+	} else if (savedata.mpBotToolsRev < 1) {
+		savedata.mpBotToolsFlags |= kMpBotVst | kMpBotCd | kMpBotMidi
+			| kMpBotRairaX | kMpBotSasami | kMpBotRec | kMpBotCap;
+		savedata.mpBotToolsRev = 1;
+	}
+	if (savedata.mpBotToolsFlags & kMpBotRaceLegacy)
+		savedata.mpBotToolsFlags = (savedata.mpBotToolsFlags & ~kMpBotRaceLegacy) | kMpBotOmake;
+}
 
 inline void UiSubGeomFromWorking(save::UiSubGeomBank& b)
 {

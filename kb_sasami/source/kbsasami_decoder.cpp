@@ -18,6 +18,7 @@ static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
 static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
+static const wchar_t KEY_LAG[] = L"lag";
 static const wchar_t KEY_GIMIC[] = L"gimic";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
@@ -78,6 +79,11 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_openPath[0] = 0;
 	m_monHold = 0;
 	m_forceHead = 0;
+	m_monSample = 0;
+	m_loopWrapArm = 0;
+	m_skipMonSeek = 0;
+	m_loopWrapQpc = 0;
+	m_qpcFreq = 0;
 	memset(m_drumMap, 0, sizeof(m_drumMap));
 	memset(m_kitPc, 0, sizeof(m_kitPc));
 	memset(m_kitOn, 0, sizeof(m_kitOn));
@@ -186,6 +192,12 @@ void KbSasamiDecoder::ReadOptions()
 			mon = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMIDIMONITOR, 1) ? 1 : 0;
 	}
 	KbsMonConfigure(mon);
+	int lag = 1700;
+	if (m_pConfig)
+		lag = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_LAG, 1700);
+	if (lag < 0) lag = 0;
+	if (lag > 10000) lag = 10000;
+	KbsMonSetDeviceLag(lag);
 	/* raira=1 でも読む。1 なら kbsasami_host32 を起こす。MON_SHOW は送らない。 */
 	int gimic = 0;
 	if (m_pConfig)
@@ -531,7 +543,8 @@ int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
 		m_MediaInfo.qwLength = (UINT64)-1;
 		m_lastSample = 0;
 	} else {
-		m_MediaInfo.dwUnitSample = rate / 100;
+		/* fpy と同じ 0。rate/100 だと本家がループ終端でシークしない。 */
+		m_MediaInfo.dwUnitSample = 0;
 		double totalSec = m_sequencer.get_total_time();
 		if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
 			totalSec = m_loopEnd;
@@ -554,6 +567,17 @@ int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
 	m_MediaInfo.dwCount = 1;
 	m_MediaInfo.dwNumber = 1;
 	m_curSample = 0;
+	m_monSample = 0;
+	m_loopWrapArm = 0;
+	{
+		__int64 monLs = 0;
+		__int64 monLe = 0;
+		if (!m_liveStream && m_loopEnd > m_loopStart && m_loopStart >= 0.0 && rate >= 8000) {
+			monLs = (__int64)(m_loopStart * (double)rate + 0.5);
+			monLe = (__int64)(m_loopEnd * (double)rate + 0.5);
+		}
+		KbsMonSetLoop(monLs, monLe);
+	}
 	LiveBind();
 	return 1;
 }
@@ -562,6 +586,7 @@ int KbSasamiDecoder::SwitchMidiEngine()
 {
 	if (m_smfSize < 22) return 0;
 	const DWORD oldRate = m_MediaInfo.dwSampleRate ? m_MediaInfo.dwSampleRate : 44100;
+	m_loopWrapArm = 0;
 	m_monHold = 1;
 	KbsMonHold(1);
 	int ok = 0;
@@ -668,6 +693,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		m_forceHead = 1;
 		KbsMonForgetPos();
 	}
+	m_monSample = 0;
+	m_loopWrapArm = 0;
 	m_monHold = 1;
 	KbsMonHold(1);
 	pFile->AddRef();
@@ -781,6 +808,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			m_fm.SetFmMonDump(1, pathForKind, m_raira);
 		else
 			m_fm.SetFmMonDump(0, pathForKind, m_raira);
+		KbsMonSetLoop(0, 0);
 		m_MediaInfo.dwSampleRate = m_fm.SampleRate();
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;
@@ -856,6 +884,16 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 				m_MediaInfo.dwLoopCount = 0;
 				m_lastSample = le;
 			}
+		}
+		{
+			const DWORD sr = m_MediaInfo.dwSampleRate ? m_MediaInfo.dwSampleRate : rate;
+			__int64 monLs = 0;
+			__int64 monLe = 0;
+			if (m_loopEnd > m_loopStart && m_loopStart >= 0.0 && sr >= 8000) {
+				monLs = (__int64)(m_loopStart * (double)sr + 0.5);
+				monLe = (__int64)(m_loopEnd * (double)sr + 0.5);
+			}
+			KbsMonSetLoop(monLs, monLe);
 		}
 		MonShow(0, pathForKind);
 		return 1;
@@ -1020,14 +1058,26 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	const int outBits = m_MediaInfo.nBitsPerSample ? m_MediaInfo.nBitsPerSample : -64;
 	const DWORD bytesPerFrame = FmPcmBytesPerFrame(outBits);
 	const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
+	auto armHonkeWrap = [&]() {
+		if (!m_qpcFreq) {
+			LARGE_INTEGER f;
+			QueryPerformanceFrequency(&f);
+			m_qpcFreq = f.QuadPart;
+		}
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		m_loopWrapQpc = now.QuadPart;
+		m_loopWrapArm = 1;
+	};
 	while (remain) {
-		/* FPY と同じ。ここで短く返すと本体が loop1（Q より前、先頭付近）へ
-		   シークし、1回目の J が曲頭から鳴る。Q の時刻へ位置だけ戻して続ける。
-		   play(0) はしない。先頭から送り直すと Q より前のノートが残る。 */
+		/* git と同じ。J で短く返すと ogg が playb を Q へ飛ばし、モニタの吐き出しが止まる。
+		   音はここで Q へ戻してバッファを満たす。本家のモニタ位置だけは巻き戻さない。 */
 		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample >= loopEndSamp) {
 			m_sequencer.set_position(m_loopStart);
 			m_curSample = loopStartSamp;
 			m_loopClosed = 0;
+			if (!m_raira)
+				armHonkeWrap();
 		}
 		DWORD chunk = remain;
 		if (chunk > MIX_FRAMES) chunk = MIX_FRAMES;
@@ -1039,6 +1089,8 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 				m_sequencer.set_position(m_loopStart);
 				m_curSample = loopStartSamp;
 				m_loopClosed = 0;
+				if (!m_raira)
+					armHonkeWrap();
 				continue;
 			}
 			ZeroMemory(p, remain * bytesPerFrame);
@@ -1087,6 +1139,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		}
 		FmWritePcm(p, m_mix, chunk, gain, outBits);
 		m_curSample += chunk;
+		m_monSample += chunk;
 		remain -= chunk;
 		p += chunk * bytesPerFrame;
 	}
@@ -1105,7 +1158,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		}
 	}
 	if (!m_raira)
-		KbsMonPlay((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
+		KbsMonPlay((__int64)m_monSample, (int)m_MediaInfo.dwSampleRate);
 	return dwSizeSample;
 }
 
@@ -1116,12 +1169,23 @@ UINT64 KbSasamiDecoder::SeekFmMidiLocked(UINT64 qwPosSample)
 	const UINT64 ls = haveLoop ? (UINT64)(m_loopStart * rate + 0.5) : 0;
 	const UINT64 le = haveLoop ? (UINT64)(m_loopEnd * rate + 0.5) : 0;
 	const UINT64 loopNear = (rate > 0.0) ? (UINT64)rate : 44100ull;
-	const int nearLoop = (haveLoop && qwPosSample + loopNear >= ls && qwPosSample <= ls + loopNear) ? 1 : 0;
-	const int atEnd = (haveLoop && le > ls && m_curSample + 1 >= le) ? 1 : 0;
-	/* FPY の軟シーク。周回直後の先頭シークで play(0) すると Q より前に戻る。 */
-	if (haveLoop && atEnd && (nearLoop || qwPosSample == 0)) {
+	/* 折返し直後だけ、本家の loop1 シークを Q へ置く。モニタのサンプルは戻さない。
+	   それ以外の Seek(0) は再演奏なので曲頭から鳴らす。 */
+	int freshWrap = 0;
+	if (!m_raira && m_loopWrapArm && haveLoop && m_loopWrapQpc && m_qpcFreq
+		&& qwPosSample <= ls + loopNear) {
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		const __int64 age = (now.QuadPart - m_loopWrapQpc) * 1000 / m_qpcFreq;
+		if (age >= 0 && age < 800)
+			freshWrap = 1;
+	}
+	m_loopWrapArm = 0;
+	m_skipMonSeek = 0;
+	if (freshWrap) {
 		m_seeking = false;
 		m_loopClosed = 0;
+		m_skipMonSeek = 1;
 		m_sequencer.set_position(m_loopStart);
 		m_curSample = ls;
 		m_endSample = 0;
@@ -1141,6 +1205,7 @@ UINT64 KbSasamiDecoder::SeekFmMidiLocked(UINT64 qwPosSample)
 	}
 	m_seeking = false;
 	m_curSample = pos;
+	m_monSample = pos;
 	m_endSample = 0;
 	m_silentSample = 0;
 	return pos;
@@ -1151,6 +1216,7 @@ UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 	if (m_forceHead) {
 		qwPosSample = 0;
 		m_forceHead = 0;
+		m_loopWrapArm = 0;
 	}
 	if (m_foreignVst) {
 		if (!KbVstSessionSeek(&m_vstSess, qwPosSample))
@@ -1173,8 +1239,8 @@ UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 		std::lock_guard<std::mutex> lk(m_midiLock);
 		pos = SeekFmMidiLocked(qwPosSample);
 	}
-	if (!m_raira)
-		KbsMonSeek((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
+	if (!m_raira && !m_skipMonSeek)
+		KbsMonSeek((__int64)m_monSample, (int)m_MediaInfo.dwSampleRate);
 	m_monHold = 0;
 	return pos;
 }

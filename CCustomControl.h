@@ -1262,6 +1262,9 @@ private:
     // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡
+    int m_playNoteItem;    // 再生行。-1=なし。♡タイマーが♪を潰したあと前面へ戻す
+    int m_playNoteImg;     // 0=♪A / 2=♪B
+    CRect m_playNoteRc;    // ♪の描画矩形（名前列カスタムドローで更新）
     BOOL m_heartTimerOn;   // 30ms が生きている。毎描画の SetTimer は周期を潰す
     // ♡の下地。30ms ごとに行を PrintClient しない。スクロールで ok を落とす。
     struct HeartUnder {
@@ -1285,7 +1288,8 @@ private:
     HeartUnder m_heartUnderHot;
     void FreeHeartUnder(HeartUnder& u);
     void CaptureHeartUnder(HeartUnder& u, HDC src, const CRect& rc);
-    void PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col);
+    BOOL PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col);
+    void DrawPlayNoteFront(HDC hdc);
     BOOL m_hotRowsPosted;
     RECT m_hotRows[4];
     int m_hotRowsN;

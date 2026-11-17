@@ -12035,6 +12035,7 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
     , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE), m_bLeaveTrack(FALSE)
+    , m_playNoteItem(-1), m_playNoteImg(1)
     , m_heartTimerOn(FALSE)
     , m_hotRowsPosted(FALSE), m_hotRowsN(0)
     , m_liveEditCol(-1), m_liveEditRow(-1), m_liveEditArm(-1), m_liveEditHold(FALSE), m_liveEditSilent(FALSE)
@@ -12042,6 +12043,7 @@ CCustomListCtrl::CCustomListCtrl()
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
     m_heartRcSel.SetRectEmpty();
     m_heartRcHot.SetRectEmpty();
+    m_playNoteRc.SetRectEmpty();
     m_hotHitRc.SetRectEmpty();
 }
 
@@ -12492,23 +12494,131 @@ void CCustomListCtrl::CaptureHeartUnder(HeartUnder& u, HDC src, const CRect& rc)
     u.ok = TRUE;
 }
 
-void CCustomListCtrl::PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col)
+// ♡更新先。画面DCへ♪を重ね描きするとマスクが毎フレーム欠けるので、ここへ字形だけ載せる。
+struct CccHeartStampDst {
+    UINT32* bits;
+    int w;
+    int h;
+    CRect rc;
+};
+static CccHeartStampDst s_heartStamp = { NULL, 0, 0, CRect() };
+
+struct CccNoteGlyphCache {
+    HIMAGELIST himl;
+    int img;
+    int w;
+    int h;
+    BOOL ok;
+    UINT32 pix[40 * 40];
+};
+
+static const UINT32* CccNoteGlyph(HIMAGELIST himl, int img, int w, int h)
 {
-    if (!u.ok || !u.plate || !u.work || !u.workBits || !dst) return;
-    if (u.w != rc.Width() || u.h != rc.Height()) return;
-    if (rc.left < 0 || rc.top < 0) return;
+    if (!himl || (img != 0 && img != 2) || w <= 0 || h <= 0 || w > 40 || h > 40)
+        return NULL;
+    static CccNoteGlyphCache cache[4];
+    static int next = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (cache[i].ok && cache[i].himl == himl && cache[i].img == img
+            && cache[i].w == w && cache[i].h == h)
+            return cache[i].pix;
+    }
+    HICON hIcon = ImageList_GetIcon(himl, img, ILD_TRANSPARENT);
+    if (!hIcon) return NULL;
+    void* bBits = NULL;
+    void* wBits = NULL;
+    HDC screen = ::GetDC(NULL);
+    HBITMAP hb = CccHeartDib(screen, w, h, &bBits);
+    HBITMAP hw = CccHeartDib(screen, w, h, &wBits);
+    HDC db = ::CreateCompatibleDC(screen);
+    HDC dw = ::CreateCompatibleDC(screen);
+    ::ReleaseDC(NULL, screen);
+    const UINT32* result = NULL;
+    if (hb && hw && db && dw && bBits && wBits) {
+        HGDIOBJ ob = ::SelectObject(db, hb);
+        HGDIOBJ ow = ::SelectObject(dw, hw);
+        RECT r = { 0, 0, w, h };
+        ::FillRect(db, &r, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+        ::FillRect(dw, &r, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+        ::DrawIconEx(db, 0, 0, hIcon, w, h, 0, NULL, DI_NORMAL);
+        ::DrawIconEx(dw, 0, 0, hIcon, w, h, 0, NULL, DI_NORMAL);
+        CccNoteGlyphCache& g = cache[next];
+        next = (next + 1) & 3;
+        const UINT32* bp = (const UINT32*)bBits;
+        const UINT32* wp = (const UINT32*)wBits;
+        const int n = w * h;
+        for (int i = 0; i < n; ++i) {
+            const int br = (int)((bp[i] >> 16) & 255);
+            const int bg = (int)((bp[i] >> 8) & 255);
+            const int bb = (int)(bp[i] & 255);
+            const int wr = (int)((wp[i] >> 16) & 255);
+            const int wg = (int)((wp[i] >> 8) & 255);
+            const int wb = (int)(wp[i] & 255);
+            int dr = wr - br; if (dr < 0) dr = 0;
+            int dg = wg - bg; if (dg < 0) dg = 0;
+            int dbv = wb - bb; if (dbv < 0) dbv = 0;
+            const int da = (dr + dg + dbv) / 3;
+            if (da >= 248) {
+                g.pix[i] = 0;
+                continue;
+            }
+            int a = 255 - da;
+            int rr = br, gg = bg, bb2 = bb;
+            if (a > 0 && a < 255) {
+                rr = br * 255 / a; if (rr > 255) rr = 255;
+                gg = bg * 255 / a; if (gg > 255) gg = 255;
+                bb2 = bb * 255 / a; if (bb2 > 255) bb2 = 255;
+            }
+            g.pix[i] = ((UINT32)a << 24) | ((UINT32)rr << 16) | ((UINT32)gg << 8) | (UINT32)bb2;
+        }
+        g.himl = himl;
+        g.img = img;
+        g.w = w;
+        g.h = h;
+        g.ok = TRUE;
+        result = g.pix;
+        ::SelectObject(db, ob);
+        ::SelectObject(dw, ow);
+    }
+    if (db) ::DeleteDC(db);
+    if (dw) ::DeleteDC(dw);
+    if (hb) ::DeleteObject(hb);
+    if (hw) ::DeleteObject(hw);
+    ::DestroyIcon(hIcon);
+    return result;
+}
+
+BOOL CCustomListCtrl::PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col)
+{
+    if (!u.ok || !u.plate || !u.work || !u.workBits || !dst) return FALSE;
+    if (u.w != rc.Width() || u.h != rc.Height()) return FALSE;
+    if (rc.left < 0 || rc.top < 0) return FALSE;
     if (!::BitBlt(u.work, 0, 0, u.w, u.h, u.plate, 0, 0, SRCCOPY))
-        return;
+        return FALSE;
     {
         UINT32* p = (UINT32*)u.workBits;
         const int n = u.w * u.h;
         for (int i = 0; i < n; ++i)
             p[i] |= 0xFF000000u;
     }
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    const int notePx = CCC_ScaleDpi(16, dpi);
+    const int heartW = CCC_ScaleDpi(14, dpi);
+    const int dy = CCC_ScaleDpi(2, dpi);
+    CRect hl(0, 0, u.w, u.h);
+    if (u.w == notePx && u.h == notePx && heartW >= 10 && notePx - dy >= 10)
+        hl = CRect(0, dy, heartW, notePx);
     CDC cdc;
     cdc.Attach(u.work);
-    DrawSoftJkHeart(&cdc, CRect(0, 0, u.w, u.h), tick, hot, col);
+    DrawSoftJkHeart(&cdc, hl, tick, hot, col);
     cdc.Detach();
+    // ♪は画面へ二度描きしない。♡と同じビットマップに載せてから1回だけ出す。
+    s_heartStamp.bits = (UINT32*)u.workBits;
+    s_heartStamp.w = u.w;
+    s_heartStamp.h = u.h;
+    s_heartStamp.rc = rc;
+    DrawPlayNoteFront(u.work);
+    s_heartStamp.bits = NULL;
     {
         UINT32* p = (UINT32*)u.workBits;
         const int n = u.w * u.h;
@@ -12517,6 +12627,58 @@ void CCustomListCtrl::PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc,
     }
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(dst, rc.left, rc.top, u.w, u.h, u.work, 0, 0, u.w, u.h, bf);
+    return TRUE;
+}
+
+// ♡ビットマップへ♪の字形だけ載せる。画面へ DrawIconEx しない（30ms だとマスクがちらつく）。
+void CCustomListCtrl::DrawPlayNoteFront(HDC)
+{
+    if (!s_heartStamp.bits || m_playNoteItem < 0 || m_playNoteRc.IsRectEmpty()) return;
+    CRect heartRc(s_heartStamp.rc);
+    CRect hit;
+    if (heartRc.IsRectEmpty() || !hit.IntersectRect(&m_playNoteRc, &heartRc)) return;
+    CRect ir;
+    if (!GetItemRect(m_playNoteItem, &ir, LVIR_BOUNDS)) return;
+    if (!ir.PtInRect(m_playNoteRc.CenterPoint())) return;
+    const int img = m_playNoteImg;
+    if (img != 0 && img != 2) return;
+    CImageList* pIL = GetImageList(LVSIL_SMALL);
+    if (!pIL) return;
+    const int iw = m_playNoteRc.Width();
+    const int ih = m_playNoteRc.Height();
+    const UINT32* glyph = CccNoteGlyph(pIL->GetSafeHandle(), img, iw, ih);
+    if (!glyph) return;
+    const int dx = m_playNoteRc.left - heartRc.left;
+    const int dy = m_playNoteRc.top - heartRc.top;
+    UINT32* dst = s_heartStamp.bits;
+    const int dw = s_heartStamp.w;
+    const int dh = s_heartStamp.h;
+    for (int y = 0; y < ih; ++y) {
+        const int yy = dy + y;
+        if ((unsigned)yy >= (unsigned)dh) continue;
+        for (int x = 0; x < iw; ++x) {
+            const int xx = dx + x;
+            if ((unsigned)xx >= (unsigned)dw) continue;
+            const UINT32 sp = glyph[y * iw + x];
+            const int a = (int)((sp >> 24) & 255);
+            if (a <= 0) continue;
+            UINT32& dp = dst[yy * dw + xx];
+            if (a >= 250) {
+                dp = (sp & 0x00FFFFFFu) | 0xFF000000u;
+                continue;
+            }
+            const int sr = (int)((sp >> 16) & 255);
+            const int sg = (int)((sp >> 8) & 255);
+            const int sb = (int)(sp & 255);
+            const int dr = (int)((dp >> 16) & 255);
+            const int dg = (int)((dp >> 8) & 255);
+            const int db = (int)(dp & 255);
+            const int r = (sr * a + dr * (255 - a)) / 255;
+            const int g = (sg * a + dg * (255 - a)) / 255;
+            const int b = (sb * a + db * (255 - a)) / 255;
+            dp = 0xFF000000u | ((UINT32)r << 16) | ((UINT32)g << 8) | (UINT32)b;
+        }
+    }
 }
 
 // kListSoftTimerId: 選択/ホバー♡の矩形だけ更新（30ms）。両方空なら Kill。
@@ -12535,25 +12697,21 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
                     m_nHotItem = hit;
             }
         }
+        m_heartRcSel.SetRectEmpty();
         if (m_nHotItem < 0)
             m_heartRcHot.SetRectEmpty();
-        if (GetSelectedCount() <= 0)
-            m_heartRcSel.SetRectEmpty();
-        if (m_nHotItem < 0 && GetSelectedCount() <= 0) {
+        if (m_nHotItem < 0) {
             m_heartTimerOn = FALSE;
             KillTimer(kListSoftTimerId);
             return;
         }
-        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty())
+        if (m_heartRcHot.IsRectEmpty())
             return;
         CClientDC dc(this);
         HDC hdc = dc.GetSafeHdc();
         const int tick = (int)(::GetTickCount64() / kListHeartStepMs);
         const COLORREF col = CCC_UiTheme().accent;
-        if (!m_heartRcSel.IsRectEmpty())
-            PresentHeartUnder(m_heartUnderSel, hdc, m_heartRcSel, tick, TRUE, col);
-        if (!m_heartRcHot.IsRectEmpty() && m_heartRcHot != m_heartRcSel)
-            PresentHeartUnder(m_heartUnderHot, hdc, m_heartRcHot, tick, TRUE, col);
+        PresentHeartUnder(m_heartUnderHot, hdc, m_heartRcHot, tick, TRUE, col);
         return;
     }
     if (nIDEvent == kListScrollOpaqueTimerId)
@@ -13536,24 +13694,41 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 noteX = ri.left + (ri.Width() - iw) / 2;
             else
                 noteX = r.left + CCC_ScaleDpi(2, dpiNote);
-            if (bS || bH) {
-                CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
-                    noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
-                if (bS)
-                    CaptureHeartUnder(m_heartUnderSel, pDC->GetSafeHdc(), rh);
-                else
-                    CaptureHeartUnder(m_heartUnderHot, pDC->GetSafeHdc(), rh);
-                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
-                    TRUE, CCC_UiTheme().accent);
-                // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
-                // ♡ の矩形だけ回して、なめらかさと軽さを両立させる。
-                if (bS) m_heartRcSel = rh; else m_heartRcHot = rh;
-                if (GetSafeHwnd() && !m_heartTimerOn) {
-                    SetTimer(kListSoftTimerId, kListHeartTimerMs, NULL);
-                    m_heartTimerOn = TRUE;
+            if (noteImg == 0 || noteImg == 2) {
+                m_playNoteItem = ni;
+                m_playNoteImg = noteImg;
+                m_playNoteRc.SetRect(noteX, noteY, noteX + iw, noteY + ih);
+            } else if (m_playNoteItem == ni) {
+                m_playNoteItem = -1;
+                m_playNoteImg = 1;
+                m_playNoteRc.SetRectEmpty();
+            }
+            // ♡はホバー行だけ。クリック（選択）では残さない。
+            // 重なる♪は同じビットマップに載せてから1回だけ出す（画面へ二度描きしない）。
+            m_heartRcSel.SetRectEmpty();
+            BOOL noteComposited = FALSE;
+            if (bH) {
+                const int dy = CCC_ScaleDpi(2, dpiNote);
+                const int heartW = CCC_ScaleDpi(14, dpiNote);
+                CRect rhSlot(noteX, noteY, noteX + iw, noteY + ih);
+                CRect rhHeart(noteX, noteY + dy, noteX + heartW, noteY + ih);
+                CaptureHeartUnder(m_heartUnderHot, pDC->GetSafeHdc(), rhSlot);
+                if (m_heartUnderHot.ok) {
+                    m_heartRcHot = rhSlot;
+                    PresentHeartUnder(m_heartUnderHot, pDC->GetSafeHdc(), rhSlot,
+                        (int)(::GetTickCount64() / kListHeartStepMs), TRUE, CCC_UiTheme().accent);
+                    noteComposited = (m_playNoteItem == ni);
+                    if (GetSafeHwnd() && !m_heartTimerOn) {
+                        SetTimer(kListSoftTimerId, kListHeartTimerMs, NULL);
+                        m_heartTimerOn = TRUE;
+                    }
+                } else {
+                    m_heartRcHot.SetRectEmpty();
+                    DrawSoftJkHeart(pDC, rhHeart, (int)(::GetTickCount64() / kListHeartStepMs),
+                        TRUE, CCC_UiTheme().accent);
                 }
             }
-            if (pIL && noteImg >= 0 && noteImg != 1) {
+            if (!noteComposited && pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
                 HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
                 if (hNote) {

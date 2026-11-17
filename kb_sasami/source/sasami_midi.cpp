@@ -370,6 +370,9 @@ static uint32_t DestFirstTick(int track, uint32_t dest, uint32_t fileOff)
 	uint32_t nearA = 0xFFFFFFFFu;
 	uint32_t nearT = 0xFFFFFFFFu;
 	uint32_t nearD = 4;
+	uint32_t beforeA = 0;
+	uint32_t beforeT = 0xFFFFFFFFu;
+	int haveBefore = 0;
 	for (int fi = 0; fi < s_firstCount; fi++) {
 		if ((s_first[fi].key >> 32) != (uint64_t)(unsigned)track) continue;
 		const uint32_t a = (uint32_t)s_first[fi].key;
@@ -383,9 +386,16 @@ static uint32_t DestFirstTick(int track, uint32_t dest, uint32_t fileOff)
 			nearA = a;
 			nearT = s_first[fi].tick;
 		}
+		if (a <= dest && (!haveBefore || a > beforeA)) {
+			haveBefore = 1;
+			beforeA = a;
+			beforeT = s_first[fi].tick;
+		}
 	}
 	if (exact != 0xFFFFFFFFu) return exact;
 	if (nearD <= 3 && nearT != 0xFFFFFFFFu) return nearT;
+	/* 着地が命令の途中。直前に実行した命令を Q にする。外すと周期が残らずループしない。 */
+	if (haveBefore && dest - beforeA <= 8u && beforeT != 0xFFFFFFFFu) return beforeT;
 	if (dest == 0 || dest == fileOff) return 0;
 	return 0xFFFFFFFFu;
 }
@@ -440,6 +450,34 @@ static uint32_t MajorityLongEnd(const MidiTrackState* tr, int ntr, uint32_t lcm)
 	}
 	if (best < lcm) return 0;
 	return best;
+}
+
+/* シミュレーションが公倍数まで届かなくても、出切った最長の J / |: を曲ループにする。
+   直線パートがそれより明らかに長いときはフレーズの繰り返しなので曲ループにしない。 */
+static int BestCompletedLoop(const MidiTrackState* tr, int ntr, uint32_t tick, uint32_t* st, uint32_t* en)
+{
+	uint32_t bestP = 0, bestS = 0, bestE = 0, linear = 0;
+	if (!tr || !st || !en) return 0;
+	for (int i = 0; i < ntr && i < 64; i++) {
+		if (!tr[i].everJump && (tr[i].alive || tr[i].endTick > 0)) {
+			const uint32_t len = tr[i].alive ? tick : tr[i].endTick;
+			if (len > linear) linear = len;
+		}
+		if (!tr[i].period || tr[i].loopStartTick == 0xFFFFFFFFu) continue;
+		if (tr[i].loopEndTick <= tr[i].loopStartTick || tr[i].loopEndTick > tick) continue;
+		if (tr[i].period > bestP) {
+			bestP = tr[i].period;
+			bestS = tr[i].loopStartTick;
+			bestE = tr[i].loopEndTick;
+		}
+	}
+	if (!bestP || bestE <= bestS) return 0;
+	/* 飛んでいないパートがループ終端より明らかに先まで鳴っているときは、
+	   途中の短い J なので曲ループにしない。fpy は曲末の J だけ残す。 */
+	if (linear > bestE + bestP / 8u + 192u) return 0;
+	*st = bestS;
+	*en = bestE;
+	return 1;
 }
 
 static uint8_t* TrkPtr(int t)
@@ -2548,8 +2586,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					break;
 				case 23: {
-					/* |: の回数省略は 2。0 を int のまま引くと -1 で回り続ける。 */
-					const int cnt = b1 ? (int)b1 : 2;
+					/* 回数 0（省略）は本家と同じ無限。2 にすると mpy が 1 周で終わる。 */
+					const int cnt = b1 ? (int)b1 : -1;
 					if (tr[i].loopSp < MidiTrackState::MIDI_LOOP_NEST)
 						tr[i].loopStack[tr[i].loopSp++] = cnt;
 					else
@@ -2560,12 +2598,45 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				case 24: {
 					uint32_t nxt = 0;
 					const uint32_t dest = ReadJump(song, addr, ver, &nxt);
-					tr[i].loopSafety++;
-					if (tr[i].loopSp <= 0 || tr[i].loopSafety > 4096) {
+					if (tr[i].loopSp <= 0) {
 						tr[i].addr = nxt;
 						break;
 					}
 					int* lp = &tr[i].loopStack[tr[i].loopSp - 1];
+					if (*lp < 0) {
+						/* 無限 |: :|。1 周を測って SMF ループにし、本家がシークで回す。 */
+						tr[i].everJump = 1;
+						const uint32_t destTick = DestFirstTick(i, dest, song.tracks[i].fileOff);
+						if (tr[i].period == 0 && destTick != 0xFFFFFFFFu && tick > destTick) {
+							tr[i].loopDest = dest;
+							tr[i].period = tick - destTick;
+							tr[i].loopStartTick = destTick;
+							tr[i].loopEndTick = tick;
+						}
+						tr[i].loopSafety++;
+						if (gLoopEnd > 0 && tick >= gLoopEnd) {
+							int pending = 0;
+							for (int k = 0; k < song.trackCount && k < 64; k++) {
+								if (tr[k].alive && !tr[k].everJump) { pending = 1; break; }
+							}
+							if (!pending) {
+								killTrack(i);
+								again = 0;
+								break;
+							}
+						}
+						if (tr[i].loopSafety > 4096) {
+							tr[i].addr = nxt;
+							break;
+						}
+						tr[i].addr = dest;
+						break;
+					}
+					tr[i].loopSafety++;
+					if (tr[i].loopSafety > 4096) {
+						tr[i].addr = nxt;
+						break;
+					}
 					(*lp)--;
 					if (*lp == 0) {
 						tr[i].loopSp--;
@@ -2881,28 +2952,50 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 		tick++;
 		{
-			/* まだ J していないトラックがいる間は終端を決めない。
-			   揃ったら、各周期の公倍数。一番長い 1 本にはしない。
-			   戻り先が変わって周期が更新されたら、次の tick で取り直す。 */
+			/* 再生は fpy と同じ。曲末のいちばん長い J を 1 周にする。
+			   公倍数まで待つと、飛んでいないパートが残ったままシミュが伸び、
+			   届いていない終端としてループが捨てられる。 */
 			int pending = 0;
+			uint32_t bestP = 0, bestS = 0, bestE = 0, linearEnd = 0;
+			for (int i = 0; i < song.trackCount && i < 64; i++) {
+				if (tr[i].alive && !tr[i].everJump) pending = 1;
+				if (!tr[i].everJump && (tr[i].alive || tr[i].endTick > 0)) {
+					const uint32_t len = tr[i].alive ? tick : tr[i].endTick;
+					if (len > linearEnd) linearEnd = len;
+				}
+				if (!tr[i].period || tr[i].loopStartTick == 0xFFFFFFFFu) continue;
+				if (tr[i].loopEndTick <= tr[i].loopStartTick || tr[i].loopEndTick > tick) continue;
+				if (tr[i].period > bestP) {
+					bestP = tr[i].period;
+					bestS = tr[i].loopStartTick;
+					bestE = tr[i].loopEndTick;
+				}
+			}
+			const int songLoop = (exportLoops <= 0 && bestP > 0
+				&& (linearEnd == 0 || linearEnd <= bestE + bestP / 8u + 192u)) ? 1 : 0;
+			if (songLoop && !pending) {
+				gLoopStart = bestS;
+				gLoopEnd = bestE;
+				smfReps = 1;
+				if (tick >= bestE)
+					break;
+			}
 			int nper = 0;
 			uint32_t lcm = 0;
 			uint32_t latestQ = 0;
 			for (int i = 0; i < song.trackCount && i < 64; i++) {
-				if (tr[i].alive && !tr[i].everJump) pending = 1;
 				if (!tr[i].period || tr[i].loopStartTick == 0xFFFFFFFFu) continue;
 				nper++;
 				lcm = lcm ? LcmU32(lcm, tr[i].period) : tr[i].period;
 				if (tr[i].loopStartTick > latestQ) latestQ = tr[i].loopStartTick;
 			}
 			enum { kLoopCap = 96000 };
-			if (!pending && nper > 0 && lcm > 0 && lcm <= (uint32_t)kLoopCap) {
+			if (exportLoops > 0 && !pending && nper > 0 && lcm > 0 && lcm <= (uint32_t)kLoopCap) {
 				gLoopStart = latestQ;
 				int reps = 1;
 				uint32_t endBase = latestQ;
 				uint32_t endStep = lcm;
-				/* 書き出しで最長が戻る J のときだけ、そのトラックの周を指定回数まで進める。
-				   再生（exportLoops==0）は公倍数 1 周のまま。 */
+				/* 書き出しで最長が戻る J のときだけ、そのトラックの周を指定回数まで進める。 */
 				if (exportLoops > 1) {
 					uint32_t bestJ = 0, bestLin = 0, jStart = 0, jPeriod = 0;
 					for (int i = 0; i < song.trackCount && i < 64; i++) {
@@ -2946,11 +3039,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		s_evs[i].tick = syxC;
 	}
 
-	/* 終端はシミュレーション中に決めた公倍数。ここでは一番長い Q/J に差し替えない。
-	   展開がイベント上限で先に止まったときは、届いていない終端を採用しない。 */
-	if (gLoopEnd > 0 && tick < gLoopEnd) {
-		/* イベント上限で指定回数に届かないときは、届いた周だけ残す。 */
-		if (smfReps > 1 && gLoopStart != 0xFFFFFFFFu && tick > gLoopStart) {
+	/* 終端はシミュレーション中に決めた公倍数。届いていない公倍数は捨てる。
+	   そのとき測り終わった最長の 1 周まで戻す。ここで 0 にすると qwLoop が
+	   立たず、本家は mpy を 1 回で止める。 */
+	if (!(gLoopEnd > gLoopStart && gLoopStart != 0xFFFFFFFFu && tick >= gLoopEnd)) {
+		if (smfReps > 1 && gLoopEnd > gLoopStart && gLoopStart != 0xFFFFFFFFu && tick > gLoopStart) {
 			const uint32_t span = gLoopEnd - gLoopStart;
 			const uint32_t one = span / (uint32_t)smfReps;
 			const uint32_t done = (one > 0) ? (tick - gLoopStart) / one : 0;
@@ -2963,8 +3056,15 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				smfReps = 1;
 			}
 		} else {
-			gLoopEnd = 0;
-			gLoopStart = 0xFFFFFFFFu;
+			uint32_t st = 0, en = 0;
+			if (BestCompletedLoop(tr, song.trackCount, tick, &st, &en)) {
+				gLoopStart = st;
+				gLoopEnd = en;
+				smfReps = 1;
+			} else {
+				gLoopEnd = 0;
+				gLoopStart = 0xFFFFFFFFu;
+			}
 		}
 	}
 	/* 最長 J 同士のずれが 1 小節以内なら、遅い方へ伸ばさず多数派の J で閉じる。

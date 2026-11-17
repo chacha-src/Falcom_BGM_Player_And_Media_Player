@@ -1638,7 +1638,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 #endif
 	, m_fontDpi(0), m_fontH(0)
 	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_barPlayb(-1), m_sx(NULL), m_sxBytes(0)
-	, m_division(480), m_sampleRate(44100), m_loopStartSample(0), m_loopEndSample(0), m_lastPlayb(-1)
+	, m_division(480), m_sampleRate(44100), m_loopStartSample(0), m_loopEndSample(0), m_loopRewindPend(0), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0), m_ins3(0), m_ins4(0), m_dlyType(0)
 	, m_noteCount(0), m_masterVol(100)
@@ -2309,6 +2309,7 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_sxBytes = 0;
 	m_loopStartSample = 0;
 	m_loopEndSample = 0;
+	m_loopRewindPend = 0;
 	m_loadedPath[0] = 0;
 	m_titleBuf[0] = 0;
 	m_copyBuf[0] = 0;
@@ -3758,6 +3759,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	delete[] data;
 	m_loopStartSample = 0;
 	m_loopEndSample = 0;
+	m_loopRewindPend = 0;
 	{
 		__int64 ccS = 0, ccE = 0;
 		for (int i = 0; i < count; ++i) {
@@ -3766,6 +3768,17 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			const int v = (int)((ev[i].msg >> 16) & 0x7f);
 			if (v == 0) ccS = ev[i].sample;
 			else ccE = ev[i].sample;
+		}
+		if (ccE <= ccS && m_sx) {
+			for (int i = 0; i < count; ++i) {
+				if (ev[i].msg != 0xfa || ((ev[i].aux >> 24) & 0xff) != 0x06) continue;
+				if (ev[i].sysexOff < 0) continue;
+				const int n = (int)(ev[i].aux & 0xffffff);
+				if (n <= 0 || ev[i].sysexOff + n > m_sxBytes) continue;
+				const char* s = (const char*)(m_sx + ev[i].sysexOff);
+				if (n == 9 && memcmp(s, "loopStart", 9) == 0) ccS = ev[i].sample;
+				else if (n == 7 && memcmp(s, "loopEnd", 7) == 0) ccE = ev[i].sample;
+			}
 		}
 		if (ccE > ccS) {
 			m_loopStartSample = ccS;
@@ -4023,6 +4036,10 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		if (pbHeard < 0) pbHeard = 0;
 #endif
 	}
+	/* 小節表示用。playb は巻き戻さないので、ここはループで折らない。 */
+#ifndef KBSASAMI_HOST_BUILD
+	const __int64 linearHeard = pbHeard;
+#endif
 	if (m_loopEndSample > m_loopStartSample) {
 		const __int64 ls = m_loopStartSample;
 		const __int64 le = m_loopEndSample;
@@ -4072,33 +4089,63 @@ void CMidiMonitorDlg::SyncFromPlayback()
 					&& pbRaw <= m_loopStartSample + slack) ? 1 : 0;
 				const int heardFromEnd = (m_hearPlayb + slack >= m_loopEndSample
 					&& pbHeard <= m_loopStartSample + slack) ? 1 : 0;
-				/* 終端から頭へ戻ったフレームで表示を進める。heard が遅れたまま
-				   終端に置くと、1 小節分 dump が止まってから跳ねる。 */
+#ifdef KBSASAMI_HOST_BUILD
+				/* 終端から Q へ戻ったフレームだけ。ループの途中の小さな戻りで
+				   ノートを消すと、次の周が空の鍵盤になる。 */
+				if ((heardBack && heardFromEnd) || (rawBack && rawFromEnd))
+					loopWrap = 1;
+				else if (heardBack && pbHeard >= m_loopStartSample && pbHeard <= m_loopStartSample + slack
+					&& m_hearPlayb + slack >= m_loopEndSample
+					&& (m_hearPlayb - pbHeard) > (__int64)sr / 10)
+					loopWrap = 1;
+#else
+				/* ogg（raira=1）は git の判定のまま。J から Q へ戻したフレームで
+				   カーソルをループ先頭へ置き、吐き出しを続ける。 */
 				if ((heardBack && heardFromEnd) || (rawBack && rawFromEnd))
 					loopWrap = 1;
 				else if (heardBack && pbHeard >= m_loopStartSample && pbHeard <= m_loopEndSample
 					&& m_hearPlayb >= m_loopStartSample && m_hearPlayb <= m_loopEndSample
 					&& (m_hearPlayb - pbHeard) > (__int64)sr / 10)
 					loopWrap = 1;
+#endif
 			}
+#ifdef KBSASAMI_HOST_BUILD
+			if (loopWrap)
+				m_loopRewindPend = 0;
+#endif
 			if (loopWrap) {
+#ifdef KBSASAMI_HOST_BUILD
 				for (int pi = 0; pi < PART_MAX; ++pi) {
 					memset(m_part[pi].noteOn, 0, sizeof(m_part[pi].noteOn));
 					memset(m_part[pi].noteFlash, 0, sizeof(m_part[pi].noteFlash));
 					m_part[pi].held = 0;
 				}
 				m_noteCount = 0;
+#endif
+				/* ogg はここで鍵盤を消すと、J のノートオフのあと Q の発音が
+				   間に合わずモニタが切れたままになる。カーソルだけ戻す。 */
 				m_evPos = 0;
 				while (m_evPos < m_evCount && m_ev[m_evPos].sample < m_loopStartSample)
 					++m_evPos;
+				m_hadNote = 1;
 				m_dirtyRows = 0xFFFFFFFFu;
 			} else if (rawBack) {
 				/* heard だけ 0 に落ちたフレームで先頭からやり直すと、
 				   長い曲のイベントを UI に一気に吐き、モニタと譜面が応答なしになる。
 				   再生中の 0 はフォーカス切替でロックを取り損ねた値なので、
-				   止まったときだけ頭からやり直す。 */
+				   止まったときだけ頭からやり直す。
+				   0.5 秒を超える巻き戻しは再演奏／シーク。カーソルを残すと頭数秒が消える。 */
 				extern int playy;
 				const int srJ = (m_sampleRate > 0) ? m_sampleRate : 44100;
+#ifdef KBSASAMI_HOST_BUILD
+				const __int64 back = (m_lastPlayb >= 0) ? (m_lastPlayb - pbRaw) : 0;
+				if (back > (__int64)srJ / 2) {
+					ResetParts();
+					m_evPos = 0;
+					m_hadNote = 0;
+					m_fxKeepPend = 1;
+				} else
+#endif
 				if (playy == 0 && pbRaw < (__int64)srJ / 5 && m_lastPlayb > (__int64)srJ) {
 					ResetParts();
 					m_evPos = 0;
@@ -4123,6 +4170,57 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		return;
 	}
 
+#ifdef KBSASAMI_HOST_BUILD
+	/* J まで吐いたカーソルのまま位置だけ Q へ戻すと、sample <= pbHeard が
+	   成立せず吐き出しが止まったままになる。カーソルを戻して続ける。 */
+	if (m_ev && m_evCount > 0 && m_evPos > 0) {
+		const __int64 at = (m_evPos < m_evCount)
+			? m_ev[m_evPos].sample
+			: (m_ev[m_evCount - 1].sample + 1);
+		if (at > pbHeard && m_ev[m_evPos - 1].sample > pbHeard) {
+			int from = 0;
+			if (m_loopEndSample > m_loopStartSample && pbHeard >= m_loopStartSample) {
+				while (from < m_evCount && m_ev[from].sample < m_loopStartSample)
+					++from;
+			}
+			for (int pi = 0; pi < PART_MAX; ++pi) {
+				memset(m_part[pi].noteOn, 0, sizeof(m_part[pi].noteOn));
+				memset(m_part[pi].noteFlash, 0, sizeof(m_part[pi].noteFlash));
+				m_part[pi].held = 0;
+			}
+			m_noteCount = 0;
+			m_hadNote = 1;
+			m_evPos = from;
+			m_loopRewindPend = 0;
+			m_dirtyRows = 0xFFFFFFFFu;
+		}
+	}
+#endif
+#ifndef KBSASAMI_HOST_BUILD
+	/* playb は進み続ける。J を過ぎた可聴位置はループ内へ折り、
+	   カーソルが先にいるときだけ Q から吐き直す。出力おわりにはしない。 */
+	extern int playy;
+	if (playy != 0 && m_ev && m_evCount > 0 && m_loopEndSample > m_loopStartSample) {
+		const __int64 span = m_loopEndSample - m_loopStartSample;
+		if (span > 0 && pbHeard >= m_loopEndSample)
+			pbHeard = m_loopStartSample + ((pbHeard - m_loopEndSample) % span);
+		if (m_evPos > 0) {
+			const __int64 at = (m_evPos < m_evCount)
+				? m_ev[m_evPos].sample
+				: (m_ev[m_evCount - 1].sample + 1);
+			if (at > pbHeard && m_ev[m_evPos - 1].sample > pbHeard) {
+				int from = 0;
+				if (pbHeard >= m_loopStartSample) {
+					while (from < m_evCount && m_ev[from].sample < m_loopStartSample)
+						++from;
+				}
+				m_evPos = from;
+				m_hadNote = 1;
+			}
+		}
+	}
+	m_barPlayb = linearHeard;
+#endif
 	if (m_evPos < 0) m_evPos = 0;
 	if (m_evPos > m_evCount) m_evPos = m_evCount;
 	m_burstApply = 0;
@@ -4195,10 +4293,19 @@ void CMidiMonitorDlg::UpdatePlayPos()
 			}
 		}
 		if (ds > 0 && tempoU > 0 && m_division > 0 && m_sampleRate > 0) {
-			tick += (unsigned __int64)ds * (unsigned __int64)m_division * 1000000ULL
-				/ ((unsigned __int64)tempoU * (unsigned __int64)m_sampleRate);
+			const unsigned __int64 denT = (unsigned __int64)tempoU * (unsigned __int64)m_sampleRate;
+			const unsigned __int64 numT = (unsigned __int64)m_division * 1000000ULL;
+			if (denT > 0 && numT > 0 && (unsigned __int64)ds > ~0ull / numT)
+				tick = ~0ull;
+			else if (denT > 0) {
+				const unsigned __int64 add = (unsigned __int64)ds * numT / denT;
+				tick = (add > ~0ull - tick) ? ~0ull : tick + add;
+			}
 		}
+		/* ogg は playb が曲末を過ぎても進む。ここで m_maxTick に止めると 25 のままになる。 */
+#ifdef KBSASAMI_HOST_BUILD
 		if (tick > m_maxTick) tick = m_maxTick;
+#endif
 	}
 
 	auto fold = [&](unsigned __int64 target, int* bar, int* beat, int* tickIn, int* tpbOut, int* numOut) {
@@ -4228,7 +4335,15 @@ void CMidiMonitorDlg::UpdatePlayPos()
 		const unsigned __int64 tpb = tpbOf();
 		const unsigned __int64 tpm = tpmOf();
 		const unsigned __int64 span = (target >= last) ? (target - last) : 0;
-		if (bar) *bar = (int)(acc + span / tpm) + 1;
+		{
+			unsigned __int64 nbar = (acc >= 999999ull) ? 999999ull : acc + 1;
+			const unsigned __int64 addb = span / tpm;
+			if (addb >= 999999ull || nbar > 999999ull - addb)
+				nbar = 999999ull;
+			else
+				nbar += addb;
+			if (bar) *bar = (int)nbar;
+		}
 		if (beat) *beat = (int)((span % tpm) / tpb) + 1;
 		/* TB・小節内 tick はファイルの PPQN のまま。48 なら 48、480 なら 480。 */
 		if (tickIn) *tickIn = (int)(span % tpm);
@@ -4247,7 +4362,11 @@ void CMidiMonitorDlg::UpdatePlayPos()
 		if (endTick == 0 && endBar > 1)
 			bars = endBar - 1;
 	}
+#ifdef KBSASAMI_HOST_BUILD
 	if (bar > bars) bar = bars;
+#endif
+	if (bar > 999999) bar = 999999;
+	if (bars > 999999) bars = 999999;
 	if (bar < 1) bar = 1;
 	if (bars < 1) bars = 1;
 	if (beat < 1) beat = 1;

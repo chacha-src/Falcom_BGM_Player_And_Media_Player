@@ -1255,6 +1255,13 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_FM, OnFmMonitor)
 	ON_BN_CLICKED(IDC_MP_BOT_CD, OnMpCdPlayer)
 	ON_BN_CLICKED(IDC_MP_BOT_MAZE, OnBotOmake)
+	ON_BN_CLICKED(IDC_MP_BOT_SHORTCFG, OnBotShortCfg)
+	ON_BN_CLICKED(IDC_MP_BOT_RAIRAX, OnBotRairaX)
+	ON_BN_CLICKED(IDC_MP_BOT_SASAMI, OnBotSasami)
+	ON_BN_CLICKED(IDC_MP_BOT_SET, OnSettings)
+	ON_BN_CLICKED(IDC_MP_BOT_FOLDER, OnFolder)
+	ON_BN_CLICKED(IDC_MP_BOT_LRC, OnDeskLrcToggle)
+	ON_BN_CLICKED(IDC_MP_BOT_EQ, OnEq)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, OnBotVisDj)
 	ON_COMMAND(ID_MP_BOTVIS_TAG, OnBotVisTag)
 	ON_COMMAND(ID_MP_BOTVIS_BPM, OnBotVisBpm)
@@ -1265,6 +1272,16 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BOTVIS_REMOTE, OnBotVisRemote)
 	ON_COMMAND(ID_MP_BOTVIS_VST, OnBotVisVst)
 	ON_COMMAND(ID_MP_BOTVIS_MAZE, OnBotVisMaze)
+	ON_COMMAND(ID_MP_BOTVIS_REC, OnBotVisRec)
+	ON_COMMAND(ID_MP_BOTVIS_CAP, OnBotVisCap)
+	ON_COMMAND(ID_MP_BOTVIS_RAIRAX, OnBotVisRairaX)
+	ON_COMMAND(ID_MP_BOTVIS_SASAMI, OnBotVisSasami)
+	ON_COMMAND(ID_MP_BOTVIS_MIDI, OnBotVisMidi)
+	ON_COMMAND(ID_MP_BOTVIS_CD, OnBotVisCd)
+	ON_COMMAND(ID_MP_BOTVIS_SET, OnBotVisSet)
+	ON_COMMAND(ID_MP_BOTVIS_FOLDER, OnBotVisFolder)
+	ON_COMMAND(ID_MP_BOTVIS_LRC, OnBotVisLrc)
+	ON_COMMAND(ID_MP_BOTVIS_EQ, OnBotVisEq)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, OnSaveParam)
 	ON_BN_CLICKED(IDC_MP_RESETDATA, OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, OnKaisuuKillFocus)
@@ -1661,6 +1678,34 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			MpMakePushToggle(&m_botMidi);
 			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetIcon(0);
 		}
+		if (!m_botShortCfg.GetSafeHwnd())
+			m_botShortCfg.Create(_T("短縮"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_SHORTCFG);
+		if (!m_botRairaX.GetSafeHwnd())
+			m_botRairaX.Create(_T("らいらX"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RAIRAX);
+		if (!m_botSasami.GetSafeHwnd())
+			m_botSasami.Create(_T("ささみ"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_SASAMI);
+		if (!m_botSet.GetSafeHwnd())
+			m_botSet.Create(_T("設定"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_SET);
+		if (!m_botFolder.GetSafeHwnd())
+			m_botFolder.Create(_T("フォルダ"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_FOLDER);
+		if (!m_botLrc.GetSafeHwnd())
+			m_botLrc.Create(_T("歌詞"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_LRC);
+		if (!m_botEq.GetSafeHwnd())
+			m_botEq.Create(_T("EQ"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_EQ);
+		if (m_botShortCfg.GetSafeHwnd())
+			m_botShortCfg.SetGradation(RGB(255, 236, 190), RGB(240, 190, 110), 0, TRUE);
+		if (m_botRairaX.GetSafeHwnd())
+			m_botRairaX.SetGradation(RGB(255, 214, 226), RGB(230, 120, 155), 0, TRUE);
+		if (m_botSasami.GetSafeHwnd())
+			m_botSasami.SetGradation(RGB(214, 245, 222), RGB(140, 205, 165), 0, TRUE);
+		if (m_botSet.GetSafeHwnd())
+			m_botSet.SetGradation(RGB(255, 235, 205), RGB(255, 205, 150), 0, TRUE);
+		if (m_botFolder.GetSafeHwnd())
+			m_botFolder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
+		if (m_botLrc.GetSafeHwnd())
+			m_botLrc.SetGradation(RGB(235, 245, 255), RGB(190, 215, 245), 0, TRUE);
+		if (m_botEq.GetSafeHwnd())
+			m_botEq.SetGradation(RGB(230, 220, 255), RGB(200, 185, 250), 0, TRUE);
 		if (!m_findFilter.GetSafeHwnd())
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
 		if (!m_findRegex.GetSafeHwnd())
@@ -2108,6 +2153,13 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botFm.GetSafeHwnd()) m_botFm.SetFont(&m_fontChk, TRUE);
 	if (m_botCd.GetSafeHwnd()) m_botCd.SetFont(&m_fontChk, TRUE);
 	if (m_botOmake.GetSafeHwnd()) m_botOmake.SetFont(&m_fontChk, TRUE);
+	if (m_botShortCfg.GetSafeHwnd()) m_botShortCfg.SetFont(&m_fontChk, TRUE);
+	if (m_botRairaX.GetSafeHwnd()) m_botRairaX.SetFont(&m_fontChk, TRUE);
+	if (m_botSasami.GetSafeHwnd()) m_botSasami.SetFont(&m_fontChk, TRUE);
+	if (m_botSet.GetSafeHwnd()) m_botSet.SetFont(&m_fontChk, TRUE);
+	if (m_botFolder.GetSafeHwnd()) m_botFolder.SetFont(&m_fontChk, TRUE);
+	if (m_botLrc.GetSafeHwnd()) m_botLrc.SetFont(&m_fontChk, TRUE);
+	if (m_botEq.GetSafeHwnd()) m_botEq.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
 	if (m_abB.GetSafeHwnd()) m_abB.SetFont(&m_fontChk, TRUE);
 	if (m_abClr.GetSafeHwnd()) m_abClr.SetFont(&m_fontChk, TRUE);
@@ -2418,6 +2470,20 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
 	if (m_botOmake.GetSafeHwnd())
 		addTip(m_botOmake, LL14(L"おまけゲーム（レース・迷路・タクティクス）を選んで遊びます。", L"Pick a bonus game (race, maze, tactics).", L"Choisir un jeu bonus (course, labyrinthe, tactique).", L"Scegli un gioco extra (gara, labirinto, tattica).", L"Elegir un juego extra (carrera, laberinto, táctica).", L"보너스 게임(레이스·미로·택틱스)을 골라 플레이합니다.", L"选择附赠游戏（竞速、迷宫、战棋）。", L"اختر لعبة إضافية (سباق، متاهة، تكتيكات).", L"Выбрать бонусную игру (гонка, лабиринт, тактика).", L"Bonusspiel wählen (Rennen, Labyrinth, Taktik).", L"Escolher um jogo extra (corrida, labirinto, tática).", L"Kies een bonusspel (race, doolhof, tactiek).", L"Wybierz grę dodatkową (wyścig, labirynt, taktyka).", L"Ekstra oyun seç (yarış, labirent, taktik)."));
+	if (m_botShortCfg.GetSafeHwnd())
+		addTip(m_botShortCfg, LL14(L"下部ショートカットの表示を切り替えます。ファルコム特化画面と保存のリセットもここから開けます。", L"Show or hide the bottom shortcuts. Falcom screen and reset-saved are here too.", L"Afficher ou masquer les raccourcis du bas. Ecran Falcom et reinitialisation aussi.", L"Mostra o nascondi le scorciatoie in basso. Anche schermata Falcom e reset.", L"Mostrar u ocultar los atajos de abajo. Tambien pantalla Falcom y restablecer.", L"하단 단축 버튼 표시를 바꿉니다. 팔콤 화면과 저장 초기화도 여기.", L"切换底栏快捷按钮。Falcom画面和重置已存也在这里。", L"إظهار أو إخفاء اختصارات الأسفل. شاشة Falcom وإعادة التعيين أيضاً.", L"Показать или скрыть нижние кнопки. Экран Falcom и сброс тоже здесь.", L"Untere Kurzbefehle ein/aus. Falcom-Bildschirm und Zurucksetzen auch hier.", L"Mostrar ou ocultar os atalhos de baixo. Tela Falcom e redefinir tambem.", L"Onderste snelknoppen tonen of verbergen. Falcom-scherm en reset ook hier.", L"Pokaz lub ukryj dolne skroty. Ekran Falcom i reset tez tutaj.", L"Alt kisayollari goster veya gizle. Falcom ekrani ve sifirlama da burada."));
+	if (m_botRairaX.GetSafeHwnd())
+		addTip(m_botRairaX, LL14(L"タクティクスRPG「らいらX」を開きます。おまけメニューにも残しています。", L"Open the tactics RPG \"Raira X\". It also stays in the Extras menu.", L"Ouvre le RPG tactique « Raira X ». Il reste aussi dans Extras.", L"Apre l'RPG tattico \"Raira X\". Resta anche nel menu Extra.", L"Abre el RPG tactico \"Raira X\". Tambien sigue en Extras.", L"택틱스 RPG \"라이라 X\"를 엽니다. 보너스 메뉴에도 남아 있습니다.", L"打开战棋RPG「莱拉X」。附赠菜单里也还在。", L"يفتح RPG التكتيك \"رايرا X\". يبقى أيضاً في الإضافات.", L"Открыть тактическую RPG «Райра X». Она также в меню бонусов.", L"Offnet das Taktik-RPG „Raira X“. Bleibt auch im Extra-Menu.", L"Abre o RPG tatico \"Raira X\". Continua tambem em Extras.", L"Opent de tactische RPG \"Raira X\". Blijft ook in Extra's.", L"Otwiera taktyczne RPG „Raira X”. Zostaje tez w Dodatkach.", L"Taktik RPG \"Raira X\" acar. Ekstralar menusunde de durur."));
+	if (m_botSasami.GetSafeHwnd())
+		addTip(m_botSasami, LL14(L"ささみコンポーザ。MML・譜面・ロールのそれぞれで MIDI と FM を選べます。", L"Sasami Composer. Pick MIDI or FM under MML, score, and roll.", L"Compositeur Sasami. Choisir MIDI ou FM sous MML, partition et roll.", L"Compositore Sasami. Scegli MIDI o FM sotto MML, partitura e roll.", L"Compositor Sasami. Elige MIDI o FM en MML, partitura y roll.", L"사사미 컴포저. MML·악보·롤에서 MIDI와 FM을 고릅니다.", L"笹见作曲。MML、乐谱、卷帘里分别选 MIDI 或 FM。", L"ملحن ساسامي. اختر MIDI أو FM تحت MML والنوتة والرول.", L"Композитор Sasami. MIDI или FM в MML, партитуре и ролле.", L"Sasami-Komponist. MIDI oder FM unter MML, Partitur und Rolle.", L"Compositor Sasami. Escolha MIDI ou FM em MML, partitura e roll.", L"Sasami-componist. Kies MIDI of FM onder MML, partituur en roll.", L"Kompozytor Sasami. MIDI albo FM w MML, partyturze i rolce.", L"Sasami besteci. MML, skor ve ruloda MIDI veya FM sec."));
+	if (m_botSet.GetSafeHwnd())
+		addTip(m_botSet, LL14(L"設定画面を開きます。", L"Open settings.", L"Ouvrir les reglages.", L"Apri le impostazioni.", L"Abrir ajustes.", L"설정 화면을 엽니다.", L"打开设置。", L"فتح الإعدادات.", L"Открыть настройки.", L"Einstellungen offnen.", L"Abrir configuracoes.", L"Instellingen openen.", L"Otworz ustawienia.", L"Ayarlari ac."));
+	if (m_botFolder.GetSafeHwnd())
+		addTip(m_botFolder, LL14(L"フォルダ設定画面を開きます。", L"Open folder settings.", L"Ouvrir les parametres de dossier.", L"Apri le impostazioni cartella.", L"Abrir la configuracion de carpeta.", L"폴더 설정을 엽니다.", L"打开文件夹设置。", L"فتح إعدادات المجلد.", L"Открыть настройки папки.", L"Ordnereinstellungen offnen.", L"Abrir configuracoes de pasta.", L"Mapinstellingen openen.", L"Otworz ustawienia folderu.", L"Klasor ayarlarini ac."));
+	if (m_botLrc.GetSafeHwnd())
+		addTip(m_botLrc, LL14(L"常時最前面の歌詞ウィンドウを開閉します。", L"Toggle the always-on-top lyrics window.", L"Afficher ou masquer la fenetre de paroles au premier plan.", L"Mostra o nascondi la finestra testi in primo piano.", L"Mostrar u ocultar la ventana de letra siempre visible.", L"항상 위 가사 창을 여닫습니다.", L"打开或关闭置顶歌词窗口。", L"فتح أو إغلاق نافذة الكلمات الأمامية.", L"Открыть или закрыть окно текста поверх всех.", L"Textfenster im Vordergrund ein/aus.", L"Abrir ou fechar a janela de letra no topo.", L"Songtekstvenster bovenop aan/uit.", L"Otworz lub zamknij okno tekstu na wierzchu.", L"Her zaman ustte soz penceresini ac veya kapat."));
+	if (m_botEq.GetSafeHwnd())
+		addTip(m_botEq, LL14(L"イコライザーを開きます。", L"Open the equalizer.", L"Ouvrir l'egaliseur.", L"Apri l'equalizzatore.", L"Abrir el ecualizador.", L"이퀄라이저를 엽니다.", L"打开均衡器。", L"فتح المعادل.", L"Открыть эквалайзер.", L"Equalizer offnen.", L"Abrir o equalizador.", L"Equalizer openen.", L"Otworz korektor.", L"Ekolayzeri ac."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
 	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
 	addTip(m_kaisuu, LL14(L"連続再生時のループ回数。空欄・0・-1は無制限（ループ曲は5分で次へ）。数字を入れるとその回数。上限は64bit整数。", L"Loop count for continuous play. Empty/0/-1 = unlimited (looped tracks advance at 5 min). A number sets the count (64-bit max).", L"Nombre de boucles. Vide/0/-1 = illimite (5 min pour les boucles). Un nombre = ce compte (max 64 bits).", L"Conteggio loop. Vuoto/0/-1 = illimitato (5 min per i loop). Un numero = il conteggio (max 64 bit).", L"Cuenta de bucle. Vacio/0/-1 = ilimitado (5 min en bucles). Un numero = la cuenta (max 64 bits).", L"연속 재생 루프 횟수. 공백·0·-1=무제한(루프 곡은 5분). 숫자=횟수(64비트 상한).", L"连续播放循环次数。空/0/-1=无限（循环曲5分钟后下一首）。数字=次数（64位上限）。", L"عدد الحلقات. فارغ/0/-1=غير محدود (5 دقائق للحلقات). رقم=العدد (حد 64 بت).", L"Число повторов. Пусто/0/-1=без лимита (зацикленные — через 5 мин). Число=счётчик (макс. 64 бит).", L"Schleifenzahl. Leer/0/-1=unbegrenzt (Loops nach 5 Min.). Zahl=Anzahl (64-Bit-Maximum).", L"Contagem de loop. Vazio/0/-1=ilimitado (loops aos 5 min). Numero=contagem (max 64 bits).", L"Loopaantal. Leeg/0/-1=onbeperkt (loops na 5 min). Getal=aantal (64-bits max).", L"Liczba petli. Puste/0/-1=bez limitu (petle po 5 min). Liczba=ilosc (max 64 bity).", L"Dongu sayisi. Bos/0/-1=sinirsiz (dongulu 5 dk). Sayi=adet (64-bit ust sinir)."));
@@ -3887,68 +3953,64 @@ void CMediaPlayerDlg::DoLayout()
 	int plBottom = ckY + chkRowH + gPad;
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
-	// 最下部: ファルコム特化〜レース + 終了。再生行と同じく幅で 0=フル / 1=中 / 2=短。
+	// 最下部: 短縮ボタン設定、らいらX、ささみ、録音〜おまけ、任意ショートカット、終了。
+	// 幅で 0=フル / 1=中 / 2=短。座標は DPI の s とアイコン余白 icoAdd。
 	const int gapBot = (int)(2 * s);
-	const int gapLead = (int)(4 * s);
 	int exW = (int)(80 * s);
 	const int exitLeft = W - M - exW;
 
-	const int swFull = max(1, (int)(120 * s) + icoAdd), swMid = max(1, (int)(72 * s) + icoAdd), swShort = max(1, (int)(40 * s));
-	const int rsFull = max(1, (int)(100 * s) + icoAdd), rsMid = max(1, (int)(56 * s) + icoAdd), rsShort = max(1, (int)(36 * s));
-	const int recFull = max(1, (int)(64 * s) + icoAdd), recMid = max(1, (int)(44 * s) + icoAdd), recShort = max(1, (int)(32 * s));
-	const int capFull = max(1, (int)(80 * s) + icoAdd), capMid = max(1, (int)(48 * s) + icoAdd), capShort = max(1, (int)(32 * s));
-	const int leadFull = swFull + gapLead + rsFull + gapLead + recFull + gapLead + capFull + gapLead;
-	const int leadMid = swMid + gapLead + rsMid + gapLead + recMid + gapLead + capMid + gapLead;
-	const int leadShort = swShort + gapLead + rsShort + gapLead + recShort + gapLead + capShort + gapLead;
-
-	if (!savedata.mpBotToolsInited) {
-		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|おまけ
-	}
-	// 旧「レース」ボタン(512)は「おまけ」(256)へ統合
-	if (savedata.mpBotToolsFlags & 512)
-		savedata.mpBotToolsFlags = (savedata.mpBotToolsFlags & ~512) | 256;
-	// VSTホストは切替対象にせず、底バーへ常時出す
-	savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
+	EnsureBotToolsFlags();
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[12] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botOmake
+	const int cfgF = max(1, (int)(132 * s) + icoAdd), cfgM = max(1, (int)(84 * s) + icoAdd), cfgS = max(1, (int)(48 * s));
+	const int rxF = max(1, (int)(80 * s) + icoAdd), rxM = max(1, (int)(64 * s) + icoAdd), rxS = max(1, (int)(40 * s));
+	const int saF = max(1, (int)(132 * s) + icoAdd), saM = max(1, (int)(72 * s) + icoAdd), saS = max(1, (int)(44 * s));
+	const int recF = max(1, (int)(64 * s) + icoAdd), recM = max(1, (int)(44 * s) + icoAdd), recS = max(1, (int)(32 * s));
+	const int capF = max(1, (int)(80 * s) + icoAdd), capM = max(1, (int)(48 * s) + icoAdd), capS = max(1, (int)(32 * s));
+	const int setF = max(1, (int)(64 * s) + icoAdd), setM = max(1, (int)(48 * s) + icoAdd), setS = max(1, (int)(32 * s));
+	const int folF = max(1, (int)(76 * s) + icoAdd), folM = max(1, (int)(52 * s) + icoAdd), folS = max(1, (int)(32 * s));
+	const int lrcF = max(1, (int)(52 * s) + icoAdd), lrcM = max(1, (int)(40 * s) + icoAdd), lrcS = max(1, (int)(32 * s));
+	const int eqF = max(1, (int)(96 * s) + icoAdd), eqM = max(1, (int)(48 * s) + icoAdd), eqS = max(1, (int)(32 * s));
+	struct BotSlot {
+		CCustomStandardButton* b;
+		int bit;
+		int wf, wm, ws;
 	};
-	const int botBit[12] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 4096, 2048, 256 };
-	const int wFull[12] = {
-		(int)(56 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(56 * s) + icoAdd,
-		(int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(56 * s) + icoAdd, (int)(64 * s) + icoAdd,
-		(int)(48 * s) + icoAdd, (int)(64 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(60 * s) + icoAdd
-	};
-	const int wMid[12] = {
-		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd,
-		(int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd,
-		(int)(40 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd
-	};
-	const int wShort[12] = {
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+	const BotSlot slots[] = {
+		{ &m_botShortCfg, 0, cfgF, cfgM, cfgS },
+		{ &m_botRairaX, kMpBotRairaX, rxF, rxM, rxS },
+		{ &m_botSasami, kMpBotSasami, saF, saM, saS },
+		{ &m_record, kMpBotRec, recF, recM, recS },
+		{ &m_capture, kMpBotCap, capF, capM, capS },
+		{ &m_botDj, kMpBotDj, (int)(56 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botTag, kMpBotTag, (int)(52 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botBpm, kMpBotBpm, (int)(48 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botSleep, kMpBotSleep, (int)(56 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botMirror, kMpBotMirror, (int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botSsViz, kMpBotSs, (int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botAlarm, kMpBotAlarm, (int)(56 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botRemote, kMpBotRemote, (int)(64 * s) + icoAdd, (int)(44 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botVst, kMpBotVst, (int)(48 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botMidi, kMpBotMidi, (int)(64 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botCd, kMpBotCd, (int)(48 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botOmake, kMpBotOmake, (int)(60 * s) + icoAdd, (int)(44 * s) + icoAdd, (int)(28 * s) },
+		{ &m_botSet, kMpBotSettings, setF, setM, setS },
+		{ &m_botFolder, kMpBotFolder, folF, folM, folS },
+		{ &m_botLrc, kMpBotLyrics, lrcF, lrcM, lrcS },
+		{ &m_botEq, kMpBotEq, eqF, eqM, eqS },
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 12; ++i) {
-		if (!(botFl & botBit[i])) continue;
-		needFull += wFull[i] + gapBot;
-		needMid += wMid[i] + gapBot;
-		needShort += wShort[i] + gapBot;
+	for (int i = 0; i < (int)(sizeof(slots) / sizeof(slots[0])); ++i) {
+		if (slots[i].bit != 0 && !(botFl & slots[i].bit)) continue;
+		needFull += slots[i].wf + gapBot;
+		needMid += slots[i].wm + gapBot;
+		needShort += slots[i].ws + gapBot;
 	}
-	// 「リード(切替〜キャプチャ) + 表示中ツール」が終了ボタン左に収まるかで段階を決める
 	const int freeBot = exitLeft - M - gapBot;
 	int botShortLv = 0;
-	if (leadFull + needFull > freeBot)
+	if (needFull > freeBot)
 		botShortLv = 1;
-	if (leadMid + needMid > freeBot)
+	if (needMid > freeBot)
 		botShortLv = 2;
-
-	const int swW = (botShortLv >= 2) ? swShort : (botShortLv >= 1) ? swMid : swFull;
-	const int rsW = (botShortLv >= 2) ? rsShort : (botShortLv >= 1) ? rsMid : rsFull;
-	const int recW = (botShortLv >= 2) ? recShort : (botShortLv >= 1) ? recMid : recFull;
-	const int capW = (botShortLv >= 2) ? capShort : (botShortLv >= 1) ? capMid : capFull;
 
 	if (!liveResize && botShortLv != m_mpBotShort) {
 		m_mpBotShort = botShortLv;
@@ -3998,25 +4060,60 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botOmake.GetSafeHwnd())
 				m_botOmake.SetWindowText(LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"));
 		}
+		if (m_botShortCfg.GetSafeHwnd())
+			m_botShortCfg.SetWindowText(botShortLv >= 2
+				? LL14(L"短縮", L"Bar", L"Bar", L"Bar", L"Bar", L"단축", L"快捷", L"اخت", L"Низ", L"Leis", L"Atal", L"Balk", L"Pask", L"Kis")
+				: botShortLv >= 1
+					? LL14(L"短縮設定", L"Bar set", L"Regl. bar", L"Barra", L"Barra", L"단축설정", L"快捷设置", L"إعداد", L"Панель", L"Leiste", L"Atalhos", L"Balk", L"Pasek", L"Kisayol")
+					: LL14(L"短縮ボタン設定", L"Shortcut buttons", L"Boutons raccourcis", L"Pulsanti rapidi", L"Botones atajo", L"단축 버튼 설정", L"快捷按钮设置", L"أزرار الاختصار", L"Кнопки панели", L"Kurzbefehle", L"Botoes de atalho", L"Snelknoppen", L"Skroty", L"Kisayol dugmeleri"));
+		if (m_botRairaX.GetSafeHwnd())
+			m_botRairaX.SetWindowText(botShortLv >= 2
+				? LL14(L"らX", L"RX", L"RX", L"RX", L"RX", L"라X", L"莱X", L"رX", L"РX", L"RX", L"RX", L"RX", L"RX", L"RX")
+				: LL14(L"らいらX", L"Raira X", L"Raira X", L"Raira X", L"Raira X", L"라이라 X", L"莱拉X", L"رايرا X", L"Райра X", L"Raira X", L"Raira X", L"Raira X", L"Raira X", L"Raira X"));
+		if (m_botSasami.GetSafeHwnd())
+			m_botSasami.SetWindowText(botShortLv >= 2
+				? LL14(L"ささ", L"Sas", L"Sas", L"Sas", L"Sas", L"사사", L"笹", L"سا", L"Сас", L"Sas", L"Sas", L"Sas", L"Sas", L"Sas")
+				: botShortLv >= 1
+					? LL14(L"ささみ", L"Sasami", L"Sasami", L"Sasami", L"Sasami", L"사사미", L"笹见", L"ساسامي", L"Сасами", L"Sasami", L"Sasami", L"Sasami", L"Sasami", L"Sasami")
+					: LL14(L"ささみコンポーザ", L"Sasami Composer", L"Compositeur Sasami", L"Compositore Sasami", L"Compositor Sasami", L"사사미 컴포저", L"笹见作曲", L"ملحن ساسامي", L"Композитор Sasami", L"Sasami-Komponist", L"Compositor Sasami", L"Sasami-componist", L"Kompozytor Sasami", L"Sasami besteci"));
+		if (m_botSet.GetSafeHwnd())
+			m_botSet.SetWindowText(botShortLv >= 2
+				? LL14(L"設", L"Set", L"Reg", L"Imp", L"Aju", L"설", L"设", L"إع", L"Нас", L"Ein", L"Cfg", L"Ins", L"Ust", L"Aya")
+				: LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Config.", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+		if (m_botFolder.GetSafeHwnd())
+			m_botFolder.SetWindowText(botShortLv >= 2
+				? LL14(L"フ", L"Fol", L"Dos", L"Car", L"Car", L"폴", L"夹", L"مج", L"Пап", L"Ord", L"Pas", L"Map", L"Fol", L"Kla")
+				: LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"));
+		if (m_botLrc.GetSafeHwnd())
+			m_botLrc.SetWindowText(botShortLv >= 2
+				? LL14(L"詞", L"Lrc", L"Par", L"Tes", L"Let", L"가", L"词", L"كل", L"Тек", L"Txt", L"Let", L"Tek", L"Tek", L"Soz")
+				: LL14(L"歌詞", L"Lyrics", L"Paroles", L"Testi", L"Letra", L"가사", L"歌词", L"كلمات", L"Текст", L"Text", L"Letra", L"Songtekst", L"Tekst", L"Sozler"));
+		if (m_botEq.GetSafeHwnd())
+			m_botEq.SetWindowText(botShortLv >= 1
+				? L"EQ"
+				: LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
 	}
 
-	bx = M;
-	MoveCtl(&m_switch, bx, botY, swW, swH); bx += swW + gapLead;
-	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
-	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
-	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
+	if (m_switch.GetSafeHwnd() && m_switch.IsWindowVisible())
+		m_switch.ShowWindow(SW_HIDE);
+	if (m_resetdata.GetSafeHwnd() && m_resetdata.IsWindowVisible())
+		m_resetdata.ShowWindow(SW_HIDE);
 	if (m_botFm.GetSafeHwnd() && m_botFm.IsWindowVisible())
 		m_botFm.ShowWindow(SW_HIDE);
-	for (int i = 0; i < 12; ++i) {
-		CCustomStandardButton* b = botBtn[i];
-		if (!b->GetSafeHwnd()) continue;
-		if (!(botFl & botBit[i])) {
+	bx = M;
+	int botStop = 0;
+	for (int i = 0; i < (int)(sizeof(slots) / sizeof(slots[0])); ++i) {
+		CCustomStandardButton* b = slots[i].b;
+		if (!b || !b->GetSafeHwnd()) continue;
+		const int show = (slots[i].bit == 0) || ((botFl & slots[i].bit) != 0);
+		if (!show) {
 			if (b->IsWindowVisible()) b->ShowWindow(SW_HIDE);
 			continue;
 		}
-		const int bw = (botShortLv >= 2) ? wShort[i] : (botShortLv >= 1) ? wMid[i] : wFull[i];
-		if (bx + bw > exitLeft - 2) {
+		const int bw = (botShortLv >= 2) ? slots[i].ws : (botShortLv >= 1) ? slots[i].wm : slots[i].wf;
+		if (bw < 1 || botStop || bx + bw > exitLeft - 2) {
 			if (b->IsWindowVisible()) b->ShowWindow(SW_HIDE);
+			botStop = 1;
 			continue;
 		}
 		MoveCtl(b, bx, botY, bw, swH);
@@ -8253,19 +8350,21 @@ void CMediaPlayerDlg::OnBotSleep()
 		PostMessage(WM_COMMAND, cmd);
 }
 
+void CMediaPlayerDlg::EnsureBotToolsFlags()
+{
+	const int beforeRev = savedata.mpBotToolsRev;
+	const int beforeFl = savedata.mpBotToolsFlags;
+	const int beforeIn = savedata.mpBotToolsInited;
+	MpBotToolsMigrate();
+	if (beforeRev != savedata.mpBotToolsRev || beforeFl != savedata.mpBotToolsFlags || beforeIn != savedata.mpBotToolsInited)
+		MpPersistSavedataQuick();
+}
+
 void CMediaPlayerDlg::ToggleBotVisFlag(int bit)
 {
-	if (!savedata.mpBotToolsInited) {
-		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|おまけ
-	}
-	// VSTホスト(1024)・MIDIモニタ(4096)・CD(2048)は常時表示。消さない。
-	if (bit == 1024 || bit == 2048 || bit == 4096) {
-		savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
-	} else {
-		savedata.mpBotToolsFlags ^= bit;
-		savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
-	}
+	if (bit == 0) return;
+	EnsureBotToolsFlags();
+	savedata.mpBotToolsFlags ^= bit;
 	MpPersistSavedataQuick();
 	m_mpBotShort = -1;
 	DoLayout();
@@ -8279,8 +8378,18 @@ void CMediaPlayerDlg::OnBotVisMirror() { ToggleBotVisFlag(16); }
 void CMediaPlayerDlg::OnBotVisSsViz() { ToggleBotVisFlag(32); }
 void CMediaPlayerDlg::OnBotVisAlarm() { ToggleBotVisFlag(64); }
 void CMediaPlayerDlg::OnBotVisRemote() { ToggleBotVisFlag(128); }
-void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(256); }
-void CMediaPlayerDlg::OnBotVisVst() { ToggleBotVisFlag(1024); }
+void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(kMpBotOmake); }
+void CMediaPlayerDlg::OnBotVisVst() { ToggleBotVisFlag(kMpBotVst); }
+void CMediaPlayerDlg::OnBotVisRec() { ToggleBotVisFlag(kMpBotRec); }
+void CMediaPlayerDlg::OnBotVisCap() { ToggleBotVisFlag(kMpBotCap); }
+void CMediaPlayerDlg::OnBotVisRairaX() { ToggleBotVisFlag(kMpBotRairaX); }
+void CMediaPlayerDlg::OnBotVisSasami() { ToggleBotVisFlag(kMpBotSasami); }
+void CMediaPlayerDlg::OnBotVisMidi() { ToggleBotVisFlag(kMpBotMidi); }
+void CMediaPlayerDlg::OnBotVisCd() { ToggleBotVisFlag(kMpBotCd); }
+void CMediaPlayerDlg::OnBotVisSet() { ToggleBotVisFlag(kMpBotSettings); }
+void CMediaPlayerDlg::OnBotVisFolder() { ToggleBotVisFlag(kMpBotFolder); }
+void CMediaPlayerDlg::OnBotVisLrc() { ToggleBotVisFlag(kMpBotLyrics); }
+void CMediaPlayerDlg::OnBotVisEq() { ToggleBotVisFlag(kMpBotEq); }
 
 void CMediaPlayerDlg::OnSaveParam()
 {
@@ -11876,30 +11985,15 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			savedata.mpToolsOpen != 0,
 			LL14(L"並べ替えやフォルダ追加などのツールパネルを開閉します", L"Show/hide the sort and add-folder tools panel", L"Afficher/masquer le panneau tri/dossier", L"Mostra/nascondi il pannello ordina/cartella", L"Mostrar/ocultar el panel ordenar/carpeta", L"정렬·폴더 추가 도구 패널을 여닫기", L"打开/关闭排序与添加文件夹工具面板", L"إظهار/إخفاء لوحة الترتيب وإضافة المجلد", L"Показать/скрыть панель сортировки/папки", L"Sortier-/Ordnerpanel ein-/ausblenden", L"Mostrar/ocultar o painel ordenar/pasta", L"Sorteer-/mappaneel tonen/verbergen", L"Pokaz/ukryj panel sortowania/folderu", L"Sirala/klasor arac panelini ac/kapat"));
 		{
-			if (!savedata.mpBotToolsInited) {
-				savedata.mpBotToolsInited = 1;
-				savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
-			}
-			savedata.mpBotToolsFlags |= 1024 | 2048 | 4096; // VSTホスト・MIDIモニタ・CDは常時表示
-			const int bf = savedata.mpBotToolsFlags;
 			CCustomPopupMenu* botSub = sub->AddSubMenu(
 				LL14(L"底バーのツールボタン", L"Bottom bar tool buttons", L"Boutons outils bas", L"Pulsanti strumenti in basso", L"Botones de herramientas abajo",
 					L"하단 도구 버튼", L"底栏工具按钮", L"أزرار أدوات الشريط السفلي", L"Кнопки панели снизу", L"Werkzeugtasten unten",
 					L"Botoes de ferramentas embaixo", L"Werkknoppen onderaan", L"Przyciski narzedzi na dole", L"Alt cubuk arac dugmeleri"),
-				LL14(L"キャプチャ右の空きに出すショートカットの表示切替", L"Show/hide shortcuts to the right of Capture", L"Afficher/masquer les raccourcis a droite de Capture", L"Mostra/nascondi scorciatoie a destra di Cattura", L"Mostrar/ocultar atajos a la derecha de Captura",
-					L"캡처 오른쪽 단축 버튼 표시", L"捕获右侧快捷按钮显示", L"إظهار/إخفاء اختصارات يمين الالتقاط", L"Показ ярлыков справа от Захвата", L"Shortcuts rechts von Capture ein/aus",
-					L"Mostrar/ocultar atalhos a direita de Captura", L"Snelkoppelingen rechts van Capture", L"Skroty na prawo od Przechwytu", L"Yakala sagindaki kisayollar"));
-			if (botSub) {
-				botSub->AddCheck(ID_MP_BOTVIS_DJ, LL14(L"DJパッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"), (bf & 1) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_TAG, LL14(L"タグ編集", L"Edit tags", L"Editer tags", L"Modifica tag", L"Editar etiquetas", L"태그 편집", L"编辑标签", L"تحرير الوسوم", L"Правка тегов", L"Tags bearbeiten", L"Editar tags", L"Tags bewerken", L"Edytuj tagi", L"Etiket duzenle"), (bf & 2) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_BPM, L"BPM", (bf & 4) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_SLEEP, LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"), (bf & 8) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_MIRROR, LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"), (bf & 16) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_SSVIZ, LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"), (bf & 32) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"), (bf & (256 | 512)) != 0);
-			}
+				LL14(L"左端の「短縮ボタン設定」と同じ表示切替です", L"Same show/hide list as the Shortcut buttons control at the left", L"La meme liste que le bouton Raccourcis a gauche", L"La stessa lista del pulsante Scorciatoie a sinistra", L"La misma lista que el boton Atajos a la izquierda",
+					L"왼쪽 「단축 버튼 설정」과 같은 표시 전환", L"与左端「快捷按钮设置」相同的显示切换", L"نفس قائمة زر الاختصارات في اليسار", L"Тот же список, что у кнопки слева", L"Dieselbe Liste wie Kurzbefehle links",
+					L"A mesma lista do botao Atalhos a esquerda", L"Dezelfde lijst als Snelknoppen links", L"Ta sama lista co Skroty po lewej", L"Soldaki Kisayol dugmeleri ile ayni liste"));
+			if (botSub)
+				AddBotVisChecks(botSub);
 		}
 		sub->AddCommand(ID_MP_MISS_MANAGE,
 			LL14(L"欠損を整理…", L"Manage missing…", L"Gerer manquants…", L"Gestisci mancanti…", L"Gestionar faltantes…", L"결손 정리…", L"整理缺失…", L"إدارة المفقود…", L"Управление отсутствующими…", L"Fehlende verwalten…", L"Gerir ausentes…", L"Ontbrekende beheren…", L"Zarzadzaj brakujacymi…", L"Eksikleri yonnet…"),
@@ -13932,6 +14026,176 @@ void CMediaPlayerDlg::OnMpSasamiFmRoll()
 void CMediaPlayerDlg::OnMpCdPlayer() { OpenCdPlayerModeless(this); }
 void CMediaPlayerDlg::OnMpSoft3DRace() { CloseOmakeTacticsIfOpen(); OpenSoft3DRaceModeless(this); }
 void CMediaPlayerDlg::OnMpOmakeTactics() { OpenOmakeTacticsModeless(this); }
+
+void CMediaPlayerDlg::AddBotVisChecks(CCustomPopupMenu* menu)
+{
+	if (!menu) return;
+	EnsureBotToolsFlags();
+	const int bf = savedata.mpBotToolsFlags;
+	auto chk = [&](UINT id, int bit, LPCTSTR label, LPCTSTR tip) {
+		menu->AddCheck(id, label, (bf & bit) != 0, tip);
+	};
+	chk(ID_MP_BOTVIS_REC, kMpBotRec,
+		LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"),
+		LL14(L"下部に録音ボタンを出します", L"Show the Record button on the bottom bar", L"Afficher Enregistrer sur la barre du bas", L"Mostra Registra sulla barra in basso", L"Mostrar Grabar en la barra inferior", L"하단에 녹음 버튼을 표시", L"在底栏显示录音", L"إظهار التسجيل في الشريط السفلي", L"Показать Запись на нижней панели", L"Aufnahme unten anzeigen", L"Mostrar Gravar na barra inferior", L"Opnemen onderaan tonen", L"Pokaz Nagraj na dolnym pasku", L"Altta Kaydet dugmesini goster"));
+	chk(ID_MP_BOTVIS_CAP, kMpBotCap,
+		LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"),
+		LL14(L"下部にキャプチャボタンを出します", L"Show the Capture button on the bottom bar", L"Afficher Capture sur la barre du bas", L"Mostra Cattura sulla barra in basso", L"Mostrar Captura en la barra inferior", L"하단에 캡처 버튼을 표시", L"在底栏显示捕获", L"إظهار الالتقاط في الشريط السفلي", L"Показать Захват на нижней панели", L"Capture unten anzeigen", L"Mostrar Captura na barra inferior", L"Opname onderaan tonen", L"Pokaz Przechwyt na dolnym pasku", L"Altta Yakala dugmesini goster"));
+	chk(ID_MP_BOTVIS_RAIRAX, kMpBotRairaX,
+		LL14(L"らいらX", L"Raira X", L"Raira X", L"Raira X", L"Raira X", L"라이라 X", L"莱拉X", L"رايرا X", L"Райра X", L"Raira X", L"Raira X", L"Raira X", L"Raira X", L"Raira X"),
+		LL14(L"短縮ボタン設定の右に、タクティクス「らいらX」を出します", L"Show tactics \"Raira X\" just right of Shortcut buttons", L"Afficher le tactique « Raira X » a droite des raccourcis", L"Mostra la tattica \"Raira X\" a destra delle scorciatoie", L"Mostrar la tactica \"Raira X\" a la derecha de los atajos", L"단축 버튼 설정 오른쪽에 택틱스 \"라이라 X\"", L"在快捷按钮设置右侧显示战棋「莱拉X」", L"إظهار تكتيك \"رايرا X\" يمين الاختصارات", L"Показать тактику «Райра X» справа от кнопок", L"Taktik „Raira X“ rechts von den Kurzbefehlen", L"Mostrar tatica \"Raira X\" a direita dos atalhos", L"Toon tactiek \"Raira X\" rechts van de snelknoppen", L"Pokaz taktyke „Raira X” na prawo od skrotow", L"Kisayollarin sagina taktik \"Raira X\""));
+	chk(ID_MP_BOTVIS_SASAMI, kMpBotSasami,
+		LL14(L"ささみコンポーザ", L"Sasami Composer", L"Compositeur Sasami", L"Compositore Sasami", L"Compositor Sasami", L"사사미 컴포저", L"笹见作曲", L"ملحن ساسامي", L"Композитор Sasami", L"Sasami-Komponist", L"Compositor Sasami", L"Sasami-componist", L"Kompozytor Sasami", L"Sasami besteci"),
+		LL14(L"下部にささみコンポーザ（MML・譜面・ロール）を出します", L"Show Sasami Composer (MML, score, roll) on the bottom bar", L"Afficher le compositeur Sasami (MML, partition, roll) en bas", L"Mostra il compositore Sasami (MML, spartito, roll) in basso", L"Mostrar el compositor Sasami (MML, partitura, roll) abajo", L"하단에 사사미 컴포저(MML·악보·롤)를 표시", L"在底栏显示笹见作曲（MML、乐谱、卷帘）", L"إظهار ملحن ساسامي (MML والنوتة والرول) بالأسفل", L"Показать композитор Sasami (MML, партитура, ролл) внизу", L"Sasami-Komponist (MML, Partitur, Rolle) unten anzeigen", L"Mostrar o compositor Sasami (MML, partitura, roll) embaixo", L"Sasami-componist (MML, partituur, roll) onderaan tonen", L"Pokaz kompozytor Sasami (MML, partytura, rolka) na dole", L"Altta Sasami besteci (MML, skor, rulo) goster"));
+	chk(ID_MP_BOTVIS_DJ, kMpBotDj,
+		LL14(L"DJパッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"),
+		LL14(L"下部にDJパッドを出します", L"Show the DJ pad on the bottom bar", L"Afficher le pad DJ en bas", L"Mostra il pad DJ in basso", L"Mostrar el pad DJ abajo", L"하단에 DJ 패드를 표시", L"在底栏显示DJ垫", L"إظهار لوحة DJ بالأسفل", L"Показать DJ-панель внизу", L"DJ-Pad unten anzeigen", L"Mostrar o pad DJ embaixo", L"DJ-pad onderaan tonen", L"Pokaz pad DJ na dole", L"Altta DJ paneli goster"));
+	chk(ID_MP_BOTVIS_TAG, kMpBotTag,
+		LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Tags", L"태그", L"标签", L"وسوم", L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"),
+		LL14(L"下部にタグ編集を出します", L"Show tag editing on the bottom bar", L"Afficher l'edition des tags en bas", L"Mostra la modifica tag in basso", L"Mostrar la edicion de etiquetas abajo", L"하단에 태그 편집을 표시", L"在底栏显示标签编辑", L"إظهار تحرير الوسوم بالأسفل", L"Показать правку тегов внизу", L"Tag-Bearbeitung unten anzeigen", L"Mostrar edicao de tags embaixo", L"Tagbewerking onderaan tonen", L"Pokaz edycje tagow na dole", L"Altta etiket duzenlemeyi goster"));
+	chk(ID_MP_BOTVIS_BPM, kMpBotBpm, L"BPM",
+		LL14(L"下部にBPMを出します", L"Show BPM on the bottom bar", L"Afficher BPM en bas", L"Mostra BPM in basso", L"Mostrar BPM abajo", L"하단에 BPM을 표시", L"在底栏显示BPM", L"إظهار BPM بالأسفل", L"Показать BPM внизу", L"BPM unten anzeigen", L"Mostrar BPM embaixo", L"BPM onderaan tonen", L"Pokaz BPM na dole", L"Altta BPM goster"));
+	chk(ID_MP_BOTVIS_SLEEP, kMpBotSleep,
+		LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Sueño", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"),
+		LL14(L"下部にスリープを出します", L"Show Sleep on the bottom bar", L"Afficher Veille en bas", L"Mostra Sleep in basso", L"Mostrar Sueño abajo", L"하단에 슬립을 표시", L"在底栏显示睡眠", L"إظهار النوم بالأسفل", L"Показать Сон внизу", L"Schlaf unten anzeigen", L"Mostrar Sono embaixo", L"Slaap onderaan tonen", L"Pokaz Sen na dole", L"Altta Uyku goster"));
+	chk(ID_MP_BOTVIS_MIRROR, kMpBotMirror,
+		LL14(L"ミラー", L"Mirror", L"Miroir", L"Mirror", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustro", L"Ayna"),
+		LL14(L"下部にミラーを出します", L"Show Mirror on the bottom bar", L"Afficher Miroir en bas", L"Mostra Mirror in basso", L"Mostrar Espejo abajo", L"하단에 미러를 표시", L"在底栏显示镜像", L"إظهار المرآة بالأسفل", L"Показать Зеркало внизу", L"Spiegel unten anzeigen", L"Mostrar Espelho embaixo", L"Spiegel onderaan tonen", L"Pokaz Lustro na dole", L"Altta Ayna goster"));
+	chk(ID_MP_BOTVIS_SSVIZ, kMpBotSs,
+		LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
+		LL14(L"下部にSSビジュアライザを出します", L"Show the SS visualizer on the bottom bar", L"Afficher le visualiseur SS en bas", L"Mostra il visualizzatore SS in basso", L"Mostrar el visualizador SS abajo", L"하단에 SS 비주얼을 표시", L"在底栏显示SS可视化", L"إظهار عارض SS بالأسفل", L"Показать SS-визуализатор внизу", L"SS-Visualizer unten anzeigen", L"Mostrar o visual SS embaixo", L"SS-visualizer onderaan tonen", L"Pokaz wizual SS na dole", L"Altta SS gorseli goster"));
+	chk(ID_MP_BOTVIS_ALARM, kMpBotAlarm,
+		LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"),
+		LL14(L"下部にアラームを出します", L"Show Alarm on the bottom bar", L"Afficher Alarme en bas", L"Mostra Sveglia in basso", L"Mostrar Alarma abajo", L"하단에 알람을 표시", L"在底栏显示闹钟", L"إظهار المنبه بالأسفل", L"Показать Будильник внизу", L"Wecker unten anzeigen", L"Mostrar Alarme embaixo", L"Wekker onderaan tonen", L"Pokaz Budzik na dole", L"Altta Alarm goster"));
+	chk(ID_MP_BOTVIS_REMOTE, kMpBotRemote,
+		LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"),
+		LL14(L"下部にリモートを出します", L"Show Remote on the bottom bar", L"Afficher Remote en bas", L"Mostra Remote in basso", L"Mostrar Remoto abajo", L"하단에 리모트를 표시", L"在底栏显示遥控", L"إظهار التحكم بالأسفل", L"Показать Пульт внизу", L"Remote unten anzeigen", L"Mostrar Remoto embaixo", L"Remote onderaan tonen", L"Pokaz Pilot na dole", L"Altta Uzaktan goster"));
+	chk(ID_MP_BOTVIS_VST, kMpBotVst, L"VST",
+		LL14(L"下部にVSTホストを出します", L"Show the VST host on the bottom bar", L"Afficher l'hote VST en bas", L"Mostra l'host VST in basso", L"Mostrar el host VST abajo", L"하단에 VST 호스트를 표시", L"在底栏显示VST宿主", L"إظهار مضيف VST بالأسفل", L"Показать VST-хост внизу", L"VST-Host unten anzeigen", L"Mostrar o host VST embaixo", L"VST-host onderaan tonen", L"Pokaz host VST na dole", L"Altta VST host goster"));
+	chk(ID_MP_BOTVIS_MIDI, kMpBotMidi, L"FM/MIDI",
+		LL14(L"下部にFM/MIDIモニタを出します", L"Show the FM/MIDI monitor on the bottom bar", L"Afficher le moniteur FM/MIDI en bas", L"Mostra il monitor FM/MIDI in basso", L"Mostrar el monitor FM/MIDI abajo", L"하단에 FM/MIDI 모니터를 표시", L"在底栏显示FM/MIDI监视", L"إظهار مراقب FM/MIDI بالأسفل", L"Показать монитор FM/MIDI внизу", L"FM/MIDI-Monitor unten anzeigen", L"Mostrar o monitor FM/MIDI embaixo", L"FM/MIDI-monitor onderaan tonen", L"Pokaz monitor FM/MIDI na dole", L"Altta FM/MIDI monitoru goster"));
+	chk(ID_MP_BOTVIS_CD, kMpBotCd, L"CD",
+		LL14(L"下部にCDプレイヤーを出します", L"Show the CD player on the bottom bar", L"Afficher le lecteur CD en bas", L"Mostra il lettore CD in basso", L"Mostrar el reproductor CD abajo", L"하단에 CD 플레이어를 표시", L"在底栏显示CD播放器", L"إظهار مشغل CD بالأسفل", L"Показать CD-плеер внизу", L"CD-Player unten anzeigen", L"Mostrar o leitor de CD embaixo", L"CD-speler onderaan tonen", L"Pokaz odtwarzacz CD na dole", L"Altta CD oynatici goster"));
+	chk(ID_MP_BOTVIS_MAZE, kMpBotOmake,
+		LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"),
+		LL14(L"下部におまけ（レース・迷路・タクティクス）を出します", L"Show Extras (race, maze, tactics) on the bottom bar", L"Afficher Extras (course, labyrinthe, tactique) en bas", L"Mostra Extra (gara, labirinto, tattica) in basso", L"Mostrar Extras (carrera, laberinto, tactica) abajo", L"하단에 보너스(레이스·미로·택틱스)를 표시", L"在底栏显示附赠（竞速、迷宫、战棋）", L"إظهار الإضافات (سباق ومتاهة وتكتيك) بالأسفل", L"Показать бонус (гонка, лабиринт, тактика) внизу", L"Extras (Rennen, Labyrinth, Taktik) unten anzeigen", L"Mostrar Extras (corrida, labirinto, tatica) embaixo", L"Extra's (race, doolhof, tactiek) onderaan tonen", L"Pokaz Dodatki (wyscig, labirynt, taktyka) na dole", L"Altta Ekstralar (yaris, labirent, taktik) goster"));
+	menu->AddSeparator();
+	chk(ID_MP_BOTVIS_SET, kMpBotSettings,
+		LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Config.", L"Instellingen", L"Ustawienia", L"Ayarlar"),
+		LL14(L"下部に設定を出します（既定はオフ）", L"Show Settings on the bottom bar (off by default)", L"Afficher Reglages en bas (desactive par defaut)", L"Mostra Impostazioni in basso (spento di default)", L"Mostrar Ajustes abajo (apagado por defecto)", L"하단에 설정을 표시(기본은 끔)", L"在底栏显示设置（默认关闭）", L"إظهار الإعدادات بالأسفل (مغلق افتراضياً)", L"Показать Настройки внизу (выкл. по умолчанию)", L"Einstellungen unten anzeigen (standard aus)", L"Mostrar Config. embaixo (desligado por padrao)", L"Instellingen onderaan tonen (standaard uit)", L"Pokaz Ustawienia na dole (domyslnie wyl.)", L"Altta Ayarlar goster (varsayilan kapali)"));
+	chk(ID_MP_BOTVIS_FOLDER, kMpBotFolder,
+		LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"),
+		LL14(L"下部にフォルダ設定を出します（既定はオフ）", L"Show Folder on the bottom bar (off by default)", L"Afficher Dossier en bas (desactive par defaut)", L"Mostra Cartella in basso (spento di default)", L"Mostrar Carpeta abajo (apagado por defecto)", L"하단에 폴더를 표시(기본은 끔)", L"在底栏显示文件夹（默认关闭）", L"إظهار المجلد بالأسفل (مغلق افتراضياً)", L"Показать Папку внизу (выкл. по умолчанию)", L"Ordner unten anzeigen (standard aus)", L"Mostrar Pasta embaixo (desligado por padrao)", L"Map onderaan tonen (standaard uit)", L"Pokaz Folder na dole (domyslnie wyl.)", L"Altta Klasor goster (varsayilan kapali)"));
+	chk(ID_MP_BOTVIS_LRC, kMpBotLyrics,
+		LL14(L"歌詞", L"Lyrics", L"Paroles", L"Testi", L"Letra", L"가사", L"歌词", L"كلمات", L"Текст", L"Text", L"Letra", L"Songtekst", L"Tekst", L"Sozler"),
+		LL14(L"下部に歌詞ウィンドウの開閉を出します（既定はオフ）", L"Show the lyrics-window toggle on the bottom bar (off by default)", L"Afficher l'ouverture des paroles en bas (desactive par defaut)", L"Mostra l'apertura testi in basso (spento di default)", L"Mostrar la ventana de letra abajo (apagado por defecto)", L"하단에 가사 창 전환을 표시(기본은 끔)", L"在底栏显示歌词窗口开关（默认关闭）", L"إظهار تبديل نافذة الكلمات بالأسفل (مغلق افتراضياً)", L"Показать переключатель текста внизу (выкл. по умолчанию)", L"Textfenster-Schalter unten anzeigen (standard aus)", L"Mostrar a janela de letra embaixo (desligado por padrao)", L"Songtekstknop onderaan tonen (standaard uit)", L"Pokaz okno tekstu na dole (domyslnie wyl.)", L"Altta soz penceresi dugmesini goster (varsayilan kapali)"));
+	chk(ID_MP_BOTVIS_EQ, kMpBotEq,
+		LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"),
+		LL14(L"下部にイコライザーを出します（既定はオフ）", L"Show the equalizer on the bottom bar (off by default)", L"Afficher l'egaliseur en bas (desactive par defaut)", L"Mostra l'equalizzatore in basso (spento di default)", L"Mostrar el ecualizador abajo (apagado por defecto)", L"하단에 이퀄라이저를 표시(기본은 끔)", L"在底栏显示均衡器（默认关闭）", L"إظهار المعادل بالأسفل (مغلق افتراضياً)", L"Показать эквалайзер внизу (выкл. по умолчанию)", L"Equalizer unten anzeigen (standard aus)", L"Mostrar o equalizador embaixo (desligado por padrao)", L"Equalizer onderaan tonen (standaard uit)", L"Pokaz korektor na dole (domyslnie wyl.)", L"Altta ekolayzer goster (varsayilan kapali)"));
+}
+
+void CMediaPlayerDlg::OnBotShortCfg()
+{
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+	menu.SetSkipChrome(TRUE);
+	menu.AddCommand(IDC_MP_SWITCHMODE,
+		LL14(L"ファルコム特化画面へ", L"To the Falcom screen", L"Vers l'ecran Falcom", L"Alla schermata Falcom", L"A la pantalla Falcom", L"팔콤 특화 화면으로", L"前往Falcom特化画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para a tela Falcom", L"Naar het Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekranina"),
+		LL14(L"ファルコムbgm特化型画面へ切り替えます。", L"Switch to the Falcom BGM screen.", L"Passer a l'ecran Falcom.", L"Passa alla schermata Falcom.", L"Cambiar a la pantalla Falcom.", L"팔콤 BGM 특화 화면으로 전환합니다.", L"切换到Falcom BGM特化画面。", L"التبديل إلى شاشة Falcom.", L"Перейти к экрану Falcom.", L"Zum Falcom-BGM-Bildschirm wechseln.", L"Mudar para a tela Falcom.", L"Overschakelen naar het Falcom-scherm.", L"Przelacz na ekran Falcom.", L"Falcom BGM ekranina gec."));
+	menu.SetLastItemBold(TRUE);
+	menu.AddCommand(IDC_MP_RESETDATA,
+		LL14(L"保存をリセット", L"Reset saved", L"Reinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zurucksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kaydi sifirla"),
+		LL14(L"曲ごとに保存した設定を削除し、音量・EQなどを初期状態へ戻します。", L"Delete per-song saved settings and reset volume, EQ and the rest to defaults.", L"Supprimer les reglages par morceau et reinitialiser volume, EQ, etc.", L"Elimina le impostazioni per brano e ripristina volume, EQ, ecc.", L"Eliminar ajustes por pista y restablecer volumen, EQ, etc.", L"곡별 저장 설정을 지우고 볼륨·EQ 등을 초기화합니다.", L"删除逐曲保存的设置，并将音量、EQ等恢复默认。", L"حذف إعدادات كل أغنية وإعادة ضبط الصوت والمعادل.", L"Удалить настройки треков и сбросить громкость, EQ и прочее.", L"Pro-Titel-Einstellungen loschen und Lautstarke, EQ usw. zurucksetzen.", L"Excluir ajustes por faixa e redefinir volume, EQ, etc.", L"Per-nummer-instellingen wissen en volume, EQ enz. resetten.", L"Usun ustawienia na utwor i zresetuj glosnosc, EQ itd.", L"Parca ayarlarini sil, ses ve EQ'yu varsayilana dondur."));
+	menu.AddSeparator();
+	AddBotVisChecks(&menu);
+	CRect r;
+	if (m_botShortCfg.GetSafeHwnd())
+		m_botShortCfg.GetWindowRect(&r);
+	else
+		GetCursorPos(&r.TopLeft());
+	const UINT cmd = menu.Track(CPoint(r.left, r.bottom), this);
+	if (cmd == IDC_MP_SWITCHMODE)
+		OnSwitch();
+	else if (cmd == IDC_MP_RESETDATA)
+		OnResetData();
+	else if (cmd)
+		PostMessage(WM_COMMAND, cmd);
+	if (m_botShortCfg.GetSafeHwnd()) {
+		m_botShortCfg.Invalidate(FALSE);
+		m_botShortCfg.UpdateWindow();
+	}
+}
+
+void CMediaPlayerDlg::OnBotRairaX()
+{
+	OnMpOmakeTactics();
+}
+
+void CMediaPlayerDlg::OnBotSasami()
+{
+	// メニュー内だけ。メッセージマップには載せず、ここで FM テキストへ振り分ける。
+	const UINT idMmlFm = 33339;
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+	menu.SetSkipChrome(TRUE);
+	CCustomPopupMenu* mml = menu.AddSubMenu(
+		LL14(L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML", L"MML"),
+		LL14(L"テキスト作曲。MIDI か FM を選びます。", L"Text compose. Choose MIDI or FM.", L"Composition texte. Choisir MIDI ou FM.", L"Composizione testo. Scegli MIDI o FM.", L"Composicion de texto. Elige MIDI o FM.", L"텍스트 작곡. MIDI 또는 FM.", L"文本作曲。选择 MIDI 或 FM。", L"تأليف نص. اختر MIDI أو FM.", L"Текстовая композиция. MIDI или FM.", L"Text komponieren. MIDI oder FM.", L"Composicao de texto. Escolha MIDI ou FM.", L"Tekst componeren. Kies MIDI of FM.", L"Kompozycja tekstowa. MIDI albo FM.", L"Metin bestele. MIDI veya FM."));
+	if (mml) {
+		mml->AddCommand(ID_MP_SASAMI_TEXT, L"MIDI",
+			LL14(L"MIDI / MICP の MML を開きます。", L"Open MIDI / MICP MML.", L"Ouvrir le MML MIDI / MICP.", L"Apri MML MIDI / MICP.", L"Abrir MML MIDI / MICP.", L"MIDI / MICP MML을 엽니다.", L"打开 MIDI / MICP 的 MML。", L"فتح MML لـ MIDI / MICP.", L"Открыть MML MIDI / MICP.", L"MIDI- / MICP-MML offnen.", L"Abrir MML MIDI / MICP.", L"MIDI- / MICP-MML openen.", L"Otworz MML MIDI / MICP.", L"MIDI / MICP MML ac."));
+		mml->AddCommand(idMmlFm, L"FM",
+			LL14(L"FM / OPNA の MML を開きます。", L"Open FM / OPNA MML.", L"Ouvrir le MML FM / OPNA.", L"Apri MML FM / OPNA.", L"Abrir MML FM / OPNA.", L"FM / OPNA MML을 엽니다.", L"打开 FM / OPNA 的 MML。", L"فتح MML لـ FM / OPNA.", L"Открыть MML FM / OPNA.", L"FM- / OPNA-MML offnen.", L"Abrir MML FM / OPNA.", L"FM- / OPNA-MML openen.", L"Otworz MML FM / OPNA.", L"FM / OPNA MML ac."));
+	}
+	CCustomPopupMenu* score = menu.AddSubMenu(
+		LL14(L"譜面", L"Score", L"Partition", L"Partitura", L"Partitura", L"악보", L"乐谱", L"نوتة", L"Партитура", L"Partitur", L"Partitura", L"Partituur", L"Partytura", L"Skor"),
+		LL14(L"譜面。MIDI か FM を選びます。", L"Score. Choose MIDI or FM.", L"Partition. Choisir MIDI ou FM.", L"Partitura. Scegli MIDI o FM.", L"Partitura. Elige MIDI o FM.", L"악보. MIDI 또는 FM.", L"乐谱。选择 MIDI 或 FM。", L"النوتة. اختر MIDI أو FM.", L"Партитура. MIDI или FM.", L"Partitur. MIDI oder FM.", L"Partitura. Escolha MIDI ou FM.", L"Partituur. Kies MIDI of FM.", L"Partytura. MIDI albo FM.", L"Skor. MIDI veya FM."));
+	if (score) {
+		score->AddCommand(ID_MP_SASAMI_MIDI, L"MIDI",
+			LL14(L"MIDI譜面を開きます。", L"Open the MIDI score.", L"Ouvrir la partition MIDI.", L"Apri la partitura MIDI.", L"Abrir la partitura MIDI.", L"MIDI 악보를 엽니다.", L"打开MIDI乐谱。", L"فتح نوتة MIDI.", L"Открыть MIDI-партитуру.", L"MIDI-Partitur offnen.", L"Abrir a partitura MIDI.", L"MIDI-partituur openen.", L"Otworz partyture MIDI.", L"MIDI skoru ac."));
+		score->AddCommand(ID_MP_SASAMI_FM, L"FM",
+			LL14(L"FM譜面を開きます。", L"Open the FM score.", L"Ouvrir la partition FM.", L"Apri la partitura FM.", L"Abrir la partitura FM.", L"FM 악보를 엽니다.", L"打开FM乐谱。", L"فتح نوتة FM.", L"Открыть FM-партитуру.", L"FM-Partitur offnen.", L"Abrir a partitura FM.", L"FM-partituur openen.", L"Otworz partyture FM.", L"FM skoru ac."));
+	}
+	CCustomPopupMenu* roll = menu.AddSubMenu(
+		LL14(L"ロール", L"Roll", L"Roll", L"Roll", L"Roll", L"롤", L"卷帘", L"رول", L"Ролл", L"Rolle", L"Roll", L"Roll", L"Rolka", L"Rulo"),
+		LL14(L"ピアノロール。MIDI か FM を選びます。", L"Piano roll. Choose MIDI or FM.", L"Piano roll. Choisir MIDI ou FM.", L"Piano roll. Scegli MIDI o FM.", L"Piano roll. Elige MIDI o FM.", L"피아노 롤. MIDI 또는 FM.", L"钢琴卷帘。选择 MIDI 或 FM。", L"بيانو رول. اختر MIDI أو FM.", L"Пианоролл. MIDI или FM.", L"Klavierrolle. MIDI oder FM.", L"Piano roll. Escolha MIDI ou FM.", L"Piano-roll. Kies MIDI of FM.", L"Rolka. MIDI albo FM.", L"Piyano rulosu. MIDI veya FM."));
+	if (roll) {
+		roll->AddCommand(ID_MP_SASAMI_MIDI_ROLL, L"MIDI",
+			LL14(L"MIDIピアノロールを開きます。", L"Open the MIDI piano roll.", L"Ouvrir le piano roll MIDI.", L"Apri il piano roll MIDI.", L"Abrir el piano roll MIDI.", L"MIDI 피아노 롤을 엽니다.", L"打开MIDI钢琴卷帘。", L"فتح بيانو رول MIDI.", L"Открыть MIDI-пианоролл.", L"MIDI-Klavierrolle offnen.", L"Abrir o piano roll MIDI.", L"MIDI-piano-roll openen.", L"Otworz rolke MIDI.", L"MIDI piyano rulosunu ac."));
+		roll->AddCommand(ID_MP_SASAMI_FM_ROLL, L"FM",
+			LL14(L"FMピアノロールを開きます。", L"Open the FM piano roll.", L"Ouvrir le piano roll FM.", L"Apri il piano roll FM.", L"Abrir el piano roll FM.", L"FM 피아노 롤을 엽니다.", L"打开FM钢琴卷帘。", L"فتح بيانو رول FM.", L"Открыть FM-пианоролл.", L"FM-Klavierrolle offnen.", L"Abrir o piano roll FM.", L"FM-piano-roll openen.", L"Otworz rolke FM.", L"FM piyano rulosunu ac."));
+	}
+	CRect r;
+	if (m_botSasami.GetSafeHwnd())
+		m_botSasami.GetWindowRect(&r);
+	else
+		GetCursorPos(&r.TopLeft());
+	const UINT cmd = menu.Track(CPoint(r.left, r.bottom), this);
+	if (cmd == ID_MP_SASAMI_TEXT || cmd == idMmlFm) {
+		CSasamiTextDlg::OpenOwned(this);
+		CSasamiTextDlg* t = CSasamiTextDlg::Instance();
+		if (t && ::IsWindow(t->GetSafeHwnd())) {
+			if (cmd == idMmlFm) {
+				if (CSasamiFmScoreDlg* sc = CSasamiFmScoreDlg::Instance()) {
+					if (::IsWindow(sc->GetSafeHwnd()))
+						sc->PushDocToText();
+				}
+				t->UseMode(1);
+			} else {
+				if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance()) {
+					if (::IsWindow(sc->GetSafeHwnd()))
+						sc->PushDocToText();
+				}
+				t->UseMode(0);
+			}
+		}
+	} else if (cmd)
+		PostMessage(WM_COMMAND, cmd);
+	if (m_botSasami.GetSafeHwnd()) {
+		m_botSasami.Invalidate(FALSE);
+		m_botSasami.UpdateWindow();
+	}
+}
 
 void CMediaPlayerDlg::AddOmakeMenuItems(CCustomPopupMenu* menu)
 {

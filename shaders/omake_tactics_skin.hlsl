@@ -32,6 +32,7 @@ cbuffer SkinParm : register(b1)
 	float4 Info;     // x=顔頂点数 y=ボーン数 z=顔の先頭 w=身長
 	uint4 Extra;     // x=髪色 y=頂点数 z=服の色 w=服の色を使う
 	float4 Jig;      // xyz=胸の遅れ（モデル空間） w=肌 0無し 1白人 2アジア 3黒人
+	float4 Expr;     // x=口 -1への字 1開き y=眉 -1下げ 1上げ z=細目 0..1
 };
 
 struct SkinIn
@@ -148,21 +149,50 @@ void CSSkin(uint dtid : SV_DispatchThreadID)
 			color = asuint(f.n.w);
 		} else if (f.d.w > 1.5) color = asuint(f.n.w);
 	}
-	// まぶた。Nip0.xyz 左目、Nip0.w 閉じ量、Nip1.xyz 右目、Nip1.w 半径。髪パスでは使わない。
-	if (Bust.x >= 0 && Nip0.w > 0.001 && Nip1.w > 0.006) {
+	// まぶた・口・眉。Nip0.xyz 左目、Nip0.w 閉じ量、Nip1.xyz 右目、Nip1.w 半径。髪パスでは使わない。
+	if (Bust.x >= 0 && Nip1.w > 0.006) {
 		float blink = saturate(Nip0.w);
+		float squint = saturate(Expr.z);
 		float rad = Nip1.w;
 		float3 eyeP[2] = { Nip0.xyz, Nip1.xyz };
 		[unroll] for (int e = 0; e < 2; e++) {
 			float3 d = p - eyeP[e];
-			float nx = d.x / (rad * 1.25);
-			float ny = d.y / (rad * 0.95);
+			float nx = d.x / (rad * 1.35);
+			float ny = d.y / (rad * 1.15);
 			float e2 = nx * nx + ny * ny;
-			if (e2 < 1.0 && abs(d.z) < rad * 2.2) {
+			if (e2 < 1.0 && abs(d.z) < rad * 2.8) {
 				float w = 1.0 - e2;
-				w = w * w;
-				p.y = lerp(p.y, eyeP[e].y, blink * w);
+				w = w * w * (3.0 - 2.0 * w);
+				float close = blink;
+				if (d.y > 0) close = saturate(max(blink, squint));
+				else close = saturate(blink * 0.9 + squint * 0.25);
+				float cover = close * w;
+				// 上まぶたは瞳を覆うところまで下ろす。数ミリだと顔の寄りでも点に見える。
+				float lidY = eyeP[e].y - rad * (d.y > 0 ? 0.85 : 0.12) * close;
+				p.y = lerp(p.y, lidY, cover);
+				if (d.y > 0) p.y -= rad * 0.35 * cover;
+				p.z += rad * 0.28 * cover;
 			}
+			if (d.y > rad * 0.25 && d.y < rad * 2.6 && abs(d.x) < rad * 1.8 && abs(d.z) < rad * 2.2) {
+				float bw = saturate(1.0 - length(d.xy) / (rad * 2.6));
+				p.y += Expr.y * bw * rad * 0.45;
+			}
+		}
+		float3 mid = (eyeP[0] + eyeP[1]) * 0.5;
+		float span = length(eyeP[1] - eyeP[0]);
+		if (span < rad) span = rad * 2.6;
+		float3 mouth = mid + float3(0, -span * 0.78, span * 0.06);
+		float3 md = p - mouth;
+		float ax = abs(md.x);
+		float lipX = span * 0.46;
+		float lipY = span * 0.28;
+		if (ax < lipX && abs(md.y) < lipY && abs(md.z) < span * 0.7 && abs(Expr.x) > 0.02) {
+			float tx = 1.0 - ax / lipX;
+			float ty = 1.0 - abs(md.y) / lipY;
+			float w = tx * tx * ty * ty;
+			float open = Expr.x;
+			p.y += (md.y >= 0 ? 0.42 : -1.05) * open * w * lipY;
+			p.z -= max(open, 0) * w * span * 0.10;
 		}
 	}
 	uint jp = s.pack.y;
@@ -251,6 +281,13 @@ void CSSkin(uint dtid : SV_DispatchThreadID)
 	uint o = id * 36u;
 	Vout.Store3(o, asuint(p));
 	Vout.Store3(o + 12, asuint(nrm));
-	Vout.Store2(o + 24, asuint(float2(0, 0)));
+	// 体だけ。x=質感 0肌 1絹 2革 3金属 4綿 5板金 6別珍 7薄布 8編地。y=1男 2女。
+	// 髪は UV を 0 のまま。頂点αは風の重みなので質感には使わない。
+	float2 uv = float2(0, 0);
+	if (Bust.x >= 0.0) {
+		float sex = (Expr.w > 1.5) ? 2.0 : ((Expr.w > 0.5) ? 1.0 : 0.0);
+		uv = float2(s.p.w, sex);
+	}
+	Vout.Store2(o + 24, asuint(uv));
 	Vout.Store(o + 32, color);
 }

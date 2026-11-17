@@ -59,6 +59,11 @@ private:
 	wchar_t m_openPath[520];
 	int m_monHold;
 	int m_forceHead;
+	UINT64 m_monSample; /* モニタへ出す位置。ループでも巻き戻さない */
+	int m_loopWrapArm; /* 本家のループシークを受け付ける短いあいだ */
+	int m_skipMonSeek;
+	__int64 m_loopWrapQpc;
+	__int64 m_qpcFreq;
 	std::mutex m_midiLock;
 
 	struct MemFile { const BYTE* p; DWORD size; DWORD pos; };
