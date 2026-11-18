@@ -509,8 +509,8 @@ float ShadowAt(float3 w, float3 n)
 	}
 	// 自然光。足元は細く、遮蔽が遠いほど太陽の視半径ぶん縁が広がる。
 	// 広がりは探索円の内側まで。影の中は探索だけで打ち切るので、外側の追加サンプルは足さない。
-	int nb = (Q.x > 5.5) ? 16 : ((Q.x > 2.5) ? 8 : 4);
-	float searchTex = (Q.x > 5.5) ? 14.0 : ((Q.x > 2.5) ? 8.0 : 5.0);
+	int nb = (Q.x > 2.5) ? 8 : 4;
+	float searchTex = (Q.x > 2.5) ? 8.0 : 5.0;
 	float search = Fog.w * searchTex;
 	float avg = 0;
 	float cnt = 0;
@@ -532,7 +532,7 @@ float ShadowAt(float3 w, float3 n)
 	sincos(ang, sn, cs);
 	float t = Fog.w * radTex;
 	float zb = z - t * 0.2;
-	int taps = (Q.x > 2.5) ? 16 : 12;
+	int taps = 12;
 	float s = 0;
 	[loop] for (int i = 0; i < taps; i++) {
 		float2 o = k[i];
@@ -2498,8 +2498,8 @@ GOut GroundPS(PSIn i, float theme)
 		col += float3(1, 0.98, 0.92) * sp * saturate(dot(nLit, L)) * (Q.x > 5.5 ? 0.09 : 0.045);
 	}
 	if (!(theme > 9.5 && theme < 12.5)) {
-		float microF = (Q.x > 5.5) ? 28.0 : ((Q.x > 2.5) ? 18.0 : 11.0);
-		float micro = fbm2(i.w.xz * microF + i.w.y * 2.0);
+		float microF = (Q.x > 2.5) ? 18.0 : 11.0;
+		float micro = fbmSky(i.w.xz * microF + i.w.y * 2.0);
 		col *= 0.95 + micro * ((Q.x > 4.5) ? 0.09 : 0.05);
 	}
 	if (tier > 1.5) {
@@ -2558,7 +2558,7 @@ GOut ExtraGround(PSIn i, float kind)
 		float ndv = saturate(dot(n, v));
 		float fres = pow(1.0 - ndv, 2.1);
 		float2 cu = xz * 0.08;
-		float cloud = smoothstep(0.32, 0.7, fbm2(cu + float2(t * 0.02, t * 0.01)));
+		float cloud = smoothstep(0.32, 0.7, fbmSky(cu + float2(t * 0.02, t * 0.01)));
 		albedo = lerp(float3(1.0, 0.78, 0.46), float3(1.0, 0.96, 0.84), cloud);
 		albedo = lerp(albedo * 0.62, float3(1.0, 0.94, 0.72), fres);
 		float2 cell = floor(xz * 0.7);
@@ -2574,8 +2574,8 @@ GOut ExtraGround(PSIn i, float kind)
 		f0 = float3(0.09, 0.07, 0.04);
 		gloss = lerp(0.82, 0.98, fres);
 	} else {
-		float wash = fbm2(xz * 0.06);
-		float wash2 = fbm2(xz * 0.15 + 3.2);
+		float wash = fbmSky(xz * 0.06);
+		float wash2 = fbmSky(xz * 0.15 + 3.2);
 		albedo = lerp(float3(0.98, 0.9, 0.7), float3(0.55, 0.78, 0.48), wash);
 		albedo = lerp(albedo, float3(0.96, 0.62, 0.58), smoothstep(0.58, 0.86, wash2) * 0.5);
 		float2 sw = float2(xz.x + sin(xz.y * 0.65) * 0.9, xz.y + cos(xz.x * 0.4) * 0.4);
@@ -3450,8 +3450,7 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		col += float3(0.95, 0.98, 0.72) * (rib * 0.38 + seed * 0.55) * veil;
 	} else if (th < 1.5) {
 		float2 dp = wxz * float2(0.14, 0.28) - float2(t * 0.75, t * 0.18);
-		float colm = smoothstep(0.4, 0.78, fbmSky(dp) * 0.65 + fbmSky(dp * 2.4) * 0.5);
-		col = FarBend(col, uv, t * 0.7, veil * 0.85, 0.006);
+		float colm = smoothstep(0.4, 0.78, fbmSky(dp) * 0.65 + vnoise(dp * 2.4) * 0.5);
 		col += float3(1.0, 0.48, 0.16) * colm * veil * 0.44;
 	} else if (th < 2.5) {
 		float ray = pow(0.5 + 0.5 * sin(yaw * 16.0 + fbmSky(wxz * 0.08 + t * 0.05) * 2.5 - t * 0.2), 8.0);
@@ -3462,16 +3461,15 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 	} else if (th < 3.5) {
 		float2 ap = float2(yaw * 2.6 + t * 0.05, rd.y * 3.2);
 		float a = fbmSky(ap);
-		float b = fbmSky(ap * 1.9 + 4.0);
+		float b = vnoise(ap * 1.9 + 4.0);
 		float curtain = pow(saturate(a * 0.6 + b * 0.5), 1.5);
 		float2 dg = wxz * 1.1 - float2(t * 1.6, t * 0.4);
 		float diamond = step(0.94, hash21(floor(dg))) * (0.5 + 0.5 * sin(t * 6.0 + hash21(floor(dg)) * 30.0));
 		col += lerp(float3(0.15, 0.88, 0.58), float3(0.38, 0.45, 1.0), b) * curtain * veil * 0.52;
 		col += float3(0.88, 0.96, 1.0) * diamond * veil * 0.45;
 	} else if (th < 4.5) {
-		col = FarBend(col, uv, t * 1.15, veil, 0.012);
 		float2 sp = wxz * float2(0.16, 0.45) - float2(t * 1.3, t * 0.25);
-		float veilS = smoothstep(0.38, 0.76, fbmSky(sp) * 0.65 + fbmSky(sp * 2.3) * 0.5);
+		float veilS = smoothstep(0.38, 0.76, fbmSky(sp) * 0.65 + vnoise(sp * 2.3) * 0.5);
 		col += float3(1.0, 0.78, 0.35) * veilS * veil * 0.42;
 	} else if (th < 5.5) {
 		float2 eg = float2(yaw * 18.0 + sin(t * 0.6 + wpos.y * 0.2), wpos.y * 0.45 - t * 1.1);
@@ -3481,7 +3479,7 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		float plume = smoothstep(0.4, 0.78, fbmSky(wxz * 0.12 - float2(t * 0.2, t * 0.35)));
 		col += float3(1.0, 0.32, 0.04) * (ember * 0.85 + plume * 0.32) * veil;
 	} else if (th < 6.5) {
-		float2 mp = wxz * 0.14 + CurlSky(wxz * 0.08 + t * 0.06) * 0.8;
+		float2 mp = wxz * 0.14;
 		float sheet = smoothstep(0.34, 0.74, fbmSky(mp + float2(t * 0.14, -t * 0.09)));
 		float2 wg = wxz * 0.45;
 		float2 wc = floor(wg);
@@ -3507,7 +3505,7 @@ void StageSignature(inout float3 col, float2 uv, float th, float t, float z, flo
 		col += (bow * arc * 0.55 + float3(0.82, 0.94, 1.0) * spray * 0.32) * veil;
 	} else if (th < 10.5) {
 		float2 u = float2(yaw * 2.0, rd.y * 2.6);
-		float n = fbmSky(u + t * 0.02) * 0.6 + fbmSky(u * 2.2 - t * 0.015) * 0.5;
+		float n = fbmSky(u + t * 0.02) * 0.6 + vnoise(u * 2.2 - t * 0.015) * 0.5;
 		float2 sg = float2(yaw * 120.0, rd.y * 180.0);
 		float star = step(0.99, hash21(floor(sg))) * saturate(1.0 - length(frac(sg) - 0.5) * 5.5);
 		col += lerp(float3(0.48, 0.12, 0.82), float3(0.1, 0.45, 1.0), saturate(n)) * n * veil * 0.58;
@@ -3561,15 +3559,12 @@ void ThemeWorld(inout float3 col, float2 uv, float th, float t, float z)
 	float far = hasZ * smoothstep(0.5, 0.84, z);
 	float zMax = z, zMin = z;
 	bool needEdge = (tier > 2.5 && hasZ > 0.5);
-	bool needRoom = (far * max(presence, 0.72) >= 0.02 && hasZ > 0.5);
-	if (needEdge || needRoom) {
-		float2 px = Screen.zw * (tier > 5.5 ? 2.4 : (needEdge ? 1.8 : 2.2));
+	if (needEdge) {
+		float2 px = Screen.zw * 1.8;
 		float zr = DepthMap.SampleLevel(SL, uv + float2(px.x, 0), 0).r;
 		float zl = DepthMap.SampleLevel(SL, uv - float2(px.x, 0), 0).r;
-		float zu = DepthMap.SampleLevel(SL, uv + float2(0, px.y), 0).r;
-		float zd = DepthMap.SampleLevel(SL, uv - float2(0, px.y), 0).r;
-		zMax = max(max(zr, zl), max(zu, zd));
-		zMin = min(min(zr, zl), min(zu, zd));
+		zMax = max(zr, zl);
+		zMin = min(zr, zl);
 	}
 	StageSignature(col, uv, th, t, z, sky, far, max(presence, 0.72), zMax);
 	if (needEdge) {
@@ -3603,11 +3598,6 @@ float4 PSBlur(QOut i) : SV_Target
 	c += (Tex.Sample(SL, i.uv + step * 2).rgb + Tex.Sample(SL, i.uv - step * 2).rgb) * 0.1216216;
 	c += (Tex.Sample(SL, i.uv + step * 3).rgb + Tex.Sample(SL, i.uv - step * 3).rgb) * 0.054054;
 	c += (Tex.Sample(SL, i.uv + step * 4).rgb + Tex.Sample(SL, i.uv - step * 4).rgb) * 0.016216;
-	if (Q.x > 2.5) {
-		c += (Tex.Sample(SL, i.uv + step * 5.5).rgb + Tex.Sample(SL, i.uv - step * 5.5).rgb) * (Q.x > 5.5 ? 0.02 : 0.012);
-		c += (Tex.Sample(SL, i.uv + step * 7.5).rgb + Tex.Sample(SL, i.uv - step * 7.5).rgb) * (Q.x > 5.5 ? 0.012 : 0.006);
-		c *= (Q.x > 5.5) ? 0.94 : 0.97;
-	}
 	return float4(c, 1);
 }
 
@@ -3622,7 +3612,7 @@ float4 PSGrade(QOut i) : SV_Target
 	float dist = length(toSun * asp);
 	float3 shaft = 0;
 	float wsum = 0;
-	int shaftN = (Q.x > 5.5) ? 16 : ((Q.x > 2.5) ? 12 : 8);
+	int shaftN = 8;
 	// 筋は太陽が空にあるとき、空の側だけ。盤面へ放射状に広げない。
 	float sky = saturate((0.46 - i.uv.y) * 2.6);
 	float sunUp = saturate((0.4 - suv.y) * 3.2);
@@ -3695,24 +3685,11 @@ float4 PSGrade(QOut i) : SV_Target
 			+ Tex.Sample(SL, i.uv + float2(px.x, -px.y)).rgb + Tex.Sample(SL, i.uv + float2(-px.x, px.y)).rgb) * 0.25;
 		col += (col - nb) * k;
 	}
-	if ((Q.x > 2.5 && Q.x < 3.5) || Q.x > 4.5) {
-		float spread = (Q.x > 5.5) ? 2.4 : ((Q.x > 4.5) ? 2.0 : 1.6);
-		float mixk = (Q.x > 5.5) ? 0.16 : ((Q.x > 4.5) ? 0.12 : 0.1);
+	if (Q.x > 2.5 && Q.x < 3.5) {
 		float nearKeep = (zpix > 0.02) ? lerp(0.22, 1.0, smoothstep(0.28, 0.62, zpix)) : 0.35;
-		float2 ca = (i.uv - 0.5) * px * spread;
+		float2 ca = (i.uv - 0.5) * px * 1.6;
 		float3 fr = float3(Tex.Sample(SL, i.uv + ca).r, col.g, Tex.Sample(SL, i.uv - ca).b);
-		col = lerp(col, fr, mixk * nearKeep);
-	}
-	if (Q.x > 4.5) {
-		float rad = (Q.x > 5.5) ? 1.7 : 1.2;
-		const float2 kRing[8] = {
-			float2(1.0, 0.0), float2(0.707107, 0.707107), float2(0.0, 1.0), float2(-0.707107, 0.707107),
-			float2(-1.0, 0.0), float2(-0.707107, -0.707107), float2(0.0, -1.0), float2(0.707107, -0.707107)
-		};
-		float3 nb = 0;
-		[unroll] for (int s = 0; s < 8; s++)
-			nb += Tex.Sample(SL, i.uv + kRing[s] * px * rad).rgb;
-		col += (col - nb * 0.125) * (Q.x > 5.5 ? 0.22 : 0.14);
+		col = lerp(col, fr, 0.1 * nearKeep);
 	}
 	AirCraft(col, i.uv, zpix, th, gt);
 	WeatherFx(col, i.uv, Extra.x, gt);
@@ -4013,7 +3990,7 @@ void CSWx(uint3 dtid : SV_DispatchThreadID)
 	float3 wind = WxWind.xyz;
 	float gust = WxWind.w;
 	uint seed = id * 1973u + (uint)(Eye.w * 4096.0) * 17u + 1u;
-	WxGpu o = WxSim[id];
+	WxGpu o = WxDraw[id];
 	if (wx < 0.5 && WxMix.z < 0.28) {
 		o.sz.x = 0; o.c.a = 0; o.sz.z = 0;
 		WxSim[id] = o;

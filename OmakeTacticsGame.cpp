@@ -826,6 +826,7 @@ int Game::QualityNow() const
 
 int Game::SyncNow() const
 {
+	if (m_syncRun == -2) return -2;
 	if (m_syncRun >= 0) return Clampi(m_syncRun, 0, TAC_HZ_N - 1);
 	if (m_save.quality == TAC_Q_AUTO) return TacHzDefaultI();
 	return Clampi(TacVsync(m_save), 0, TAC_HZ_N - 1);
@@ -833,6 +834,7 @@ int Game::SyncNow() const
 
 int Game::PaceHz() const
 {
+	if (m_syncRun == -2) return 15;
 	return TacHzAt(SyncNow());
 }
 
@@ -887,9 +889,8 @@ void Game::PulseQuality(float work, float span)
 {
 	(void)work;
 	if (m_screen == SC_LOADING || !m_loaded || !m_r.Ready()) return;
-	int runI = SyncNow();
-	int hz = TacHzAt(runI);
-	if (hz < 30) hz = 30;
+	int hz = (m_syncRun == -2) ? 15 : TacHzAt(SyncNow());
+	if (hz < 15) hz = 15;
 	if (m_qHz != hz) {
 		m_qHz = hz;
 		m_qMissN = 0;
@@ -897,7 +898,7 @@ void Game::PulseQuality(float work, float span)
 		m_syncArmN = 0;
 	}
 	if (m_qCoolT > 0) return;
-	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.25f) return;
+	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.40f) return;
 	if (m_syncLock > 0) return;
 	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
 	int wantedQ = TacQualityWanted(m_save);
@@ -934,11 +935,16 @@ void Game::PulseQuality(float work, float span)
 			return best;
 		};
 		auto applyHz = [&](int nhz) {
-			if (nhz < 30) nhz = 30;
+			if (nhz < 15) nhz = 15;
 			if (nhz > capHz) nhz = capHz;
-			int idx = TacHzIndexOf(nhz);
-			m_syncRun = idx;
-			m_qHz = TacHzAt(idx);
+			if (nhz <= 15) {
+				m_syncRun = -2;
+				m_qHz = 15;
+			} else {
+				int idx = TacHzIndexOf(nhz);
+				m_syncRun = idx;
+				m_qHz = TacHzAt(idx);
+			}
 			if (m_qCoolT < 0.20f) m_qCoolT = 0.20f;
 		};
 		auto applyNotch = [&](int next) {
@@ -951,14 +957,61 @@ void Game::PulseQuality(float work, float span)
 			m_r.SetQualityPlus(plus);
 			ApplyQualityNow(q);
 		};
-		if (m_syncRun < 0) {
+		if (m_syncRun == -1) {
 			m_syncRun = TacHzIndexOf(autoOn ? 240 : capHz);
 			m_syncArm = 0;
 			m_qHold = 0;
 		}
+		// ノートなど、1/240 のまま 8fps のように全く届かないときは 1 段ずつ落とさず一気に下げる。
+		// 1/60 標準 → まだ 30fps 前後なら 1/30 軽量 → まだ 8fps なら 1/15 標準。
+		// 60fps 付近で届いている機械はここを通さず、これまでの細かい上げ下げのまま。
+		if (autoOn) {
+			float fpsNow = m_fps;
+			if (fpsNow < 1.f && span > 0.001f && span < 0.40f) fpsNow = 1.f / span;
+			float workMs = m_workAvg * 1000.f;
+			static int s_bad = 0, s_up = 0;
+			auto dive = [&](int hzTo, int notchTo) {
+				applyHz(hzTo);
+				applyNotch(notchTo);
+				m_qHold = 0;
+				m_qOkN = 0;
+				m_qMissN = 0;
+				m_syncArm = 0;
+				m_syncArmN = 0;
+				m_qSlots = 0;
+				if (m_qCoolT < 0.45f) m_qCoolT = 0.45f;
+				s_bad = 0;
+				s_up = 0;
+			};
+			int curHz = (m_syncRun == -2) ? 15 : TacHzAt(m_syncRun);
+			if (fpsNow > 0.f && curHz <= 15) {
+				if (workMs > 0.f && workMs <= 20.f && fpsNow >= 13.f) {
+					if (++s_up >= 8) dive(30, kLight);
+				} else s_up = 0;
+				return;
+			}
+			if (fpsNow > 0.f && curHz >= 72 && fpsNow < 22.f) {
+				if (++s_bad >= 3) dive(60, kStd);
+				return;
+			}
+			if (fpsNow > 0.f && curHz >= 50 && curHz <= 70 && fpsNow < 38.f && m_qFine >= kStd && m_qFine < TAC_NOTCH_LIMIT) {
+				float gNow = m_r.GpuMs();
+				if (gNow > 13.33f) {
+					if (++s_bad >= 4) dive(30, kLight);
+					return;
+				}
+				s_bad = 0;
+			} else
+			if (fpsNow > 0.f && curHz <= 30 && fpsNow < 14.f) {
+				if (++s_bad >= 4) dive(15, kStd);
+				return;
+			}
+			s_bad = 0;
+		}
+		if (autoOn && m_syncRun == -2) return;
 		float g = m_r.GpuMs();
 		if (g <= 0.05f) return;
-		int cur = TacHzAt(m_syncRun);
+		int cur = (m_syncRun == -2) ? 15 : TacHzAt(m_syncRun);
 		if (cur > capHz) {
 			int fit = 30;
 			for (int c = 0; c < nRep; ++c) if (kRep[c] <= capHz && kRep[c] > fit) fit = kRep[c];
@@ -969,12 +1022,15 @@ void Game::PulseQuality(float work, float span)
 			m_qHold = 0;
 			return;
 		}
-		if (cur < 30) cur = 30;
+		if (cur < 15) cur = 15;
 		float period = 1000.f / (float)cur;
 		int up = nextUp(cur);
 		int dn = nextDn(cur);
-		const bool over = g > period * 1.02f;
-		const bool spare = g <= period * 0.55f;
+		float cpuMs = m_workAvg * 1000.f;
+		const bool gpuOver = g > period * 1.02f;
+		const bool cpuOver = cur > 30 && cpuMs > period * 1.15f;
+		const bool over = gpuOver || cpuOver;
+		const bool spare = g <= period * 0.55f && (cpuMs <= 0.05f || cpuMs <= period * 0.70f);
 		int notch = m_qFine;
 		if (notch > TAC_NOTCH_OPEN) notch = TAC_NOTCH_OPEN;
 		if (m_qHold < 0) m_qHold = 0;
@@ -985,18 +1041,19 @@ void Game::PulseQuality(float work, float span)
 		// 失敗した拍は、+ を下げたか、今の + で余裕が出るまでやり直さない。
 		if (m_syncArm > 0 && m_qSlots > 0 && notch < m_qSlots) m_syncArm = 0;
 		if (m_syncArm > 0 && up == m_syncArm) {
-			if (spare || (up && g <= (1000.f / (float)up) * 0.80f)) m_syncArm = 0;
+			float retry = up ? (1000.f / (float)up) * 0.90f : 0.f;
+			if (spare || (up && g <= retry)) m_syncArm = 0;
 		} else if (spare) m_syncArm = 0;
-		// 今の +N の計測で次の拍を試す。かなり入りそうなら早く、際どいなら + を足してから。
+		// 今の +N の計測で次の拍を試す。GPU が次の拍に十分入るなら、+ を足し続けずに拍を上げる。
 		bool comfy = false;
 		bool very = false;
 		if (notch >= TAC_NOTCH_LIMIT && cur > 30 && up && up != m_syncArm) {
 			float nextP = 1000.f / (float)up;
-			comfy = g <= nextP * 1.06f;
-			very = g <= nextP * 0.82f;
+			comfy = g <= nextP * 0.90f && (cpuMs <= 0.05f || cpuMs <= nextP * 0.92f);
+			very = g <= nextP * 0.70f && (cpuMs <= 0.05f || cpuMs <= nextP * 0.80f);
 		}
 		const int needPhase = very ? 1 : 2;
-		const bool trySoon = comfy && (m_syncArmN >= needPhase || notch >= TAC_NOTCH_OPEN);
+		const bool trySoon = comfy && (very || m_syncArmN >= needPhase || notch >= TAC_NOTCH_OPEN);
 		// 上げた拍が枠内で落ち着いたら、挑戦中の印を外す。
 		if (!over && m_qHold == 1 && !slack && !trySoon) {
 			m_qOkN++;
@@ -1020,9 +1077,21 @@ void Game::PulseQuality(float work, float span)
 			m_qOkN = 0;
 			int needM = (g > period * 1.20f) ? 3 : 6;
 			if (m_qHold == 1 || m_qHold == 2) needM = (g > period * 1.20f) ? 2 : 4;
+			if (cur >= 90 && (g > period * 1.05f || cpuMs > period * 1.08f)) needM = 1;
+			if (cpuOver && !gpuOver) needM = (cur >= 72) ? 1 : 2;
 			if (m_qMissN < needM) return;
-			const bool mild = (m_qHold == 1 && dn > 0 && notch > TAC_NOTCH_LIMIT && g <= period * 1.12f);
-			if (mild) {
+			if (cpuOver && !gpuOver) {
+				if (dn > 0) {
+					m_syncArm = cur;
+					nextH = (cur > 60) ? 60 : dn;
+					if (nextH == cur) nextH = dn;
+					holdOut = 0;
+				} else {
+					m_qMissN = 0;
+					return;
+				}
+			} else
+			if ((m_qHold == 1 && dn > 0 && notch > TAC_NOTCH_LIMIT && g <= period * 1.12f)) {
 				// 挑戦先で + を 1 つ外せば収まりそう。拍はそのまま。
 				nextN = notch - 1;
 				holdOut = 2;
@@ -1051,7 +1120,7 @@ void Game::PulseQuality(float work, float span)
 		} else {
 			int leave = 60;
 			if (leave > capHz) leave = capHz;
-			const bool holdStd30 = (cur <= 30 && notch >= kStd && leave > 30);
+			const bool holdStd30 = (cur > 15 && cur <= 30 && notch >= kStd && leave > 30);
 			const bool tryHz = trySoon;
 			if (!slack && !holdStd30 && !tryHz) {
 				m_qOkN = 0;
@@ -1061,21 +1130,28 @@ void Game::PulseQuality(float work, float span)
 			m_qOkN++;
 			m_qMissN = 0;
 			int need = 10;
+			const float fit60 = (1000.f / 60.f) * 0.80f;
 			if (holdStd30) {
-				need = 10;
+				need = (g <= fit60) ? 4 : 10;
 				nextH = leave;
 				holdOut = 0;
 			} else if (cur <= 30) {
-				if (notch < kStd && slack) { nextN = notch + 1; holdOut = 0; }
-				else { m_qOkN = 0; return; }
+				if (slack && g <= fit60 && leave >= 60) {
+					nextH = 60;
+					holdOut = 0;
+					need = 4;
+				} else if (notch < kStd && slack) {
+					nextN = notch + 1;
+					holdOut = 0;
+				} else { m_qOkN = 0; return; }
 			} else if (notch < TAC_NOTCH_LIMIT && slack) {
 				nextN = notch + 1;
 				holdOut = 0;
 			} else if (tryHz) {
-				need = 10;
+				need = very ? 3 : 8;
 				nextH = up;
 				holdOut = 1;
-			} else if (slack && notch < TAC_NOTCH_OPEN) {
+			} else if (slack && notch < TAC_NOTCH_OPEN && !very) {
 				need = 8;
 				nextN = notch + 1;
 				holdOut = 0;
@@ -1235,7 +1311,7 @@ void Game::Tick(float dt)
 	if (m_fpsAt.QuadPart && freq.QuadPart) {
 		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
 		float busy = (float)((double)(t1.QuadPart - busy0.QuadPart) / (double)freq.QuadPart);
-		if (span >= 0.003f && span < 0.25f && busy >= 0.f && busy < 0.25f) {
+		if (span >= 0.003f && span < 0.40f && busy >= 0.f && busy < 0.40f) {
 			enum { FPS_CAP = 160 };
 			const float kWin = 0.50f;
 			const int kMin = 8;
@@ -1386,6 +1462,7 @@ void Game::SetupCamera(V3 target, float yaw, float pitch, float dist, float fov)
 
 void Game::RenderFrame()
 {
+	TacBrReset();
 	m_renderDt = Clampf(m_time - m_lastRenderTime, 0, .1f);
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
@@ -1412,10 +1489,6 @@ void Game::RenderFrame()
 		m_r.SetScreenFx(crit01, fairy01, Clampf(m_wxFlash, 0.f, 1.f), quake01, m_wetGlobal, inCut, hasMarks);
 	}
 	m_r.SetAvaLoadFull(m_screen != SC_CREATE && m_screen != SC_BATTLE);
-	LARGE_INTEGER rf0, rf1, rfq;
-	m_msSh = m_msRef = 0;
-	QueryPerformanceCounter(&rf0);
-	QueryPerformanceFrequency(&rfq);
 	m_r.BeginFrame();
 	if (m_screen != SC_BATTLE && m_screen != SC_BASE) m_r.SetSight(0, 0, 0.f);
 	if (m_screen == SC_BATTLE) {
@@ -1439,15 +1512,7 @@ void Game::RenderFrame()
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	} break;
 	}
-	QueryPerformanceCounter(&rf1);
-	m_msMain = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
-	m_msMain -= m_msSh + m_msRef;
-	if (m_msMain < 0.f) m_msMain = 0.f;
-	QueryPerformanceCounter(&rf0);
 	if (m_loaded) RenderPortraits();
-	QueryPerformanceCounter(&rf1);
-	m_msPort = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
-	QueryPerformanceCounter(&rf0);
 	const BOOL avaWait = m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL;
 	const BOOL avaFull = avaWait && !m_loaded && m_screen != SC_CREATE;
 	if (avaFull) {
@@ -1455,6 +1520,7 @@ void Game::RenderFrame()
 		m_r.BeginMainPass();
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	}
+	TacBrMark();
 	m_r.BeginHud();
 	if (m_screen == SC_CREATE && avaWait) m_r.GrabAvaPlate();
 	m_btns.clear();
@@ -1523,8 +1589,6 @@ void Game::RenderFrame()
 	}
 	if (m_demo) DrawDemoCurtain();
 	m_r.EndHud();
-	QueryPerformanceCounter(&rf1);
-	m_msHud = rfq.QuadPart ? (float)((double)(rf1.QuadPart - rf0.QuadPart) * 1000.0 / (double)rfq.QuadPart) : 0.f;
 	m_btnsPrev = m_btns;
 	if (m_uiHoverHit) {
 		if (m_uiHoverCand != m_uiHover && !m_click && m_activateId < 0)
@@ -2974,6 +3038,10 @@ void Game::InvalidatePortraits()
 	}
 }
 
+static int g_pfGather = 0;
+struct PfCam { M4 world, view, proj; V3 eye; unsigned frame; int valid; const void* who; };
+static PfCam g_pfCam[Renderer::PORTRAIT_N];
+
 static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, int slot, BOOL live, float dt)
 {
 	struct Bit { V3 p, v; float life, max, spin, stretch, size; float cr, cg, cb; int on; int add; };
@@ -2983,6 +3051,11 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 	static int who[Renderer::PORTRAIT_N];
 	if (slot < 0 || slot >= Renderer::PORTRAIT_N) return;
 	if (a.wings <= 0 || a.wingGrade <= 0) return;
+	if (!g_pfGather) {
+		r.PortraitFeatherDraw(slot);
+		(void)g;
+		return;
+	}
 	int id = a.model * 17 + a.wingGrade * 3 + a.wings + (live ? 100000 : 0);
 	if (who[slot] != id) {
 		who[slot] = id;
@@ -3055,13 +3128,38 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 		q.r = b.cr; q.g = b.cg; q.b = b.cb; q.a = 1.f;
 		q.shape = 8; q.spin = b.spin; q.stretch = b.stretch; q.add = b.add;
 	}
-	if (n > 0) r.DrawParticles(ps, n, NULL);
+	if (n > 0) r.PortraitFeatherAdd(slot, ps, n);
 	(void)g;
 }
 
 BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody, BOOL live)
 {
-	if (!live) {
+	const BOOL gather = g_pfGather != 0;
+	if (gather && (a.wings <= 0 || a.wingGrade <= 0)) return TRUE;
+	LARGE_INTEGER portDraw0 = {};
+	if (!gather) portDraw0 = TacBrNow();
+	M4 world, view, proj;
+	V3 eye;
+	BOOL camReady = FALSE;
+	if (gather && slot >= 0 && slot < Renderer::PORTRAIT_N && g_pfCam[slot].valid && g_pfCam[slot].who == &a) {
+		world = g_pfCam[slot].world;
+		m_r.m_view = g_pfCam[slot].view;
+		m_r.m_proj = g_pfCam[slot].proj;
+		m_r.m_vp = MMul(g_pfCam[slot].view, g_pfCam[slot].proj);
+		m_r.m_eye = g_pfCam[slot].eye;
+		g_pfCam[slot].frame = m_r.m_frame;
+		PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
+		return TRUE;
+	}
+	if (!gather && slot >= 0 && slot < Renderer::PORTRAIT_N && g_pfCam[slot].valid && g_pfCam[slot].frame == m_r.m_frame) {
+		world = g_pfCam[slot].world;
+		view = g_pfCam[slot].view;
+		proj = g_pfCam[slot].proj;
+		eye = g_pfCam[slot].eye;
+		camReady = TRUE;
+	}
+	if (!camReady) {
+	if (!live && (gather || a.poseFrame != m_r.m_frame)) {
 		if (a.clip != CL_IDLE) ActorPlay(a, CL_IDLE, 1, 0);
 		float len = ActorClipLen(a, m_lib, m_r, CL_IDLE);
 		if (len < 0.25f) len = 1.6f;
@@ -3069,10 +3167,9 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	}
 	if (!live || !a.poseValid || a.poseFrame != m_r.m_frame)
 		ActorPose(a, m_lib, m_r);
-	M4 world = ActorWorld(a, v3(0, 0, 0), PI);
+	world = ActorWorld(a, v3(0, 0, 0), PI);
 	V3 look;
 	float d;
-	V3 eye;
 	BOOL body = FALSE;
 	float midY = a.height * .5f;
 	float rad = a.height * 1.05f;
@@ -3125,12 +3222,29 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		d = a.height * 1.35f;
 		eye = look + v3(d * .3f, d * .12f, -d);
 	}
-	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
+	view = MLookAtLH(eye, look, v3(0, 1, 0));
 	float zn = d * 0.04f;
 	if (zn < 0.02f) zn = 0.02f;
 	if (zn > 0.25f) zn = 0.25f;
-	M4 proj = MPerspLH(.6f, 1.f, zn, max(50.f, d * 6.f));
-	if (!m_r.BeginPortrait(slot)) return FALSE;
+	proj = MPerspLH(.6f, 1.f, zn, max(50.f, d * 6.f));
+	if (gather) {
+		if (slot >= 0 && slot < Renderer::PORTRAIT_N) {
+			PfCam& c = g_pfCam[slot];
+			c.world = world; c.view = view; c.proj = proj; c.eye = eye;
+			c.frame = m_r.m_frame; c.valid = 1; c.who = &a;
+		}
+		m_r.m_view = view;
+		m_r.m_proj = proj;
+		m_r.m_vp = MMul(view, proj);
+		m_r.m_eye = eye;
+		PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
+		return TRUE;
+	}
+	}
+	if (!m_r.BeginPortrait(slot)) {
+		TacBrAdd(TAC_BR_PDRAW, portDraw0, TacBrNow());
+		return FALSE;
+	}
 	m_r.SetCamera(view, proj, eye, m_time);
 	DrawParams dp;
 	dp.outline = 0;
@@ -3143,8 +3257,11 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	}
 	m_r.BeginMainPass();
 	BOOL drew = ActorDraw(m_r, m_lib, a, world, dp, m_time);
+	TacBrAdd(TAC_BR_PDRAW, portDraw0, TacBrNow());
+	LARGE_INTEGER portFeather0 = TacBrNow();
 	PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
 	m_r.EndPortrait();
+	TacBrAdd(TAC_BR_PFEATH, portFeather0, TacBrNow());
 	return drew;
 }
 
@@ -3176,14 +3293,19 @@ static void PortraitJobBg(int cls, DWORD& bg0, DWORD& bg1)
 	bg1 = RGBA8(r, g, b);
 }
 
+static unsigned g_portDone = 0xFFFFFFFFu;
+
 void Game::RenderPortraits()
 {
+	if (g_portDone == m_r.m_frame) return;
+	TacBrMark();
 	int nWant = 0;
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		if (m_portraitWant[s] > 0) nWant++;
 		else m_portraitKey[s] = m_portraitWant[s];
 	}
 	if (nWant <= 0) return;
+	g_portDone = m_r.m_frame;
 	M4 camView = m_r.m_view, camProj = m_r.m_proj;
 	V3 camEye = m_r.m_eye;
 	float camT = m_r.m_time;
@@ -3261,6 +3383,20 @@ void Game::RenderPortraits()
 		}
 		return FALSE;
 	};
+	g_pfGather = 1;
+	m_r.PortraitFeatherReset();
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
+		int want = m_portraitWant[s];
+		if (want <= 0) continue;
+		if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
+		paint(s, want);
+	}
+	g_pfGather = 0;
+	{
+		LARGE_INTEGER up0 = TacBrNow();
+		m_r.PortraitFeatherUpload();
+		TacBrAdd(TAC_BR_PFEATH, up0, TacBrNow());
+	}
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		int want = m_portraitWant[s];
 		if (want <= 0) { m_portraitKey[s] = want; continue; }
@@ -3268,8 +3404,11 @@ void Game::RenderPortraits()
 		if (!paint(s, want)) continue;
 		m_portraitKey[s] = want;
 	}
+	LARGE_INTEGER fin0 = TacBrNow();
 	m_r.FinishPortraits();
 	m_r.SetCamera(camView, camProj, camEye, camT);
+	TacBrAdd(TAC_BR_PFIN, fin0, TacBrNow());
+	TacBrTake(TAC_BR_PORT);
 }
 
 int Game::RosterPortrait(int roster) const
@@ -3720,7 +3859,7 @@ void Game::UpdateParticles(float dt)
 					Burst(p + v3(0, 0.2f, 0), 1, 0.7f, 0.55f, 2.4f, 0.28f, 0.26f, 0.24f, 0, 1, -0.35f, 0.02f, 2.6f, 0.95f);
 				} else if (s.kind == 1) {
 					Burst(p, 2, 0.4f, 0.7f, 1.8f, 0.9f, 0.96f, 1.f, 0, 1, -0.1f, 0, 1.2f, 1.0f);
-					int drops = (QualityNow() == 4) ? 2 : 5;
+					int drops = (QualityNow() == 4) ? 2 : 3;
 					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
 						Particle q = {};
 						q.p = p + v3(m_rng.F(-0.35f, 0.35f), m_rng.F(-1.8f, 1.6f), m_rng.F(-0.35f, 0.35f));
@@ -3735,7 +3874,7 @@ void Game::UpdateParticles(float dt)
 				} else if (s.kind == 16) {
 					Burst(p, 4, 1.6f, 0.06f, 0.55f, 0.92f, 0.97f, 1.f, 1, 1, 14.f, 0.03f, 2.4f, 0.02f);
 					Burst(p, 2, 0.7f, 0.45f, 1.1f, 0.88f, 0.94f, 1.f, 0, 0, -0.08f, 0, 1.8f, 0.7f);
-					int drops = (QualityNow() == 4) ? 3 : 7;
+					int drops = (QualityNow() == 4) ? 3 : 4;
 					for (int k = 0; k < drops && (int)m_parts.size() < 3600; k++) {
 						float ang = m_rng.F(0.f, 6.2831853f);
 						float sp = m_rng.F(1.1f, 3.2f);
@@ -3848,8 +3987,8 @@ void Game::UpdateParticles(float dt)
 			const Map& map = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
 			int theme = Clampi(map.theme, 0, TH_COUNT - 1);
 			int q = QualityNow();
-			float step = (q == 4) ? 0.22f : ((q <= 0) ? 0.12f : ((q >= 5) ? 0.05f : 0.08f));
-			int ambCap = (q == 4) ? 40 : ((q <= 0) ? 80 : ((q >= 5) ? 180 : 120));
+			float step = (q == 4) ? 0.22f : ((q <= 0) ? 0.12f : 0.10f);
+			int ambCap = (q == 4) ? 40 : ((q <= 0) ? 80 : 100);
 			int amb = 0;
 			for (int i = 0; i < m_parts.size(); i++) if (m_parts[i].wxHit == 8) amb++;
 			airAcc += dt;
@@ -3907,7 +4046,7 @@ void Game::UpdateParticles(float dt)
 				else if (theme == TH_HEAVEN) sheet = 3;
 				else if (theme == TH_MARCHEN) sheet = 2;
 				else if (theme == TH_FALLS) sheet = 7;
-				int nSpawn = (q == 4) ? 1 : ((q >= 5) ? 4 : 2);
+				int nSpawn = (q == 4) ? 1 : 2;
 				for (int n = 0; n < nSpawn; n++) {
 					if (theme == TH_PLAINS) {
 						if ((n & 1) == 0) {
@@ -5885,7 +6024,8 @@ void Game::UpdateBase(float dt)
 
 void Game::DrawShowcase3D()
 {
-	if (m_screen == SC_BASE && m_codex == 4) { DrawMonStage(); return; }
+	TacBrLap(TAC_BR_PREP);
+	if (m_screen == SC_BASE && m_codex == 4) { DrawMonStage(); TacBrLap(TAC_BR_ACT); return; }
 	m_r.SetTheme(m_showMap.theme);
 	m_r.SetStageId(m_showStage);
 	if (m_screen != SC_BATTLE && m_screen != SC_RESULT) {
@@ -5994,6 +6134,12 @@ void Game::DrawShowcase3D()
 	if (showN < 0) showN = 0;
 	for (int i = 0; i < showN; i++)
 		faceYaw[i] = atan2f(fx - m_showPos[i].x, fz - m_showPos[i].z);
+	for (int i = 0; i < showN; i++) {
+		Actor& a = m_showAct[i];
+		if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
+	}
+	RenderPortraits();
+	TacBr().t = TacBrNow();
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
@@ -6059,6 +6205,7 @@ void Game::DrawShowcase3D()
 		HomeSky(wx, hr);
 		if (wx != WX_CLEAR) m_r.DrawWxGpu();
 	}
+	TacBrLap(TAC_BR_ACT);
 }
 
 void Game::HomeSky(int& wx, int& hr) const
@@ -7677,9 +7824,9 @@ static void ShopRank(int shopKind, int id, int gearIsId, int* price, int* kind, 
 		*kind = sd.kind;
 		*tier = sd.element;
 	} else if (shopKind == 3) {
-		wchar_t nm[8];
+		// 並び替えは値段だけ使う。名前を8文字に書くと swprintf_s が落ちる。
 		int ct = 0, pr = 0;
-		TrophyNameOf(id, nm, 8, &ct, &pr);
+		TrophyNameOf(id, NULL, 0, &ct, &pr);
 		*price = pr;
 		*kind = id;
 	}
@@ -9272,6 +9419,7 @@ void Game::DrawSlotUi()
 
 void Game::DrawPerfHud()
 {
+	TacBrTake(TAC_BR_HUD);
 	if (!TacFpsOn(m_save)) return;
 	if (m_screen == SC_LOADING || m_screen == SC_FAIL) return;
 	if (m_fps < 1.f) return;
@@ -9312,7 +9460,7 @@ void Game::DrawPerfHud()
 	}
 	wchar_t qlabel[48];
 	swprintf_s(qlabel, L"%s%s", TT(TacQualityTx(q)), sign);
-	wchar_t line[220];
+	wchar_t line[160];
 	if (m_save.quality == TAC_Q_AUTO)
 		swprintf_s(line, L"%d.%dfps %d.%dms 1/%d%s %s %s", fps10 / 10, fps10 % 10, ms10 / 10, ms10 % 10, pace, mode, TT(TX_SET_Q_AUTO), qlabel);
 	else
@@ -10198,6 +10346,7 @@ void Game::RefreshPreview()
 
 void Game::DrawCreate3D()
 {
+	TacBrLap(TAC_BR_PREP);
 	V3 pos = v3(0, -50.f, 0);
 	Actor& a = m_preview;
 	float ht = a.htScale > 0.05f ? a.htScale : 1.f;
@@ -10226,6 +10375,8 @@ void Game::DrawCreate3D()
 	}
 	m_r.SetShadowEnabled(TRUE);
 	ActorPose(a, m_lib, m_r);
+	RenderPortraits();
+	TacBr().t = TacBrNow();
 	M4 aw = ActorWorld(a, pos + v3(0, a.hover, 0), PI + m_previewYaw);
 	DrawParams dp;
 	dp.outline = .01f;
@@ -10253,6 +10404,7 @@ void Game::DrawCreate3D()
 	if (m_previewRain) m_r.DrawWxGpu();
 	m_r.SetStageWind(TRUE);
 	m_r.SetPreviewPost(TRUE);
+	TacBrLap(TAC_BR_ACT);
 }
 
 #include "tactics_src/ava_more_nm.inc"

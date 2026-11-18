@@ -4874,16 +4874,9 @@ void CMediaPlayerDlg::TickLyricsView()
 	double sec = OggGetLyricsPlaySec();
 	if (sec < 0.0) sec = 0.0;
 	const unsigned nowCs = (unsigned)(sec * 100.0 + 0.5);
-	int lp = 0;
 	const int n = og->lrcnum;
-	for (int i = 0; i < n - 1; ++i) {
-		if (og->lrctm[i] <= nowCs && og->lrctm[i + 1] > nowCs) {
-			lp = i;
-			break;
-		}
-		if (nowCs >= og->lrctm[i])
-			lp = i;
-	}
+	extern int OggPickLyricsLine(unsigned nowCs);
+	int lp = OggPickLyricsLine(nowCs);
 	if (lp < 0) lp = 0;
 	if (lp >= n) lp = n - 1;
 	og->lrccur = lp;
@@ -4907,8 +4900,8 @@ void CMediaPlayerDlg::TickLyricsView()
 		m_lrc3.SetWindowText(hi);
 		m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
 	}
-	MpPutLyricsText(m_lrc4, (lp + 1 < n) ? og->lrc[lp + 1] : CString());
-	MpPutLyricsText(m_lrc5, (lp + 2 < n - 1) ? og->lrc[lp + 2] : CString());
+	MpPutLyricsText(m_lrc4, (lp + 1 < n && !og->lrc[lp + 1].IsEmpty()) ? og->lrc[lp + 1] : CString());
+	MpPutLyricsText(m_lrc5, (lp + 2 < n - 1 && !og->lrc[lp + 2].IsEmpty()) ? og->lrc[lp + 2] : CString());
 }
 
 // DS/拡張/テンポ/ピッチの%は見える MP スライダーの GetPos から作る。

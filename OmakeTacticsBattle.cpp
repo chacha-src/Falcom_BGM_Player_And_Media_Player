@@ -3245,7 +3245,7 @@ BOOL Game::CanTarget(int ui, int t, int skill) const
 			for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
 				dist = min(dist, abs((u.x + ax) - (d.x + dx)) + abs((u.z + az) - (d.z + dz)));
 		if (dist <= 0) return TRUE;
-		int add = LayerRangeCost(u.deck, d.deck);
+		int add = StandRangeAdd(m_b.map, u.x, u.z, u.deck, d.x, d.z, d.deck);
 		if (add < 0) return FALSE;
 		int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
 		return dist + add >= rmin && dist + add <= rmax;
@@ -3261,7 +3261,7 @@ BOOL Game::CanTarget(int ui, int t, int skill) const
 	if (sd.effect == EF_REACT && (t == ui || d.ct >= 1000)) return FALSE;
 	int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
 	if (friendly) {
-		int add = LayerRangeCost(u.deck, d.deck);
+		int add = StandRangeAdd(m_b.map, u.x, u.z, u.deck, d.x, d.z, d.deck);
 		if (add < 0) return FALSE;
 		int dist = 9999, sa = UnitSpan(u), sdn = UnitSpan(d);
 		for (int az = 0; az < sa; az++) for (int ax = 0; ax < sa; ax++)
@@ -5937,15 +5937,7 @@ static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int
 
 void Game::DrawBattle3D()
 {
-	LARGE_INTEGER pq, pt;
-	QueryPerformanceFrequency(&pq);
-	QueryPerformanceCounter(&pt);
-	m_msSh = m_msRef = 0;
-	auto take = [&](float& dst) {
-		LARGE_INTEGER n; QueryPerformanceCounter(&n);
-		dst = pq.QuadPart ? (float)((double)(n.QuadPart - pt.QuadPart) * 1000.0 / (double)pq.QuadPart) : 0.f;
-		pt = n;
-	};
+	TacBrLap(TAC_BR_PREP);
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	m_r.SetSceneShift(MIdent());
@@ -6160,6 +6152,9 @@ void Game::DrawBattle3D()
 		if (foeGone(i) || (m_b.u[i].team != TEAM_PLAYER && m_b.u[i].dissolve >= 1.f) || !nearCam(m_b.u[i])) continue;
 		ActorPose(m_act[i], m_lib, m_r);
 	}
+	TacBrLap(TAC_BR_POSE);
+	RenderPortraits();
+	TacBr().t = TacBrNow();
 	float shR = min(30.f, m_camDist * 1.35f + 6.f);
 	auto inLight = [&](const Unit& u) -> BOOL {
 		int sp = UnitSpan(u);
@@ -6193,7 +6188,7 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	}
-	take(m_msSh);
+	TacBrLap(TAC_BR_SH);
 	{
 		V3 look = m_camTarget + v3(0, .4f, 0);
 		BOOL reflectBusy = m_phase == PH_MOVING || m_phase == PH_E_MOVE || m_phase == PH_ACTION || m_phase == PH_INTRO || m_shake > 0.02f;
@@ -6229,7 +6224,7 @@ void Game::DrawBattle3D()
 			s_tz = m_camTarget.z;
 		}
 	}
-	take(m_msRef);
+	TacBrLap(TAC_BR_REF);
 	m_r.BeginMainPass();
 	{
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -6360,6 +6355,7 @@ void Game::DrawBattle3D()
 			if (t >= 0) MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, link);
 		}
 	}
+	TacBrLap(TAC_BR_LAND);
 	// 足元リング。敵は未発見でも出す。今見ている床と違う階は半透明で、床に隠さない。
 	m_r.BeginInstBatch();
 	for (int i = 0; i < m_b.nUnits; i++) {
@@ -6466,6 +6462,7 @@ void Game::DrawBattle3D()
 		}
 		m_r.EndInstBatch();
 	}
+	TacBrLap(TAC_BR_RING);
 	for (int pass = 0; pass < 2; pass++) {
 		if (pass == 1) m_r.BeginInstBatch();
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -6603,6 +6600,7 @@ void Game::DrawBattle3D()
 		}
 	}
 	m_r.EndInstBatch();
+	TacBrLap(TAC_BR_ACT);
 	DrawDebris();
 	if (m_fairyFxT > 0.f) {
 		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
@@ -6627,6 +6625,7 @@ void Game::DrawBattle3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 	DrawGust();
 	m_r.DrawWxGpu();
+	TacBrLap(TAC_BR_FX);
 }
 
 // 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
@@ -7327,6 +7326,7 @@ static void CutLeaveCam(int fam, float u, V3 focus, float h, V3 posA, V3 posD, V
 
 void Game::DrawCutIn3D()
 {
+	TacBrLap(TAC_BR_PREP);
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	Env e;
@@ -7647,6 +7647,8 @@ void Game::DrawCutIn3D()
 	};
 	for (int k = 0; k < nId; k++) if (ids[k] >= 0) ActorPose(m_act[ids[k]], m_lib, m_r);
 	if (m_sumOn) ActorPose(m_sumAct, m_lib, m_r);
+	RenderPortraits();
+	TacBr().t = TacBrNow();
 	auto sumWorld = [&]() {
 		return ActorWorld(m_sumAct, m_sumPos, m_sumYaw);
 	};
@@ -7839,6 +7841,7 @@ void Game::DrawCutIn3D()
 	m_r.SetCutActors(FALSE);
 	m_r.SetSceneShift(MIdent());
 	m_r.SetCutDeck(-1);
+	TacBrLap(TAC_BR_ACT);
 }
 
 // 職歴の行数に合わせたカードの高さ。room を超えない。戻り値の高さと行数は描画側と同じ式。

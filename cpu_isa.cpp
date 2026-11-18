@@ -161,24 +161,24 @@ int CpuIsaFormatExtras(char* out, int cap)
 	out[0] = 0;
 	const CpuIsa& isa = CpuIsaGet();
 	int n = 0;
-	if (isa.fma) extras_add(out, &n, cap, "FMA");
-	if (isa.bmi1) extras_add(out, &n, cap, "BMI1");
-	if (isa.bmi2) extras_add(out, &n, cap, "BMI2");
+	/* FMA は本文側の FMA3。ここは登場順: Nehalem → Westmere → Haswell → 以降 */
 	if (isa.popcnt) extras_add(out, &n, cap, "POPCNT");
 	if (isa.aes) extras_add(out, &n, cap, "AES");
 	if (isa.pclmul) extras_add(out, &n, cap, "PCLMUL");
+	if (isa.bmi1) extras_add(out, &n, cap, "BMI1");
+	if (isa.bmi2) extras_add(out, &n, cap, "BMI2");
 	if (isa.sha) extras_add(out, &n, cap, "SHA");
 	if (isa.avx_vnni) extras_add(out, &n, cap, "AVX-VNNI");
-	if (isa.avx512_vnni) extras_add(out, &n, cap, "AVX512-VNNI");
+	if (isa.avx512_ifma) extras_add(out, &n, cap, "AVX512-IFMA");
 	if (isa.avx512_vbmi) extras_add(out, &n, cap, "AVX512-VBMI");
 	if (isa.avx512_vbmi2) extras_add(out, &n, cap, "AVX512-VBMI2");
-	if (isa.avx512_ifma) extras_add(out, &n, cap, "AVX512-IFMA");
-	if (isa.avx512_vpopcntdq) extras_add(out, &n, cap, "AVX512-VPOPCNTDQ");
+	if (isa.avx512_vnni) extras_add(out, &n, cap, "AVX512-VNNI");
 	if (isa.avx512_bitalg) extras_add(out, &n, cap, "AVX512-BITALG");
-	if (isa.avx512_bf16) extras_add(out, &n, cap, "AVX512-BF16");
+	if (isa.avx512_vpopcntdq) extras_add(out, &n, cap, "AVX512-VPOPCNTDQ");
 	if (isa.avx512_gfni) extras_add(out, &n, cap, "GFNI");
 	if (isa.avx512_vaes) extras_add(out, &n, cap, "VAES");
 	if (isa.avx512_vpclmul) extras_add(out, &n, cap, "VPCLMULQDQ");
+	if (isa.avx512_bf16) extras_add(out, &n, cap, "AVX512-BF16");
 	if (isa.avx512_fp16) extras_add(out, &n, cap, "AVX512-FP16");
 	if (isa.avx10_ver > 0) {
 		char ver[24];

@@ -2430,9 +2430,7 @@ bool CPianoRoll::PresentMeterStrip(CDC& dc, int w, int rollH, int keyH, int chor
             m_chromaCache.UpdateOpaqueRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH);
         // 本文ガラスだけ AlphaBlend。不透明帯は鍵盤バッファを SRCCOPY（同じ画素で軽い）。
         if (bodyAero) {
-            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-            if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, screenY, w, meterH,
-                    m_chromaCache.hdcDib, 0, rollH, w, meterH, bf))
+            if (!m_chromaCache.BlitAt(dc.GetSafeHdc(), 0, screenY, w, meterH, 0, rollH))
                 ::BitBlt(dc.GetSafeHdc(), 0, screenY, w, meterH, m_keyDC.GetSafeHdc(), 0, 0, SRCCOPY);
         }
         else {
@@ -6106,8 +6104,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         auto blitChroma = [&](int dx, int dy, int rw, int rh, int sx, int sy) {
             if (rw <= 0 || rh <= 0 || !m_chromaCache.hdcDib) return;
             if (bodyAero) {
-                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-                if (!::GdiAlphaBlend(dc.GetSafeHdc(), dx, dy, rw, rh, m_chromaCache.hdcDib, sx, sy, rw, rh, bf))
+                if (!m_chromaCache.BlitAt(dc.GetSafeHdc(), dx, dy, rw, rh, sx, sy))
                     ::BitBlt(dc.GetSafeHdc(), dx, dy, rw, rh, m_chromaCache.hdcDib, sx, sy, SRCCOPY);
             }
             else {

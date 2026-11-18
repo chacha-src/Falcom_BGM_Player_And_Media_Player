@@ -66,6 +66,8 @@ struct CCC_ChromaBlitCache {
     BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey); // color==key なら α=0
     BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h); // 差分矩形
     BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h); // 全面
+    // 部分矩形。ソース (sx,sy) を画面 (dx,dy) へ。α=0 はガラス、α=255 は画素。
+    BOOL BlitAt(HDC hdcDest, int dx, int dy, int w, int h, int sx, int sy);
     // BlitFull 前にオーバーレイ等を焼き込んだ矩形のアルファを不透明にする
     void MakeRectOpaque(int x, int y, int rw, int rh);
 };
@@ -1909,7 +1911,7 @@ protected:
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 
-	void PaintClient(CDC& dc); // 余白はダイアログ色、内側がレベルバー
+	void PaintClient(CDC& dc, BOOL bChromaBg = FALSE); // bChromaBg: 余白をクロマ。バーは不透明
 
 	int m_level;       // 0..1000。SetLevel がクランプ
 	BOOL m_bAeroMode;

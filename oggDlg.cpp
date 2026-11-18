@@ -1100,7 +1100,6 @@ static CString BuildCpuInstructionListString()
 		if (CPUInfo[3] & (1 << 26))  avx2 += L"SSE2 ";
 		if (CPUInfo[2] & (1))        avx2 += L"SSE3 ";
 		if (CPUInfo[2] & (1 << 9))   avx2 += L"SSSE3 ";
-		if (CPUInfo[2] & (1 << 12))  avx2 += L"FMA3 ";
 		if (CPUInfo[2] & (1 << 19))  avx2 += L"SSE4.1 ";
 		if (CPUInfo[2] & (1 << 20))  avx2 += L"SSE4.2 ";
 	}
@@ -1109,9 +1108,13 @@ static CString BuildCpuInstructionListString()
 		if (CPUInfo[2] & (1 << 6))  avx2 += L"SSE4a ";
 	}
 	__cpuid(CPUInfo, 0x00000001);
+	int fma3 = 0;
 	if (CPUInfo[0] >= 2) {
 		if (CPUInfo[2] & (1 << 28))  avx2 += L"AVX ";
+		if (CPUInfo[2] & (1 << 12))  fma3 = 1;
 	}
+	if (fma3)
+		avx2 += L"FMA3 ";
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
 		if (CPUInfo[1] & (1 << 5))  avx2 += L"AVX2 ";
@@ -7548,9 +7551,13 @@ BOOL COggDlg::OnInitDialog()
 		if (CPUInfo[2] & (1 << 6))  avx2 += "SSE4a ";
 	}
 	__cpuid(CPUInfo, 0x00000001);
+	int fma3 = 0;
 	if (CPUInfo[0] >= 2) {
 		if (CPUInfo[2] & (1 << 28))  avx2 += "AVX ";
+		if (CPUInfo[2] & (1 << 12))  fma3 = 1;
 	}
+	if (fma3)
+		avx2 += "FMA3 ";
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
 		if (CPUInfo[1] & (1 << 5))  avx2 += "AVX2 ";
@@ -9707,21 +9714,13 @@ static void OggApplySidecarLrc(const CString& path, int pickCs = -1, int doTick 
 	}
 	if (og->lrcnum >= 2) {
 		const UINT now = (pickCs >= 0) ? (UINT)pickCs : OggGetLyricsPlayCentis();
-		int lp = 0;
-		for (int i = 0; i < og->lrcnum - 1; ++i) {
-			if (og->lrctm[i] <= now && og->lrctm[i + 1] > now) {
-				lp = i;
-				break;
-			}
-			if (now >= og->lrctm[i])
-				lp = i;
-		}
+		const int lp = OggPickLyricsLine(now);
 		og->lrccur = lp;
 		og->m_lrc.SetWindowText(lp >= 2 ? og->lrc[lp - 2] : L"");
 		og->m_lrc2.SetWindowText(lp >= 1 ? og->lrc[lp - 1] : L"");
 		og->m_lrc3.SetWindowText(og->lrc[lp]);
-		og->m_lrc4.SetWindowText((lp + 1 < og->lrcnum) ? og->lrc[lp + 1] : L"");
-		og->m_lrc5.SetWindowText((lp + 2 < og->lrcnum - 1) ? og->lrc[lp + 2] : L"");
+		og->m_lrc4.SetWindowText((lp + 1 < og->lrcnum && !og->lrc[lp + 1].IsEmpty()) ? og->lrc[lp + 1] : L"");
+		og->m_lrc5.SetWindowText((lp + 2 < og->lrcnum - 1 && !og->lrc[lp + 2].IsEmpty()) ? og->lrc[lp + 2] : L"");
 		og->lrc_backup = og->lrc[lp];
 	}
 	extern void MpLyricsForceRelayout();
@@ -28447,6 +28446,53 @@ DWORD OggGetLyricsPlayCentis()
 	return (DWORD)(sec * 100.0 + 0.5);
 }
 
+int OggPickLyricsLine(unsigned nowCs)
+{
+	if (!og || og->lrcnum < 2)
+		return 0;
+	int last = og->lrcnum - 1;
+	while (last > 0 && og->lrc[last].IsEmpty())
+		--last;
+	const DWORD lastTm = og->lrctm[last];
+	static int s_pin = 0;
+	static int s_low = 0;
+	static DWORD s_pinTm = 0xFFFFFFFFu;
+	static int s_pinNum = -1;
+	if (s_pinNum != og->lrcnum || s_pinTm != lastTm) {
+		s_pin = 0;
+		s_low = 0;
+		s_pinNum = og->lrcnum;
+		s_pinTm = lastTm;
+	}
+	/* 最後の実歌詞以降はそこに固定。終端で時刻が空行側と末尾行で往復しても表示は動かさない */
+	if (nowCs >= lastTm) {
+		s_pin = 1;
+		s_low = 0;
+		return last;
+	}
+	if (s_pin) {
+		if (++s_low < 20)
+			return last;
+		s_pin = 0;
+	}
+	int lp = 0;
+	const int n = og->lrcnum;
+	for (int i = 0; i < n - 1 && i <= last; ++i) {
+		const DWORD nextTm = (i < last) ? og->lrctm[i + 1] : 0xFFFFFFFFu;
+		if (og->lrctm[i] <= nowCs && nextTm > nowCs) {
+			lp = i;
+			break;
+		}
+		if (nowCs >= og->lrctm[i])
+			lp = i;
+	}
+	if (lp > last)
+		lp = last;
+	if (lp < 0)
+		lp = 0;
+	return lp;
+}
+
 __int64 OggGetUiSourcePcmFrames()
 {
 	/* バナー time: は TempoPredWallNow()／g_tpSrcSec。OggGetHeardPcmFrames() は
@@ -29035,20 +29081,16 @@ void COggDlg::timerp()
 		|| InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0) >= 0
 		|| !InterlockedCompareExchange(&g_xfInProgress, 0, 0))) {
 		const UINT lrcNow = (UINT)(OggGetLyricsPlaySec() * 100.0 + 0.5);
-		for (int lp = 0; lp < lrcnum - 1; lp++) {
-			if (lrctm[lp] <= lrcNow && lrctm[lp + 1] > lrcNow) {
-				if (lrc[lp] != lrc_backup) {
-					m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
-					m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
-					m_lrc3.SetWindowText(lrc[lp]);
-					m_lrc4.SetWindowText(lrc[lp + 1]);
-					m_lrc5.SetWindowText((lp + 2 < lrcnum - 1) ? lrc[lp + 2] : L"");
-					lrc_backup = lrc[lp];
-				}
-				lrccur = lp;
-				break;
-			}
+		const int lp = OggPickLyricsLine(lrcNow);
+		if (lp >= 0 && lp < lrcnum && lrc[lp] != lrc_backup) {
+			m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
+			m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
+			m_lrc3.SetWindowText(lrc[lp]);
+			m_lrc4.SetWindowText((lp + 1 < lrcnum && !lrc[lp + 1].IsEmpty()) ? lrc[lp + 1] : L"");
+			m_lrc5.SetWindowText((lp + 2 < lrcnum - 1 && !lrc[lp + 2].IsEmpty()) ? lrc[lp + 2] : L"");
+			lrc_backup = lrc[lp];
 		}
+		lrccur = lp;
 	}
 
 	if (bGdiFrame)

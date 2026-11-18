@@ -740,8 +740,28 @@ static void EnsureClimbPath(Map& m, int sx, int sz, int tx, int tz)
 	}
 }
 
+// 離れた層は別の道。一番下だけ残して消すと、上の本線が切れる。
+static int SplitRoad(const Cell& c)
+{
+	int n = CellLayN(c), lo = 99999, hi = -1, any = 0;
+	for (int L = 0; L < n; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+		int h = LayerHt(c, L);
+		if (h < lo) lo = h;
+		if (h > hi) hi = h;
+		any = 1;
+	}
+	return any && hi - lo > 2;
+}
+
 static void StripActorCell(Cell& c)
 {
+	if (SplitRoad(c)) {
+		c.prop = PK_NONE;
+		if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+		return;
+	}
 	int keepH = -1;
 	int n = CellLayN(c);
 	if (c.t != T_VOID && c.t != T_CHASM && TerrainInfo(c.t).costFoot < 99)
@@ -777,6 +797,7 @@ static void OpenBeside(Map& m, int cx, int cz)
 		if (!Map::In(x, z)) continue;
 		Cell& n = m.c[z][x];
 		if (n.t == T_VOID || n.t == T_CHASM) continue;
+		if (SplitRoad(n)) continue;
 		int blocked = (n.t == T_ROCK || n.t == T_MOUNTAIN || n.t == T_DOOR || TerrainInfo(n.t).costFoot >= 99);
 		int clip = 0;
 		if (n.nLay >= 2) {
@@ -1228,6 +1249,33 @@ static bool ShapeInside(int kind, float x, float y)
 static BYTE gShape[MAPN][MAPN];
 static int gShapeOn = 0;
 static int gGenSpiral = 0;
+// 本線の中心。後段が足場を潰しても、この高さへ戻せばボスまで 1 段で歩ける。
+static short gSpineX[1800], gSpineZ[1800], gSpineH[1800];
+static int gSpineN = 0;
+
+static void RememberSpine(const short* sx, const short* sz, const short* sh, int ns)
+{
+	if (ns < 2) { gSpineN = 0; return; }
+	if (ns > 1800) ns = 1800;
+	for (int i = 0; i < ns; i++) {
+		gSpineX[i] = sx[i];
+		gSpineZ[i] = sz[i];
+		gSpineH[i] = sh[i];
+	}
+	gSpineN = ns;
+}
+
+// そのマスの本線の高さ。本線が無ければ fallback。
+static int SpineHAt(int x, int z, int fallback)
+{
+	if (gSpineN < 1) return fallback;
+	int best = fallback, bestD = 99999;
+	for (int i = 0; i < gSpineN; i++) {
+		int d = abs((int)gSpineX[i] - x) + abs((int)gSpineZ[i] - z);
+		if (d < bestD) { bestD = d; best = (int)gSpineH[i]; }
+	}
+	return bestD > 2 ? fallback : best;
+}
 
 // 小さい欠けは捨て、残った島は消さずに一番大きい島へ3マス幅でつなぐ。
 static void KeepLargestMask(BYTE mask[MAPN][MAPN])
@@ -1550,6 +1598,7 @@ static int CellStand(const Cell& c, int L);
 static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& paz, int& endX, int& endZ)
 {
 	gGenSpiral = 1;
+	gSpineN = 0;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		Cell& c = m.c[z][x];
 		WipeCell(c);
@@ -1727,6 +1776,8 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 	}
 
 	if (ns < 24) {
+		gGenSpiral = 0;
+		gSpineN = 0;
 		return StampVertical(m, r, tp, climbUp ? 1 : 0, pax, paz, endX, endZ);
 	}
 
@@ -2049,6 +2100,7 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 		else if (nL < LAY_N) LayDeck(c, nL, roadT, h);
 	}
 
+	RememberSpine(sx, sz, sh, ns);
 	pax = (int)sx[0]; paz = (int)sz[0];
 	endX = (int)sx[ns - 1]; endZ = (int)sz[ns - 1];
 	return Clampi(ns / 8, 16 + tier / 4, 28 + tier);
@@ -2830,6 +2882,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 	memset(&m, 0, sizeof(m));
 	gShapeOn = 0;
 	gGenSpiral = 0;
+	gSpineN = 0;
 	Rng r(seed);
 	m.seed = seed;
 	m.stage = stage;
@@ -3755,19 +3808,63 @@ void TacRollSky(int theme, DWORD seed, int& wx, int& hour)
 	else if (hs == 8) hour = HR_MOON;
 }
 
+// 本線の中心だけを、記録した高さ（1歩1段）の歩ける床に戻す。別アームは触らない。
+static void RepairSpineChain(Map& m)
+{
+	if (gSpineN < 2) return;
+	int prev = -1;
+	for (int i = 0; i < gSpineN; i++) {
+		int x = (int)gSpineX[i], z = (int)gSpineZ[i];
+		int h = (int)gSpineH[i];
+		if (prev >= 0) {
+			if (h > prev + 1) h = prev + 1;
+			if (h + 1 < prev) h = prev - 1;
+		}
+		if (h < 2) h = 2;
+		if (!Map::In(x, z)) { prev = h; continue; }
+		Cell& c = m.c[z][x];
+		int nL = CellLayN(c);
+		if (c.t == T_VOID && c.nLay < 2) nL = 0;
+		int placed = 0;
+		for (int L = 0; L < nL; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+			if (LayerHt(c, L) == h) { placed = 1; break; }
+		}
+		if (!placed) {
+			int n = (int)c.nLay;
+			if (n < 1) n = (c.t == T_VOID) ? 0 : 1;
+			int useL = n;
+			if (useL >= LAY_N) {
+				useL = 0;
+				int bestD = 99999;
+				for (int L = 0; L < LAY_N; L++) {
+					int d = abs(LayerHt(c, L) - h);
+					if (d < bestD) { bestD = d; useL = L; }
+				}
+			}
+			LayerSet(c, useL, T_PLAIN, h);
+		}
+		prev = h;
+	}
+}
+
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	for (int attempt = 0; attempt < 60; attempt++) {
 		GenerateMapBody(m, stage, seed + (DWORD)attempt * 9973u, theme);
 		// 立体交差の別アームを階段で繋ぐと滝ショートカットになるので、スパイラルはリボンの連続だけ残す。
-		if (gGenSpiral || MapIsSpiral(m)) return;
+		if (gGenSpiral || MapIsSpiral(m)) break;
 		ConnectFeet(m);
 		if (FeetLinked(m)) return;
 	}
-	// 6 回とも全足場が繋がらない配置（例: 3マス幅の通路を 3x3 の障害物が塞ぐ）は、
-	// 障害物を貫く平地回廊を強制的に掘って、スタート→ボス（全ての敵足場）を必ず歩けるようにする。
-	// FeetLinked が通る＝立てる全マスが一繋がり＝クリア不能マップを出さない保証。
-	if (!gGenSpiral && !MapIsSpiral(m)) ForceConnectFeet(m);
+	// 平地は全足場を一続きにする。スパイラルは別アームを掘らず、本線の中心だけ 1 段差に戻す。
+	// 足場を広げたとき下の層だけ残すと本線が切れ、その保険がスパイラルでは呼ばれていなかった。
+	if (gGenSpiral || MapIsSpiral(m)) {
+		RepairSpineChain(m);
+		return;
+	}
+	if (!FeetLinked(m)) ForceConnectFeet(m);
 }
 
 // ============================================================ クラス
@@ -8023,13 +8120,13 @@ static bool SkillReachUnit(const Battle& b, int ui, int skill, int ti)
 	int dist = FootDist(u.x, u.z, UnitSpan(u), t.x, t.z, UnitSpan(t));
 	if (s.effect == EF_RAISE) {
 		if (dist <= 0) return true;
-		int add = LayerRangeCost(u.deck, t.deck);
+		int add = StandRangeAdd(b.map, u.x, u.z, u.deck, t.x, t.z, t.deck);
 		if (add < 0) return false;
 		return dist + add >= rmin && dist + add <= rmax;
 	}
 	BOOL friendly = s.kind == SK_HEAL || s.kind == SK_BUFF;
 	if (friendly) {
-		int add = LayerRangeCost(u.deck, t.deck);
+		int add = StandRangeAdd(b.map, u.x, u.z, u.deck, t.x, t.z, t.deck);
 		if (add < 0) return false;
 		return dist + add >= rmin && dist + add <= rmax;
 	}
@@ -9292,7 +9389,7 @@ static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 	int bestLeave = 99999, lx = -1, lz = -1, lDeck = 0;
 	int bestAny = 99999, ax = -1, az = -1, aDeck = 0;
 	BOOL needStep = UnitMove(u) >= 1 && UnitMoveType(u) != MV_FLY;
-	int goalH = Map::In(gx, gz) ? CellStandH(b.map, gx, gz, -1) : 2;
+	int goalH = Map::In(gx, gz) ? SpineHAt(gx, gz, CellStandH(b.map, gx, gz, -1)) : 2;
 	int refH = goalH;
 	int nearPx = -1, nearPz = -1, playerH = -1;
 	int spiral = MapIsSpiral(b.map);
@@ -9597,7 +9694,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		if (Map::In(u.x, u.z)) {
 			const Cell& sc = b.map.At(u.x, u.z);
 			int nL = CellLayN(sc);
-			int hRef = CellStandH(b.map, b.map.pStartX[0], b.map.pStartZ[0], -1);
+			int hRef = SpineHAt(b.map.pStartX[0], b.map.pStartZ[0], CellStandH(b.map, b.map.pStartX[0], b.map.pStartZ[0], -1));
 			if (i > 0 && b.u[0].alive && Map::In(b.u[0].x, b.u[0].z))
 				hRef = LayerHt(b.map.At(b.u[0].x, b.u[0].z), b.u[0].deck);
 			int bestL = 0, bestDh = 99999;

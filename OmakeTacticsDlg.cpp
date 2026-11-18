@@ -596,7 +596,7 @@ DWORD WINAPI COmakeTacticsDlg::PaceThread(LPVOID param)
 		HANDLE stop = d->m_paceStop;
 		if (!stop || WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) break;
 		int hz = (int)d->m_paceHz;
-		if (hz < 30) hz = 30;
+		if (hz < 15) hz = 15;
 		if (hz > TAC_HZ_MAX) hz = TAC_HZ_MAX;
 		const LONGLONG period = freq.QuadPart / hz;
 		QueryPerformanceCounter(&now);
@@ -613,7 +613,7 @@ DWORD WINAPI COmakeTacticsDlg::PaceThread(LPVOID param)
 				HANDLE w[2] = { timer, stop };
 				DWORD cap = (DWORD)((remain * 1000) / freq.QuadPart) + 4;
 				if (cap < 1) cap = 1;
-				if (cap > 48) cap = 48;
+				if (cap > 80) cap = 80;
 				if (WaitForMultipleObjects(2, w, FALSE, cap) == WAIT_OBJECT_0 + 1) break;
 			}
 		}
@@ -704,7 +704,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	if (dt > 0.1f) dt = 0.1f;
 	m_tickAt = now;
 	int hz = m_game.PaceHz();
-	if (hz < 30) hz = 30;
+	if (hz < 15) hz = 15;
 	m_paceHz = hz;
 	if (windowCheckFlag == 0) {
 		m_fg = (::GetForegroundWindow() == m_hWnd);

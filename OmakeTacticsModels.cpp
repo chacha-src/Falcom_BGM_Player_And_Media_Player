@@ -2542,6 +2542,8 @@ static M4 WingTear(const M4& local, int side, float tear)
 }
 
 // 翼の根は胸ボーンの直後。服の背面を使うが、裾やマントで骨から 16cm 以上離れた点には付けない。
+static M4 CachedBind(const Model& m, int j);
+
 static void WingMount(Renderer& r, const Actor& a, const Model& m, int cj, BOOL human, float& y, float& z, float& x, float& yaw)
 {
 	y = human ? 1.32f : 1.12f;
@@ -2549,7 +2551,7 @@ static void WingMount(Renderer& r, const Actor& a, const Model& m, int cj, BOOL 
 	x = human ? 0.10f : 0.18f;
 	yaw = human ? -0.40f : -0.55f;
 	if (!human || cj < 0 || cj >= m.nJ) return;
-	M4 bind = MInverse(m.invBind[cj]);
+	M4 bind = CachedBind(m, cj);
 	float by = bind.m[13], bz = bind.m[14];
 	if (by > 0.90f && by < 1.60f) y = by;
 	int ava = a.avatar;
@@ -2569,6 +2571,7 @@ static void WingMount(Renderer& r, const Actor& a, const Model& m, int cj, BOOL 
 
 static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time, BOOL human)
 {
+	TacBrSpan wingSpan(TAC_BR_WING);
 	if (!a.wings || !a.poseValid) return;
 	float tear = a.wingTear;
 	if (tear < 0.f) tear = 0.f;
@@ -2648,21 +2651,59 @@ BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float
 	const Model& m = *(const Model*)a.modelPtr;
 	int cj = m.chestJ;
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return FALSE;
-	BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
 	int dr = a.wings == 2 ? 1 : 0;
 	float use = phase > 1e8f ? a.wingPh : phase;
-	float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
-	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
-	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
-	float y, z, x, yaw;
-	WingMount(r, a, m, cj, human, y, z, x, yaw);
-	float rest = human ? 0.20f : 0.35f;
-	float s = side == 0 ? 1.f : -1.f;
-	M4 fl = MRotZ(s * flap);
-	M4 base = MMul(MMul(MRotY(s * yaw), MRotZ(s * rest)), MTrans(s * x, y, z));
-	M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
-	M4 l = MMul(ex, a.pose.global[cj]);
-	M4 wm = MMul(l, world);
+	const float ox = world.m[12], oy = world.m[13], oz = world.m[14];
+	struct SpanMem { const Actor* a; unsigned frame; int side; float phase, ox, oy, oz; M4 wm; };
+	static SpanMem tab[128];
+	static int cursor = 0;
+	M4 wm;
+	BOOL got = FALSE;
+	for (int i = 0; i < 128; i++) {
+		const SpanMem& s = tab[i];
+		if (s.a == &a && s.frame == r.m_frame && s.side == side && s.phase == use && s.ox == ox && s.oy == oy && s.oz == oz) {
+			wm = s.wm;
+			got = TRUE;
+			break;
+		}
+	}
+	if (!got) {
+		BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
+		float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
+		float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+		float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
+		float y, z, x, yaw;
+		struct Mnt { const Actor* a; unsigned frame; int side; float y, z, x, yaw; };
+		static Mnt mnt[64];
+		int mi = -1;
+		for (int i = 0; i < 64; i++) if (mnt[i].a == &a && mnt[i].frame == r.m_frame && mnt[i].side == side) { mi = i; break; }
+		if (mi >= 0) { y = mnt[mi].y; z = mnt[mi].z; x = mnt[mi].x; yaw = mnt[mi].yaw; }
+		else {
+			WingMount(r, a, m, cj, human, y, z, x, yaw);
+			int free = -1;
+			for (int i = 0; i < 64; i++) if (!mnt[i].a || mnt[i].frame != r.m_frame) { free = i; break; }
+			if (free < 0) free = (int)(r.m_frame & 63);
+			mnt[free].a = &a; mnt[free].frame = r.m_frame; mnt[free].side = side;
+			mnt[free].y = y; mnt[free].z = z; mnt[free].x = x; mnt[free].yaw = yaw;
+		}
+		float rest = human ? 0.20f : 0.35f;
+		float sgn = side == 0 ? 1.f : -1.f;
+		M4 fl = MRotZ(sgn * flap);
+		M4 base = MMul(MMul(MRotY(sgn * yaw), MRotZ(sgn * rest)), MTrans(sgn * x, y, z));
+		M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
+		M4 l = MMul(ex, a.pose.global[cj]);
+		wm = MMul(l, world);
+		SpanMem& dst = tab[cursor];
+		cursor = (cursor + 1) & 127;
+		dst.a = &a;
+		dst.frame = r.m_frame;
+		dst.side = side;
+		dst.phase = use;
+		dst.ox = ox;
+		dst.oy = oy;
+		dst.oz = oz;
+		dst.wm = wm;
+	}
 	if (along < 0.f) along = 0.f;
 	if (along > 1.f) along = 1.f;
 	float span = 0.42f + along * (dr ? 0.95f : 1.28f);

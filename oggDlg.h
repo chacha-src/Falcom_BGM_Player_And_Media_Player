@@ -545,6 +545,8 @@ double OggGetGdiPlaybackTimeSec();
 /* LRC/カラオケ用。バナー time: と同じ TempoPred ソース位置。動画は ttt */
 double OggGetLyricsPlaySec();
 DWORD OggGetLyricsPlayCentis();
+/* 末尾を過ぎたら最後の実歌詞に固定する。空の番兵行や終端の時刻揺れでは進めない */
+int OggPickLyricsLine(unsigned nowCs);
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
 /* DS に残っているキューをミリ秒で返す。測れない、または fallback から 80ms 以上離れていれば fallback */

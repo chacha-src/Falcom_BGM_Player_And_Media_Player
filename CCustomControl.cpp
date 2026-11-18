@@ -161,16 +161,24 @@ static BOOL CCC_IsCustomPopupChild(HWND hWnd)
 
 static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd);
 static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
+static BOOL CCC_IsBlurControl(HWND hWnd);
 UINT CCC_CtlIconForCtrl(UINT id);
 static BOOL CCC_CaptionIsGlyphOnly(const CString& s);
 static void CCC_CaptionApplySharedIcon(CCustomStandardButton* p, UINT iconId);
 
-// キャプション常時アクリル(本文 aero=0)でも子は α=255 必須
+// キャプションだけガラスの本文、およびフルアクリル時のリスト/ボタン/エディットは α=255。
+// ラベル・スライダー・チェック・グループ・進捗はフルアクリルならガラスを透かす。
 static BOOL CCC_HostNeedsChildOpaque(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsCustomPopupChild(hWnd)) return TRUE;
-    return CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd));
+    if (!CCC_IsWin11()) return FALSE;
+    if (CCC_CaptionOnlyHostGlass(hWnd)) return TRUE;
+    if (CCC_IsAeroEnabled()) {
+        if (CCC_IsBlurControl(hWnd)) return FALSE;
+        return TRUE;
+    }
+    return FALSE;
 #else
     return CCC_IsCustomPopupChild(hWnd);
 #endif
@@ -192,8 +200,8 @@ static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
             return TRUE;
         }
     }
-    // x86 では子 GDI が不透明に見えたが、x64 + DWMWA_REDIRECTIONBITMAP_ALPHA では
-    // クロマ blit が本当に抜け、ボタン/スタティックが消える。本文は不透明面にする。
+    // x64 + DWMWA_REDIRECTIONBITMAP_ALPHA では素の BitBlt が α=0 で抜ける。
+    // リスト/ボタン/エディットは不透明面。ラベル等は下のクロマ経路（α=255 の文字）。
     if (hWnd && CCC_HostNeedsChildOpaque(hWnd))
         return FALSE;
     if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
@@ -397,9 +405,10 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
     if (bAeroEnabled && CCC_IsWin11())
     {
         CPaintDC dc(pWnd);
-        CRect rect;
-        pWnd->GetClientRect(&rect);
-        dc.FillSolidRect(&rect, RGB(250, 250, 250)); // 隙間の薄い下地（子の下は見えない）
+        // 素の FillSolidRect は α=0 のまま帯まで潰す。隙間だけガラスにし、帯は描き戻す。
+        CCC_PaintAeroGaps(dc, pWnd, nullptr);
+        if (pWnd->GetSafeHwnd())
+            CCC_CaptionPaint(dc, pWnd->m_hWnd);
         return;
     }
 #else
@@ -787,31 +796,60 @@ void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
     }
 }
 
-// キャッシュ DIB の部分矩形を画面へ。GdiAlphaBlend 優先（BeginBufferedPaint は 60fps で重い）。
-BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
+// α 付き DIB を窓へ書く。α=0 はガラス、α=255 はその色。AlphaBlend は α=0 を捨てて白が残る。
+static BOOL CCC_WriteAlphaDib(HDC hdcDest, int dx, int dy, int w, int h,
+    const void* bits, int sx, int sy, int stride)
+{
+    if (!hdcDest || !bits || w <= 0 || h <= 0 || stride <= 0) return FALSE;
+    if (sx < 0 || sy < 0 || sx + w > stride) return FALSE;
+    if (CCC_AvoidBufferedPaint()) return FALSE;
+    RECT rect = { dx, dy, dx + w, dy + h };
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) return FALSE;
+    RGBQUAD* pPx = nullptr;
+    int rowLength = 0;
+    if (FAILED(::GetBufferedPaintBits(hBP, &pPx, &rowLength)) || !pPx || rowLength < w) {
+        ::EndBufferedPaint(hBP, FALSE);
+        return FALSE;
+    }
+    const UINT32* src = (const UINT32*)bits;
+    for (int y = 0; y < h; ++y) {
+        UINT32* dst = reinterpret_cast<UINT32*>(
+            reinterpret_cast<BYTE*>(pPx) + (size_t)y * (size_t)rowLength * sizeof(RGBQUAD));
+        const UINT32* srow = src + ((size_t)sy + (size_t)y) * (size_t)stride + (size_t)sx;
+        for (int x = 0; x < w; ++x)
+            dst[x] = srow[x];
+    }
+    ::EndBufferedPaint(hBP, TRUE);
+    return TRUE;
+}
+
+// 部分矩形。ソース (sx,sy) を画面 (dx,dy) へ。ピアノ/アナライザの本文 GDI もここ。
+BOOL CCC_ChromaBlitCache::BlitAt(HDC hdcDest, int dx, int dy, int w, int h, int sx, int sy)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW <= 0 || dibH <= 0) return FALSE;
-    if (x < 0 || y < 0 || x + w > dibW || y + h > dibH) return FALSE;
-
-    // BeginBufferedPaint はピアノ/アナライザ 60fps で約数倍重い。α付き DIB を直接合成する。
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, x, y, w, h, bf))
+    if (sx < 0 || sy < 0 || sx + w > dibW || sy + h > dibH) return FALSE;
+    if (CCC_WriteAlphaDib(hdcDest, dx, dy, w, h, pBits, sx, sy, dibW))
         return TRUE;
-    /* Win+Shift+S 中は AlphaBlend が失敗し BeginBufferedPaint が EXECUTE AV になる → BitBlt のみ */
-    return ::BitBlt(hdcDest, x, y, w, h, hdcDib, x, y, SRCCOPY) ? TRUE : FALSE;
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (::GdiAlphaBlend(hdcDest, dx, dy, w, h, hdcDib, sx, sy, w, h, bf))
+        return TRUE;
+    return ::BitBlt(hdcDest, dx, dy, w, h, hdcDib, sx, sy, SRCCOPY) ? TRUE : FALSE;
+}
+
+// キャッシュ DIB の部分矩形を画面へ。
+BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
+{
+    return BlitAt(hdcDest, x, y, w, h, x, y);
 }
 
 // 全面提示。dest は画面座標（キャプション下 y>0 でも buffer 原点と混同しない）。
 BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW != w || dibH != h) return FALSE;
-
-    // キャプション下(y>0)でも dest は画面座標。BeginBufferedPaint を避けて直接合成。
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, 0, 0, w, h, bf))
-        return TRUE;
-    /* Win+Shift+S 中は AlphaBlend が失敗し BeginBufferedPaint が EXECUTE AV になる → BitBlt のみ */
-    return ::BitBlt(hdcDest, x, y, w, h, hdcDib, 0, 0, SRCCOPY) ? TRUE : FALSE;
+    return BlitAt(hdcDest, x, y, w, h, 0, 0);
 }
 
 // キャッシュ DIB へ描いてキー→α、GdiAlphaBlend。失敗時のみ BeginBufferedPaint。
@@ -834,6 +872,10 @@ static BOOL CCC_BlitChromaCachedRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, 
         dcDib.Detach();
     }
     CCC_AlphaFromChroma(cache.pBits, destW, destH, clrKey);
+
+    if (CCC_WriteAlphaDib(hdcDest, rect.left, rect.top, destW, destH, cache.pBits, 0, 0,
+            (cache.dibW > 0) ? cache.dibW : destW))
+        return TRUE;
 
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
@@ -867,6 +909,13 @@ static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     else
         dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
     CCC_AlphaFromChroma(pBits, destW, destH, clrKey);
+
+    if (CCC_WriteAlphaDib(hdcDest, rect.left, rect.top, destW, destH, pBits, 0, 0, destW)) {
+        ::SelectObject(dcDib.GetSafeHdc(), hOld);
+        ::DeleteObject(hDib);
+        dcSrc.Detach();
+        return TRUE;
+    }
 
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
@@ -16804,13 +16853,18 @@ void CCustomLevelMeter::SetLevel(int n)
 // テーマ WS_BORDER は α=0 なので外し、同じ位置を不透明な 1px 枠で描く。
 // 余白は COLOR_DIALOG_BG（親と同じ）で埋め、クロマで抜かない。
 // 850 超で赤、650 超で黄。トラックは暗い紺。
-void CCustomLevelMeter::PaintClient(CDC& dc)
+void CCustomLevelMeter::PaintClient(CDC& dc, BOOL bChromaBg)
 {
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
 
+#if CCUSTOM_AERO_SUPPORT
+	dc.FillSolidRect(&r, bChromaBg ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
+#else
+	UNREFERENCED_PARAMETER(bChromaBg);
 	dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+#endif
 
 	if (r.Width() >= 2 && r.Height() >= 2) {
 		const COLORREF clrFrame = RGB(255, 255, 255);
@@ -16860,6 +16914,19 @@ void CCustomLevelMeter::OnPaint()
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
+	if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && !CCC_HostNeedsChildOpaque(m_hWnd))
+	{
+		CDC mDC;
+		CBitmap bmp;
+		if (mDC.CreateCompatibleDC(&dc) && bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
+			CBitmap* ob = mDC.SelectObject(&bmp);
+			PaintClient(mDC, TRUE);
+			CCC_BlitChromaNF(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+				mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+			mDC.SelectObject(ob);
+			return;
+		}
+	}
 	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
 	params.dwFlags = BPPF_ERASE;
 	HDC hdcBuf = NULL;
@@ -16893,6 +16960,8 @@ void CCustomLevelMeter::OnNcPaint()
 BOOL CCustomLevelMeter::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
+	if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && !CCC_HostNeedsChildOpaque(m_hWnd))
+		return TRUE;
 	if (pDC)
 	{
 		CRect r;
@@ -17418,6 +17487,12 @@ void CCustomProgressCtrl::OnPaint()
 	if (CCC_HostNeedsChildOpaque(m_hWnd))
 	{
 		PaintOpaqueClient(dc);
+		return;
+	}
+	if (CCC_UseTransPaint(m_hWnd, m_bAeroMode))
+	{
+		if (r.Width() > 0 && r.Height() > 0)
+			PaintClient(dc);
 		return;
 	}
 #endif
@@ -20113,9 +20188,12 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         }
     }
 
-    // Win11 ガラス（全面 aero / キャプションのみ）では本文 blur 系も不透明化。
-    // x86 では素 GDI が不透明に見えたが、x64 では α=0 のまま合成されて消える。
+    // キャプションのみガラスは本文を不透明 fixer。フルアクリルのラベル等は
+    // fixer の α=255 塗りでガラスが死ぬので自前クロマ描画に任せる。
+    // リスト/ボタン/エディットは x64 で α=0 のまま消えるので fixer 継続。
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd))) {
+        if (CCC_IsAeroEnabled() && CCC_IsBlurControl(hWnd))
+            return FALSE;
         if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
         {
             if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;

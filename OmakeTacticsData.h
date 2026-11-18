@@ -791,6 +791,17 @@ inline int LayerRangeCost(int fromL, int toL)
 	if (up < 0) return 1;
 	return 0;
 }
+// 段差 4 以内は平地と同じ。それを超える層だけ距離を足す。届かない高さは -1。
+inline int StandRangeAdd(const Map& m, int ax, int az, int aDeck, int tx, int tz, int tDeck)
+{
+	if (!Map::In(ax, az) || !Map::In(tx, tz)) return -1;
+	int aL = LayerOn(m.At(ax, az), aDeck) ? aDeck : 0;
+	int tL = LayerOn(m.At(tx, tz), tDeck) ? tDeck : 0;
+	int dh = abs(LayerHt(m.At(ax, az), aL) - LayerHt(m.At(tx, tz), tL));
+	if (dh > 18) return -1;
+	if (dh <= 4) return 0;
+	return LayerRangeCost(aL, tL);
+}
 float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
 float TacMonsterWide(int packIndex);   // 同じ姿勢で翼や胴を含む全身の半幅。未計測は 0
 float TacMonsterTall(int packIndex);   // 同じ姿勢の身長。未計測は 0

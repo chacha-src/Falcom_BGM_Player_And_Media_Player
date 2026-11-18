@@ -574,9 +574,13 @@ public:
 	void SetStageId(int stage);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n, const M4* mapXform = NULL);
+	void PortraitFeatherReset();
+	void PortraitFeatherAdd(int slot, const Particle* ps, int n);
+	void PortraitFeatherUpload();
+	void PortraitFeatherDraw(int slot);
 	void DrawRibbon(const Buf<VtxP>& v);
 	enum { WX_GPU_MAX = 8192, WX_GPU_ACT = 80 };
-	BOOL WxGpuReady() const { return m_csWx != NULL && m_wxGpuUAV != NULL && m_vsPWx != NULL && m_gsP != NULL; }
+	BOOL WxGpuReady() const { return m_csWx != NULL && m_wxGpuUAV[0] != NULL && m_wxGpuUAV[1] != NULL && m_vsPWx != NULL && m_gsP != NULL; }
 	void TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const V3& wind, float gust, int nAct, const float* act4, const float* height64, float heat);
 	void DrawWxGpu();
 
@@ -889,9 +893,10 @@ private:
 	ID3D11Buffer* m_cbHairSim;
 	ID3D11ComputeShader* m_csWx;
 	ID3D11VertexShader* m_vsPWx;
-	ID3D11Buffer* m_wxGpuSB;
-	ID3D11UnorderedAccessView* m_wxGpuUAV;
-	ID3D11ShaderResourceView* m_wxGpuSRV;
+	ID3D11Buffer* m_wxGpuSB[2];
+	ID3D11UnorderedAccessView* m_wxGpuUAV[2];
+	ID3D11ShaderResourceView* m_wxGpuSRV[2];
+	int m_wxGpuFlip;
 	ID3D11Buffer* m_wxActSB;
 	ID3D11ShaderResourceView* m_wxActSRV;
 	ID3D11Buffer* m_wxHgtSB;
@@ -951,7 +956,8 @@ private:
 	ID3D11Buffer* m_vbInst;
 	ID3D11Buffer* m_ibQuad;
 	UINT m_vbDynBytes;
-	UINT m_dynPos, m_dynOff, m_hudPos;
+	UINT m_vbInstBytes;
+	UINT m_dynPos, m_dynOff, m_hudPos, m_instPos;
 	void* DynMap(UINT bytes, UINT& off);
 	ID3D11SamplerState* m_sLin;
 	ID3D11SamplerState* m_sCmp;
@@ -1074,6 +1080,34 @@ private:
 	float m_ptClear[4];
 	BOOL PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void FlushInst();
+};
+
+// 1フレームの内訳。上の行は足すとフレームに近い。下の行（骨以降）はその内側。
+enum {
+	TAC_BR_PREP = 0, TAC_BR_POSE, TAC_BR_SH, TAC_BR_REF, TAC_BR_LAND, TAC_BR_RING, TAC_BR_ACT, TAC_BR_FX,
+	TAC_BR_PORT, TAC_BR_SKIN, TAC_BR_CLOTH, TAC_BR_FLUSH, TAC_BR_INST, TAC_BR_WING, TAC_BR_PDRAW, TAC_BR_PFEATH,
+	TAC_BR_PFIN,
+	TAC_BR_HUD,
+	TAC_BR_N
+};
+struct TacBrClock {
+	LARGE_INTEGER qpf, t, mark;
+	float slot[TAC_BR_N];
+};
+inline TacBrClock& TacBr()
+{
+	static TacBrClock c;
+	return c;
+}
+inline LARGE_INTEGER TacBrNow() { LARGE_INTEGER n; n.QuadPart = 0; return n; }
+inline void TacBrAdd(int, const LARGE_INTEGER&, const LARGE_INTEGER&) {}
+inline void TacBrReset() {}
+inline void TacBrLap(int) {}
+inline void TacBrMark() {}
+inline void TacBrTake(int) {}
+inline float TacBrAt(int) { return 0.f; }
+struct TacBrSpan {
+	explicit TacBrSpan(int) {}
 };
 
 } // namespace otac

@@ -41,6 +41,7 @@ struct TacDrawCmd {
 	ID3D11BlendState* blend;
 	ID3D11RasterizerState* rs;
 	ID3D11DepthStencilState* depth;
+	ID3D11GeometryShader* gs;
 	UINT nIdx;
 	UINT iBase;
 	UINT stride;
@@ -52,6 +53,8 @@ struct TacDrawCmd {
 	unsigned pair;
 	unsigned char pre;
 	unsigned char alpha;
+	ID3D11Buffer* fcb;
+	UINT vpX, vpY, vpW, vpH;
 };
 static unsigned g_drawPair = 1;
 static unsigned g_drawSeq = 1;
@@ -64,6 +67,30 @@ enum { TAC_CB_POOL = 4096 };
 static ID3D11Buffer* g_cbPool[TAC_CB_POOL];
 static int g_cbPoolN = 0;
 static int g_cbPoolI = 0;
+// 顔枠の Map が、GPU がまだ読んでいる定数を捨てると CPU が止まり、そのあいだ GPU も空く。
+// 飛行中なら待たずに次の枠へ回す。範囲付きの定数バインドは武具が多い顔で1描画ずつ重かった。
+static int g_uploadNowait = 0;
+static int g_nowaitOk = 1;
+enum { PT_RING = 16, PT_CAP = 4096 * 60 };
+static ID3D11Buffer* g_ptRing[PT_RING];
+static int g_ptSlot = -1;
+static ID3D11Buffer* g_ptPart = NULL;
+struct TacPPt { float p[3]; float vel[4]; float sz[4]; float c[4]; };
+static_assert(sizeof(TacPPt) == 60, "TacPPt");
+enum { PF_BLOB = 4, PF_BLOB_BYTES = 32 * 1024 };
+static ID3D11Buffer* g_pfBlob[PF_BLOB];
+static unsigned g_pfBlobFrame[PF_BLOB];
+static int g_pfBlobI = -1;
+enum { PF_REG = 16, PF_REG_PTS = 1024, PF_REG_BYTES = PF_REG_PTS * 60 };
+static ID3D11Buffer* g_pfAppend = NULL;
+static int g_pfAppendReady = 0;
+static ID3D11Buffer* g_pfBuf[PF_REG];
+static int g_pfBufReady[PF_REG];
+struct PfSlot { int n[2]; UINT off[2]; ID3D11Buffer* vb; M4 basis; int ok; TacPPt pt[2][16]; };
+static PfSlot g_pf[Renderer::PORTRAIT_N];
+// 顔のメッシュは共有されない。行列だけを1回書いて、定数は色が変わったときだけ送る。
+static ID3D11Buffer* g_faceInst = NULL;
+static UINT g_faceInstAt = 0xFFFFFFF0u;
 // 同じ動的定数を描画の途中で DISCARD すると、GPU が読み終わるまで CPU が止まり、その間 GPU も空く。
 // 枠を回して、飛行中のバッファは触らない。
 enum { TAC_CB_RING = 256 };
@@ -117,16 +144,52 @@ static void TacCbRingMake(ID3D11Device* dev, TacCbRing& r, UINT bytes)
 }
 static ID3D11Buffer* TacCbAcquire(TacCbRing& r, ID3D11DeviceContext* ctx, ID3D11Buffer* fallback, D3D11_MAPPED_SUBRESOURCE& ms)
 {
-	ID3D11Buffer* b = (r.n > 0) ? r.b[r.i] : fallback;
-	if (!ctx || !b) return NULL;
-	if (FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
-	if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
-	r.cur = b;
-	return b;
+	if (!ctx) return NULL;
+	// 顔の最中は、GPU がまだ読んでいる定数を捨てて待たない。隣の枠へ回す。
+	const BOOL spin = g_uploadNowait && g_nowaitOk && r.n > 1;
+	int spins = 0;
+	for (;;) {
+		ID3D11Buffer* b = (r.n > 0) ? r.b[r.i] : fallback;
+		if (!b) return NULL;
+		HRESULT hr = spin
+			? ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms)
+			: ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+		if (SUCCEEDED(hr) && ms.pData) {
+			if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
+			r.cur = b;
+			return b;
+		}
+		if (!spin || hr != DXGI_ERROR_WAS_STILL_DRAWING) {
+			if (!spin) return NULL;
+			if (FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
+			if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
+			r.cur = b;
+			return b;
+		}
+		if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
+		if (++spins >= r.n) {
+			b = r.b[r.i];
+			if (!b || FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
+			r.i++; if (r.i >= r.n) r.i = 0;
+			r.cur = b;
+			return b;
+		}
+	}
 }
 static ID3D11Buffer* TacCbCur(const TacCbRing& r, ID3D11Buffer* fallback)
 {
 	return r.cur ? r.cur : fallback;
+}
+static void TacStampCam(TacDrawCmd& c, ID3D11Buffer* fcb, BOOL inPortrait, int slot)
+{
+	c.fcb = fcb;
+	c.vpX = c.vpY = c.vpW = c.vpH = 0;
+	if (inPortrait && slot >= 0 && slot < Renderer::PORTRAIT_N) {
+		c.vpX = (UINT)((slot % 6) * Renderer::PORTRAIT_PX);
+		c.vpY = (UINT)((slot / 6) * Renderer::PORTRAIT_PX);
+		c.vpW = (UINT)Renderer::PORTRAIT_PX;
+		c.vpH = (UINT)Renderer::PORTRAIT_PX;
+	}
 }
 static ID3D11Buffer* g_cbBound = NULL;
 
@@ -167,13 +230,34 @@ static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacOb
 	if (!ctx || !cb) return;
 	if (g_objValid && g_cbBound && memcmp(&g_objGPU, &o, sizeof(o)) == 0) return;
 	ID3D11Buffer* dst = cb;
-	if (g_cbPoolN > 0) {
-		dst = g_cbPool[g_cbPoolI];
-		g_cbPoolI++;
-		if (g_cbPoolI >= g_cbPoolN) g_cbPoolI = 0;
-	}
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	ms.pData = NULL;
+	ms.RowPitch = 0;
+	ms.DepthPitch = 0;
+	HRESULT hr = E_FAIL;
+	if (g_cbPoolN > 0) {
+		const BOOL spin = g_uploadNowait && g_nowaitOk;
+		int spins = 0;
+		for (;;) {
+			dst = g_cbPool[g_cbPoolI];
+			if (++g_cbPoolI >= g_cbPoolN) g_cbPoolI = 0;
+			if (!spin) {
+				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+				break;
+			}
+			hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+			if (SUCCEEDED(hr)) break;
+			if (hr != DXGI_ERROR_WAS_STILL_DRAWING) {
+				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+				break;
+			}
+			if (++spins >= 32) {
+				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+				break;
+			}
+		}
+	} else hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+	if (FAILED(hr) || !ms.pData) return;
 	memcpy(ms.pData, &o, sizeof(o));
 	ctx->Unmap(dst, 0);
 	TacBindObjBuf(ctx, dst, tessOn);
@@ -253,7 +337,10 @@ Renderer::Renderer()
 	memset(m_hairCapN, 0, sizeof(m_hairCapN));
 	m_csHair[0] = m_csHair[1] = NULL; m_cbHairSim = NULL;
 	m_csWx = NULL; m_vsPWx = NULL;
-	m_wxGpuSB = NULL; m_wxGpuUAV = NULL; m_wxGpuSRV = NULL;
+	m_wxGpuSB[0] = m_wxGpuSB[1] = NULL;
+	m_wxGpuUAV[0] = m_wxGpuUAV[1] = NULL;
+	m_wxGpuSRV[0] = m_wxGpuSRV[1] = NULL;
+	m_wxGpuFlip = 0;
 	m_wxActSB = NULL; m_wxActSRV = NULL; m_wxHgtSB = NULL; m_wxHgtSRV = NULL;
 	m_cbWx = NULL; m_wxGpuN = 0; m_wxGpuWx = -1; m_wxHeat = 0.f;
 	m_hairGuideSB = NULL; m_hairGuide = NULL; m_hairVertSB = NULL; m_hairVert = NULL;
@@ -268,7 +355,7 @@ Renderer::Renderer()
 	m_capC = RGBA8(70, 70, 70);
 	for (int s = 0; s < TAC_SCALP_CACHE; s++) m_scalps[s].model = -1;
 	m_ilS = m_ilB = m_ilK = m_ilH = m_ilP = m_ilPT = NULL;
-	m_cbFrame = m_cbAir = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u;
+	m_cbFrame = m_cbAir = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_vbInstBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u; m_instPos = 0xFFFFFFF0u;
 	m_sLin = m_sCmp = m_sClamp = NULL;
 	m_rsBack = m_rsFront = m_rsNone = m_rsShadow = m_rsHud = NULL;
 	m_dsWrite = m_dsRead = m_dsOff = NULL;
@@ -414,7 +501,7 @@ void Renderer::Release()
 	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft); TacCbRingFree(g_softR);
 	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim); TacCbRingFree(g_hairSimR);
 	TAC_REL(m_csWx); TAC_REL(m_vsPWx);
-	TAC_REL(m_wxGpuUAV); TAC_REL(m_wxGpuSRV); TAC_REL(m_wxGpuSB);
+	for (int wi = 0; wi < 2; wi++) { TAC_REL(m_wxGpuUAV[wi]); TAC_REL(m_wxGpuSRV[wi]); TAC_REL(m_wxGpuSB[wi]); }
 	TAC_REL(m_wxActSRV); TAC_REL(m_wxActSB);
 	TAC_REL(m_wxHgtSRV); TAC_REL(m_wxHgtSB);
 	TAC_REL(m_cbWx);
@@ -424,6 +511,16 @@ void Renderer::Release()
 	for (int i = 0; i < g_cbPoolN; i++) TAC_REL(g_cbPool[i]);
 	g_cbPoolN = 0;
 	g_cbPoolI = 0;
+	for (int i = 0; i < PT_RING; i++) TAC_REL(g_ptRing[i]);
+	g_ptPart = NULL;
+	g_ptSlot = -1;
+	for (int i = 0; i < PF_BLOB; i++) { TAC_REL(g_pfBlob[i]); g_pfBlobFrame[i] = 0; }
+	g_pfBlobI = -1;
+	TAC_REL(g_pfAppend);
+	g_pfAppendReady = 0;
+	for (int i = 0; i < PF_REG; i++) { TAC_REL(g_pfBuf[i]); g_pfBufReady[i] = 0; }
+	TAC_REL(g_faceInst);
+	g_faceInstAt = 0xFFFFFFF0u;
 	g_cbBound = NULL;
 	g_objValid = FALSE;
 	TAC_REL(m_sLin); TAC_REL(m_sCmp); TAC_REL(m_sClamp);
@@ -729,12 +826,8 @@ BOOL Renderer::CreateTargets()
 	if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 	if (FAILED(hr = m_dev->CreateRenderTargetView(m_bb, NULL, &m_bbRtv))) { m_lastHr = hr; return FALSE; }
 	}
-	int want = 2;
+	// 2x は全面のサンプルと解決で塗りをほぼ倍にする。縁の段差よりフレーム時間を取る。
 	m_msaa = 1;
-	for (int s = want; s >= 2; s /= 2) {
-		UINT ql = 0;
-		if (SUCCEEDED(m_dev->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, s, &ql)) && ql > 0) { m_msaa = s; break; }
-	}
 	D3D11_TEXTURE2D_DESC td = {};
 	td.Width = m_w; td.Height = m_h; td.MipLevels = 1; td.ArraySize = 1;
 	td.SampleDesc.Count = m_msaa;
@@ -1208,18 +1301,19 @@ BOOL Renderer::CreateShaders()
 				pd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 				pd.StructureByteStride = 80;
 				pd.Usage = D3D11_USAGE_DEFAULT;
-				if (FAILED(m_dev->CreateBuffer(&pd, NULL, &m_wxGpuSB))) m_wxGpuSB = NULL;
-				if (m_wxGpuSB) {
+				for (int wi = 0; wi < 2; wi++) {
+					if (FAILED(m_dev->CreateBuffer(&pd, NULL, &m_wxGpuSB[wi]))) m_wxGpuSB[wi] = NULL;
+					if (!m_wxGpuSB[wi]) continue;
 					D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
 					ud.Format = DXGI_FORMAT_UNKNOWN;
 					ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
 					ud.Buffer.NumElements = WX_GPU_MAX;
-					if (FAILED(m_dev->CreateUnorderedAccessView(m_wxGpuSB, &ud, &m_wxGpuUAV))) m_wxGpuUAV = NULL;
+					if (FAILED(m_dev->CreateUnorderedAccessView(m_wxGpuSB[wi], &ud, &m_wxGpuUAV[wi]))) m_wxGpuUAV[wi] = NULL;
 					D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
 					sd.Format = DXGI_FORMAT_UNKNOWN;
 					sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
 					sd.Buffer.NumElements = WX_GPU_MAX;
-					if (FAILED(m_dev->CreateShaderResourceView(m_wxGpuSB, &sd, &m_wxGpuSRV))) m_wxGpuSRV = NULL;
+					if (FAILED(m_dev->CreateShaderResourceView(m_wxGpuSB[wi], &sd, &m_wxGpuSRV[wi]))) m_wxGpuSRV[wi] = NULL;
 				}
 				D3D11_BUFFER_DESC ad = {};
 				ad.ByteWidth = WX_GPU_ACT * 16;
@@ -1252,9 +1346,9 @@ BOOL Renderer::CreateShaders()
 				ad.StructureByteStride = 0;
 				if (FAILED(m_dev->CreateBuffer(&ad, NULL, &m_cbWx))) m_cbWx = NULL;
 			}
-			if (!m_csWx || !m_vsPWx || !m_wxGpuUAV || !m_wxGpuSRV || !m_wxActSRV || !m_wxHgtSRV || !m_cbWx) {
+			if (!m_csWx || !m_vsPWx || !m_wxGpuUAV[0] || !m_wxGpuUAV[1] || !m_wxGpuSRV[0] || !m_wxGpuSRV[1] || !m_wxActSRV || !m_wxHgtSRV || !m_cbWx) {
 				TAC_REL(m_csWx); TAC_REL(m_vsPWx);
-				TAC_REL(m_wxGpuUAV); TAC_REL(m_wxGpuSRV); TAC_REL(m_wxGpuSB);
+				for (int wi = 0; wi < 2; wi++) { TAC_REL(m_wxGpuUAV[wi]); TAC_REL(m_wxGpuSRV[wi]); TAC_REL(m_wxGpuSB[wi]); }
 				TAC_REL(m_wxActSRV); TAC_REL(m_wxActSB);
 				TAC_REL(m_wxHgtSRV); TAC_REL(m_wxHgtSB);
 				TAC_REL(m_cbWx);
@@ -1301,7 +1395,11 @@ BOOL Renderer::CreateStates()
 	m_dynPos = 0xFFFFFFF0u;
 	m_dynOff = 0;
 	m_hudPos = 0xFFFFFFF0u;
-	bd.ByteWidth = 64u * 64u;
+	// 共有メッシュ（翼など）だけが使う。1人分の行列はここへ載せず、描き終わっていない領域は捨てない。
+	// グループごとに捨てると、GPU が読んでいるあいだ CPU が止まり、GPU も次の命令を待って空く。
+	m_vbInstBytes = 256u * 1024u;
+	bd.ByteWidth = m_vbInstBytes;
+	m_instPos = 0xFFFFFFF0u;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbInst))) return FALSE;
 	{
 		enum { QN = 8192 };
@@ -4477,6 +4575,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		base.stride = savedStride;
 	};
 	if (so && so->frame == m_frame && so->key == key) { drawOut(so->vb); return TRUE; }
+	TacBrSpan skinSpan(TAC_BR_SKIN);
 	if (!so && owner && src.outVB && src.gpuSkinFrame == m_frame && src.gpuSkinOwner == owner && src.gpuSkinKey == key) {
 		drawOut(src.outVB);
 		return TRUE;
@@ -10273,6 +10372,7 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	const BOOL canSoft = !m_inPortrait && owner && src.outUAV && ac.softN > 0 && ac.softN <= SOFT_MAX && ac.softVN > 0
 		&& ac.softSRV[0] && ac.softSRV[1] && m_cbSoft && m_csSoft[0] && m_csSoft[1];
 	if (!canSkirt && !canSoft) return;
+	TacBrSpan clothSpan(TAC_BR_CLOTH);
 	int deferCloth = 0;
 	ClothInst* ci = NULL;
 	if (m_inPortrait) {
@@ -11260,7 +11360,7 @@ void Renderer::EnsureScalp(int model, int headJ)
 		}
 	}
 	m_scalpModel = -1;
-	m_capDraw.ib = NULL; m_capDraw.nIdx = 0;
+	m_capDraw.ib = NULL; m_capDraw.vb = NULL; m_capDraw.nIdx = 0;
 	m_capBind.clear();
 	if (!m_dev || !m_ctx || headJ < 0) return;
 	const CreatureSkin* sk = NULL;
@@ -11325,6 +11425,13 @@ void Renderer::EnsureScalp(int model, int headJ)
 					m_capDraw.stride = sizeof(VtxS);
 					m_capDraw.tex = -1;
 					m_capDraw.i32 = 0;
+					D3D11_BUFFER_DESC vbd = {};
+					vbd.ByteWidth = (UINT)m_capBind.size() * (UINT)sizeof(VtxS);
+					vbd.Usage = D3D11_USAGE_IMMUTABLE;
+					vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+					D3D11_SUBRESOURCE_DATA vsd = { m_capBind.data(), 0, 0 };
+					m_capDraw.vb = NULL;
+					m_dev->CreateBuffer(&vbd, &vsd, &m_capDraw.vb);
 					m_scalpModel = model;
 					int slot = -1;
 					for (int s = 0; s < TAC_SCALP_CACHE; s++) if (m_scalps[s].model < 0) { slot = s; break; }
@@ -11348,6 +11455,26 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		EnsureScalp(model, headJ);
 		if (!(m_capDraw.ib && m_capBind.size() >= 3)) return FALSE;
 		const M4& B = pose.palette[headJ];
+		if (m_capDraw.vb) {
+			DrawParams dc = dp;
+			dc.outline = 0.f;
+			dc.twoSided = 1;
+			dc.sway = dp.sway;
+			dc.rim = 0.02f;
+			dc.noTess = 1;
+			// 地肌の頂点色は灰。シェーダは頂点色と Tint を両方掛けるので、今までの髪色×髪色に合わせる。
+			int gch = (int)(m_capC & 255);
+			if (gch < 5) gch = 5;
+			auto sq = [&](unsigned shift) {
+				int t = (int)((dp.tint >> shift) & 255);
+				int v = (t * t + gch / 2) / gch;
+				if (v > 255) v = 255;
+				return v;
+			};
+			dc.tint = RGBA8(sq(0), sq(8), sq(16), (int)((dp.tint >> 24) & 255));
+			DrawStatic(m_capDraw, MMul(B, world), dc);
+			return TRUE;
+		}
 		struct CapOnlyMem { const void* owner; unsigned frame; int n; DWORD tint; Buf<VtxS> v; };
 		static CapOnlyMem capOnlyMem[48];
 		CapOnlyMem* got = NULL;
@@ -11547,7 +11674,16 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	}
 	if (ho) { ho->frame = m_frame; ho->key = hkey; hairVB = ho->vb; }
 	}
-	if (m_capDraw.ib && m_capBind.size() >= 3 && headJ < pose.nJ) {
+	if (m_capDraw.vb && m_capDraw.ib && !hostSkull && headJ < pose.nJ) {
+		DrawParams dc = dp;
+		dc.outline = 0.f;
+		dc.twoSided = 1;
+		dc.sway = dp.sway;
+		dc.rim = 0.02f;
+		dc.mode = 7.f;
+		dc.noTess = 1;
+		DrawStatic(m_capDraw, MMul(pose.palette[headJ], world), dc);
+	} else if (m_capDraw.ib && m_capBind.size() >= 3 && headJ < pose.nJ) {
 		const M4& B = pose.palette[headJ];
 		struct CapMem { const void* owner; unsigned frame; int n; Buf<VtxS> v; VtxS dome[25]; int domeOk; };
 		static CapMem capMem[128];
@@ -12009,7 +12145,6 @@ static float TacEaseAboveBreak(float rank, float atBreak, float far)
 // ============================================================ フレーム
 void Renderer::UpdateFrameCB()
 {
-	FlushQueuedDraws();
 	static_assert(sizeof(m_fcb) <= sizeof(g_fcbSnap), "frame cb");
 	if (g_fcbLive && memcmp(g_fcbSnap, &m_fcb, sizeof(m_fcb)) == 0) {
 		TacUploadShaderAir(m_ctx, m_cbAir, m_fcb.eye[3]);
@@ -12020,10 +12155,12 @@ void Renderer::UpdateFrameCB()
 	if (!b) return;
 		memcpy(ms.pData, &m_fcb, sizeof(m_fcb));
 	m_ctx->Unmap(b, 0);
-	m_ctx->VSSetConstantBuffers(0, 1, &b);
-	m_ctx->PSSetConstantBuffers(0, 1, &b);
-	m_ctx->HSSetConstantBuffers(0, 1, &b);
-	m_ctx->DSSetConstantBuffers(0, 1, &b);
+	if (!m_inPortrait) {
+		m_ctx->VSSetConstantBuffers(0, 1, &b);
+		m_ctx->PSSetConstantBuffers(0, 1, &b);
+		m_ctx->HSSetConstantBuffers(0, 1, &b);
+		m_ctx->DSSetConstantBuffers(0, 1, &b);
+	}
 	memcpy(g_fcbSnap, &m_fcb, sizeof(m_fcb));
 	g_fcbLive = 1;
 	TacUploadShaderAir(m_ctx, m_cbAir, m_fcb.eye[3]);
@@ -12033,6 +12170,7 @@ void Renderer::BeginFrame()
 {
 	MarkGpuBegin();
 	FlushQueuedDraws();
+	g_uploadNowait = 1;
 	m_avaLoading = 0;
 	m_avaFlashed = FALSE;
 	if (g_avaNeedReset) {
@@ -12304,19 +12442,14 @@ void Renderer::ReuseReflect(float planeY)
 
 void Renderer::BeginMainPass()
 {
-	FlushQueuedDraws();
+	if (!m_inPortrait) FlushQueuedDraws();
 	if (!m_inPortrait) PollStageLook();
 	m_pass = m_inPortrait ? PASS_PORTRAIT : PASS_MAIN;
 	if (m_inPortrait) {
 		int sx = (m_portraitSlot % 6) * PORTRAIT_PX, sy = (m_portraitSlot / 6) * PORTRAIT_PX;
 		D3D11_VIEWPORT vp = { (float)sx, (float)sy, (float)PORTRAIT_PX, (float)PORTRAIT_PX, 0, 1 };
 		m_ctx->RSSetViewports(1, &vp);
-		// 枠の色は消さないと、選択順で枠が入れ替わったとき前の髪が残る。深度は BeginPortrait で全面クリア済み。
-		if (m_ctx1) {
-			D3D11_RECT rc;
-			rc.left = sx; rc.top = sy; rc.right = sx + PORTRAIT_PX; rc.bottom = sy + PORTRAIT_PX;
-			m_ctx1->ClearView(m_ptRtv, m_ptClear, &rc, 1);
-		}
+		// 枠の色は、定数を上げたあとに三角形で塗る。ClearView はここだと CPU が GPU の完了を待つ。
 	} else {
 		BOOL mrt = TacQFx(m_quality) && m_zRtv && m_zSrv;
 		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
@@ -12356,6 +12489,42 @@ void Renderer::BeginMainPass()
 		if (m_marksSrv) m_ctx->PSSetShaderResources(14, 1, &m_marksSrv);
 	}
 	if (m_skinArrSrv) m_ctx->PSSetShaderResources(9, 1, &m_skinArrSrv);
+	if (m_inPortrait && m_portraitSlot >= 0 && m_vsQ && m_psSky) {
+		int r8 = (int)(m_ptClear[0] * 255.f + 0.5f);
+		int g8 = (int)(m_ptClear[1] * 255.f + 0.5f);
+		int b8 = (int)(m_ptClear[2] * 255.f + 0.5f);
+		if (r8 < 0) r8 = 0; if (r8 > 255) r8 = 255;
+		if (g8 < 0) g8 = 0; if (g8 > 255) g8 = 255;
+		if (b8 < 0) b8 = 0; if (b8 > 255) b8 = 255;
+		DrawParams bg;
+		bg.tint = RGBA8(r8, g8, b8);
+		bg.dissolve = r8 / 255.f;
+		bg.flash = g8 / 255.f;
+		bg.rim = b8 / 255.f;
+		if (g_drawN >= TAC_DRAWQ) FlushQueuedDraws();
+		if (g_drawN < TAC_DRAWQ) {
+			TacDrawCmd& c = g_drawQ[g_drawN];
+			memset(&c, 0, sizeof(c));
+			c.nIdx = 3;
+			c.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+			c.vs = m_vsQ;
+			c.ps = m_psSky;
+			c.il = NULL;
+			c.rs = m_rsNone;
+			c.blend = m_bsOpaque;
+			c.depth = m_dsRead;
+			c.pre = 0;
+			c.alpha = 0;
+			c.seq = g_drawSeq++;
+			c.pair = g_drawPair;
+			TacFillObj(c.obj, MIdent(), bg, 0);
+			TacStampCam(c, TacCbCur(g_frameR, m_cbFrame), TRUE, m_portraitSlot);
+			g_drawN++;
+		}
+		m_dsWant = m_dsWrite;
+		m_bindKey = -1;
+		m_lastPsSrv = NULL;
+	}
 }
 
 void Renderer::ClearDepth()
@@ -12370,6 +12539,40 @@ void Renderer::SetObj(const M4& world, const DrawParams& dp, float outlineW)
 	TacUploadObj(m_ctx, m_cbObj, o, m_tessOn);
 }
 
+static int g_gsLive = 0;
+static void TacGsOff(ID3D11DeviceContext* ctx)
+{
+	if (!ctx || !g_gsLive) return;
+	ctx->GSSetShader(NULL, NULL, 0);
+	g_gsLive = 0;
+}
+static void TacGsOn(ID3D11DeviceContext* ctx, ID3D11GeometryShader* gs)
+{
+	if (!ctx) return;
+	ctx->GSSetShader(gs, NULL, 0);
+	g_gsLive = gs ? 1 : 0;
+}
+static int g_fastDraw = 0;
+struct TacNowBind {
+	ID3D11Buffer* vb;
+	ID3D11Buffer* ib;
+	UINT stride, off;
+	int i32;
+	ID3D11DepthStencilState* depth;
+	ID3D11BlendState* blend;
+};
+static TacNowBind g_now;
+static void TacNowClear()
+{
+	g_now.vb = NULL;
+	g_now.ib = NULL;
+	g_now.stride = 0xFFFFFFFFu;
+	g_now.off = 0xFFFFFFFFu;
+	g_now.i32 = -1;
+	g_now.depth = NULL;
+	g_now.blend = NULL;
+}
+
 void Renderer::ClearTess()
 {
 	if (!m_ctx) return;
@@ -12378,7 +12581,7 @@ void Renderer::ClearTess()
 	m_ctx->DSSetShader(NULL, NULL, 0);
 		m_tessOn = FALSE;
 	}
-	m_ctx->GSSetShader(NULL, NULL, 0);
+	TacGsOff(m_ctx);
 	m_bindKey = -1;
 	m_lastPsSrv = NULL;
 }
@@ -12398,11 +12601,11 @@ void Renderer::BindForPass(BOOL skinned, BOOL outline)
 			m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			m_tessOn = FALSE;
 		}
-		m_ctx->GSSetShader(NULL, NULL, 0);
+		TacGsOff(m_ctx);
 		return;
 	}
 	m_bindKey = key;
-	m_ctx->GSSetShader(NULL, NULL, 0);
+	TacGsOff(m_ctx);
 	m_ctx->IASetInputLayout(skinned ? m_ilK : m_ilS);
 	if (tess) {
 		m_ctx->VSSetShader(m_vsT, NULL, 0);
@@ -12493,6 +12696,37 @@ void* Renderer::DynMap(UINT bytes, UINT& off)
 	return TacRingMap(m_ctx, m_vbDyn, m_vbDynBytes, m_dynPos, bytes, off);
 }
 
+// 顔の羽はシーンの動的頂点を捨てない。1枚を使い回すと、GPU がまだ読んでいる枠を捨てるまで CPU が待つ。
+static void* TacPtPartMap(ID3D11Device* dev, ID3D11DeviceContext* ctx, UINT bytes, UINT& off)
+{
+	if (!dev || !ctx || !bytes || bytes > (UINT)PT_CAP) return NULL;
+	ID3D11Buffer* none = NULL;
+	UINT z = 0;
+	ctx->IASetVertexBuffers(0, 1, &none, &z, &z);
+	for (int n = 0; n < PT_RING; n++) {
+		int s = g_ptSlot + 1;
+		if (s < 0 || s >= PT_RING) s = 0;
+		g_ptSlot = s;
+		if (!g_ptRing[s]) {
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = PT_CAP;
+			bd.Usage = D3D11_USAGE_DYNAMIC;
+			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			if (FAILED(dev->CreateBuffer(&bd, NULL, &g_ptRing[s]))) { g_ptRing[s] = NULL; continue; }
+		}
+		D3D11_MAPPED_SUBRESOURCE ms;
+		ms.pData = NULL;
+		HRESULT hr = ctx->Map(g_ptRing[s], 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+		if (hr == DXGI_ERROR_WAS_STILL_DRAWING) continue;
+		if (FAILED(hr) || !ms.pData) continue;
+		g_ptPart = g_ptRing[s];
+		off = 0;
+		return ms.pData;
+	}
+	return NULL;
+}
+
 void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp)
 {
 	if (!m.ib || !v || !nv || !m_vbDyn || nv * sizeof(VtxS) > m_vbDynBytes) { DrawStatic(m, world, dp); return; }
@@ -12513,6 +12747,7 @@ void Renderer::FlushQueuedDraws()
 	if (g_hairN > 0 && !g_drawFlush) FlushHairPend();
 	if (g_pendN > 0 && !g_drawFlush) FlushClothPend();
 	if (g_drawN <= 0 || !m_ctx || g_drawFlush) return;
+	TacBrSpan flushSpan(TAC_BR_FLUSH);
 	g_drawFlush = TRUE;
 	// キュー再生中は各コマンドの深度状態を結ぶ。最後のコマンド（たとえば α の水は深度書き込み無し）が
 	// 呼び出し側の m_dsWant を上書きしたまま抜けると、このあとのキャラ一括描画が深度を書かず、
@@ -12531,10 +12766,14 @@ void Renderer::FlushQueuedDraws()
 	ID3D11BlendState* blend = (ID3D11BlendState*)1;
 	ID3D11RasterizerState* rs = (ID3D11RasterizerState*)1;
 	ID3D11DepthStencilState* depth = (ID3D11DepthStencilState*)1;
+	ID3D11GeometryShader* gsNow = NULL;
 	D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
 	if (g_drawN > 1) {
 		std::sort(g_drawQ, g_drawQ + g_drawN, [](const TacDrawCmd& a, const TacDrawCmd& b) {
 			if (a.alpha != b.alpha) return a.alpha < b.alpha;
+			if (a.vpY != b.vpY) return a.vpY < b.vpY;
+			if (a.vpX != b.vpX) return a.vpX < b.vpX;
+			if (a.fcb != b.fcb) return (uintptr_t)a.fcb < (uintptr_t)b.fcb;
 			if (a.alpha) return a.seq < b.seq;
 			if (a.pre != b.pre) return a.pre < b.pre;
 			if (a.ps != b.ps) return (uintptr_t)a.ps < (uintptr_t)b.ps;
@@ -12550,8 +12789,134 @@ void Renderer::FlushQueuedDraws()
 			return a.seq < b.seq;
 		});
 	}
-	for (int i = 0; i < g_drawN; ++i) {
+	const int savedNowait = g_uploadNowait;
+	if (m_inPortrait) g_uploadNowait = 1;
+	// 戦闘の顔は武具の数だけ Map していた。行列はまとめて1回書き、色が同じ描画は定数を出し直さない。
+	BOOL faceInst = FALSE;
+	UINT faceAt = 0;
+	if (m_inPortrait && m_vsB && m_ilB && m_dev && g_drawN > 0 && g_drawN <= 1024) {
+		enum { CAP = 1024u * 64u };
+		if (!g_faceInst) {
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = CAP;
+			bd.Usage = D3D11_USAGE_DYNAMIC;
+			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_faceInst))) g_faceInst = NULL;
+		}
+		UINT need = (UINT)g_drawN * 64u;
+		if (g_faceInst && need <= CAP) {
+			UINT at = 0;
+			ID3D11Buffer* none[2] = { NULL, NULL };
+			UINT z[2] = { 0, 0 };
+			m_ctx->IASetVertexBuffers(0, 2, none, z, z);
+			D3D11_MAPPED_SUBRESOURCE pms;
+			pms.pData = NULL;
+			HRESULT phr = m_ctx->Map(g_faceInst, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &pms);
+			if (phr == DXGI_ERROR_WAS_STILL_DRAWING || FAILED(phr) || !pms.pData) phr = E_FAIL;
+			if (SUCCEEDED(phr) && pms.pData) {
+				BYTE* dst = (BYTE*)pms.pData + at;
+				for (int k = 0; k < g_drawN; ++k)
+					memcpy(dst + (size_t)k * 64u, &g_drawQ[k].obj.w, sizeof(M4));
+				m_ctx->Unmap(g_faceInst, 0);
+				g_faceInstAt = at + need;
+				faceAt = at;
+				faceInst = TRUE;
+			}
+		}
+	}
+	int faceMat = 0;
+	TacObjCB faceCb;
+	memset(&faceCb, 0, sizeof(faceCb));
+	ID3D11Buffer* curFcb = NULL;
+	UINT curVpX = 0xFFFFFFFFu, curVpY = 0, curVpW = 0, curVpH = 0;
+	for (int i = 0; i < g_drawN; ) {
 		const TacDrawCmd& c = g_drawQ[i];
+		if (c.vpW > 0 && (c.vpX != curVpX || c.vpY != curVpY || c.vpW != curVpW || c.vpH != curVpH)) {
+			D3D11_VIEWPORT vp = { (float)c.vpX, (float)c.vpY, (float)c.vpW, (float)c.vpH, 0.f, 1.f };
+			m_ctx->RSSetViewports(1, &vp);
+			curVpX = c.vpX; curVpY = c.vpY; curVpW = c.vpW; curVpH = c.vpH;
+		}
+		if (c.fcb && c.fcb != curFcb) {
+			ID3D11Buffer* fb = c.fcb;
+			m_ctx->VSSetConstantBuffers(0, 1, &fb);
+			m_ctx->PSSetConstantBuffers(0, 1, &fb);
+			m_ctx->HSSetConstantBuffers(0, 1, &fb);
+			m_ctx->DSSetConstantBuffers(0, 1, &fb);
+			curFcb = c.fcb;
+		}
+		const BOOL canFace = faceInst && c.hs == NULL && c.vs == m_vsS && c.il == m_ilS
+			&& c.stride == (UINT)sizeof(VtxS) && (c.vbOff % c.stride) == 0
+			&& c.topo == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST && c.vb && c.ib && c.nIdx > 0;
+		if (canFace) {
+			int run = 1;
+			if (c.alpha == 0 && c.blend == m_bsOpaque && c.depth == m_dsWrite) {
+				while (i + run < g_drawN && run < 64) {
+					const TacDrawCmd& b = g_drawQ[i + run];
+					if (b.hs != NULL || b.vs != m_vsS || b.il != m_ilS || b.alpha != 0 || b.blend != m_bsOpaque || b.depth != m_dsWrite) break;
+					if (b.vb != c.vb || b.ib != c.ib || b.srv != c.srv || b.ps != c.ps || b.rs != c.rs
+						|| b.nIdx != c.nIdx || b.iBase != c.iBase || b.stride != c.stride || b.vbOff != c.vbOff
+						|| b.ibFmt != c.ibFmt || b.topo != c.topo || b.fcb != c.fcb
+						|| b.vpX != c.vpX || b.vpY != c.vpY || b.vpW != c.vpW)
+						break;
+					if (memcmp((const char*)&b.obj + sizeof(M4), (const char*)&c.obj + sizeof(M4), sizeof(TacObjCB) - sizeof(M4)) != 0)
+						break;
+					run++;
+				}
+			}
+			if (m_tessOn) {
+				m_ctx->HSSetShader(NULL, NULL, 0);
+				m_ctx->DSSetShader(NULL, NULL, 0);
+				m_tessOn = FALSE;
+			}
+			TacGsOff(m_ctx);
+			gsNow = NULL;
+			if (il != m_ilB) { m_ctx->IASetInputLayout(m_ilB); il = m_ilB; }
+			if (topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) {
+				m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+			}
+			if (vs != m_vsB) { m_ctx->VSSetShader(m_vsB, NULL, 0); vs = m_vsB; }
+			if (hs != NULL) { m_ctx->HSSetShader(NULL, NULL, 0); hs = NULL; }
+			if (dom != NULL) { m_ctx->DSSetShader(NULL, NULL, 0); dom = NULL; }
+			if (c.ps != ps) { m_ctx->PSSetShader(c.ps, NULL, 0); ps = c.ps; }
+			if (c.rs != rs) { m_ctx->RSSetState(c.rs); rs = c.rs; }
+			if (c.blend != blend) { m_ctx->OMSetBlendState(c.blend, NULL, 0xFFFFFFFF); blend = c.blend; }
+			if (c.depth != depth) { m_ctx->OMSetDepthStencilState(c.depth, 0); depth = c.depth; m_dsWant = c.depth; }
+			if (c.ps && c.srv != srv) {
+				ID3D11ShaderResourceView* s = c.srv;
+				m_ctx->PSSetShaderResources(0, 1, &s);
+				srv = c.srv;
+				m_lastPsSrv = c.srv;
+			}
+			ID3D11Buffer* bufs[2] = { c.vb, g_faceInst };
+			UINT st2[2] = { c.stride, 64u };
+			UINT off2[2] = { c.vbOff, faceAt + (UINT)i * 64u };
+			m_ctx->IASetVertexBuffers(0, 2, bufs, st2, off2);
+			vb = NULL;
+			stride = 0xFFFFFFFFu;
+			vbOff = 0xFFFFFFFFu;
+			if (c.ib != ib || c.ibFmt != ibFmt) {
+				m_ctx->IASetIndexBuffer(c.ib, c.ibFmt, 0);
+				ib = c.ib;
+				ibFmt = c.ibFmt;
+			}
+			if (!faceMat || memcmp((const char*)&c.obj + sizeof(M4), (const char*)&faceCb + sizeof(M4), sizeof(TacObjCB) - sizeof(M4)) != 0) {
+				TacUploadObj(m_ctx, m_cbObj, c.obj, FALSE);
+				faceCb = c.obj;
+				faceMat = 1;
+			}
+			m_ctx->DrawIndexedInstanced(c.nIdx, (UINT)run, c.iBase, 0, 0);
+			i += run;
+			continue;
+		}
+		if (vs == m_vsB) {
+			ID3D11Buffer* none = NULL;
+			UINT zst = 0;
+			m_ctx->IASetVertexBuffers(1, 1, &none, &zst, &zst);
+			vs = (ID3D11VertexShader*)1;
+			il = (ID3D11InputLayout*)1;
+		}
 		if (c.il != il) { m_ctx->IASetInputLayout(c.il); il = c.il; }
 		if (c.topo != topo) { m_ctx->IASetPrimitiveTopology(c.topo); topo = c.topo; }
 		if (c.vs != vs) { m_ctx->VSSetShader(c.vs, NULL, 0); vs = c.vs; }
@@ -12575,6 +12940,26 @@ void Renderer::FlushQueuedDraws()
 			stride = c.stride;
 			vbOff = c.vbOff;
 		}
+		if (c.gs != gsNow) {
+			if (c.gs) TacGsOn(m_ctx, c.gs);
+			else {
+				TacGsOff(m_ctx);
+				ID3D11Buffer* gnone[2] = { NULL, NULL };
+				m_ctx->GSSetConstantBuffers(0, 2, gnone);
+			}
+			gsNow = c.gs;
+		}
+		if (c.gs) {
+			TacUploadObj(m_ctx, m_cbObj, c.obj, FALSE);
+			ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
+			ID3D11Buffer* gcb[2] = { c.fcb ? c.fcb : TacCbCur(g_frameR, m_cbFrame), objb };
+			m_ctx->GSSetConstantBuffers(0, 2, gcb);
+		}
+		if (!c.ib) {
+			m_ctx->Draw(c.nIdx, 0);
+			i++;
+			continue;
+		}
 		if (c.ib != ib || c.ibFmt != ibFmt) {
 			m_ctx->IASetIndexBuffer(c.ib, c.ibFmt, 0);
 			ib = c.ib;
@@ -12582,9 +12967,21 @@ void Renderer::FlushQueuedDraws()
 		}
 		TacUploadObj(m_ctx, m_cbObj, c.obj, m_tessOn);
 		m_ctx->DrawIndexed(c.nIdx, c.iBase, 0);
+		i++;
+	}
+	if (faceInst) {
+		ID3D11Buffer* none = NULL;
+		UINT zst = 0;
+		m_ctx->IASetVertexBuffers(1, 1, &none, &zst, &zst);
+	}
+	if (g_gsLive) {
+		TacGsOff(m_ctx);
+		ID3D11Buffer* gnone[2] = { NULL, NULL };
+		m_ctx->GSSetConstantBuffers(0, 2, gnone);
 	}
 	g_drawN = 0;
 	g_drawFlush = FALSE;
+	g_uploadNowait = savedNowait;
 	// 深度状態を呼び出し前へ戻し、GPU の結びも合わせる。これをしないと直後のキャラ描画へ漏れる。
 	m_dsWant = savedWant;
 	{
@@ -12618,6 +13015,7 @@ void Renderer::EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams
 	c.ibFmt = m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 	BOOL tess = !outline && m_allowTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
 		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
+	if (tess && m.nIdx >= 1536) tess = FALSE;
 	c.il = m_ilS;
 	c.topo = tess ? D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST : D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 	c.vs = tess ? m_vsT : ((m_pass == PASS_SHADOW && m_vsSh && dp.mode == 0.f) ? m_vsSh : m_vsS);
@@ -12643,17 +13041,31 @@ void Renderer::EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams
 	c.seq = g_drawSeq++;
 	c.pre = outline ? 0 : 1;
 	c.alpha = (c.blend == m_bsAlpha) ? 1 : 0;
+	TacStampCam(c, TacCbCur(g_frameR, m_cbFrame), m_inPortrait, m_portraitSlot);
 	g_drawN++;
 }
 
 void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams& dp)
 {
 	if (!m.vb || !m.ib) return;
-	if (m_dsWant) m_ctx->OMSetDepthStencilState(m_dsWant, 0);
 	m_allowTess = !(dp.outline > 0.f) && !dp.noTess;
 	UINT st = m.stride, off = (m.vb == m_vbDyn) ? m_dynOff : 0;
-	m_ctx->IASetVertexBuffers(0, 1, &m.vb, &st, &off);
-	m_ctx->IASetIndexBuffer(m.ib, m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
+	const BOOL fast = g_fastDraw != 0;
+	if (m_dsWant && !(fast && g_now.depth == m_dsWant)) {
+		m_ctx->OMSetDepthStencilState(m_dsWant, 0);
+		g_now.depth = m_dsWant;
+	}
+	if (!(fast && g_now.vb == m.vb && g_now.stride == st && g_now.off == off)) {
+		m_ctx->IASetVertexBuffers(0, 1, &m.vb, &st, &off);
+		g_now.vb = m.vb;
+		g_now.stride = st;
+		g_now.off = off;
+	}
+	if (!(fast && g_now.ib == m.ib && g_now.i32 == m.i32)) {
+		m_ctx->IASetIndexBuffer(m.ib, m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
+		g_now.ib = m.ib;
+		g_now.i32 = m.i32;
+	}
 	if (m_pass == PASS_SHADOW) {
 		if (((dp.tint >> 24) & 255) < 128 || dp.dissolve > .5f) return;
 		SetObj(world, dp, 0);
@@ -12671,7 +13083,11 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 		m_lastPsSrv = srv;
 	}
 	BOOL alpha = ((dp.tint >> 24) & 255) < 255;
-	m_ctx->OMSetBlendState(alpha ? m_bsAlpha : m_bsOpaque, NULL, 0xFFFFFFFF);
+	ID3D11BlendState* bl = alpha ? m_bsAlpha : m_bsOpaque;
+	if (!(fast && g_now.blend == bl)) {
+		m_ctx->OMSetBlendState(bl, NULL, 0xFFFFFFFF);
+		g_now.blend = bl;
+	}
 	if (dp.outline > 0 && !alpha) {
 		BindForPass(FALSE, TRUE);
 		SetObj(world, dp, dp.outline);
@@ -12684,7 +13100,10 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 	if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
 	m_ctx->DrawIndexed(m.nIdx, m.iBase, 0);
 	if (dp.twoSided) m_ctx->RSSetState(m_reflecting ? m_rsFront : m_rsBack);
-	if (alpha) m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+	if (alpha && g_now.blend != m_bsOpaque) {
+		m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+		g_now.blend = m_bsOpaque;
+	}
 }
 
 static void AvxCopy(void* dst, const void* src, size_t n)
@@ -12692,11 +13111,11 @@ static void AvxCopy(void* dst, const void* src, size_t n)
 	SimdKernels::Get().Copy(dst, src, n);
 }
 
-enum { TAC_INST_N = 64, TAC_INST_G = 96 };
+enum { TAC_INST_N = 64, TAC_INST_G = 160 };
 struct TacInstG {
 	ID3D11Buffer* vb;
 	ID3D11Buffer* ib;
-	UINT nIdx, stride;
+	UINT nIdx, stride, iBase;
 	int tex, i32;
 	DrawParams dp;
 	int n, seq, alpha;
@@ -12726,7 +13145,7 @@ void Renderer::ResetActorPipe()
 	g_cbBound = NULL;
 	m_bindKey = -1;
 	m_lastPsSrv = NULL;
-	m_ctx->GSSetShader(NULL, NULL, 0);
+	TacGsOff(m_ctx);
 	m_ctx->IASetInputLayout(m_ilS);
 	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_ctx->VSSetShader(m_vsS, NULL, 0);
@@ -12770,15 +13189,12 @@ BOOL Renderer::PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp)
 	if (m_inPortrait || m_psOverride || dp.dissolve > 0.001f || dp.mode != 0.f) return FALSE;
 	if (((dp.tint >> 24) & 255) < 255) return FALSE;
 	if (m_pass == PASS_SHADOW && ((dp.tint >> 24) & 255) < 128) return FALSE;
-	BOOL tess = m_allowTess && !dp.noTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
-		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
-	if (tess) return FALSE;
 	if (m_dsWant && m_dsWant != m_dsWrite) return FALSE;
 	int alpha = (((dp.tint >> 24) & 255) < 255) ? 1 : 0;
 	for (int i = 0; i < g_igN; ++i) {
 		TacInstG& g = g_ig[i];
 		if (g.n >= TAC_INST_N || !g.vb) continue;
-		if (g.vb != m.vb || g.ib != m.ib || g.nIdx != m.nIdx || g.tex != m.tex) continue;
+		if (g.vb != m.vb || g.ib != m.ib || g.nIdx != m.nIdx || g.iBase != m.iBase || g.tex != m.tex) continue;
 		if (!SameInstDp(g.dp, dp)) continue;
 		g.w[g.n++] = world;
 		return TRUE;
@@ -12789,6 +13205,7 @@ BOOL Renderer::PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp)
 	g.vb = m.vb;
 	g.ib = m.ib;
 	g.nIdx = m.nIdx;
+	g.iBase = m.iBase;
 	g.stride = m.stride ? m.stride : (UINT)sizeof(VtxS);
 	g.tex = m.tex;
 	g.i32 = m.i32;
@@ -12805,10 +13222,15 @@ void Renderer::FlushInst()
 	if (g_hairN > 0) FlushHairPend();
 	if (g_pendN > 0) FlushClothPend();
 	if (g_igN <= 0 || !m_ctx || !m_vsB || !m_ilB) { g_igN = 0; return; }
+	TacBrSpan instSpan(TAC_BR_INST);
 	int nGrp = g_igN;
 	g_igN = 0;
+	int ord[TAC_INST_G];
+	for (int i = 0; i < nGrp; ++i) ord[i] = i;
 	if (nGrp > 1) {
-		std::sort(g_ig, g_ig + nGrp, [](const TacInstG& a, const TacInstG& b) {
+		std::sort(ord, ord + nGrp, [](int ia, int ib) {
+			const TacInstG& a = g_ig[ia];
+			const TacInstG& b = g_ig[ib];
 			if (a.alpha != b.alpha) return a.alpha < b.alpha;
 			if (a.tex != b.tex) return a.tex < b.tex;
 			if (a.dp.matSlice != b.dp.matSlice) return a.dp.matSlice < b.dp.matSlice;
@@ -12817,18 +13239,19 @@ void Renderer::FlushInst()
 			return a.seq < b.seq;
 		});
 	}
+	// 連続する1人描画は、同じ深度・合成・同じバッファを出し直さない。絵は同じ。
+	g_fastDraw = 1;
+	TacNowClear();
 	BOOL gpu = FALSE;
 	ID3D11Buffer* boundVb = NULL;
 	ID3D11Buffer* boundIb = NULL;
 	ID3D11ShaderResourceView* boundSrv = (ID3D11ShaderResourceView*)1;
-	// グループ間で同じ値を毎回出し直していた描画ステートを、変わったときだけ発行する。
-	// 結果の GPU 状態は同一。ドライバ呼び出し（CPU 側）だけを減らす。見た目・挙動は不変。
 	ID3D11PixelShader* curPs = (ID3D11PixelShader*)1;
 	ID3D11RasterizerState* curRs = (ID3D11RasterizerState*)1;
 	ID3D11BlendState* curBlend = (ID3D11BlendState*)1;
 	ID3D11DepthStencilState* curDepth = (ID3D11DepthStencilState*)1;
-	for (int i = 0; i < nGrp; ++i) {
-		TacInstG& g = g_ig[i];
+	for (int k = 0; k < nGrp; ++k) {
+		TacInstG& g = g_ig[ord[k]];
 		if (!g.vb || !g.ib || g.n <= 0) continue;
 		if (g.n < 2) {
 			GpuMesh one;
@@ -12838,18 +13261,20 @@ void Renderer::FlushInst()
 			one.stride = g.stride;
 			one.tex = g.tex;
 			one.i32 = g.i32;
+			one.iBase = g.iBase;
+			DrawStaticNow(one, g.w[0], g.dp);
 			gpu = FALSE;
 			boundVb = NULL;
 			boundIb = NULL;
 			boundSrv = (ID3D11ShaderResourceView*)1;
-			// DrawStaticNow は自前でステートを張り替えるので、追跡値を無効化して次群で必ず張り直す。
 			curPs = (ID3D11PixelShader*)1;
 			curRs = (ID3D11RasterizerState*)1;
 			curBlend = (ID3D11BlendState*)1;
 			curDepth = (ID3D11DepthStencilState*)1;
-			DrawStaticNow(one, g.w[0], g.dp);
 			continue;
 		}
+		g_fastDraw = 0;
+		TacNowClear();
 		if (!gpu) {
 			if (m_tessOn) {
 				m_ctx->HSSetShader(NULL, NULL, 0);
@@ -12863,21 +13288,54 @@ void Renderer::FlushInst()
 			m_bindKey = -1;
 			gpu = TRUE;
 		}
+		UINT need = (UINT)g.n * 64u;
+		UINT at = m_instPos;
+		D3D11_MAP mt = D3D11_MAP_WRITE_NO_OVERWRITE;
+		UINT mapFlags = 0;
+		if (need > m_vbInstBytes || at > m_vbInstBytes || at + need > m_vbInstBytes) {
+			at = 0;
+			mt = D3D11_MAP_WRITE_DISCARD;
+			mapFlags = D3D11_MAP_FLAG_DO_NOT_WAIT;
+		}
 		D3D11_MAPPED_SUBRESOURCE ms;
-		if (FAILED(m_ctx->Map(m_vbInst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) continue;
-		AvxCopy(ms.pData, g.w, (size_t)g.n * sizeof(M4));
+		ms.pData = NULL;
+		HRESULT hr = m_ctx->Map(m_vbInst, 0, mt, mapFlags, &ms);
+		if (FAILED(hr) && mt == D3D11_MAP_WRITE_DISCARD && hr != DXGI_ERROR_WAS_STILL_DRAWING)
+			hr = m_ctx->Map(m_vbInst, 0, mt, 0, &ms);
+		if (FAILED(hr) || !ms.pData) {
+			GpuMesh one;
+			one.vb = g.vb;
+			one.ib = g.ib;
+			one.nIdx = g.nIdx;
+			one.stride = g.stride;
+			one.tex = g.tex;
+			one.i32 = g.i32;
+			one.iBase = g.iBase;
+			for (int ii = 0; ii < g.n; ++ii) DrawStaticNow(one, g.w[ii], g.dp);
+			gpu = FALSE;
+			boundVb = NULL;
+			boundIb = NULL;
+			boundSrv = (ID3D11ShaderResourceView*)1;
+			curPs = (ID3D11PixelShader*)1;
+			curRs = (ID3D11RasterizerState*)1;
+			curBlend = (ID3D11BlendState*)1;
+			curDepth = (ID3D11DepthStencilState*)1;
+			continue;
+		}
+		AvxCopy((BYTE*)ms.pData + at, g.w, (size_t)g.n * sizeof(M4));
 		m_ctx->Unmap(m_vbInst, 0);
+		m_instPos = at + need;
 		if (boundVb != g.vb || boundIb != g.ib) {
 			ID3D11Buffer* bufs[2] = { g.vb, m_vbInst };
-			UINT st[2] = { g.stride, 64u };
-			UINT off[2] = { 0, 0 };
-			m_ctx->IASetVertexBuffers(0, 2, bufs, st, off);
+			UINT st2[2] = { g.stride, 64u };
+			UINT off2[2] = { 0, at };
+			m_ctx->IASetVertexBuffers(0, 2, bufs, st2, off2);
 			m_ctx->IASetIndexBuffer(g.ib, g.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
 			boundVb = g.vb;
 			boundIb = g.ib;
 		} else {
-			UINT st = 64, off = 0;
-			m_ctx->IASetVertexBuffers(1, 1, &m_vbInst, &st, &off);
+			UINT st1 = 64;
+			m_ctx->IASetVertexBuffers(1, 1, &m_vbInst, &st1, &at);
 		}
 		if (m_pass != PASS_SHADOW) {
 			ID3D11ShaderResourceView* srv = (g.tex == -2 && m_hairSrv) ? m_hairSrv : SrvFor(g.tex);
@@ -12905,11 +13363,14 @@ void Renderer::FlushInst()
 				setRs(outline ? m_rsFront : (g.dp.twoSided ? m_rsNone : (m_reflecting ? m_rsFront : m_rsBack)));
 				setBl(m_bsOpaque);
 			}
-			m_ctx->DrawIndexedInstanced(g.nIdx, (UINT)g.n, 0, 0, 0);
+			m_ctx->DrawIndexedInstanced(g.nIdx, (UINT)g.n, g.iBase, 0, 0);
 		};
 		if (m_pass != PASS_SHADOW && g.dp.outline > 0.f) issue(TRUE);
 		issue(FALSE);
+		g_fastDraw = 1;
+		TacNowClear();
 	}
+	g_fastDraw = 0;
 	if (gpu) {
 		ID3D11Buffer* none = NULL;
 		UINT zst = 0;
@@ -13015,6 +13476,7 @@ void Renderer::DrawTerrain()
 {
 	DrawParams dp;
 	dp.rim = 0;
+	dp.noTess = 1;
 	if (m_coverGhost) {
 		// A<255 で α ブレンドになる。不透明のままだと GhostA が色を薄くするだけで裏が透けない。
 		dp.tint = 0x4CFFFFFF;
@@ -13313,15 +13775,128 @@ static V3 XformDir(V3 p, const M4& m)
 		p.x * m.m[2] + p.y * m.m[6] + p.z * m.m[10]);
 }
 
+void Renderer::PortraitFeatherReset()
+{
+	for (int s = 0; s < PORTRAIT_N; s++) {
+		g_pf[s].n[0] = g_pf[s].n[1] = 0;
+		g_pf[s].off[0] = g_pf[s].off[1] = 0;
+		g_pf[s].vb = NULL;
+		g_pf[s].ok = 0;
+	}
+}
+
+void Renderer::PortraitFeatherAdd(int slot, const Particle* ps, int n)
+{
+	if (slot < 0 || slot >= PORTRAIT_N || !ps || n <= 0) return;
+	PfSlot& d = g_pf[slot];
+	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
+	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
+	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
+	d.basis = MIdent();
+	d.basis.m[0] = right.x; d.basis.m[1] = right.y; d.basis.m[2] = right.z;
+	d.basis.m[4] = up.x; d.basis.m[5] = up.y; d.basis.m[6] = up.z;
+	d.basis.m[8] = fwd.x; d.basis.m[9] = fwd.y; d.basis.m[10] = fwd.z;
+	for (int pi = 0; pi < n; pi++) {
+		const Particle& p = ps[pi];
+		if (p.life <= 0) continue;
+		float t = 1.f - p.life / max(1e-4f, p.max);
+		float sz = Lerpf(p.size, p.size1, t);
+		float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
+		int bi = p.add ? 1 : 0;
+		if (d.n[bi] >= 16) continue;
+		TacPPt& o = d.pt[bi][d.n[bi]++];
+		o.p[0] = p.p.x; o.p[1] = p.p.y; o.p[2] = p.p.z;
+		o.vel[0] = p.v.x; o.vel[1] = p.v.y; o.vel[2] = p.v.z; o.vel[3] = p.shape == 8 ? 0.f : p.stretch;
+		o.sz[0] = sz; o.sz[1] = (float)p.shape; o.sz[2] = p.shape == 8 ? p.spin : 0.f; o.sz[3] = 0.f;
+		o.c[0] = p.r; o.c[1] = p.g; o.c[2] = p.b; o.c[3] = a;
+	}
+}
+
+void Renderer::PortraitFeatherUpload()
+{
+	UINT bytes = 0;
+	for (int s = 0; s < PORTRAIT_N; s++)
+		bytes += (UINT)(g_pf[s].n[0] + g_pf[s].n[1]) * (UINT)sizeof(TacPPt);
+	if (!bytes || bytes > (UINT)PF_REG_BYTES || !m_dev || !m_ctx) return;
+	static ID3D11Buffer* s_buf = NULL;
+	if (!s_buf) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = (UINT)PF_REG_BYTES;
+		bd.Usage = D3D11_USAGE_DYNAMIC;
+		bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &s_buf))) { s_buf = NULL; return; }
+	}
+	ID3D11Buffer* none = NULL;
+	UINT z = 0;
+	m_ctx->IASetVertexBuffers(0, 1, &none, &z, &z);
+	D3D11_MAPPED_SUBRESOURCE ms;
+	ms.pData = NULL;
+	HRESULT hr = m_ctx->Map(s_buf, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+	if (FAILED(hr) || !ms.pData) return;
+	BYTE* dst = (BYTE*)ms.pData;
+	UINT local = 0;
+	for (int s = 0; s < PORTRAIT_N; s++) {
+		PfSlot& d = g_pf[s];
+		d.vb = s_buf;
+		d.ok = 1;
+		for (int bi = 0; bi < 2; bi++) {
+			if (d.n[bi] <= 0) continue;
+			UINT nb = (UINT)d.n[bi] * (UINT)sizeof(TacPPt);
+			if (local + nb > bytes) { d.n[bi] = 0; continue; }
+			memcpy(dst + local, d.pt[bi], nb);
+			d.off[bi] = local;
+			local += nb;
+		}
+	}
+	m_ctx->Unmap(s_buf, 0);
+}
+
+void Renderer::PortraitFeatherDraw(int slot)
+{
+	if (slot < 0 || slot >= PORTRAIT_N || !m_inPortrait || !m_gsP || !m_vsPT || !m_ilPT) return;
+	PfSlot& d = g_pf[slot];
+	if (!d.ok || !d.vb) return;
+	DrawParams bdp;
+	for (int bi = 0; bi < 2; bi++) {
+		if (d.n[bi] <= 0) continue;
+		if (g_drawN >= TAC_DRAWQ) FlushQueuedDraws();
+		if (g_drawN >= TAC_DRAWQ) return;
+		TacDrawCmd& c = g_drawQ[g_drawN];
+		memset(&c, 0, sizeof(c));
+		c.vb = d.vb;
+		c.nIdx = (UINT)d.n[bi];
+		c.stride = (UINT)sizeof(TacPPt);
+		c.vbOff = d.off[bi];
+		c.topo = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+		c.vs = m_vsPT;
+		c.gs = m_gsP;
+		c.ps = m_psP;
+		c.il = m_ilPT;
+		c.blend = bi ? m_bsAdd : m_bsPremul;
+		c.rs = m_rsNone;
+		c.depth = m_dsRead;
+		c.alpha = 1;
+		TacFillObj(c.obj, d.basis, bdp, 0);
+		c.seq = g_drawSeq++;
+		c.pair = g_drawPair;
+		TacStampCam(c, TacCbCur(g_frameR, m_cbFrame), m_inPortrait, slot);
+		g_drawN++;
+	}
+}
+
 void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 {
-	FlushQueuedDraws();
-	ClearTess();
+	// 顔はここで吐き出さない。メッシュを出した直後に頂点を Map すると、GPU の完了を CPU が待つ。
+	if (!m_inPortrait) {
+		FlushQueuedDraws();
+		ClearTess();
+	}
 	if (!ps || nPart <= 0 || m_pass == PASS_SHADOW) return;
 	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
 	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
 	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
-	if (m_gsP && m_vsPT && m_ilPT) {
+	if (m_gsP && m_vsPT && m_ilPT && !m_inPortrait) {
 		struct PPt { float p[3]; float vel[4]; float sz[4]; float c[4]; };
 		enum { PN = 4096 };
 		static PPt buf[2][PN];
@@ -13363,7 +13938,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->IASetInputLayout(m_ilPT);
 		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
 		m_ctx->VSSetShader(m_vsPT, NULL, 0);
-		m_ctx->GSSetShader(m_gsP, NULL, 0);
+		TacGsOn(m_ctx, m_gsP);
 		ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
 		ID3D11Buffer* gcb[2] = { TacCbCur(g_frameR, m_cbFrame), objb };
 		m_ctx->GSSetConstantBuffers(0, 2, gcb);
@@ -13374,17 +13949,16 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		for (int b = 0; b < 2; b++) {
 			if (vn[b] <= 0) continue;
 			UINT bytes = (UINT)vn[b] * (UINT)sizeof(PPt);
-			if (bytes > m_vbDynBytes) continue;
 			UINT st = sizeof(PPt), off = 0;
-			void* dst = DynMap(bytes, off);
-			if (!dst) continue;
+			void* dst = TacPtPartMap(m_dev, m_ctx, bytes, off);
+			if (!dst || !g_ptPart) continue;
 			memcpy(dst, buf[b], bytes);
-			m_ctx->Unmap(m_vbDyn, 0);
-			m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
+			m_ctx->Unmap(g_ptPart, 0);
+			m_ctx->IASetVertexBuffers(0, 1, &g_ptPart, &st, &off);
 			m_ctx->OMSetBlendState(b ? m_bsAdd : m_bsPremul, NULL, 0xFFFFFFFF);
 			m_ctx->Draw((UINT)vn[b], 0);
 		}
-		m_ctx->GSSetShader(NULL, NULL, 0);
+		TacGsOff(m_ctx);
 		ID3D11Buffer* gnone[2] = { NULL, NULL };
 		m_ctx->GSSetConstantBuffers(0, 2, gnone);
 		if (mrt) {
@@ -13394,6 +13968,74 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 		m_dsWant = m_dsWrite;
 		m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+		return;
+	}
+	// 顔の羽は点のまま積む。広げるのはワールドと同じジオメトリシェーダ。CPU で四角にすると、GPU が前の顔を読み終わるまで待つ。
+	if (m_inPortrait && m_gsP && m_vsPT && m_ilPT) {
+		struct PPt { float p[3]; float vel[4]; float sz[4]; float c[4]; };
+		static_assert(sizeof(PPt) == 60, "PPt");
+		enum { PN = 64 };
+		static PPt pbuf[2][PN];
+		int vn[2] = { 0, 0 };
+		for (int pi = 0; pi < nPart; pi++) {
+			const Particle& p = ps[pi];
+			if (p.life <= 0) continue;
+			V3 pos = p.p, vel = p.v;
+			if (mapXform && p.wxHit != 0) {
+				pos = XformPt(p.p, *mapXform);
+				vel = XformDir(p.v, *mapXform);
+			}
+			float t = 1.f - p.life / max(1e-4f, p.max);
+			float sz = Lerpf(p.size, p.size1, t);
+			float rad = sz * 1.8f;
+			if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
+			if (rad < 0.2f) rad = 0.2f;
+			if (!mapXform && !InView(pos, rad)) continue;
+			float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
+			int bi = p.add ? 1 : 0;
+			if (vn[bi] >= PN) continue;
+			PPt& o = pbuf[bi][vn[bi]++];
+			o.p[0] = pos.x; o.p[1] = pos.y; o.p[2] = pos.z;
+			o.vel[0] = vel.x; o.vel[1] = vel.y; o.vel[2] = vel.z; o.vel[3] = p.shape == 8 ? 0.f : p.stretch;
+			o.sz[0] = sz; o.sz[1] = (float)p.shape; o.sz[2] = p.shape == 8 ? p.spin : 0.f; o.sz[3] = 0.f;
+			o.c[0] = p.r; o.c[1] = p.g; o.c[2] = p.b; o.c[3] = a;
+		}
+		M4 basis = MIdent();
+		basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z;
+		basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z;
+		basis.m[8] = fwd.x; basis.m[9] = fwd.y; basis.m[10] = fwd.z;
+		DrawParams bdp;
+		for (int bi = 0; bi < 2; bi++) {
+			if (vn[bi] <= 0) continue;
+			UINT bytes = (UINT)vn[bi] * (UINT)sizeof(PPt);
+			UINT off = 0;
+			void* dst = TacPtPartMap(m_dev, m_ctx, bytes, off);
+			if (!dst || !g_ptPart) continue;
+			memcpy(dst, pbuf[bi], bytes);
+			m_ctx->Unmap(g_ptPart, 0);
+			if (g_drawN >= TAC_DRAWQ) FlushQueuedDraws();
+			if (g_drawN >= TAC_DRAWQ) continue;
+			TacDrawCmd& c = g_drawQ[g_drawN];
+			memset(&c, 0, sizeof(c));
+			c.vb = g_ptPart;
+			c.nIdx = (UINT)vn[bi];
+			c.stride = (UINT)sizeof(PPt);
+			c.vbOff = off;
+			c.topo = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+			c.vs = m_vsPT;
+			c.gs = m_gsP;
+			c.ps = m_psP;
+			c.il = m_ilPT;
+			c.blend = bi ? m_bsAdd : m_bsPremul;
+			c.rs = m_rsNone;
+			c.depth = m_dsRead;
+			c.alpha = 1;
+			TacFillObj(c.obj, basis, bdp, 0);
+			c.seq = g_drawSeq++;
+			c.pair = g_drawPair;
+			TacStampCam(c, TacCbCur(g_frameR, m_cbFrame), m_inPortrait, m_portraitSlot);
+			g_drawN++;
+		}
 		return;
 	}
 	enum { PV = 16384 };
@@ -13445,6 +14087,38 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		buf[bi][vn[bi]++] = q[0]; buf[bi][vn[bi]++] = q[1]; buf[bi][vn[bi]++] = q[2];
 		buf[bi][vn[bi]++] = q[0]; buf[bi][vn[bi]++] = q[2]; buf[bi][vn[bi]++] = q[3];
 	}
+	if (m_inPortrait) {
+		for (int bi = 0; bi < 2; bi++) {
+			if (vn[bi] <= 0) continue;
+			UINT bytes = (UINT)vn[bi] * (UINT)sizeof(VtxP);
+			UINT off = 0;
+			void* dst = TacPtPartMap(m_dev, m_ctx, bytes, off);
+			if (!dst) continue;
+			memcpy(dst, buf[bi], bytes);
+			m_ctx->Unmap(g_ptPart, 0);
+			if (g_drawN >= TAC_DRAWQ) FlushQueuedDraws();
+			if (g_drawN >= TAC_DRAWQ || !g_ptPart) continue;
+			TacDrawCmd& c = g_drawQ[g_drawN];
+			memset(&c, 0, sizeof(c));
+			c.vb = g_ptPart;
+			c.nIdx = (UINT)vn[bi];
+			c.stride = (UINT)sizeof(VtxP);
+			c.vbOff = off;
+			c.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+			c.vs = m_vsP;
+			c.ps = m_psP;
+			c.il = m_ilP;
+			c.blend = bi ? m_bsAdd : m_bsPremul;
+			c.rs = m_rsNone;
+			c.depth = m_dsRead;
+			c.alpha = 1;
+			c.seq = g_drawSeq++;
+			c.pair = g_drawPair;
+			TacStampCam(c, TacCbCur(g_frameR, m_cbFrame), m_inPortrait, m_portraitSlot);
+			g_drawN++;
+		}
+		return;
+	}
 	// 加算の粒が線形深度まで塗ると、後段のぼけが盤面を粒の奥行きで扱う。
 	BOOL mrt = TacQFx(m_quality) && m_zRtv && m_msRtv && !m_inPortrait;
 	if (mrt) {
@@ -13455,7 +14129,16 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		if (vn[b] <= 0) continue;
 		size_t bytes = min((size_t)vn[b] * sizeof(VtxP), (size_t)m_vbDynBytes);
 		UINT st = sizeof(VtxP), off = 0;
-		void* dst = DynMap((UINT)bytes, off);
+		ID3D11Buffer* partVB = m_vbDyn;
+		void* dst = NULL;
+		if (m_inPortrait) {
+			dst = TacPtPartMap(m_dev, m_ctx, (UINT)bytes, off);
+			if (dst) partVB = g_ptPart;
+		}
+		if (!dst) {
+			dst = DynMap((UINT)bytes, off);
+			partVB = m_vbDyn;
+		}
 		if (!dst) {
 			if (mrt) {
 				ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
@@ -13464,8 +14147,8 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			return;
 		}
 		memcpy(dst, buf[b], bytes);
-		m_ctx->Unmap(m_vbDyn, 0);
-		m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
+		m_ctx->Unmap(partVB, 0);
+		m_ctx->IASetVertexBuffers(0, 1, &partVB, &st, &off);
 		m_ctx->IASetInputLayout(m_ilP);
 		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		m_ctx->VSSetShader(m_vsP, NULL, 0);
@@ -13490,10 +14173,8 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	if (heat < 0.f) heat = 0.f;
 	if (heat > 1.f) heat = 1.f;
 	m_wxHeat = heat;
-	int n = 4096;
-	if (m_quality <= 0 || m_quality == 4) n = 2048;
-	else if (m_quality >= 5) n = 8192;
-	else if (m_quality >= 3) n = 6144;
+	int n = 2048;
+	if (m_quality <= 0 || m_quality == 4) n = 1024;
 	if (n > WX_GPU_MAX) n = WX_GPU_MAX;
 	float dens = 0.55f;
 	if (wx == WX_CLEAR) dens = heat > 0.28f ? 0.12f : 0.f;
@@ -13504,22 +14185,37 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	if (n > WX_GPU_MAX) n = WX_GPU_MAX;
 	n &= ~63;
 	int reset = (wx != m_wxGpuWx || n != m_wxGpuN) ? 1 : 0;
-	m_wxGpuWx = wx;
-	m_wxGpuN = n;
 	if (nAct < 0) nAct = 0;
 	if (nAct > WX_GPU_ACT) nAct = WX_GPU_ACT;
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (m_wxActSB && SUCCEEDED(m_ctx->Map(m_wxActSB, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
-		memset(ms.pData, 0, WX_GPU_ACT * 16);
-		if (act4 && nAct > 0) memcpy(ms.pData, act4, (size_t)nAct * 16);
-		m_ctx->Unmap(m_wxActSB, 0);
+	auto mapWx = [&](ID3D11Buffer* b, int must) -> void* {
+		if (!b) return NULL;
+		D3D11_MAPPED_SUBRESOURCE mapped;
+		mapped.pData = NULL;
+		HRESULT hr = m_ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+		if ((FAILED(hr) || !mapped.pData) && must)
+			hr = m_ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+		return (SUCCEEDED(hr) && mapped.pData) ? mapped.pData : NULL;
+	};
+	void* actp = mapWx(m_wxActSB, m_wxGpuN <= 0);
+	if (!actp) return;
+	memset(actp, 0, WX_GPU_ACT * 16);
+	if (act4 && nAct > 0) memcpy(actp, act4, (size_t)nAct * 16);
+	m_ctx->Unmap(m_wxActSB, 0);
+	static int s_hgtOk = 0;
+	static unsigned s_hgtFrame = 0;
+	if (!s_hgtOk || reset || (m_frame - s_hgtFrame) > 45u) {
+		void* hp = mapWx(m_wxHgtSB, s_hgtOk ? 0 : 1);
+		if (hp) {
+			if (height64) memcpy(hp, height64, MAPN * MAPN * sizeof(float));
+			else memset(hp, 0, MAPN * MAPN * sizeof(float));
+			m_ctx->Unmap(m_wxHgtSB, 0);
+			s_hgtOk = 1;
+			s_hgtFrame = m_frame;
+		} else if (!s_hgtOk) return;
 	}
-	if (m_wxHgtSB && SUCCEEDED(m_ctx->Map(m_wxHgtSB, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
-		if (height64) memcpy(ms.pData, height64, MAPN * MAPN * sizeof(float));
-		else memset(ms.pData, 0, MAPN * MAPN * sizeof(float));
-		m_ctx->Unmap(m_wxHgtSB, 0);
-	}
-	if (m_cbWx && SUCCEEDED(m_ctx->Map(m_cbWx, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
+	void* cbp = mapWx(m_cbWx, m_wxGpuN <= 0);
+	if (!cbp) return;
+	{
 		float cb[20];
 		cb[0] = fwd.x; cb[1] = fwd.y; cb[2] = fwd.z; cb[3] = 0;
 		cb[4] = side.x; cb[5] = side.y; cb[6] = side.z; cb[7] = 0;
@@ -13536,9 +14232,14 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 			if (drip < 8) drip = 8;
 		}
 		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = heat; cb[19] = 0;
-		memcpy(ms.pData, cb, sizeof(cb));
+		memcpy(cbp, cb, sizeof(cb));
 		m_ctx->Unmap(m_cbWx, 0);
 	}
+	m_wxGpuWx = wx;
+	m_wxGpuN = n;
+	int read = m_wxGpuFlip;
+	if (read < 0 || read > 1) read = 0;
+	int write = 1 - read;
 	ID3D11ShaderResourceView* noneVS = NULL;
 	m_ctx->VSSetShaderResources(11, 1, &noneVS);
 	ID3D11UnorderedAccessView* noneU2[2] = { NULL, NULL };
@@ -13548,10 +14249,10 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	m_ctx->CSSetConstantBuffers(0, 1, &frame);
 	m_ctx->CSSetConstantBuffers(4, 1, &air);
 	m_ctx->CSSetConstantBuffers(5, 1, &m_cbWx);
-	ID3D11ShaderResourceView* srv[2] = { m_wxActSRV, m_wxHgtSRV };
-	m_ctx->CSSetShaderResources(12, 2, srv);
+	ID3D11ShaderResourceView* srv[3] = { m_wxGpuSRV[read], m_wxActSRV, m_wxHgtSRV };
+	m_ctx->CSSetShaderResources(11, 3, srv);
 	UINT cnt = 0;
-	m_ctx->CSSetUnorderedAccessViews(0, 1, &m_wxGpuUAV, &cnt);
+	m_ctx->CSSetUnorderedAccessViews(0, 1, &m_wxGpuUAV[write], &cnt);
 	m_ctx->CSSetShader(m_csWx, NULL, 0);
 	m_ctx->Dispatch((UINT)(n / 64), 1, 1);
 	m_ctx->CSSetUnorderedAccessViews(0, 2, noneU2, NULL);
@@ -13561,6 +14262,7 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	ID3D11Buffer* noneB = NULL;
 	m_ctx->CSSetConstantBuffers(0, 1, &noneB);
 	m_ctx->CSSetConstantBuffers(5, 1, &noneB);
+	m_wxGpuFlip = write;
 }
 
 void Renderer::DrawWxGpu()
@@ -13589,8 +14291,10 @@ void Renderer::DrawWxGpu()
 	ID3D11Buffer* noVb = NULL;
 	m_ctx->IASetVertexBuffers(0, 1, &noVb, &stride, &off);
 	m_ctx->VSSetShader(m_vsPWx, NULL, 0);
-	m_ctx->VSSetShaderResources(11, 1, &m_wxGpuSRV);
-	m_ctx->GSSetShader(m_gsP, NULL, 0);
+	int wxDraw = 1 - m_wxGpuFlip;
+	if (wxDraw < 0 || wxDraw > 1) wxDraw = 0;
+	m_ctx->VSSetShaderResources(11, 1, &m_wxGpuSRV[wxDraw]);
+	TacGsOn(m_ctx, m_gsP);
 	ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
 	ID3D11Buffer* gcb[2] = { TacCbCur(g_frameR, m_cbFrame), objb };
 	m_ctx->GSSetConstantBuffers(0, 2, gcb);
@@ -13602,7 +14306,7 @@ void Renderer::DrawWxGpu()
 	ID3D11ShaderResourceView* none = NULL;
 	m_ctx->VSSetShaderResources(11, 1, &none);
 	m_ctx->PSSetShaderResources(11, 1, &none);
-	m_ctx->GSSetShader(NULL, NULL, 0);
+	TacGsOff(m_ctx);
 	ID3D11Buffer* gnone[2] = { NULL, NULL };
 	m_ctx->GSSetConstantBuffers(0, 2, gnone);
 	m_ctx->IASetInputLayout(m_ilS);
@@ -15270,8 +15974,10 @@ BOOL Renderer::CreaturePosedExtent(int model, const Pose& pose, float& cx, float
 BOOL Renderer::BeginPortrait(int slot)
 {
 	if (!m_ptRtv || !m_ptDsv || slot < 0 || slot >= PORTRAIT_N) return FALSE;
-	FlushQueuedDraws();
+	// 顔が終わるまで、定数の Map は空いている枠へ回して待たない。
+	g_uploadNowait = 1;
 	if (!m_inPortrait) {
+		FlushQueuedDraws();
 	m_inPortrait = TRUE;
 		memcpy(g_ptSavedFcb, &m_fcb, sizeof(m_fcb));
 		g_ptSavedLvp = m_lightVP;
@@ -15282,6 +15988,10 @@ BOOL Renderer::BeginPortrait(int slot)
 		SetLight(Norm(v3(.40f, .82f, -.44f)), v3(0, 0, 0), 3.5f);
 		SetShadowEnabled(FALSE);
 		m_fcb.fxMore[3] = 1.f;
+		// 直前の HUD が顔の絵を読んだまま同じ面へ描くと、ドライバが GPU の完了を待って両方空く。
+		ID3D11ShaderResourceView* unbPortrait[2] = { NULL, NULL };
+		m_ctx->PSSetShaderResources(0, 2, unbPortrait);
+		m_lastPsSrv = NULL;
 		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
 		m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 		ID3D11ShaderResourceView* sh = NULL;
@@ -15302,7 +16012,6 @@ BOOL Renderer::BeginPortrait(int slot)
 
 void Renderer::EndPortrait()
 {
-	FlushQueuedDraws();
 }
 
 void Renderer::FinishPortraits()
@@ -15359,18 +16068,17 @@ BOOL Renderer::ApplyPost()
 	ID3D11ShaderResourceView* src = m_sceneSrv;
 	// 作成プレビューは Q.w を負にする。シェーダは場面そのものを返すだけなので、全面の書き写しをしない。
 	float qRank = TacQRank(m_quality, m_qPlus);
-	if (m_fcb.q[3] >= 0.f && m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && (qRank >= 2.f ? (qRank >= 3.5f ? m_psDofU : m_psDofH) : NULL)) {
+	if (m_fcb.q[3] >= 0.f && m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && qRank >= 5.f && m_psDofH) {
 		if (m_msaa > 1 && m_zTex && m_zRes)
 			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
 		DrawParams df;
-		// ぼかし半径。限界突破の 24 は据え置き、上の段だけ被写界を滑らかに広げる。
-		df.emissive = (qRank > 6.f) ? TacEaseAboveBreak(qRank, 24.f, 46.f)
-			: TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 14.f, 18.f, 24.f, 24.f);
+		df.emissive = TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 8.f, 10.f, 12.f, 12.f);
 		df.hue = 0.16f;
-		fs(qRank >= 3.5f ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
+		fs(m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
 		src = m_dofSrv;
 	}
-	int nblur = (int)(TacQLerp(qRank, 0.f, 2.f, 3.f, 4.f, 5.f, 6.f, 8.f, 8.f) + 0.5f);
+	int nblur = (int)(TacQLerp(qRank, 0.f, 2.f, 2.f, 2.f, 3.f, 3.f, 3.f, 3.f) + 0.5f);
+	if (nblur > 2) nblur = 2;
 	if (m_gpu == 3 && m_quality < 5) nblur = min(nblur, 2);
 	if (nblur > 0) {
 		DrawParams ex;
