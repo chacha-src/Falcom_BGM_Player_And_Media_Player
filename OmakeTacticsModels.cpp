@@ -2571,41 +2571,15 @@ static void WingMount(Renderer& r, const Actor& a, const Model& m, int cj, BOOL 
 
 static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time, BOOL human)
 {
-	TacBrSpan wingSpan(TAC_BR_WING);
 	if (!a.wings || !a.poseValid) return;
 	float tear = a.wingTear;
 	if (tear < 0.f) tear = 0.f;
 	if (tear > 1.f) tear = 1.f;
 	if (tear >= 0.97f && a.wingHop <= 0.f) return;
-	BOOL torn = tear > 0.001f;
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	const Model& m = r.models[a.model];
 	int cj = m.chestJ;
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return;
-	struct WMem { const Actor* a; unsigned frame; unsigned th; M4 l[2]; int mesh[2]; int n; };
-	static WMem tab[64];
-	unsigned th = (unsigned)(time * 1000.f);
-	WMem* hit = NULL;
-	int freeSlot = -1;
-	for (int i = 0; i < 64; i++) {
-		if (tab[i].a == &a) { hit = &tab[i]; break; }
-		if (freeSlot < 0 && tab[i].a == NULL) freeSlot = i;
-	}
-	if (!torn && hit && hit->frame == a.poseFrame && hit->th == th && hit->n == 2) {
-		for (int side = 0; side < 2; side++) {
-			DrawParams dw = dp;
-			dw.hue = 0;
-			dw.twoSided = 1;
-			dw.noTess = 1;
-			dw.mode = 0.f;
-			dw.sway = 0.f;
-			if (a.wingGrade == 1) { dw.tint = RGBA8(255, 228, 170, 255); dw.hue = 0.08f; }
-			else if (a.wingGrade == 2) { dw.tint = RGBA8(255, 248, 220, 255); dw.hue = 0.16f; dw.emissive += 0.12f; }
-			else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
-			r.DrawStatic(lib.wing[hit->mesh[side] >> 1][hit->mesh[side] & 1], MMul(WingTear(hit->l[side], side, tear), world), dw);
-		}
-		return;
-	}
 	int dr = a.wings == 2 ? 1 : 0;
 	float flapSp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
 	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : sinf(time * flapSp);
@@ -2614,12 +2588,6 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	float y, z, x, yaw;
 	WingMount(r, a, m, cj, human, y, z, x, yaw);
 	float rest = human ? 0.20f : 0.35f;
-	if (!hit) {
-		if (freeSlot < 0) freeSlot = (int)(r.m_frame & 63);
-		hit = &tab[freeSlot];
-		hit->a = &a;
-	}
-	hit->n = 0;
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
 		M4 fl = MRotZ(s * flap);
@@ -2637,11 +2605,7 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 		else if (a.wingGrade >= 3) { dw.tint = RGBA8(255, 198, 228, 255); dw.hue = 0.58f; dw.emissive += 0.28f; }
 		// 0 番は羽根が -X へ伸びる右翼。side 0 は +X の肩なので、同じ側へ伸びる翼を付ける。
 		r.DrawStatic(lib.wing[dr][1 - side], MMul(WingTear(l, side, tear), world), dw);
-		hit->l[side] = l;
-		hit->mesh[side] = dr * 2 + (1 - side);
-		hit->n++;
 	}
-	if (hit) { hit->frame = a.poseFrame; hit->th = th; }
 }
 
 BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float along, V3& pos, V3& outDir, float phase)
@@ -2653,57 +2617,19 @@ BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float
 	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return FALSE;
 	int dr = a.wings == 2 ? 1 : 0;
 	float use = phase > 1e8f ? a.wingPh : phase;
-	const float ox = world.m[12], oy = world.m[13], oz = world.m[14];
-	struct SpanMem { const Actor* a; unsigned frame; int side; float phase, ox, oy, oz; M4 wm; };
-	static SpanMem tab[128];
-	static int cursor = 0;
-	M4 wm;
-	BOOL got = FALSE;
-	for (int i = 0; i < 128; i++) {
-		const SpanMem& s = tab[i];
-		if (s.a == &a && s.frame == r.m_frame && s.side == side && s.phase == use && s.ox == ox && s.oy == oy && s.oz == oz) {
-			wm = s.wm;
-			got = TRUE;
-			break;
-		}
-	}
-	if (!got) {
-		BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
-		float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
-		float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
-		float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
-		float y, z, x, yaw;
-		struct Mnt { const Actor* a; unsigned frame; int side; float y, z, x, yaw; };
-		static Mnt mnt[64];
-		int mi = -1;
-		for (int i = 0; i < 64; i++) if (mnt[i].a == &a && mnt[i].frame == r.m_frame && mnt[i].side == side) { mi = i; break; }
-		if (mi >= 0) { y = mnt[mi].y; z = mnt[mi].z; x = mnt[mi].x; yaw = mnt[mi].yaw; }
-		else {
-			WingMount(r, a, m, cj, human, y, z, x, yaw);
-			int free = -1;
-			for (int i = 0; i < 64; i++) if (!mnt[i].a || mnt[i].frame != r.m_frame) { free = i; break; }
-			if (free < 0) free = (int)(r.m_frame & 63);
-			mnt[free].a = &a; mnt[free].frame = r.m_frame; mnt[free].side = side;
-			mnt[free].y = y; mnt[free].z = z; mnt[free].x = x; mnt[free].yaw = yaw;
-		}
-		float rest = human ? 0.20f : 0.35f;
-		float sgn = side == 0 ? 1.f : -1.f;
-		M4 fl = MRotZ(sgn * flap);
-		M4 base = MMul(MMul(MRotY(sgn * yaw), MRotZ(sgn * rest)), MTrans(sgn * x, y, z));
-		M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
-		M4 l = MMul(ex, a.pose.global[cj]);
-		wm = MMul(l, world);
-		SpanMem& dst = tab[cursor];
-		cursor = (cursor + 1) & 127;
-		dst.a = &a;
-		dst.frame = r.m_frame;
-		dst.side = side;
-		dst.phase = use;
-		dst.ox = ox;
-		dst.oy = oy;
-		dst.oz = oz;
-		dst.wm = wm;
-	}
+	BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
+	float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
+	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
+	float y, z, x, yaw;
+	WingMount(r, a, m, cj, human, y, z, x, yaw);
+	float rest = human ? 0.20f : 0.35f;
+	float sgn = side == 0 ? 1.f : -1.f;
+	M4 fl = MRotZ(sgn * flap);
+	M4 base = MMul(MMul(MRotY(sgn * yaw), MRotZ(sgn * rest)), MTrans(sgn * x, y, z));
+	M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
+	M4 l = MMul(ex, a.pose.global[cj]);
+	M4 wm = MMul(l, world);
 	if (along < 0.f) along = 0.f;
 	if (along > 1.f) along = 1.f;
 	float span = 0.42f + along * (dr ? 0.95f : 1.28f);

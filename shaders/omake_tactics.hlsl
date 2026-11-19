@@ -2145,18 +2145,34 @@ GOut GroundPS(PSIn i, float theme)
 	// 配列は 0..7 がアルベド、8..15 が法線。海底・滝・追加4テーマは実写を床にする。
 	bool dedicated = theme > 7.5;
 	float texTheme = theme;
+	float tier = StageTier();
+	// 氷・星空・月は、実写へ替える前の法線でハイライトを足している。他は実写が法線を捨てるので、先の DetailN は画素に出ない。
+	bool ndhTheme = (theme >= 2.5 && theme < 3.5) || (theme >= 9.5 && theme < 10.5) || (theme >= 11.5 && theme < 12.5);
+	bool photoNormals = false;
+	if (!ndhTheme && (tier > 1.5 || dedicated)) {
+		float rep0 = dedicated ? (cliff > 0.5 ? 0.36 : 0.5) : (cliff > 0.5 ? 0.22 : 0.15);
+		photoNormals = Photo.SampleLevel(SL, float3(i.w.xz * rep0, theme), 0).a > 0.5;
+	}
 	float4 alb = dedicated ? float4(0.42, 0.42, 0.44, 1) : Ground.Sample(SL, float3(uv, texTheme));
-	float4 nr = dedicated ? float4(0.5, 0.5, 1, 1) : Ground.Sample(SL, float3(uv, texTheme + 8));
 	float3 albedo = alb.rgb * lerp(0.78, 1, alb.a) * i.c.rgb;
 	if (cliff > 0.5) albedo *= 0.8;
-	float3 nLit = DetailN(Bump(n, nr.rgb), i.w);
+	float3 nLit;
+	[branch] if (photoNormals)
+		nLit = n;
+	else {
+		float4 nr = dedicated ? float4(0.5, 0.5, 1, 1) : Ground.Sample(SL, float3(uv, texTheme + 8));
+		nLit = DetailN(Bump(n, nr.rgb), i.w);
+	}
 	float rough = 0.7;
 	float3 glow = 0;
 	float3 f0 = float3(0.035, 0.035, 0.035);
 	float burst = GustAmt();
 	float3 Hsun = normalize(normalize(LightDir.xyz) + v);
 	float ndhG = saturate(dot(nLit, Hsun));
-	float2 curl = Curl2(i.w.xz * 0.35 + Eye.w * 0.08);
+	// カールを読まない地形では、法線用のノイズを回さない。
+	float2 curl = float2(0, 0);
+	bool useCurl = theme < 2.5 || (theme >= 3.5 && theme < 4.5) || (theme >= 5.5 && theme < 6.5) || (theme >= 7.5 && theme < 8.5) || theme >= 12.5;
+	[branch] if (useCurl) curl = Curl2(i.w.xz * 0.35 + Eye.w * 0.08);
 	if (theme < 0.5) {
 		rough = 0.8;
 		float sway = sin(i.w.x * 0.48 + i.w.z * 0.27 - Eye.w * 0.52);
@@ -2349,12 +2365,16 @@ GOut GroundPS(PSIn i, float theme)
 		glow += float3(1, 0.9, 0.55) * Sparkle(i.w.xz, Eye.w, 13.0, 0.96) * 0.16;
 		nLit = normalize(nLit + float3(curl.x, 0.03, curl.y) * 0.06);
 	}
-	float tier = StageTier();
 	GroundSurfaceLayer(theme, i.w, n, cliff, Eye.w, burst, albedo, nLit, rough, glow);
 	{
 		float rep = dedicated ? (cliff > 0.5 ? 0.36 : 0.5) : (cliff > 0.5 ? 0.22 : 0.15);
 		float2 puv = i.w.xz * rep;
-		if (!dedicated && cliff < 0.5 && tier > 3.5 && Photo.SampleLevel(SL, float3(puv, theme), 0).a > 0.5) {
+		bool enterPom = !dedicated && cliff < 0.5 && tier > 3.5;
+		if (enterPom && !photoNormals && ndhTheme)
+			enterPom = Photo.SampleLevel(SL, float3(puv, theme), 0).a > 0.5;
+		else if (enterPom && !photoNormals)
+			enterPom = false;
+		if (enterPom) {
 			int steps = (tier > 5.5) ? 14 : ((tier > 4.5) ? 8 : 4);
 			if (theme < 0.5 || (theme > 1.5 && theme < 2.5) || (theme > 6.5 && theme < 7.5))
 				steps = (tier > 5.5) ? 8 : 4;
@@ -2502,9 +2522,9 @@ GOut GroundPS(PSIn i, float theme)
 		float micro = fbmSky(i.w.xz * microF + i.w.y * 2.0);
 		col *= 0.95 + micro * ((Q.x > 4.5) ? 0.09 : 0.05);
 	}
+	float glossF = FloorGloss(theme, nLit.y, i.w.xz);
 	if (tier > 1.5) {
-		float gloss = FloorGloss(theme, nLit.y, i.w.xz);
-		gloss *= lerp(1.0, 0.10, saturate(sGhost));
+		float gloss = glossF * lerp(1.0, 0.10, saturate(sGhost));
 		ApplyReflect(col, nLit, v, i.w, rough, gloss);
 		if (cliff < 0.5 && gloss > 0.18) {
 			float2 ge = abs(frac(i.w.xz) - 0.5);
@@ -2512,10 +2532,7 @@ GOut GroundPS(PSIn i, float theme)
 			col *= 1.0 - edge2 * 0.3;
 		}
 	}
-	{
-		float glossF = FloorGloss(theme, nLit.y, i.w.xz);
-		MapFinish(col, albedo, n, nLit, v, i.w, rough, glossF, sh, 0);
-	}
+	MapFinish(col, albedo, n, nLit, v, i.w, rough, glossF, sh, 0);
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(1)), i.w);
 }
 
@@ -2734,10 +2751,10 @@ GOut PSProp(PSIn i)
 	}
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
+	float gloss = 0;
 	if (tier > 1.5) {
-		float gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
-		gloss *= leaf > 0.5 ? 0.35 : 0.82;
-		ApplyReflect(col, nLit, v, i.w, rough, gloss);
+		gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
+		ApplyReflect(col, nLit, v, i.w, rough, gloss * (leaf > 0.5 ? 0.35 : 0.82));
 	}
 	if (Q.x > 2.5) {
 		float pore = fbm2(i.w.xz * 7.5 + i.w.y * 2.2);
@@ -2750,11 +2767,10 @@ GOut PSProp(PSIn i)
 		col = lerp(col, FogColor.rgb, fg * fg * 0.25);
 		return Emit(float4(col, Tint.a), i.w);
 	}
-	{
-		float gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
-		gloss *= leaf > 0.5 ? 0.35 : 0.82;
-		MapFinish(col, albedo, n, nLit, v, i.w, rough, gloss, sh, leaf);
-	}
+	if (tier <= 1.5)
+		gloss = FloorGloss(FogColor.a, nLit.y, i.w.xz);
+	gloss *= leaf > 0.5 ? 0.35 : 0.82;
+	MapFinish(col, albedo, n, nLit, v, i.w, rough, gloss, sh, leaf);
 	return Emit(float4(GhostCol(FogAt(col, i.w)), GhostA(Tint.a)), i.w);
 }
 

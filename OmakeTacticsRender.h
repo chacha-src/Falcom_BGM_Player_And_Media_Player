@@ -641,6 +641,7 @@ public:
 	float GpuMs() const { return m_gpuMs; }
 	void EndFrameTextGc();
 	BOOL FrameReady();             // 待機オブジェクト（ブロックしない）
+	void WaitFrame();              // V-Sync / スロット待ち。描画時間には入れない
 	BOOL PresentBusy() const { return m_presentBusy; }
 	BOOL RefreshSurface();         // 表示後にスワップチェインを付け直す
 	BOOL DeviceLost() const { return m_lost; }
@@ -742,6 +743,7 @@ private:
 	BOOL m_exclusive;
 	BOOL m_presented;
 	BOOL m_presentBusy;
+	BOOL m_tear;
 	BOOL m_occluded;
 	DWORD m_waitStuck;   // 退役待ちが始まった時刻。0 は待ちなし
 	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
@@ -1080,34 +1082,6 @@ private:
 	float m_ptClear[4];
 	BOOL PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void FlushInst();
-};
-
-// 1フレームの内訳。上の行は足すとフレームに近い。下の行（骨以降）はその内側。
-enum {
-	TAC_BR_PREP = 0, TAC_BR_POSE, TAC_BR_SH, TAC_BR_REF, TAC_BR_LAND, TAC_BR_RING, TAC_BR_ACT, TAC_BR_FX,
-	TAC_BR_PORT, TAC_BR_SKIN, TAC_BR_CLOTH, TAC_BR_FLUSH, TAC_BR_INST, TAC_BR_WING, TAC_BR_PDRAW, TAC_BR_PFEATH,
-	TAC_BR_PFIN,
-	TAC_BR_HUD,
-	TAC_BR_N
-};
-struct TacBrClock {
-	LARGE_INTEGER qpf, t, mark;
-	float slot[TAC_BR_N];
-};
-inline TacBrClock& TacBr()
-{
-	static TacBrClock c;
-	return c;
-}
-inline LARGE_INTEGER TacBrNow() { LARGE_INTEGER n; n.QuadPart = 0; return n; }
-inline void TacBrAdd(int, const LARGE_INTEGER&, const LARGE_INTEGER&) {}
-inline void TacBrReset() {}
-inline void TacBrLap(int) {}
-inline void TacBrMark() {}
-inline void TacBrTake(int) {}
-inline float TacBrAt(int) { return 0.f; }
-struct TacBrSpan {
-	explicit TacBrSpan(int) {}
 };
 
 } // namespace otac

@@ -143,12 +143,16 @@ Game::Game()
 	m_fps = 0;
 	m_workAvg = 0;
 	m_msUpd = m_msSh = m_msRef = m_msMain = m_msPort = m_msHud = m_msPr = m_msAud = 0;
+	m_msPre = m_msTail = m_msScene = m_msBook = 0;
+	ZeroMemory(m_split, sizeof(m_split));
 	ZeroMemory(m_fpsSpan, sizeof(m_fpsSpan));
 	ZeroMemory(m_workSpan, sizeof(m_workSpan));
 	m_fpsN = 0;
 	m_fpsI = 0;
 	m_fpsWin = 0;
 	m_fpsAt.QuadPart = 0;
+	m_afterPr.QuadPart = 0;
+	m_vsyncDue.QuadPart = 0;
 	m_recoverTries = 0;
 	m_mx = m_my = 0;
 	m_mouseSeen = FALSE;
@@ -437,7 +441,7 @@ BOOL Game::Init(HWND view, int w, int h)
 	m_loadFrames = 0;
 	m_ui = Clampf(min(m_w / 1280.f, m_h / 720.f), .62f, 2.2f);
 	m_qApply = TacQualityWanted(m_save);
-	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzDefaultI(); }
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_qFine = TacTierNotch(6); m_syncRun = TacHzIndexOf(60); }
 	m_qCoolT = 0.8f;
 	if (!m_r.Init(view, m_qApply)) { m_screen = SC_FAIL; return FALSE; }
 	return TRUE;
@@ -654,7 +658,7 @@ BOOL Game::Recover()
 	m_r.Release();
 	m_loaded = FALSE;
 	m_qApply = TacQualityWanted(m_save);
-	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzDefaultI(); }
+	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzIndexOf(60); }
 	else m_syncRun = -1;
 	m_syncArmN = 0;
 	if (!m_r.Init(m_hwnd, m_qApply)) return FALSE;
@@ -828,7 +832,7 @@ int Game::SyncNow() const
 {
 	if (m_syncRun == -2) return -2;
 	if (m_syncRun >= 0) return Clampi(m_syncRun, 0, TAC_HZ_N - 1);
-	if (m_save.quality == TAC_Q_AUTO) return TacHzDefaultI();
+	if (m_save.quality == TAC_Q_AUTO) return TacHzIndexOf(60);
 	return Clampi(TacVsync(m_save), 0, TAC_HZ_N - 1);
 }
 
@@ -866,7 +870,7 @@ void Game::PickQuality(int delta)
 		m_save.spare[2] = 6;
 		TacQualityEnsureAutoDefault(m_save);
 		m_save.spare[2] = 6;
-		m_syncRun = TacHzDefaultI();
+		m_syncRun = TacHzIndexOf(60);
 		m_syncArm = 0;
 		m_syncArmN = 0;
 		m_qFine = TacTierNotch(6);
@@ -898,13 +902,57 @@ void Game::PulseQuality(float work, float span)
 		m_syncArmN = 0;
 	}
 	if (m_qCoolT > 0) return;
-	if (m_fpsWin < 0.22f || span < 0.003f || span >= 0.40f) return;
+	if (m_fpsN < 8 || span <= 0.f) return;
 	if (m_syncLock > 0) return;
+	// 限界突破+0 を数フレームだけ入れて、次の拍へ上がれるかを見る。
+	static int s_jab = 0, s_jabHz = 0, s_jabAge = 0, s_jabCool = 0, s_jabBack = 0, s_jabWait = 0, s_jabScreen = -1;
+	static int s_jabGuard = 0, s_jabGuardHz = 0;
+	if (m_qHold < 0) {
+		s_jab = 0; s_jabAge = 0; s_jabCool = 0; s_jabWait = 0; s_jabGuard = 0;
+	}
+	// 実測が今の拍の9割に届かないときは1段だけ下げる。240の次は165。
+	// 240のままだと合格が216fpsになり、170fps台でも最軽量から上がれない。
+	// ジャブの数フレームは古い平均で拍を落とさない。
+	if (s_jab != 1) {
+		static int s_paceDn = 0;
+		int lower = 0;
+		if (m_fps > 1.f && hz > 60 && m_fps < (float)hz * 0.90f) {
+			static const int kStep[] = { 60, 72, 90, 120, 144, 165, 240 };
+			for (int s = 0; s < 7; ++s)
+				if (kStep[s] < hz && kStep[s] > lower) lower = kStep[s];
+		}
+		if (lower >= 60) {
+			if (++s_paceDn >= 8) {
+				int idx = TacHzIndexOf(lower);
+				m_syncRun = idx;
+				m_qHz = TacHzAt(idx);
+				m_qOkN = 0;
+				m_qMissN = 0;
+				if (m_qCoolT < 0.20f) m_qCoolT = 0.20f;
+				s_paceDn = 0;
+			}
+			return;
+		}
+		s_paceDn = 0;
+	}
+	if (s_jabGuard > 0) {
+		s_jabGuard--;
+		int nowHz = (m_syncRun == -2) ? 15 : TacHzAt(SyncNow());
+		if (s_jabGuardHz > 0 && nowHz < s_jabGuardHz && s_jabBack > TAC_NOTCH_LIMIT && m_qFine <= TAC_NOTCH_LIMIT) {
+			m_qFine = s_jabBack;
+			int q, plus;
+			TacNotchSplit(m_qFine, q, plus);
+			m_r.SetQualityPlus(plus);
+			ApplyQualityNow(q);
+			s_jabGuard = 0;
+		}
+	}
 	BOOL autoOn = (m_save.quality == TAC_Q_AUTO);
 	int wantedQ = TacQualityWanted(m_save);
 	// 画質と拍を一緒に探る。自動は代表 Hz の天井まで。手動の限界突破は、指定した Hz が天井。
-	// 限界突破までは画質を上げ、そこから +N を足しつつ、今の +N のまま上の拍へ挑戦する。
-	// 挑戦先で少し溢れたら + を 1 つ外してその拍に残る。厳しければ拍を戻し、+N は連れ返す。
+	// 限界突破までは画質を上げ、そこから +N を足す。+N のままでは次の拍の9割に届かず昇格が始まれない。
+	// たまに限界突破+0を数フレームだけ入れて、GPU の ms が次の拍に入るなら拍を上げる。入らなければ +N を戻す。
+	// 上げた拍が直後に落ちたときも +N を戻す。余白があるときだけ、以前の + を一度に戻す。
 	// 戻した先では +N を上下して収める。無印まで落ちたときだけ拍を 1 段下げる。
 	// 1/60 だけ特別で、標準、軽量、1/30 と行き来する。1/30 で標準に届いたら 1/60 へ戻す。
 	if (autoOn || wantedQ == 6) {
@@ -946,6 +994,12 @@ void Game::PulseQuality(float work, float span)
 				m_qHz = TacHzAt(idx);
 			}
 			if (m_qCoolT < 0.20f) m_qCoolT = 0.20f;
+			// 拍を変えた直後の平均は前の拍のままなので、次の判定に使わない。
+			m_fpsN = 0;
+			m_fpsI = 0;
+			m_fpsWin = 0;
+			m_workAvg = 0.f;
+			m_fpsAt.QuadPart = 0;
 		};
 		auto applyNotch = [&](int next) {
 			if (next < kTiny) next = kTiny;
@@ -958,14 +1012,14 @@ void Game::PulseQuality(float work, float span)
 			ApplyQualityNow(q);
 		};
 		if (m_syncRun == -1) {
-			m_syncRun = TacHzIndexOf(autoOn ? 240 : capHz);
+			m_syncRun = TacHzIndexOf(autoOn ? 60 : capHz);
 			m_syncArm = 0;
 			m_qHold = 0;
 		}
 		// ノートなど、1/240 のまま 8fps のように全く届かないときは 1 段ずつ落とさず一気に下げる。
 		// 1/60 標準 → まだ 30fps 前後なら 1/30 軽量 → まだ 8fps なら 1/15 標準。
 		// 60fps 付近で届いている機械はここを通さず、これまでの細かい上げ下げのまま。
-		if (autoOn) {
+		if (autoOn && s_jab != 1) {
 			float fpsNow = m_fps;
 			if (fpsNow < 1.f && span > 0.001f && span < 0.40f) fpsNow = 1.f / span;
 			float workMs = m_workAvg * 1000.f;
@@ -994,14 +1048,13 @@ void Game::PulseQuality(float work, float span)
 				if (++s_bad >= 3) dive(60, kStd);
 				return;
 			}
-			if (fpsNow > 0.f && curHz >= 50 && curHz <= 70 && fpsNow < 38.f && m_qFine >= kStd && m_qFine < TAC_NOTCH_LIMIT) {
+			if (curHz >= 50 && curHz <= 70 && m_qFine >= kStd && m_qFine < TAC_NOTCH_LIMIT) {
 				float gNow = m_r.GpuMs();
-				if (gNow > 13.33f) {
+				if (gNow > 22.f && workMs > 22.f) {
 					if (++s_bad >= 4) dive(30, kLight);
 					return;
 				}
-				s_bad = 0;
-			} else
+			}
 			if (fpsNow > 0.f && curHz <= 30 && fpsNow < 14.f) {
 				if (++s_bad >= 4) dive(15, kStd);
 				return;
@@ -1010,7 +1063,14 @@ void Game::PulseQuality(float work, float span)
 		}
 		if (autoOn && m_syncRun == -2) return;
 		float g = m_r.GpuMs();
-		if (g <= 0.05f) return;
+		if (s_jab == 1 && m_screen != s_jabScreen) {
+			s_jab = 0;
+			s_jabAge = 0;
+			s_jabCool = 180;
+			if (s_jabBack > TAC_NOTCH_LIMIT) applyNotch(s_jabBack);
+			return;
+		}
+		if (g <= 0.05f && s_jab != 1) return;
 		int cur = (m_syncRun == -2) ? 15 : TacHzAt(m_syncRun);
 		if (cur > capHz) {
 			int fit = 30;
@@ -1024,43 +1084,116 @@ void Game::PulseQuality(float work, float span)
 		}
 		if (cur < 15) cur = 15;
 		float period = 1000.f / (float)cur;
+		if (s_jab == 1) {
+			if (g <= 0.05f) {
+				if (++s_jabAge < 12) return;
+				s_jab = 0;
+				s_jabAge = 0;
+				s_jabCool = 180;
+				if (s_jabBack > TAC_NOTCH_LIMIT) applyNotch(s_jabBack);
+				return;
+			}
+			if (++s_jabAge < 8) return;
+			// +0 の GPU 時間に入る一番上の拍へ上げる。隣の一段だけだと 1/60 から 120 に届かない。
+			int best = 0;
+			for (int c = 0; c < nRep; ++c) {
+				int h = kRep[c];
+				if (h <= cur || h > capHz) continue;
+				float room = 1000.f / (float)h;
+				if (g > 0.5f && g <= room * 1.02f && h > best) best = h;
+			}
+			if (capHz > cur && capHz <= 540 && TacHzAt(TacHzIndexOf(capHz)) == capHz) {
+				float room = 1000.f / (float)capHz;
+				if (g > 0.5f && g <= room * 1.02f && capHz > best) best = capHz;
+			}
+			int back = s_jabBack;
+			s_jab = 0;
+			s_jabAge = 0;
+			if (best <= cur) {
+				if (back > TAC_NOTCH_LIMIT) applyNotch(back);
+				s_jabCool = 220;
+				m_qOkN = 0;
+				m_qMissN = 0;
+				return;
+			}
+			applyHz(best);
+			s_jabGuard = 50;
+			s_jabGuardHz = best;
+			s_jabCool = 150;
+			s_jabWait = 0;
+			m_qHold = 0;
+			m_qOkN = 0;
+			m_qMissN = 0;
+			m_syncArmN = 0;
+			return;
+		}
 		int up = nextUp(cur);
 		int dn = nextDn(cur);
+		(void)up;
 		float cpuMs = m_workAvg * 1000.f;
 		const bool gpuOver = g > period * 1.02f;
-		const bool cpuOver = cur > 30 && cpuMs > period * 1.15f;
+		// GPU が余裕なのに CPU 側だけ長いのは待ち。画質を落とすと段が往復する。
+		const bool cpuOver = cur > 30 && cpuMs > period * 1.15f && g > period * 0.85f;
 		const bool over = gpuOver || cpuOver;
-		const bool spare = g <= period * 0.55f && (cpuMs <= 0.05f || cpuMs <= period * 0.70f);
+		const bool drawFits60 = g <= 13.33f && (cpuMs <= 0.05f || cpuMs <= 16.f);
 		int notch = m_qFine;
 		if (notch > TAC_NOTCH_OPEN) notch = TAC_NOTCH_OPEN;
 		if (m_qHold < 0) m_qHold = 0;
-		// 1 つ外して収まった。すぐ足し戻さない。
-		if (!over && m_qHold == 2) { m_qHold = 4; m_qSlots = 0; }
-		float slackLine = (m_qHold == 4 && notch >= TAC_NOTCH_LIMIT) ? 0.78f : 0.90f;
-		const bool slack = g <= period * slackLine;
-		// 失敗した拍は、+ を下げたか、今の + で余裕が出るまでやり直さない。
-		if (m_syncArm > 0 && m_qSlots > 0 && notch < m_qSlots) m_syncArm = 0;
-		if (m_syncArm > 0 && up == m_syncArm) {
-			float retry = up ? (1000.f / (float)up) * 0.90f : 0.f;
-			if (spare || (up && g <= retry)) m_syncArm = 0;
-		} else if (spare) m_syncArm = 0;
-		// 今の +N の計測で次の拍を試す。GPU が次の拍に十分入るなら、+ を足し続けずに拍を上げる。
-		bool comfy = false;
-		bool very = false;
-		if (notch >= TAC_NOTCH_LIMIT && cur > 30 && up && up != m_syncArm) {
-			float nextP = 1000.f / (float)up;
-			comfy = g <= nextP * 0.90f && (cpuMs <= 0.05f || cpuMs <= nextP * 0.92f);
-			very = g <= nextP * 0.70f && (cpuMs <= 0.05f || cpuMs <= nextP * 0.80f);
-		}
-		const int needPhase = very ? 1 : 2;
-		const bool trySoon = comfy && (very || m_syncArmN >= needPhase || notch >= TAC_NOTCH_OPEN);
-		// 上げた拍が枠内で落ち着いたら、挑戦中の印を外す。
-		if (!over && m_qHold == 1 && !slack && !trySoon) {
-			m_qOkN++;
-			m_qMissN = 0;
-			if (m_qOkN >= 12) { m_qHold = 0; m_qOkN = 0; m_qSlots = 0; }
+		if (notch >= TAC_NOTCH_LIMIT) {
+			if (m_qSlots < notch) m_qSlots = notch;
+			if (m_qSlots < TAC_NOTCH_LIMIT) m_qSlots = TAC_NOTCH_LIMIT;
+			if (m_qSlots > TAC_NOTCH_OPEN) m_qSlots = TAC_NOTCH_OPEN;
+		} else m_qSlots = 0;
+		const int held = (notch >= TAC_NOTCH_LIMIT) ? m_qSlots : 0;
+		// 実フレームが 120 に届いていないのに表示だけ 1/120 へ上げると、次の拍で落ちて往復する。
+		const bool fits120 = g > 0.5f && g <= 8.5f && cpuMs > 0.05f && cpuMs <= 8.5f && m_fps >= 90.f;
+		(void)drawFits60;
+		if (fits120 && cur >= 30 && cur < 120) {
+			applyHz(120);
 			return;
 		}
+		const bool overNow = over && !(fits120 && cur <= 120);
+		float slackLine = 0.90f;
+		const bool slack = g <= period * slackLine;
+		if (m_qHold == 4) {
+			if (!overNow) m_syncArmN++;
+			else m_syncArmN = 0;
+			if (m_syncArmN >= 90) {
+				m_qHold = 0;
+				m_syncArm = 0;
+				m_syncArmN = 0;
+			}
+		} else if (m_qHold == 0 && notch >= TAC_NOTCH_LIMIT && !overNow)
+			m_syncArmN++;
+		int wantHz = 0;
+		if (notch >= TAC_NOTCH_LIMIT && cur > 30 && m_qHold == 0 && m_syncArmN >= 90) {
+			int h = nextUp(cur);
+			float room = (h > 0) ? (1000.f / (float)h) : 0.f;
+			if (h > cur && h <= capHz && h != m_syncArm && cpuMs > 0.05f && cpuMs <= room
+				&& m_fps >= (float)h * 0.90f)
+				wantHz = h;
+		}
+		if (s_jabCool > 0) s_jabCool--;
+		if (s_jab == 0 && s_jabCool == 0 && wantHz == 0 && m_qHold == 0 && notch > TAC_NOTCH_LIMIT && cur > 30 && cur < capHz) {
+			int h = nextUp(cur);
+			if (h > cur && h <= capHz && h != m_syncArm) {
+				float room = 1000.f / (float)h;
+				if (m_fps < (float)h * 0.90f || g > room) {
+					if (++s_jabWait >= 90) {
+						s_jabWait = 0;
+						s_jab = 1;
+						s_jabHz = h;
+						s_jabAge = 0;
+						s_jabScreen = m_screen;
+						s_jabBack = notch;
+						applyNotch(TAC_NOTCH_LIMIT);
+						m_qOkN = 0;
+						m_qMissN = 0;
+						return;
+					}
+				} else s_jabWait = 0;
+			}
+		} else if (wantHz > 0) s_jabWait = 0;
 		if (notch < kTiny) {
 			applyNotch(kTiny);
 			m_qOkN = 0;
@@ -1071,65 +1204,67 @@ void Game::PulseQuality(float work, float span)
 		int nextN = notch;
 		int nextH = cur;
 		int holdOut = m_qHold;
-		bool grewPlus = false;
-		if (over) {
+		if (m_qHold == 1) {
+			if (overNow) { m_qMissN++; m_qOkN = 0; }
+			else { m_qOkN++; m_qMissN = 0; }
+			int needM = (g > period * 1.20f) ? 2 : 4;
+			if (cpuOver && !gpuOver) needM = (cur >= 72) ? 1 : 2;
+			if (overNow && m_qMissN >= needM) {
+				if (dn > 0) nextH = dn;
+				else if (cur > 60) nextH = 60;
+				nextN = held > 0 ? held : TAC_NOTCH_LIMIT;
+				m_syncArm = cur;
+				holdOut = 4;
+				m_syncArmN = 0;
+			} else if (!overNow && m_qOkN >= 8) {
+				// 昇格先が +0 で収まっても、以前の + を全部戻すと拍が落ちる。余白があるときだけ戻す。
+				nextN = TAC_NOTCH_LIMIT;
+				if (held > TAC_NOTCH_LIMIT && g <= period * 0.72f && (cpuMs <= 0.05f || cpuMs <= period * 0.72f))
+					nextN = held;
+				holdOut = 0;
+			} else return;
+		} else if (overNow) {
 			m_qMissN++;
 			m_qOkN = 0;
 			int needM = (g > period * 1.20f) ? 3 : 6;
-			if (m_qHold == 1 || m_qHold == 2) needM = (g > period * 1.20f) ? 2 : 4;
 			if (cur >= 90 && (g > period * 1.05f || cpuMs > period * 1.08f)) needM = 1;
 			if (cpuOver && !gpuOver) needM = (cur >= 72) ? 1 : 2;
 			if (m_qMissN < needM) return;
-			if (cpuOver && !gpuOver) {
-				if (dn > 0) {
-					m_syncArm = cur;
-					nextH = (cur > 60) ? 60 : dn;
-					if (nextH == cur) nextH = dn;
-					holdOut = 0;
-				} else {
-					m_qMissN = 0;
-					return;
-				}
-			} else
-			if ((m_qHold == 1 && dn > 0 && notch > TAC_NOTCH_LIMIT && g <= period * 1.12f)) {
-				// 挑戦先で + を 1 つ外せば収まりそう。拍はそのまま。
-				nextN = notch - 1;
-				holdOut = 2;
-			} else if ((m_qHold == 1 || m_qHold == 2) && dn > 0) {
-				// 厳しければ拍を戻す。外した + は元に戻して連れ帰る。
-				if (m_qHold == 2 && notch < TAC_NOTCH_OPEN) nextN = notch + 1;
+			if (notch >= TAC_NOTCH_LIMIT && cur > 60 && dn > 0) {
 				m_syncArm = cur;
-				m_qSlots = nextN;
 				nextH = dn;
+				nextN = held > 0 ? held : notch;
 				holdOut = 4;
-			} else if (notch > TAC_NOTCH_LIMIT) {
+				m_syncArmN = 0;
+			} else if (notch > TAC_NOTCH_LIMIT && cur <= 60) {
 				nextN = notch - 1;
-				holdOut = 4;
+				holdOut = 0;
 			} else if (cur > 60 && dn > 0) {
 				m_syncArm = cur;
-				m_qSlots = notch;
 				nextH = dn;
 				holdOut = 0;
 			} else if (cur > 30) {
-				if (notch > kLight) { nextN = notch - 1; holdOut = 4; }
-				else { nextH = 30; nextN = kLight; holdOut = 0; }
+				// GPU が拍に収まっているときは段を限界突破より下へ落とさない。CPU の待ちで最高へ落ちていた。
+				if (notch > TAC_NOTCH_LIMIT) { nextN = notch - 1; holdOut = 0; }
+				else if (gpuOver && notch > kLight) { nextN = notch - 1; holdOut = 0; }
+				else if (gpuOver) { nextH = 30; nextN = kLight; holdOut = 0; }
+				else { m_qMissN = 0; return; }
 			} else if (notch > kTiny) {
 				nextN = notch - 1;
-				holdOut = 4;
+				holdOut = 0;
 			} else { m_qMissN = 0; return; }
 		} else {
 			int leave = 60;
 			if (leave > capHz) leave = capHz;
 			const bool holdStd30 = (cur > 15 && cur <= 30 && notch >= kStd && leave > 30);
-			const bool tryHz = trySoon;
-			if (!slack && !holdStd30 && !tryHz) {
+			if (!slack && !holdStd30 && !(wantHz && m_qHold == 0 && notch >= TAC_NOTCH_LIMIT)) {
 				m_qOkN = 0;
 				m_qMissN = 0;
 				return;
 			}
 			m_qOkN++;
 			m_qMissN = 0;
-			int need = 10;
+			int need = (g <= 8.5f) ? 3 : 10;
 			const float fit60 = (1000.f / 60.f) * 0.80f;
 			if (holdStd30) {
 				need = (g <= fit60) ? 4 : 10;
@@ -1147,15 +1282,17 @@ void Game::PulseQuality(float work, float span)
 			} else if (notch < TAC_NOTCH_LIMIT && slack) {
 				nextN = notch + 1;
 				holdOut = 0;
-			} else if (tryHz) {
-				need = very ? 3 : 8;
-				nextH = up;
+			} else if (wantHz && m_qHold == 0 && notch >= TAC_NOTCH_LIMIT) {
+				need = 4;
+				nextN = TAC_NOTCH_LIMIT;
+				nextH = wantHz;
 				holdOut = 1;
-			} else if (slack && notch < TAC_NOTCH_OPEN && !very) {
+				m_syncArmN = 0;
+			} else if (slack && cpuMs <= period && notch >= TAC_NOTCH_LIMIT && notch < TAC_NOTCH_OPEN) {
+				// 実時間が今の拍を超えているあいだは足さない。GPU の ms だけ見るとテッセだけ増える。
 				need = 8;
 				nextN = notch + 1;
 				holdOut = 0;
-				grewPlus = true;
 			} else {
 				m_qOkN = 0;
 				return;
@@ -1164,16 +1301,17 @@ void Game::PulseQuality(float work, float span)
 		}
 		if (nextN != notch) applyNotch(nextN);
 		if (nextH != cur) applyHz(nextH);
-		if (grewPlus && comfy && m_syncArmN < 2) m_syncArmN++;
-		if (nextH != cur || nextN < notch) m_syncArmN = 0;
+		if (nextN >= TAC_NOTCH_LIMIT && m_qSlots < nextN) m_qSlots = nextN;
 		m_qHold = holdOut;
 		m_qOkN = 0;
 		m_qMissN = 0;
 		return;
 	}
-	m_syncRun = -1;
+	// 保存の拍に実測が届いていないあいだは、上で下げた段を残す。毎フレーム -1 に戻すと 1/240 に張り付く。
+	if (!(m_fps > 1.f && TacVsyncHz(m_save) > 60 && m_fps < (float)TacVsyncHz(m_save) * 0.90f))
+		m_syncRun = -1;
 
-	// 限界突破以外の手動段。指定の Hz は動かさず、その段の細分だけを上下する。
+	// 限界突破以外の手動段。届いているときの拍は保存のまま、細分だけを上下する。
 	int ceilQ = TacQualityWanted(m_save);
 	int ceilNotch = TacTierCeilNotch(ceilQ);
 	int floorNotch = TAC_NOTCH_FLOOR;
@@ -1216,8 +1354,6 @@ void Game::Tick(float dt)
 		m_slotBusy = 0;
 	}
 	dt = Clampf(dt, 0, .1f);
-	LARGE_INTEGER busy0;
-	QueryPerformanceCounter(&busy0);
 	m_time += dt;
 	if (!m_demo) {
 		// 拠点でカーソルもボタンも止まっていれば、10秒でデモへ。戦闘の途中からは始めない。
@@ -1287,13 +1423,14 @@ void Game::Tick(float dt)
 	// スワップがまだ描き中なら場面は積まない。拍自体は捨てないので、ゲーム時間は進む。
 	if (!m_r.FrameReady()) return;
 	LARGE_INTEGER t0, t1, freq;
-	QueryPerformanceCounter(&t0);
 	QueryPerformanceFrequency(&freq);
-	m_msUpd = freq.QuadPart ? (float)((double)(t0.QuadPart - busy0.QuadPart) * 1000.0 / (double)freq.QuadPart) : 0.f;
+	QueryPerformanceCounter(&t0);
+	int paceHz = PaceHz();
+	if (paceHz < 15) paceHz = 15;
 	RenderFrame();
 	LARGE_INTEGER tPr;
 	QueryPerformanceCounter(&tPr);
-	if (!m_r.ConsumeAvaFlash()) m_r.Present();
+	if (!m_r.ConsumeAvaFlash()) m_r.Present(1, paceHz);
 	if (m_goHome) {
 		m_goHome = FALSE;
 		if (m_demo) DemoLeave();
@@ -1301,47 +1438,39 @@ void Game::Tick(float dt)
 	}
 	QueryPerformanceCounter(&t1);
 	QueryPerformanceFrequency(&freq);
-	m_msPr = freq.QuadPart ? (float)((double)(t1.QuadPart - tPr.QuadPart) * 1000.0 / (double)freq.QuadPart) : 0.f;
+	// ここで周期を足さない。120 を超えていた頃は Present が戻ったら次のフレームへ進んでいた。
 	m_r.EndFrameTextGc();
-	if (m_r.PresentBusy()) return;
 	float work = 0.f;
 	float span = 0.f;
 	if (freq.QuadPart)
 		work = (float)((double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
 	if (m_fpsAt.QuadPart && freq.QuadPart) {
 		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
-		float busy = (float)((double)(t1.QuadPart - busy0.QuadPart) / (double)freq.QuadPart);
-		if (span >= 0.003f && span < 0.40f && busy >= 0.f && busy < 0.40f) {
+		float busy = (float)((double)(tPr.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
+		// 来た間隔は長さで捨てない。リングに入っている本数で割ったものが平均。
+		if (span > 0.f) {
 			enum { FPS_CAP = 160 };
-			const float kWin = 0.50f;
-			const int kMin = 8;
 			m_fpsSpan[m_fpsI] = span;
-			m_workSpan[m_fpsI] = busy;
-			int newest = m_fpsI;
+			m_workSpan[m_fpsI] = busy > 0.f ? busy : 0.f;
 			m_fpsI = (m_fpsI + 1) % FPS_CAP;
 			if (m_fpsN < FPS_CAP) m_fpsN++;
-			float sum = 0.f, wsum = 0.f, acc = 0.f;
-			int n = 0;
-			int idx = newest;
-			for (int k = 0; k < m_fpsN; k++) {
-				float s = m_fpsSpan[idx];
-				if (n >= kMin && acc >= kWin) break;
-				sum += s;
-				wsum += m_workSpan[idx];
-				acc += s;
-				n++;
-				if (n >= kMin && acc >= kWin) break;
+			float sum = 0.f, wsum = 0.f;
+			int idx = m_fpsI;
+			for (int k = 0; k < m_fpsN; ++k) {
 				idx = (idx + FPS_CAP - 1) % FPS_CAP;
+				sum += m_fpsSpan[idx];
+				wsum += m_workSpan[idx];
 			}
-			if (n < 1) n = 1;
-			span = sum / (float)n;
-			m_workAvg = wsum / (float)n;
-			m_fps = 1.f / span;
-			m_fpsWin = acc;
+			float mean = sum / (float)m_fpsN;
+			m_workAvg = wsum / (float)m_fpsN;
+			if (mean > 0.f) m_fps = 1.f / mean;
+			m_fpsWin = sum;
+			span = mean;
 		}
 	}
 	m_fpsAt = t1;
-	PulseQuality(work, span);
+	if (!m_r.PresentBusy())
+		PulseQuality(work, span);
 }
 
 	static_assert(TAC_BGM_MARCHEN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
@@ -1462,7 +1591,6 @@ void Game::SetupCamera(V3 target, float yaw, float pitch, float dist, float fov)
 
 void Game::RenderFrame()
 {
-	TacBrReset();
 	m_renderDt = Clampf(m_time - m_lastRenderTime, 0, .1f);
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
@@ -1512,6 +1640,7 @@ void Game::RenderFrame()
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	} break;
 	}
+	StepPortraitFeathers();
 	if (m_loaded) RenderPortraits();
 	const BOOL avaWait = m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL;
 	const BOOL avaFull = avaWait && !m_loaded && m_screen != SC_CREATE;
@@ -1520,7 +1649,6 @@ void Game::RenderFrame()
 		m_r.BeginMainPass();
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	}
-	TacBrMark();
 	m_r.BeginHud();
 	if (m_screen == SC_CREATE && avaWait) m_r.GrabAvaPlate();
 	m_btns.clear();
@@ -2055,6 +2183,8 @@ void Game::OnBecameActive()
 	m_qOkN = 0;
 	if (m_qCoolT < 0.6f) m_qCoolT = 0.6f;
 	m_fpsAt.QuadPart = 0;
+	m_afterPr.QuadPart = 0;
+	m_vsyncDue.QuadPart = 0;
 	m_fpsN = 0;
 	m_fpsI = 0;
 	m_fpsWin = 0;
@@ -3038,11 +3168,7 @@ void Game::InvalidatePortraits()
 	}
 }
 
-static int g_pfGather = 0;
-struct PfCam { M4 world, view, proj; V3 eye; unsigned frame; int valid; const void* who; };
-static PfCam g_pfCam[Renderer::PORTRAIT_N];
-
-static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, int slot, BOOL live, float dt)
+static void PortraitFeathers(Renderer& r, Actor& a, const M4& world, int slot, BOOL live, float dt)
 {
 	struct Bit { V3 p, v; float life, max, spin, stretch, size; float cr, cg, cb; int on; int add; };
 	static Bit mote[Renderer::PORTRAIT_N][16];
@@ -3051,11 +3177,6 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 	static int who[Renderer::PORTRAIT_N];
 	if (slot < 0 || slot >= Renderer::PORTRAIT_N) return;
 	if (a.wings <= 0 || a.wingGrade <= 0) return;
-	if (!g_pfGather) {
-		r.PortraitFeatherDraw(slot);
-		(void)g;
-		return;
-	}
 	int id = a.model * 17 + a.wingGrade * 3 + a.wings + (live ? 100000 : 0);
 	if (who[slot] != id) {
 		who[slot] = id;
@@ -3075,15 +3196,18 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 		held[slot] = a.wingPh;
 		if (a.wingTear < 0.2f && prev > 0.55f && now <= 0.55f) {
 			int per = a.flap > 0.5f ? 4 : 3;
-			for (int side = 0; side < 2; side++) for (int k = 0; k < per; k++) {
+			for (int side = 0; side < 2; side++) {
 				float sgn = side ? -1.f : 1.f;
-				float along = 0.4f + (float)k * 0.18f;
-				V3 pos, out, sweep;
-				if (!WingSweepDir(r, a, world, side, along, pos, out, sweep)) {
-					pos = v3(sgn * (0.35f + along * 0.7f), a.height * 0.62f, -0.05f);
+				const float mid = 0.62f;
+				V3 pos0, out, sweep;
+				if (!WingSweepDir(r, a, world, side, mid, pos0, out, sweep)) {
+					pos0 = v3(sgn * (0.35f + mid * 0.7f), a.height * 0.62f, -0.05f);
 					out = v3(sgn, 0.f, 0.f);
 					sweep = v3(0.f, -1.5f, 0.f);
 				}
+				for (int k = 0; k < per; k++) {
+				float along = 0.4f + (float)k * 0.18f;
+				V3 pos = pos0 + out * ((along - mid) * 1.35f);
 				int slotB = -1;
 				for (int i = 0; i < 16; i++) if (!mote[slot][i].on) { slotB = i; break; }
 				if (slotB < 0) slotB = (side * per + k) % 16;
@@ -3101,6 +3225,7 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 				if (a.wingGrade >= 3) { b.cr = 0.98f; b.cg = 0.7f; b.cb = 0.86f; }
 				else if (a.wingGrade == 2) { b.cr = 1.f; b.cg = 0.94f; b.cb = 0.76f; }
 				else { b.cr = 0.96f; b.cg = 0.8f; b.cb = 0.52f; }
+				}
 			}
 		}
 		for (int i = 0; i < 16; i++) {
@@ -3109,7 +3234,7 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 			b.life -= dt;
 			if (b.life <= 0.f) { b.on = 0; continue; }
 			b.v.y -= 4.6f * dt;
-			float drag = expf(-0.4f * dt);
+			float drag = 1.f - 0.4f * dt;
 			b.v.x *= drag; b.v.y *= drag; b.v.z *= drag;
 			b.p = b.p + b.v * dt;
 			b.spin += b.stretch * dt;
@@ -3129,37 +3254,13 @@ static void PortraitFeathers(Game& g, Renderer& r, Actor& a, const M4& world, in
 		q.shape = 8; q.spin = b.spin; q.stretch = b.stretch; q.add = b.add;
 	}
 	if (n > 0) r.PortraitFeatherAdd(slot, ps, n);
-	(void)g;
 }
 
 BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody, BOOL live)
 {
-	const BOOL gather = g_pfGather != 0;
-	if (gather && (a.wings <= 0 || a.wingGrade <= 0)) return TRUE;
-	LARGE_INTEGER portDraw0 = {};
-	if (!gather) portDraw0 = TacBrNow();
 	M4 world, view, proj;
 	V3 eye;
-	BOOL camReady = FALSE;
-	if (gather && slot >= 0 && slot < Renderer::PORTRAIT_N && g_pfCam[slot].valid && g_pfCam[slot].who == &a) {
-		world = g_pfCam[slot].world;
-		m_r.m_view = g_pfCam[slot].view;
-		m_r.m_proj = g_pfCam[slot].proj;
-		m_r.m_vp = MMul(g_pfCam[slot].view, g_pfCam[slot].proj);
-		m_r.m_eye = g_pfCam[slot].eye;
-		g_pfCam[slot].frame = m_r.m_frame;
-		PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
-		return TRUE;
-	}
-	if (!gather && slot >= 0 && slot < Renderer::PORTRAIT_N && g_pfCam[slot].valid && g_pfCam[slot].frame == m_r.m_frame) {
-		world = g_pfCam[slot].world;
-		view = g_pfCam[slot].view;
-		proj = g_pfCam[slot].proj;
-		eye = g_pfCam[slot].eye;
-		camReady = TRUE;
-	}
-	if (!camReady) {
-	if (!live && (gather || a.poseFrame != m_r.m_frame)) {
+	if (!live && a.poseFrame != m_r.m_frame) {
 		if (a.clip != CL_IDLE) ActorPlay(a, CL_IDLE, 1, 0);
 		float len = ActorClipLen(a, m_lib, m_r, CL_IDLE);
 		if (len < 0.25f) len = 1.6f;
@@ -3227,24 +3328,7 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	if (zn < 0.02f) zn = 0.02f;
 	if (zn > 0.25f) zn = 0.25f;
 	proj = MPerspLH(.6f, 1.f, zn, max(50.f, d * 6.f));
-	if (gather) {
-		if (slot >= 0 && slot < Renderer::PORTRAIT_N) {
-			PfCam& c = g_pfCam[slot];
-			c.world = world; c.view = view; c.proj = proj; c.eye = eye;
-			c.frame = m_r.m_frame; c.valid = 1; c.who = &a;
-		}
-		m_r.m_view = view;
-		m_r.m_proj = proj;
-		m_r.m_vp = MMul(view, proj);
-		m_r.m_eye = eye;
-		PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
-		return TRUE;
-	}
-	}
-	if (!m_r.BeginPortrait(slot)) {
-		TacBrAdd(TAC_BR_PDRAW, portDraw0, TacBrNow());
-		return FALSE;
-	}
+	if (!m_r.BeginPortrait(slot)) return FALSE;
 	m_r.SetCamera(view, proj, eye, m_time);
 	DrawParams dp;
 	dp.outline = 0;
@@ -3257,11 +3341,8 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 	}
 	m_r.BeginMainPass();
 	BOOL drew = ActorDraw(m_r, m_lib, a, world, dp, m_time);
-	TacBrAdd(TAC_BR_PDRAW, portDraw0, TacBrNow());
-	LARGE_INTEGER portFeather0 = TacBrNow();
-	PortraitFeathers(*this, m_r, a, world, slot, live, m_renderDt);
+	m_r.PortraitFeatherDraw(slot);
 	m_r.EndPortrait();
-	TacBrAdd(TAC_BR_PFEATH, portFeather0, TacBrNow());
 	return drew;
 }
 
@@ -3295,10 +3376,44 @@ static void PortraitJobBg(int cls, DWORD& bg0, DWORD& bg1)
 
 static unsigned g_portDone = 0xFFFFFFFFu;
 
+void Game::StepPortraitFeathers()
+{
+	int nWant = 0;
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) if (m_portraitWant[s] > 0) nWant++;
+	m_r.PortraitFeatherReset();
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
+		int want = m_portraitWant[s];
+		if (want <= 0) continue;
+		if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
+		Actor* a = NULL;
+		BOOL live = TRUE;
+		if (want >= 100 && want < 100 + MAX_UNITS) {
+			int ui = want - 100;
+			if (ui < 0 || ui >= MAX_UNITS) continue;
+			if (m_act[ui].model >= 0) a = &m_act[ui];
+			else if (m_ptCacheWant[s] == want && m_ptCache[s].model >= 0) { a = &m_ptCache[s]; live = FALSE; }
+			else continue;
+		} else if (want >= 1 && want <= MAX_ROSTER) {
+			const CharData& c = m_save.roster[want - 1];
+			if (!c.used) continue;
+			int idx = 0;
+			for (int i = 0; i < MAX_PARTY && idx < m_showN; i++) {
+				int r = m_save.party[i];
+				if (r < 0 || r >= MAX_ROSTER || !m_save.roster[r].used) continue;
+				if (r == want - 1) { a = &m_showAct[idx]; break; }
+				idx++;
+			}
+			if (!a && m_ptCacheWant[s] == want && m_ptCache[s].model >= 0) { a = &m_ptCache[s]; live = FALSE; }
+		}
+		if (!a || a->model < 0 || a->wings <= 0 || a->wingGrade <= 0) continue;
+		PortraitFeathers(m_r, *a, ActorWorld(*a, v3(0, 0, 0), PI), s, live, m_renderDt);
+	}
+	m_r.PortraitFeatherUpload();
+}
+
 void Game::RenderPortraits()
 {
 	if (g_portDone == m_r.m_frame) return;
-	TacBrMark();
 	int nWant = 0;
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		if (m_portraitWant[s] > 0) nWant++;
@@ -3383,20 +3498,6 @@ void Game::RenderPortraits()
 		}
 		return FALSE;
 	};
-	g_pfGather = 1;
-	m_r.PortraitFeatherReset();
-	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
-		int want = m_portraitWant[s];
-		if (want <= 0) continue;
-		if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
-		paint(s, want);
-	}
-	g_pfGather = 0;
-	{
-		LARGE_INTEGER up0 = TacBrNow();
-		m_r.PortraitFeatherUpload();
-		TacBrAdd(TAC_BR_PFEATH, up0, TacBrNow());
-	}
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		int want = m_portraitWant[s];
 		if (want <= 0) { m_portraitKey[s] = want; continue; }
@@ -3404,11 +3505,8 @@ void Game::RenderPortraits()
 		if (!paint(s, want)) continue;
 		m_portraitKey[s] = want;
 	}
-	LARGE_INTEGER fin0 = TacBrNow();
 	m_r.FinishPortraits();
 	m_r.SetCamera(camView, camProj, camEye, camT);
-	TacBrAdd(TAC_BR_PFIN, fin0, TacBrNow());
-	TacBrTake(TAC_BR_PORT);
 }
 
 int Game::RosterPortrait(int roster) const
@@ -3494,9 +3592,10 @@ static BOOL WingDownbeat(float prev, float now)
 	return prev > 0.55f && now <= 0.55f;
 }
 
-void Game::ShedFeathers(const Actor& a, V3 origin, float face, BOOL hard)
+void Game::ShedFeathers(Actor& a, V3 origin, float face, BOOL hard)
 {
 	if (m_parts.size() > 4800) return;
+	if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
 	M4 world = ActorWorld(a, origin, face);
 	if (a.proc == 3) {
 		float hs = a.htScale > 0.05f ? a.htScale : 1.f;
@@ -6024,8 +6123,7 @@ void Game::UpdateBase(float dt)
 
 void Game::DrawShowcase3D()
 {
-	TacBrLap(TAC_BR_PREP);
-	if (m_screen == SC_BASE && m_codex == 4) { DrawMonStage(); TacBrLap(TAC_BR_ACT); return; }
+	if (m_screen == SC_BASE && m_codex == 4) { DrawMonStage(); return; }
 	m_r.SetTheme(m_showMap.theme);
 	m_r.SetStageId(m_showStage);
 	if (m_screen != SC_BATTLE && m_screen != SC_RESULT) {
@@ -6138,8 +6236,6 @@ void Game::DrawShowcase3D()
 		Actor& a = m_showAct[i];
 		if (!a.poseValid || a.poseFrame != m_r.m_frame) ActorPose(a, m_lib, m_r);
 	}
-	RenderPortraits();
-	TacBr().t = TacBrNow();
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
@@ -6205,7 +6301,6 @@ void Game::DrawShowcase3D()
 		HomeSky(wx, hr);
 		if (wx != WX_CLEAR) m_r.DrawWxGpu();
 	}
-	TacBrLap(TAC_BR_ACT);
 }
 
 void Game::HomeSky(int& wx, int& hr) const
@@ -9419,13 +9514,14 @@ void Game::DrawSlotUi()
 
 void Game::DrawPerfHud()
 {
-	TacBrTake(TAC_BR_HUD);
 	if (!TacFpsOn(m_save)) return;
 	if (m_screen == SC_LOADING || m_screen == SC_FAIL) return;
 	if (m_fps < 1.f) return;
 	float fps = m_fps;
 	if (fps > 999.f) fps = 999.f;
-	float ms = 1000.f / fps;
+	float ms = m_r.GpuMs();
+	if (ms < 0.05f) ms = m_workAvg * 1000.f;
+	if (ms < 0.05f && fps > 1.f) ms = 1000.f / fps;
 	if (ms > 999.f) ms = 999.f;
 	int q = QualityNow();
 	int pace = PaceHz();
@@ -9553,7 +9649,8 @@ void Game::DrawPerfHud()
 	if (x + bw > (float)m_w - U(4)) x = (float)m_w - U(4) - bw;
 	if (y + th > (float)m_h - U(4)) y = (float)m_h - U(4) - th;
 	Panel(x, y, bw, th, 0.82f);
-	m_r.HudText(line, x + pad + tw, y + th * .5f, px, RGBA8(236, 238, 244), 2, 0);
+	float right = x + pad + tw;
+	m_r.HudText(line, right, y + th * 0.5f, px, RGBA8(236, 238, 244), 2, 0);
 }
 
 void Game::DrawBaseUi()
@@ -10346,7 +10443,6 @@ void Game::RefreshPreview()
 
 void Game::DrawCreate3D()
 {
-	TacBrLap(TAC_BR_PREP);
 	V3 pos = v3(0, -50.f, 0);
 	Actor& a = m_preview;
 	float ht = a.htScale > 0.05f ? a.htScale : 1.f;
@@ -10375,8 +10471,6 @@ void Game::DrawCreate3D()
 	}
 	m_r.SetShadowEnabled(TRUE);
 	ActorPose(a, m_lib, m_r);
-	RenderPortraits();
-	TacBr().t = TacBrNow();
 	M4 aw = ActorWorld(a, pos + v3(0, a.hover, 0), PI + m_previewYaw);
 	DrawParams dp;
 	dp.outline = .01f;
@@ -10404,7 +10498,6 @@ void Game::DrawCreate3D()
 	if (m_previewRain) m_r.DrawWxGpu();
 	m_r.SetStageWind(TRUE);
 	m_r.SetPreviewPost(TRUE);
-	TacBrLap(TAC_BR_ACT);
 }
 
 #include "tactics_src/ava_more_nm.inc"

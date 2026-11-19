@@ -150,6 +150,7 @@ private:
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
+	void StepPortraitFeathers();
 	BOOL RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0, BOOL live = FALSE);
 	void InvalidatePortraits();
 	void DrawPortrait(int slot, float x, float y, float s, DWORD frame);
@@ -374,7 +375,7 @@ private:
 
 	// 演出
 	void Burst(V3 p, int n, float spd, float size, float life, float r, float g, float b, int shape, int add, float grav, float stretch = 0, float upBias = 0, float size1 = -1);
-	void ShedFeathers(const Actor& a, V3 origin, float face, BOOL hard);
+	void ShedFeathers(Actor& a, V3 origin, float face, BOOL hard);
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void SpawnDebris(V3 p, V3 vel, int kind, int n, float sc, DWORD tint);
@@ -400,7 +401,7 @@ private:
 	Library m_lib;
 	SaveData m_save;
 	int m_qApply, m_qHold, m_qMissN, m_qOkN, m_qHz;
-	int m_qSlots; // 拍の挑戦に失敗したときの notch。0 はなし。
+	int m_qSlots; // 限界突破で覚えておく最高 notch（LIMIT+plus）。0 は未記録。
 	int m_qFine;
 	int m_syncArm, m_syncArmN, m_syncRun;
 	BOOL m_qDrew;
@@ -411,8 +412,12 @@ private:
 	float m_workAvg;
 	float m_fpsWin;
 	float m_msUpd, m_msSh, m_msRef, m_msMain, m_msPort, m_msHud, m_msPr, m_msAud;
+	float m_msPre, m_msTail, m_msScene, m_msBook;
+	float m_split[7];
 	int m_fpsN, m_fpsI;
 	LARGE_INTEGER m_fpsAt;
+	LARGE_INTEGER m_afterPr;
+	LARGE_INTEGER m_vsyncDue;
 	HWND m_hwnd;
 	int m_w, m_h;
 	float m_ui;

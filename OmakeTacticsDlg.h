@@ -57,6 +57,7 @@ protected:
 	afx_msg void OnTimer(UINT_PTR id);
 	afx_msg LRESULT OnTacPace(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnMove(int x, int y);
 	afx_msg void OnEnterSizeMove();
 	afx_msg void OnExitSizeMove();
 	afx_msg LRESULT OnNcHitTest(CPoint pt);
@@ -103,6 +104,7 @@ protected:
 	BOOL m_fg = TRUE;
 	LARGE_INTEGER m_qpf = {}, m_tickAt = {};
 	HANDLE m_paceStop = NULL;
+	HANDLE m_paceDone = NULL;
 	HANDLE m_paceThread = NULL;
 	BOOL m_inPace = FALSE;
 	volatile LONG m_pacePosted = 0;

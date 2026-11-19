@@ -10,6 +10,7 @@
 #include <d3dcompiler.h>
 #include <d3d11_1.h>
 #include <dxgi1_3.h>
+#include <dxgi1_5.h>
 #include <wincodec.h>
 #include <algorithm>
 #include <stdlib.h>
@@ -63,37 +64,45 @@ static int g_drawN = 0;
 static BOOL g_drawFlush = FALSE;
 static TacObjCB g_objGPU;
 static BOOL g_objValid = FALSE;
-enum { TAC_CB_POOL = 4096 };
+enum { TAC_CB_POOL = 16384 };
+enum { TAC_INST_RING = 4 };
+static ID3D11Buffer* g_instRing[TAC_INST_RING];
+static UINT g_instAt[TAC_INST_RING] = { 0xFFFFFFF0u, 0xFFFFFFF0u, 0xFFFFFFF0u, 0xFFFFFFF0u };
+static int g_instSlot = 0;
 static ID3D11Buffer* g_cbPool[TAC_CB_POOL];
 static int g_cbPoolN = 0;
 static int g_cbPoolI = 0;
-// 顔枠の Map が、GPU がまだ読んでいる定数を捨てると CPU が止まり、そのあいだ GPU も空く。
-// 飛行中なら待たずに次の枠へ回す。範囲付きの定数バインドは武具が多い顔で1描画ずつ重かった。
-static int g_uploadNowait = 0;
-static int g_nowaitOk = 1;
 enum { PT_RING = 16, PT_CAP = 4096 * 60 };
 static ID3D11Buffer* g_ptRing[PT_RING];
 static int g_ptSlot = -1;
 static ID3D11Buffer* g_ptPart = NULL;
 struct TacPPt { float p[3]; float vel[4]; float sz[4]; float c[4]; };
 static_assert(sizeof(TacPPt) == 60, "TacPPt");
-enum { PF_BLOB = 4, PF_BLOB_BYTES = 32 * 1024 };
-static ID3D11Buffer* g_pfBlob[PF_BLOB];
-static unsigned g_pfBlobFrame[PF_BLOB];
-static int g_pfBlobI = -1;
-enum { PF_REG = 16, PF_REG_PTS = 1024, PF_REG_BYTES = PF_REG_PTS * 60 };
-static ID3D11Buffer* g_pfAppend = NULL;
-static int g_pfAppendReady = 0;
-static ID3D11Buffer* g_pfBuf[PF_REG];
-static int g_pfBufReady[PF_REG];
 struct PfSlot { int n[2]; UINT off[2]; ID3D11Buffer* vb; M4 basis; int ok; TacPPt pt[2][16]; };
 static PfSlot g_pf[Renderer::PORTRAIT_N];
 // 顔のメッシュは共有されない。行列だけを1回書いて、定数は色が変わったときだけ送る。
+enum { TAC_FACE_RING = 16 };
+static ID3D11Buffer* g_faceRing[TAC_FACE_RING];
+static int g_faceSlot = 0;
 static ID3D11Buffer* g_faceInst = NULL;
 static UINT g_faceInstAt = 0xFFFFFFF0u;
+static char g_portSkinOwn[Renderer::PORTRAIT_N];
+static char g_portHairOwn[Renderer::PORTRAIT_N];
+static unsigned g_portSkinQ[Renderer::PORTRAIT_N];
+static unsigned g_portHairQ[Renderer::PORTRAIT_N];
+static M4 g_portHairPlace[Renderer::PORTRAIT_N];
+static char g_portHairHave[Renderer::PORTRAIT_N];
+static Renderer::CreatureSkin* g_portSkinSrc[Renderer::PORTRAIT_N];
+enum { TAC_PT_RING = 4 };
+static ID3D11Texture2D* g_ptRingTex[TAC_PT_RING];
+static ID3D11RenderTargetView* g_ptRingRtv[TAC_PT_RING];
+static ID3D11ShaderResourceView* g_ptRingSrv[TAC_PT_RING];
+static ID3D11Texture2D* g_ptRingDs[TAC_PT_RING];
+static ID3D11DepthStencilView* g_ptRingDsv[TAC_PT_RING];
+static int g_ptRingI = -1;
 // 同じ動的定数を描画の途中で DISCARD すると、GPU が読み終わるまで CPU が止まり、その間 GPU も空く。
 // 枠を回して、飛行中のバッファは触らない。
-enum { TAC_CB_RING = 256 };
+enum { TAC_CB_RING = 2048 };
 struct TacCbRing { ID3D11Buffer* b[TAC_CB_RING]; int n, i; ID3D11Buffer* cur; };
 static TacCbRing g_frameR, g_airR, g_boneR, g_skinBoneR, g_skinParmR, g_clothR, g_softR, g_hairSimR, g_hairClothR;
 struct ClothPend {
@@ -107,7 +116,8 @@ struct ClothPend {
 };
 static ClothPend g_pend[Renderer::CLOTH_INST];
 static int g_pendN, g_pendBusy;
-static ID3D11Buffer* g_clothGate;
+static ID3D11Buffer* g_clothGateOff = NULL;
+static ID3D11Buffer* g_clothGateOn = NULL;
 static ID3D11Buffer* g_clStB; static ID3D11UnorderedAccessView* g_clStU;
 static ID3D11Buffer* g_clCnB; static ID3D11ShaderResourceView* g_clCnS;
 static ID3D11Buffer* g_clPfB; static ID3D11ShaderResourceView* g_clPfS;
@@ -142,39 +152,26 @@ static void TacCbRingMake(ID3D11Device* dev, TacCbRing& r, UINT bytes)
 		r.n++;
 	}
 }
-static ID3D11Buffer* TacCbAcquire(TacCbRing& r, ID3D11DeviceContext* ctx, ID3D11Buffer* fallback, D3D11_MAPPED_SUBRESOURCE& ms)
+static ID3D11Buffer* TacCbAcquire(TacCbRing& r, ID3D11DeviceContext* ctx, ID3D11Buffer* single, D3D11_MAPPED_SUBRESOURCE& ms)
 {
 	if (!ctx) return NULL;
-	// 顔の最中は、GPU がまだ読んでいる定数を捨てて待たない。隣の枠へ回す。
-	const BOOL spin = g_uploadNowait && g_nowaitOk && r.n > 1;
-	int spins = 0;
-	for (;;) {
-		ID3D11Buffer* b = (r.n > 0) ? r.b[r.i] : fallback;
-		if (!b) return NULL;
-		HRESULT hr = spin
-			? ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms)
-			: ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
-		if (SUCCEEDED(hr) && ms.pData) {
-			if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
-			r.cur = b;
-			return b;
+	// 使い終わった枠を順に使う。通常の Map なので、書いた定数がそのまま描画に乗る。
+	if (r.n > 0) {
+		ID3D11Buffer* b = NULL;
+		for (int s = 0; s < r.n && !b; s++) {
+			ID3D11Buffer* c = r.b[r.i];
+			if (++r.i >= r.n) r.i = 0;
+			if (c) b = c;
 		}
-		if (!spin || hr != DXGI_ERROR_WAS_STILL_DRAWING) {
-			if (!spin) return NULL;
-			if (FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
-			if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
-			r.cur = b;
-			return b;
-		}
-		if (r.n > 0) { r.i++; if (r.i >= r.n) r.i = 0; }
-		if (++spins >= r.n) {
-			b = r.b[r.i];
-			if (!b || FAILED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
-			r.i++; if (r.i >= r.n) r.i = 0;
+		if (b && SUCCEEDED(ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) && ms.pData) {
 			r.cur = b;
 			return b;
 		}
 	}
+	if (!single) return NULL;
+	if (FAILED(ctx->Map(single, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return NULL;
+	r.cur = single;
+	return single;
 }
 static ID3D11Buffer* TacCbCur(const TacCbRing& r, ID3D11Buffer* fallback)
 {
@@ -213,22 +210,29 @@ static void TacFillObj(TacObjCB& o, const M4& world, const DrawParams& dp, float
 	if (dp.noTess && dp.mode < 0.5f) o.oc[3] = (dp.matSlice >= 0) ? (3.f + (float)dp.matSlice) : 2.f;
 }
 
+static int g_cbHs = 0;
 static void TacBindObjBuf(ID3D11DeviceContext* ctx, ID3D11Buffer* b, BOOL tessOn)
 {
-	if (!ctx || !b || g_cbBound == b) return;
-	g_cbBound = b;
-	ctx->VSSetConstantBuffers(1, 1, &b);
-	ctx->PSSetConstantBuffers(1, 1, &b);
-	if (tessOn) {
+	if (!ctx || !b) return;
+	if (g_cbBound != b) {
+		g_cbBound = b;
+		g_cbHs = 0;
+		ctx->VSSetConstantBuffers(1, 1, &b);
+		ctx->PSSetConstantBuffers(1, 1, &b);
+	}
+	if (tessOn && !g_cbHs) {
 		ctx->HSSetConstantBuffers(1, 1, &b);
 		ctx->DSSetConstantBuffers(1, 1, &b);
+		g_cbHs = 1;
 	}
 }
-
 static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacObjCB& o, BOOL tessOn = FALSE)
 {
 	if (!ctx || !cb) return;
-	if (g_objValid && g_cbBound && memcmp(&g_objGPU, &o, sizeof(o)) == 0) return;
+	if (g_objValid && g_cbBound && memcmp(&g_objGPU, &o, sizeof(o)) == 0) {
+		TacBindObjBuf(ctx, g_cbBound, tessOn);
+		return;
+	}
 	ID3D11Buffer* dst = cb;
 	D3D11_MAPPED_SUBRESOURCE ms;
 	ms.pData = NULL;
@@ -236,27 +240,20 @@ static void TacUploadObj(ID3D11DeviceContext* ctx, ID3D11Buffer* cb, const TacOb
 	ms.DepthPitch = 0;
 	HRESULT hr = E_FAIL;
 	if (g_cbPoolN > 0) {
-		const BOOL spin = g_uploadNowait && g_nowaitOk;
-		int spins = 0;
-		for (;;) {
-			dst = g_cbPool[g_cbPoolI];
+		dst = NULL;
+		for (int n = 0; n < g_cbPoolN && !dst; ++n) {
+			ID3D11Buffer* c = g_cbPool[g_cbPoolI];
 			if (++g_cbPoolI >= g_cbPoolN) g_cbPoolI = 0;
-			if (!spin) {
-				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
-				break;
-			}
-			hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
-			if (SUCCEEDED(hr)) break;
-			if (hr != DXGI_ERROR_WAS_STILL_DRAWING) {
-				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
-				break;
-			}
-			if (++spins >= 32) {
-				hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
-				break;
-			}
+			if (c) dst = c;
 		}
+		if (!dst) dst = cb;
+		hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
 	} else hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+	if ((FAILED(hr) || !ms.pData) && dst != cb) {
+		dst = cb;
+		ms.pData = NULL;
+		hr = ctx->Map(dst, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+	}
 	if (FAILED(hr) || !ms.pData) return;
 	memcpy(ms.pData, &o, sizeof(o));
 	ctx->Unmap(dst, 0);
@@ -289,7 +286,7 @@ Renderer::Renderer()
 	m_menuCam = FALSE;
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
-	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_exclusive = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
+	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_exclusive = FALSE; m_presented = FALSE; m_presentBusy = FALSE; m_tear = FALSE; m_occluded = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_qDisjoint = m_qTs0 = m_qTs1 = NULL; m_gpuMs = 0; m_gpuArmed = FALSE;
 	m_fadeAbove = -1;
 	m_fadeY = -999.f;
@@ -473,6 +470,16 @@ void Renderer::Release()
 	m_assetsOk = FALSE;
 	ReleaseTargets();
 	TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex);
+	for (int pi = 0; pi < TAC_PT_RING; pi++) {
+		if (g_ptRingTex[pi] == m_ptTex) m_ptTex = NULL;
+		if (g_ptRingRtv[pi] == m_ptRtv) m_ptRtv = NULL;
+		if (g_ptRingSrv[pi] == m_srvPortrait) m_srvPortrait = NULL;
+		if (g_ptRingDs[pi] == m_ptDs) m_ptDs = NULL;
+		if (g_ptRingDsv[pi] == m_ptDsv) m_ptDsv = NULL;
+		TAC_REL(g_ptRingSrv[pi]); TAC_REL(g_ptRingRtv[pi]); TAC_REL(g_ptRingTex[pi]);
+		TAC_REL(g_ptRingDsv[pi]); TAC_REL(g_ptRingDs[pi]);
+	}
+	g_ptRingI = -1;
 	TAC_REL(m_srvPortrait); TAC_REL(m_ptRtv); TAC_REL(m_ptTex); TAC_REL(m_ptDsv); TAC_REL(m_ptDs);
 	TAC_REL(m_vsS); TAC_REL(m_vsSh); TAC_REL(m_vsB); TAC_REL(m_vsBSh); TAC_REL(m_vsK); TAC_REL(m_vsKSh); TAC_REL(m_vsH); TAC_REL(m_vsP); TAC_REL(m_vsPT); TAC_REL(m_vsQ);
 	TAC_REL(m_gsP);
@@ -493,7 +500,8 @@ void Renderer::Release()
 	TacCbRingFree(g_skinBoneR); TacCbRingFree(g_skinParmR); TacCbRingFree(g_hairClothR);
 	for (int ci = 0; ci < 3; ci++) TAC_REL(m_csCloth[ci]);
 	TAC_REL(m_cbCloth); TacCbRingFree(g_clothR);
-	TAC_REL(g_clothGate);
+	TAC_REL(g_clothGateOff);
+	TAC_REL(g_clothGateOn);
 	TAC_REL(g_clStU); TAC_REL(g_clStB); TAC_REL(g_clCnS); TAC_REL(g_clCnB); TAC_REL(g_clPfS); TAC_REL(g_clPfB); TAC_REL(g_clPmS); TAC_REL(g_clPmB);
 	g_pendN = 0;
 	TAC_REL(g_hStU); TAC_REL(g_hStB); TAC_REL(g_hPmS); TAC_REL(g_hPmB);
@@ -507,19 +515,16 @@ void Renderer::Release()
 	TAC_REL(m_cbWx);
 	ReleaseHair();
 	TAC_REL(m_ilS); TAC_REL(m_ilB); TAC_REL(m_ilK); TAC_REL(m_ilH); TAC_REL(m_ilP); TAC_REL(m_ilPT);
-	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbAir); TacCbRingFree(g_airR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
+	TAC_REL(m_cbFrame); TacCbRingFree(g_frameR); TAC_REL(m_cbAir); TacCbRingFree(g_airR); TAC_REL(m_cbRipple); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TacCbRingFree(g_boneR); TAC_REL(m_vbHud); TAC_REL(m_vbDyn); for (int ii = 0; ii < TAC_INST_RING; ii++) { if (g_instRing[ii] == m_vbInst) m_vbInst = NULL; TAC_REL(g_instRing[ii]); } TAC_REL(m_vbInst); TAC_REL(m_ibQuad);
 	for (int i = 0; i < g_cbPoolN; i++) TAC_REL(g_cbPool[i]);
 	g_cbPoolN = 0;
 	g_cbPoolI = 0;
 	for (int i = 0; i < PT_RING; i++) TAC_REL(g_ptRing[i]);
 	g_ptPart = NULL;
 	g_ptSlot = -1;
-	for (int i = 0; i < PF_BLOB; i++) { TAC_REL(g_pfBlob[i]); g_pfBlobFrame[i] = 0; }
-	g_pfBlobI = -1;
-	TAC_REL(g_pfAppend);
-	g_pfAppendReady = 0;
-	for (int i = 0; i < PF_REG; i++) { TAC_REL(g_pfBuf[i]); g_pfBufReady[i] = 0; }
-	TAC_REL(g_faceInst);
+	for (int i = 0; i < TAC_FACE_RING; i++) TAC_REL(g_faceRing[i]);
+	g_faceInst = NULL;
+	g_faceSlot = 0;
 	g_faceInstAt = 0xFFFFFFF0u;
 	g_cbBound = NULL;
 	g_objValid = FALSE;
@@ -529,7 +534,7 @@ void Renderer::Release()
 	TAC_REL(m_bsOpaque); TAC_REL(m_bsAlpha); TAC_REL(m_bsPremul); TAC_REL(m_bsAdd);
 	for (int i = 0; i < TEX_MAX; i++) { TAC_REL(m_srv[i]); TAC_REL(m_tex[i]); }
 	for (int i = 0; i < LAY_N; i++) { TAC_REL(m_srvMiniL[i]); TAC_REL(m_texMiniL[i]); }
-	if (m_wait) { CloseHandle(m_wait); m_wait = NULL; }
+	m_wait = NULL;
 	TAC_REL(m_qDisjoint); TAC_REL(m_qTs0); TAC_REL(m_qTs1); m_gpuArmed = FALSE;
 	if (m_swap && m_exclusive) {
 		m_swap->SetFullscreenState(FALSE, NULL);
@@ -580,11 +585,34 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	m_w = max(8, (int)(rc.right - rc.left)); m_h = max(8, (int)(rc.bottom - rc.top));
 	DXGI_SWAP_CHAIN_DESC1 sd = {};
 	sd.Width = m_w; sd.Height = m_h; sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; sd.SampleDesc.Count = 1;
-	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.BufferCount = 3; sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	sd.Scaling = DXGI_SCALING_STRETCH; sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	// STRETCH だと画面へ直に出せず、DWM が 1 枚待ってから返す。
+	sd.Scaling = DXGI_SCALING_NONE; sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+	m_tear = FALSE;
+	m_wait = NULL;
+	// 120fps を超えていた頃と同じ。FLIP_DISCARD で interval 0。
+	// 直出しのティアリングは使わない。バッファを画面に固定すると次フレームの描画が揺れる。
+	sd.Flags = 0;
+	sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	sd.BufferCount = 3;
 	hr = f2 ? f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap) : E_FAIL;
-	if (FAILED(hr) && f2) { sd.BufferCount = 2; hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap); }
-	if (FAILED(hr) && f2) { sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; sd.BufferCount = 1; hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap); }
+	if (FAILED(hr) && f2 && m_tear) {
+		m_tear = FALSE;
+		sd.Flags = 0;
+		hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap);
+	}
+	if (FAILED(hr) && f2) {
+		sd.BufferCount = 2;
+		hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap);
+	}
+	if (FAILED(hr) && f2) {
+		m_tear = FALSE;
+		sd.Flags = 0;
+		sd.Scaling = DXGI_SCALING_STRETCH;
+		sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+		sd.BufferCount = 1;
+		hr = f2->CreateSwapChainForHwnd(m_dev, hwnd, &sd, NULL, NULL, &m_swap);
+	}
 	if (f2) f2->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
 	if (xd) {
 		IDXGIDevice1* d1 = NULL;
@@ -856,16 +884,26 @@ BOOL Renderer::CreateTargets()
 		}
 	}
 	if (!m_ptTex) {
-		D3D11_TEXTURE2D_DESC pt = {};
-		pt.Width = PORTRAIT_PX * 6; pt.Height = PORTRAIT_PX * 4; pt.MipLevels = 1; pt.ArraySize = 1; pt.SampleDesc.Count = 1;
-		pt.Format = DXGI_FORMAT_B8G8R8A8_UNORM; pt.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-		if (SUCCEEDED(m_dev->CreateTexture2D(&pt, NULL, &m_ptTex))) {
-			m_dev->CreateRenderTargetView(m_ptTex, NULL, &m_ptRtv);
-			m_dev->CreateShaderResourceView(m_ptTex, NULL, &m_srvPortrait);
-			if (m_ptRtv) { float c[4] = { 0, 0, 0, 0 }; m_ctx->ClearRenderTargetView(m_ptRtv, c); }
+		D3D11_TEXTURE2D_DESC color = {};
+		color.Width = PORTRAIT_PX * 6; color.Height = PORTRAIT_PX * 4; color.MipLevels = 1; color.ArraySize = 1; color.SampleDesc.Count = 1;
+		color.Format = DXGI_FORMAT_B8G8R8A8_UNORM; color.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		D3D11_TEXTURE2D_DESC depth = color;
+		depth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+		for (int pi = 0; pi < TAC_PT_RING; pi++) {
+			if (FAILED(m_dev->CreateTexture2D(&color, NULL, &g_ptRingTex[pi]))) g_ptRingTex[pi] = NULL;
+			else {
+				m_dev->CreateRenderTargetView(g_ptRingTex[pi], NULL, &g_ptRingRtv[pi]);
+				m_dev->CreateShaderResourceView(g_ptRingTex[pi], NULL, &g_ptRingSrv[pi]);
+			}
+			if (FAILED(m_dev->CreateTexture2D(&depth, NULL, &g_ptRingDs[pi]))) g_ptRingDs[pi] = NULL;
+			else m_dev->CreateDepthStencilView(g_ptRingDs[pi], NULL, &g_ptRingDsv[pi]);
+			if (!m_ptTex && g_ptRingRtv[pi] && g_ptRingSrv[pi] && g_ptRingDsv[pi]) {
+				m_ptTex = g_ptRingTex[pi]; m_ptRtv = g_ptRingRtv[pi]; m_srvPortrait = g_ptRingSrv[pi];
+				m_ptDs = g_ptRingDs[pi]; m_ptDsv = g_ptRingDsv[pi]; g_ptRingI = pi;
+				float c0[4] = { 0, 0, 0, 0 };
+				m_ctx->ClearRenderTargetView(m_ptRtv, c0);
+			}
 		}
-		pt.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; pt.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-		if (SUCCEEDED(m_dev->CreateTexture2D(&pt, NULL, &m_ptDs))) m_dev->CreateDepthStencilView(m_ptDs, NULL, &m_ptDsv);
 	}
 	int div = 2;
 	m_blW = max(8, m_w / div); m_blH = max(8, m_h / div);
@@ -1029,12 +1067,11 @@ BOOL Renderer::RefreshSurface()
 
 BOOL Renderer::FrameReady()
 {
-	// 前の絵がまだ画面に出ていない。同じ場面をもう一度積むと GPU が遅れ、次の Present も失敗する。
-	// ここは出し直しだけ。まだ描き中なら、この拍のシーン記録はしない。ゲームの更新は呼び出し側で済んでいる。
-	if (!m_presentBusy) return TRUE;
-	if (!m_swap) { m_presentBusy = FALSE; return TRUE; }
-	Present(0, 0);
-	return !m_presentBusy;
+	return TRUE;
+}
+
+void Renderer::WaitFrame()
+{
 }
 
 // ============================================================ シェーダ・状態
@@ -1256,7 +1293,18 @@ BOOL Renderer::CreateShaders()
 			m_cbCloth = NULL;
 		} else TacCbRingMake(m_dev, g_clothR, bd.ByteWidth);
 		bd.ByteWidth = 16;
-		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_clothGate))) g_clothGate = NULL;
+		{
+			D3D11_BUFFER_DESC gd = bd;
+			gd.ByteWidth = 16;
+			gd.Usage = D3D11_USAGE_IMMUTABLE;
+			gd.CPUAccessFlags = 0;
+			unsigned gate0[4] = {};
+			unsigned gate1[4] = { 1u, 0u, 0u, 0u };
+			D3D11_SUBRESOURCE_DATA sd0 = { gate0, 0, 0 };
+			D3D11_SUBRESOURCE_DATA sd1 = { gate1, 0, 0 };
+			if (FAILED(m_dev->CreateBuffer(&gd, &sd0, &g_clothGateOff))) g_clothGateOff = NULL;
+			if (FAILED(m_dev->CreateBuffer(&gd, &sd1, &g_clothGateOn))) g_clothGateOn = NULL;
+		}
 		static const struct { const char* e; int rid; } sf[2] = {
 			{ "CSSoft", IDR_CSO_TAC_CSSOFT }, { "CSSoftWrite", IDR_CSO_TAC_CSSOFTW } };
 		for (int i = 0; i < 2; i++) {
@@ -1377,12 +1425,11 @@ BOOL Renderer::CreateStates()
 	g_cbPoolI = 0;
 	for (int i = 0; i < TAC_CB_POOL; i++) {
 		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_cbPool[i]))) {
-			for (int j = 0; j < i; j++) TAC_REL(g_cbPool[j]);
-			g_cbPoolN = 0;
+			g_cbPool[i] = NULL;
 			break;
 		}
+		g_cbPoolN++;
 	}
-	if (g_cbPool[0]) g_cbPoolN = TAC_CB_POOL;
 	bd.ByteWidth = 64 * MAXJ;
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbBones))) return FALSE;
 	TacCbRingMake(m_dev, g_boneR, bd.ByteWidth);
@@ -1400,7 +1447,16 @@ BOOL Renderer::CreateStates()
 	m_vbInstBytes = 256u * 1024u;
 	bd.ByteWidth = m_vbInstBytes;
 	m_instPos = 0xFFFFFFF0u;
-	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbInst))) return FALSE;
+	m_vbInst = NULL;
+	for (int ii = 0; ii < TAC_INST_RING; ii++) {
+		g_instAt[ii] = 0xFFFFFFF0u;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_instRing[ii]))) {
+			for (int j = 0; j < ii; j++) TAC_REL(g_instRing[j]);
+			return FALSE;
+		}
+	}
+	m_vbInst = g_instRing[0];
+	g_instSlot = 0;
 	{
 		enum { QN = 8192 };
 		static WORD qix[QN * 6];
@@ -4461,6 +4517,33 @@ static unsigned TacPoseKey(const Pose& p)
 	return h;
 }
 
+static unsigned TacPoseKeyQ(const Pose& p)
+{
+	unsigned h = (unsigned)p.nJ * 2654435761u;
+	int n = p.nJ;
+	if (n > MAXJ) n = MAXJ;
+	for (int i = 0; i < n; i++) {
+		const float* m = p.palette[i].m;
+		// 根に近い骨は 5mm。指先まで 2mm にすると待機の揺れだけで毎フレーム外れる。
+		// 回転は対角の cos ではなく非対角。約 4 度で枠が変わる。
+		const float ts = (i < 4) ? 200.f : 50.f;
+		int x = (int)(m[12] * ts);
+		int y = (int)(m[13] * ts);
+		int z = (int)(m[14] * ts);
+		unsigned r = (unsigned)(int)(m[1] * 16.f);
+		r ^= (unsigned)(int)(m[2] * 16.f) << 5;
+		r ^= (unsigned)(int)(m[4] * 16.f) << 10;
+		r ^= (unsigned)(int)(m[6] * 16.f) << 15;
+		r ^= (unsigned)(int)(m[8] * 16.f) << 20;
+		r ^= (unsigned)(int)(m[9] * 16.f) * 0x9E3779B1u;
+		h ^= (unsigned)x + 0x9e3779b9u + (h << 6) + (h >> 2);
+		h ^= (unsigned)y + 0x9e3779b9u + (h << 6) + (h >> 2);
+		h ^= (unsigned)z + 0x9e3779b9u + (h << 6) + (h >> 2);
+		h ^= r + 0x9e3779b9u + (h << 6) + (h >> 2);
+	}
+	return h ? h : 1u;
+}
+
 static BOOL TacMakeRawVB(ID3D11Device* dev, UINT nv, ID3D11Buffer** vb, ID3D11UnorderedAccessView** uav)
 {
 	if (uav) TAC_REL(*uav);
@@ -4558,9 +4641,6 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		memcpy(&u, &am, 4); key ^= u;
 		key ^= m_cutActorGen * 0x85EBCA6Bu;
 	}
-	SkinOut* so = owner ? TakeSkinOut(owner, src) : NULL;
-	ID3D11Buffer* outVB = (so && so->vb) ? so->vb : src.outVB;
-	ID3D11UnorderedAccessView* outUAV = (so && so->uav) ? so->uav : src.outUAV;
 	auto drawOut = [&](ID3D11Buffer* vb) {
 		if (!vb) return;
 		ID3D11Buffer* saved = base.vb;
@@ -4574,8 +4654,66 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		base.vb = saved;
 		base.stride = savedStride;
 	};
+	const void* skinOwner = owner;
+	int portSlot = m_portraitSlot;
+	if (portSlot < 0) portSlot = 0;
+	if (portSlot >= PORTRAIT_N) portSlot = PORTRAIT_N - 1;
+	unsigned qkey = 0;
+	if (m_inPortrait && owner) {
+		for (int i = 0; i < TAC_SKIN_OUT; i++) {
+			SkinOut& o = m_skinOut[i];
+			if (o.owner == owner && o.src == &src && o.vb && o.frame == m_frame) {
+				drawOut(o.vb);
+				return TRUE;
+			}
+		}
+		for (int i = 0; i < TAC_SKIN_OUT; i++) {
+			SkinOut& o = m_skinOut[i];
+			if (o.src == &src && o.vb && o.frame == m_frame && o.key == key) {
+				drawOut(o.vb);
+				return TRUE;
+			}
+		}
+		skinOwner = &g_portSkinOwn[portSlot];
+		if (g_portSkinSrc[portSlot] != &src) { g_portSkinSrc[portSlot] = &src; g_portSkinQ[portSlot] = 0; }
+		qkey = TacPoseKeyQ(pose);
+		qkey ^= (unsigned)dp.face * 0x9E3779B1u;
+		qkey ^= (unsigned)(int)(dp.blink * 8.f + (dp.blink >= 0.f ? 0.5f : -0.5f)) * 0x85EBCA6Bu;
+		qkey ^= (unsigned)(int)(dp.mouth * 8.f + (dp.mouth >= 0.f ? 0.5f : -0.5f)) * 0xC2B2AE35u;
+		qkey ^= (unsigned)(int)(dp.brow * 8.f + (dp.brow >= 0.f ? 0.5f : -0.5f)) * 0x27D4EB2Fu;
+		qkey ^= (unsigned)(int)(dp.squint * 8.f + (dp.squint >= 0.f ? 0.5f : -0.5f)) * 0x165667B1u;
+		qkey ^= dp.clothTint;
+		qkey ^= (unsigned)dp.skinTone * 0x9E3779B1u;
+		qkey ^= (unsigned)dp.hideMeshHair * 0x85EBCA6Bu;
+		if (!qkey) qkey = 1;
+	}
+	SkinOut* so = skinOwner ? TakeSkinOut(skinOwner, src) : NULL;
+	ID3D11Buffer* outVB = (so && so->vb) ? so->vb : src.outVB;
+	ID3D11UnorderedAccessView* outUAV = (so && so->uav) ? so->uav : src.outUAV;
 	if (so && so->frame == m_frame && so->key == key) { drawOut(so->vb); return TRUE; }
-	TacBrSpan skinSpan(TAC_BR_SKIN);
+	if (m_inPortrait && so && so->vb && so->uav && so->frame != 0 && so->nv == src.gpuNv && skinOwner != owner && g_portSkinQ[portSlot] == qkey && qkey) {
+		D3D11_MAPPED_SUBRESOURCE msB;
+		ID3D11Buffer* skinBone = TacCbAcquire(g_skinBoneR, m_ctx, m_cbSkinBone, msB);
+		if (skinBone) {
+			int nj = pose.nJ;
+			if (nj < 0) nj = 0;
+			if (nj > MAXJ) nj = MAXJ;
+			if (nj) memcpy(msB.pData, pose.palette, sizeof(M4) * (size_t)nj);
+			if (nj < MAXJ) memset((M4*)msB.pData + nj, 0, sizeof(M4) * (size_t)(MAXJ - nj));
+			m_ctx->Unmap(skinBone, 0);
+			if (cloth && owner) {
+				ID3D11Buffer* keepVB = src.outVB;
+				ID3D11UnorderedAccessView* keepUAV = src.outUAV;
+				src.outVB = so->vb; src.outUAV = so->uav;
+				RunCloth(*cloth, owner, src, pose, world, dp);
+				src.outVB = keepVB; src.outUAV = keepUAV;
+			}
+			ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+			m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
+			drawOut(so->vb);
+			return TRUE;
+		}
+	}
 	if (!so && owner && src.outVB && src.gpuSkinFrame == m_frame && src.gpuSkinOwner == owner && src.gpuSkinKey == key) {
 		drawOut(src.outVB);
 		return TRUE;
@@ -4699,6 +4837,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, co
 		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
 	}
 	if (so) { so->frame = m_frame; so->key = key; }
+	if (m_inPortrait && skinOwner != owner && qkey) g_portSkinQ[portSlot] = qkey;
 	else {
 		src.gpuSkinFrame = m_frame;
 		src.gpuSkinKey = key;
@@ -10182,13 +10321,12 @@ static void TacBufCopy(ID3D11DeviceContext* ctx, ID3D11Buffer* dst, UINT dstOff,
 
 static void TacClothGate(ID3D11DeviceContext* ctx, unsigned on)
 {
-	if (!ctx || !g_clothGate) return;
-	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(ctx->Map(g_clothGate, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms)) || !ms.pData) return;
-	unsigned f[4] = { on, 0, 0, 0 };
-	memcpy(ms.pData, f, sizeof(f));
-	ctx->Unmap(g_clothGate, 0);
-	ctx->CSSetConstantBuffers(2, 1, &g_clothGate);
+	// 中身を書き換える枠を共有すると、髪の一括フラグがスカートの計算に混ざる。
+	// 0 と 1 は作ったまま結び替える。
+	if (!ctx) return;
+	ID3D11Buffer* b = on ? g_clothGateOn : g_clothGateOff;
+	if (!b) return;
+	ctx->CSSetConstantBuffers(2, 1, &b);
 }
 
 static BOOL TacClothBatchReady(ID3D11Device* dev)
@@ -10372,7 +10510,6 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	const BOOL canSoft = !m_inPortrait && owner && src.outUAV && ac.softN > 0 && ac.softN <= SOFT_MAX && ac.softVN > 0
 		&& ac.softSRV[0] && ac.softSRV[1] && m_cbSoft && m_csSoft[0] && m_csSoft[1];
 	if (!canSkirt && !canSoft) return;
-	TacBrSpan clothSpan(TAC_BR_CLOTH);
 	int deferCloth = 0;
 	ClothInst* ci = NULL;
 	if (m_inPortrait) {
@@ -10413,7 +10550,8 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	// カットでも風を溜める。1.5m を超える移動だけ、上の判定で置き直す。
 	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
 	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
-	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+	// フレーム時間が跳ねても裾は 1/60 秒を上限に一歩ずつ進める。風の位相だけ時刻に従う。
+	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 60.f);
 	float velUse[3] = { ci->vel[0], ci->vel[1], ci->vel[2] };
 	if (reset) { velUse[0] = velUse[1] = velUse[2] = 0.f; ci->vel[0] = ci->vel[1] = ci->vel[2] = 0.f; }
 	else if (dtRaw > 1e-3f) { TacVel(ci->world, world, dtRaw, velUse); ci->vel[0] = velUse[0]; ci->vel[1] = velUse[1]; ci->vel[2] = velUse[2]; }
@@ -10583,26 +10721,16 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	if (step) {
 		m_ctx->CSSetShader(m_csCloth[0], NULL, 0);
 		m_ctx->Dispatch(((UINT)ac.clothN + 63u) / 64u, 1, 1);
-		// 人数が揃ってから拘束だけ走らせる。描く前に FlushClothPend が書き戻す。
-		if (m_instOn && g_pendN < CLOTH_INST && ci->sb && ci->uav && ac.clothSB[0] && ac.clothSB[2] && src.outUAV) {
-			ClothPend& j = g_pend[g_pendN++];
-			j.ac = &ac;
-			j.ci = ci;
-			j.vert = src.outUAV;
-			j.clothB = clothB;
-			j.boneB = TacCbCur(g_skinBoneR, m_cbSkinBone);
-			j.softB = NULL;
-			j.cloth = 1;
-			j.soft = 0;
-			deferCloth = 1;
-		} else {
+		if (m_csCloth[1]) {
 			m_ctx->CSSetShader(m_csCloth[1], NULL, 0);
 			m_ctx->Dispatch(1, 1, 1);
 		}
 	}
-	if (!deferCloth) {
-	m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
-	m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
+	// 拘束と頂点の書き戻しは、このキャラの定数を書いた直後に行う。
+	// 後でポインタを結び直すと、その枠は次のキャラの Map で中身が入れ替わっている。
+	if (m_csCloth[2]) {
+		m_ctx->CSSetShader(m_csCloth[2], NULL, 0);
+		m_ctx->Dispatch(((UINT)ac.clothVN + 63u) / 64u, 1, 1);
 	}
 		}
 	}
@@ -11534,12 +11662,41 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	if (headJ >= nj) return FALSE;
 	EnsureScalp(model, headJ);
 	unsigned hkey = TacPoseKey(pose) ^ ((unsigned)style * 0x9E3779B1u) ^ ((unsigned)model << 16) ^ (unsigned)headJ ^ (dp.cape ? 0xC0A7E001u : 0u);
-	HairOut* ho = owner ? TakeHairOut(owner) : NULL;
+	HairOut* ho = NULL;
+	const void* hairOwner = owner;
+	int portHair = -1;
+	unsigned hairQ = 0;
+	if (m_inPortrait && owner) {
+		for (int i = 0; i < TAC_HAIR_OUT; i++) {
+			HairOut& o = m_hairOut[i];
+			if (o.owner == owner && o.vb && o.frame == m_frame) { ho = &o; break; }
+		}
+		if (!ho) {
+			for (int i = 0; i < TAC_HAIR_OUT; i++) {
+				HairOut& o = m_hairOut[i];
+				if (o.vb && o.frame == m_frame && o.key == hkey) { ho = &o; break; }
+			}
+		}
+		if (!ho) {
+			int ps = m_portraitSlot;
+			if (ps < 0) ps = 0;
+			if (ps >= PORTRAIT_N) ps = PORTRAIT_N - 1;
+			hairOwner = &g_portHairOwn[ps];
+			portHair = ps;
+			hairQ = TacPoseKeyQ(pose) ^ ((unsigned)style * 0x9E3779B1u) ^ ((unsigned)model << 16) ^ (unsigned)headJ ^ (unsigned)(uintptr_t)owner;
+			if (!hairQ) hairQ = 1;
+		}
+	}
+	if (!ho) ho = hairOwner ? TakeHairOut(hairOwner) : NULL;
 	ID3D11Buffer* hairVB = m_hairVB;
 	ID3D11UnorderedAccessView* hairUAV = m_hairUAV;
 	BOOL hairFresh = TRUE;
 	if (ho && ho->vb && ho->frame == m_frame && ho->key == hkey) {
 		hairVB = ho->vb;
+		hairFresh = FALSE;
+	} else if (portHair >= 0 && ho && ho->vb && ho->frame != 0 && hairQ && g_portHairQ[portHair] == hairQ) {
+		hairVB = ho->vb;
+		hairUAV = ho->uav;
 		hairFresh = FALSE;
 	} else if (ho && ho->uav) {
 		hairVB = ho->vb;
@@ -11673,6 +11830,16 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
 	}
 	if (ho) { ho->frame = m_frame; ho->key = hkey; hairVB = ho->vb; }
+	if (portHair >= 0 && hairQ) {
+		g_portHairQ[portHair] = hairQ;
+		g_portHairPlace[portHair] = hairPlace;
+		g_portHairHave[portHair] = 1;
+	}
+	}
+	if (!hairFresh && portHair >= 0 && ho && ho->uav && g_portHairHave[portHair] && g_portHairQ[portHair] == hairQ) {
+		RunHair(model, style, headJ, pose, world, hairOwner, g_portHairPlace[portHair], pose.palette[headJ], ho->uav, (float)dp.cape, dp.girth, dp.gait, dp.fly, NULL);
+		ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+		m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
 	}
 	if (m_capDraw.vb && m_capDraw.ib && !hostSkull && headJ < pose.nJ) {
 		DrawParams dc = dp;
@@ -11870,41 +12037,62 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	return TRUE;
 }
 
+static int TacNameEq32(const char* a, const char* b)
+{
+	const __m256i x = _mm256_loadu_si256((const __m256i*)a);
+	const __m256i y = _mm256_loadu_si256((const __m256i*)b);
+	const unsigned eqm = (unsigned)_mm256_movemask_epi8(_mm256_cmpeq_epi8(x, y));
+	const unsigned zm = (unsigned)_mm256_movemask_epi8(_mm256_cmpeq_epi8(x, _mm256_setzero_si256()));
+	_mm256_zeroupper();
+	if (!zm) return eqm == 0xFFFFFFFFu;
+	const unsigned zbit = zm & (0u - zm);
+	const unsigned need = zbit | (zbit - 1u);
+	return (eqm & need) == need;
+}
+
 float Renderer::AvatarClothBack(int model, int avatar, float y)
 {
-	struct Hit { int model, avatar; float y, z; };
-	static Hit hit[24];
-	static int hitN = 0;
-	for (int i = 0; i < hitN; i++)
-		if (hit[i].model == model && hit[i].avatar == avatar && hit[i].y == y) return hit[i].z;
-	float z = -1e9f;
-	if (model < 0 || model >= (int)models.size() || avatar <= 0 || m_avaSegN <= 0) z = -1e9f;
-	else {
-	const AvaModel* am = NULL;
-	for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, models[model].name)) { am = &x; break; }
-	if (!am) return -1e9f;
-	int ci = -1;
-	for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
-	if (ci < 0) return -1e9f;
+	struct Keep { int avatar, ci; const AvaCache* ac; unsigned used; };
+	static Keep keep[192][4];
+	static unsigned char turn[192];
+	if (model < 0 || model >= 192 || model >= (int)models.size() || avatar <= 0 || m_avaSegN <= 0) return -1e9f;
 	const AvaCache* ac = NULL;
-	for (const AvaCache& x : m_avaCache) if (x.model == model && x.cos == ci) { ac = &x; break; }
-	if (!ac || ac->backN < 2 || ac->backDy < 1e-5f) return -1e9f;
+	int found = 0;
+	for (int i = 0; i < 4; i++) {
+		const Keep& k = keep[model][i];
+		if (!k.used || k.avatar != avatar) continue;
+		if (k.ac && (k.ac->model != model || k.ac->cos != k.ci)) continue;
+		ac = k.ac;
+		found = 1;
+		break;
+	}
+	if (!found) {
+		const AvaModel* am = NULL;
+		for (const AvaModel& x : m_avaModels) if (TacNameEq32(x.name, models[model].name)) { am = &x; break; }
+		int ci = -1;
+		if (am) {
+			for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
+		}
+		ac = NULL;
+		if (ci >= 0) {
+			for (const AvaCache& x : m_avaCache) if (x.model == model && x.cos == ci) { ac = &x; break; }
+		}
+		Keep& dst = keep[model][turn[model] & 3];
+		turn[model] = (unsigned char)((turn[model] + 1) & 3);
+		dst.avatar = avatar;
+		dst.ci = ci;
+		dst.ac = (ac && ac->backN >= 2 && ac->backDy > 1e-5f) ? ac : NULL;
+		dst.used = 1;
+		ac = dst.ac;
+	}
+	if (!ac) return -1e9f;
 	float t = (y - ac->backY0) / ac->backDy;
 	if (t < 0.f || t > (float)(ac->backN - 1)) return -1e9f;
 	int i = (int)t;
 	if (i < 0) return ac->backZ[0];
 	if (i >= ac->backN - 1) return ac->backZ[ac->backN - 1];
 	float f = t - (float)i;
-	z = ac->backZ[i] * (1.f - f) + ac->backZ[i + 1] * f;
-	}
-	if (hitN < 24) {
-		hit[hitN].model = model;
-		hit[hitN].avatar = avatar;
-		hit[hitN].y = y;
-		hit[hitN].z = z;
-		hitN++;
-	}
-	return z;
+	return ac->backZ[i] * (1.f - f) + ac->backZ[i + 1] * f;
 }
 
 void Renderer::DrawGear(int i, const M4& world, const DrawParams& dp)
@@ -12170,7 +12358,6 @@ void Renderer::BeginFrame()
 {
 	MarkGpuBegin();
 	FlushQueuedDraws();
-	g_uploadNowait = 1;
 	m_avaLoading = 0;
 	m_avaFlashed = FALSE;
 	if (g_avaNeedReset) {
@@ -12690,9 +12877,11 @@ static void* TacRingMap(ID3D11DeviceContext* ctx, ID3D11Buffer* b, UINT cap, UIN
 
 void* Renderer::DynMap(UINT bytes, UINT& off)
 {
+	if (!m_ctx || !m_vbDyn || !bytes || bytes > m_vbDynBytes) return NULL;
 	UINT at = (m_dynPos + 15u) & ~15u;
-	if ((m_dynPos > m_vbDynBytes || at > m_vbDynBytes || bytes > m_vbDynBytes - at) && TacQueueUses(m_vbDyn))
-		FlushQueuedDraws();
+	if (m_dynPos > m_vbDynBytes || at > m_vbDynBytes || bytes > m_vbDynBytes - at) {
+		if (TacQueueUses(m_vbDyn)) FlushQueuedDraws();
+	}
 	return TacRingMap(m_ctx, m_vbDyn, m_vbDynBytes, m_dynPos, bytes, off);
 }
 
@@ -12717,12 +12906,12 @@ static void* TacPtPartMap(ID3D11Device* dev, ID3D11DeviceContext* ctx, UINT byte
 		}
 		D3D11_MAPPED_SUBRESOURCE ms;
 		ms.pData = NULL;
-		HRESULT hr = ctx->Map(g_ptRing[s], 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+		HRESULT hr = ctx->Map(g_ptRing[s], 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
 		if (hr == DXGI_ERROR_WAS_STILL_DRAWING) continue;
 		if (FAILED(hr) || !ms.pData) continue;
 		g_ptPart = g_ptRing[s];
 		off = 0;
-		return ms.pData;
+			return ms.pData;
 	}
 	return NULL;
 }
@@ -12742,12 +12931,138 @@ void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M
 	DrawStatic(d, world, dp);
 }
 
+struct TacOrd { unsigned long long key; unsigned idx; unsigned pad; };
+static_assert(sizeof(TacOrd) == 16, "TacOrd");
+static TacOrd g_tacOrd[TAC_DRAWQ];
+static TacOrd g_tacOrdTmp[TAC_DRAWQ];
+static unsigned char g_tacSeen[TAC_DRAWQ];
+
+static unsigned long long TacMix(unsigned long long h, unsigned long long v)
+{
+	h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+	return h;
+}
+
+static void TacRadix(TacOrd* a, int n)
+{
+	if (n < 2) return;
+	static int hist[256];
+	TacOrd* src = a;
+	TacOrd* dst = g_tacOrdTmp;
+	for (int pass = 0; pass < 8; ++pass) {
+		const int shift = pass * 8;
+		for (int b = 0; b < 256; ++b) hist[b] = 0;
+		for (int i = 0; i < n; ++i) {
+			const __m128i item = _mm_loadu_si128((const __m128i*)(src + i));
+			const unsigned long long key = (unsigned long long)_mm_cvtsi128_si64(item);
+			hist[(key >> shift) & 255u]++;
+			_mm_storeu_si128((__m128i*)(src + i), item);
+		}
+		int sum = 0;
+		for (int b = 0; b < 256; ++b) { int c = hist[b]; hist[b] = sum; sum += c; }
+		for (int i = 0; i < n; ++i) {
+			const __m128i item = _mm_loadu_si128((const __m128i*)(src + i));
+			const unsigned long long key = (unsigned long long)_mm_cvtsi128_si64(item);
+			const unsigned b = (unsigned)((key >> shift) & 255u);
+			_mm_storeu_si128((__m128i*)(dst + hist[b]), item);
+			hist[b]++;
+		}
+		_mm256_zeroupper();
+		TacOrd* sw = src; src = dst; dst = sw;
+	}
+}
+
+static void TacCopyBytes(void* dst, const void* src, size_t n)
+{
+	unsigned char* d = (unsigned char*)dst;
+	const unsigned char* s = (const unsigned char*)src;
+	size_t i = 0;
+	for (; i + 32 <= n; i += 32) {
+		const __m256i v = _mm256_loadu_si256((const __m256i*)(s + i));
+		_mm256_storeu_si256((__m256i*)(d + i), v);
+	}
+	if (i < n) memcpy(d + i, s + i, n - i);
+	_mm256_zeroupper();
+}
+
+static unsigned long long TacDrawKey(const TacDrawCmd& c, const M4& view)
+{
+	unsigned vp = 0;
+	if (c.vpW) {
+		vp = c.vpX / 512u + (c.vpY / 512u) * 6u;
+		if (vp > 31u) vp = 31u;
+	}
+	unsigned long long key = ((unsigned long long)(c.alpha & 1u) << 63)
+		| ((unsigned long long)vp << 58)
+		| (((unsigned long long)((uintptr_t)c.fcb >> 5) & 63ull) << 52);
+	if (!c.alpha) {
+		key |= (unsigned long long)(c.pre & 1u) << 51;
+		unsigned long long h = 0x9E3779B97F4A7C15ull;
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.ps);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.vb);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.ib);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.srv);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.vs);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.hs);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.il);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.rs);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.blend);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.depth);
+		h = TacMix(h, (unsigned long long)(uintptr_t)c.gs);
+		h = TacMix(h, ((unsigned long long)c.nIdx << 32) | c.iBase);
+		h = TacMix(h, ((unsigned long long)c.stride << 32) | c.vbOff);
+		h = TacMix(h, (unsigned)c.topo | ((unsigned long long)c.ibFmt << 16));
+		unsigned tb = 0, ob = 0;
+		memcpy(&tb, &c.obj.tint[0], 4);
+		memcpy(&ob, &c.obj.oc[3], 4);
+		h = TacMix(h, ((unsigned long long)tb << 32) | ob);
+		key |= h & ((1ull << 51) - 1);
+	} else {
+		const float x = c.obj.w.m[12], y = c.obj.w.m[13], z = c.obj.w.m[14];
+		const float vz = view.m[2] * x + view.m[6] * y + view.m[10] * z + view.m[14];
+		int q = (int)(-vz * 32.f) + (1 << 20);
+		if (q < 0) q = 0;
+		if (q > ((1 << 21) - 1)) q = (1 << 21) - 1;
+		key |= (unsigned long long)(unsigned)q;
+	}
+	return key;
+}
+
+static void TacOrderDraws(const M4& view, int n)
+{
+	if (n < 2 || n > TAC_DRAWQ) return;
+	for (int i = 0; i < n; ++i) {
+		g_tacOrd[i].key = TacDrawKey(g_drawQ[i], view);
+		g_tacOrd[i].idx = (unsigned)i;
+	}
+	TacRadix(g_tacOrd, n);
+	memset(g_tacSeen, 0, (size_t)n);
+	for (int i = 0; i < n; ++i) {
+		if (g_tacSeen[i]) continue;
+		if (g_tacOrd[i].idx == (unsigned)i) { g_tacSeen[i] = 1; continue; }
+		TacDrawCmd hold;
+		TacCopyBytes(&hold, &g_drawQ[i], sizeof(hold));
+		int cur = i;
+		for (;;) {
+			if (cur < 0 || cur >= n || g_tacSeen[cur]) break;
+			g_tacSeen[cur] = 1;
+			const unsigned src = g_tacOrd[cur].idx;
+			if (src >= (unsigned)n) break;
+			if (src == (unsigned)i) {
+				TacCopyBytes(&g_drawQ[cur], &hold, sizeof(hold));
+				break;
+			}
+			TacCopyBytes(&g_drawQ[cur], &g_drawQ[src], sizeof(TacDrawCmd));
+			cur = (int)src;
+		}
+	}
+}
+
 void Renderer::FlushQueuedDraws()
 {
 	if (g_hairN > 0 && !g_drawFlush) FlushHairPend();
 	if (g_pendN > 0 && !g_drawFlush) FlushClothPend();
 	if (g_drawN <= 0 || !m_ctx || g_drawFlush) return;
-	TacBrSpan flushSpan(TAC_BR_FLUSH);
 	g_drawFlush = TRUE;
 	// キュー再生中は各コマンドの深度状態を結ぶ。最後のコマンド（たとえば α の水は深度書き込み無し）が
 	// 呼び出し側の m_dsWant を上書きしたまま抜けると、このあとのキャラ一括描画が深度を書かず、
@@ -12768,59 +13083,39 @@ void Renderer::FlushQueuedDraws()
 	ID3D11DepthStencilState* depth = (ID3D11DepthStencilState*)1;
 	ID3D11GeometryShader* gsNow = NULL;
 	D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
-	if (g_drawN > 1) {
-		std::sort(g_drawQ, g_drawQ + g_drawN, [](const TacDrawCmd& a, const TacDrawCmd& b) {
-			if (a.alpha != b.alpha) return a.alpha < b.alpha;
-			if (a.vpY != b.vpY) return a.vpY < b.vpY;
-			if (a.vpX != b.vpX) return a.vpX < b.vpX;
-			if (a.fcb != b.fcb) return (uintptr_t)a.fcb < (uintptr_t)b.fcb;
-			if (a.alpha) return a.seq < b.seq;
-			if (a.pre != b.pre) return a.pre < b.pre;
-			if (a.ps != b.ps) return (uintptr_t)a.ps < (uintptr_t)b.ps;
-			if (a.srv != b.srv) return (uintptr_t)a.srv < (uintptr_t)b.srv;
-			if (a.obj.oc[3] != b.obj.oc[3]) return a.obj.oc[3] < b.obj.oc[3];
-			if (a.vb != b.vb) return (uintptr_t)a.vb < (uintptr_t)b.vb;
-			if (a.ib != b.ib) return (uintptr_t)a.ib < (uintptr_t)b.ib;
-			if (a.rs != b.rs) return (uintptr_t)a.rs < (uintptr_t)b.rs;
-			if (a.blend != b.blend) return (uintptr_t)a.blend < (uintptr_t)b.blend;
-			if (a.depth != b.depth) return (uintptr_t)a.depth < (uintptr_t)b.depth;
-			if (a.hs != b.hs) return (uintptr_t)a.hs < (uintptr_t)b.hs;
-			if (a.vs != b.vs) return (uintptr_t)a.vs < (uintptr_t)b.vs;
-			return a.seq < b.seq;
-		});
-	}
-	const int savedNowait = g_uploadNowait;
-	if (m_inPortrait) g_uploadNowait = 1;
+	if (g_drawN > 1) TacOrderDraws(m_view, g_drawN);
 	// 戦闘の顔は武具の数だけ Map していた。行列はまとめて1回書き、色が同じ描画は定数を出し直さない。
 	BOOL faceInst = FALSE;
 	UINT faceAt = 0;
-	if (m_inPortrait && m_vsB && m_ilB && m_dev && g_drawN > 0 && g_drawN <= 1024) {
-		enum { CAP = 1024u * 64u };
-		if (!g_faceInst) {
-			D3D11_BUFFER_DESC bd = {};
-			bd.ByteWidth = CAP;
-			bd.Usage = D3D11_USAGE_DYNAMIC;
-			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-			if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_faceInst))) g_faceInst = NULL;
-		}
+	if (m_inPortrait && m_vsB && m_ilB && m_dev && g_drawN > 0 && g_drawN <= 4096) {
+		enum { CAP = 4096u * 64u };
 		UINT need = (UINT)g_drawN * 64u;
-		if (g_faceInst && need <= CAP) {
-			UINT at = 0;
+		if (need <= CAP) {
 			ID3D11Buffer* none[2] = { NULL, NULL };
 			UINT z[2] = { 0, 0 };
 			m_ctx->IASetVertexBuffers(0, 2, none, z, z);
-			D3D11_MAPPED_SUBRESOURCE pms;
-			pms.pData = NULL;
-			HRESULT phr = m_ctx->Map(g_faceInst, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &pms);
-			if (phr == DXGI_ERROR_WAS_STILL_DRAWING || FAILED(phr) || !pms.pData) phr = E_FAIL;
-			if (SUCCEEDED(phr) && pms.pData) {
-				BYTE* dst = (BYTE*)pms.pData + at;
+			for (int ntry = 0; ntry < TAC_FACE_RING && !faceInst; ntry++) {
+				int s = g_faceSlot + 1;
+				if (s < 0 || s >= TAC_FACE_RING) s = 0;
+				g_faceSlot = s;
+				if (!g_faceRing[s]) {
+					D3D11_BUFFER_DESC bd = {};
+					bd.ByteWidth = CAP;
+					bd.Usage = D3D11_USAGE_DYNAMIC;
+					bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+					bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+					if (FAILED(m_dev->CreateBuffer(&bd, NULL, &g_faceRing[s]))) { g_faceRing[s] = NULL; continue; }
+				}
+				D3D11_MAPPED_SUBRESOURCE pms;
+				pms.pData = NULL;
+				HRESULT phr = m_ctx->Map(g_faceRing[s], 0, D3D11_MAP_WRITE_DISCARD, 0, &pms);
+				if (FAILED(phr) || !pms.pData) continue;
 				for (int k = 0; k < g_drawN; ++k)
-					memcpy(dst + (size_t)k * 64u, &g_drawQ[k].obj.w, sizeof(M4));
-				m_ctx->Unmap(g_faceInst, 0);
-				g_faceInstAt = at + need;
-				faceAt = at;
+					memcpy((BYTE*)pms.pData + (size_t)k * 64u, &g_drawQ[k].obj.w, sizeof(M4));
+				m_ctx->Unmap(g_faceRing[s], 0);
+				g_faceInst = g_faceRing[s];
+				g_faceInstAt = need;
+				faceAt = 0;
 				faceInst = TRUE;
 			}
 		}
@@ -12981,7 +13276,6 @@ void Renderer::FlushQueuedDraws()
 	}
 	g_drawN = 0;
 	g_drawFlush = FALSE;
-	g_uploadNowait = savedNowait;
 	// 深度状態を呼び出し前へ戻し、GPU の結びも合わせる。これをしないと直後のキャラ描画へ漏れる。
 	m_dsWant = savedWant;
 	{
@@ -13011,7 +13305,7 @@ void Renderer::EnqueueStatic(const GpuMesh& m, const M4& world, const DrawParams
 	c.nIdx = m.nIdx;
 	c.iBase = m.iBase;
 	c.stride = m.stride;
-	c.vbOff = (m.vb == m_vbDyn) ? m_dynOff : 0;
+	c.vbOff = ((m.vb == m_vbDyn)) ? m_dynOff : 0;
 	c.ibFmt = m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 	BOOL tess = !outline && m_allowTess && !m_inPortrait && !m_reflecting && m_pass != PASS_SHADOW
 		&& TacQRich(m_quality, m_qPlus) && m_vsT && m_hsT && m_dsT;
@@ -13049,7 +13343,7 @@ void Renderer::DrawStaticNow(const GpuMesh& m, const M4& world, const DrawParams
 {
 	if (!m.vb || !m.ib) return;
 	m_allowTess = !(dp.outline > 0.f) && !dp.noTess;
-	UINT st = m.stride, off = (m.vb == m_vbDyn) ? m_dynOff : 0;
+	UINT st = m.stride, off = ((m.vb == m_vbDyn)) ? m_dynOff : 0;
 	const BOOL fast = g_fastDraw != 0;
 	if (m_dsWant && !(fast && g_now.depth == m_dsWant)) {
 		m_ctx->OMSetDepthStencilState(m_dsWant, 0);
@@ -13185,7 +13479,7 @@ BOOL Renderer::PushInst(const GpuMesh& m, const M4& world, const DrawParams& dp)
 {
 	if (!m_vsB || !m_ilB || !m_vbInst || !m.vb || !m.ib || m.i32) return FALSE;
 	if (m.stride && m.stride != sizeof(VtxS)) return FALSE;
-	if (m.vb == m_vbDyn || m.vb == m_hairVB) return FALSE;
+	if ((m.vb == m_vbDyn) || m.vb == m_hairVB) return FALSE;
 	if (m_inPortrait || m_psOverride || dp.dissolve > 0.001f || dp.mode != 0.f) return FALSE;
 	if (((dp.tint >> 24) & 255) < 255) return FALSE;
 	if (m_pass == PASS_SHADOW && ((dp.tint >> 24) & 255) < 128) return FALSE;
@@ -13222,22 +13516,22 @@ void Renderer::FlushInst()
 	if (g_hairN > 0) FlushHairPend();
 	if (g_pendN > 0) FlushClothPend();
 	if (g_igN <= 0 || !m_ctx || !m_vsB || !m_ilB) { g_igN = 0; return; }
-	TacBrSpan instSpan(TAC_BR_INST);
 	int nGrp = g_igN;
 	g_igN = 0;
 	int ord[TAC_INST_G];
 	for (int i = 0; i < nGrp; ++i) ord[i] = i;
 	if (nGrp > 1) {
-		std::sort(ord, ord + nGrp, [](int ia, int ib) {
-			const TacInstG& a = g_ig[ia];
-			const TacInstG& b = g_ig[ib];
-			if (a.alpha != b.alpha) return a.alpha < b.alpha;
-			if (a.tex != b.tex) return a.tex < b.tex;
-			if (a.dp.matSlice != b.dp.matSlice) return a.dp.matSlice < b.dp.matSlice;
-			if (a.vb != b.vb) return (uintptr_t)a.vb < (uintptr_t)b.vb;
-			if (a.ib != b.ib) return (uintptr_t)a.ib < (uintptr_t)b.ib;
-			return a.seq < b.seq;
-		});
+		for (int i = 0; i < nGrp; ++i) {
+			const TacInstG& g = g_ig[i];
+			unsigned long long h = TacMix(0x9E3779B97F4A7C15ull, (unsigned)g.tex);
+			h = TacMix(h, (unsigned)g.dp.matSlice);
+			h = TacMix(h, (unsigned long long)(uintptr_t)g.vb);
+			h = TacMix(h, (unsigned long long)(uintptr_t)g.ib);
+			g_tacOrd[i].key = ((unsigned long long)(g.alpha & 1) << 63) | (h & 0x7FFFFFFFFFFFFFFFull);
+			g_tacOrd[i].idx = (unsigned)i;
+		}
+		TacRadix(g_tacOrd, nGrp);
+		for (int i = 0; i < nGrp; ++i) ord[i] = (int)g_tacOrd[i].idx;
 	}
 	// 連続する1人描画は、同じ深度・合成・同じバッファを出し直さない。絵は同じ。
 	g_fastDraw = 1;
@@ -13245,6 +13539,7 @@ void Renderer::FlushInst()
 	BOOL gpu = FALSE;
 	ID3D11Buffer* boundVb = NULL;
 	ID3D11Buffer* boundIb = NULL;
+	ID3D11Buffer* boundInst = NULL;
 	ID3D11ShaderResourceView* boundSrv = (ID3D11ShaderResourceView*)1;
 	ID3D11PixelShader* curPs = (ID3D11PixelShader*)1;
 	ID3D11RasterizerState* curRs = (ID3D11RasterizerState*)1;
@@ -13266,6 +13561,7 @@ void Renderer::FlushInst()
 			gpu = FALSE;
 			boundVb = NULL;
 			boundIb = NULL;
+			boundInst = NULL;
 			boundSrv = (ID3D11ShaderResourceView*)1;
 			curPs = (ID3D11PixelShader*)1;
 			curRs = (ID3D11RasterizerState*)1;
@@ -13289,43 +13585,29 @@ void Renderer::FlushInst()
 			gpu = TRUE;
 		}
 		UINT need = (UINT)g.n * 64u;
-		UINT at = m_instPos;
+		int slot = g_instSlot;
+		if (slot < 0 || slot >= TAC_INST_RING) slot = 0;
+		UINT pos = g_instAt[slot];
 		D3D11_MAP mt = D3D11_MAP_WRITE_NO_OVERWRITE;
-		UINT mapFlags = 0;
-		if (need > m_vbInstBytes || at > m_vbInstBytes || at + need > m_vbInstBytes) {
+		UINT at = pos;
+		if (need > m_vbInstBytes || pos > m_vbInstBytes || pos + need > m_vbInstBytes) {
+			slot = (slot + 1) % TAC_INST_RING;
+			g_instSlot = slot;
 			at = 0;
 			mt = D3D11_MAP_WRITE_DISCARD;
-			mapFlags = D3D11_MAP_FLAG_DO_NOT_WAIT;
 		}
+		ID3D11Buffer* b = g_instRing[slot];
+		if (!b) b = m_vbInst;
 		D3D11_MAPPED_SUBRESOURCE ms;
 		ms.pData = NULL;
-		HRESULT hr = m_ctx->Map(m_vbInst, 0, mt, mapFlags, &ms);
-		if (FAILED(hr) && mt == D3D11_MAP_WRITE_DISCARD && hr != DXGI_ERROR_WAS_STILL_DRAWING)
-			hr = m_ctx->Map(m_vbInst, 0, mt, 0, &ms);
-		if (FAILED(hr) || !ms.pData) {
-			GpuMesh one;
-			one.vb = g.vb;
-			one.ib = g.ib;
-			one.nIdx = g.nIdx;
-			one.stride = g.stride;
-			one.tex = g.tex;
-			one.i32 = g.i32;
-			one.iBase = g.iBase;
-			for (int ii = 0; ii < g.n; ++ii) DrawStaticNow(one, g.w[ii], g.dp);
-			gpu = FALSE;
-			boundVb = NULL;
-			boundIb = NULL;
-			boundSrv = (ID3D11ShaderResourceView*)1;
-			curPs = (ID3D11PixelShader*)1;
-			curRs = (ID3D11RasterizerState*)1;
-			curBlend = (ID3D11BlendState*)1;
-			curDepth = (ID3D11DepthStencilState*)1;
-			continue;
-		}
+		if (!b || FAILED(m_ctx->Map(b, 0, mt, 0, &ms)) || !ms.pData) continue;
+		m_vbInst = b;
+		g_instAt[slot] = at + need;
+		m_instPos = g_instAt[slot];
 		AvxCopy((BYTE*)ms.pData + at, g.w, (size_t)g.n * sizeof(M4));
 		m_ctx->Unmap(m_vbInst, 0);
 		m_instPos = at + need;
-		if (boundVb != g.vb || boundIb != g.ib) {
+		if (boundVb != g.vb || boundIb != g.ib || boundInst != m_vbInst) {
 			ID3D11Buffer* bufs[2] = { g.vb, m_vbInst };
 			UINT st2[2] = { g.stride, 64u };
 			UINT off2[2] = { 0, at };
@@ -13333,6 +13615,7 @@ void Renderer::FlushInst()
 			m_ctx->IASetIndexBuffer(g.ib, g.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
 			boundVb = g.vb;
 			boundIb = g.ib;
+			boundInst = m_vbInst;
 		} else {
 			UINT st1 = 64;
 			m_ctx->IASetVertexBuffers(1, 1, &m_vbInst, &st1, &at);
@@ -13817,39 +14100,25 @@ void Renderer::PortraitFeatherUpload()
 	UINT bytes = 0;
 	for (int s = 0; s < PORTRAIT_N; s++)
 		bytes += (UINT)(g_pf[s].n[0] + g_pf[s].n[1]) * (UINT)sizeof(TacPPt);
-	if (!bytes || bytes > (UINT)PF_REG_BYTES || !m_dev || !m_ctx) return;
-	static ID3D11Buffer* s_buf = NULL;
-	if (!s_buf) {
-		D3D11_BUFFER_DESC bd = {};
-		bd.ByteWidth = (UINT)PF_REG_BYTES;
-		bd.Usage = D3D11_USAGE_DYNAMIC;
-		bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-		bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &s_buf))) { s_buf = NULL; return; }
-	}
-	ID3D11Buffer* none = NULL;
-	UINT z = 0;
-	m_ctx->IASetVertexBuffers(0, 1, &none, &z, &z);
-	D3D11_MAPPED_SUBRESOURCE ms;
-	ms.pData = NULL;
-	HRESULT hr = m_ctx->Map(s_buf, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
-	if (FAILED(hr) || !ms.pData) return;
-	BYTE* dst = (BYTE*)ms.pData;
+	if (!bytes || !m_dev || !m_ctx) return;
+	UINT off = 0;
+	void* dst = TacPtPartMap(m_dev, m_ctx, bytes, off);
+	if (!dst || !g_ptPart) return;
+	BYTE* w = (BYTE*)dst;
 	UINT local = 0;
 	for (int s = 0; s < PORTRAIT_N; s++) {
 		PfSlot& d = g_pf[s];
-		d.vb = s_buf;
+		d.vb = g_ptPart;
 		d.ok = 1;
 		for (int bi = 0; bi < 2; bi++) {
 			if (d.n[bi] <= 0) continue;
 			UINT nb = (UINT)d.n[bi] * (UINT)sizeof(TacPPt);
-			if (local + nb > bytes) { d.n[bi] = 0; continue; }
-			memcpy(dst + local, d.pt[bi], nb);
-			d.off[bi] = local;
+			memcpy(w + local, d.pt[bi], nb);
+			d.off[bi] = off + local;
 			local += nb;
 		}
 	}
-	m_ctx->Unmap(s_buf, 0);
+	m_ctx->Unmap(g_ptPart, 0);
 }
 
 void Renderer::PortraitFeatherDraw(int slot)
@@ -13857,6 +14126,13 @@ void Renderer::PortraitFeatherDraw(int slot)
 	if (slot < 0 || slot >= PORTRAIT_N || !m_inPortrait || !m_gsP || !m_vsPT || !m_ilPT) return;
 	PfSlot& d = g_pf[slot];
 	if (!d.ok || !d.vb) return;
+	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
+	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
+	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
+	d.basis = MIdent();
+	d.basis.m[0] = right.x; d.basis.m[1] = right.y; d.basis.m[2] = right.z;
+	d.basis.m[4] = up.x; d.basis.m[5] = up.y; d.basis.m[6] = up.z;
+	d.basis.m[8] = fwd.x; d.basis.m[9] = fwd.y; d.basis.m[10] = fwd.z;
 	DrawParams bdp;
 	for (int bi = 0; bi < 2; bi++) {
 		if (d.n[bi] <= 0) continue;
@@ -13914,7 +14190,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			float rad = sz * 1.8f;
 			if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
 			if (rad < 0.2f) rad = 0.2f;
-			if (!mapXform && !InView(pos, rad)) continue;
+			if (!mapXform && p.shape != 8 && !InView(pos, rad)) continue;
 			float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 			int bi = p.add ? 1 : 0;
 			if (vn[bi] >= PN) continue;
@@ -13946,6 +14222,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->RSSetState(m_rsNone);
 		m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 		m_bindKey = -1;
+		int drew = 0;
 		for (int b = 0; b < 2; b++) {
 			if (vn[b] <= 0) continue;
 			UINT bytes = (UINT)vn[b] * (UINT)sizeof(PPt);
@@ -13957,6 +14234,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			m_ctx->IASetVertexBuffers(0, 1, &g_ptPart, &st, &off);
 			m_ctx->OMSetBlendState(b ? m_bsAdd : m_bsPremul, NULL, 0xFFFFFFFF);
 			m_ctx->Draw((UINT)vn[b], 0);
+			drew++;
 		}
 		TacGsOff(m_ctx);
 		ID3D11Buffer* gnone[2] = { NULL, NULL };
@@ -13968,7 +14246,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 		m_dsWant = m_dsWrite;
 		m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
-		return;
+		if (drew || (vn[0] + vn[1] <= 0)) return;
 	}
 	// 顔の羽は点のまま積む。広げるのはワールドと同じジオメトリシェーダ。CPU で四角にすると、GPU が前の顔を読み終わるまで待つ。
 	if (m_inPortrait && m_gsP && m_vsPT && m_ilPT) {
@@ -13990,7 +14268,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 			float rad = sz * 1.8f;
 			if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
 			if (rad < 0.2f) rad = 0.2f;
-			if (!mapXform && !InView(pos, rad)) continue;
+			if (!mapXform && p.shape != 8 && !InView(pos, rad)) continue;
 			float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 			int bi = p.add ? 1 : 0;
 			if (vn[bi] >= PN) continue;
@@ -14055,7 +14333,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		float rad = sz * 1.8f;
 		if (p.stretch > 0.f) rad += Len(vel) * p.stretch;
 		if (rad < 0.2f) rad = 0.2f;
-		if (!mapXform && !InView(pos, rad)) continue;
+		if (!mapXform && p.shape != 8 && !InView(pos, rad)) continue;
 		float a = p.a * Clampf(p.life / max(1e-4f, p.max) * 3.f, 0, 1) * Clampf(t * 8.f + .1f, 0, 1);
 		V3 ax = right * sz, ay = up * sz;
 		if (p.shape == 8) {
@@ -14134,6 +14412,7 @@ void Renderer::DrawParticles(const Particle* ps, int nPart, const M4* mapXform)
 		if (m_inPortrait) {
 			dst = TacPtPartMap(m_dev, m_ctx, (UINT)bytes, off);
 			if (dst) partVB = g_ptPart;
+			else continue;
 		}
 		if (!dst) {
 			dst = DynMap((UINT)bytes, off);
@@ -14191,7 +14470,7 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 		if (!b) return NULL;
 		D3D11_MAPPED_SUBRESOURCE mapped;
 		mapped.pData = NULL;
-		HRESULT hr = m_ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+		HRESULT hr = m_ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
 		if ((FAILED(hr) || !mapped.pData) && must)
 			hr = m_ctx->Map(b, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
 		return (SUCCEEDED(hr) && mapped.pData) ? mapped.pData : NULL;
@@ -15974,8 +16253,6 @@ BOOL Renderer::CreaturePosedExtent(int model, const Pose& pose, float& cx, float
 BOOL Renderer::BeginPortrait(int slot)
 {
 	if (!m_ptRtv || !m_ptDsv || slot < 0 || slot >= PORTRAIT_N) return FALSE;
-	// 顔が終わるまで、定数の Map は空いている枠へ回して待たない。
-	g_uploadNowait = 1;
 	if (!m_inPortrait) {
 		FlushQueuedDraws();
 	m_inPortrait = TRUE;
@@ -15989,9 +16266,31 @@ BOOL Renderer::BeginPortrait(int slot)
 		SetShadowEnabled(FALSE);
 		m_fcb.fxMore[3] = 1.f;
 		// 直前の HUD が顔の絵を読んだまま同じ面へ描くと、ドライバが GPU の完了を待って両方空く。
+		// 描かない枠の絵は、1 枚前の面から写して残す。
 		ID3D11ShaderResourceView* unbPortrait[2] = { NULL, NULL };
 		m_ctx->PSSetShaderResources(0, 2, unbPortrait);
 		m_lastPsSrv = NULL;
+		{
+			int prev = g_ptRingI;
+			int s = -1;
+			for (int n = 0; n < TAC_PT_RING; n++) {
+				int k = prev + 1 + n;
+				if (k >= TAC_PT_RING) k -= TAC_PT_RING;
+				if (k < 0) k += TAC_PT_RING;
+				if (g_ptRingRtv[k] && g_ptRingSrv[k] && g_ptRingDsv[k]) { s = k; break; }
+			}
+			if (s >= 0) {
+				g_ptRingI = s;
+				m_ptTex = g_ptRingTex[s]; m_ptRtv = g_ptRingRtv[s]; m_srvPortrait = g_ptRingSrv[s];
+				m_ptDs = g_ptRingDs[s]; m_ptDsv = g_ptRingDsv[s];
+				if (prev >= 0 && prev != s && g_ptRingTex[prev] && g_ptRingTex[s])
+					m_ctx->CopyResource(g_ptRingTex[s], g_ptRingTex[prev]);
+				else if (prev != s) {
+					float zc[4] = { 0, 0, 0, 0 };
+					m_ctx->ClearRenderTargetView(m_ptRtv, zc);
+				}
+			}
+		}
 		m_ctx->OMSetRenderTargets(1, &m_ptRtv, m_ptDsv);
 		m_ctx->ClearDepthStencilView(m_ptDsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 		ID3D11ShaderResourceView* sh = NULL;
@@ -16469,13 +16768,15 @@ void Renderer::Present()
 	Present(1, 0);
 }
 
-void Renderer::Present(int, int)
+void Renderer::Present(int, int wantHz)
 {
-	MarkGpuEnd();
 	FlushQueuedDraws();
+	MarkGpuEnd();
 	if (!m_swap) return;
 	m_presentBusy = FALSE;
 	const BOOL vis = m_hwnd && ::IsWindowVisible(m_hwnd);
+	(void)wantHz;
+	// 直出しはしない。Present が 0.1ms で返ると、待ちが次フレームの描画へ移って揺れる。
 	HRESULT hr = m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
 	if (hr == DXGI_ERROR_WAS_STILL_DRAWING) {
 		m_presentBusy = TRUE;

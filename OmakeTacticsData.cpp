@@ -288,6 +288,20 @@ static int SameStep(int h0, int h1, int units)
 	if (dy < 0.f) dy = -dy;
 	return dy <= (float)units * kHStep + 0.02f;
 }
+static const float kDeckClearY = 3.2f;
+static int HForClear(int hLo, float minY)
+{
+	int h = hLo + 1;
+	if (h < 1) h = 1;
+	while (h < MAXH_SPIRAL && (TacHToY(h) - TacHToY(hLo)) < minY) h++;
+	return h;
+}
+static int HasWorldClear(int h0, int h1, float minY)
+{
+	float dy = TacHToY(h0) - TacHToY(h1);
+	if (dy < 0.f) dy = -dy;
+	return dy + 0.02f >= minY;
+}
 int ThemeNameTx(int th) { return TX_TH_PLAINS + Clampi(th, 0, TH_COUNT - 1); }
 int StatNameTx(int s) { return TX_ST_HP + Clampi(s, 0, S_COUNT - 1); }
 
@@ -802,7 +816,7 @@ static void OpenBeside(Map& m, int cx, int cz)
 		int clip = 0;
 		if (n.nLay >= 2) {
 			for (int L = 1; L < CellLayN(n); L++)
-				if (abs(LayerHt(n, L) - h) < 8) clip = 1;
+				if (!HasWorldClear(LayerHt(n, L), h, kDeckClearY)) clip = 1;
 		}
 		if (!blocked && !clip) continue;
 		int keep = (!blocked && TerrainInfo(n.t).costFoot < 99) ? (int)n.h : h;
@@ -1805,22 +1819,28 @@ static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& p
 			}
 			sh[i] = (short)hi;
 		}
-		// 立体交差は坂のまま 8 段以上離す。段差の上限は 1 のままなので、道は切れない。
-		for (int pass = 0; pass < 3; pass++) {
+		// 立体交差は世界高さで人+翼が通るだけ離す。整数8段は高所で 36cm しかなく天井になる。
+		for (int pass = 0; pass < 8; pass++) {
 			for (int i = 24; i < ns; i++) {
-				int clash = 0;
+				int clash = 0, otherH = (int)sh[i];
 				for (int j = 0; j < i - 16; j++) {
 					if (abs((int)sx[i] - (int)sx[j]) <= 2 && abs((int)sz[i] - (int)sz[j]) <= 2
-						&& abs((int)sh[i] - (int)sh[j]) < 8) { clash = 1; break; }
+						&& !HasWorldClear((int)sh[i], (int)sh[j], kDeckClearY)) {
+						clash = 1; otherH = (int)sh[j]; break;
+					}
 				}
 				if (!clash) continue;
-				int dir = climbUp ? 1 : -1;
-				int k0 = i - 12;
+				int want = HForClear(otherH, kDeckClearY);
+				if ((int)sh[i] >= want) continue;
+				int climb = want - (int)sh[i];
+				int k0 = i - climb;
 				if (k0 < 1) k0 = 1;
 				for (int k = k0; k <= i; k++) {
 					int prev = (int)sh[k - 1];
-					sh[k] = (short)Clampi((int)sh[k] + dir, prev - 1, prev + 1);
-					sh[k] = (short)Clampi((int)sh[k], 2, hTop);
+					int nxt = prev + 1;
+					if (nxt > want) nxt = want;
+					sh[k] = (short)Clampi(nxt, 2, hTop);
+					sh[k] = (short)Clampi((int)sh[k], prev - 1, prev + 1);
 				}
 				for (int k = i + 1; k < ns; k++) {
 					int prev = (int)sh[k - 1];
@@ -2199,7 +2219,6 @@ static int DeckCellOk(const Map& m, int x, int z)
 static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int wantSky)
 {
 	(void)tp; (void)ax; (void)az;
-	const int gap = 6;
 	struct Run { short n, vert, lane, start; };
 	Run runs[160];
 	int nr = 0;
@@ -2260,10 +2279,16 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 		auto undo = [&](int mark) {
 			while (kn > mark) { kn--; m.c[keep[kn].z][keep[kn].x] = keep[kn].c; }
 		};
+		int base0 = (int)m.c[zs[0]][xs[0]].h;
+		int gap = HForClear(base0, kDeckClearY) - base0;
+		if (gap < 8) gap = 8;
+		int nRamp = gap / 2;
+		if (nRamp < 3) nRamp = 3;
+		if (n < nRamp * 2 + 4) continue;
 		int doSky = (wantSky && skies < 2) ? 1 : 0;
 		int ndeck = 0, gotSky = 0;
-		int i0 = (n >= 10) ? 2 : 1;
-		int i1 = (n >= 10) ? n - 2 : n - 1;
+		int i0 = nRamp - 1;
+		int i1 = n - (nRamp - 1);
 		for (int i = i0; i < i1; i++) {
 			for (int side = 0; side < 2; side++) {
 				int cx = xs[i] + ox * side, cz = zs[i] + oz * side;
@@ -2273,8 +2298,14 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 				Cell& c = m.c[cz][cx];
 				int base = (int)c.h;
 				int skyHere = (doSky && i > n / 5 && i < (n * 4) / 5) ? 1 : 0;
-				LayerSet(c, 1, T_HILL, base + gap);
-				if (skyHere) { LayerSet(c, 2, T_RUINS, base + gap * 2); gotSky = 1; }
+				int g1 = HForClear(base, kDeckClearY) - base;
+				if (g1 < gap) g1 = gap;
+				LayerSet(c, 1, T_HILL, base + g1);
+				if (skyHere) {
+					int g2 = HForClear(base + g1, kDeckClearY) - base;
+					LayerSet(c, 2, T_RUINS, base + g2);
+					gotSky = 1;
+				}
 				c.prop = PK_NONE;
 				ndeck++;
 			}
@@ -2284,33 +2315,46 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 		if (m.nP > 0 && m.nE > 0)
 			wasReach = FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0]) ? 1 : 0;
 		auto putStair = [&](int hx, int hz, int hh) -> int {
-			if (!Map::In(hx, hz) || hh < 1 || hh > 250) return 0;
+			if (!Map::In(hx, hz) || hh < 1 || hh > MAXH_SPIRAL) return 0;
 			for (int i = 0; i < kn; i++) if (keep[i].x == hx && keep[i].z == hz) return 0;
 			const Cell& c = m.c[hz][hx];
 			if (c.nLay >= 2 || c.gimm || c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM || c.t == T_MOUNTAIN || c.t == T_ROCK || c.t == T_DOOR || c.t == T_BRIDGE) return 0;
 			if (gShapeOn && !gShape[hz][hx]) return 0;
 			hold(hx, hz);
 			Cell& w = m.c[hz][hx];
-			w.t = T_HILL; w.h = (BYTE)hh; w.nLay = 1; w.prop = PK_NONE; w.gparam = 0;
+			w.t = T_HILL; w.h = (WORD)hh; w.nLay = 1; w.prop = PK_NONE; w.gparam = 0;
 			ClearDecks(w);
-			w.t = T_HILL; w.h = (BYTE)hh; w.nLay = 1;
+			w.t = T_HILL; w.h = (WORD)hh; w.nLay = 1;
 			return 1;
 		};
-		auto ramp = [&](int lowI, int highI, int deckI) -> int {
-			if (lowI < 0 || highI < 0 || deckI < 0 || deckI >= n) return 0;
-			if (m.c[zs[deckI]][xs[deckI]].nLay < 2) return 0;
-			int h1 = LayerHt(m.c[zs[deckI]][xs[deckI]], 1);
-			if (h1 < 6) return 0;
+		int deckH = 0;
+		for (int i = i0; i < i1; i++) if (m.c[zs[i]][xs[i]].nLay >= 2) {
+			deckH = LayerHt(m.c[zs[i]][xs[i]], 1);
+			break;
+		}
+		int groundH = base0;
+		if (deckH > groundH + 2) {
 			int mark = kn;
-			if (!putStair(xs[lowI], zs[lowI], h1 - 4) || !putStair(xs[highI], zs[highI], h1 - 2)) { undo(mark); return 0; }
+			int okRamp = 1;
+			for (int s = 1; s < nRamp && okRamp; s++) {
+				int hh = groundH + s * 2;
+				if (hh >= deckH) hh = deckH - 2;
+				if (hh < 1) hh = 1;
+				if (!putStair(xs[s - 1], zs[s - 1], hh)) okRamp = 0;
+			}
+			for (int s = 1; s < nRamp && okRamp; s++) {
+				int hh = groundH + (nRamp - s) * 2;
+				if (hh >= deckH) hh = deckH - 2;
+				if (hh < 1) hh = 1;
+				int idx = n - s;
+				if (idx < i1 || idx >= n) continue;
+				if (!putStair(xs[idx], zs[idx], hh)) okRamp = 0;
+			}
 			int reach = 1;
-			if (wasReach && m.nP > 0 && m.nE > 0)
+			if (okRamp && wasReach && m.nP > 0 && m.nE > 0)
 				reach = FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0]) ? 1 : 0;
-			if (!reach) { undo(mark); return 0; }
-			return 1;
-		};
-		if (i0 >= 2) ramp(0, 1, i0);
-		if (n - i1 >= 2) ramp(n - 1, n - 2, i1 - 1);
+			if (!okRamp || !reach) undo(mark);
+		}
 		if (gotSky) {
 			auto climbSky = [&](int skyIdx, int dir) {
 				for (int side = 0; side < 2; side++) {
@@ -2323,17 +2367,12 @@ static void StampCaves(Map& m, Rng& r, const ThemeParam& tp, int ax, int az, int
 						if (!Map::In(x, z) || m.c[z][x].nLay != 2) return 0;
 						return &m.c[z][x];
 					};
-					Cell* a = at(skyIdx + dir);
-					Cell* b = at(skyIdx + dir * 2);
-					if (a && b) {
-						if (LayerHt(*b, 1) < h2 - 4) LayerSet(*b, 1, LayerTr(*b, 1), h2 - 4);
-						if (LayerHt(*a, 1) < h2 - 2) LayerSet(*a, 1, LayerTr(*a, 1), h2 - 2);
-					} else if (a) {
-						int step = LayerHt(*a, 1) + 2;
-						if (step < h2 - 2) {
-							LayerSet(*a, 1, LayerTr(*a, 1), step);
-							if (LayerHt(m.c[cz][cx], 2) > step + 2) LayerSet(m.c[cz][cx], 2, LayerTr(m.c[cz][cx], 2), step + 2);
-						}
+					for (int s = 1; s < nRamp; s++) {
+						Cell* a = at(skyIdx + dir * s);
+						if (!a) break;
+						int hh = h2 - s * 2;
+						if (hh < 1) break;
+						if (hh > LayerHt(*a, 1)) LayerSet(*a, 1, LayerTr(*a, 1), hh);
 					}
 				}
 			};
@@ -2384,18 +2423,18 @@ static void StampDeckPreset(Map& m, Rng& r, int ground, int preset)
 		x = nx; z = nz;
 		int h = prevH;
 		if (down) {
-			if (layer < prevL && h > 1) h = prevH - 1;
-		} else if (layer > prevL || (i % 4) == 0) {
-			if (h < MAXH) h = prevH + 1;
+			if (h > 2) h = prevH - 1;
+		} else if ((i % 2) == 0) {
+			if (h < 240) h = prevH + 1;
 		}
 		Cell& c = m.c[z][x];
 		if (c.t == T_VOID || c.t == T_CHASM) c.t = (BYTE)ground;
-		for (int L = 0; L <= layer; L++) {
-			int hh = h - (layer - L);
-			if (hh < 1) hh = 1;
-			LayDeck(c, L, ground, hh);
-		}
-		prevH = h;
+		int tr = FootPassable((int)c.t) ? (int)c.t : ground;
+		ClearDecks(c);
+		c.t = (BYTE)tr;
+		c.h = (WORD)Clampi(h, 1, MAXH_SPIRAL);
+		c.nLay = 1;
+		prevH = (int)c.h;
 		prevL = layer;
 	}
 	(void)r;
@@ -5560,6 +5599,18 @@ static int WarpSkillFor(int cls)
 	return SKL_WARP0 + line;
 }
 
+static int EvoKeepNext(int cls, EvoOption out[4], int n)
+{
+	int want = ClassInfo(cls).tier + 1;
+	if (want < 2 || want > 20 || n <= 0) return n;
+	int w = 0;
+	for (int k = 0; k < n; k++) {
+		if (ClassInfo(out[k].target).tier != want) continue;
+		if (w != k) out[w] = out[k];
+		w++;
+	}
+	return w;
+}
 int EvoOptions(int cls, EvoOption out[4], int secret)
 {
 	int n = 0;
@@ -5577,7 +5628,7 @@ int EvoOptions(int cls, EvoOption out[4], int secret)
 			n++;
 		}
 		if (n == 0 && secret) return HidOffer(cls, out);
-		return n;
+		return EvoKeepNext(cls, out, n);
 	}
 	int line = LegacyLine(cls);
 	if (line >= 0) {
@@ -5590,14 +5641,14 @@ int EvoOptions(int cls, EvoOption out[4], int secret)
 				out[n].needGroup = -1;
 				n++;
 			}
-			if (n > 0) return n;
+			if (n > 0) return EvoKeepNext(cls, out, n);
 		}
 	}
 	for (int i = 0; i < (int)_countof(kEvo); i++) {
 		if (kEvo[i].from != cls) continue;
 		for (int k = 0; k < 4; k++) if (kEvo[i].o[k].target >= 0 && n < 4) out[n++] = kEvo[i].o[k];
 	}
-	return n;
+	return EvoKeepNext(cls, out, n);
 }
 
 bool EvoMainEligible(const CharData& c)
@@ -5716,14 +5767,19 @@ void JobPathText(const CharData& c, wchar_t* out, int cap)
 	int cn = 0;
 	for (int i = 0; i < n && cn < JOB_STEP_N; i++) cls[cn++] = JobSlot(c, i);
 	if (cn == 0 || cls[cn - 1] != c.cls) {
-		if (cn < JOB_STEP_N) cls[cn++] = c.cls;
+		int lastT = cn > 0 ? ClassInfo(cls[cn - 1]).tier : 0;
+		int nowT = ClassInfo(c.cls).tier;
+		if (cn > 0 && nowT <= lastT) cls[cn - 1] = c.cls;
+		else if (cn < JOB_STEP_N) cls[cn++] = c.cls;
 		else cls[cn - 1] = c.cls;
 	}
 	for (int i = 0; i < cn; i++) {
 		const wchar_t* nm = ClassTitle(cls[i]);
 		if (!nm || !nm[0]) nm = TT(ClassInfo(cls[i]).nameTx);
 		wchar_t bit[80];
-		swprintf_s(bit, TT(TX_JOB_NTH), i + 1, nm);
+		int nthNo = ClassInfo(cls[i]).tier;
+		if (nthNo < 1) nthNo = i + 1;
+		swprintf_s(bit, TT(TX_JOB_NTH), nthNo, nm);
 		if (i && wcslen(out) + 3 < (size_t)cap) wcscat_s(out, cap, L" → ");
 		if (wcslen(out) + wcslen(bit) + 1 < (size_t)cap) wcscat_s(out, cap, bit);
 	}
@@ -5756,6 +5812,12 @@ static void JobPathNote(CharData& c, int from, int to, int replaceTip)
 		return;
 	}
 	if (JobSlot(c, n - 1) == to) return;
+	int lastT = ClassInfo(JobSlot(c, n - 1)).tier;
+	int toT = ClassInfo(to).tier;
+	if (toT <= lastT) {
+		JobSlotSet(c, n - 1, to);
+		return;
+	}
 	if (n < JOB_STEP_N) JobSlotSet(c, n, to);
 }
 // CharLevelUp と同じく成長率を2倍し、端数はレベルをまたいで積む。画面を開くたびに振らない。
@@ -5940,6 +6002,8 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 		c.trialFrom = old;
 		c.trialLv = c.lv > 0 ? c.lv : 1;
 		JobPathNote(c, old, target, 0);
+	} else {
+		JobPathNote(c, old, target, 1);
 	}
 	// 転職前に覚えたスキルはそのまま残し、新しい職業で到達している分を足す。
 	int inherited = 0;
@@ -13066,13 +13130,24 @@ bool JobLineFar(int root, int cls)
 int JobWrongStep(const CharData& c)
 {
 	if (!c.used) return -1;
+	int n = 0;
+	for (; n < JOB_STEP_N && JobSlot(c, n) >= 0; n++) {}
+	int ct = ClassInfo(c.cls).tier;
+	for (int i = 1; i < n; i++) {
+		int a = JobSlot(c, i - 1), b = JobSlot(c, i);
+		if (a >= 0 && b >= 0 && a != b && ClassInfo(a).tier == ClassInfo(b).tier && ClassInfo(b).tier >= 2)
+			return i;
+	}
+	if (n >= 1) {
+		int last = JobSlot(c, n - 1);
+		if (last >= 0 && last != c.cls && ClassInfo(last).tier == ct && ct >= 2)
+			return n - 1;
+	}
 	int root = c.jobPath[0];
 	if (root < 0 || JobLineOf(root) < 0) return -1;
 	int steps = JobStepsForLevel(c.lv);
 	if (steps > JOB_STEP_N) steps = JOB_STEP_N;
 	if (steps < 2) return -1;
-	int n = 0;
-	for (; n < JOB_STEP_N && JobSlot(c, n) >= 0; n++) {}
 	int limit = n < steps ? n : steps;
 	for (int i = 1; i < limit; i++)
 		if (JobLineFar(root, JobSlot(c, i))) return i;
@@ -13154,6 +13229,12 @@ static bool JobRailFix(CharData& c)
 	int cls = c.cls;
 	if (cls >= 0 && cls < 1024 && par[cls] != -2) {
 		if (JobPathWalkOk(c)) return false;
+		int pn = JobPathCount(c);
+		if (pn >= 1) {
+			int last = JobSlot(c, pn - 1);
+			if (last >= 0 && last != c.cls && ClassInfo(last).tier == ClassInfo(c.cls).tier)
+				return false;
+		}
 		JobRailWrite(c, cls, par);
 		return true;
 	}

@@ -227,8 +227,13 @@ END_MESSAGE_MAP()
 BOOL CTacView::CreateView(CWnd* parent, const CRect& rc)
 {
 	const CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(NULL, IDC_ARROW), NULL, NULL);
-	return CreateEx(0, cls, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-		rc, parent, 0x7A01);
+	CRect scr = rc;
+	if (parent) parent->ClientToScreen(&scr);
+	// 転送用ビットマップを残す。直出しにすると Present はすぐ返るが、次の描画が
+	// バッファの解放待ちで 10ms と 30ms を行き来する。
+	return CreateEx(WS_EX_NOPARENTNOTIFY, cls, L"",
+		WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+		scr, parent, 0);
 }
 
 void CTacView::Down(int btn, CPoint pt)
@@ -307,6 +312,7 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_TAC_PACE, OnTacPace)
 	ON_MESSAGE(WM_TAC_DESTROY, OnTacDestroy)
 	ON_WM_SIZE()
+	ON_WM_MOVE()
 	ON_WM_ENTERSIZEMOVE()
 	ON_WM_EXITSIZEMOVE()
 	ON_WM_NCHITTEST()
@@ -421,7 +427,9 @@ void COmakeTacticsDlg::LayoutView()
 	GetClientRect(&rc);
 	rc.top += CCC_GetCustomCaptionHeight(m_hWnd);
 	if (rc.bottom < rc.top + 8) rc.bottom = rc.top + 8;
-	m_view.SetWindowPos(NULL, rc.left, rc.top, rc.Width(), rc.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
+	CRect scr = rc;
+	ClientToScreen(&scr);
+	m_view.SetWindowPos(NULL, scr.left, scr.top, scr.Width(), scr.Height(), SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 	if (rc.Width() != m_viewW || rc.Height() != m_viewH) {
 		m_viewW = rc.Width();
 		m_viewH = rc.Height();
@@ -500,7 +508,6 @@ void COmakeTacticsDlg::ApplyWinMode()
 	if (!m_gameOk || !GetSafeHwnd() || m_sizing) return;
 	int mode = otac::TacWinMode(m_game.Save());
 	if (m_winApplied == mode) {
-		SyncBorderlessZ();
 		if (mode == 2 && m_fg && !IsIconic() && !m_exclFail && !m_game.Exclusive()) {
 			if (!m_game.SetExclusive(TRUE)) m_exclFail = TRUE;
 		}
@@ -565,8 +572,7 @@ void COmakeTacticsDlg::PollPad(float dt)
 {
 	PadState p;
 	TacReadPad(m_hWnd, p);
-	const BOOL fg = (::GetForegroundWindow() == m_hWnd);
-	if (!fg) { memset(&p, 0, sizeof(p)); p.hat = -1; }
+	if (!m_fg) { memset(&p, 0, sizeof(p)); p.hat = -1; }
 	m_game.OnPad(p, dt);
 }
 
@@ -587,40 +593,21 @@ DWORD WINAPI COmakeTacticsDlg::PaceThread(LPVOID param)
 {
 	COmakeTacticsDlg* d = (COmakeTacticsDlg*)param;
 	if (!d) return 0;
-	HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-	if (!timer) timer = CreateWaitableTimerW(NULL, TRUE, NULL);
-	LARGE_INTEGER freq, next, now;
-	QueryPerformanceFrequency(&freq);
-	QueryPerformanceCounter(&next);
 	for (;;) {
 		HANDLE stop = d->m_paceStop;
 		if (!stop || WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) break;
-		int hz = (int)d->m_paceHz;
-		if (hz < 15) hz = 15;
-		if (hz > TAC_HZ_MAX) hz = TAC_HZ_MAX;
-		const LONGLONG period = freq.QuadPart / hz;
-		QueryPerformanceCounter(&now);
-		next.QuadPart += period;
-		if (next.QuadPart < now.QuadPart)
-			next = now;
-		else if (timer) {
-			const LONGLONG remain = next.QuadPart - now.QuadPart;
-			LARGE_INTEGER due;
-			due.QuadPart = -(LONGLONG)((remain * 10000000ULL + (ULONGLONG)freq.QuadPart / 2)
-				/ (ULONGLONG)freq.QuadPart);
-			if (due.QuadPart >= 0) due.QuadPart = -1;
-			if (SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) {
-				HANDLE w[2] = { timer, stop };
-				DWORD cap = (DWORD)((remain * 1000) / freq.QuadPart) + 4;
-				if (cap < 1) cap = 1;
-				if (cap > 80) cap = 80;
-				if (WaitForMultipleObjects(2, w, FALSE, cap) == WAIT_OBJECT_0 + 1) break;
-			}
-		}
 		if (d->m_destroying) break;
 		d->KickPace();
+		HANDLE done = d->m_paceDone;
+		if (!done) {
+			if (WaitForSingleObject(stop, 8) == WAIT_OBJECT_0) break;
+			continue;
+		}
+		HANDLE w[2] = { done, stop };
+		DWORD r = WaitForMultipleObjects(2, w, FALSE, INFINITE);
+		if (r == WAIT_OBJECT_0 + 1) break;
+		if (d->m_destroying) break;
 	}
-	if (timer) CloseHandle(timer);
 	return 0;
 }
 
@@ -629,6 +616,8 @@ void COmakeTacticsDlg::StartPace()
 	if (m_paceThread) return;
 	if (!m_paceStop) m_paceStop = CreateEventW(NULL, TRUE, FALSE, NULL);
 	if (m_paceStop) ResetEvent(m_paceStop);
+	if (!m_paceDone) m_paceDone = CreateEventW(NULL, FALSE, FALSE, NULL);
+	if (m_paceDone) ResetEvent(m_paceDone);
 	m_paceHz = TAC_HZ_MAX;
 	m_paceThread = CreateThread(NULL, 256u * 1024u, PaceThread, this, 0, NULL);
 }
@@ -636,6 +625,7 @@ void COmakeTacticsDlg::StartPace()
 void COmakeTacticsDlg::StopPace()
 {
 	if (m_paceStop) SetEvent(m_paceStop);
+	if (m_paceDone) SetEvent(m_paceDone);
 	if (m_paceThread) {
 		WaitForSingleObject(m_paceThread, INFINITE);
 		CloseHandle(m_paceThread);
@@ -644,6 +634,10 @@ void COmakeTacticsDlg::StopPace()
 	if (m_paceStop) {
 		CloseHandle(m_paceStop);
 		m_paceStop = NULL;
+	}
+	if (m_paceDone) {
+		CloseHandle(m_paceDone);
+		m_paceDone = NULL;
 	}
 }
 
@@ -691,10 +685,12 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	static int windowCheckFlag = 0;
 	if (m_destroying || m_inPace || !m_gameOk || m_sizing) {
 		InterlockedExchange(&m_pacePosted, 0);
+		if (m_paceDone && !m_inPace) SetEvent(m_paceDone);
 		return 0;
 	}
 	m_inPace = TRUE;
 	// 描画中に次の拍が来たら捨てず、終わった直後に続ける。捨てると 16ms 超過が 33ms 空きになり 30 と 60 を往復する。
+	// ここでフレームを連ねない。Present は待たずに返るので、連ねると待ちが次の描画へ入り GPU が空く。
 	InterlockedExchange(&m_pacePosted, 0);
 	DrainInput();
 	LARGE_INTEGER now;
@@ -708,6 +704,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	m_paceHz = hz;
 	if (windowCheckFlag == 0) {
 		m_fg = (::GetForegroundWindow() == m_hWnd);
+		SyncBorderlessZ();
 		{
 			static int pri = -1;
 			int want = m_fg ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL;
@@ -721,12 +718,7 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	windowCheckFlag++;
 	windowCheckFlag = windowCheckFlag % 10;
 	if (!IsIconic() && IsWindowVisible()) {
-		LARGE_INTEGER a0, a1, af;
-		QueryPerformanceCounter(&a0);
 		if (!TacAudioOnThread()) TacAudioPump();
-		QueryPerformanceCounter(&a1);
-		QueryPerformanceFrequency(&af);
-		if (m_gameOk) m_game.SetAudioMs(af.QuadPart ? (float)((double)(a1.QuadPart - a0.QuadPart) * 1000.0 / (double)af.QuadPart) : 0.f);
 		PollPad(dt);
 		PullImeToGame();
 		m_game.Tick(dt);
@@ -742,25 +734,29 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	}
 	m_inPace = FALSE;
 	InterlockedExchange(&m_pacePosted, 0);
+	if (m_paceDone) SetEvent(m_paceDone);
 	return 0;
 }
 
 void COmakeTacticsDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
-	if (nType == SIZE_MINIMIZED) return;
+	if (nType == SIZE_MINIMIZED) {
+		if (m_view.GetSafeHwnd()) m_view.ShowWindow(SW_HIDE);
+		return;
+	}
 	if (m_sizing) {
-		if (m_view.GetSafeHwnd()) {
-			CRect rc;
-			GetClientRect(&rc);
-			int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-			if (cap > 0 && cap < rc.Height()) rc.top += cap;
-			m_view.SetWindowPos(NULL, rc.left, rc.top, rc.Width(), rc.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
-		}
+		LayoutView();
 		return;
 	}
 	LayoutView();
 	StoreWindowRect();
+}
+
+void COmakeTacticsDlg::OnMove(int, int)
+{
+	if (IsIconic()) return;
+	LayoutView();
 }
 
 void COmakeTacticsDlg::OnEnterSizeMove()

@@ -5937,7 +5937,6 @@ static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int
 
 void Game::DrawBattle3D()
 {
-	TacBrLap(TAC_BR_PREP);
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	m_r.SetSceneShift(MIdent());
@@ -6152,9 +6151,6 @@ void Game::DrawBattle3D()
 		if (foeGone(i) || (m_b.u[i].team != TEAM_PLAYER && m_b.u[i].dissolve >= 1.f) || !nearCam(m_b.u[i])) continue;
 		ActorPose(m_act[i], m_lib, m_r);
 	}
-	TacBrLap(TAC_BR_POSE);
-	RenderPortraits();
-	TacBr().t = TacBrNow();
 	float shR = min(30.f, m_camDist * 1.35f + 6.f);
 	auto inLight = [&](const Unit& u) -> BOOL {
 		int sp = UnitSpan(u);
@@ -6188,7 +6184,6 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	}
-	TacBrLap(TAC_BR_SH);
 	{
 		V3 look = m_camTarget + v3(0, .4f, 0);
 		BOOL reflectBusy = m_phase == PH_MOVING || m_phase == PH_E_MOVE || m_phase == PH_ACTION || m_phase == PH_INTRO || m_shake > 0.02f;
@@ -6224,7 +6219,6 @@ void Game::DrawBattle3D()
 			s_tz = m_camTarget.z;
 		}
 	}
-	TacBrLap(TAC_BR_REF);
 	m_r.BeginMainPass();
 	{
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -6355,7 +6349,6 @@ void Game::DrawBattle3D()
 			if (t >= 0) MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, link);
 		}
 	}
-	TacBrLap(TAC_BR_LAND);
 	// 足元リング。敵は未発見でも出す。今見ている床と違う階は半透明で、床に隠さない。
 	m_r.BeginInstBatch();
 	for (int i = 0; i < m_b.nUnits; i++) {
@@ -6462,7 +6455,6 @@ void Game::DrawBattle3D()
 		}
 		m_r.EndInstBatch();
 	}
-	TacBrLap(TAC_BR_RING);
 	for (int pass = 0; pass < 2; pass++) {
 		if (pass == 1) m_r.BeginInstBatch();
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -6600,7 +6592,6 @@ void Game::DrawBattle3D()
 		}
 	}
 	m_r.EndInstBatch();
-	TacBrLap(TAC_BR_ACT);
 	DrawDebris();
 	if (m_fairyFxT > 0.f) {
 		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
@@ -6625,7 +6616,6 @@ void Game::DrawBattle3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 	DrawGust();
 	m_r.DrawWxGpu();
-	TacBrLap(TAC_BR_FX);
 }
 
 // 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
@@ -7326,7 +7316,6 @@ static void CutLeaveCam(int fam, float u, V3 focus, float h, V3 posA, V3 posD, V
 
 void Game::DrawCutIn3D()
 {
-	TacBrLap(TAC_BR_PREP);
 	m_r.SetTheme(m_b.map.theme);
 	m_r.SetStageId(m_b.stage);
 	Env e;
@@ -7647,8 +7636,6 @@ void Game::DrawCutIn3D()
 	};
 	for (int k = 0; k < nId; k++) if (ids[k] >= 0) ActorPose(m_act[ids[k]], m_lib, m_r);
 	if (m_sumOn) ActorPose(m_sumAct, m_lib, m_r);
-	RenderPortraits();
-	TacBr().t = TacBrNow();
 	auto sumWorld = [&]() {
 		return ActorWorld(m_sumAct, m_sumPos, m_sumYaw);
 	};
@@ -7841,7 +7828,6 @@ void Game::DrawCutIn3D()
 	m_r.SetCutActors(FALSE);
 	m_r.SetSceneShift(MIdent());
 	m_r.SetCutDeck(-1);
-	TacBrLap(TAC_BR_ACT);
 }
 
 // 職歴の行数に合わせたカードの高さ。room を超えない。戻り値の高さと行数は描画側と同じ式。
@@ -10539,19 +10525,18 @@ void Game::DrawPromoteOffer()
 	BOOL grace = m_promoAsk == 2 && u.ch.trialFrom >= 0;
 	int tgt[5];
 	int nt = 0;
-	int revert = -1;
+	int stayCls = (grace && u.ch.cls >= 0) ? u.ch.cls : -1;
 	EvoOption opt[4];
 	int no = EvoOptions(grace ? u.ch.trialFrom : u.ch.cls, opt, 1);
 	for (int k = 0; k < no && nt < 4; k++) {
 		if (grace && opt[k].target == u.ch.cls) continue;
 		tgt[nt++] = opt[k].target;
 	}
-	if (grace && u.ch.trialFrom != u.ch.cls) revert = u.ch.trialFrom;
 	float wPre = min(U(760.f), (float)m_w - U(24));
 	wchar_t jlines[8][120];
 	int jn = SplitJobPath(m_r, u.ch, wPre - U(36), U(13), 8, jlines);
 	float histH = jn > 0 ? jn * (U(13) + 4.f) + U(8) : 0.f;
-	int rows = nt + (revert >= 0 ? 1 : 0);
+	int rows = nt + (stayCls >= 0 ? 1 : 0);
 	float w = min(U(760.f), (float)m_w - U(24));
 	float briefPx = U(13);
 	float briefLine = briefPx * 1.55f + 4.f;
@@ -10626,10 +10611,16 @@ void Game::DrawPromoteOffer()
 		}
 		ty += row;
 	}
-	if (revert >= 0) {
+	if (stayCls >= 0) {
 		m_btnSfx = -2;
-		if (Btn(ID_BT_PROMO0 + 4, x + U(16), ty, w - U(32), U(34), TT(TX_EV_REVERT), TRUE, FALSE, U(16))) {
-			take(revert);
+		wchar_t stayLb[96];
+		swprintf_s(stayLb, L"%s(%s)", TT(TX_EV_REVERT), ClassName(u.ch.cls));
+		if (Btn(ID_BT_PROMO0 + 4, x + U(16), ty, w - U(32), U(34), stayLb, TRUE, FALSE, U(16))) {
+			// 文言どおり今の職を確定する。trialFrom に戻すと1次職へ落ちる。
+			u.ch.trialFrom = -1;
+			u.ch.trialLv = 0;
+			TacSfx(TS_GET);
+			AdvanceLevelUp();
 			return;
 		}
 	}
