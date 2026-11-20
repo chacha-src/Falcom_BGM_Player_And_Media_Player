@@ -2674,6 +2674,85 @@ static M4 CachedBind(const Model& m, int j)
 	return s.inv[j];
 }
 
+void PortraitVisFill(const Renderer& r, const Actor& a, float time, DrawParams& d)
+{
+	BOOL hum = a.model >= 0 && a.model < (int)r.models.size() && strncmp(r.models[a.model].name, "Hum", 3) == 0;
+	if (!hum) return;
+	d.face = a.face;
+	d.clothHue = a.hue;
+	float blinkSeed = a.blinkSeed;
+	if (blinkSeed <= 0.f && a.poseHold == 0) blinkSeed = 0.31f + a.idleSeed;
+	d.blink = HumanBlink(time, blinkSeed);
+	if (a.recoil > 0.08f) d.blink = max(d.blink, Clampf(a.recoil * 1.45f, 0.f, 0.94f));
+	float mouth = 0.f, brow = 0.f, squint = 0.f;
+	int c = a.clip;
+	BOOL cast = c == CL_CAST_SHOOT || c == CL_CAST_RAISE || c == CL_CAST_LONG || c == CL_THROW || c == CL_USE;
+	BOOL bow = c == CL_1H_SHOOT || c == CL_2H_SHOOT;
+	BOOL melee = c == CL_1H_CHOP || c == CL_1H_SLICE || c == CL_1H_STAB || c == CL_2H_CHOP || c == CL_2H_SPIN || c == CL_PUNCH;
+	BOOL heal = c == CL_CAST_RAISE;
+	if (a.skillPose >= 0) {
+		const SkillDef& sd = SkillInfo(a.skillPose);
+		if (sd.kind == SK_HEAL) heal = TRUE;
+		if (sd.kind == SK_MAGIC || sd.kind == SK_BUFF) cast = TRUE;
+	}
+	if (c == CL_DEATH || a.poseHold == 2) {
+		d.blink = max(d.blink, 0.96f);
+		mouth = 0.42f; brow = -0.25f;
+	} else if (a.poseHold == 3) {
+		d.blink = max(d.blink, 0.92f);
+	} else if (c == CL_HIT_A || c == CL_HIT_B) {
+		d.blink = max(d.blink, 0.55f);
+		squint = 0.8f; mouth = -0.2f; brow = -0.75f;
+	} else if (c == CL_STUN || c == CL_CONFUSE) {
+		squint = 0.4f; mouth = 0.28f; brow = 0.1f;
+	} else if (c == CL_TAUNT || c == CL_CHEER) {
+		mouth = 0.5f + 0.28f * sinf(a.t * 7.5f);
+		brow = 0.42f;
+	} else if (bow) {
+		squint = 0.78f; brow = -0.62f; mouth = -0.18f;
+	} else if (cast) {
+		float talk = 0.5f + 0.5f * sinf(time * 10.5f + a.idleSeed * 5.f);
+		float word = 0.5f + 0.5f * sinf(time * 6.2f + 1.3f);
+		mouth = 0.12f + talk * word * (heal ? 0.42f : 0.62f);
+		squint = heal ? 0.12f : (c == CL_CAST_SHOOT ? 0.48f : 0.28f);
+		brow = heal ? 0.38f : (c == CL_CAST_LONG ? 0.22f : -0.08f);
+	} else if (melee) {
+		float swing = sinf(a.t * 7.f);
+		mouth = swing > 0.15f ? 0.5f : -0.06f;
+		brow = -0.7f; squint = 0.3f;
+	} else if (c == CL_BLOCK) {
+		brow = -0.45f; squint = 0.4f; mouth = -0.12f;
+	} else if (c == CL_DODGE || c == CL_JUMP || a.wingHop > 0.05f) {
+		brow = 0.18f; mouth = 0.22f; squint = 0.12f;
+	} else if (c == CL_WALK || c == CL_RUN) {
+		brow = -0.12f; squint = 0.1f;
+		mouth = 0.05f * sinf(time * 2.2f + a.idleSeed);
+	} else {
+		mouth = 0.035f * sinf(time * 1.6f + a.idleSeed * 3.f);
+		if (c == CL_IDLE_LOOK || c == CL_IDLE_GLANCE_L || c == CL_IDLE_GLANCE_R) brow = 0.22f;
+	}
+	d.mouth = mouth; d.brow = brow; d.squint = squint;
+	d.sex = a.female ? 2 : 1;
+	const Model* humM = &r.models[a.model];
+	BOOL digitBody = (strncmp(humM->name, "HumF", 4) == 0 || strncmp(humM->name, "HumM", 4) == 0) && humM->name[4] >= '0' && humM->name[4] <= '9';
+	d.skinTone = 0;
+	if (digitBody) {
+		int ix = humM->name[4] - '0';
+		if (ix >= 0 && ix < MODEL_N) d.skinTone = ix + 1;
+	} else if (!strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing")) d.skinTone = 4;
+	else if (!strcmp(humM->name, "HumMedieval")) d.skinTone = 5;
+	else if (!strcmp(humM->name, "HumWitch")) d.skinTone = 6;
+	d.hideMeshHair = a.hair > 0 ? 1 : 0;
+	int avaId = a.avatar;
+	if (avaId <= 0) {
+		const BOOL mal = strncmp(humM->name, "HumM", 4) == 0 || !strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing");
+		const BOOL fem = strncmp(humM->name, "HumF", 4) == 0 || !strcmp(humM->name, "HumMedieval") || !strcmp(humM->name, "HumWitch");
+		if (mal) avaId = 9;
+		else if (fem) avaId = 12;
+	}
+	d.clothTint = avaId > 0 ? a.avaTint : 0;
+}
+
 BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
 	if (a.proc == 3) {
@@ -2693,63 +2772,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			d.rim = 0.04f;
 			// 服の色は染め色の頂点だけ。シェーダの色相回転は肌まで回すので使わない。
 			d.hue = 0;
-			d.clothHue = a.hue;
-			d.face = a.face;
-			float blinkSeed = a.blinkSeed;
-			if (blinkSeed <= 0.f && a.poseHold == 0) blinkSeed = 0.31f + a.idleSeed;
-			d.blink = HumanBlink(time, blinkSeed);
-			if (a.recoil > 0.08f) d.blink = max(d.blink, Clampf(a.recoil * 1.45f, 0.f, 0.94f));
-			{
-				float mouth = 0.f, brow = 0.f, squint = 0.f;
-				int c = a.clip;
-				BOOL cast = c == CL_CAST_SHOOT || c == CL_CAST_RAISE || c == CL_CAST_LONG || c == CL_THROW || c == CL_USE;
-				BOOL bow = c == CL_1H_SHOOT || c == CL_2H_SHOOT;
-				BOOL melee = c == CL_1H_CHOP || c == CL_1H_SLICE || c == CL_1H_STAB || c == CL_2H_CHOP || c == CL_2H_SPIN || c == CL_PUNCH;
-				BOOL heal = c == CL_CAST_RAISE;
-				if (a.skillPose >= 0) {
-					const SkillDef& sd = SkillInfo(a.skillPose);
-					if (sd.kind == SK_HEAL) heal = TRUE;
-					if (sd.kind == SK_MAGIC || sd.kind == SK_BUFF) cast = TRUE;
-				}
-				if (c == CL_DEATH || a.poseHold == 2) {
-					d.blink = max(d.blink, 0.96f);
-					mouth = 0.42f; brow = -0.25f;
-				} else if (a.poseHold == 3) {
-					d.blink = max(d.blink, 0.92f);
-				} else if (c == CL_HIT_A || c == CL_HIT_B) {
-					d.blink = max(d.blink, 0.55f);
-					squint = 0.8f; mouth = -0.2f; brow = -0.75f;
-				} else if (c == CL_STUN || c == CL_CONFUSE) {
-					squint = 0.4f; mouth = 0.28f; brow = 0.1f;
-				} else if (c == CL_TAUNT || c == CL_CHEER) {
-					mouth = 0.5f + 0.28f * sinf(a.t * 7.5f);
-					brow = 0.42f;
-				} else if (bow) {
-					squint = 0.78f; brow = -0.62f; mouth = -0.18f;
-				} else if (cast) {
-					float talk = 0.5f + 0.5f * sinf(time * 10.5f + a.idleSeed * 5.f);
-					float word = 0.5f + 0.5f * sinf(time * 6.2f + 1.3f);
-					mouth = 0.12f + talk * word * (heal ? 0.42f : 0.62f);
-					squint = heal ? 0.12f : (c == CL_CAST_SHOOT ? 0.48f : 0.28f);
-					brow = heal ? 0.38f : (c == CL_CAST_LONG ? 0.22f : -0.08f);
-				} else if (melee) {
-					float swing = sinf(a.t * 7.f);
-					mouth = swing > 0.15f ? 0.5f : -0.06f;
-					brow = -0.7f; squint = 0.3f;
-				} else if (c == CL_BLOCK) {
-					brow = -0.45f; squint = 0.4f; mouth = -0.12f;
-				} else if (c == CL_DODGE || c == CL_JUMP || a.wingHop > 0.05f) {
-					brow = 0.18f; mouth = 0.22f; squint = 0.12f;
-				} else if (c == CL_WALK || c == CL_RUN) {
-					brow = -0.12f; squint = 0.1f;
-					mouth = 0.05f * sinf(time * 2.2f + a.idleSeed);
-				} else {
-					mouth = 0.035f * sinf(time * 1.6f + a.idleSeed * 3.f);
-					if (c == CL_IDLE_LOOK || c == CL_IDLE_GLANCE_L || c == CL_IDLE_GLANCE_R) brow = 0.22f;
-				}
-				d.mouth = mouth; d.brow = brow; d.squint = squint;
-			d.sex = a.female ? 2 : 1;
-			}
+			PortraitVisFill(r, a, time, d);
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 			d.noTess = 1;

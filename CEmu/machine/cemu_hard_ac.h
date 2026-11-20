@@ -591,6 +591,7 @@ public:
 	int AcHotchase() const;
 	void AcHotchaseMix(int16_t* stereo, int frames);
 	int AcGinganin() const;
+	int Msgundam() const;
 	struct mc6809* NamcoM6809Cpu() { return namcoM6809_; }
 	uint8_t NamcoM6809Read8(uint16_t addr);
 	void NamcoM6809Write8(uint16_t addr, uint8_t v);

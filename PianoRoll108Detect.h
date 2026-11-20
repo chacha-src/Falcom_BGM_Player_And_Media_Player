@@ -202,6 +202,8 @@ namespace PianoRoll108
         // 歌声は一人。直前のメロディ f0 と、途切れたフレーム数。
         float* melodyHz = nullptr;
         int* melodyMiss = nullptr;
+        // 連続 NMF 活性・自己説明率の時間積分に使う解析ホップ(ms)。
+        float dtMs = 16.0f;
     };
 
     inline int KeyFromHzTune(float hz, float tuneSemis)
@@ -287,6 +289,31 @@ namespace PianoRoll108
     {
         static PickScratch s;
         return s;
+    }
+
+    struct TemporalPickState
+    {
+        float hSmooth[COUNT];
+        float shSmooth[COUNT];
+        void clear() { memset(this, 0, sizeof(*this)); }
+        void decaySilence()
+        {
+            for (int i = 0; i < COUNT; ++i) {
+                hSmooth[i] *= 0.30f;
+                shSmooth[i] *= 0.50f;
+            }
+        }
+    };
+
+    inline TemporalPickState& PickTemporal()
+    {
+        static TemporalPickState s{};
+        return s;
+    }
+
+    inline void ResetPickState()
+    {
+        PickTemporal().clear();
     }
 
     inline float HarmCentsTol(int n, bool subtract)
@@ -387,15 +414,19 @@ namespace PianoRoll108
         memset(seriesHz, 0, sizeof(seriesHz));
         memset(seriesA, 0, sizeof(seriesA));
         int nPicked = 0;
-        // スパース KL-NMF + 帯域バランス白色化 + ドラム基底辞書による基音分離。
-        // ドラムの平坦な広帯域ノイズはオクターブ別ドラム基底 u[d] が吸収し、
-        // 正音の倍音エネルギーは各鍵の調波テンプレート W[k] が基音側へ集約する。
+        // 欠損倍音計上・2段音色適応 KL-NMF + 連続活性の非対称時間積分 + 隣接次数コム排除。
+        // 1) 欠けている低次倍音(h=2..4、特に奇数次 h=3)を列和に残し、下オクターブ誤認を抑える。
+        // 2) 第2パスで強い中低音の減衰傾きを観測倍音の中央値から適応させ、歪みギター等の高次倍音を親へ吸収する。
+        // 3) 自己説明率(share)と帯域別の非対称時間積分で倍音ゴーストの居座りを断ち、スマートな線にする。
         {
             static constexpr int NMF_K0 = MUSIC_LOW_FLOOR; // 28 (E1)
             static constexpr int NMF_K1 = EDGE_HI;         // 96 (C7)
             static constexpr int NMF_NK = NMF_K1 - NMF_K0; // 68
             static constexpr int NMF_ND = 7;               // 6 オクターブ + 全体広帯域
-            static constexpr int NMF_MAX_E = 10;
+            static constexpr int NMF_MAX_E = 12;
+
+            TemporalPickState& tp = PickTemporal();
+            const float dtMs = (p.dtMs >= 4.0f && p.dtMs <= 200.0f) ? p.dtMs : 16.0f;
 
             float bMaxN = 0.0f;
             if (p.burstHz && p.burstAmp && p.nBurst > 0) {
@@ -437,11 +468,11 @@ namespace PianoRoll108
                 const float mix = (relShortN(k) >= 0.14f) ? 0.30f : 0.55f;
                 const float ampC = (1.0f - mix) * a + mix * (a < b * 1.25f ? a : b * 1.25f);
                 const float nfVal = (floorPow[k] > 0.0f) ? sqrtf(floorPow[k]) : 0.0f;
-                const float fSub = (k < BASS_END) ? 0.68f : ((k >= MID_END) ? 0.80f : 0.72f);
+                const float fSub = (k < BASS_END) ? 0.68f : ((k >= O5_HI) ? 0.85f : 0.72f);
                 const float net = ampC - fSub * nfVal;
                 if (net <= 1.0e-5f) continue;
                 obsHz[nObs] = hz;
-                obsY[nObs] = net;
+                obsY[nObs] = powf(net, 0.72f);
                 obsSnr[nObs] = (nfVal > 1.0e-6f) ? (ampC / nfVal) : 10.0f;
                 obsRawP[nObs] = rawP;
                 obsKey[nObs] = k;
@@ -452,8 +483,11 @@ namespace PianoRoll108
             memset(seriesHz, 0, sizeof(seriesHz));
             memset(seriesA, 0, sizeof(seriesA));
 
-            if (nObs > 0) {
-                // 帯域バランス白色化: 低音(nu=0.88, 1.55x)を保ちつつ中高音の平坦化(nu=0.72)を行う
+            if (nObs <= 0) {
+                for (int i = 0; i < COUNT; ++i) tp.hSmooth[i] *= 0.40f;
+            }
+            else {
+                // 帯域バランス白色化: 低音と高音の実音ダイナミクスを揃える
                 float octPow[8] = {};
                 int   octCnt[8] = {};
                 for (int q = 0; q < nObs; ++q) {
@@ -479,9 +513,10 @@ namespace PianoRoll108
                         if (o > 7) o = 7;
                         float sig = sqrtf(octPow[o] / (float)octCnt[o]);
                         if (sig < floorClamp) sig = floorClamp;
-                        const float nu = (obsKey[q] < BASS_END) ? 0.88f : 0.72f;
+                        const float nu = (obsKey[q] < BASS_END) ? 0.88f : 0.56f;
                         obsY[q] *= powf(sig / octMean, nu - 1.0f);
-                        if (obsKey[q] < BASS_END) obsY[q] *= 1.55f;
+                        if (obsKey[q] < BASS_END) obsY[q] *= 1.72f;
+                        else if (obsKey[q] >= MID_END) obsY[q] *= 1.65f;
                     }
                 }
 
@@ -495,33 +530,41 @@ namespace PianoRoll108
                     float keyObs[NMF_NK] = {};
                     float keySnr[NMF_NK] = {};
                     float keyRawP[NMF_NK] = {};
+                    float keyCents[NMF_NK] = {};
                     const float tuneMulK = powf(2.0f, p.tuneSemis / 12.0f);
                     for (int ki = 0; ki < NMF_NK; ++ki) {
                         const float tgt = PianoKey::KeyHz(NMF_K0 + ki) * tuneMulK;
-                        float bestHz = tgt, bestA = 0.0f, bestS = 0.0f, bestRP = 0.0f;
+                        float bestHz = tgt, bestA = 0.0f, bestS = 0.0f, bestRP = 0.0f, bestC = 42.0f;
                         for (int q = 0; q < nObs; ++q) {
-                            if (centsDist(obsHz[q], tgt) < 42.0f && obsY[q] > bestA) {
+                            const float cd = centsDist(obsHz[q], tgt);
+                            if (cd < 42.0f && obsY[q] > bestA) {
                                 bestA = obsY[q];
                                 bestHz = obsHz[q];
                                 bestS = obsSnr[q];
                                 bestRP = obsRawP[q];
+                                bestC = cd;
                             }
                         }
                         keyHz[ki] = bestHz;
                         keyObs[ki] = bestA;
                         keySnr[ki] = bestS;
                         keyRawP[ki] = bestRP;
+                        keyCents[ki] = bestC;
                     }
 
                     int   wIdx[NMF_NK][NMF_MAX_E];
+                    int   wHarm[NMF_NK][NMF_MAX_E];
                     float wVal[NMF_NK][NMF_MAX_E];
+                    float wMiss[NMF_NK] = {};
                     int   wLen[NMF_NK] = {};
                     float colSum[NMF_NK] = {};
                     int   keyPartials[NMF_NK] = {};
 
                     for (int ki = 0; ki < NMF_NK; ++ki) {
                         if (keyObs[ki] <= 0.015f) continue;
+                        const int k = NMF_K0 + ki;
                         const float f0 = keyHz[ki];
+                        float obsW = 0.0f, missW = 0.0f;
                         for (int h = 1; h <= NMF_MAX_E; ++h) {
                             const float tgt = f0 * (float)h;
                             if (tgt > 4600.0f) break;
@@ -532,20 +575,27 @@ namespace PianoRoll108
                                 const float d = centsDist(obsHz[q], tgt);
                                 if (d < bestD) { bestD = d; bestP = q; }
                             }
+                            float w = powf((float)h, -0.85f);
+                            if (h == 1) w *= 1.35f;
                             if (bestP >= 0) {
                                 if (h >= 2 && h <= 4 && obsY[bestP] >= keyObs[ki] * 0.18f)
                                     ++keyPartials[ki];
-                                float w = powf((float)h, -0.85f);
-                                if (h == 1) w *= 1.35f;
                                 const int e = wLen[ki]++;
                                 wIdx[ki][e] = bestP;
+                                wHarm[ki][e] = h;
                                 wVal[ki][e] = w;
-                                colSum[ki] += w;
+                                obsW += w;
+                            }
+                            else if (h >= 2 && h <= 4) {
+                                float ma = (k < BASS_END) ? 0.10f : 0.55f;
+                                if (h == 3) ma *= 2.0f;
+                                missW += w * ma;
                             }
                         }
-                        if (colSum[ki] > 0.0f) {
-                            const float inv = 1.0f / colSum[ki];
+                        if (obsW > 0.0f) {
+                            const float inv = 1.0f / (obsW + missW);
                             for (int e = 0; e < wLen[ki]; ++e) wVal[ki][e] *= inv;
+                            wMiss[ki] = missW * inv;
                             colSum[ki] = 1.0f;
                         }
                     }
@@ -578,66 +628,178 @@ namespace PianoRoll108
                     for (int d = 0; d < NMF_ND; ++d) if (colSumD[d] > 0.0f) uAct[d] = 0.06f;
 
                     float est[PickScratch::PMAX];
-                    for (int it = 0; it < 28; ++it) {
-                        for (int q = 0; q < nObs; ++q) est[q] = 1.0e-6f;
-                        for (int ki = 0; ki < NMF_NK; ++ki) {
-                            const float hv = hAct[ki];
-                            if (hv <= 1.0e-6f) continue;
-                            for (int e = 0; e < wLen[ki]; ++e) est[wIdx[ki][e]] += hv * wVal[ki][e];
-                        }
-                        for (int d = 0; d < NMF_ND; ++d) {
-                            const float uv = uAct[d];
-                            if (uv <= 1.0e-6f) continue;
-                            for (int e = 0; e < wdLen[d]; ++e) est[wdIdx[d][e]] += uv * wdVal[d][e];
-                        }
-                        for (int ki = 0; ki < NMF_NK; ++ki) {
-                            if (hAct[ki] <= 1.0e-6f || colSum[ki] <= 0.0f) continue;
-                            float num = 0.0f;
-                            for (int e = 0; e < wLen[ki]; ++e)
-                                num += wVal[ki][e] * (obsY[wIdx[ki][e]] / est[wIdx[ki][e]]);
-                            float pen = 0.060f / (hAct[ki] + 0.08f);
-                            if (prevActive && prevActive[NMF_K0 + ki]) pen *= 0.62f;
-                            else if (p.percussive > 0.35f) pen *= (1.0f + 0.70f * p.percussive);
-                            hAct[ki] *= num / (colSum[ki] + pen);
-                        }
-                        for (int d = 0; d < NMF_ND; ++d) {
-                            if (uAct[d] <= 1.0e-6f || colSumD[d] <= 0.0f) continue;
-                            float num = 0.0f;
-                            for (int e = 0; e < wdLen[d]; ++e)
-                                num += wdVal[d][e] * (obsY[wdIdx[d][e]] / est[wdIdx[d][e]]);
-                            float ld = 0.21f;
-                            if (d < 6 && octCnt2[d] >= 4) ld *= 0.70f;
-                            if (p.percussive > 0.35f) {
-                                const float pm = 1.0f - 0.35f * p.percussive;
-                                ld *= (pm > 0.45f) ? pm : 0.45f;
+                    auto runNmfIters = [&](int nIt) {
+                        for (int it = 0; it < nIt; ++it) {
+                            for (int q = 0; q < nObs; ++q) est[q] = 1.0e-6f;
+                            for (int ki = 0; ki < NMF_NK; ++ki) {
+                                const float hv = hAct[ki];
+                                if (hv <= 1.0e-6f) continue;
+                                for (int e = 0; e < wLen[ki]; ++e) est[wIdx[ki][e]] += hv * wVal[ki][e];
                             }
-                            uAct[d] *= num / (colSumD[d] + ld);
+                            for (int d = 0; d < NMF_ND; ++d) {
+                                const float uv = uAct[d];
+                                if (uv <= 1.0e-6f) continue;
+                                for (int e = 0; e < wdLen[d]; ++e) est[wdIdx[d][e]] += uv * wdVal[d][e];
+                            }
+                            for (int ki = 0; ki < NMF_NK; ++ki) {
+                                if (hAct[ki] <= 1.0e-6f || colSum[ki] <= 0.0f) continue;
+                                float num = 0.0f;
+                                for (int e = 0; e < wLen[ki]; ++e)
+                                    num += wVal[ki][e] * (obsY[wIdx[ki][e]] / est[wIdx[ki][e]]);
+                                float pen = 0.105f / (hAct[ki] + 0.065f);
+                                if (keyCents[ki] > 16.0f) {
+                                    const float ex = (keyCents[ki] - 16.0f) / 26.0f;
+                                    pen *= (1.0f + 1.30f * ex * ex);
+                                }
+                                if (prevActive && prevActive[NMF_K0 + ki]) pen *= 0.78f;
+                                else if (p.percussive > 0.35f) pen *= (1.0f + 0.55f * p.percussive);
+                                hAct[ki] *= num / (colSum[ki] + pen);
+                            }
+                            for (int d = 0; d < NMF_ND; ++d) {
+                                if (uAct[d] <= 1.0e-6f || colSumD[d] <= 0.0f) continue;
+                                float num = 0.0f;
+                                for (int e = 0; e < wdLen[d]; ++e)
+                                    num += wdVal[d][e] * (obsY[wdIdx[d][e]] / est[wdIdx[d][e]]);
+                                float ld = 0.21f;
+                                if (d < 6 && octCnt2[d] >= 4) ld *= 0.70f;
+                                if (p.percussive > 0.35f) {
+                                    const float pm = 1.0f - 0.30f * p.percussive;
+                                    ld *= (pm > 0.50f) ? pm : 0.50f;
+                                }
+                                uAct[d] *= num / (colSumD[d] + ld);
+                            }
                         }
+                    };
+
+                    runNmfIters(18);
+
+                    // 第2パス: 強い中低音(k<72)の倍音減衰スロープをロバスト中央値で適応し、
+                    // 歪みギターや明るいブラスの高次倍音コムを基音へ回収する。
+                    float h1Max = 0.0f;
+                    for (int ki = 0; ki < NMF_NK; ++ki)
+                        if (hAct[ki] > h1Max) h1Max = hAct[ki];
+                    if (h1Max > 1.0e-5f) {
+                        for (int ki = 0; ki < NMF_NK; ++ki) {
+                            const int k = NMF_K0 + ki;
+                            if (k >= MID_END || hAct[ki] < h1Max * 0.14f || wLen[ki] < 3 || keyObs[ki] <= 0.03f)
+                                continue;
+                            float slopes[NMF_MAX_E];
+                            int ns = 0;
+                            for (int e = 0; e < wLen[ki]; ++e) {
+                                const int h = wHarm[ki][e];
+                                if (h < 2 || h > NMF_MAX_E) continue;
+                                const float rat = obsY[wIdx[ki][e]] / keyObs[ki];
+                                if (rat <= 0.02f) continue;
+                                float sl = -logf(rat) / logf((float)h);
+                                if (sl < 0.08f) sl = 0.08f;
+                                if (sl > 1.60f) sl = 1.60f;
+                                slopes[ns++] = sl;
+                            }
+                            if (ns < 2) continue;
+                            std::sort(slopes, slopes + ns);
+                            const float fitSlope = slopes[ns / 2];
+                            float newW[NMF_MAX_E];
+                            float obsSum = 0.0f;
+                            for (int e = 0; e < wLen[ki]; ++e) {
+                                const int h = wHarm[ki][e];
+                                const float stdW = powf((float)h, -0.85f) * ((h == 1) ? 1.35f : 1.0f);
+                                if (h == 1) newW[e] = stdW;
+                                else {
+                                    const float fitW = powf((float)h, -fitSlope);
+                                    newW[e] = 0.15f * stdW + 0.85f * fitW;
+                                }
+                                obsSum += newW[e];
+                            }
+                            const float keepObs = 1.0f - wMiss[ki];
+                            if (obsSum > 1.0e-6f && keepObs > 0.05f) {
+                                const float sc = keepObs / obsSum;
+                                for (int e = 0; e < wLen[ki]; ++e) wVal[ki][e] = newW[e] * sc;
+                            }
+                        }
+                        runNmfIters(14);
+                    }
+
+                    // 再構成スペクトルと各鍵の自己説明率 shareVal(h=1..2 の最大占有率)
+                    for (int q = 0; q < nObs; ++q) est[q] = 1.0e-6f;
+                    for (int ki = 0; ki < NMF_NK; ++ki) {
+                        const float hv = hAct[ki];
+                        if (hv <= 1.0e-6f) continue;
+                        for (int e = 0; e < wLen[ki]; ++e) est[wIdx[ki][e]] += hv * wVal[ki][e];
+                    }
+                    for (int d = 0; d < NMF_ND; ++d) {
+                        const float uv = uAct[d];
+                        if (uv <= 1.0e-6f) continue;
+                        for (int e = 0; e < wdLen[d]; ++e) est[wdIdx[d][e]] += uv * wdVal[d][e];
+                    }
+                    float shareVal[NMF_NK] = {};
+                    for (int ki = 0; ki < NMF_NK; ++ki) {
+                        if (hAct[ki] <= 1.0e-6f) continue;
+                        for (int e = 0; e < wLen[ki]; ++e) {
+                            if (wHarm[ki][e] <= 2) {
+                                const float s = (hAct[ki] * wVal[ki][e]) / est[wIdx[ki][e]];
+                                if (s > shareVal[ki]) shareVal[ki] = s;
+                            }
+                        }
+                    }
+
+                    // 帯域別の非対称時間積分(低音はじっくり、高音メロディは素早く追従)
+                    float hRawMax = 0.0f;
+                    for (int ki = 0; ki < NMF_NK; ++ki)
+                        if (hAct[ki] > hRawMax) hRawMax = hAct[ki];
+                    float hUse[NMF_NK] = {};
+                    float shUse[NMF_NK] = {};
+                    const float aSh = 1.0f - expf(-dtMs / 65.0f);
+                    for (int ki = 0; ki < NMF_NK; ++ki) {
+                        const int k = NMF_K0 + ki;
+                        const float v = (hRawMax > 1.0e-5f) ? (hAct[ki] / hRawMax) : 0.0f;
+                        const float tu = (k < BASS_END) ? 75.0f : ((k < MID_END) ? 60.0f : 26.0f);
+                        const float td = (k < BASS_END) ? 48.0f : ((k < MID_END) ? 40.0f : 34.0f);
+                        const float a = (v >= tp.hSmooth[k]) ? (1.0f - expf(-dtMs / tu)) : (1.0f - expf(-dtMs / td));
+                        tp.hSmooth[k] = tp.hSmooth[k] * (1.0f - a) + v * a;
+                        hUse[ki] = tp.hSmooth[k];
+
+                        if (hAct[ki] > 1.0e-5f)
+                            tp.shSmooth[k] = tp.shSmooth[k] * (1.0f - aSh) + shareVal[ki] * aSh;
+                        else
+                            tp.shSmooth[k] *= (1.0f - aSh);
+                        shUse[ki] = tp.shSmooth[k];
                     }
 
                     float hMax = 0.0f;
                     float bMaxH[3] = {};
                     for (int ki = 0; ki < NMF_NK; ++ki) {
-                        if (hAct[ki] > hMax) hMax = hAct[ki];
+                        if (hUse[ki] > hMax) hMax = hUse[ki];
                         const int k = NMF_K0 + ki;
                         const int b = (k < BASS_END) ? 0 : ((k < MID_END) ? 1 : 2);
-                        if (hAct[ki] > bMaxH[b]) bMaxH[b] = hAct[ki];
+                        if (hUse[ki] > bMaxH[b]) bMaxH[b] = hUse[ki];
                     }
 
                     if (hMax > 1.0e-5f) {
                         for (int ki = 0; ki < NMF_NK; ++ki) {
-                            if (keyObs[ki] < 0.025f) continue;
+                            if (keyObs[ki] < 0.018f && hUse[ki] < hMax * 0.22f) continue;
                             const int k = NMF_K0 + ki;
+                            // 超高域(D6以上)のシンバル金属共鳴の常時点灯を防ぐ
+                            if (k >= 86 && keyPartials[ki] < 1 && keySnr[ki] < 18.0f && relShortN(k) < 0.22f)
+                                continue;
                             const int b = (k < BASS_END) ? 0 : ((k < MID_END) ? 1 : 2);
-                            const float hN = hAct[ki] / hMax;
-                            float th = (b == 0) ? 0.068f : ((b == 1) ? 0.135f : 0.115f);
-                            if (prevActive && prevActive[k]) th *= 0.68f;
-                            else if (p.percussive > 0.35f) th *= (1.0f + 0.245f * p.percussive);
+                            const float hN = hUse[ki] / hMax;
+                            float th = (b == 0) ? 0.095f : ((b == 1) ? 0.175f : 0.092f);
+                            if (prevActive && prevActive[k]) th *= 0.72f;
+                            else if (p.percussive > 0.35f) th *= (1.0f + 0.18f * p.percussive);
                             const bool mainOk = (hN >= th);
-                            const bool bandOk = (bMaxH[b] > hMax * 0.16f && hAct[ki] >= bMaxH[b] * 0.34f && hN >= th * 0.45f);
+                            const bool bandOk = (bMaxH[b] > hMax * 0.14f && hUse[ki] >= bMaxH[b] * 0.48f && hN >= th * 0.45f);
                             const bool burstOk = (relShortN(k) >= 0.14f && hN >= th * 0.50f);
                             if (!(mainOk || bandOk || burstOk)) continue;
-                            if (hN < th * 1.65f && !(prevActive && prevActive[k]) && relShortN(k) < 0.12f
+                            if (k >= BASS_END) {
+                                const float shReq = (k < MID_END) ? 0.55f : 0.32f;
+                                if (!(prevActive && prevActive[k])) {
+                                    if (shareVal[ki] < shReq) continue;
+                                }
+                                else {
+                                    if (shUse[ki] < shReq * 0.60f) continue;
+                                }
+                            }
+                            if (hN < th * 1.60f && !(prevActive && prevActive[k]) && relShortN(k) < 0.12f
                                 && keyPartials[ki] < 1 && keySnr[ki] < 16.0f)
                                 continue;
                             seriesOn[k] = true;
@@ -648,7 +810,7 @@ namespace PianoRoll108
                         // 隣接半音のマージ漏れを抑制
                         for (int k = NMF_K0; k + 1 < NMF_K1; ++k) {
                             if (seriesOn[k] && seriesOn[k + 1]) {
-                                if (hAct[k - NMF_K0] >= hAct[k + 1 - NMF_K0]) seriesOn[k + 1] = false;
+                                if (hUse[k - NMF_K0] >= hUse[k + 1 - NMF_K0]) seriesOn[k + 1] = false;
                                 else seriesOn[k] = false;
                             }
                         }
@@ -660,52 +822,107 @@ namespace PianoRoll108
                             return ba;
                         };
 
-                        // コム倍音・オクターブ上倍音の刈り取り
+                        // 下オクターブのサブハーモニック・ゴースト(上音の偶数倍音への相乗り)を除去
+                        for (int lo = NMF_K0; lo + 12 < NMF_K1; ++lo) {
+                            if (!seriesOn[lo]) continue;
+                            const int oct = lo + 12;
+                            const float aLo = keyObs[lo - NMF_K0];
+                            const float aOct = keyObs[oct - NMF_K0];
+                            const float fLo = keyHz[lo - NMF_K0];
+                            if (aOct >= aLo * 0.80f
+                                && obsAtN(fLo * 3.0f, 36.0f) < aLo * 0.24f
+                                && obsAtN(fLo * 5.0f, 38.0f) < aLo * 0.24f
+                                && hUse[lo - NMF_K0] < hUse[oct - NMF_K0] * 0.90f) {
+                                seriesOn[lo] = false;
+                            }
+                            if (seriesOn[lo] && seriesOn[oct] && aLo < aOct * 0.24f
+                                && obsAtN(fLo * 3.0f, 36.0f) < aOct * 0.25f) {
+                                seriesOn[lo] = false;
+                            }
+                        }
+
+                        // 純正律デチューニング判定 + 隣接次数コム倍音排除(高域で 3*fHi が帯域外でも機能)
                         for (int hi = BASS_END; hi < NMF_K1; ++hi) {
-                            if (!seriesOn[hi] || (prevActive && prevActive[hi]) || relShortN(hi) >= 0.14f) continue;
+                            if (!seriesOn[hi]) continue;
                             const float fHi = keyHz[hi - NMF_K0];
                             const float aHi = keyObs[hi - NMF_K0];
-                            const float hi3 = obsAtN(fHi * 3.0f, 36.0f);
+                            const bool can3 = (fHi * 3.0f <= 4400.0f);
+                            const float hi3 = can3 ? obsAtN(fHi * 3.0f, 36.0f) : 0.0f;
+                            const float hi2 = (fHi * 2.0f <= 4400.0f) ? obsAtN(fHi * 2.0f, 36.0f) : 0.0f;
+                            const float c12 = centsDist(fHi, PianoKey::KeyHz(hi) * tuneMulK);
                             for (int lo = NMF_K0; lo < hi; ++lo) {
                                 if (!seriesOn[lo]) continue;
                                 const float fLo = keyHz[lo - NMF_K0];
                                 const int n = (int)floorf(fHi / fLo + 0.5f);
-                                if (n < 2 || n > 10 || centsDist(fHi, fLo * (float)n) > 36.0f) continue;
-                                if (n == 2 && hAct[hi - NMF_K0] < hAct[lo - NMF_K0] * 0.55f && hi3 < aHi * 0.22f
-                                    && obsAtN(fLo * 3.0f, 36.0f) >= keyObs[lo - NMF_K0] * 0.25f) {
+                                if (n < 2 || n > 12) continue;
+                                const float cJ = centsDist(fHi, fLo * (float)n);
+                                if (cJ > 36.0f) continue;
+
+                                if ((n == 5 || n == 7 || n == 11) && cJ + 5.0f < c12
+                                    && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.98f) {
                                     seriesOn[hi] = false;
                                     break;
                                 }
-                                if (n >= 4 && hi3 < aHi * 0.30f) {
-                                    const float nbL = obsAtN(fLo * (float)(n - 1), 36.0f);
-                                    const float nbR = obsAtN(fLo * (float)(n + 1), 36.0f);
-                                    const float nb = (nbL > nbR) ? nbL : nbR;
-                                    if (nb >= aHi * 0.30f && hAct[hi - NMF_K0] < hAct[lo - NMF_K0] * 0.85f) {
-                                        seriesOn[hi] = false;
-                                        break;
+                                if (n >= 3 && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.95f) {
+                                    const float sibL = obsAtN(fLo * (float)(n - 1), 38.0f);
+                                    const float sibR = (fLo * (float)(n + 1) <= 4600.0f)
+                                        ? obsAtN(fLo * (float)(n + 1), 38.0f) : sibL;
+                                    const bool inComb = (sibL >= aHi * 0.22f && sibR >= aHi * 0.22f);
+                                    bool sticksOut = false;
+                                    if (can3 && hi3 >= aHi * 0.30f) {
+                                        float combAt3 = 0.0f;
+                                        if (fLo * (float)(3 * n - 1) <= 4600.0f) {
+                                            const float cL = obsAtN(fLo * (float)(3 * n - 1), 38.0f);
+                                            const float cR = obsAtN(fLo * (float)(3 * n + 1), 38.0f);
+                                            combAt3 = (cL > cR) ? cL : cR;
+                                        }
+                                        if (hi3 > combAt3 * 1.45f) sticksOut = true;
                                     }
+                                    else if (!can3 && fHi * 2.0f <= 4400.0f && hi2 >= aHi * 0.35f) {
+                                        const float cL = obsAtN(fLo * (float)(2 * n - 1), 38.0f);
+                                        const float cR = obsAtN(fLo * (float)(2 * n + 1), 38.0f);
+                                        const float combAt2 = (cL > cR) ? cL : cR;
+                                        if (hi2 > combAt2 * 1.50f) sticksOut = true;
+                                    }
+                                    if (inComb && !sticksOut) {
+                                        if (n >= 5 || hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.65f) {
+                                            seriesOn[hi] = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (n == 2 && can3 && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.75f
+                                    && hi3 < aHi * 0.24f
+                                    && obsAtN(fLo * 3.0f, 36.0f) >= keyObs[lo - NMF_K0] * 0.22f) {
+                                    seriesOn[hi] = false;
+                                    break;
+                                }
+                                if (n >= 3 && can3 && hi3 < aHi * 0.26f
+                                    && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * ((n == 3) ? 0.54f : 0.75f)) {
+                                    seriesOn[hi] = false;
+                                    break;
                                 }
                             }
                         }
 
-                        // オクターブ上げすぎの回復: 下の基音に 2f+3f 系列があり上音に 3f が薄ければ下を起こし上を落とす
+                        // オクターブ上げすぎの回復: 下の基音に明確な 2f+3f 系列があり上音に 3f が薄ければ下を起こす
                         for (int hi = NMF_K1 - 1; hi >= C4_KEY; --hi) {
                             if (!seriesOn[hi]) continue;
                             const int lo = hi - 12;
                             if (lo < NMF_K0 || seriesOn[lo]) continue;
                             const float aLo = keyObs[lo - NMF_K0];
                             const float aHi = keyObs[hi - NMF_K0];
-                            if (aLo < aHi * 0.12f || aLo < 0.04f) continue;
+                            if (aLo < aHi * 0.16f || aLo < 0.05f) continue;
                             const float fLo = keyHz[lo - NMF_K0];
                             const float fHi = keyHz[hi - NMF_K0];
-                            const float b2 = obsAtN(fLo * 2.0f, 34.0f);
-                            const float b3 = obsAtN(fLo * 3.0f, 34.0f);
-                            if (b2 >= aLo * 0.25f && b3 >= aLo * 0.20f && b2 >= 0.05f && b3 >= 0.04f) {
+                            const float b2 = obsAtN(fLo * 2.0f, 32.0f);
+                            const float b3 = obsAtN(fLo * 3.0f, 32.0f);
+                            if (b2 >= aLo * 0.25f && b3 >= aLo * 0.25f && b2 >= 0.05f && b3 >= 0.05f) {
                                 seriesOn[lo] = true;
                                 seriesHz[lo] = fLo;
                                 seriesA[lo] = (blend[lo] > keyRawP[lo - NMF_K0]) ? blend[lo] : keyRawP[lo - NMF_K0];
-                                const float h3 = obsAtN(fHi * 3.0f, 34.0f);
-                                if (h3 < aHi * 0.30f && aHi < aLo * 1.15f)
+                                const float h3 = (fHi * 3.0f <= 4400.0f) ? obsAtN(fHi * 3.0f, 34.0f) : aHi;
+                                if (h3 < aHi * 0.28f && aHi < aLo * 1.15f)
                                     seriesOn[hi] = false;
                             }
                         }

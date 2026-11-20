@@ -2464,7 +2464,7 @@ void Game::BuildOverlayQuads()
 		int n = 0;
 		int nL = CellLayN(m.At(x, z));
 		for (int L = 0; L < nL; L++) {
-			if (!LayerOn(m.At(x, z), L) || LayerRangeCost(aL, L) < 0) continue;
+			if (!LayerOn(m.At(x, z), L) || StandRangeAdd(m, u.x, u.z, aL, x, z, L) < 0) continue;
 			quad(x, z, c, lift, m.WalkY(x, z, L), L, 4);
 			n++;
 		}
@@ -2714,19 +2714,24 @@ static int MoveRangeLayer(const Reach& r, const Map& m, int x, int z, int unitL,
 		}
 		int sc = 4;
 		if (ReachCanStopLayer(r, x, z, L)) sc += 4;
-		if (L == unitL) sc += 4;
-		if (unitY > -1e8f && fabsf(y - unitY) <= 0.55f) sc += 4;
+		if (unitY > -1e8f && fabsf(y - unitY) <= 0.95f) sc += 6;
+		else if (L == unitL && (unitY <= -1e8f || fabsf(y - unitY) <= 1.8f)) sc += 2;
 		if (sc > bestSc) { bestSc = sc; best = L; }
 	}
-	if (nBlue >= 2 && upper >= 0) return upper;
+	if (nBlue >= 2 && upper >= 0) {
+		if (unitY > -1e8f && best >= 0 && fabsf(m.WalkY(x, z, best) - unitY) <= 0.95f && fabsf(upperY - unitY) > 2.4f)
+			return best;
+		return upper;
+	}
 	if (best >= 0) return best;
 	if (!MoveFieldNear(r, x, z, kMoveLayerMargin)) return -1;
 	for (int L = 0; L < n; L++) {
 		int tr = LayerTr(c, L);
 		if (TerrainInfo(tr).costFoot >= 99 && !TerrainInfo(tr).flyOk) continue;
+		float y = m.WalkY(x, z, L);
 		int sc = 0;
-		if (L == unitL) sc += 4;
-		if (unitY > -1e8f && fabsf(m.WalkY(x, z, L) - unitY) <= 0.55f) sc += 4;
+		if (unitY > -1e8f && fabsf(y - unitY) <= 0.95f) sc += 6;
+		else if (L == unitL && (unitY <= -1e8f || fabsf(y - unitY) <= 1.8f)) sc += 4;
 		if (sc > bestSc) { bestSc = sc; best = L; }
 	}
 	return (bestSc >= 4) ? best : -1;
@@ -2831,13 +2836,23 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 	V3 org, dir;
 	m_r.ScreenRay(sx, sy, org, dir);
 	const Map& m = m_b.map;
-	float top = TacHToY(MAXH_SPIRAL + 14) + 2.f;
-	float t0 = 0.f, t1 = 260.f;
+	int maxH = MAXH;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.At(x, z);
+		if (c.t == T_VOID && c.nLay < 2) continue;
+		int n = CellLayN(c);
+		for (int L = 0; L < n; L++) {
+			int h = LayerHt(c, L);
+			if (h > maxH) maxH = h;
+		}
+	}
+	float top = TacHToY(maxH + 6) + 2.f;
+	float t0 = 0.f, t1 = 380.f;
 	if (!RaySlab(org, dir, -1.f, -4.f, -1.f, (float)MAPN + 1.f, top, (float)MAPN + 1.f, t0)) return FALSE;
 	float hlen = sqrtf(dir.x * dir.x + dir.z * dir.z);
-	float dt = hlen > 0.15f ? (0.24f / hlen) : 0.24f;
-	if (dt > 0.28f) dt = 0.28f;
-	t1 = t0 + 260.f;
+	float dt = hlen > 0.15f ? (0.16f / hlen) : 0.16f;
+	if (dt > 0.20f) dt = 0.20f;
+	t1 = t0 + 380.f;
 	float bestT = 1e9f, bestY = -1e9f;
 	int bx = -1, bz = -1, bl = 0;
 	int prevX = -9999, prevZ = -9999;
@@ -2865,34 +2880,35 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 			int tr = LayerTr(c, L);
 			if (TerrainInfo(tr).costFoot >= 99 && !TerrainInfo(tr).flyOk) continue;
 			float y = m.WalkY(ix, iz, L);
-			float y0 = (L == 0) ? y - 0.16f : y - 0.72f;
+			float y0 = (L == 0 && c.h <= MAXH) ? y - 0.16f : y - 0.56f;
 			float th = 0;
 			if (moving && ReachCostAt(m_reach, L, ix, iz) >= 0) {
 				float thTop = 0;
 				// 床の面だけを見る。下側の厚い判定だと、横から下の青マスを狙っても上の床に吸われる。
-				if (RaySlab(org, dir, (float)ix, y - 0.10f, (float)iz, (float)ix + 1.f, y + 0.06f, (float)iz + 1.f, thTop) && thTop < nearT) {
+				if (RaySlab(org, dir, (float)ix, y - 0.12f, (float)iz, (float)ix + 1.f, y + 0.08f, (float)iz + 1.f, thTop) && thTop < nearT) {
 					nearT = thTop; nx = ix; nz = iz; nL = L;
 				}
 			}
-			if (!RaySlab(org, dir, (float)ix, y0, (float)iz, (float)ix + 1.f, y + 0.04f, (float)iz + 1.f, th)) continue;
+			if (!RaySlab(org, dir, (float)ix, y0, (float)iz, (float)ix + 1.f, y + 0.06f, (float)iz + 1.f, th)) continue;
 			int sc = 0;
 			int reach = 0;
-			if (unitY > -1e8f && (L == unitL || fabsf(y - unitY) <= 0.55f)) sc += 4;
-			if (prefY > -1e8f && (L == prefL || fabsf(y - prefY) <= 0.55f)) sc += 1;
-			if (targeting && (m_ovAtkLay[iz][ix] & TacLayBit(L))) sc += 4;
+			BOOL sameUnitFloor = (unitY > -1e8f && fabsf(y - unitY) <= 0.95f);
+			BOOL samePrefFloor = (prefY > -1e8f && fabsf(y - prefY) <= 0.95f);
+			if (sameUnitFloor) sc += 4;
+			if (samePrefFloor) sc += 1;
+			if (targeting && (m_ovAtkLay[iz][ix] & TacLayBit(L))) sc += 6;
 			if (moving && ReachCostAt(m_reach, L, ix, iz) >= 0) {
 				reach = 1;
 				sc += 12;
 				if (ReachCanStopLayer(m_reach, ix, iz, L)) sc += 4;
-			} else if (moving && MoveFieldNear(m_reach, ix, iz, kMoveLayerMargin)
-				&& (L == unitL || (unitY > -1e8f && fabsf(y - unitY) <= 0.55f))) {
+			} else if (moving && MoveFieldNear(m_reach, ix, iz, kMoveLayerMargin) && sameUnitFloor) {
 				reach = 1;
 				sc += 10;
 			}
 			BOOL better = FALSE;
 			if (reach != bestReach) better = reach ? TRUE : FALSE;
 			else if (sc > bestSc) better = TRUE;
-			else if (sc == bestSc && L == unitL && th <= bestT + 0.18f) better = TRUE;
+			else if (sc == bestSc && sameUnitFloor && th <= bestT + 0.18f) better = TRUE;
 			else if (sc == bestSc && th < bestT - 0.08f) better = TRUE;
 			if (!better) continue;
 			bestSc = sc; bestT = th; bestY = y; bx = ix; bz = iz; bl = L; bestReach = reach;
@@ -3034,10 +3050,10 @@ void Game::UpdateHover()
 				else {
 					const Cell& nc = m_b.map.At(cx, cz);
 					float pickY = m_b.map.WalkY(cx, cz, lay);
-					BOOL home = (m_cur >= 0 && m_cur < m_b.nUnits && (lay == m_b.u[m_cur].deck || fabsf(pickY - m_b.u[m_cur].py) <= 0.55f));
+					BOOL home = (m_cur >= 0 && m_cur < m_b.nUnits && fabsf(pickY - m_b.u[m_cur].py) <= 0.95f);
 					if (!home) {
 						int nearL = ClosestLayerToHt(nc, prevH, lay);
-						if (abs(LayerHt(nc, nearL) - prevH) <= 6 && abs(LayerHt(nc, lay) - prevH) > 6)
+						if (abs(LayerHt(nc, nearL) - prevH) <= 4 && abs(LayerHt(nc, lay) - prevH) > 8)
 							lay = nearL;
 					}
 				}
@@ -3512,7 +3528,7 @@ void Game::BattleClick(int x, int y)
 			lay = ml;
 		else if (m_phase != PH_P_MOVE || ReachCostAt(m_reach, lay, cx, cz) < 0) {
 			float pickY = m_b.map.WalkY(cx, cz, lay);
-			BOOL home = (m_cur >= 0 && (lay == m_b.u[m_cur].deck || fabsf(pickY - unitY) <= 0.55f));
+			BOOL home = (m_cur >= 0 && fabsf(pickY - unitY) <= 0.95f);
 			if (!home && prevH >= 0 && !ReachCanStopLayer(m_reach, cx, cz, lay) && m_b.UnitAt(cx, cz, lay) < 0 && CellLayN(pickedC) >= 2)
 				lay = ClosestLayerToHt(pickedC, prevH, lay);
 		}
@@ -3524,8 +3540,8 @@ void Game::BattleClick(int x, int y)
 		float refY = m_cur >= 0 ? m_b.u[m_cur].py : m_camGoal.y;
 		float refZ = m_cur >= 0 ? m_b.u[m_cur].pz : m_camGoal.z;
 		float dy = m_b.map.WalkY(cx, cz, m_cLayer) - refY;
-		BOOL home = (m_cur >= 0 && (m_cLayer == m_b.u[m_cur].deck || fabsf(dy) <= 0.55f));
-		BOOL onBlue = (m_phase == PH_P_MOVE && (ReachBestCost(m_reach, cx, cz) >= 0 || MoveFieldNear(m_reach, cx, cz, kMoveLayerMargin)));
+		BOOL home = (m_cur >= 0 && fabsf(dy) <= 0.95f);
+		BOOL onBlue = (m_phase == PH_P_MOVE && ReachCostAt(m_reach, m_cLayer, cx, cz) >= 0);
 		if (home || onBlue)
 			m_camPan = v3(0, 0, 0);
 		else if (!ReachCanStopLayer(m_reach, cx, cz, lay) && m_b.UnitAt(cx, cz, lay) < 0 && (m_cur < 0 || cx != m_b.u[m_cur].x || cz != m_b.u[m_cur].z)) {
@@ -6175,48 +6191,44 @@ void Game::DrawBattle3D()
 		m_r.BeginAvaBatch(pend > 0 ? pend : 1);
 	}
 	m_r.BeginInstBatch();
-	for (int i = 0; i < m_b.nUnits; i++) {
-		const Unit& u = m_b.u[i];
-		if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= .5f) || !nearCam(u) || !inLight(u)) continue;
-		DrawParams dp;
-		if (offLayer(i)) dp.tint = 0x55FFFFFF;
-		ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], AilmentPos(m_act[i], ActorPos(i)), ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+	{
+		int fed = 0;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= .5f) || !nearCam(u) || !inLight(u)) continue;
+			DrawParams dp;
+			if (offLayer(i)) dp.tint = 0x55FFFFFF;
+			ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], AilmentPos(m_act[i], ActorPos(i)), ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+			// 影は深度だけ。数人ずつ出すと、残りをCPUが組むあいだGPUが影を描ける。絵は同じ。
+			if ((++fed & 3) == 0) m_r.FeedInst();
+		}
 	}
 	m_r.EndInstBatch();
 	}
 	{
 		V3 look = m_camTarget + v3(0, .4f, 0);
-		BOOL reflectBusy = m_phase == PH_MOVING || m_phase == PH_E_MOVE || m_phase == PH_ACTION || m_phase == PH_INTRO || m_shake > 0.02f;
-		static int s_refFrame = -100;
-		static float s_yaw = 0.f, s_pitch = 0.f, s_dist = 0.f, s_tx = 0.f, s_tz = 0.f;
-		BOOL camMove = fabsf(m_camYaw - s_yaw) > 0.004f || fabsf(m_camPitch - s_pitch) > 0.004f
-			|| fabsf(m_camDist - s_dist) > 0.08f
-			|| fabsf(m_camTarget.x - s_tx) > 0.08f || fabsf(m_camTarget.z - s_tz) > 0.08f;
-		// 奈落だけを見ているときは、床も水面も反射をサンプルしない。シーンの描き直しは待ちになるだけ。
-		BOOL drawRef = seeGround && (reflectBusy || camMove || s_refFrame < 0 || (m_r.m_frame - s_refFrame) >= 2);
-		if (seeGround && !drawRef) m_r.ReuseReflect(m_camTarget.y);
-		else if (seeGround && m_r.BeginReflectPass(m_camTarget.y, look)) {
+		// 奈落だけを見ているときは、床も水面も反射をサンプルしない。それ以外は毎フレーム更新してフレーム時間の揺れを無くす。
+		if (seeGround && m_r.BeginReflectPass(m_camTarget.y, look)) {
 			m_r.DrawTerrain();
 			m_r.DrawSky(e.skyTop, e.skyBot, 0, 0);
 			m_r.DrawWater();
 			m_r.BeginInstBatch();
-			for (int i = 0; i < m_b.nUnits; i++) {
-				const Unit& u = m_b.u[i];
-				if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= 1.f) || !nearCam(u)) continue;
-				DrawParams dp;
-				dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
-				dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
-				V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
-				ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+			{
+				int fed = 0;
+				for (int i = 0; i < m_b.nUnits; i++) {
+					const Unit& u = m_b.u[i];
+					if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= 1.f) || !nearCam(u)) continue;
+					DrawParams dp;
+					dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
+					dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
+					V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
+					ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+					// 反射の不透明だけ先に出す。半透明は列に残る。
+					if ((++fed & 3) == 0) m_r.FeedInst();
+				}
 			}
 			m_r.EndInstBatch();
 			m_r.EndReflectPass();
-			s_refFrame = (int)m_r.m_frame;
-			s_yaw = m_camYaw;
-			s_pitch = m_camPitch;
-			s_dist = m_camDist;
-			s_tx = m_camTarget.x;
-			s_tz = m_camTarget.z;
 		}
 	}
 	m_r.BeginMainPass();
@@ -6457,6 +6469,7 @@ void Game::DrawBattle3D()
 	}
 	for (int pass = 0; pass < 2; pass++) {
 		if (pass == 1) m_r.BeginInstBatch();
+		int fed = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			BOOL ghost = offLayer(i);
@@ -6589,6 +6602,8 @@ void Game::DrawBattle3D()
 				m_r.DrawStatic(m_lib.orb, MMul(MMul(MScale(.2f, .2f, .2f), MRotY(m_time * 2.4f)), MTrans(hp.x, hp.y, hp.z)), lp);
 			}
 			if (ghost) m_r.SetDepthTest(TRUE);
+			// 本体は先に出す。輪郭と半透明は列に残り、最後に今まで通りまとめて描く。
+			if (pass == 1 && (++fed & 3) == 0) m_r.FeedInst();
 		}
 	}
 	m_r.EndInstBatch();
@@ -11664,7 +11679,10 @@ void Game::DrawBattleUi()
 	// 地形情報
 	if (m_cursorValid && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)) {
 		const Cell& c = m_b.map.At(m_cx, m_cz);
-		const TerrainDef& td = TerrainInfo(c.t);
+		int useL = (m_cLayer >= 0 && LayerOn(c, m_cLayer)) ? m_cLayer : 0;
+		int curTr = LayerTr(c, useL);
+		int curHt = LayerHt(c, useL);
+		const TerrainDef& td = TerrainInfo(curTr);
 		wchar_t l[128];
 		const wchar_t* gm = L"";
 		if (c.gimm == GM_HEAL) gm = TT(TX_GM_HEAL);
@@ -11679,17 +11697,17 @@ void Game::DrawBattleUi()
 		else if (c.gimm)
 			swprintf_s(l, L"%s  %s  %s", TT(TX_BT_TERRAIN), TT(td.nameTx), gm);
 		else if (m_cur >= 0 && CanTerrace(m_b, m_cur, m_cx, m_cz))
-			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)c.h, TT(TX_BT_CLIMB));
-		else if (c.t == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4)
-			swprintf_s(l, L"%s  %s  %s %d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_BT_DEPTH), (int)c.gparam, c.h);
+			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), curHt, TT(TX_BT_CLIMB));
+		else if (curTr == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4)
+			swprintf_s(l, L"%s  %s  %s %d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_BT_DEPTH), (int)c.gparam, curHt);
 		else if (c.prop == PK_MOUNT && (c.gparam & 15) >= 1 && (c.gparam & 15) <= 3)
-			swprintf_s(l, L"%s  %s  %dx%d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)(c.gparam & 15), (int)((c.gparam >> 4) & 15), c.h);
-		else if (c.t == T_LAVA)
-			swprintf_s(l, L"%s  %s  %s%d  HP-12%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(StatNameTx(S_MOV)), td.costFoot, c.h);
+			swprintf_s(l, L"%s  %s  %dx%d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)(c.gparam & 15), (int)((c.gparam >> 4) & 15), curHt);
+		else if (curTr == T_LAVA)
+			swprintf_s(l, L"%s  %s  %s%d  HP-12%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(StatNameTx(S_MOV)), td.costFoot, curHt);
 		else if (td.costFoot < 99)
-			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d  %s%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, c.h, TT(StatNameTx(S_MOV)), td.costFoot);
+			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d  %s%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, curHt, TT(StatNameTx(S_MOV)), td.costFoot);
 		else
-			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, c.h);
+			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, curHt);
 		float tw = m_r.TextWidth(l, U(13), 0) + U(24);
 		float ty = logTop - U(34);
 		if (hoverTop >= 0.f) ty = hoverTop - U(34);

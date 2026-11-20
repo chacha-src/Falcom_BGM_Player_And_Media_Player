@@ -4,6 +4,9 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
+/* 0 のとき既存の波形式。madshark だけ 1。 */
+static int sX1010MameWave = 0;
+
 /* Seta X1-010。MAME x1_010.cpp を参考。
 
    チップは 8KB RAM窓。$0000-$007F が 16ch×8 制御バイト。それより上は
@@ -176,10 +179,52 @@ private:
 		smpOffs_[ch] = offs;
 	}
 
+	/* madshark: 波形は reg1<<7 + $1000、ピッチは reg3:reg2、エンベロープは reg4 が 0 なら保持。 */
+	void MixWaveMame(int ch, const uint8_t* reg, int16_t* stereo, int frames, int gain)
+	{
+		const unsigned waveAt = ((unsigned)reg[1] << 7) + 0x1000u;
+		const int8_t* wave = (const int8_t*)&ram_[waveAt & (kX1010RamSize - 1)];
+		const uint8_t* env = &ram_[((unsigned)reg[5] << 7) & (kX1010RamSize - 1)];
+		unsigned freq = ((unsigned)reg[3] << 8) | reg[2];
+		if (reg[0] & 0x80) freq >>= 1;
+		if (!freq || sampleRate_ <= 0) return;
+		uint32_t step = (uint32_t)((uint64_t)clockHz_ * freq / (32ull * (unsigned)sampleRate_));
+		if (!step) step = 1;
+		uint32_t estep = 0;
+		if (reg[4]) {
+			estep = (uint32_t)((uint64_t)clockHz_ * reg[4] / (32ull * (unsigned)sampleRate_));
+			if (!estep) estep = 1;
+		}
+		uint32_t offs = smpOffs_[ch];
+		uint32_t eoffs = envOffs_[ch];
+		for (int i = 0; i < frames; i++) {
+			const unsigned ei = eoffs >> 10;
+			if ((reg[0] & 4) && ei >= 0x80u) {
+				ram_[ch * 8] &= (uint8_t)~1u;
+				SetPlaying(ch, 0);
+				break;
+			}
+			const int8_t s = wave[(offs >> 10) & 0x7f];
+			const uint8_t e = env[ei & 0x7f];
+			const int volL = ((e >> 4) & 0x0f) * kX1010VolScale;
+			const int volR = (e & 0x0f) * kX1010VolScale;
+			/* 16ch が同時に振れると 32767 で貼り付く。この経路だけ下げる。 */
+			AddSample(stereo, i, s * volL, s * volR, gain >> 3);
+			offs += step;
+			eoffs += estep;
+		}
+		smpOffs_[ch] = offs;
+		envOffs_[ch] = eoffs;
+	}
+
 	/* 波形: reg1 が選ぶ128バイト符号付きページ。振幅は reg5 の
 	   128バイトステレオエンベロープページで整形。 */
 	void MixWave(int ch, const uint8_t* reg, int16_t* stereo, int frames, int gain)
 	{
+		if (sX1010MameWave) {
+			MixWaveMame(ch, reg, stereo, frames, gain);
+			return;
+		}
 		const int8_t* wave = (const int8_t*)&ram_[((unsigned)reg[1] * 0x80u)
 			& (kX1010RamSize - 1)];
 		const uint8_t* env = &ram_[((unsigned)reg[5] * 0x80u)
@@ -254,4 +299,9 @@ uint8_t CEmuChipX1010Read(CChip* c, unsigned offset)
 void CEmuChipX1010Write(CChip* c, unsigned offset, uint8_t data)
 {
 	if (c) static_cast<CChipX1010*>(c)->WriteRam(offset, data);
+}
+
+void CEmuChipX1010MameWave(int on)
+{
+	sX1010MameWave = on ? 1 : 0;
 }

@@ -2411,6 +2411,17 @@
 #define IDR_CSO_TAC_PSGM                5002
 #define IDR_CSO_TAC_PSGH                5003
 #define IDR_CSO_TAC_PSGK                5004
+#define IDR_CSO_TAC_PSG10               5005
+#define IDR_CSO_TAC_PSG11               5006
+#define IDR_CSO_TAC_PSG12               5007
+#define IDR_CSO_TAC_PSG13               5008
+#define IDR_CSO_TAC_PSSKY10             5009
+#define IDR_CSO_TAC_PSSKY11             5010
+#define IDR_CSO_TAC_PSSKY12             5011
+#define IDR_CSO_TAC_PSSKY13             5012
+#define IDR_CSO_TAC_PSSKY14             5013
+#define IDR_CSO_TAC_PSSKY15             5014
+#define IDR_CSO_TAC_PSSKY16             5015
 #define IDR_GS_WOPN                     399
 
 #define IDC_MP_BOT_SHORTCFG             5100

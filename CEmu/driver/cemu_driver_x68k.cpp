@@ -591,6 +591,29 @@ static void CDriverX68kKeepByakuyaPlay(CHardX68k* hw)
 		hw->Write16(a, 0x4e71u);
 }
 
+/* arcus hoot は起動時に A6 を 0 にする。OPM 書きの tst.b 2(a6); bmi
+   は $E90003 の busy を見るつもりが、ベクタ $0002 の $FF を見て止まる。
+   その move.l d0,a6 を NOP し、0 のときだけ $E90001 に戻す。 */
+static void CDriverX68kPlantArcusA6(CHardX68k* hw)
+{
+	if (!hw) return;
+	const unsigned w = hw->Read16(0x280u);
+	if (w != 0x2c40u && w != 0x4e71u) return;
+	if (hw->Read32(0x282u) != 0x4eb90000u) return;
+	if (hw->Read16(0x286u) != 0x02feu) return;
+	if (hw->Read32(0x288u) != 0x13fc0014u) return;
+	if (w == 0x2c40u)
+		hw->Write16(0x280u, 0x4e71u);
+	/* IRQ6 トランポリンは move.l $10C,a0 してから ISR へ飛ぶ。展開中の
+	   タイマ割り込みが窓ベース A0 を ISR 番地で潰し、次のコピーが
+	   ISR 先頭を壊してその曲だけ止まる。生きた ISR へ直接向ける。 */
+	if (hw->Read16(0x2e92u) == 0x48e7u
+		&& (hw->Read32(0x78u) & 0xffffffu) != 0x2e92u)
+		hw->Write32(0x78u, 0x2e92u);
+	if ((m68k_get_reg(NULL, M68K_REG_A6) & 0xffffffu) != 0) return;
+	m68k_set_reg(M68K_REG_A6, 0x00e90001u);
+}
+
 CDriverX68k::CDriverX68k()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -1274,6 +1297,7 @@ void CDriverX68k::ResumeMailboxForSong(unsigned code)
 void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 {
 	if (!hw_ || !hook || softTimerBusy_) return;
+	CDriverX68kPlantArcusA6(hw_);
 	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 	const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR) & 0xffffu;
 	unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
@@ -1439,6 +1463,7 @@ void CDriverX68k::RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
 	CEmuHardX68kSetActive(hw_);
+	CDriverX68kPlantArcusA6(hw_);
 	CDriverX68kFixMidiA4(hw_);
 	/* Open 後は runKind_ を使う。毎サンプル $400–$C00 を走査すると DS リングが間に合わず古い PCM が繰り返す。 */
 	const int glue = (runKind_ == 1) || (runKind_ == 0 && driverOpmGlue(hw_));

@@ -7,7 +7,7 @@
 #include "Soft3DGpuInfo.h"
 #include <stdio.h>
 #include <math.h>
-#include <xmmintrin.h>
+#include <immintrin.h>
 #include <zstd.h>
 #include <bcrypt.h>
 #pragma comment(lib, "libzstd_static.lib")
@@ -137,6 +137,24 @@ M4 MIdent() { M4 r = {}; r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1; return r; }
 M4 MMul(const M4& a, const M4& b)
 {
 	M4 r;
+#if defined(__AVX2__)
+	const __m256 b0 = _mm256_broadcast_ps((const __m128*)(b.m + 0));
+	const __m256 b1 = _mm256_broadcast_ps((const __m128*)(b.m + 4));
+	const __m256 b2 = _mm256_broadcast_ps((const __m128*)(b.m + 8));
+	const __m256 b3 = _mm256_broadcast_ps((const __m128*)(b.m + 12));
+	const __m256 a01 = _mm256_loadu_ps(a.m + 0);
+	__m256 r01 = _mm256_mul_ps(_mm256_shuffle_ps(a01, a01, 0x00), b0);
+	r01 = _mm256_fmadd_ps(_mm256_shuffle_ps(a01, a01, 0x55), b1, r01);
+	r01 = _mm256_fmadd_ps(_mm256_shuffle_ps(a01, a01, 0xAA), b2, r01);
+	r01 = _mm256_fmadd_ps(_mm256_shuffle_ps(a01, a01, 0xFF), b3, r01);
+	_mm256_storeu_ps(r.m + 0, r01);
+	const __m256 a23 = _mm256_loadu_ps(a.m + 8);
+	__m256 r23 = _mm256_mul_ps(_mm256_shuffle_ps(a23, a23, 0x00), b0);
+	r23 = _mm256_fmadd_ps(_mm256_shuffle_ps(a23, a23, 0x55), b1, r23);
+	r23 = _mm256_fmadd_ps(_mm256_shuffle_ps(a23, a23, 0xAA), b2, r23);
+	r23 = _mm256_fmadd_ps(_mm256_shuffle_ps(a23, a23, 0xFF), b3, r23);
+	_mm256_storeu_ps(r.m + 8, r23);
+#else
 	const __m128 b0 = _mm_loadu_ps(b.m + 0);
 	const __m128 b1 = _mm_loadu_ps(b.m + 4);
 	const __m128 b2 = _mm_loadu_ps(b.m + 8);
@@ -149,6 +167,7 @@ M4 MMul(const M4& a, const M4& b)
 		x = _mm_add_ps(x, _mm_mul_ps(_mm_set1_ps(ar[3]), b3));
 		_mm_storeu_ps(r.m + i * 4, x);
 	}
+#endif
 	return r;
 }
 
@@ -800,32 +819,30 @@ static void StripActorCell(Cell& c)
 	ClearDecks(c);
 }
 
+static void StripSpiralCell(Cell& c)
+{
+	c.prop = PK_NONE;
+	if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+	int n = CellLayN(c);
+	for (int L = 0; L < n; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM) continue;
+		if (tr == T_ROCK || tr == T_MOUNTAIN || tr == T_DOOR || TerrainInfo(tr).costFoot >= 99)
+			LayerSet(c, L, T_PLAIN, LayerHt(c, L));
+	}
+}
+
 static void OpenBeside(Map& m, int cx, int cz)
 {
 	if (!Map::In(cx, cz)) return;
-	StripActorCell(m.c[cz][cx]);
-	int h = (int)m.c[cz][cx].h;
+	StripSpiralCell(m.c[cz][cx]);
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	for (int k = 0; k < 4; k++) {
 		int x = cx + dx[k], z = cz + dz[k];
 		if (!Map::In(x, z)) continue;
 		Cell& n = m.c[z][x];
 		if (n.t == T_VOID || n.t == T_CHASM) continue;
-		if (SplitRoad(n)) continue;
-		int blocked = (n.t == T_ROCK || n.t == T_MOUNTAIN || n.t == T_DOOR || TerrainInfo(n.t).costFoot >= 99);
-		int clip = 0;
-		if (n.nLay >= 2) {
-			for (int L = 1; L < CellLayN(n); L++)
-				if (!HasWorldClear(LayerHt(n, L), h, kDeckClearY)) clip = 1;
-		}
-		if (!blocked && !clip) continue;
-		int keep = (!blocked && TerrainInfo(n.t).costFoot < 99) ? (int)n.h : h;
-		if (abs(keep - h) > 2) keep = h;
-		n.t = T_PLAIN;
-		n.h = (WORD)Clampi(keep, 1, MAXH_SPIRAL);
-		n.prop = PK_NONE;
-		if (n.gimm == GM_FENCE || n.gimm == GM_DROP) { n.gimm = 0; n.gparam = 0; }
-		ClearDecks(n);
+		StripSpiralCell(n);
 	}
 }
 
@@ -875,8 +892,28 @@ static void FlattenStand(Cell& c, int h)
 }
 
 // ボスは足が広い。後から岩や水を敷いても、立っているマスと周囲は平らな地面のままにする。
+// スパイラルは階層と階段の高さが固定されているので、高さを潰さず障害物だけ除く。
+static int gGenSpiral;
 static void OpenStandPads(Map& m)
 {
+	if (gGenSpiral) {
+		for (int g = 0; g < m.nGrp; g++) {
+			MapGroup& grp = m.grp[g];
+			if (grp.n <= 0) continue;
+			if (grp.boss) {
+				int cx = grp.x[0], cz = grp.z[0];
+				for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++) {
+					int x = cx + dx, z = cz + dz;
+					if (Map::In(x, z) && m.c[z][x].t != T_VOID) StripSpiralCell(m.c[z][x]);
+				}
+			}
+			for (int k = 0; k < grp.n && k < GRP_CAP; k++) {
+				int x = grp.x[k], z = grp.z[k];
+				if (Map::In(x, z) && m.c[z][x].t != T_VOID) StripSpiralCell(m.c[z][x]);
+			}
+		}
+		return;
+	}
 	for (int g = 0; g < m.nGrp; g++) {
 		MapGroup& grp = m.grp[g];
 		if (grp.n <= 0) continue;
@@ -1031,26 +1068,28 @@ static int CellStandH(const Map& m, int x, int z, int prefH)
 					if (g_laySeen[NL][nz][nx]) continue;
 					int tTr = LayerTr(t, NL);
 					if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
-					if (abs(LayerHt(t, NL) - h) > 3) continue;
+					if (!SameStep(LayerHt(t, NL), h, 2)) continue;
 					g_laySeen[NL][nz][nx] = 1;
 					if (qt < LAY_Q) { g_layQx[qt] = nx; g_layQz[qt] = nz; g_layQL[qt] = NL; qt++; }
 				}
 			}
 		}
 	}
-	// それでも足りない場合は近傍の通行可能マス（重複無し）を拾う。
+	// それでも足りない場合はまず同じ高さ帯の通行可能マスを拾い、最後に残りを拾う。
 	if (got < want) {
-		for (int rad = 1; rad < MAPN && got < want; rad++) {
-			for (int dz2 = -rad; dz2 <= rad && got < want; dz2++) {
-				for (int dx2 = -rad; dx2 <= rad && got < want; dx2++) {
-					if (max(abs(dx2), abs(dz2)) != rad) continue;
-					int nx = ax + dx2, nz = az + dz2;
-					if (!Map::In(nx, nz) || usedCell(nx, nz)) continue;
-					const Cell& t = m.c[nz][nx];
-					int nL = CellLayN(t);
-					for (int NL = 0; NL < nL; NL++) {
-						int tTr = LayerTr(t, NL);
-						if (tTr != T_VOID && tTr != T_CHASM && TerrainInfo(tTr).costFoot < 99) {
+		for (int pass = 0; pass < 2 && got < want; pass++) {
+			for (int rad = 1; rad < MAPN && got < want; rad++) {
+				for (int dz2 = -rad; dz2 <= rad && got < want; dz2++) {
+					for (int dx2 = -rad; dx2 <= rad && got < want; dx2++) {
+						if (max(abs(dx2), abs(dz2)) != rad) continue;
+						int nx = ax + dx2, nz = az + dz2;
+						if (!Map::In(nx, nz) || usedCell(nx, nz)) continue;
+						const Cell& t = m.c[nz][nx];
+						int nL = CellLayN(t);
+						for (int NL = 0; NL < nL; NL++) {
+							int tTr = LayerTr(t, NL);
+							if (tTr == T_VOID || tTr == T_CHASM || TerrainInfo(tTr).costFoot >= 99) continue;
+							if (pass == 0 && prefH >= 0 && abs(LayerHt(t, NL) - prefH) > 6) continue;
 							outX[got] = nx; outZ[got] = nz; got++;
 							break;
 						}
@@ -1262,15 +1301,14 @@ static bool ShapeInside(int kind, float x, float y)
 // 外形。螺旋と固定図は使わない。後段が角を埋め戻しても、最後にここへ戻す。
 static BYTE gShape[MAPN][MAPN];
 static int gShapeOn = 0;
-static int gGenSpiral = 0;
 // 本線の中心。後段が足場を潰しても、この高さへ戻せばボスまで 1 段で歩ける。
-static short gSpineX[1800], gSpineZ[1800], gSpineH[1800];
+static short gSpineX[2400], gSpineZ[2400], gSpineH[2400];
 static int gSpineN = 0;
 
 static void RememberSpine(const short* sx, const short* sz, const short* sh, int ns)
 {
 	if (ns < 2) { gSpineN = 0; return; }
-	if (ns > 1800) ns = 1800;
+	if (ns > 2400) ns = 2400;
 	for (int i = 0; i < ns; i++) {
 		gSpineX[i] = sx[i];
 		gSpineZ[i] = sz[i];
@@ -1606,524 +1644,537 @@ static void LayDeck(Cell& c, int L, int t, int h);
 static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN]);
 static int CellStand(const Cell& c, int L);
 
-// スパイラルマップ。大きさ 20 段階（中心の小ぶりな軌道〜ほぼ全域）× 形 10 種。
-// 円・四角・三角・菱形・楕円・二重らせん・8の字・星・蛇行・交差迷宮。
-// 同じ (x,z) に重なった高さだけを層にし、1歩は最大1段なので徒歩でつながる。
+// セルの層を昇順に保ちつつ挿入・更新する。minSepH 未満の近接層は増やさない。
+static void InsertSortedDeck(Cell& c, int t, int h, int minSepH)
+{
+	h = Clampi(h, 1, MAXH_SPIRAL);
+	if (c.t == T_VOID && c.nLay < 2) {
+		ClearDecks(c);
+		c.t = (BYTE)t;
+		c.h = (WORD)h;
+		c.nLay = 1;
+		return;
+	}
+	int n = CellLayN(c);
+	BYTE trs[LAY_N];
+	int hts[LAY_N];
+	for (int L = 0; L < n; L++) {
+		trs[L] = (BYTE)LayerTr(c, L);
+		hts[L] = LayerHt(c, L);
+	}
+	for (int L = 0; L < n; L++) {
+		if (abs(hts[L] - h) < max(1, minSepH)) {
+			if (TerrainInfo(trs[L]).costFoot >= 99 && TerrainInfo(t).costFoot < 99) trs[L] = (BYTE)t;
+			hts[L] = h;
+			for (int a = 0; a < n; a++) for (int b = a + 1; b < n; b++) if (hts[b] < hts[a]) {
+				int th = hts[a]; hts[a] = hts[b]; hts[b] = th;
+				BYTE tt = trs[a]; trs[a] = trs[b]; trs[b] = tt;
+			}
+			ClearDecks(c);
+			for (int k = 0; k < n; k++) LayerSet(c, k, trs[k], hts[k]);
+			return;
+		}
+	}
+	if (n < LAY_N) {
+		trs[n] = (BYTE)t;
+		hts[n] = h;
+		n++;
+		for (int a = 0; a < n; a++) for (int b = a + 1; b < n; b++) if (hts[b] < hts[a]) {
+			int th = hts[a]; hts[a] = hts[b]; hts[b] = th;
+			BYTE tt = trs[a]; trs[a] = trs[b]; trs[b] = tt;
+		}
+		ClearDecks(c);
+		for (int k = 0; k < n; k++) LayerSet(c, k, trs[k], hts[k]);
+	}
+}
+
+static int CellHasStairStep(const Map& m, int x, int z)
+{
+	if (!Map::In(x, z)) return 0;
+	const Cell& c = m.c[z][x];
+	if (c.t == T_VOID && c.nLay < 2) return 0;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int nL = CellLayN(c);
+	for (int L = 0; L < nL; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
+		int h = LayerHt(c, L);
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			const Cell& nb = m.c[nz][nx];
+			int nn = CellLayN(nb);
+			for (int NL = 0; NL < nn; NL++) {
+				int ntr = LayerTr(nb, NL);
+				if (ntr == T_VOID || ntr == T_CHASM || TerrainInfo(ntr).costFoot >= 99) continue;
+				int dh = abs(LayerHt(nb, NL) - h);
+				if (dh >= 1 && dh <= 2) return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int FeetLinked(const Map& m);
+
+static int SpiralAuditOk(const Map& m, int sx0, int sz0, int sx1, int sz1, int minSepH)
+{
+	if (!Map::In(sx0, sz0) || !Map::In(sx1, sz1)) return 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.c[z][x];
+		if (c.t == T_VOID && c.nLay < 2) continue;
+		int n = CellLayN(c);
+		for (int L = 1; L < n; L++) {
+			if (LayerHt(c, L) - LayerHt(c, L - 1) < minSepH) return 0;
+		}
+	}
+	if (!FeetLinked(m)) return 0;
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	if (!BfsFeet(m, seen)) return 0;
+	int hit0 = 0, hit1 = 0;
+	for (int L = 0; L < LAY_N; L++) {
+		if (seen[L][sz0][sx0]) hit0 = 1;
+		if (seen[L][sz1][sx1]) hit1 = 1;
+	}
+	return hit0 && hit1 && MapIsSpiral(m);
+}
+
+// スパイラルマップ。大きさ 20 段階 × 形 10 種。
+// 各レイヤー（階層）を平坦な床にして上下の間隔を大きく空け（20段＝8.0m）、階層どうしは階段（1歩2段＝0.8m）で繋ぐ。
 static int StampSpiralMap(Map& m, Rng& r, const ThemeParam& tp, int& pax, int& paz, int& endX, int& endZ)
 {
 	gGenSpiral = 1;
 	gSpineN = 0;
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		Cell& c = m.c[z][x];
-		WipeCell(c);
-		c.var = (BYTE)((x * 17 + z * 31) & 255);
-	}
-	enum { MAX_SPINE = 1800 };
-	static short sx[MAX_SPINE], sz[MAX_SPINE], sh[MAX_SPINE];
-	int ns = 0;
-	const int cx = MAPN / 2, cz = MAPN / 2;
-	// 別マップを引き直すと同じ種から別の規模・形が出る。抽選そのものの確率はいじらない。
-	const int tier = (int)((m.seed / 11u) % 20u);
-	const int shape = (int)((m.seed / 13u) % 10u);
-	const float tf = (float)tier / 19.f;
-	const float radIn = 4.2f + tf * 3.2f;
-	const float radOut = 9.f + tf * 15.f;
-	const int turns = 1 + tier / 6;
-	const int hTop = 48 + (int)(tf * (float)(MAXH_SPIRAL - 48));
-	const int nRing = tier < 7 ? 0 : (tier < 14 ? 1 : 2);
-	const int style = (shape == 6 || shape == 7 || shape == 9) ? 2 : (shape == 5 ? 1 : 0);
-	const int climbUp = (r.Next() & 1) != 0;
-	int curX = cx, curZ = cz;
-	auto pushStep = [&](int tx, int tz) {
-		tx = Clampi(tx, 5, MAPN - 6);
-		tz = Clampi(tz, 5, MAPN - 6);
-		if (ns == 0) {
-			curX = tx; curZ = tz;
-			sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
-			return;
-		}
-		int guard = MAPN * 4;
-		while ((curX != tx || curZ != tz) && ns < MAX_SPINE - 2 && guard-- > 0) {
-			int dx = tx - curX, dz = tz - curZ;
-			int nx = curX, nz = curZ;
-			if (dx != 0 && (dz == 0 || abs(dx) >= abs(dz))) nx += (dx > 0 ? 1 : -1);
-			else if (dz != 0) nz += (dz > 0 ? 1 : -1);
-			else break;
-			if (nx == curX && nz == curZ) break;
-			curX = nx; curZ = nz;
-			if (ns > 0 && sx[ns - 1] == curX && sz[ns - 1] == curZ) continue;
-			sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
-		}
+	enum {
+		MAX_SPINE = 2400,
+		kSpiralBaseH = 14,       // 5.6m（MAXH 超えの浮遊床）
+		kSpiralFloorGapH = 20,   // レイヤー間の高さ 8.0m（見やすさ・クリック性優先）
+		kSpiralStairStepH = 2,   // 階段 1 マスあたり 0.8m（徒歩でそのまま昇降可能）
+		kSpiralStairTiles = (kSpiralFloorGapH / kSpiralStairStepH) - 1, // 9 マスで次の階層へ到達
+		kSpiralMinSepH = 14      // 同一マスの別レイヤー間に最低 5.6m の空間を保証
 	};
-
+	static short sx[MAX_SPINE], sz[MAX_SPINE], sh[MAX_SPINE];
+	static BYTE isStair[MAX_SPINE];
+	const int cx = MAPN / 2, cz = MAPN / 2;
+	const int tier = (int)((m.seed / 11u) % 20u);
+	const int shapeOrig = (int)((m.seed / 13u) % 10u);
+	const float tf = (float)tier / 19.f;
+	const int nFloors = (tier < 7) ? 3 : ((tier < 14) ? 4 : 5);
+	const int climbUp = (r.Next() & 1) != 0;
 	const float ph0 = r.F(0.f, 6.2831853f);
 	const float dirA = climbUp ? 1.f : -1.f;
 	const float TAU = 6.2831853f;
-	auto polar = [&](float ang, float rad, float ax, float az) {
-		int tx = (int)lroundf((float)cx + cosf(ang) * rad * ax);
-		int tz = (int)lroundf((float)cz + sinf(ang) * rad * az);
-		pushStep(tx, tz);
-	};
-	auto coil = [&](float rad0, float rad1, float phase, float aspectX, float aspectZ, int pts, float wobble) {
-		if (pts < 8) pts = 8;
-		for (int i = 0; i <= pts; i++) {
-			float u = (float)i / (float)pts;
-			float ang = phase + dirA * u * (float)turns * TAU;
-			float rad = rad0 + (rad1 - rad0) * u;
-			rad += wobble * (sinf(ang * 1.35f) * 0.55f + sinf(ang * 2.6f + phase) * 0.35f);
-			polar(ang, rad, aspectX, aspectZ);
-		}
-	};
-	if (shape == 1) {
-		// 四角い渦。内側から一辺ずつ伸ばす。
-		int leg = max(4, (int)lroundf(radIn * 1.3f));
-		int limit = max(leg + 4, (int)lroundf(radOut * 2.f));
-		int x = cx, z = cz, dir = (int)(r.Next() & 3u);
-		static const int kdx[4] = { 1, 0, -1, 0 }, kdz[4] = { 0, 1, 0, -1 };
-		int grow = 1 + tier / 8;
-		int sides = turns * 4 + 2;
-		for (int s = 0; s < sides && leg <= limit; s++) {
-			for (int k = 0; k < leg; k++) {
-				x += kdx[dir];
-				z += kdz[dir];
-				pushStep(x, z);
-				x = curX;
-				z = curZ;
-			}
-			dir = (dir + 1) & 3;
-			if (s & 1) leg += grow * 2;
-		}
-	} else if (shape == 2 || shape == 3) {
-		// 2 三角、3 菱形。頂点を結ぶので辺は直線になる。
-		int sides = (shape == 2) ? 3 : 4;
-		float spin = (shape == 3) ? (ph0 + 0.78539816f) : ph0;
-		int nV = turns * sides;
-		if (nV < sides) nV = sides;
-		for (int i = 0; i <= nV; i++) {
-			float u = (float)i / (float)nV;
-			float ang = spin + (float)i * (TAU / (float)sides);
-			float rad = radIn + (radOut - radIn) * u;
-			polar(ang, rad, 1.f, 1.f);
-		}
-	} else if (shape == 4) {
-		coil(radIn, radOut, ph0, 1.55f, 0.58f, turns * 36, radOut * 0.04f);
-	} else if (shape == 5) {
-		coil(radIn, radOut, ph0, 1.f, 1.f, turns * 32, radOut * (0.04f + tf * 0.08f));
-		coil(radIn * 0.7f, radOut * 0.68f, ph0 + 2.2f, 1.f, 1.f, turns * 28, radOut * 0.03f);
-	} else if (shape == 6) {
-		int pts = turns * 40;
-		for (int i = 0; i <= pts; i++) {
-			float u = (float)i / (float)pts;
-			float ang = ph0 + u * (float)turns * TAU;
-			float s = sinf(ang), c = cosf(ang);
-			float rad = radIn + (radOut - radIn) * (0.4f + 0.6f * fabsf(s));
-			pushStep((int)lroundf((float)cx + s * rad), (int)lroundf((float)cz + s * c * rad * 0.9f));
-		}
-	} else if (shape == 7) {
-		int nV = turns * 5;
-		if (nV < 5) nV = 5;
-		for (int k = 0; k <= nV; k++) {
-			float u = (float)k / (float)nV;
-			float ang = ph0 + (float)(k * 2) * (TAU / 5.f);
-			float rad = radIn + (radOut - radIn) * u;
-			polar(ang, rad, 1.f, 1.f);
-		}
-	} else if (shape == 8) {
-		int rows = 3 + tier / 2;
-		if (rows > 12) rows = 12;
-		int halfW = max(4, (int)lroundf(radOut));
-		int z0 = cz - ((rows - 1) * 3) / 2;
-		for (int row = 0; row < rows; row++) {
-			int z = z0 + row * 3;
-			int xA = (row & 1) ? cx + halfW : cx - halfW;
-			int xB = (row & 1) ? cx - halfW : cx + halfW;
-			pushStep(xA, z);
-			pushStep(xB, z);
-		}
-		if (tier >= 10) {
-			int cols = 3 + (tier - 10) / 3;
-			if (cols > 6) cols = 6;
-			int halfH = max(4, rows * 3 / 2);
-			int x0 = cx - ((cols - 1) * 3) / 2;
-			for (int col = 0; col < cols; col++) {
-				int x = x0 + col * 3;
-				int zA = (col & 1) ? cz + halfH : cz - halfH;
-				int zB = (col & 1) ? cz - halfH : cz + halfH;
-				pushStep(x, zA);
-				pushStep(x, zB);
-			}
-		}
-	} else if (shape == 9) {
-		int nWp = 5 + tier / 2;
-		if (nWp > 16) nWp = 16;
-		float ang = ph0;
-		for (int w = 0; w < nWp; w++) {
-			ang += 2.35f + r.F(-0.45f, 0.45f);
-			float rad = (w % 3 == 1) ? radIn * r.F(0.85f, 1.25f) : radOut * r.F(0.72f, 1.f);
-			int wx = (int)lroundf((float)cx + cosf(ang) * rad);
-			int wz = (int)lroundf((float)cz + sinf(ang) * rad);
-			int mx = (curX + wx) / 2 + r.Range(-2, 2);
-			int mz = (curZ + wz) / 2 + r.Range(-2, 2);
-			pushStep(mx, mz);
-			pushStep(wx, wz);
-		}
-	} else {
-		float wob = radOut * (0.05f + tf * 0.12f);
-		float oxs = 0.4f + tf * 2.0f;
-		int pts = turns * (30 + tier / 3);
-		for (int i = 0; i <= pts; i++) {
-			float u = (float)i / (float)pts;
-			float ang = ph0 + dirA * u * (float)turns * TAU;
-			float ox = oxs * cosf(ang * 0.47f + ph0);
-			float oz = oxs * sinf(ang * 0.53f + ph0);
-			float rad = radIn + (radOut - radIn) * u + wob * sinf(ang * 1.35f);
-			int tx = (int)lroundf((float)cx + ox + cosf(ang) * rad);
-			int tz = (int)lroundf((float)cz + oz + sinf(ang) * rad);
-			pushStep(tx, tz);
-		}
-	}
-	if (ns < 24) {
-		for (int i = 0; i <= 32; i++) {
-			float a = ph0 + dirA * (float)i / 32.f * TAU;
-			polar(a, radOut, 1.f, 1.f);
-		}
-	}
+	const BYTE roadT = T_ROAD;
+	const BYTE floorRoadT = (BYTE)(tp.road ? T_ROAD : tp.ground);
+	const BYTE sideT = (BYTE)(tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_RUINS);
+	const DWORD rKeep = r.s;
 
-	if (ns < 24) {
+	struct VSlot { short h; BYTE t; BYTE center; BYTE stair; };
+	static VSlot vgrid[MAPN][MAPN][LAY_N];
+	static BYTE vcnt[MAPN][MAPN];
+	static BYTE spineW[MAX_SPINE];
+
+	auto buildAttempt = [&](int shape, bool cleanCoil) -> int {
+		r.s = rKeep;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			Cell& c = m.c[z][x];
+			WipeCell(c);
+			c.var = (BYTE)((x * 17 + z * 31) & 255);
+		}
+		int ns = 0;
+		int curX = cx, curZ = cz;
+		auto pushStep = [&](int tx, int tz) {
+			tx = Clampi(tx, 5, MAPN - 6);
+			tz = Clampi(tz, 5, MAPN - 6);
+			if (ns == 0) {
+				curX = tx; curZ = tz;
+				sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
+				return;
+			}
+			int guard = MAPN * 4;
+			while ((curX != tx || curZ != tz) && ns < MAX_SPINE - 2 && guard-- > 0) {
+				int dx = tx - curX, dz = tz - curZ;
+				int nx = curX, nz = curZ;
+				if (dx != 0 && (dz == 0 || abs(dx) >= abs(dz))) nx += (dx > 0 ? 1 : -1);
+				else if (dz != 0) nz += (dz > 0 ? 1 : -1);
+				else break;
+				if (nx == curX && nz == curZ) break;
+				curX = nx; curZ = nz;
+				if (ns > 0 && sx[ns - 1] == curX && sz[ns - 1] == curZ) continue;
+				if (ns >= 2 && sx[ns - 2] == curX && sz[ns - 2] == curZ) {
+					ns--;
+					continue;
+				}
+				sx[ns] = (short)curX; sz[ns] = (short)curZ; ns++;
+			}
+		};
+		auto polar = [&](float ang, float rad, float ax, float az) {
+			int tx = (int)lroundf((float)cx + cosf(ang) * rad * ax);
+			int tz = (int)lroundf((float)cz + sinf(ang) * rad * az);
+			pushStep(tx, tz);
+		};
+		const float radIn = 5.2f + tf * 2.6f;
+		const float radOut = min(24.5f, 11.5f + tf * 13.0f);
+		const int turns = max(nFloors, 2 + tier / 5);
+		auto coil = [&](float rad0, float rad1, float phase, float aspectX, float aspectZ, int pts, float wobble) {
+			if (pts < 24) pts = 24;
+			for (int i = 0; i <= pts; i++) {
+				float u = (float)i / (float)pts;
+				float ang = phase + dirA * u * (float)turns * TAU;
+				float rad = rad0 + (rad1 - rad0) * u;
+				rad += wobble * (sinf(ang * 1.35f) * 0.55f + sinf(ang * 2.6f + phase) * 0.35f);
+				polar(ang, rad, aspectX, aspectZ);
+			}
+		};
+
+		if (cleanCoil) {
+			// 確実につながる標準スパイラル（各周が重なりつつ十分な長さを確保）
+			coil(radIn + 1.0f, max(radIn + 4.5f, radOut * 0.88f), ph0, 1.f, 1.f, turns * 48, 0.f);
+		} else if (shape == 1) {
+			int leg = max(6, (int)lroundf(radIn * 1.4f));
+			int limit = max(leg + 8, (int)lroundf(radOut * 2.f));
+			int x = cx - leg / 2, z = cz - leg / 2, dir = (int)(r.Next() & 3u);
+			static const int kdx[4] = { 1, 0, -1, 0 }, kdz[4] = { 0, 1, 0, -1 };
+			int grow = max(1, (limit - leg) / max(2, turns * 2));
+			int sides = turns * 4 + 2;
+			pushStep(x, z);
+			for (int s = 0; s < sides && ns < MAX_SPINE - 32; s++) {
+				int useLeg = min(leg, 46);
+				for (int k = 0; k < useLeg; k++) {
+					x += kdx[dir]; z += kdz[dir];
+					pushStep(x, z);
+					x = curX; z = curZ;
+				}
+				dir = (dir + 1) & 3;
+				if (s & 1) leg = min(limit, leg + grow);
+			}
+		} else if (shape == 2 || shape == 3) {
+			int sides = (shape == 2) ? 3 : 4;
+			float spin = (shape == 3) ? (ph0 + 0.78539816f) : ph0;
+			int nV = max(turns * sides, nFloors * sides);
+			for (int i = 0; i <= nV; i++) {
+				float u = (float)i / (float)nV;
+				float ang = spin + dirA * (float)i * (TAU / (float)sides);
+				float rad = radIn + (radOut - radIn) * u;
+				polar(ang, rad, 1.f, 1.f);
+			}
+		} else if (shape == 4) {
+			coil(radIn, radOut, ph0, 1.38f, 0.72f, turns * 44, radOut * 0.03f);
+		} else if (shape == 5) {
+			coil(radIn, radOut, ph0, 1.f, 1.f, turns * 40, radOut * 0.04f);
+		} else if (shape == 6) {
+			int pts = turns * 48;
+			for (int i = 0; i <= pts; i++) {
+				float u = (float)i / (float)pts;
+				float ang = ph0 + dirA * u * (float)turns * TAU;
+				float s = sinf(ang), c = cosf(ang);
+				float rad = radIn + 2.f + (radOut - radIn - 2.f) * (0.45f + 0.55f * fabsf(s));
+				pushStep((int)lroundf((float)cx + s * rad), (int)lroundf((float)cz + s * c * rad * 0.92f));
+			}
+		} else if (shape == 7) {
+			int nV = max(turns * 5, nFloors * 5);
+			for (int k = 0; k <= nV; k++) {
+				float u = (float)k / (float)nV;
+				float ang = ph0 + dirA * (float)(k * 2) * (TAU / 5.f);
+				float rad = radIn + 1.5f + (radOut - radIn - 1.5f) * u;
+				polar(ang, rad, 1.f, 1.f);
+			}
+		} else if (shape == 8) {
+			int rows = max(nFloors + 2, 4 + tier / 3);
+			if (rows > 10) rows = 10;
+			int halfW = max(7, (int)lroundf(radOut * 0.85f));
+			int stepZ = 4;
+			int z0 = cz - ((rows - 1) * stepZ) / 2;
+			for (int row = 0; row < rows; row++) {
+				int z = Clampi(z0 + row * stepZ, 6, MAPN - 7);
+				int xA = (row & 1) ? cx + halfW : cx - halfW;
+				int xB = (row & 1) ? cx - halfW : cx + halfW;
+				pushStep(xA, z);
+				pushStep(xB, z);
+			}
+		} else if (shape == 9) {
+			coil(radIn, radOut, ph0, 1.12f, 0.92f, turns * 44, radOut * 0.08f);
+		} else {
+			float wob = radOut * (0.04f + tf * 0.07f);
+			int pts = turns * 44;
+			coil(radIn, radOut, ph0, 1.f, 1.f, pts, wob);
+		}
+
+		const int minNeed = nFloors * (kSpiralStairTiles + 18) + 12;
+		if (ns < minNeed) return 0;
+
+		int floorH[8];
+		for (int f = 0; f < nFloors; f++) {
+			int idx = climbUp ? f : (nFloors - 1 - f);
+			floorH[f] = kSpiralBaseH + idx * kSpiralFloorGapH;
+		}
+		memset(isStair, 0, sizeof(isStair));
+		for (int i = 0; i < ns; i++) sh[i] = (short)floorH[0];
+
+		// 各階層の境目に、折れ曲がりや他層との近接が最も少ない 9 マスの直線的な階段区間を置く
+		int stairPos[8];
+		int prevEnd = 10;
+		for (int f = 0; f < nFloors - 1; f++) {
+			int ideal = ((f + 1) * ns) / nFloors - kSpiralStairTiles / 2;
+			int nextLimit = ((f + 2) * ns) / nFloors - kSpiralStairTiles - 10;
+			if (f == nFloors - 2) nextLimit = ns - kSpiralStairTiles - 10;
+			int lo = max(prevEnd + 8, ideal - 22);
+			int hi = min(nextLimit, ideal + 22);
+			if (hi < lo) {
+				lo = prevEnd + 4;
+				hi = ns - (nFloors - 1 - f) * (kSpiralStairTiles + 8) - 8;
+			}
+			if (hi < lo) return 0;
+			int bestS = lo, bestScore = 1 << 29;
+			for (int s0 = lo; s0 <= hi; s0++) {
+				int bends = 0;
+				for (int k = s0; k < s0 + kSpiralStairTiles - 1; k++) {
+					int dx0 = (int)sx[k] - (int)sx[k - 1], dz0 = (int)sz[k] - (int)sz[k - 1];
+					int dx1 = (int)sx[k + 1] - (int)sx[k], dz1 = (int)sz[k + 1] - (int)sz[k];
+					if (dx0 != dx1 || dz0 != dz1) bends++;
+				}
+				int clash = 0;
+				for (int k = s0 - 1; k <= s0 + kSpiralStairTiles; k++) {
+					if (k < 0 || k >= ns) continue;
+					for (int j = 0; j < ns; j++) {
+						if (j >= s0 - 6 && j <= s0 + kSpiralStairTiles + 6) continue;
+						if (max(abs((int)sx[k] - (int)sx[j]), abs((int)sz[k] - (int)sz[j])) <= 2) {
+							clash++;
+							break;
+						}
+					}
+				}
+				int sc = clash * 5000 + bends * 30 + abs(s0 - ideal);
+				if (sc < bestScore) { bestScore = sc; bestS = s0; }
+			}
+			stairPos[f] = bestS;
+			prevEnd = bestS + kSpiralStairTiles;
+		}
+
+		{
+			int curF = 0;
+			for (int i = 0; i < ns; i++) {
+				if (curF < nFloors - 1 && i >= stairPos[curF] + kSpiralStairTiles)
+					curF++;
+				if (curF < nFloors - 1 && i >= stairPos[curF] && i < stairPos[curF] + kSpiralStairTiles) {
+					int stepIdx = i - stairPos[curF] + 1;
+					int dirSign = (floorH[curF + 1] > floorH[curF]) ? 1 : -1;
+					sh[i] = (short)(floorH[curF] + dirSign * stepIdx * kSpiralStairStepH);
+					isStair[i] = 1;
+				} else {
+					sh[i] = (short)floorH[curF];
+				}
+			}
+		}
+
+		// 同じ階層の折り返し以外の近接交差で高さ差が中途半端（1..13）にならないよう検証
+		for (int i = 0; i < ns; i++) {
+			if (!isStair[i]) continue;
+			for (int j = 0; j < ns; j++) {
+				if (abs(i - j) <= 12) continue;
+				if (sx[i] == sx[j] && sz[i] == sz[j] && abs((int)sh[i] - (int)sh[j]) < kSpiralMinSepH)
+					return 0;
+			}
+		}
+
+		memset(vcnt, 0, sizeof(vcnt));
+		{
+			int w = 3, plaza = -1;
+			for (int i = 0; i < ns; i++) {
+				if (isStair[i]) { spineW[i] = 3; continue; }
+				if (i < 10 || i > ns - 11) w = 4;
+				else if (i <= plaza) w = 5;
+				else if (r.Chance(14)) { plaza = i + r.Range(6, 12); w = 5; }
+				else if (r.Chance(18)) w = Clampi(w + (r.Chance(55) ? 1 : -1), 3, 5);
+				spineW[i] = (BYTE)Clampi(w, 3, 5);
+			}
+		}
+		auto walkT = [&](int i) -> BYTE {
+			int v = (int)(r.Next() + (DWORD)i * 17u) % 100;
+			if (v < 42) return (BYTE)tp.ground;
+			if (v < 60 && tp.road) return T_ROAD;
+			if (v < 72) return T_FOREST;
+			if (v < 84) return T_RUINS;
+			if (v < 92) return T_HILL;
+			return floorRoadT;
+		};
+		auto edgeT = [&](int i) -> BYTE {
+			int v = (int)(r.Next() + (DWORD)i * 29u) % 100;
+			if (v < 24) return T_FOREST;
+			if (v < 36) return T_HILL;
+			if (v < 50) return T_RUINS;
+			if (v < 64) return (BYTE)tp.ground;
+			return sideT;
+		};
+		auto putVSlot = [&](int x, int z, int h, BYTE tr, bool center, bool stair) {
+			if (!Map::In(x, z)) return;
+			if (!FootPassable(tr)) tr = T_PLAIN;
+			int n = (int)vcnt[z][x];
+			for (int e = 0; e < n; e++) {
+				int dh = abs(h - (int)vgrid[z][x][e].h);
+				if (dh < kSpiralMinSepH) {
+					if (center && !vgrid[z][x][e].center) {
+						vgrid[z][x][e].h = (short)h;
+						vgrid[z][x][e].t = tr;
+						vgrid[z][x][e].center = 1;
+						vgrid[z][x][e].stair = stair ? 1 : 0;
+					} else if (stair && !vgrid[z][x][e].center && !vgrid[z][x][e].stair && dh == 0) {
+						vgrid[z][x][e].t = T_ROAD;
+						vgrid[z][x][e].stair = 1;
+					}
+					return;
+				}
+			}
+			if (n < LAY_N) {
+				vgrid[z][x][n].h = (short)h;
+				vgrid[z][x][n].t = tr;
+				vgrid[z][x][n].center = center ? 1 : 0;
+				vgrid[z][x][n].stair = stair ? 1 : 0;
+				vcnt[z][x] = (BYTE)(n + 1);
+			}
+		};
+		auto nearOtherStep = [&](int x, int z, int h, int selfI) -> bool {
+			for (int k = max(0, selfI - 6); k <= min(ns - 1, selfI + 6); k++) {
+				if (k == selfI) continue;
+				if (abs((int)sx[k] - x) + abs((int)sz[k] - z) <= 1) {
+					int dh = abs((int)sh[k] - h);
+					if (dh > 2 && dh < kSpiralMinSepH) return true;
+				}
+			}
+			return false;
+		};
+
+		// 1) 本線の中心（平坦フロア＋階段）を確定
+		for (int i = 0; i < ns; i++) {
+			bool st = isStair[i] != 0;
+			if (!st && ((i > 0 && isStair[i - 1]) || (i + 1 < ns && isStair[i + 1])))
+				putVSlot((int)sx[i], (int)sz[i], (int)sh[i], roadT, true, true);
+			else
+				putVSlot((int)sx[i], (int)sz[i], (int)sh[i], st ? roadT : walkT(i), true, st);
+		}
+		// 2) 階段の幅（3マス幅の石段・木段）を先に確保し、踊り場へ滑らかに接続
+		for (int i = 0; i < ns; i++) {
+			bool st = isStair[i] != 0 || (i > 0 && isStair[i - 1]) || (i + 1 < ns && isStair[i + 1]);
+			if (!st) continue;
+			int gx = (int)sx[i], gz = (int)sz[i], h = (int)sh[i];
+			int perpx = 0, perpz = 0;
+			if (i + 1 < ns) { perpx = (int)sz[i] - (int)sz[i + 1]; perpz = (int)sx[i + 1] - (int)sx[i]; }
+			else if (i > 0) { perpx = (int)sz[i - 1] - (int)sz[i]; perpz = (int)sx[i] - (int)sx[i - 1]; }
+			if (perpx) perpx = perpx > 0 ? 1 : -1;
+			if (perpz) perpz = perpz > 0 ? 1 : -1;
+			if (perpx || perpz) {
+				if (!nearOtherStep(gx + perpx, gz + perpz, h, i))
+					putVSlot(gx + perpx, gz + perpz, h, roadT, false, true);
+				if (!nearOtherStep(gx - perpx, gz - perpz, h, i))
+					putVSlot(gx - perpx, gz - perpz, h, roadT, false, true);
+			}
+		}
+		// 3) 平坦フロアの道幅（3〜5マス）と出撃・中間・最奥の広場を敷く
+		for (int i = 0; i < ns; i++) {
+			if (isStair[i]) continue;
+			int gx = (int)sx[i], gz = (int)sz[i], h = (int)sh[i];
+			int perpx = 0, perpz = 0;
+			if (i + 1 < ns) { perpx = (int)sz[i] - (int)sz[i + 1]; perpz = (int)sx[i + 1] - (int)sx[i]; }
+			else if (i > 0) { perpx = (int)sz[i - 1] - (int)sz[i]; perpz = (int)sx[i] - (int)sx[i - 1]; }
+			if (perpx) perpx = perpx > 0 ? 1 : -1;
+			if (perpz) perpz = perpz > 0 ? 1 : -1;
+			int w = (int)spineW[i];
+			if ((perpx || perpz) && !nearOtherStep(gx + perpx, gz + perpz, h, i))
+				putVSlot(gx + perpx, gz + perpz, h, edgeT(i), false, false);
+			if (w >= 3 && (perpx || perpz) && !nearOtherStep(gx - perpx, gz - perpz, h, i))
+				putVSlot(gx - perpx, gz - perpz, h, edgeT(i + 3), false, false);
+			if (w >= 4 && (perpx || perpz) && !nearOtherStep(gx + perpx * 2, gz + perpz * 2, h, i))
+				putVSlot(gx + perpx * 2, gz + perpz * 2, h, edgeT(i + 9), false, false);
+			if (w >= 5 && (perpx || perpz) && !nearOtherStep(gx - perpx * 2, gz - perpz * 2, h, i))
+				putVSlot(gx - perpx * 2, gz - perpz * 2, h, edgeT(i + 11), false, false);
+		}
+		int ends[2] = { 0, ns - 1 };
+		for (int e = 0; e < 2; e++) {
+			int idx = ends[e];
+			int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
+			for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++) {
+				if (abs(dx) + abs(dz) > 4) continue;
+				int nx = gx + dx, nz = gz + dz;
+				if (!Map::In(nx, nz)) continue;
+				bool hitStair = false;
+				for (int k = 0; k < ns; k++) if (isStair[k] && abs((int)sx[k] - nx) <= 1 && abs((int)sz[k] - nz) <= 1) { hitStair = true; break; }
+				if (hitStair) continue;
+				putVSlot(nx, nz, h, (BYTE)tp.ground, dx == 0 && dz == 0, false);
+			}
+		}
+		// 中間階層の平坦部に大型も立てる 5x5 広場を確保
+		for (int f = 1; f < nFloors; f++) {
+			int mid = (f == 1 ? stairPos[0] / 2 : (stairPos[f - 2] + kSpiralStairTiles + stairPos[f - 1]) / 2);
+			if (mid < 6 || mid >= ns - 6 || isStair[mid]) continue;
+			int gx = (int)sx[mid], gz = (int)sz[mid], h = (int)sh[mid];
+			for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++) {
+				int nx = gx + dx, nz = gz + dz;
+				bool hitStair = false;
+				for (int k = 0; k < ns; k++) if (isStair[k] && abs((int)sx[k] - nx) <= 1 && abs((int)sz[k] - nz) <= 1) { hitStair = true; break; }
+				if (!hitStair) putVSlot(nx, nz, h, (BYTE)tp.ground, dx == 0 && dz == 0, false);
+			}
+			break;
+		}
+
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			int n = (int)vcnt[z][x];
+			if (n <= 0) continue;
+			for (int a = 0; a < n; a++) for (int b = a + 1; b < n; b++) {
+				if (vgrid[z][x][b].h < vgrid[z][x][a].h) {
+					VSlot tmp = vgrid[z][x][a]; vgrid[z][x][a] = vgrid[z][x][b]; vgrid[z][x][b] = tmp;
+				}
+			}
+			Cell& c = m.c[z][x];
+			for (int L = 0; L < n && L < LAY_N; L++)
+				LayDeck(c, L, vgrid[z][x][L].t, vgrid[z][x][L].h);
+		}
+		for (int i = 0; i < ns; i++) {
+			int x = (int)sx[i], z = (int)sz[i], h = (int)sh[i];
+			if (!Map::In(x, z)) continue;
+			InsertSortedDeck(m.c[z][x], isStair[i] ? roadT : floorRoadT, h, kSpiralMinSepH);
+		}
+		// 端数の浮き島があれば BFS 到達成分だけを残す
+		{
+			static BYTE seen[LAY_N][MAPN][MAPN];
+			m.nP = 1;
+			m.pStartX[0] = (int)sx[0];
+			m.pStartZ[0] = (int)sz[0];
+			if (BfsFeet(m, seen) > 0) {
+				for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+					Cell& c = m.c[z][x];
+					if (c.t == T_VOID && c.nLay < 2) continue;
+					int n = CellLayN(c), keep = 0;
+					BYTE trs[LAY_N];
+					int hts[LAY_N];
+					for (int L = 0; L < n; L++) {
+						if (!seen[L][z][x]) continue;
+						trs[keep] = (BYTE)LayerTr(c, L);
+						hts[keep] = LayerHt(c, L);
+						keep++;
+					}
+					WipeCell(c);
+					c.var = (BYTE)((x * 17 + z * 31) & 255);
+					for (int k = 0; k < keep; k++) LayerSet(c, k, trs[k], hts[k]);
+				}
+			}
+			m.nP = 0;
+		}
+		if (!SpiralAuditOk(m, (int)sx[0], (int)sz[0], (int)sx[ns - 1], (int)sz[ns - 1], kSpiralMinSepH))
+			return 0;
+		RememberSpine(sx, sz, sh, ns);
+		pax = (int)sx[0]; paz = (int)sz[0];
+		endX = (int)sx[ns - 1]; endZ = (int)sz[ns - 1];
+		return ns;
+	};
+
+	int builtNs = buildAttempt(shapeOrig, false);
+	if (builtNs <= 0) builtNs = buildAttempt(0, true);
+	if (builtNs <= 0) {
 		gGenSpiral = 0;
 		gSpineN = 0;
 		return StampVertical(m, r, tp, climbUp ? 1 : 0, pax, paz, endX, endZ);
 	}
-
-	// 0〜999 レイヤー空間の高さを軌道へ割り当てる（1歩あたり最大±2段なので徒歩で全域を登り降り可能）。
-	// ぐるぐる登り降り・ジグザグ高低差を付け、最大 999 レイヤーまで到達させる。
-	{
-		float hCur = climbUp ? 12.f : (float)hTop;
-		const float dirSign = climbUp ? 1.f : -1.f;
-		const float waveAmp = 0.2f + tf * 0.65f;
-		const float wave2 = 0.08f + tf * 0.24f;
-		for (int i = 0; i < ns; i++) {
-			float u = (float)i / (float)max(1, ns - 1);
-			// 小さい軌道はゆるく登る。大きい軌道だけ 0〜999 を縦断し、途中で折り返す。
-			float wave = sinf(u * 6.2831853f * (style == 2 ? 4.5f : 3.0f)) * waveAmp
-				+ wave2 * sinf(u * 19.7f + (float)shape);
-			float delta = dirSign * (0.6f + tf * 0.85f) + wave;
-			// 1歩は最大1段。2段を超える上書きが、選択できない切れ目になる。
-			delta = Clampf(delta, -1.f, 1.f);
-			if (i > 0) hCur = Clampf(hCur + delta, 2.f, (float)hTop);
-			int hi = Clampi((int)lroundf(hCur), 2, hTop);
-			if (i > 0) {
-				int prev = (int)sh[i - 1];
-				hi = Clampi(hi, prev - 1, prev + 1);
-				hi = Clampi(hi, 2, hTop);
-			}
-			sh[i] = (short)hi;
-		}
-		// 立体交差は世界高さで人+翼が通るだけ離す。整数8段は高所で 36cm しかなく天井になる。
-		for (int pass = 0; pass < 8; pass++) {
-			for (int i = 24; i < ns; i++) {
-				int clash = 0, otherH = (int)sh[i];
-				for (int j = 0; j < i - 16; j++) {
-					if (abs((int)sx[i] - (int)sx[j]) <= 2 && abs((int)sz[i] - (int)sz[j]) <= 2
-						&& !HasWorldClear((int)sh[i], (int)sh[j], kDeckClearY)) {
-						clash = 1; otherH = (int)sh[j]; break;
-					}
-				}
-				if (!clash) continue;
-				int want = HForClear(otherH, kDeckClearY);
-				if ((int)sh[i] >= want) continue;
-				int climb = want - (int)sh[i];
-				int k0 = i - climb;
-				if (k0 < 1) k0 = 1;
-				for (int k = k0; k <= i; k++) {
-					int prev = (int)sh[k - 1];
-					int nxt = prev + 1;
-					if (nxt > want) nxt = want;
-					sh[k] = (short)Clampi(nxt, 2, hTop);
-					sh[k] = (short)Clampi((int)sh[k], prev - 1, prev + 1);
-				}
-				for (int k = i + 1; k < ns; k++) {
-					int prev = (int)sh[k - 1];
-					sh[k] = (short)Clampi((int)sh[k], prev - 1, prev + 1);
-					sh[k] = (short)Clampi((int)sh[k], 2, hTop);
-				}
-			}
-		}
-	}
-
-	// 幅は 2〜5。1マス道は置かない。細い区間も、5マスの足場も残す。
-	struct VSlot { short h; short pass; BYTE t; };
-	static VSlot vgrid[MAPN][MAPN][LAY_N];
-	static BYTE vcnt[MAPN][MAPN];
-	static BYTE spineW[MAX_SPINE];
-	memset(vcnt, 0, sizeof(vcnt));
-	const BYTE roadT = (BYTE)(tp.road ? T_ROAD : tp.ground);
-	const BYTE sideT = (BYTE)(tp.ground == T_SAND || tp.ground == T_SNOW ? tp.ground : T_RUINS);
-	{
-		int w = 3, plaza = -1, lane = -1;
-		for (int i = 0; i < ns; i++) {
-			if (i < 8 || i > ns - 9) w = 3;
-			else if (i <= plaza) w = 5;
-			else if (i <= lane) w = 2;
-			else if (r.Chance(12)) { plaza = i + r.Range(5, 12); w = 5; }
-			else if (r.Chance(14)) { lane = i + r.Range(8, 16); w = 2; }
-			else if (r.Chance(18)) w = Clampi(w + (r.Chance(50) ? 1 : -1), 2, 5);
-			if (w < 2) w = 2;
-			if (w > 5) w = 5;
-			spineW[i] = (BYTE)w;
-		}
-		{
-			int has5 = 0;
-			for (int i = 0; i < ns; i++) if (spineW[i] >= 5) has5 = 1;
-			if (!has5 && ns > 20) {
-				int a = ns / 3;
-				if (a < 8) a = 8;
-				for (int i = a; i < a + 6 && i < ns - 6; i++) spineW[i] = 5;
-			}
-		}
-	}
-	auto walkT = [&](int i) -> BYTE {
-		int v = (int)(r.Next() + (DWORD)i * 17u) % 100;
-		if (v < 38) return (BYTE)tp.ground;
-		if (v < 52 && tp.road) return T_ROAD;
-		if (v < 64) return T_FOREST;
-		if (v < 74) return T_RUINS;
-		if (v < 82) return T_HILL;
-		if (v < 88 && tp.swamp) return T_SWAMP;
-		return roadT;
-	};
-	auto edgeT = [&](int i) -> BYTE {
-		int v = (int)(r.Next() + (DWORD)i * 29u) % 100;
-		if (v < 22) return T_FOREST;
-		if (v < 32) return T_HILL;
-		if (v < 42) return T_RUINS;
-		if (v < 50) return (BYTE)tp.ground;
-		if (v < 56) return T_ROCK;
-		return sideT;
-	};
-
-	auto putVSlot = [&](int x, int z, int h, int pass, BYTE tr, bool isCenter) {
-		if (!Map::In(x, z)) return;
-		if (!FootPassable(tr)) tr = T_PLAIN;
-		int n = (int)vcnt[z][x];
-		for (int e = 0; e < n; e++) {
-			// 同じ床（1段以内）だけ共有する。離れた交差の高さを書き換えると、前後が段差になって通れなくなる。
-			if (abs(h - (int)vgrid[z][x][e].h) <= 1) {
-				if (isCenter && !FootPassable(vgrid[z][x][e].t)) vgrid[z][x][e].t = tr;
-				return;
-			}
-		}
-		if (n < LAY_N) {
-			vgrid[z][x][n].h = (short)h;
-			vgrid[z][x][n].pass = (short)pass;
-			vgrid[z][x][n].t = tr;
-			vcnt[z][x] = (BYTE)(n + 1);
-		} else if (isCenter) {
-			int bestE = 0, bestD = 99999;
-			for (int e = 0; e < LAY_N; e++) {
-				int d = abs(h - (int)vgrid[z][x][e].h);
-				if (d < bestD) { bestD = d; bestE = e; }
-			}
-			vgrid[z][x][bestE].h = (short)h;
-			vgrid[z][x][bestE].pass = (short)pass;
-			vgrid[z][x][bestE].t = tr;
-		}
-	};
-
-	for (int i = 0; i < ns; i++) {
-		int gx = (int)sx[i], gz = (int)sz[i], h = (int)sh[i];
-		int perpx = 0, perpz = 0;
-		if (i + 1 < ns) { perpx = (int)sz[i] - (int)sz[i + 1]; perpz = (int)sx[i + 1] - (int)sx[i]; }
-		else if (i > 0) { perpx = (int)sz[i - 1] - (int)sz[i]; perpz = (int)sx[i] - (int)sx[i - 1]; }
-		if (perpx) perpx = perpx > 0 ? 1 : -1;
-		if (perpz) perpz = perpz > 0 ? 1 : -1;
-		int w = (int)spineW[i];
-		if (w < 2) w = 2;
-		if (w > 5) w = 5;
-		putVSlot(gx, gz, h, i, walkT(i), true);
-		if (w >= 2 && (perpx || perpz))
-			putVSlot(gx + perpx, gz + perpz, h, i, edgeT(i), false);
-		if (w >= 3 && (perpx || perpz))
-			putVSlot(gx - perpx, gz - perpz, h, i, edgeT(i + 3), false);
-		if (w >= 4 && (perpx || perpz))
-			putVSlot(gx + perpx * 2, gz + perpz * 2, h, i, edgeT(i + 9), false);
-		if (w >= 5 && (perpx || perpz))
-			putVSlot(gx - perpx * 2, gz - perpz * 2, h, i, edgeT(i + 11), false);
-	}
-
-	// スタートとボス地点は足場を少し広げる。穴を残して正方形にはしない。
-	int ends[2] = { 0, ns - 1 };
-	for (int e = 0; e < 2; e++) {
-		int idx = ends[e];
-		int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
-		int rad = tier < 8 ? 2 : r.Range(2, 3);
-		for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
-			if (abs(dx) + abs(dz) > rad + 1) continue;
-			if ((dx || dz) && r.Chance(18)) continue;
-			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
-		}
-	}
-	// 道幅は 2〜5。そのうち 1 か所は、5x5 の敵がそのまま立つ同じ高さの床。
-	if (ns > 16) {
-		int idx = ns / 3;
-		if (idx < 8) idx = 8;
-		if (idx > ns - 8) idx = ns / 2;
-		int gx = (int)sx[idx], gz = (int)sz[idx], h = (int)sh[idx];
-		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
-			putVSlot(gx + dx, gz + dz, h, idx, (BYTE)tp.ground, dx == 0 && dz == 0);
-	}
-
-	// 大きい軌道だけ、半径をずらした環を 1〜2 本足す。交差は段を離し、坂で届くところだけ結ぶ。
-	{
-		enum { MAXP = 1400 };
-		static short bx[2][MAXP], bz[2][MAXP], bh[2][MAXP];
-		int bn[2] = { 0, 0 };
-		float phase = r.F(0.f, 6.2831853f);
-		int turnsUse = turns;
-		float radBase[2] = { radOut * 0.78f, radOut * 1.02f };
-		if (radBase[1] > 26.f) radBase[1] = 26.f;
-		const int liftMax = 6 + (tier * 8) / 19;
-		for (int ri = 0; ri < nRing; ri++) {
-			int curX = cx, curZ = cz, n = 0;
-			auto push = [&](int tx, int tz) {
-				tx = Clampi(tx, 4, MAPN - 5);
-				tz = Clampi(tz, 4, MAPN - 5);
-				if (n == 0) {
-					curX = tx; curZ = tz;
-					bx[ri][n] = (short)curX; bz[ri][n] = (short)curZ; n++;
-					return;
-				}
-				int guard = MAPN * 4;
-				while ((curX != tx || curZ != tz) && n < MAXP - 2 && guard-- > 0) {
-					int dx = tx - curX, dz = tz - curZ;
-					int nx = curX, nz = curZ;
-					if (dx != 0 && (dz == 0 || abs(dx) >= abs(dz))) nx += (dx > 0 ? 1 : -1);
-					else if (dz != 0) nz += (dz > 0 ? 1 : -1);
-					else break;
-					if (nx == curX && nz == curZ) break;
-					curX = nx; curZ = nz;
-					if (n > 0 && bx[ri][n - 1] == curX && bz[ri][n - 1] == curZ) continue;
-					bx[ri][n] = (short)curX; bz[ri][n] = (short)curZ; n++;
-				}
-			};
-			push(cx, cz);
-			int samples = turnsUse * 34;
-			for (int i = 0; i <= samples; i++) {
-				float u = (float)i / (float)samples;
-				float ang = phase + ri * 2.2f + (climbUp ? 1.f : -1.f) * u * (float)turnsUse * 6.2831853f;
-				float rad = radBase[ri] + 1.3f * sinf(ang * 1.5f + phase);
-				int tx = (int)lroundf((float)cx + cosf(ang) * rad);
-				int tz = (int)lroundf((float)cz + sinf(ang) * rad);
-				push(tx, tz);
-			}
-			bn[ri] = n;
-			int h = (int)sh[0];
-			for (int i = 0; i < n; i++) {
-				if (i > 0) {
-					float u = (float)i / (float)max(1, n - 1);
-					int j = Clampi((int)(u * (float)(ns - 1)), 0, ns - 1);
-					int lift = 0;
-					if (ri == 1 || nRing == 1) {
-						if (u > 0.14f && u < 0.8f) lift = liftMax;
-						else if (u > 0.08f && u <= 0.14f) lift = (int)((u - 0.08f) / 0.06f * (float)liftMax);
-						else if (u >= 0.8f && u < 0.9f) lift = (int)((0.9f - u) / 0.1f * (float)liftMax);
-					}
-					int want = (int)sh[j] + (climbUp ? lift : -lift);
-					if (want > h + 1) want = h + 1;
-					if (want < h - 1) want = h - 1;
-					h = Clampi(want, 2, hTop);
-				}
-				bh[ri][i] = (short)h;
-			}
-		}
-		auto stampWide = [&](const short* xs, const short* zs, const short* hs, int n, int pass0) {
-			int w = 3, left = 0;
-			for (int i = 0; i < n; i++) {
-				if (left <= 0) { w = 2 + (int)(r.Next() % 4); left = 8 + (int)(r.Next() % 10); }
-				left--;
-				if (i < 6 || i > n - 7) w = 3;
-				int gx = (int)xs[i], gz = (int)zs[i], hh = (int)hs[i];
-				int perpx = 0, perpz = 0;
-				if (i + 1 < n) { perpx = (int)zs[i] - (int)zs[i + 1]; perpz = (int)xs[i + 1] - (int)xs[i]; }
-				else if (i > 0) { perpx = (int)zs[i - 1] - (int)zs[i]; perpz = (int)xs[i] - (int)xs[i - 1]; }
-				if (perpx) perpx = perpx > 0 ? 1 : -1;
-				if (perpz) perpz = perpz > 0 ? 1 : -1;
-				int pass = pass0 + i;
-				putVSlot(gx, gz, hh, pass, roadT, true);
-				if ((perpx || perpz)) {
-					putVSlot(gx + perpx, gz + perpz, hh, pass, roadT, false);
-					if (w >= 3) putVSlot(gx - perpx, gz - perpz, hh, pass, roadT, false);
-					if (w >= 4) putVSlot(gx + perpx * 2, gz + perpz * 2, hh, pass, roadT, false);
-					if (w >= 5) putVSlot(gx - perpx * 2, gz - perpz * 2, hh, pass, roadT, false);
-				}
-			}
-		};
-		if (bn[0] >= 16) stampWide(bx[0], bz[0], bh[0], bn[0], 40000);
-		if (bn[1] >= 16) stampWide(bx[1], bz[1], bh[1], bn[1], 80000);
-		auto bridge = [&](const short* x0, const short* z0, const short* h0, int n0,
-			const short* x1, const short* z1, const short* h1, int n1) {
-			int step = tier >= 16 ? 28 : 48;
-			for (int i = 20; i < n0 - 20; i += step) {
-				int best = -1, bestD = 99;
-				for (int j = 0; j < n1; j++) {
-					int d = abs((int)x0[i] - (int)x1[j]) + abs((int)z0[i] - (int)z1[j]);
-					int dh = abs((int)h0[i] - (int)h1[j]);
-					if (d < 4 || d > 14 || dh > d) continue;
-					if (d < bestD) { bestD = d; best = j; }
-				}
-				if (best < 0) continue;
-				int x = (int)x0[i], z = (int)z0[i], h = (int)h0[i];
-				int tx = (int)x1[best], tz = (int)z1[best], th = (int)h1[best];
-				int guard = 24;
-				while ((x != tx || z != tz) && guard-- > 0) {
-					if (x != tx) x += (tx > x) ? 1 : -1;
-					else if (z != tz) z += (tz > z) ? 1 : -1;
-					if (h < th) h++;
-					else if (h > th) h--;
-					h = Clampi(h, 2, MAXH_SPIRAL);
-					putVSlot(x, z, h, 120000 + i, roadT, true);
-					if (Map::In(x, z + 1)) putVSlot(x, z + 1, h, 120000 + i, roadT, false);
-				}
-			}
-		};
-		if (tier >= 12 && bn[0] >= 16) bridge(sx, sz, sh, ns, bx[0], bz[0], bh[0], bn[0]);
-		if (tier >= 12 && bn[0] >= 16 && bn[1] >= 16) bridge(bx[0], bz[0], bh[0], bn[0], bx[1], bz[1], bh[1], bn[1]);
-	}
-
-	// 各セルで高さを昇順に並べ、同時デッキへ書き込む
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		int n = (int)vcnt[z][x];
-		if (n <= 0) continue;
-		for (int a = 0; a < n; a++) for (int b = a + 1; b < n; b++) {
-			if (vgrid[z][x][b].h < vgrid[z][x][a].h) {
-				VSlot tmp = vgrid[z][x][a]; vgrid[z][x][a] = vgrid[z][x][b]; vgrid[z][x][b] = tmp;
-			}
-		}
-		Cell& c = m.c[z][x];
-		for (int L = 0; L < n && L < LAY_N; L++) {
-			LayDeck(c, L, vgrid[z][x][L].t, vgrid[z][x][L].h);
-		}
-	}
-
-	// 本線の中心は、前後が 2 段以内で歩ける床を必ず持つ。無いときだけ層を足す。既存の高さは動かさない。
-	for (int i = 0; i < ns; i++) {
-		int x = (int)sx[i], z = (int)sz[i], h = (int)sh[i];
-		if (!Map::In(x, z)) continue;
-		Cell& c = m.c[z][x];
-		int nL = (c.t == T_VOID) ? 0 : CellLayN(c);
-		int ok = 0;
-		for (int L = 0; L < nL; L++) {
-			if (abs(LayerHt(c, L) - h) <= 2 && TerrainInfo(LayerTr(c, L)).costFoot < 99) { ok = 1; break; }
-		}
-		if (ok) continue;
-		if (c.t == T_VOID) LayDeck(c, 0, roadT, h);
-		else if (nL < LAY_N) LayDeck(c, nL, roadT, h);
-	}
-
-	RememberSpine(sx, sz, sh, ns);
-	pax = (int)sx[0]; paz = (int)sz[0];
-	endX = (int)sx[ns - 1]; endZ = (int)sz[ns - 1];
-	return Clampi(ns / 8, 16 + tier / 4, 28 + tier);
+	return Clampi(builtNs / 8, 16 + tier / 4, 28 + tier);
 }
 
 // 幅3の螺旋。腕のあいだは空白なので、飛び越えて近道できない。
@@ -2448,6 +2499,21 @@ static void StampSpiralDecor(Map& m, Rng& r, int th)
 		Cell& c = m.c[z][x];
 		c.prop = PK_NONE;
 		if (c.t == T_VOID || c.t == T_CHASM) continue;
+		// 階段マスとその前後の踊り場は木や木箱で視界・クリックを塞がない
+		int onStair = CellHasStairStep(m, x, z);
+		if (!onStair) {
+			for (int k = 0; k < 4 && !onStair; k++)
+				if (CellHasStairStep(m, x + kDx[k], z + kDz[k])) onStair = 1;
+		}
+		if (onStair) {
+			int nL = CellLayN(c);
+			for (int L = 0; L < nL; L++) {
+				int tr = LayerTr(c, L);
+				if (tr != T_VOID && tr != T_CHASM && TerrainInfo(tr).costFoot < 99)
+					LayerSet(c, L, T_ROAD, LayerHt(c, L));
+			}
+			continue;
+		}
 		int nVoid = 0;
 		for (int k = 0; k < 4; k++) {
 			int nx = x + kDx[k], nz = z + kDz[k];
@@ -2455,14 +2521,14 @@ static void StampSpiralDecor(Map& m, Rng& r, int th)
 		}
 		int nearStart = NearPartyOrGroup(m, x, z, 3);
 		int roll = (int)((c.var + (x * 13 + z * 29)) & 255);
-		if (!c.gimm && c.nLay <= 1 && !nearStart && FootPassable(c.t) && c.t != T_BRIDGE && c.t != T_DOOR) {
+		if (!c.gimm && c.nLay <= 1 && !nearStart && FootPassable(c.t) && c.t != T_BRIDGE && c.t != T_DOOR && c.t != T_ROAD) {
 			if (roll < 42 && c.t != T_FOREST) c.t = T_FOREST;
 			else if (roll < 54) c.t = T_RUINS;
 			else if (roll < 62) c.t = T_HILL;
 			else if (th == TH_SWAMP && roll < 70) c.t = T_SWAMP;
 			else if ((th == TH_DESERT || th == TH_VOLCANO) && roll < 68) c.t = T_SAND;
 		}
-		if (c.t == T_VOID) continue;
+		if (c.t == T_VOID || c.nLay >= 2) continue;
 		if (NearPartyOrGroup(m, x, z, 2)) { c.prop = PK_NONE; continue; }
 		if (th == TH_SEABED) {
 			if (c.t == T_ROCK || c.t == T_MOUNTAIN) c.prop = PK_KIT;
@@ -3202,9 +3268,10 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			int t = m.c[z][x].t;
 			if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
 			if (vertical == 2 && stepFromP[z][x] < 0) continue;
+			if (vertical == 2 && CellHasStairStep(m, x, z)) continue;
 			if (pathDistP(x, z) < 5) continue;
 			int ht = CellStandH(m, x, z, homeH);
-			int nearXZ = (vertical == 2) ? 14 : 10;
+			int nearXZ = (vertical == 2) ? 5 : 10;
 			if (max(abs(x - pax), abs(z - paz)) <= nearXZ && abs(ht - homeH) > 5) continue;
 			order[nc++] = z * MAPN + x;
 		}
@@ -3262,7 +3329,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 			if (want > budget) want = budget;
 			MapGroup& g = m.grp[m.nGrp];
 			g.ax = (short)x; g.az = (short)z; g.boss = 0; g.n = 0;
-			{
+			if (vertical != 2) {
 				int hh = max(1, (int)m.c[z][x].h);
 				if (m.c[z][x].t == T_MOUNTAIN) hh = max(1, hh - 2);
 				if (m.c[z][x].t == T_CHASM) hh = 2;
@@ -3619,6 +3686,7 @@ static void GenerateMapBody(Map& m, int stage, DWORD seed, int theme)
 		for (int z = 2; z < MAPN - 2; z++) for (int x = 2; x < MAPN - 2; x++) {
 			if (taken[z][x] || !FootPassable(m.c[z][x].t)) continue;
 			if (m.c[z][x].t == T_BRIDGE) continue;
+			if (vertical == 2 && (m.c[z][x].nLay >= 2 || CellHasStairStep(m, x, z))) continue;
 			spots[ns++] = z * MAPN + x;
 		}
 		for (int i = ns - 1; i > 0; i--) {
@@ -3847,7 +3915,7 @@ void TacRollSky(int theme, DWORD seed, int& wx, int& hour)
 	else if (hs == 8) hour = HR_MOON;
 }
 
-// 本線の中心だけを、記録した高さ（1歩1段）の歩ける床に戻す。別アームは触らない。
+// 本線の中心だけを、記録した高さ（1歩最大2段＝階段対応）の歩ける床に戻す。層は昇順を維持する。
 static void RepairSpineChain(Map& m)
 {
 	if (gSpineN < 2) return;
@@ -3856,8 +3924,8 @@ static void RepairSpineChain(Map& m)
 		int x = (int)gSpineX[i], z = (int)gSpineZ[i];
 		int h = (int)gSpineH[i];
 		if (prev >= 0) {
-			if (h > prev + 1) h = prev + 1;
-			if (h + 1 < prev) h = prev - 1;
+			if (h > prev + 2) h = prev + 2;
+			if (h + 2 < prev) h = prev - 2;
 		}
 		if (h < 2) h = 2;
 		if (!Map::In(x, z)) { prev = h; continue; }
@@ -3868,37 +3936,57 @@ static void RepairSpineChain(Map& m)
 		for (int L = 0; L < nL; L++) {
 			int tr = LayerTr(c, L);
 			if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) continue;
-			if (LayerHt(c, L) == h) { placed = 1; break; }
+			if (abs(LayerHt(c, L) - h) <= 1) { placed = 1; break; }
 		}
-		if (!placed) {
-			int n = (int)c.nLay;
-			if (n < 1) n = (c.t == T_VOID) ? 0 : 1;
-			int useL = n;
-			if (useL >= LAY_N) {
-				useL = 0;
-				int bestD = 99999;
-				for (int L = 0; L < LAY_N; L++) {
-					int d = abs(LayerHt(c, L) - h);
-					if (d < bestD) { bestD = d; useL = L; }
-				}
-			}
-			LayerSet(c, useL, T_PLAIN, h);
-		}
+		if (!placed)
+			InsertSortedDeck(c, T_ROAD, h, 14);
 		prev = h;
 	}
+}
+
+static int SpiralMapBfsValid(const Map& m)
+{
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.c[z][x];
+		if (c.t == T_VOID && c.nLay < 2) continue;
+		int n = CellLayN(c);
+		for (int L = 1; L < n; L++)
+			if (LayerHt(c, L) - LayerHt(c, L - 1) < 14) return 0;
+	}
+	if (!FeetLinked(m)) return 0;
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	if (!BfsFeet(m, seen)) return 0;
+	for (int i = 0; i < m.nP && i < MAX_PARTY; i++) {
+		int x = m.pStartX[i], z = m.pStartZ[i];
+		if (!Map::In(x, z)) return 0;
+		int ok = 0;
+		for (int L = 0; L < LAY_N; L++) if (seen[L][z][x]) { ok = 1; break; }
+		if (!ok) return 0;
+	}
+	for (int g = 0; g < m.nGrp; g++) {
+		for (int k = 0; k < m.grp[g].n && k < GRP_CAP; k++) {
+			int x = m.grp[g].x[k], z = m.grp[g].z[k];
+			if (!Map::In(x, z)) return 0;
+			int ok = 0;
+			for (int L = 0; L < LAY_N; L++) if (seen[L][z][x]) { ok = 1; break; }
+			if (!ok) return 0;
+		}
+	}
+	return 1;
 }
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	for (int attempt = 0; attempt < 60; attempt++) {
 		GenerateMapBody(m, stage, seed + (DWORD)attempt * 9973u, theme);
-		// 立体交差の別アームを階段で繋ぐと滝ショートカットになるので、スパイラルはリボンの連続だけ残す。
-		if (gGenSpiral || MapIsSpiral(m)) break;
+		if (gGenSpiral || MapIsSpiral(m)) {
+			RepairSpineChain(m);
+			if (SpiralMapBfsValid(m)) return;
+			continue;
+		}
 		ConnectFeet(m);
 		if (FeetLinked(m)) return;
 	}
-	// 平地は全足場を一続きにする。スパイラルは別アームを掘らず、本線の中心だけ 1 段差に戻す。
-	// 足場を広げたとき下の層だけ残すと本線が切れ、その保険がスパイラルでは呼ばれていなかった。
 	if (gGenSpiral || MapIsSpiral(m)) {
 		RepairSpineChain(m);
 		return;
@@ -6648,15 +6736,33 @@ static void FloodWalk(const Battle& b, int mt, int limit, const int* sx, const i
 	}
 }
 
+// 原点セルの高さに最も近い層番号を返す（立体交差の縁で nLay が変わる大型ユニット用）
+static int MatchDeckAt(const Cell& c, int refH, int fallbackL)
+{
+	int n = CellLayN(c);
+	if (n <= 1) return 0;
+	int best = -1, bestDh = 99999;
+	for (int L = 0; L < n; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM) continue;
+		if (TerrainInfo(tr).costFoot >= 99 && !TerrainInfo(tr).flyOk) continue;
+		int dh = abs(LayerHt(c, L) - refH);
+		if (dh < bestDh) { bestDh = dh; best = L; }
+	}
+	if (best >= 0) return best;
+	return Clampi(fallbackL, 0, n - 1);
+}
+
 static void SeedUnitSteps(const Unit& u, const Map& m, int* sx, int* sz, int* sL, int& n, int cap)
 {
 	int s = UnitSpan(u);
-	int L = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+	int L0 = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+	int refH = Map::In(u.x, u.z) ? LayerHt(m.At(u.x, u.z), LayerOn(m.At(u.x, u.z), L0) ? L0 : 0) : 0;
 	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
 		if (n >= cap) return;
 		int x = u.x + dx, z = u.z + dz;
 		if (!Map::In(x, z)) continue;
-		int useL = LayerOn(m.At(x, z), L) ? L : 0;
+		int useL = (dx == 0 && dz == 0 && LayerOn(m.At(x, z), L0)) ? L0 : MatchDeckAt(m.At(x, z), refH, L0);
 		sx[n] = x; sz[n] = z; sL[n] = useL; n++;
 	}
 }
@@ -6798,12 +6904,17 @@ static void FillNoticeSteps(const Battle& b, int ei, int limit)
 	int L0 = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
 	int sp = UnitSpan(u);
 	int qh = 0, qt = 0;
+	int refH = LayerHt(b.map.At(u.x, u.z), LayerOn(b.map.At(u.x, u.z), L0) ? L0 : 0);
 	for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
 		int x = u.x + dx, z = u.z + dz;
-		if (!Map::In(x, z) || !LayerOn(b.map.At(x, z), L0) || g_laySeen[L0][z][x]) continue;
-		g_laySeen[L0][z][x] = 1;
-		g_stepDist[L0][z][x] = 0;
-		if (qt < LAY_Q) { g_layQx[qt] = x; g_layQz[qt] = z; g_layQL[qt] = L0; qt++; }
+		if (!Map::In(x, z)) continue;
+		const Cell& fc = b.map.At(x, z);
+		int useL = (dx == 0 && dz == 0 && LayerOn(fc, L0)) ? L0 : MatchDeckAt(fc, refH, L0);
+		if (!LayerOn(fc, useL) || g_laySeen[useL][z][x]) continue;
+		if (abs(LayerHt(fc, useL) - refH) > 2) continue;
+		g_laySeen[useL][z][x] = 1;
+		g_stepDist[useL][z][x] = 0;
+		if (qt < LAY_Q) { g_layQx[qt] = x; g_layQz[qt] = z; g_layQL[qt] = useL; qt++; }
 	}
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	while (qh < qt) {
@@ -6853,50 +6964,57 @@ static int ChooseLayer(const Cell& from, int fromLayer, const Cell& to, int jump
 	return best;
 }
 
-// いまいる高さから、隣の各層へ届くかを見る。近い層だけに潰さない。
+// 足場の各マスは、原点の着地高さに一番近い層へ合わせる。立体交差で層番号がずれても同じ床なら通る。
 static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int fromLayer, int toLayer, int* climbsOut)
 {
 	const Unit& u = b.u[ui];
 	int s = UnitSpan(u);
 	int mt = UnitMoveType(u);
+	if (!Map::In(nx, nz) || !LayerOn(b.map.At(nx, nz), toLayer)) return false;
+	int refH = LayerHt(b.map.At(nx, nz), toLayer);
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
 		if (!Map::In(sx, sz) || !Map::In(tx, tz)) return false;
 		const Cell& f = b.map.At(sx, sz);
 		const Cell& t = b.map.At(tx, tz);
-		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
-		if (!LayerLegal(f, fromL, t, toLayer, mt)) return false;
+		int fromL = (ix == 0 && iz == 0 && LayerOn(f, fromLayer)) ? fromLayer : MatchDeckAt(f, LayerHt(f, LayerOn(f, fromLayer) ? fromLayer : 0), fromLayer);
+		int landL = (ix == 0 && iz == 0) ? toLayer : MatchDeckAt(t, refH, toLayer);
+		if (!LayerLegal(f, fromL, t, landL, mt)) return false;
 		int nT = CellLayN(t);
-		float yTo = b.map.WalkY(tx, tz, toLayer);
+		float yTo = b.map.WalkY(tx, tz, landL);
 		for (int L = 0; L < nT; L++) {
 			int o = b.UnitAt(tx, tz, L);
 			if (o < 0 || o == ui || !b.u[o].alive) continue;
-			if (L != toLayer && fabsf(b.map.WalkY(tx, tz, L) - yTo) > 0.9f) continue;
+			if (L != landL && fabsf(b.map.WalkY(tx, tz, L) - yTo) > 0.9f) continue;
 			if (b.u[o].team != u.team) return false;
-			if (s > 1 && L == toLayer) return false;
+			if (s > 1 && L == landL) return false;
 		}
 	}
 	if (climbsOut) *climbsOut = 1;
 	return true;
 }
 
-// 原点を (x,z) から (nx,nz) へ 1 マス動かす。同じ層にいる相手だけが道を塞ぐ。
+// 原点を (x,z) から (nx,nz) へ 1 マス動かす。同じ高さ帯にいる相手だけが道を塞ぐ。
 static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz, int fromLayer, int* toLayer)
 {
 	const Unit& u = b.u[ui];
 	int s = UnitSpan(u);
 	int mt = UnitMoveType(u), jp = UnitJump(u);
-	int layer = 0;
+	if (!Map::In(x, z) || !Map::In(nx, nz)) return false;
+	const Cell& f0 = b.map.At(x, z);
+	const Cell& t0 = b.map.At(nx, nz);
+	int from0 = LayerOn(f0, fromLayer) ? fromLayer : 0;
+	int layer = ChooseLayer(f0, from0, t0, jp, mt);
+	if (layer < 0) return false;
+	int refH = LayerHt(t0, layer);
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
 		if (!Map::In(sx, sz) || !Map::In(tx, tz)) return false;
 		const Cell& f = b.map.At(sx, sz);
 		const Cell& t = b.map.At(tx, tz);
-		int fromL = LayerOn(f, fromLayer) ? fromLayer : 0;
-		int lay = ChooseLayer(f, fromL, t, jp, mt);
-		if (lay < 0) return false;
-		if (ix == 0 && iz == 0) layer = lay;
-		else if (lay != layer) return false;
+		int fromL = (ix == 0 && iz == 0) ? from0 : MatchDeckAt(f, LayerHt(f0, from0), from0);
+		int lay = (ix == 0 && iz == 0) ? layer : MatchDeckAt(t, refH, layer);
+		if (!LayerLegal(f, fromL, t, lay, mt)) return false;
 		int nT = CellLayN(t);
 		float yTo = b.map.WalkY(tx, tz, lay);
 		for (int L = 0; L < nT; L++) {
@@ -6917,13 +7035,15 @@ static int FootCost(const Battle& b, int ui, int x, int z, int layer = 0)
 	int s = UnitSpan(u);
 	int mt = UnitMoveType(u);
 	int c = 0;
+	int refH = LayerHt(b.map.At(x, z), LayerOn(b.map.At(x, z), layer) ? layer : 0);
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		if (!Map::In(x + ix, z + iz)) return 99;
 		const Cell& cell = b.map.At(x + ix, z + iz);
 		int e;
 		if (mt == MV_FLY) e = 2;
 		else {
-			int t = LayerTr(cell, LayerOn(cell, layer) ? layer : 0);
+			int useL = (ix == 0 && iz == 0 && LayerOn(cell, layer)) ? layer : MatchDeckAt(cell, refH, layer);
+			int t = LayerTr(cell, useL);
 			e = TerrainInfo(t).costFoot;
 			if ((t == T_SAND || t == T_SNOW) && (cell.var % 5) == 0) e = 3;
 		}
@@ -6938,7 +7058,10 @@ static bool FootCanStop(const Battle& b, int ui, int x, int z, int layer)
 	int s = UnitSpan(u);
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		if (!Map::In(x + ix, z + iz)) return false;
-		int o = b.UnitAt(x + ix, z + iz, layer);
+		const Cell& cell = b.map.At(x + ix, z + iz);
+		int refH = LayerHt(b.map.At(x, z), LayerOn(b.map.At(x, z), layer) ? layer : 0);
+		int useL = (ix == 0 && iz == 0 && LayerOn(cell, layer)) ? layer : MatchDeckAt(cell, refH, layer);
+		int o = b.UnitAt(x + ix, z + iz, useL);
 		if (o >= 0 && o != ui) return false;
 	}
 	return true;
@@ -7128,9 +7251,7 @@ bool AttackReachLayer(const Battle& b, int ax, int az, int fromLayer, int rMin, 
 	if (fromLayer < 0 || fromLayer >= LAY_N || !LayerOn(b.map.At(ax, az), fromLayer)) fromLayer = 0;
 	int ah = LayerHt(b.map.At(ax, az), fromLayer);
 	int th = LayerHt(tc, toLayer);
-	int dh = abs(ah - th);
-	if (dh > 18) return false;
-	int add = (dh <= 4) ? 0 : LayerRangeCost(fromLayer, toLayer);
+	int add = HeightRangeCost(ah, th);
 	if (add < 0) return false;
 	int d = Dist(ax, az, tx, tz) + add;
 	if (d < rMin || d > rMax) return false;
@@ -7158,9 +7279,7 @@ bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int
 	int tL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
 	int ah = LayerHt(b.map.At(a.x, a.z), aL);
 	int tht = LayerHt(b.map.At(t.x, t.z), tL);
-	int dh = abs(ah - tht);
-	if (dh > 18) return false;
-	int layerAdd = (dh <= 4) ? 0 : LayerRangeCost(aL, tL);
+	int layerAdd = HeightRangeCost(ah, tht);
 	if (layerAdd < 0) return false;
 	for (int az1 = 0; az1 < sa; az1++) for (int ax1 = 0; ax1 < sa; ax1++)
 		for (int tz = 0; tz < st; tz++) for (int tx = 0; tx < st; tx++) {
@@ -8305,9 +8424,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 			if (!t.killed || t.team != c.team || !RaisePlaceable(b, t)) continue;
 			int fromL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
 			int toL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
-			int dh = abs(LayerHt(b.map.At(c.x, c.z), fromL) - LayerHt(b.map.At(t.x, t.z), toL));
-			if (dh > 18) continue;
-			int add = (dh <= 4) ? 0 : LayerRangeCost(fromL, toL);
+			int add = HeightRangeCost(LayerHt(b.map.At(c.x, c.z), fromL), LayerHt(b.map.At(t.x, t.z), toL));
 			if (add < 0) continue;
 			if (areaN > 0) {
 				int ox = (s.rMax == 0) ? c.x : cx;
@@ -8330,11 +8447,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		{
 			int fromL = LayerOn(b.map.At(c.x, c.z), c.deck) ? c.deck : 0;
 			int toL = LayerOn(b.map.At(t.x, t.z), t.deck) ? t.deck : 0;
-			int ah = LayerHt(b.map.At(c.x, c.z), fromL);
-			int th = LayerHt(b.map.At(t.x, t.z), toL);
-			int dh = abs(ah - th);
-			if (dh > 18) continue;
-			int add = (dh <= 4) ? 0 : LayerRangeCost(fromL, toL);
+			int add = HeightRangeCost(LayerHt(b.map.At(c.x, c.z), fromL), LayerHt(b.map.At(t.x, t.z), toL));
 			if (add < 0) continue;
 			if (areaN > 0) {
 				int ox = (s.rMax == 0) ? c.x : cx;
@@ -9374,13 +9487,24 @@ static int OpenWidth(const Map& m, int x, int z)
 
 static int LayerOpenWidth(const Map& m, int x, int z, int layer)
 {
+	if (!Map::In(x, z)) return 0;
+	const Cell& org = m.At(x, z);
+	int tall = CellLayN(org) >= 2 || (int)org.h > MAXH;
+	int refH = LayerOn(org, layer) ? LayerHt(org, layer) : (int)org.h;
 	auto ok = [&](int cx, int cz) -> int {
 		if (!Map::In(cx, cz)) return 0;
 		const Cell& c = m.At(cx, cz);
-		if (!LayerOn(c, layer)) return 0;
-		int tr = LayerTr(c, layer);
+		if (!tall) {
+			if (!LayerOn(c, layer)) return 0;
+			int tr = LayerTr(c, layer);
+			if (tr == T_VOID || tr == T_CHASM) return 0;
+			return TerrainInfo(tr).costFoot < 99;
+		}
+		int useL = (cx == x && cz == z && LayerOn(c, layer)) ? layer : MatchDeckAt(c, refH, layer);
+		int tr = LayerTr(c, useL);
 		if (tr == T_VOID || tr == T_CHASM) return 0;
-		return TerrainInfo(tr).costFoot < 99;
+		if (TerrainInfo(tr).costFoot >= 99) return 0;
+		return abs(LayerHt(c, useL) - refH) <= 2;
 	};
 	if (!ok(x, z)) return 0;
 	int wx = 1, wz = 1;
@@ -9411,11 +9535,19 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 	int dL = u.deck;
 	if (dL < 0 || dL >= LAY_N) dL = 0;
 	int hmin = 99999, hmax = -99999, room = 99;
+	int refH = 0, haveRef = 0;
 	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
 		int x = ax + dx, z = az + dz;
 		if (!Map::In(x, z)) return false;
 		const Cell& c = b.map.At(x, z);
-		int useL = LayerOn(c, dL) ? dL : 0;
+		int useL;
+		if (!haveRef) {
+			useL = LayerOn(c, dL) ? dL : MatchDeckAt(c, LayerHt(c, 0), dL);
+			refH = LayerHt(c, useL);
+			haveRef = 1;
+		} else {
+			useL = MatchDeckAt(c, refH, dL);
+		}
 		int o = b.UnitAt(x, z, useL);
 		if (o >= 0 && o != ui) return false;
 		int tr = LayerTr(c, useL);
@@ -9544,6 +9676,7 @@ static bool RelocateWide(Battle& b, int ui)
 // 岩と段差に挟まれて一歩も出られない大型を、味方の方向へ足跡幅の坂で出す。
 static void CarveFootExit(Battle& b, int ui)
 {
+	if (MapIsSpiral(b.map)) return;
 	Unit& u = b.u[ui];
 	int s = UnitSpan(u);
 	int tx = u.x, tz = u.z, best = 99999;
@@ -9632,19 +9765,20 @@ static void RescueStuckFeet(Battle& b)
 }
 
 // 同じ層番号の span×span が、一段以内の歩行床で空いている。
-static bool DeckSpanOpen(const Battle& b, int x, int z, int layer, int span)
+static bool DeckSpanOpen(const Battle& b, int x, int z, int refH, int span)
 {
-	if (span < 1 || span > 5 || layer < 0 || layer >= LAY_N) return false;
+	if (span < 1 || span > 5) return false;
 	int hmin = 99999, hmax = -99999;
 	for (int dz = 0; dz < span; dz++) for (int dx = 0; dx < span; dx++) {
 		int cx = x + dx, cz = z + dz;
 		if (!Map::In(cx, cz)) return false;
 		const Cell& c = b.map.At(cx, cz);
-		if (!LayerOn(c, layer)) return false;
-		int tr = LayerTr(c, layer);
+		int useL = MatchDeckAt(c, refH, 0);
+		int h = LayerHt(c, useL);
+		if (abs(h - refH) > 2) return false;
+		int tr = LayerTr(c, useL);
 		if (tr == T_VOID || tr == T_CHASM || TerrainInfo(tr).costFoot >= 99) return false;
-		if (b.UnitAt(cx, cz, layer) >= 0) return false;
-		int h = LayerHt(c, layer);
+		if (b.UnitAt(cx, cz, useL) >= 0) return false;
 		if (h < hmin) hmin = h;
 		if (h > hmax) hmax = h;
 	}
@@ -9652,11 +9786,11 @@ static bool DeckSpanOpen(const Battle& b, int x, int z, int layer, int span)
 }
 
 // 拠点マスを含むように、原点をずらして span が収まるか。
-static int FitSpanAt(const Battle& b, int gx, int gz, int layer, int span, int* outX, int* outZ)
+static int FitSpanAt(const Battle& b, int gx, int gz, int refH, int span, int* outX, int* outZ)
 {
 	for (int oz = 0; oz < span; oz++) for (int ox = 0; ox < span; ox++) {
 		int x = gx - ox, z = gz - oz;
-		if (!DeckSpanOpen(b, x, z, layer, span)) continue;
+		if (!DeckSpanOpen(b, x, z, refH, span)) continue;
 		if (outX) *outX = x;
 		if (outZ) *outZ = z;
 		return 1;
@@ -9701,6 +9835,88 @@ static int RibbonCells(const Battle& b, int ax, int az, int aLayer, int* xs, int
 		}
 	}
 	return n;
+}
+
+static int DeckSeen(const Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN])
+{
+	const Unit& u = b.u[ui];
+	if (!u.alive || !Map::In(u.x, u.z)) return 0;
+	int s = UnitSpan(u);
+	int dL = u.deck;
+	if (dL < 0 || dL >= LAY_N) dL = 0;
+	const Cell& o = b.map.At(u.x, u.z);
+	int refH = LayerHt(o, LayerOn(o, dL) ? dL : 0);
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int x = u.x + dx, z = u.z + dz;
+		if (!Map::In(x, z)) return 0;
+		const Cell& c = b.map.At(x, z);
+		int useL = (dx == 0 && dz == 0 && LayerOn(c, dL)) ? dL : MatchDeckAt(c, refH, dL);
+		if (useL < 0 || useL >= LAY_N || !seen[useL][z][x]) return 0;
+		if (abs(LayerHt(c, useL) - refH) > 2) return 0;
+	}
+	return 1;
+}
+
+// 配置後の味方・敵が、階段の歩行BFSから外れていたら届く床へ戻す。高さは潰さない。
+static void AnchorSpiralUnits(Battle& b)
+{
+	if (!MapIsSpiral(b.map)) return;
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	if (!BfsFeet(b.map, seen)) return;
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive) continue;
+		if (Map::In(u.x, u.z)) {
+			int keep = u.deck;
+			int nL = CellLayN(b.map.At(u.x, u.z));
+			int fixed = 0;
+			for (int L = 0; L < nL; L++) {
+				if (!seen[L][u.z][u.x]) continue;
+				u.deck = L;
+				if (DeckSeen(b, i, seen)) { fixed = 1; break; }
+			}
+			if (!fixed) u.deck = keep;
+			else { b.RebuildOcc(); continue; }
+		}
+		int gx = u.x, gz = u.z;
+		if (u.team == TEAM_PLAYER) {
+			gx = b.map.nP > 0 ? b.map.pStartX[0] : gx;
+			gz = b.map.nP > 0 ? b.map.pStartZ[0] : gz;
+		} else if (u.grp >= 0 && u.grp < b.map.nGrp) {
+			gx = b.map.grp[u.grp].ax;
+			gz = b.map.grp[u.grp].az;
+		}
+		int ox = u.x, oz = u.z, od = u.deck;
+		u.x = -1; u.z = -1;
+		b.RebuildOcc();
+		if (PlaceFoot(b, i, gx, gz) && DeckSeen(b, i, seen)) {
+			b.RebuildOcc();
+			continue;
+		}
+		int best = 99999, bx = -1, bz = -1, bL = 0;
+		for (int rad = 0; rad <= 28 && bx < 0; rad++) {
+			for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
+				if (max(abs(dx), abs(dz)) != rad) continue;
+				int x = gx + dx, z = gz + dz;
+				if (!Map::In(x, z)) continue;
+				int nL = CellLayN(b.map.At(x, z));
+				for (int L = 0; L < nL; L++) {
+					if (!seen[L][z][x]) continue;
+					u.deck = L;
+					if (!FootFits(b, i, x, z)) continue;
+					int rank = abs(dx) + abs(dz);
+					if (rank < best) { best = rank; bx = x; bz = z; bL = L; }
+				}
+			}
+		}
+		if (bx >= 0) {
+			u.x = bx; u.z = bz; u.deck = bL;
+			if (!DeckSeen(b, i, seen)) { u.x = ox; u.z = oz; u.deck = od; }
+		} else {
+			u.x = ox; u.z = oz; u.deck = od;
+		}
+		b.RebuildOcc();
+	}
 }
 
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
@@ -9896,9 +10112,11 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		return best;
 	};
 	auto placeSized = [&](int gx, int gz, int layer, int lv, int boss, int grp) -> int {
+		if (!Map::In(gx, gz)) return 0;
+		int refH = LayerHt(b.map.At(gx, gz), LayerOn(b.map.At(gx, gz), layer) ? layer : 0);
 		for (int span = 5; span >= 1; span--) {
 			int px = gx, pz = gz;
-			if (!FitSpanAt(b, gx, gz, layer, span, &px, &pz)) continue;
+			if (!FitSpanAt(b, gx, gz, refH, span, &px, &pz)) continue;
 			int id = PickMonsterOfSpan(stage, span, boss, r);
 			if (id < 0) continue;
 			Unit& u = b.u[n];
@@ -9910,7 +10128,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			u.alert = 0;
 			u.x = px;
 			u.z = pz;
-			u.deck = layer;
+			u.deck = MatchDeckAt(b.map.At(px, pz), refH, layer);
 			n++;
 			b.nUnits = n;
 			b.RebuildOcc();
@@ -10031,12 +10249,18 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 				int s = max(1, UnitSpan(eu));
 				int gx = Clampi(x, 1, MAPN - s - 1);
 				int gz = Clampi(z, 1, MAPN - s - 1);
-				int h = 2;
-				if (Map::In(gx, gz) && b.map.c[gz][gx].h > 0) h = (int)b.map.c[gz][gx].h;
-				for (int dz = -1; dz <= s; dz++) for (int dx = -1; dx <= s; dx++)
-					if (Map::In(gx + dx, gz + dz)) StampWalk(b.map.c[gz + dz][gx + dx], h);
-				eu.x = gx;
-				eu.z = gz;
+				if (MapIsSpiral(b.map)) {
+					eu.x = -1; eu.z = -1;
+					b.RebuildOcc();
+					if (!PlaceFoot(b, farUi, gx, gz)) { eu.x = x; eu.z = z; }
+				} else {
+					int h = 2;
+					if (Map::In(gx, gz) && b.map.c[gz][gx].h > 0) h = (int)b.map.c[gz][gx].h;
+					for (int dz = -1; dz <= s; dz++) for (int dx = -1; dx <= s; dx++)
+						if (Map::In(gx + dx, gz + dz)) StampWalk(b.map.c[gz + dz][gx + dx], h);
+					eu.x = gx;
+					eu.z = gz;
+				}
 			}
 		}
 	}
@@ -10093,6 +10317,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			}
 		}
 	}
+	AnchorSpiralUnits(b);
 	if (b.sweep == TAC_VAR_SCAR) {
 		for (int i = 0; i < b.nUnits; i++) {
 			Unit& u = b.u[i];
@@ -10150,12 +10375,22 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 
 static int StampedeSpot(Battle& b, int ui, int ax, int az, int ally, int radMax, int needRange)
 {
-	int bestX = -1, bestZ = -1, bestD = 99;
+	int bestX = -1, bestZ = -1, bestL = 0, bestD = 99;
+	int allyH = 0;
+	if (Map::In(ax, az)) {
+		int aL = b.u[ally].deck;
+		if (aL < 0 || aL >= LAY_N) aL = 0;
+		allyH = LayerHt(b.map.At(ax, az), LayerOn(b.map.At(ax, az), aL) ? aL : 0);
+	}
 	for (int rad = 1; rad <= radMax; rad++) {
 		int found = 0;
 		for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
 			if (max(abs(dx), abs(dz)) != rad) continue;
 			int x = ax + dx, z = az + dz;
+			if (!Map::In(x, z)) continue;
+			int useL = MatchDeckAt(b.map.At(x, z), allyH, 0);
+			if (abs(LayerHt(b.map.At(x, z), useL) - allyH) > 2) continue;
+			b.u[ui].deck = useL;
 			if (!FootFits(b, ui, x, z)) continue;
 			if (needRange) {
 				const Unit& u = b.u[ui];
@@ -10164,13 +10399,14 @@ static int StampedeSpot(Battle& b, int ui, int ax, int az, int ally, int radMax,
 				if (!InRangeOfUnit(b, u, x, z, rmin, rmax, b.u[ally], true)) continue;
 			}
 			int d = abs(dx) + abs(dz);
-			if (d < bestD) { bestD = d; bestX = x; bestZ = z; found = 1; }
+			if (d < bestD) { bestD = d; bestX = x; bestZ = z; bestL = b.u[ui].deck; found = 1; }
 		}
 		if (found && needRange) break;
 	}
 	if (bestX < 0) return 0;
 	b.u[ui].x = bestX;
 	b.u[ui].z = bestZ;
+	b.u[ui].deck = bestL;
 	return 1;
 }
 
@@ -13730,6 +13966,89 @@ bool CatalogRaises(int kind, int id, int stat)
 		return false;
 	}
 	return false;
+}
+
+// 階段BFS。起動引数 -spiralbfs のときだけ呼ばれ、結果を書いて終了する。
+int TacSpiralAuditRun(const wchar_t* path)
+{
+	FILE* fp = nullptr;
+	if (!path || _wfopen_s(&fp, path, L"w") != 0 || !fp) return 2;
+	CharData party[4];
+	memset(party, 0, sizeof(party));
+	int roster[4] = { 0, 1, 2, 3 };
+	for (int i = 0; i < 4; i++) {
+		party[i].used = 1;
+		party[i].cls = 0;
+		party[i].lv = 10;
+		party[i].stat[S_HP] = 40;
+		party[i].stat[S_MP] = 8;
+		party[i].stat[S_MOV] = 5;
+		party[i].stat[S_JMP] = 2;
+		party[i].stat[S_AGI] = 8;
+	}
+	static Battle b;
+	int spiral = 0, mapFail = 0, partyMiss = 0, foeMiss = 0, stairMaps = 0;
+	int minGap = 9999;
+	for (DWORD seed = 0; seed < 120 && spiral < 10; seed++) {
+		if (((seed / 3u) % 10u) >= 3u) continue;
+		SetupBattle(b, 30, seed, party, roster, 4, TH_PLAINS);
+		if (!MapIsSpiral(b.map)) {
+			fwprintf(fp, L"seed %lu did not stay spiral\n", (unsigned long)seed);
+			mapFail++;
+			continue;
+		}
+		spiral++;
+		int gapOk = 1, stairs = 0;
+		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			const Cell& c = b.map.At(x, z);
+			if (c.t == T_VOID && c.nLay < 2) continue;
+			int n = CellLayN(c);
+			for (int L = 1; L < n; L++) {
+				int g = LayerHt(c, L) - LayerHt(c, L - 1);
+				if (g < minGap) minGap = g;
+				if (g < 14) gapOk = 0;
+			}
+			for (int L = 0; L < n; L++) {
+				int h = LayerHt(c, L);
+				for (int k = 0; k < 4; k++) {
+					int nx = x + dx[k], nz = z + dz[k];
+					if (!Map::In(nx, nz)) continue;
+					const Cell& nb = b.map.At(nx, nz);
+					int nn = CellLayN(nb);
+					for (int NL = 0; NL < nn; NL++) {
+						int dh = LayerHt(nb, NL) - h;
+						if (dh == 2) stairs++;
+					}
+				}
+			}
+		}
+		stairs /= 2;
+		if (stairs > 0) stairMaps++;
+		int bfsOk = SpiralMapBfsValid(b.map);
+		if (!gapOk || !bfsOk) mapFail++;
+		static BYTE seen[LAY_N][MAPN][MAPN];
+		BfsFeet(b.map, seen);
+		int pAlive = 0, eAlive = 0, pBad = 0, eBad = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			const Unit& u = b.u[i];
+			if (!u.alive) continue;
+			if (u.team == TEAM_PLAYER) pAlive++;
+			else eAlive++;
+			if (DeckSeen(b, i, seen)) continue;
+			if (u.team == TEAM_PLAYER) { pBad++; partyMiss++; }
+			else { eBad++; foeMiss++; }
+			fwprintf(fp, L"  miss team %d span %d boss %d x %d z %d deck %d\n",
+				u.team, UnitSpan(u), u.boss, u.x, u.z, u.deck);
+		}
+		fwprintf(fp, L"seed %lu floors-gap-min-so-far %d stairs %d bfs %d party %d/%d enemy %d/%d\n",
+			(unsigned long)seed, minGap, stairs, bfsOk, pAlive - pBad, pAlive, eAlive - eBad, eAlive);
+	}
+	fwprintf(fp, L"spiral %d mapFail %d stairMaps %d partyMiss %d foeMiss %d minGap %d\n",
+		spiral, mapFail, stairMaps, partyMiss, foeMiss, minGap);
+	fclose(fp);
+	if (spiral < 8 || mapFail || partyMiss || foeMiss) return 1;
+	return 0;
 }
 
 } // namespace otac

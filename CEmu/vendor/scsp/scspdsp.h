@@ -9,6 +9,7 @@ struct _SCSPDSP
 	UINT32 SCSPRAM_LENGTH;
 	UINT32 RBP;	//Ring buf pointer
 	UINT32 RBL;	//Delay ram (Ring buffer) size in words
+	int RbSet;	/* set once the program writes 0x402 (RBL/RBP) */
 
 //context
 

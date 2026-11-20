@@ -203,8 +203,7 @@ enum { MAPN = 64, MAXH = 12, MAXH_SPIRAL = 999 };
 const float kHStep = 0.4f;
 inline float TacHToY(int h)
 {
-	if (h <= MAXH) return h * kHStep;
-	return MAXH * kHStep + (float)(h - MAXH) * 0.045f;
+	return (float)h * kHStep;
 }
 // 経路の1点に「橋の上」を載せる。マス番号は 0..4095（12bit）。層は bit12 から。
 // 同時デッキは 64。スパイラルの立体交差は高さ 0..999 をこの枠へ昇順に載せる。
@@ -791,16 +790,20 @@ inline int LayerRangeCost(int fromL, int toL)
 	if (up < 0) return 1;
 	return 0;
 }
-// 段差 4 以内は平地と同じ。それを超える層だけ距離を足す。届かない高さは -1。
+// 段差 4 以内は平地と同じ。階段・1層差（18段＝7.2m以内）は距離 +1。別階層（20段＝8.0m以上）は届かない（-1）。
+inline int HeightRangeCost(int ah, int th)
+{
+	int dh = ah >= th ? (ah - th) : (th - ah);
+	if (dh > 18) return -1;
+	if (dh <= 4) return 0;
+	return 1;
+}
 inline int StandRangeAdd(const Map& m, int ax, int az, int aDeck, int tx, int tz, int tDeck)
 {
 	if (!Map::In(ax, az) || !Map::In(tx, tz)) return -1;
 	int aL = LayerOn(m.At(ax, az), aDeck) ? aDeck : 0;
 	int tL = LayerOn(m.At(tx, tz), tDeck) ? tDeck : 0;
-	int dh = abs(LayerHt(m.At(ax, az), aL) - LayerHt(m.At(tx, tz), tL));
-	if (dh > 18) return -1;
-	if (dh <= 4) return 0;
-	return LayerRangeCost(aL, tL);
+	return HeightRangeCost(LayerHt(m.At(ax, az), aL), LayerHt(m.At(tx, tz), tL));
 }
 float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
 float TacMonsterWide(int packIndex);   // 同じ姿勢で翼や胴を含む全身の半幅。未計測は 0
@@ -918,6 +921,7 @@ enum {
 	TAC_VAR_BLESS = 10
 };
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
+int TacSpiralAuditRun(const wchar_t* path);
 int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnOut, int* bleedOut);

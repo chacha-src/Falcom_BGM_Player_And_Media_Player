@@ -399,6 +399,7 @@ private:
     bool m_meterDirty = false;
     int  m_framesPending = 0;        // スクロール済み未コミットフレーム数
     DWORD m_lastAnalyzeTick = 0;     // スロットリング用(ANALYZE_MIN_MS 未満は再分析しない)
+    DWORD m_lastPickStateTick = 0;   // UpdateNoteStates の実ホップ計測(時間積分 dtMs 用)
 
     // ---- レベルメーター ----
     float m_bufwav3LevelDb = -60.0f;          // AGC後の動作レベル dB(ピック閾値スケーリング)

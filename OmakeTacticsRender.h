@@ -535,6 +535,12 @@ public:
 		m_ptClear[2] = ((c >> 16) & 255) / 255.f;
 		m_ptClear[3] = 1.f;
 	}
+	// 描き直さない枠があるときだけ、前の面を写す。全員描くなら写さない。
+	void SetPortraitPreserve(BOOL keep) { m_ptPreserve = keep ? 1 : 0; }
+	unsigned PortraitVisKey(const Pose& pose, const DrawParams& dp) const;
+	BOOL PortraitCanSkip(int slot, unsigned key, unsigned extra) const;
+	void PortraitDidDraw(int slot, unsigned key, unsigned extra);
+	void PortraitHoldReset();
 	void ClearDepth();
 	void CommitFrame() { UpdateFrameCB(); }
 	void SetShadowEnabled(BOOL on) { m_fcb.light[3] = (on && m_shSrv) ? 1.f : 0.f; }
@@ -543,6 +549,7 @@ public:
 	void DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp);
 	void BeginInstBatch();
 	void EndInstBatch();
+	void FeedInst();
 	// カットシーンのキャラ描画前。滝の定数と分割を捨て、布も置き直す。
 	void ResetActorPipe();
 	void SetCutActors(BOOL on) { m_cutActors = on; }
@@ -837,7 +844,7 @@ private:
 	ID3D11PixelShader* m_psP;
 	ID3D11VertexShader* m_vsQ;
 	ID3D11PixelShader* m_psSky;
-	ID3D11PixelShader* m_psSkyT[10];
+	ID3D11PixelShader* m_psSkyT[TH_COUNT];
 	ID3D11PixelShader* m_psBloom;
 	ID3D11PixelShader* m_psBlur;
 	ID3D11PixelShader* m_psGrade;
@@ -1077,6 +1084,7 @@ private:
 	int m_textNext[TAC_TEXTN];
 	int m_textHead[TAC_TEXTH];
 	BOOL m_inPortrait;
+	int m_ptPreserve;
 	BOOL m_instOn;
 	int m_portraitSlot;
 	float m_ptClear[4];

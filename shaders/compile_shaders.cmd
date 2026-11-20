@@ -86,6 +86,13 @@ call :job ps_5_0 PSSKY6 shaders\omake_tactics.hlsl tac_PSSKY6 tac_pssky6
 call :job ps_5_0 PSSKY7 shaders\omake_tactics.hlsl tac_PSSKY7 tac_pssky7
 call :job ps_5_0 PSSKY8 shaders\omake_tactics.hlsl tac_PSSKY8 tac_pssky8
 call :job ps_5_0 PSSKY9 shaders\omake_tactics.hlsl tac_PSSKY9 tac_pssky9
+call :job ps_5_0 PSSKY10 shaders\omake_tactics.hlsl tac_PSSKY10 tac_pssky10
+call :job ps_5_0 PSSKY11 shaders\omake_tactics.hlsl tac_PSSKY11 tac_pssky11
+call :job ps_5_0 PSSKY12 shaders\omake_tactics.hlsl tac_PSSKY12 tac_pssky12
+call :job ps_5_0 PSSKY13 shaders\omake_tactics.hlsl tac_PSSKY13 tac_pssky13
+call :job ps_5_0 PSSKY14 shaders\omake_tactics.hlsl tac_PSSKY14 tac_pssky14
+call :job ps_5_0 PSSKY15 shaders\omake_tactics.hlsl tac_PSSKY15 tac_pssky15
+call :job ps_5_0 PSSKY16 shaders\omake_tactics.hlsl tac_PSSKY16 tac_pssky16
 call :job cs_5_0 CSSkin shaders\omake_tactics_skin.hlsl tac_CSSkin tac_csskin
 call :job cs_5_0 CSClothStep shaders\omake_tactics_cloth.hlsl tac_CSClothStep tac_csclths
 call :job cs_5_0 CSClothRelax shaders\omake_tactics_cloth.hlsl tac_CSClothRelax tac_csclthr
@@ -104,6 +111,10 @@ call :job ps_5_0 PSG6 shaders\omake_tactics.hlsl tac_PSG6 tac_psg6
 call :job ps_5_0 PSG7 shaders\omake_tactics.hlsl tac_PSG7 tac_psg7
 call :job ps_5_0 PSG8 shaders\omake_tactics.hlsl tac_PSG8 tac_psg8
 call :job ps_5_0 PSG9 shaders\omake_tactics.hlsl tac_PSG9 tac_psg9
+call :job ps_5_0 PSG10 shaders\omake_tactics.hlsl tac_PSG10 tac_psg10
+call :job ps_5_0 PSG11 shaders\omake_tactics.hlsl tac_PSG11 tac_psg11
+call :job ps_5_0 PSG12 shaders\omake_tactics.hlsl tac_PSG12 tac_psg12
+call :job ps_5_0 PSG13 shaders\omake_tactics.hlsl tac_PSG13 tac_psg13
 call :job ps_5_0 PSGX shaders\omake_tactics.hlsl tac_PSGX tac_psgx
 call :job ps_5_0 PSGM shaders\omake_tactics.hlsl tac_PSGM tac_psgm
 call :job ps_5_0 PSGH shaders\omake_tactics.hlsl tac_PSGH tac_psgh
@@ -166,6 +177,7 @@ for /f "usebackq tokens=1-5" %%A in ("%STALE%") do (
   )
 )
 echo cso ok
+powershell -NoProfile -Command "if (Test-Path -LiteralPath 'ogg.rc') { (Get-Item -LiteralPath 'ogg.rc').LastWriteTimeUtc = [DateTime]::UtcNow }"
 del /q "%JOBS%" "%STALE%" 2>nul
 exit /b 0
 

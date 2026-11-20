@@ -389,6 +389,20 @@ IDR_CSO_TAC_PSSKY8      RCDATA                  "res\\cso\\tac_pssky8.cso"
 
 IDR_CSO_TAC_PSSKY9      RCDATA                  "res\\cso\\tac_pssky9.cso"
 
+IDR_CSO_TAC_PSSKY10     RCDATA                  "res\\cso\\tac_pssky10.cso"
+
+IDR_CSO_TAC_PSSKY11     RCDATA                  "res\\cso\\tac_pssky11.cso"
+
+IDR_CSO_TAC_PSSKY12     RCDATA                  "res\\cso\\tac_pssky12.cso"
+
+IDR_CSO_TAC_PSSKY13     RCDATA                  "res\\cso\\tac_pssky13.cso"
+
+IDR_CSO_TAC_PSSKY14     RCDATA                  "res\\cso\\tac_pssky14.cso"
+
+IDR_CSO_TAC_PSSKY15     RCDATA                  "res\\cso\\tac_pssky15.cso"
+
+IDR_CSO_TAC_PSSKY16     RCDATA                  "res\\cso\\tac_pssky16.cso"
+
 IDR_CSO_TAC_CSSKIN      RCDATA                  "res\\cso\\tac_csskin.cso"
 
 IDR_CSO_TAC_CSCLTHS     RCDATA                  "res\\cso\\tac_csclths.cso"
@@ -444,6 +458,14 @@ IDR_CSO_TAC_PSG7        RCDATA                  "res\\cso\\tac_psg7.cso"
 IDR_CSO_TAC_PSG8        RCDATA                  "res\\cso\\tac_psg8.cso"
 
 IDR_CSO_TAC_PSG9        RCDATA                  "res\\cso\\tac_psg9.cso"
+
+IDR_CSO_TAC_PSG10       RCDATA                  "res\\cso\\tac_psg10.cso"
+
+IDR_CSO_TAC_PSG11       RCDATA                  "res\\cso\\tac_psg11.cso"
+
+IDR_CSO_TAC_PSG12       RCDATA                  "res\\cso\\tac_psg12.cso"
+
+IDR_CSO_TAC_PSG13       RCDATA                  "res\\cso\\tac_psg13.cso"
 
 IDR_CSO_TAC_PSGX        RCDATA                  "res\\cso\\tac_psgx.cso"
 
@@ -3145,10 +3167,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.19 v1683"
-            VALUE "FileVersion", "0.9.1.1683"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.20 v1690"
+            VALUE "FileVersion", "0.9.1.1690"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.19"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.20"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

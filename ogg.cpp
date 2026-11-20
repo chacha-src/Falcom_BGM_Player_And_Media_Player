@@ -26,6 +26,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+namespace otac { int TacSpiralAuditRun(const wchar_t* path); }
+
 #include "rubberband/RubberBandStretcher.h"
 /////////////////////////////////////////////////////////////////////////////
 // COggApp
@@ -278,6 +280,10 @@ BOOL COggApp::ExitInstance()
 
 BOOL COggApp::InitInstance()
 {
+	if (m_lpCmdLine && _tcsstr(m_lpCmdLine, _T("-spiralbfs"))) {
+		int rc = otac::TacSpiralAuditRun(L"C:\\projects\\APPLICATION3\\ogg_all2022\\spiral_bfs_result.txt");
+		exit(rc);
+	}
 	// 旧KPIの SEH/確保失敗で WER ダイアログを出さない（配布プラグインは触らない）
 	::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 	// マニフェストに dpiAwareness を足すと SxS が壊れやすいので API で Per-Monitor V2 を要求

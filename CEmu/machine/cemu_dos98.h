@@ -80,6 +80,8 @@ public:
 
 	int VectorInstalled(uint8_t vec) const;
 	uint16_t PspSeg() const { return pspSeg_; }
+	/* 予算切れで AH=4C まで届かなかった EXE のアリーナを返す。常駐ドライバは別ブロック。 */
+	void ReleaseProgram(uint8_t* mem) { FreeBlock(mem, pspSeg_); }
 	const CEmuDos98File* FindFile(const char* name) const;
 	int AllocBlock(uint8_t* mem, uint16_t paras, uint16_t* outSeg);
 

@@ -501,7 +501,7 @@ namespace Cfg
     static constexpr int   VIS_GAP_FRAMES_MID = 4;
     static constexpr int   VIS_GAP_FRAMES_TRE = 3;
     static constexpr int   VIS_GAP_SUSTAIN_BONUS = 2;
-    static constexpr int   ATTACK_MISS_GRACE = 2;
+    static constexpr int   ATTACK_MISS_GRACE = 1;
     static constexpr float RETRIGGER_RATIO = 0.16f;
     static constexpr int   BAND_BASS_END = PianoRoll108::BASS_END;
     static constexpr int   BAND_MID_END = PianoRoll108::MID_END;
@@ -776,6 +776,8 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
     m_detPeakN = 0;
     memset(m_prevPicked, 0, sizeof(m_prevPicked));
+    PianoRoll108::ResetPickState();
+    m_lastPickStateTick = 0;
     memset(m_ownVoice, 0, sizeof(m_ownVoice));
     m_melodyHz = 0.0f;
     m_melodyMiss = 0;
@@ -1038,6 +1040,8 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
         m_detPeakN = 0;
         memset(m_prevPicked, 0, sizeof(m_prevPicked));
+        PianoRoll108::ResetPickState();
+        m_lastPickStateTick = 0;
     memset(m_ownVoice, 0, sizeof(m_ownVoice));
     m_melodyHz = 0.0f;
     m_melodyMiss = 0;
@@ -1535,6 +1539,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_burstN = 0;
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         m_percLevel = 0.0f;
+        PianoRoll108::PickTemporal().decaySilence();
         m_detectSilent = true;
         return;
     }
@@ -1772,6 +1777,7 @@ void CPianoRoll::UpdateNoteStates()
             m_percLevel = 0.0f;
             memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
             memset(m_prevPicked, 0, sizeof(m_prevPicked));
+            PianoRoll108::PickTemporal().decaySilence();
     memset(m_ownVoice, 0, sizeof(m_ownVoice));
     m_melodyHz = 0.0f;
     m_melodyMiss = 0;
@@ -1840,6 +1846,16 @@ void CPianoRoll::UpdateNoteStates()
     pp.ownVoice = m_ownVoice;
     pp.melodyHz = &m_melodyHz;
     pp.melodyMiss = &m_melodyMiss;
+    {
+        const DWORD nowTick = GetTickCount();
+        float dt = (float)EffectiveAnalyzeMinMs();
+        if (m_lastPickStateTick != 0) {
+            const DWORD diff = nowTick - m_lastPickStateTick;
+            if (diff >= 4 && diff <= 120) dt = (float)diff;
+        }
+        m_lastPickStateTick = nowTick;
+        pp.dtMs = dt;
+    }
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
     // C6 より上で、短い窓に出ていない整数倍は倍音なので落とす。足し込みはしない。
@@ -1972,16 +1988,10 @@ void CPianoRoll::UpdateNoteStates()
                 m_unpickedFrames[i] = 0;
                 m_strengthDipFrames[i] = 0;
             }
-            int gapLimit = VisGapFrames(i);
-            if (m_envPeak[i] > 0.12f)
-                gapLimit += VIS_GAP_SUSTAIN_BONUS;
-            // 一度しっかり鳴った音は、減衰中の欠測で長音が途切れないように少し長く繋ぐ。
-            if (m_consecActive[i] >= 8)
-                gapLimit += 6;
-            // 中高音は拾いがフレームごとに欠ける。立ち始めたあとは少し長く繋いで点線にしない。
-            if (i >= PianoRoll108::BASS_END && m_consecActive[i] >= 4)
-                gapLimit += 4;
-            const int releaseLimit = TemporalFrames(i, RELEASE_FRAMES);
+            // PickNotes 側で連続活性を時間積分して滑らかに保つため、表示側の過剰な尻尾引き延ばしを廃し、
+            // 音の切れ目でゴーストや残響が帯状に居座らないスマートな描画にする。
+            const int gapLimit = (m_consecActive[i] >= 6) ? 3 : 2;
+            const int releaseLimit = gapLimit;
             const bool gapDetected =
                 m_unpickedFrames[i] >= gapLimit ||
                 m_strengthDipFrames[i] >= gapLimit;
@@ -1999,13 +2009,8 @@ void CPianoRoll::UpdateNoteStates()
     // PickNotes が捨てた部分音が gap で残っているなら即切る。
     for (int i = PianoRoll108::MUSIC_LOW_FLOOR; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i] || picked[i]) continue;
-        // 長く鳴っている音は欠測のあいだ倍音扱いでも切らない。長音が途中で消える。
-        if (m_consecActive[i] >= 8) continue;
-        // 中高音は、ベースの倍音だけ欠測中に切る。別の中音の倍音扱いでは消さない。
-        const int harmHi = (i >= PianoRoll108::BASS_END && m_consecActive[i] >= 4)
-            ? PianoRoll108::BASS_END : i;
         if (!PianoKey::IsHarmonicOfAnyActive(blend, i, picked,
-            PianoRoll108::MUSIC_LOW_FLOOR, harmHi, KEY_COUNT, 0.80f))
+            PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.72f))
             continue;
         m_activeKeys[i] = false;
         m_consecActive[i] = 0;

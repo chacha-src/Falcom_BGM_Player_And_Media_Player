@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4780; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4790; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -187,6 +187,12 @@
                   + syvalion68snd (X68k HD63450 CSR reads idle; Main / Universe / Fine stay audible for 8s)
                   + hnova68snd (X68k OPMSNS returns the YM2151 status; MUSIC 01-03 stay audible for 8s)
                   + ultima4_98 (PC-98 play skips the AH=19 stop; opening / field / combat stay audible for 8s)
+                  + yakyudop_98 (PC-98 device init stack no longer aliases the driver; songs 1-3 stay audible for 8s)
+                  + kbreed98 (PC-98 ADPCM ready flag reaches the low status port; battle / title / temple stay audible for 8s)
+                  + rolw2_98 (PC-98 init stack stays below the driver; lake / crisis / flight stay audible for 8s)
+                  + tetris98 (PC-98 sound board jumper selects INT14; stroll / techno / karinka stay audible for 8s)
+                  + moongate_98 (PC-98 timer irq arrives during the channel wait; songs 00-02 stay audible for 8s)
+                  + arcus268snd (X68k timer irq leaves the decompressor window alone; IPL / Ten Years After 1 / Ten Years After 2 stay audible for 8s)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -428,6 +434,7 @@ static const char* const kSupported[] = {
 	"arcshu68snd",
 	"arcus",
 	"arcus2",
+	"arcus268snd",
 	"arcus2_msx",
 	"arcus2dm",
 	"arcus398",
@@ -1935,6 +1942,7 @@ static const char* const kSupported[] = {
 	"harakiri",
 	"harald_at",
 	"hardball3_at",
+	"harddunk",
 	"hardnova_at",
 	"hardrank",
 	"hardrank_98",
@@ -2250,6 +2258,7 @@ static const char* const kSupported[] = {
 	"kawara_at",
 	"kboxing_msx",
 	"kbreed",
+	"kbreed98",
 	"keef_at",
 	"keeper68snd",
 	"kekko2_98",
@@ -2880,6 +2889,7 @@ static const char* const kSupported[] = {
 	"monmon_msx",
 	"monzetu_98",
 	"moomesa",
+	"moongate_98",
 	"morang98",
 	"morange",
 	"more_98",
@@ -3101,6 +3111,7 @@ static const char* const kSupported[] = {
 	"orangerd98",
 	"orangerd_msx",
 	"ordyne",
+	"orunners",
 	"oscar",
 	"oscar_at",
 	"oshioki2",
@@ -3582,6 +3593,7 @@ static const char* const kSupported[] = {
 	"rolling95",
 	"rolw1_98",
 	"rolw1_msx",
+	"rolw2_98",
 	"rolw68snd",
 	"romancia_msx",
 	"romanciasr",
@@ -3763,6 +3775,7 @@ static const char* const kSupported[] = {
 	"scotrsht",
 	"scramble",
 	"scrmblf_msx",
+	"scross",
 	"scsnd",
 	"sd2snd",
 	"sd_98",
@@ -3932,6 +3945,7 @@ static const char* const kSupported[] = {
 	"sker_98",
 	"skichamp",
 	"skiordie_at",
+	"skisuprg",
 	"skugyoku",
 	"skugyoku98",
 	"skugyoku_msx",
@@ -4306,6 +4320,7 @@ static const char* const kSupported[] = {
 	"tetris1",
 	"tetris68snd",
 	"tetris88",
+	"tetris98",
 	"tetris_fmav",
 	"tetris_msx",
 	"tetrist",
@@ -4872,6 +4887,7 @@ static const char* const kSupported[] = {
 	"yakyudo2",
 	"yakyudo2_msx",
 	"yakyudo_msx",
+	"yakyudop_98",
 	"yakyudou",
 	"yakyufan",
 	"yakyufan_fmav",

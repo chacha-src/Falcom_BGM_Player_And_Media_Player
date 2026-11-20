@@ -658,6 +658,7 @@ static void SCSP_UpdateReg(struct _SCSP *SCSP, int reg)
 			{
 				unsigned int v=RBL(SCSP);
 				SCSP->DSP.RBP=RBP(SCSP);
+				SCSP->DSP.RbSet=1;
 				if(v==0)
 					SCSP->DSP.RBL=8*1024;
 				else if(v==1)
@@ -1202,7 +1203,6 @@ static void SCSP_DoMasterSamples(struct _SCSP *SCSP, int nsamples)
 		SCSP_TimersAddTicks(SCSP, 1);
 		CheckPendingIRQ(SCSP);
 	}
-
 }
 
 static void dma_scsp(struct _SCSP *SCSP)

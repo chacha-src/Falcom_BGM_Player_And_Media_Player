@@ -137,13 +137,15 @@ float4 PSDofH(QOut i) : SV_Target
 	float z = Depth.SampleLevel(SL, i.uv, 0).r;
 	float focus = Params.w;
 	float coc = saturate((z - focus) * 2.4) * DofGain();
-	scene += ReflectTap(i.uv, z) * (Q.x > 1.5 ? 0.24 : 0.18);
-	scene *= ContactShadow(i.uv, z, Q.x > 1.5 ? 5 : 4);
+	[branch] if (z > 0.005 && z < 0.96) {
+		scene += ReflectTap(i.uv, z) * (Q.x > 1.5 ? 0.24 : 0.18);
+		scene *= ContactShadow(i.uv, z, Q.x > 1.5 ? 5 : 4);
+	}
 	scene *= 1. - min(Ao4(i.uv, z, Q.x > 1.5 ? 8.5 : 5.5), 0.5) * (Q.x > 1.5 ? 0.30 : 0.22);
 	float2 rad = Screen.zw * Params.z * coc;
 	float3 acc = scene;
 	float wsum = 1;
-	if (coc > 0.002) {
+	[branch] if (coc > 0.002) {
 		[unroll] for (int k = 0; k < 8; k++) {
 			float2 u = i.uv + k8[k] * rad;
 			float zs = Depth.SampleLevel(SL, u, 0).r;

@@ -1045,6 +1045,14 @@ void ym2608::save_restore(ymfm_saved_state &state)
 uint8_t ym2608::read_status()
 {
 	uint8_t result = m_fm.status() & (fm_engine::STATUS_TIMERA | fm_engine::STATUS_TIMERB);
+	/* ADPCM-B EOS (bit2) and BRDY (bit3) are visible on the low status
+	   port. Leaving them only on read_status_hi stalls drivers that poll
+	   0188h while copying a sample into ADPCM RAM. */
+	const uint8_t adpcm = m_adpcm_b.status();
+	if ((adpcm & adpcm_b_channel::STATUS_EOS) != 0)
+		result |= STATUS_ADPCM_B_EOS;
+	if ((adpcm & adpcm_b_channel::STATUS_BRDY) != 0)
+		result |= STATUS_ADPCM_B_BRDY;
 	if (m_fm.intf().ymfm_is_busy())
 		result |= fm_engine::STATUS_BUSY;
 	return result;

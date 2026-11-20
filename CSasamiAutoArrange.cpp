@@ -2751,6 +2751,54 @@ static void ApplyHalfBars(BarInfo* bars, int nBars, int style, int pat)
 	}
 }
 
+/* スタイルの8コードを8小節フレーズで回す。次の8小節は5度上、その次は逆行、その次は7度上。
+   2小節ループには戻さない。終わりの小節だけ主音。ジャズ/ファンク/16/ブルースは小節後半も変える。 */
+static void PaintHarmony(BarInfo* bars, int nBars, int style, int pat, int variation, int keySig)
+{
+	if (!bars || nBars < 1) return;
+	if (style < 0 || style >= SC_AS_COUNT) style = 0;
+	if (pat < 0) pat = 0;
+	if (pat >= SC_ARRANGE_COUNT) pat = 0;
+	ProgStep step[8];
+	int n = StyleProgression(style, variation, step, 8);
+	if (n < 1) return;
+	const int tonic = TonicPc(keySig);
+	const int fam = StyleFam(style);
+	const int rot = (pat & 3) + ((pat & 8) ? 3 : 0);
+	static const int phraseAdd[4] = { 0, 5, 0, 7 };
+	const int halfFam = (fam == FAM_JAZZ || fam == FAM_FUNK || fam == FAM_16 || fam == FAM_BLUES);
+	int body = 0;
+	for (int i = 0; i < nBars; i++) {
+		if (bars[i].section == SEC_END) {
+			int ty0 = (int)step[0].type;
+			if (ty0 == CH_7 || ty0 == CH_MAJ7 || ty0 == CH_SUS || ty0 == CH_POW) ty0 = CH_MAJ;
+			else if (ty0 == CH_M7 || ty0 == CH_DIM) ty0 = CH_MIN;
+			if (ty0 < 0 || ty0 > CH_POW) ty0 = CH_MAJ;
+			bars[i].root = tonic;
+			bars[i].type = ty0;
+			bars[i].root2 = -1;
+			continue;
+		}
+		int at = (bars[i].section == SEC_BODY) ? body++ : i;
+		int phrase = (at / 8) & 3;
+		int ix = (at + rot) % n;
+		if (phrase == 2)
+			ix = (n - 1 - ((at + rot) % n) + n) % n;
+		int off = (int)step[ix].off;
+		if (off < 0) off = 0;
+		int ty = (int)step[ix].type;
+		if (ty < 0 || ty > CH_POW) ty = CH_MAJ;
+		int root = (tonic + off + phraseAdd[phrase]) % 12;
+		if (root < 0) root += 12;
+		bars[i].root = root;
+		bars[i].type = ty;
+		bars[i].root2 = -1;
+		bars[i].type2 = 0;
+		if (halfFam && ((pat & 4) || ((at + pat) & 1)))
+			SecondChord(root, ty, at, style, pat, &bars[i].root2, &bars[i].type2);
+	}
+}
+
 /* 伴奏の中に、小節単位の歌い回しを置く。毎小節ではない。 */
 static int HookLine(int style, int bar, int pat)
 {
@@ -3381,6 +3429,7 @@ static uint32_t s_wroteMel;
 static uint32_t s_wroteDrum;
 static int s_barNotes;
 static int s_putForce;
+static int s_nextRootPc = -1;
 
 static int ScaleOff(int scale, int deg)
 {
@@ -3848,7 +3897,7 @@ static void BuildMelody(int form, int melSpan)
 					{ 0, 3, 6, 12, 18, 24, 33, 36 },
 					{ 6, 12, 15, 18, 24, 30, 36, 42 }
 				};
-				const int8_t* rr = r16[(bar + pat + sx.salt) & 3];
+				const int8_t* rr = r16[(bar + (int)ag.arpStyle + (int)ag.phase + (int)sx.salt) & 3];
 				for (int k = 0; k < 8 && nd < baseDense; k++) at[nd++] = rr[k];
 			} else if (melFam == FAM_JAZZ || melFam == FAM_BLUES || melFam == FAM_SHUF) {
 				static const int8_t rj[4][7] = {
@@ -3857,7 +3906,7 @@ static void BuildMelody(int form, int melSpan)
 					{ 0, 12, 20, 24, 36, 42, -1 },
 					{ 8, 12, 24, 28, 36, -1, -1 }
 				};
-				const int8_t* rr = rj[(bar + pat) & 3];
+				const int8_t* rr = rj[(bar + (int)ag.arpStyle + (int)ag.phase) & 3];
 				for (int k = 0; k < 7 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
 			} else if (melFam == FAM_BALLAD || melFam == FAM_PAD || style == SC_AS_ENKA || style == SC_AS_SLOWROCK) {
 				static const int8_t rb[4][5] = {
@@ -3866,7 +3915,7 @@ static void BuildMelody(int form, int melSpan)
 					{ 6, 18, 24, 38, -1 },
 					{ 0, 12, 30, -1, -1 }
 				};
-				const int8_t* rr = rb[(bar + secType) & 3];
+				const int8_t* rr = rb[(bar + secType + (int)ag.arpStyle) & 3];
 				for (int k = 0; k < 5 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
 			} else if (melFam == FAM_HOP || melFam == FAM_TRAP || melFam == FAM_REG || melFam == FAM_SKA) {
 				static const int8_t rh[4][6] = {
@@ -3875,7 +3924,7 @@ static void BuildMelody(int form, int melSpan)
 					{ 6, 18, 24, 33, 42, -1 },
 					{ 0, 12, 18, 30, -1, -1 }
 				};
-				const int8_t* rr = rh[(bar + pat) & 3];
+				const int8_t* rr = rh[(bar + (int)ag.arpStyle + (int)ag.phase) & 3];
 				for (int k = 0; k < 6 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
 			} else {
 				int step = (melFam == FAM_METAL || melKind == MEL_CHIP || melKind == MEL_SURF) ? 6 : (mode & 1 ? 6 : 12);
@@ -3897,20 +3946,67 @@ static void BuildMelody(int form, int melSpan)
 		}
 
 		if (nd > 12) nd = 12;
+		if (ag.sync >= 2 && !waltz) {
+			for (int k = nd - 1; k >= 1; k--) {
+				int sh = (ag.phase & 1) ? 6 : 3;
+				int lim = (k + 1 < nd) ? (at[k + 1] - 2) : 44;
+				if (at[k] > 0 && at[k] + sh <= lim) at[k] += sh;
+			}
+		}
+		if (ag.dens == 0 && nd > 3 && !phraseEnd) nd = 3;
+		if (form < 35 && nd > 2 && bar < melSpan - 1) {
+			int a0 = at[0];
+			int a1 = at[nd - 1];
+			int d1 = (nd > 1) ? du[nd - 1] : 12;
+			if (a1 <= a0 + 3) a1 = (a0 + 18 > 36) ? 36 : a0 + 18;
+			int d0 = a1 - a0 - 1;
+			if (d0 < 4) d0 = 4;
+			if (d0 > 20) d0 = 20;
+			at[0] = a0; du[0] = d0;
+			at[1] = a1; du[1] = (d1 < 4) ? 8 : d1;
+			nd = 2;
+		}
+		uint8_t passN[12];
+		for (int z = 0; z < 12; z++) passN[z] = 0;
+		if (form >= 75 && !waltz && nd >= 2 && nd < 11 && !phraseEnd) {
+			for (int k = 0; k + 1 < nd; k++) {
+				if (at[k + 1] - at[k] < 9) continue;
+				if (((k + bar + pat) & 1) != 0) continue;
+				for (int j = nd; j > k + 1; j--) {
+					at[j] = at[j - 1];
+					du[j] = du[j - 1];
+					passN[j] = passN[j - 1];
+				}
+				at[k + 1] = at[k] + 3;
+				du[k + 1] = 3;
+				passN[k + 1] = 1;
+				if (du[k] > 3) du[k] = 3;
+				nd++;
+				break;
+			}
+		}
 		int secLift = (secType == 0) ? 0 : (secType == 1) ? 2 : (secType == 2) ? 4 : 1;
 		if (ag.octBias >= 7) secLift += 2;
-		const int motifRow = ((bar / 4) + pat + (int)sx.salt) & 7;
+		else if (ag.octBias <= -7) secLift -= 2;
+		const int motifRow = ((bar / 4) + (int)ag.arpStyle + (int)ag.phase) & 7;
+		int prevDeg = secLift;
 		for (int k = 0; k < nd; k++) {
-			int mDeg = kMotif[motifRow][k & 7];
-			int deg = mDeg + secLift;
-			if (k == 0) deg = secLift + ((phrasePos == 0) ? 0 : (phrasePos == 2) ? 4 : 2);
+			int mDeg = kMotif[motifRow][(phrasePos == 2) ? (7 - (k & 7)) : (k & 7)];
+			int seq = (phrasePos == 1) ? 2 : (phrasePos == 2) ? 4 : 0;
+			int deg = mDeg + secLift + seq;
+			if (passN[k]) deg = prevDeg + 1;
+			else if (k == 0 && phrasePos == 0) deg = secLift;
 			if (songEnd && k == nd - 1) deg = 0;
 			else if (phraseEnd && k == nd - 1) deg = (secType == 1) ? 4 : 2;
+			prevDeg = deg;
 			if (sx.bendMode == 3 && (k == 1 || (phraseEnd && k == 0))) bend[k] = 1;
 			else if ((sx.bendMode == 1 || sx.bendMode == 2 || sx.bendMode == 6) && du[k] >= 12 && (k == 0 || k == nd - 1)) bend[k] = 1;
-			s_song.mel[bar][k].deg = (int8_t)(deg * dir);
+			int stored = deg * dir;
+			if (stored > 127) stored = 127;
+			if (stored < -127) stored = -127;
+			s_song.mel[bar][k].deg = (int8_t)stored;
 			s_song.mel[bar][k].at = (uint8_t)at[k];
-			s_song.mel[bar][k].du = (uint8_t)du[k];
+			s_song.mel[bar][k].du = (uint8_t)((du[k] < 1) ? 1 : du[k]);
 			s_song.mel[bar][k].leg = (uint8_t)((k == 0 || du[k] >= 10) ? 1 : 0);
 			s_song.mel[bar][k].bend = bend[k];
 		}
@@ -4472,6 +4568,76 @@ static void PaintPulse(int style, int pat, int bar, int section, int div, int en
 
 static void PlaceExpr(Ctx* c, int ch, uint32_t tick, int val);
 
+static void ChordAt(const BarInfo* b, int st, int* pc, int* ty)
+{
+	int p = (b && b->root >= 0) ? (b->root % 12) : 0;
+	int t = b ? b->type : CH_MAJ;
+	if (b && b->root2 >= 0 && st >= 24) {
+		p = b->root2 % 12;
+		t = b->type2;
+	}
+	if (p < 0) p += 12;
+	if (pc) *pc = p;
+	if (ty) *ty = t;
+}
+
+static int FitRange(int midi, int prev, int lo, int hi)
+{
+	return NearMidi(midi, prev, lo, hi);
+}
+
+static int ChordPick(int pc, int type, int which, int prev, int lo, int hi)
+{
+	int tones[4];
+	int n = ChordTones(pc, type, 0, tones, 4);
+	if (n < 1) return FitRange(48 + (pc % 12), prev, lo, hi);
+	if (which < 0) which = -which;
+	return FitRange(tones[which % n], prev, lo, hi);
+}
+
+static int ScalePick(int pc, int type, int deg, int prev, int lo, int hi)
+{
+	return FitRange(ScaleStep(pc, type, deg), prev, lo, hi);
+}
+
+/* 強拍用。目標のスケール音に一番近い構成音。 */
+static int SnapChord(int pc, int type, int deg, int prev, int lo, int hi)
+{
+	int target = ScaleStep(pc, type, deg);
+	int tones[4];
+	int n = ChordTones(pc, type, 0, tones, 4);
+	if (n < 1) return FitRange(target, prev, lo, hi);
+	int best = target;
+	int bd = 99;
+	for (int i = 0; i < n; i++) {
+		int c = tones[i];
+		while (c < target - 6) c += 12;
+		while (c > target + 6) c -= 12;
+		int d = c - target;
+		if (d < 0) d = -d;
+		if (d < bd) { bd = d; best = c; }
+	}
+	return FitRange(best, prev, lo, hi);
+}
+
+/* 次の根音の直前。すでに近ければ根音のまま。 */
+static int ApproachMidi(int curRoot, int type, int nextPc)
+{
+	int cur = BassMidi(curRoot, 1, type);
+	int nxt = BassMidi(nextPc, 1, type);
+	while (nxt < cur - 6) nxt += 12;
+	while (nxt > cur + 6) nxt -= 12;
+	int gap = nxt - cur;
+	if (gap < 0) gap = -gap;
+	if (gap <= 2) return nxt;
+	int ap = nxt - 1;
+	int rel = (ap - (36 + (curRoot % 12)) + 120) % 12;
+	if (rel == ThirdIv(type)) ap = nxt - 2;
+	while (ap < 28) ap += 12;
+	while (ap > 52) ap -= 12;
+	return ap;
+}
+
 static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	int nBass, const int* bassCh, int nChord, const int* chordCh,
 	int nPad, const int* padCh, int nArp, const int* arpCh,
@@ -4544,14 +4710,6 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int du = s_song.mel[src][k].du;
 			if (mode == 1) { at += 6; if (at > 42) continue; }
 			int raw = (int)s_song.mel[src][k].deg;
-			int deg;
-			if (mode == 3) {
-				int step = raw < 0 ? -raw : raw;
-				deg = rd + ((step % 3 == 0) ? 0 : (step % 3 == 1) ? 4 : 7);
-				if (k == n - 1 && pos >= span - 1) deg = rd;
-			} else if (mode == 1) deg = NearTriad(rd + (7 - raw), rd);
-			else if (mode == 2) deg = NearTriad(rd + raw + 7, rd);
-			else deg = NearTriad(rd + raw - 2, rd);
 			if (mode == 2) {
 				if (du < 10) du = 10;
 				if (k + 2 < n) {
@@ -4560,7 +4718,21 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 					if (du > lim) du = lim;
 				}
 			}
-			int m = Tone(tonic, deg, *prev, lo, hi);
+			int pcS, tyS;
+			ChordAt(b, at, &pcS, &tyS);
+			const int strong = ((at % 12) == 0) || k == 0 || k == n - 1;
+			int m;
+			if (k == n - 1 && pos >= span - 1)
+				m = ChordPick(pcS, tyS, 0, *prev, lo, hi);
+			else if (mode == 3)
+				m = ChordPick(pcS, tyS, k, *prev, lo, hi);
+			else if (mode == 1)
+				m = strong ? SnapChord(pcS, tyS, raw - 2, *prev, lo, hi)
+					: ScalePick(pcS, tyS, raw - 2, *prev, lo, hi);
+			else if (strong)
+				m = SnapChord(pcS, tyS, raw, *prev, lo, hi);
+			else
+				m = ScalePick(pcS, tyS, raw, *prev, lo, hi);
 			*prev = m;
 			int keep = s_putForce;
 			s_putForce = 1;
@@ -4620,153 +4792,280 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 		Push(c, b->t0 + (uint32_t)(b->len - 2), padCh[0], SC_EV_PITCH, 64, 0, 0, 0);
 	}
 
-	int bassDur = 36;
-	if (waltz) bassDur = 32;
-	if (s_song.cast.bass == 1) bassDur = 36;
 	s_putForce = 1;
-	for (int i = 0; i < nBass && !c->overflow; i++) {
-		int deg = rd - ((i > 0) ? 7 : 0);
-		int loB = (i > 0) ? 36 : 28, hiB = (i > 0) ? 62 : 55;
-		if (!waltz) {
-			uint16_t bm = FamMask(StyleFam(style), s_song.pat + i * 3, pos, 0);
-			static const int add[6] = { 0, 4, 2, 7, 0, 4 };
-			int k = 0;
-			int famB = StyleFam(style);
-			int srcB = (melBar >= 0 && melBar < 256) ? melBar : 0;
-			int nMelB = s_song.melCount[srcB];
-			for (int s = 0; s < 16 && !c->overflow; s++) {
-				if (!(bm & (uint16_t)(1u << s))) continue;
-				int addDeg = add[(k + i) % 6];
-				if (melBass && nMelB > 0) {
+	{
+		const int famB = StyleFam(style);
+		const int patB = s_song.pat & 15;
+		const int srcB = (melBar >= 0 && melBar < 256) ? melBar : 0;
+		const int nMelB = s_song.melCount[srcB];
+		int nextPc = (s_nextRootPc >= 0) ? (s_nextRootPc % 12) : 0;
+		if (nextPc < 0) nextPc += 12;
+		for (int i = 0; i < nBass && !c->overflow; i++) {
+			int at[12], deg[12], appr[12];
+			int nh = 0;
+			auto addB = [&](int a, int d, int ap) {
+				if (nh >= 12 || a > 44) return;
+				if (a < 0) a = 0;
+				at[nh] = a; deg[nh] = d; appr[nh] = ap; nh++;
+			};
+			if (waltz || famB == FAM_WALTZ) {
+				addB(0, 1, 0); addB(16, 2, 0); addB(32, (patB & 1) ? 5 : 1, 0);
+			} else if (famB == FAM_JAZZ || famB == FAM_BLUES || famB == FAM_SHUF) {
+				static const int wdeg[4][4] = {
+					{ 1, 5, 2, 8 }, { 1, 8, 5, 2 }, { 1, 2, 5, 8 }, { 1, 5, 8, 2 }
+				};
+				const int row = (bar + (patB & 3) + ((patB & 8) ? 2 : 0)) & 3;
+				addB(0, wdeg[row][0], 0); addB(12, wdeg[row][1], 0);
+				addB(24, wdeg[row][2], 0); addB(36, 1, 1);
+			} else if (famB == FAM_BALLAD || famB == FAM_PAD) {
+				addB(0, 1, 0);
+				if (ag.dens != 0) addB(24, 2, 0);
+				if (ag.dens >= 2) addB(36, 1, 1);
+			} else if (famB == FAM_REG || famB == FAM_SKA) {
+				addB(24, 1, 0);
+				if (ag.dens != 0) addB(36, 2, 0);
+				if (ag.dens >= 2 || (bar & 1)) addB(42, 1, 1);
+			} else if (famB == FAM_FLOOR || famB == FAM_DISCO) {
+				addB(0, 1, 0); addB(12, 3, 0); addB(24, 1, 0); addB(36, 3, 0);
+			} else if (famB == FAM_8 || famB == FAM_METAL || famB == FAM_MARCH || famB == FAM_TANGO) {
+				static const int d8[8] = { 1, 2, 5, 2, 1, 8, 2, 1 };
+				int shift = patB & 3;
+				for (int k = 0; k < 8; k++)
+					addB(k * 6, d8[(k + shift) & 7], (k == 7) ? 1 : 0);
+			} else if (famB == FAM_HOP || famB == FAM_TRAP) {
+				addB(0, 1, 0); addB(18, 1, 0); addB(24, 7, 0); addB(36, 1, 0);
+				if (ag.dens >= 2) addB(9, 2, 0);
+			} else if (famB == FAM_BOSSA) {
+				addB(0, 1, 0); addB(9, 5, 0); addB(24, 2, 0); addB(33, 8, 0);
+			} else if (famB == FAM_SAMBA || famB == FAM_LATIN || famB == FAM_AFRO) {
+				addB(0, 1, 0); addB(6, 5, 0); addB(12, 1, 0); addB(18, 2, 0);
+				addB(24, 1, 0); addB(30, 5, 0); addB(36, 8, 0); addB(42, 1, 1);
+			} else {
+				static const int s16[5] = { 0, 9, 18, 30, 39 };
+				static const int d16[4][5] = {
+					{ 1, 2, 5, 2, 1 }, { 1, 5, 3, 2, 8 }, { 1, 2, 1, 5, 2 }, { 1, 8, 2, 5, 1 }
+				};
+				const int row = (bar + (patB & 3) + ((patB & 8) ? 1 : 0)) & 3;
+				for (int k = 0; k < 5; k++)
+					addB(s16[k], d16[row][k], (k == 4) ? 1 : 0);
+				if (ag.dens >= 2 && famB == FAM_FUNK) {
+					addB(6, 1, 0); addB(27, 5, 0);
+				}
+			}
+			if (patB == 6 && nh > 2) {
+				int w = 0;
+				for (int k = 0; k < nh; k++) {
+					if ((at[k] % 24) == 0 || appr[k] || k == 0) {
+						at[w] = at[k]; deg[w] = deg[k]; appr[w] = appr[k]; w++;
+					}
+				}
+				if (w > 0) nh = w;
+			}
+			if (ag.dens == 0 && nh > 3) {
+				int w = 0;
+				for (int k = 0; k < nh; k++) {
+					if ((k & 1) == 0 || appr[k]) {
+						at[w] = at[k]; deg[w] = deg[k]; appr[w] = appr[k]; w++;
+					}
+				}
+				if (w > 0) nh = w;
+			}
+			if (ag.sync >= 2 && nh > 1
+				&& (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB
+					|| famB == FAM_LATIN || famB == FAM_SAMBA || famB == FAM_AFRO
+					|| famB == FAM_HOP || famB == FAM_BOSSA)) {
+				for (int k = nh - 1; k >= 1; k--) {
+					int lim = (k + 1 < nh) ? (at[k + 1] - 2) : 45;
+					if (at[k] + 3 <= lim) at[k] += 3;
+				}
+			}
+			for (int a = 0; a < nh; a++) {
+				for (int c2 = a + 1; c2 < nh; c2++) {
+					if (at[c2] < at[a]) {
+						int ta = at[a], td = deg[a], tp = appr[a];
+						at[a] = at[c2]; deg[a] = deg[c2]; appr[a] = appr[c2];
+						at[c2] = ta; deg[c2] = td; appr[c2] = tp;
+					}
+				}
+			}
+			for (int k = 0; k < nh && !c->overflow; k++) {
+				if (k > 0 && at[k] == at[k - 1]) continue;
+				int st = at[k];
+				int pc, ty;
+				ChordAt(b, st, &pc, &ty);
+				int midi;
+				if (appr[k] && k == nh - 1)
+					midi = ApproachMidi(pc, ty, nextPc);
+				else if (melBass && nMelB > 0) {
 					int raw = s_song.mel[srcB][k % nMelB].deg;
 					if (raw < 0) raw = -raw;
-					addDeg = (raw % 3 == 0) ? 0 : (raw % 3 == 1) ? 4 : 7;
+					int dsel = (raw % 3 == 0) ? 1 : (raw % 3 == 1) ? 5 : 2;
+					midi = BassMidi(pc, dsel, ty);
+				} else
+					midi = BassMidi(pc, deg[k], ty);
+				if (i > 0) midi -= 12;
+				if (ag.octBias <= -7) midi -= 12;
+				while (midi < 28) midi += 12;
+				while (midi > 50) midi -= 12;
+				int du = (k + 1 < nh) ? (at[k + 1] - st) : (48 - st);
+				if (du < 2) du = 2;
+				if (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB) {
+					if (du > 9) du = 9;
+				} else if (famB == FAM_8 || famB == FAM_METAL) {
+					if (du > 6) du = 6;
 				}
-				int m = Tone(tonic, deg + addDeg, s_song.prevBass, loB, hiB);
-				s_song.prevBass = m;
-				int du = 2;
-				if (famB == FAM_BALLAD || famB == FAM_PAD || famB == FAM_MARCH) du = 10;
-				else if (famB == FAM_8 || famB == FAM_FLOOR || famB == FAM_DISCO) du = 5;
-				int nextS = 16;
-				for (int s2 = s + 1; s2 < 16; s2++) {
-					if (bm & (uint16_t)(1u << s2)) { nextS = s2; break; }
-				}
-				int maxDu = (nextS - s) * 3 - 1;
-				if (maxDu < 2) maxDu = 2;
-				if (du > maxDu) du = maxDu;
-				if (s_song.soloAcc && i == 0 && du > 2) du = 2;
-				PutFrac(c, bassCh[i], b, s * 3, du, m, ((s % 2) ? 92 : 108) - i * 8, 64);
-				if (i == 0 && sx.bendMode == 4 && s >= 12 && !c->isFm)
-					emitBend(bassCh[i], s * 3, -16);
-				k++;
+				if (st + du > 48) du = 48 - st;
+				int vel = ((st % 12) == 0) ? 114 : ((st % 6) == 0) ? 100 : 86;
+				if (appr[k]) vel = 92;
+				vel -= i * 8;
+				if (vel < 60) vel = 60;
+				PutFrac(c, bassCh[i], b, st, du, midi, vel, 80);
+				s_song.prevBass = midi;
+				if (i == 0 && sx.bendMode == 4 && k == nh - 1 && !c->isFm)
+					emitBend(bassCh[i], st, -16);
 			}
-			if (s_song.soloAcc && i == 0 && !c->isFm) {
-				int hat[4];
-				int nh = HitTimes(pos, span, fig, s_song.pat, waltz, hat, 4, 1);
-				for (int h = 0; h < nh; h++) {
-					int hst = hat[h] + 1;
-					if (hst > 45) continue;
-					int lim = (h + 1 < nh) ? (hat[h + 1] - hst - 1) : (45 - hst);
-					int hdu = (lim < 5) ? (lim < 2 ? 2 : lim) : 5;
-					int m1 = Tone(tonic, rd + 2, -1, 57, 74);
-					int m2 = Tone(tonic, rd + 4, m1, 60, 79);
-					PutFrac(c, bassCh[0], b, hst, hdu, m1, 76, 80);
-					PutFrac(c, bassCh[0], b, hst, hdu, m2, 72, 80);
+			if (s_song.soloAcc && i == 0 && !c->isFm && nChord < 1) {
+				int pc0, ty0;
+				ChordAt(b, waltz ? 16 : 24, &pc0, &ty0);
+				int tones[3];
+				int nt = ChordTones(pc0, ty0, 0, tones, 3);
+				int hst = waltz ? 16 : 24;
+				int hdu = waltz ? 10 : 6;
+				for (int t = 0; t < nt && t < 2; t++) {
+					int m = tones[t];
+					while (m < 55) m += 12;
+					while (m > 76) m -= 12;
+					PutFrac(c, bassCh[0], b, hst, hdu, m, 74 - t * 4, 80);
 				}
 			}
-			continue;
-		}
-		int m = Tone(tonic, deg, s_song.prevBass, loB, hiB);
-		s_song.prevBass = m;
-		PutFrac(c, bassCh[i], b, 0, bassDur, m, 104 - i * 8, 90);
-		if (nxt != rd) {
-			int ap = Tone(tonic, nxt - 1, m, loB, hiB);
-			PutFrac(c, bassCh[i], b, 36, 6, ap, 90 - i * 8, 64);
-		}
-		if (s_song.soloAcc && i == 0 && !c->isFm) {
-			int m1 = Tone(tonic, rd + 2, -1, 55, 74);
-			int m2 = Tone(tonic, rd + 4, m1, 57, 78);
-			PutFrac(c, bassCh[0], b, 16, 12, m1, 74, 78);
-			PutFrac(c, bassCh[0], b, 32, 12, m2, 70, 78);
 		}
 	}
 
 	s_putForce = 1;
 	for (int i = 0; i < nChord && !c->overflow; i++) {
-		int at[8];
-		int nHit = HitTimes(pos + i * 2, span, fig, s_song.pat + i * 3, waltz, at, quiet ? 4 : 8, 1);
-		int inv = (pos + s_song.pat + i) % 5;
-		int v0 = 0, v1 = 2, v2 = 4;
-		if (inv == 1) { v0 = 2; v1 = 4; v2 = 7; }
-		else if (inv == 2) { v0 = 4; v1 = 7; v2 = 9; }
-		else if (inv == 3) { v0 = 0; v1 = 4; v2 = 7; }
-		else if (inv == 4) { v0 = -3; v1 = 0; v2 = 4; }
-		const int srcM = (melBar >= 0 && melBar < 256) ? melBar : 0;
-		const int nMel = s_song.melCount[srcM];
-		const int dockWild = melActive && (melChord || form >= 55) && nMel > 0;
-		int runPos[4], nRun = 0;
-		if (i == 0 && !c->isFm && !waltz && (dockWild || s_song.twoAcc) && form >= 1) {
-			static const int kRunAt[4][4] = {
-				{ 18, 21, 39, 42 }, { 15, 21, 36, 42 }, { 18, 27, 39, 45 }, { 12, 21, 33, 42 }
+		const int famC = StyleFam(style);
+		const int patC = s_song.pat & 15;
+		int loC = 55, hiC = 84;
+		if (ag.octBias >= 7) { loC += 12; hiC += 12; }
+		else if (ag.octBias <= -7) { loC -= 12; hiC -= 12; }
+		if (i >= 1) { loC -= 12; hiC -= 12; }
+		if (loC < 48) loC = 48;
+		if (hiC > 96) hiC = 96;
+		if (hiC < loC + 7) hiC = loC + 7;
+		auto fitC = [&](int midi) {
+			while (midi < loC) midi += 12;
+			while (midi > hiC) midi -= 12;
+			if (midi < 0) midi = 0;
+			if (midi > 127) midi = 127;
+			return midi;
+		};
+		auto one = [&](int st, int du, int midi, int vel) {
+			if (st < 0 || st > 46 || du < 1) return;
+			if (patC == 10 && du > 2) du = 2;
+			else if (patC == 11 && du < 10 && du > 2) du += 3;
+			if (st + du > 48) du = 48 - st;
+			if (vel < 48) vel = 48;
+			if (vel > 124) vel = 124;
+			int m = fitC(midi);
+			PutFrac(c, chordCh[i], b, st, du, m, vel - i * 4, (patC == 10) ? 42 : 86);
+			s_song.prevCh = m;
+		};
+		auto block = [&](int st, int du, int vel) {
+			int pc, ty;
+			ChordAt(b, st, &pc, &ty);
+			int tones[4];
+			int nt = ChordTones(pc, ty, 0, tones, 4);
+			if (nt < 1) return;
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++)
+				one(st, du, tones[v], vel - v * 6);
+		};
+		auto dy = [&](int st, int du, int vel) {
+			int pc, ty;
+			ChordAt(b, st, &pc, &ty);
+			int tones[4];
+			int nt = ChordTones(pc, ty, 0, tones, 4);
+			if (nt < 1) return;
+			int a = (bar + patC) & 1;
+			one(st, du, tones[a % nt], vel);
+			if (!c->isFm && nt > 1)
+				one(st, du, tones[(a + 1) % nt], vel - 10);
+		};
+		if (i > 0) {
+			block(0, (b->root2 >= 0) ? 22 : 40, 74);
+			if (b->root2 >= 0) block(24, 20, 70);
+			continue;
+		}
+		if (famC == FAM_BALLAD || famC == FAM_PAD || famC == FAM_MARCH) {
+			int hold = (patC == 10) ? 8 : ((b->root2 >= 0) ? 22 : 44);
+			block(0, hold, 80);
+			if (b->root2 >= 0) block(24, 20, 76);
+		} else if (famC == FAM_JAZZ || famC == FAM_BLUES || famC == FAM_SHUF || famC == FAM_BOSSA) {
+			int ats[3] = { 0, 18, 36 };
+			if (famC == FAM_BOSSA) { ats[0] = 6; ats[1] = 18; ats[2] = 30; }
+			else if (patC == 5) { ats[0] = 6; ats[1] = 24; ats[2] = 42; }
+			int nHit = (ag.dens == 0) ? 2 : 3;
+			for (int k = 0; k < nHit; k++)
+				block(ats[k], (patC == 11) ? 14 : 8, 104 - k * 4);
+		} else if (famC == FAM_REG || famC == FAM_SKA) {
+			int ats[4] = { 6, 18, 30, 42 };
+			int step = (ag.dens == 0) ? 2 : 1;
+			for (int k = 0; k < 4; k += step)
+				block(ats[k], 4, 102);
+		} else if (famC == FAM_WALTZ) {
+			block(0, 14, 84);
+			dy(16, 8, 96);
+			dy(32, 8, 100);
+		} else if (famC == FAM_8 || famC == FAM_METAL || famC == FAM_TANGO) {
+			int start = 0;
+			for (int st = start; st <= 42 && !c->overflow; st += 6) {
+				if (ag.dens == 0 && (st % 12) != 0 && st != 24) continue;
+				int vel = (st == 24) ? 118 : (((st % 12) == 0) ? 84 : 70);
+				int du = (patC == 10) ? 2 : 5;
+				dy(st, du, vel);
+			}
+		} else if (famC == FAM_FLOOR || famC == FAM_DISCO) {
+			for (int st = 6; st <= 42 && !c->overflow; st += 12)
+				block(st, 4, 104);
+			if (ag.dens >= 2) {
+				int pc, ty; ChordAt(b, 0, &pc, &ty);
+				int tones[4]; int nt = ChordTones(pc, ty, 0, tones, 4);
+				if (nt > 0) one(0, 3, tones[0], 96);
+			}
+		} else if (famC == FAM_HOP || famC == FAM_TRAP) {
+			int ats[4] = { 0, 18, 24, 36 };
+			if (ag.sync >= 2) { ats[1] = 15; ats[3] = 39; }
+			int nHit = (ag.dens == 0) ? 2 : 4;
+			for (int k = 0; k < nHit; k++)
+				dy(ats[k], 4, ((ats[k] % 12) == 0) ? 92 : 76);
+		} else {
+			static const uint16_t masks[8] = {
+				0xEEEEu, 0xAAAAu, 0x4444u, 0xFFFFu, 0x6DB6u, 0xBBBBu, 0x5555u, 0xDDDDu
 			};
-			const int* runAt = kRunAt[(pos + s_song.pat) & 3];
-			for (int r = 0; r < 4; r++) {
-				if (r < 2 && form < 45 && !s_song.twoAcc) continue;
-				if (thin && ((r + pos) & 1)) continue;
-				int clash = 0;
-				for (int k = 0; k < nHit; k++) if (at[k] == runAt[r]) { clash = 1; break; }
-				if (!clash) runPos[nRun++] = runAt[r];
+			int mi = (patC & 7) ^ ((patC & 8) ? 3 : 0);
+			uint16_t mask = masks[mi & 7];
+			if (ag.dens == 0) mask = (uint16_t)(mask & 0x2222u);
+			else if (ag.dens == 1 && (patC & 2)) mask = (uint16_t)(mask & 0xAAAAu);
+			if (patC == 6) mask = 0x1111u;
+			if (!mask) mask = 0x2222u;
+			for (int s = 0; s < 16 && !c->overflow; s++) {
+				if (!(mask & (uint16_t)(1u << s))) continue;
+				int st = s * 3;
+				int pc, ty;
+				ChordAt(b, st, &pc, &ty);
+				int tones[4];
+				int nt = ChordTones(pc, ty, 0, tones, 4);
+				if (nt < 1) continue;
+				int sub = s & 3;
+				int vel = 108 - sub * 14 - ((bar & 1) ? 4 : 0);
+				if (vel < 62) vel = 62;
+				int midi = tones[(s + bar + patC) % nt];
+				if (s_song.prevCh > 0) {
+					while (midi < s_song.prevCh - 7) midi += 12;
+					while (midi > s_song.prevCh + 6) midi -= 12;
+				}
+				one(st, (patC == 11) ? 3 : 2, midi, vel);
 			}
-		}
-		for (int k = 0; k < nHit && !c->overflow; k++) {
-			int nextEnd = (k + 1 < nHit) ? (at[k + 1] - 1) : 44;
-			for (int r = 0; r < nRun; r++) {
-				if (runPos[r] > at[k] && runPos[r] - 1 < nextEnd)
-					nextEnd = runPos[r] - 1;
-			}
-			int du = nextEnd - at[k];
-			int cFam = StyleFam(style);
-			if (cFam == FAM_16 || cFam == FAM_FUNK || cFam == FAM_DNB || cFam == FAM_REG || cFam == FAM_SKA) {
-				if (du > 3) du = 3;
-			} else if (cFam == FAM_BALLAD || cFam == FAM_PAD) {
-				if (du < 12 && nextEnd - at[k] >= 12) du = 12;
-			} else if (fig == 3 || fig == 6) { if (du > 4) du = 4; }
-			else if (fig == 1 || fig == 4) { if (du > 8) du = 8; }
-			if (du > nextEnd - at[k]) du = nextEnd - at[k];
-			if (du < 2) du = 2;
-			int voices[3] = { v0, v1, v2 };
-			int nv = c->isFm ? 1 : 3;
-			int loC = 48 + (i == 1 ? -12 : i >= 2 ? 12 : 0) + (ag.octBias / 2);
-			int hiC = 79 + (i == 1 ? -12 : i >= 2 ? 12 : 0) + (ag.octBias / 2);
-			if (loC < 36) loC = 36;
-			if (hiC > 96) hiC = 96;
-			if (dockWild) {
-				int raw = (int)s_song.mel[srcM][k % nMel].deg;
-				int topD = NearTriad(rd + raw, rd) - rd;
-				voices[2] = topD;
-				voices[1] = topD - 3;
-				voices[0] = topD - 5;
-			}
-			for (int v = 0; v < nv; v++) {
-				int m = Tone(tonic, rd + voices[v], s_song.prevCh, loC, hiC);
-				s_song.prevCh = m;
-				PutFrac(c, chordCh[i], b, at[k], du, m, (84 - v * 6) - i * 4, (fig == 3 || fig == 6) ? 48 : 86);
-			}
-		}
-		for (int r = 0; r < nRun && !c->overflow; r++) {
-			int nextEnd = 44;
-			for (int k = 0; k < nHit; k++) {
-				if (at[k] > runPos[r] && at[k] - 1 < nextEnd)
-					nextEnd = at[k] - 1;
-			}
-			if (r + 1 < nRun && runPos[r + 1] - 1 < nextEnd)
-				nextEnd = runPos[r + 1] - 1;
-			int rdu = nextEnd - runPos[r];
-			if (rdu > 3) rdu = 3;
-			if (rdu < 2) continue;
-			int degR = (nMel > 0) ? (NearTriad(rd + s_song.mel[srcM][r % nMel].deg, rd) + (r & 1 ? 4 : 0)) : (rd + r * 2);
-			int m = Tone(tonic, degR, s_song.prevCh, 60, 88);
-			PutFrac(c, chordCh[0], b, runPos[r], rdu, m, 88 + (r & 1) * 8, 72);
 		}
 	}
 
@@ -4776,18 +5075,24 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			sing(padCh[i], &s_song.prevPad, 52, 81, 2, 70);
 			continue;
 		}
-		int deg = ChordDegAt(pos, i * 2, s_song.pat + 3 + i, span);
-		int loP = (i & 1) ? 60 : 52, hiP = (i & 1) ? 84 : 76;
-		int m = Tone(tonic, rd + deg, s_song.prevPad, loP, hiP);
-		s_song.prevPad = m;
-		int du = 44;
-		int split = ((pos + s_song.pat + i) % 5);
-		if (split == 2 || split == 4) du = (split == 2) ? 20 : 28;
-		PutFrac(c, padCh[i], b, (i & 1) && (pos & 2) ? 12 : 0, du, m, 62 - i * 4, 100);
-		if (du < 40) {
-			int m2 = Tone(tonic, rd + ChordDegAt(pos, 2 + i, s_song.pat, span), m, loP, hiP);
-			PutFrac(c, padCh[i], b, du + 2, 44 - du, m2, 60 - i * 4, 100);
-		}
+		auto holdPad = [&](int st, int du) {
+			int pc, ty;
+			ChordAt(b, st, &pc, &ty);
+			int tones[4];
+			int nt = ChordTones(pc, ty, 0, tones, 4);
+			if (nt < 1) return;
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++) {
+				int m = tones[(v + i) % nt];
+				while (m < 55) m += 12;
+				while (m > 81) m -= 12;
+				PutFrac(c, padCh[i], b, st, du, m, 64 - i * 4 - v * 3, 100);
+				s_song.prevPad = m;
+			}
+		};
+		int du = (b->root2 >= 0) ? 22 : 44;
+		holdPad(0, du);
+		if (b->root2 >= 0) holdPad(24, 22);
 	}
 
 	if (nArp > 0 && arpCh && !(thin && form < 1 && (pos & 1) && !boom)) {
@@ -4800,8 +5105,9 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			}
 			if (waltz) {
 				for (int k = 0; k < 3 && !c->overflow; k++) {
-					int deg = rd + ChordDegAt(pos + shape, k + i, s_song.pat, span);
-					int m = Tone(tonic, deg, s_song.prevArp, 52, 88);
+					int pcA, tyA;
+					ChordAt(b, k * 16, &pcA, &tyA);
+					int m = ChordPick(pcA, tyA, k + i + shape, s_song.prevArp, 52, 88);
 					s_song.prevArp = m;
 					PutFrac(c, arpCh[i], b, k * 16, 6, m, 86 - i * 6, 58);
 				}
@@ -4811,9 +5117,12 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int k = 0;
 			for (int s = 0; s < 16 && !c->overflow; s++) {
 				if (!(am & (uint16_t)(1u << s))) continue;
-				int deg = rd + ChordDegAt(pos + shape, k + i, s_song.pat, span);
-				if (i > 0) deg += (i & 1) ? 7 : 4;
-				int m = Tone(tonic, deg, s_song.prevArp, 52, 88);
+				int pcA, tyA;
+				ChordAt(b, s * 3, &pcA, &tyA);
+				int m = ChordPick(pcA, tyA, k + i + shape, s_song.prevArp, 52, 88);
+				if (i > 0 && (i & 1)) m += 12;
+				while (m > 88) m -= 12;
+				while (m < 52) m += 12;
 				s_song.prevArp = m;
 				int du = (arpFam == FAM_BALLAD || arpFam == FAM_PAD) ? 8 : 2;
 				int nextS = 16;
@@ -4840,12 +5149,13 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int du = (k + 1 < nh) ? (hat[k + 1] - hat[k] - 1) : (46 - hat[k]);
 			if (du > 18) du = 18;
 			if (du < 4) du = 4;
-			int deg = rd + ChordDegAt(pos, k + 2 + i, s_song.pat + 1, span) + (i > 0 ? 7 : 0);
-			int m = Tone(tonic, deg, s_song.prevHarm, 60, 92);
+			int pcH, tyH;
+			ChordAt(b, hat[k], &pcH, &tyH);
+			int m = ChordPick(pcH, tyH, k + i, s_song.prevHarm, 60, 92);
 			s_song.prevHarm = m;
 			PutFrac(c, harmCh[i], b, hat[k], du, m, 80 - i * 5, 84);
 			if (!c->isFm && (form >= 30 || i == 0)) {
-				int m2 = Tone(tonic, deg + 4, m, 64, 94);
+				int m2 = ChordPick(pcH, tyH, k + i + 1, m, 64, 94);
 				if (m2 != m) PutFrac(c, harmCh[i], b, hat[k], du, m2, 68 - i * 5, 80);
 			}
 		}
@@ -4862,10 +5172,17 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int mst = s_song.mel[src][k].at;
 			int mdu = s_song.mel[src][k].du;
 			int mlg = s_song.mel[src][k].leg;
-			int raw = rd + s_song.mel[src][k].deg;
-			int deg = ((mst % 24) == 0 || k == 0 || k == melN - 1) ? NearTriad(raw, rd) : raw;
-			if (b->section == SEC_BODY && pos >= span - 1 && k == melN - 1) deg = 0;
-			int m = Tone(tonic, deg, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+			int raw = (int)s_song.mel[src][k].deg;
+			int pcM, tyM;
+			ChordAt(b, mst, &pcM, &tyM);
+			int strong = ((mst % 12) == 0) || k == 0 || k == melN - 1;
+			int m;
+			if (b->section == SEC_BODY && pos >= span - 1 && k == melN - 1)
+				m = ChordPick(pcM, tyM, 0, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+			else if (strong)
+				m = SnapChord(pcM, tyM, raw, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+			else
+				m = ScalePick(pcM, tyM, raw, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
 			s_song.prevMel = m;
 			int vel = mlg ? 108 : 94;
 			if (boom) vel = 118;
@@ -4884,7 +5201,10 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	s_putForce = 1;
 	for (int i = 0; i < nCnt && !c->overflow; i++) {
 		if (pos >= span - 1) {
-			int m = Tone(tonic, rd + (i & 1 ? 4 : 2), s_song.prevCnt, 55, 84);
+			int pc, ty;
+			ChordAt(b, 0, &pc, &ty);
+			int m = ChordPick(pc, ty, (i & 1) ? 1 : 2, s_song.prevCnt, 55, 84);
+			s_song.prevCnt = m;
 			PutFrac(c, cntCh[i], b, 0, 24, m, 76, 84);
 			continue;
 		}
@@ -4898,50 +5218,87 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int du = (k + 1 < nc) ? (cat[k + 1] - cat[k] - 1) : 10;
 			if (du > 12) du = 12;
 			if (du < 3) du = 3;
-			int m = Tone(tonic, rd + ChordDegAt(pos, k + 5 + i, s_song.pat + 2, span), s_song.prevCnt, 52 + i * 4, 86);
+			int pc, ty;
+			ChordAt(b, cat[k], &pc, &ty);
+			int m = ChordPick(pc, ty, k + 5 + i, s_song.prevCnt, 52 + i * 4, 86);
 			s_song.prevCnt = m;
 			PutFrac(c, cntCh[i], b, cat[k], du, m, 76 - i * 4, 78);
 		}
 	}
 	for (int i = 0; i < nStab && !c->overflow; i++) {
-		if (pos >= span - 1) {
-			int m = Tone(tonic, rd + 7, -1, 70, 96);
-			PutFrac(c, stabCh[i], b, 0, 12, m, 98, 60);
-			continue;
+		const int famS = StyleFam(style);
+		const int patS = s_song.pat & 15;
+		int ats[4];
+		int ns = 0;
+		int sdu = 3;
+		int vel = 114;
+		if (pos >= span - 1 || b->section == SEC_END) {
+			ats[0] = 0; ns = 1; sdu = 8; vel = 100;
+		} else if (famS == FAM_BALLAD || famS == FAM_PAD || famS == FAM_MARCH) {
+			if ((bar & 3) != 0 && patS != 15) continue;
+			ats[0] = 0; ns = 1; sdu = 10; vel = 88;
+		} else if (famS == FAM_JAZZ || famS == FAM_BLUES || famS == FAM_SHUF || famS == FAM_BOSSA) {
+			ats[0] = 18; ats[1] = 42; ns = (ag.dens >= 2) ? 2 : 1; sdu = 4; vel = 96;
+		} else if (famS == FAM_8 || famS == FAM_METAL || famS == FAM_TANGO) {
+			ats[0] = 24; ns = 1; sdu = 6; vel = 118;
+			if (ag.dens >= 3) { ats[1] = 42; ns = 2; }
+		} else if (famS == FAM_FUNK || famS == FAM_REG || famS == FAM_SKA) {
+			ats[0] = 6; ats[1] = 18; ats[2] = 30; ats[3] = 42;
+			ns = (ag.dens == 0) ? 2 : 4; sdu = 3; vel = 114;
+		} else if (famS == FAM_WALTZ) {
+			ats[0] = 16; ats[1] = 32; ns = 2; sdu = 4; vel = 104;
+		} else {
+			ats[0] = 15; ats[1] = 39; ns = (ag.dens == 0) ? 1 : 2; sdu = 3; vel = 112;
+			if (ag.dens >= 3) { ats[2] = 27; ns = 3; }
 		}
-		int sat[6];
-		int ns = HitTimes(pos + 1 + i * 2, span, fig, s_song.pat + i, waltz, sat, (ag.dens >= 2) ? 4 : 3, 4);
+		int shift = (patS & 3) * 3;
+		if (famS == FAM_8 || famS == FAM_METAL || famS == FAM_BALLAD || famS == FAM_PAD || famS == FAM_WALTZ)
+			shift = 0;
+		int nv = c->isFm ? 1 : 2;
 		for (int s = 0; s < ns && !c->overflow; s++) {
-			int lim = (s + 1 < ns) ? (sat[s + 1] - sat[s] - 1) : (46 - sat[s]);
-			int sdu = (lim < 4) ? (lim < 2 ? 2 : lim) : 4;
-			int voices[3] = { 0, 2, 4 };
-			int nv = c->isFm ? 1 : 3;
-			for (int v = 0; v < nv; v++) {
-				int m = Tone(tonic, rd + voices[v] + 7, -1, 66 + i * 5, 98);
-				PutFrac(c, stabCh[i], b, sat[s], sdu, m, (boom ? 114 : 98) - v * 6 - i * 4, 42);
+			int st = ats[s];
+			if (s > 0) st += shift;
+			if (st > 44) st = ats[s];
+			int pc, ty;
+			ChordAt(b, st, &pc, &ty);
+			int tones[4];
+			int nn = ChordTones(pc, ty, 0, tones, 4);
+			if (nn < 1) continue;
+			for (int v = 0; v < nv && v < nn; v++) {
+				int m = tones[v] + 12;
+				while (m < 70) m += 12;
+				while (m > 96) m -= 12;
+				PutFrac(c, stabCh[i], b, st, sdu, m, vel - v * 8 - i * 4, 40);
 			}
 		}
 	}
 	for (int i = 0; i < nColor && !c->overflow; i++) {
 		if (pos >= span - 1) {
-			int m = Tone(tonic, rd + 7, s_song.prevCol, 74, 98);
+			int pc, ty;
+			ChordAt(b, 0, &pc, &ty);
+			int m = ChordPick(pc, ty, 2, s_song.prevCol, 74, 98);
+			s_song.prevCol = m;
 			PutFrac(c, colorCh[i], b, 0, 24, m, 74, 82);
 			continue;
 		}
 		int colAt[6];
-		int ncol = HitTimes(pos + 2 + i, span, fig, s_song.pat + 5 + i, waltz, colAt, 4, 3);
+		int ncol = HitTimes(pos + 2 + i, span, fig, s_song.pat + 5 + i, waltz, colAt, (ag.dens == 0) ? 2 : 3, 3);
 		for (int k = 0; k < ncol && !c->overflow; k++) {
-			int cdu = (form >= 60) ? 6 : 10;
+			int cdu = (form >= 60) ? 4 : 6;
 			int lim = (k + 1 < ncol) ? (colAt[k + 1] - colAt[k] - 1) : (46 - colAt[k]);
 			if (lim < 2) lim = 2;
 			if (cdu > lim) cdu = lim;
-			int m = Tone(tonic, rd + ChordDegAt(pos, k + 3 + i, s_song.pat + 5, span) + 7, s_song.prevCol, 74, 100);
+			int pc, ty;
+			ChordAt(b, colAt[k], &pc, &ty);
+			int m = ChordPick(pc, ty, k + i + 1, s_song.prevCol, 74, 100);
 			s_song.prevCol = m;
-			PutFrac(c, colorCh[i], b, colAt[k], cdu, m, 74 - i * 4, 72);
+			PutFrac(c, colorCh[i], b, colAt[k], cdu, m, 78 - i * 4, 60);
 		}
 	}
 	s_putForce = 0;
 	(void)tonic;
+	(void)rd;
+	(void)nxt;
 }
 
 
@@ -5739,21 +6096,6 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		}
 	}
 
-	/* 8個のコード列は置かない。調の主音だけを残し、動きは歌の度数で作る。 */
-	if (useProg && nBars > 0) {
-		int pc = TonicPc(opt->defKey);
-		LineCast cast;
-		int pv = opt->patVar;
-		if (pv < 0 || pv >= SC_ARRANGE_COUNT) pv = 0;
-		CastOf(opt->style, pv, variation & 1, &cast);
-		int minor = (cast.scale == 1 || cast.scale == 2 || cast.scale == 5
-			|| cast.scale == 6 || cast.scale == 7);
-		for (int i = 0; i < nBars; i++) {
-			bars[i].root = pc;
-			bars[i].type = minor ? CH_MIN : CH_MAJ;
-			bars[i].root2 = -1;
-		}
-	}
 	if (nBars > 0) {
 		int pc = TonicPc(opt->defKey);
 		for (int i = 0; i < nBars; i++) {
@@ -5789,6 +6131,8 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (patVar < 0 || patVar >= SC_ARRANGE_COUNT) patVar = 0;
 	LoadStyle(opt->style, patVar, &st);
 	ApplyHalfBars(bars, nBars, opt->style, patVar);
+	if (useProg && nBars > 0)
+		PaintHarmony(bars, nBars, opt->style, patVar, variation, opt->defKey);
 	SetHeadTempo(&ctx, StyleBpm(opt->style), rewrite, opt->docTempoT);
 	{
 		const int stIdx = (opt->style >= 0 && opt->style < SC_AS_COUNT) ? opt->style : 0;
@@ -6106,6 +6450,9 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		}
 		PaintPulse(opt->style, patVar, barAt, b.section, div,
 			(b.section == SEC_END && endFromEnd <= 0) ? 1 : 0, drm);
+		s_nextRootPc = (b.root >= 0) ? b.root : TonicPc(opt->defKey);
+		if (bi + 1 < nBars && bars[bi + 1].root >= 0)
+			s_nextRootPc = bars[bi + 1].root;
 		if (b.section != SEC_BREAK && (allowBar || form >= 1))
 			ComposeBar(&ctx, &b, (b.section == SEC_BODY) ? barAt : 0, form, TonicPc(opt->defKey),
 				nBass, bassCh, nChord, chordCh, nPad, padCh, nArp, arpCh,

@@ -11,3 +11,6 @@ void CEmuChipX1010Destroy(CChip* c);
 /* サウンドRAM窓アクセス（$0000-$1FFF）。 */
 uint8_t CEmuChipX1010Read(CChip* c, unsigned offset);
 void CEmuChipX1010Write(CChip* c, unsigned offset, uint8_t data);
+
+/* madshark の波形は MAME と同じ $1000 ページと 16bit ピッチ。他のゲームは既定のまま。 */
+void CEmuChipX1010MameWave(int on);

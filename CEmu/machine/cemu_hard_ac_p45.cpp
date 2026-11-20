@@ -930,16 +930,34 @@ void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 static const unsigned kScspRegBase = 0x100000u;
 static const unsigned kScspRomBase = 0x600000u;
 
+/* 実バイトが入っている波形 ROM の終端。確保サイズは窓（最低 12MB）で、
+   未ロードの上側は 0 のまま。waverunr/hotd は bit 0x20 クリアで高半面を選び、
+   ポインタがこの終端を超える。範囲内の読み（doa/gunblade/zerogun）はそのまま。 */
+static unsigned sScspPcmEnd = 0;
+/* 高半面を選ぶが波形は 8MB で終わる未掲載セットだけ折り返す。
+   vf2/motoraid/daytona/zerogun も同じラッチで、余白の 0 が掲載済みの音なので折り返さない。 */
+static int sScspMirrorHigh = 0;
+
 /* 3 つのサンプル窓内の 68000 番地を波形 ROM オフセットへ。窓外なら 0xffffffff */
 unsigned CHardAc::Sega2ASampleOffset(unsigned addr) const
 {
+	unsigned off = 0xffffffffu;
 	if (addr >= 0x800000u && addr <= 0x9fffffu)
-		return addr - 0x800000u;
-	if (addr >= 0xa00000u && addr <= 0xdfffffu)
-		return (addr - 0xa00000u) + (scspSampleBank_ ? 0x800000u : 0x200000u);
-	if (addr >= 0xe00000u && addr <= 0xffffffu)
-		return (addr - 0xe00000u) + (scspSampleBank_ ? 0xa00000u : 0x600000u);
-	return 0xffffffffu;
+		off = addr - 0x800000u;
+	else if (addr >= 0xa00000u && addr <= 0xdfffffu)
+		off = (addr - 0xa00000u) + (scspSampleBank_ ? 0x800000u : 0x200000u);
+	else if (addr >= 0xe00000u && addr <= 0xffffffu)
+		off = (addr - 0xe00000u) + (scspSampleBank_ ? 0xa00000u : 0x600000u);
+	if (off == 0xffffffffu)
+		return off;
+	if (sScspMirrorHigh && sScspPcmEnd && off >= sScspPcmEnd) {
+		const unsigned mask = sScspPcmEnd;
+		if ((mask & (mask - 1u)) == 0u)
+			off &= mask - 1u;
+		else
+			off %= mask;
+	}
+	return off;
 }
 
 /* バス読込 */
@@ -1064,6 +1082,13 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (ms1Rom_) { free(ms1Rom_); ms1Rom_ = NULL; ms1RomSize_ = 0; }
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 	scspSampleBank_ = 0;
+	sScspPcmEnd = 0;
+	sScspMirrorHigh = 0;
+	if (ge->archive && (_stricmp(ge->archive, "waverunr") == 0
+		|| _stricmp(ge->archive, "hotd") == 0
+		|| _stricmp(ge->archive, "dynamcop") == 0
+		|| _stricmp(ge->archive, "pltkids") == 0))
+		sScspMirrorHigh = 1;
 
 	/* 音源プログラム: 512KB 窓へ ROM_LOAD16_WORD_SWAP。カタログは領域オフセット（Model 2A は 0x80000）だが CPU は 0x600000 で見るので、窓相対イメージへ正規化する。 */
 	unsigned romNeed = 0x80000u;
@@ -1114,6 +1139,7 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			pcm[off + j] = data[j + 1u];
 			pcm[off + j + 1u] = data[j];
 		}
+		if (off + n > sScspPcmEnd) sScspPcmEnd = off + n;
 	}
 	pcmRom_ = pcm;
 	pcmRomSize_ = pcmNeed;

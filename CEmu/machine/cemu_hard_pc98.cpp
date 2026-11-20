@@ -3487,6 +3487,13 @@ static void PlantFmdSongBank(CEmuDos98* dos)
 	mem[b + 8] = (uint8_t)(seg >> 8);
 }
 
+/* FMP2（edge）の MIDI シーケンサは PIT の IRQ0。FMP3 は Timer B なので
+   UART 中は IRQ0 をマスクするが、ここをマスクすると FMP2 はノートを出さない。 */
+static int Pc98Fmp2UsesPit(const CEmuGameEntry* ge)
+{
+	return ge && ge->archive && _stricmp(ge->archive, "edge98") == 0;
+}
+
 /* CHardPc98::Int60Hooked の実装 */
 int CHardPc98::Int60Hooked() const
 {
@@ -3533,7 +3540,9 @@ int CHardPc98::DeliverIrqs()
 					opnInService_ = 0;
 			}
 			/* GROP の停止待ちは [0]|[2] が 0 になるまで同じ CS でスピンする。
-			   ISR は IRET 済みでも入口 SP より深いので、この 9 バイトのときだけ外す。 */
+			   ISR は IRET 済みでも入口 SP より深いので、この 9 バイトのときだけ外す。
+			   moongate は [2]|[3] で同じ形。ラッチが残るとタイマが一度で止まり、
+			   キーが 1 回のまま 8 秒鳴る。 */
 			{
 				const uint16_t cs = np2_reg_get(NP2_R_CS);
 				const uint16_t ip = np2_reg_get(NP2_R_IP);
@@ -3541,10 +3550,14 @@ int CHardPc98::DeliverIrqs()
 				static const uint8_t kGropWait[] = {
 					0xA0, 0x00, 0x00, 0x0A, 0x06, 0x02, 0x00, 0x75, 0xF7
 				};
+				static const uint8_t kMoonWait[] = {
+					0xA0, 0x02, 0x00, 0x0A, 0x06, 0x03, 0x00, 0x75, 0xF7
+				};
 				for (unsigned back = 0; back <= 6; back += 3) {
 					if (at < back || at - back + sizeof(kGropWait) >= 0x200000u)
 						continue;
-					if (memcmp(mem + (at - back), kGropWait, sizeof(kGropWait)) == 0) {
+					if (memcmp(mem + (at - back), kGropWait, sizeof(kGropWait)) == 0
+						|| memcmp(mem + (at - back), kMoonWait, sizeof(kMoonWait)) == 0) {
 						opnInService_ = 0;
 						break;
 					}
@@ -3739,7 +3752,7 @@ int CHardPc98::DeliverIrqs()
 		/* スピーカリップ（BGML_98）は IRQ0 でノートを組む。INT 7F 後はしばしば CLI 待ち。IF が無いと PIT が INT08 に届かず MixBeep は DC ゲート。実 BIOS はまだ IRQ0 を上げる。FMD intelligent ヘルパは MPU ACK 周りで CLI — ここで IF を強制すると INT 0E が FE を奪い 0713 がハングまたは RET 破壊（portOut=2）。 */
 		/* FMP3 UART は Timer B。IRQ0 を開けると BIOS INT08（00C0:0000）が
 		   FMP ロックを落とし TB が入れ子して MIDI が爆速になる。 */
-		if (fmpSeq_ && mpuUart_)
+		if (fmpSeq_ && mpuUart_ && !Pc98Fmp2UsesPit(dosGe_))
 			picMask_ = (uint8_t)(picMask_ | 0x01);
 		else
 			picMask_ = (uint8_t)(picMask_ & 0xfeu);
@@ -6639,6 +6652,22 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	} else {
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = 0;
+	}
+	if (ge && ge->archive && _stricmp(ge->archive, "edge98") == 0) {
+		/* FMP2 の曲モード [0831] は糊が IN 7E4 で受け取る。0=FM、1=LA、2=GS。
+		   カタログ midiout_type は 1/2=MT-32、4=SC-55。byte2 を EXT_SONG に
+		   入れる既定だと GS も LA もモード 0 のままトラックが消される。 */
+		int mt = 0;
+		for (int i = 0; i < ge->optCount; i++) {
+			if (_stricmp(ge->opt[i].name, "midiout_type") == 0) {
+				mt = (int)strtoul(ge->opt[i].value, NULL, 0);
+				break;
+			}
+		}
+		if (mt == 4 || mt == 6)
+			extParam_ = 2;
+		else if (mt == 1 || mt == 2)
+			extParam_ = 1;
 	}
 }
 
@@ -9691,7 +9720,21 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			}
 			np2_reg_set(NP2_R_DS, loadSeg);
 			np2_reg_set(NP2_R_ES, reqSeg);
-			np2_set_ss_sp(launchSeg, 0xFFFE);
+			/* SOUND5 の割り込み入口は自スタックへ切替える前に PUSHAW する。
+			   起動スタック A0:FFFE はロード先 1001:09D6 に重なり、0x1D ハンドラを潰す。
+			   MUDRV2 も同じ配置で 09DA が HLT に潰れ、INIT が常駐前に止まる。 */
+			uint16_t launchSp = 0xFFFE;
+			if (!_strnicmp(name, "sound5", 6) || !_strnicmp(name, "mudrv2", 6)) {
+				const unsigned stackLin = (unsigned)launchSeg << 4;
+				const unsigned drvLin = (unsigned)loadSeg << 4;
+				if (drvLin > stackLin + 0x400u && drvLin < stackLin + 0x10000u) {
+					unsigned sp = (drvLin - stackLin) - 0x400u;
+					sp &= ~1u;
+					if (sp > 0x400u)
+						launchSp = (uint16_t)sp;
+				}
+			}
+			np2_set_ss_sp(launchSeg, launchSp);
 			np2_set_cs_ip(launchSeg, 0x0000);
 			np2_reg_set(NP2_R_FLAGS, 0x0202);
 			stubState_ = 0;
@@ -9889,6 +9932,19 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		: dos_.LoadCom(mem, image, imageSize, pspTail);
 	if (!ok) return 0;
 	Pc98ArmFm26k(image, imageSize, isExe);
+	if (!isExe && imageSize == 18136u && image[0] == 0xE9 && image[1] == 0x8B
+		&& image[2] == 0x46 && image[0x131] == 0xB6 && image[0x132] == 0x02
+		&& image[0x4377] == 0xC3) {
+		/* FMP2（edge）の INT D2 表 AL=11h は周波数表の途中。糊は起動の AH=3F が
+		   0 バイトでも 11h を呼び、そこで不正命令になって INT 7F を植えない。
+		   11h だけ直後の RET へ。00h–0Eh の再生コマンドは元のまま。 */
+		const uint16_t psp = dos_.PspSeg();
+		const unsigned slot = ((unsigned)psp << 4) + 0x231u;
+		if (slot + 1u < 0x200000u) {
+			mem[slot] = 0x77;
+			mem[slot + 1] = 0x44;
+		}
+	}
 	if (s_fukujin3Board && isExe && imageSize == 7428u) {
 		/* 既存 INT43 の seg:001D がトランポリン上で非 0 だと 4C01。ゼロ段落を指して導入させる。 */
 		memset(mem + 0x90000u, 0, 0x40);
@@ -10019,7 +10075,52 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		TickSide(u);
 		AdvanceOpnClocks(u);
 	}
+	/* kbreed98 の PCMSET は ADPCM を載せたあと [288] が落ちるまで INT 2F を
+	   回り、8 秒で予算が切れる。ブロックを持ったまま戻ると次の糊が確保できず
+	   INT 7F を植えない。PCM は既に YM2608 側にあるので、この EXE だけ解放する。 */
+	if (stubState_ != 0x81 && _stricmp(name, "pcmset") == 0
+		&& dosGe_ && dosGe_->archive
+		&& _stricmp(dosGe_->archive, "kbreed98") == 0) {
+		uint8_t* m = np2_mem();
+		if (m)
+			dos_.ReleaseProgram(m);
+	}
 	return stubState_ == 0x81 ? 1 : 0;
+}
+
+/* kbreed98 の OPNA は PCMSET が [288] 待ちのまま予算を使い、64KB の糊が
+   Alloc できない。INT 7F は未フックのまま。92 バイトの糊だけ載せ、ハンドラ
+   010F をベクタに結ぶ。OPN 側は既に自分で植えているのでここでは何もしない。 */
+static void KbreedPlantGlue(CEmuDos98& dos, uint8_t* mem)
+{
+	if (!mem || IvtHooked(0x7F, 1))
+		return;
+	const CEmuDos98File* glue = dos.FindFile("kbreed98.com");
+	if (!glue)
+		glue = dos.FindFile("kbreed98");
+	if (!glue || !glue->data || glue->size < 0x5C || glue->size > 0x80)
+		return;
+	if (glue->data[0] != 0xB8 || glue->data[1] != 0x7F || glue->data[2] != 0x25)
+		return;
+	const uint16_t psp = dos.PspSeg();
+	if (psp >= 0x1800)
+		dos.ReleaseProgram(mem);
+	uint16_t gseg = 0;
+	if (!dos.AllocBlock(mem, 0x100, &gseg) || !gseg)
+		return;
+	const unsigned base = (unsigned)gseg << 4;
+	if (base + 0x100u + glue->size >= 0x200000u)
+		return;
+	memcpy(mem + base + 0x100, glue->data, glue->size);
+	mem[0x7F * 4 + 0] = 0x0F;
+	mem[0x7F * 4 + 1] = 0x01;
+	mem[0x7F * 4 + 2] = (uint8_t)(gseg & 0xff);
+	mem[0x7F * 4 + 3] = (uint8_t)(gseg >> 8);
+	np2_set_cs_ip(gseg, 0x0109);
+	np2_set_ss_sp(gseg, 0xFFFE);
+	np2_reg_set(NP2_R_DS, gseg);
+	np2_reg_set(NP2_R_ES, gseg);
+	np2_reg_set(NP2_R_FLAGS, 0x0202);
 }
 
 /* NAX -I は INT60 とタイマまで植えて戻らず、続く NLP_HOOT が INT7F を植えない。
@@ -10288,11 +10389,14 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	const uint64_t setupBudget = (uint64_t)cpuHz_ * 8ull; /* シェルあたり約 8 秒 */
 	/* mbmusp/MUSDRV: SSG I/O A bits7-6 が INT14 を選ぶ。EOI はスレーブを仮定。
 	   iwaplay/F.COM（IWADRV）は bit7=0 で INT14、bit7=1 で INT15。0xC0 を植えると
-	   INT15 に ISR が行き、こちらの OPN は IRQ3/INT0B のまま無音になる。 */
+	   INT15 に ISR が行き、こちらの OPN は IRQ3/INT0B のまま無音になる。
+	   tetris98 の TETRIS.EXE は I/O A が 0xC0 か 0x40 のときだけ INT14/15 を植える。
+	   オープンバス 0 だと init がベクタを書かず、曲を読んでも FM が動かない。 */
 	static const char* kSsgJumperShell[] = {
 		"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE",
 		"fplay", "FPLAY",
 		"mmd2", "MMD2", "mmd2va",
+		"tetris98",
 		NULL
 	};
 	if (chip_ && DosShellStarts(ge, kSsgJumperShell)) {
@@ -10354,6 +10458,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 	}
 	dosStubReady_ = (stubState_ == 0x81) ? 1 : dosStubReady_;
+	if (ge && ge->archive && _stricmp(ge->archive, "kbreed98") == 0)
+		KbreedPlantGlue(dos_, mem);
 	/* s_iwaBusHold は再生中も残す。カナリア IN 18A と ISR の SSG 読が
 	   ymfm ReadData()=status のままだと CMP が外れ INT14 を植えない。 */
 	PatchSynth98PaiDest(mem, dos_.PspSeg());
@@ -10842,7 +10948,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 		/* FMP UART は IRQ0 をマスクのまま。BootDos で開けると TriggerPlay
 		   前に BIOS INT08 が入り、MIDI テンポが TB+PIT になる。 */
-		if (fmpSeq_ && mpuUart_)
+		if (fmpSeq_ && mpuUart_ && !Pc98Fmp2UsesPit(ge))
 			picMask_ = (uint8_t)(picMask_ | 0x01);
 		else
 			picMask_ = (uint8_t)(picMask_ & 0xfeu);
@@ -12277,6 +12383,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		   2 回目 poke は BindDos の byte2 既定で EXT_PARAM=0 になり、ディレクトリの
 		   低位+0Ah をハンドルにする。tousin1 曲2 はそのハンドルが未オープンの 0Dh で、
 		   入口の INT40 AH=1 がタイマを 30h にしたまま再開できない。 */
+		/* SND5_98 の 2 回目 INT 7F は cmd0 のまま INT 41 で曲を載せ直す。
+		   先頭ノートのキーオン途中に入り、戻り先を曲データへ潰す。 */
+		static const char* kSnd5Once[] = { "snd5_98", NULL };
 		static const char* kMakoOnce[] = { "MAKO", "mako", NULL };
 		static const char* kOpndrvOnce[] = { "fugam", "fgplay", NULL };
 		/* olteus オーバーレイ再生（INT7F cmd2 → MAP:D471）は 20KB MUS+MTB を載せる。2 回目 poke は DEF1 途中でロードを再開。 */
@@ -12321,7 +12430,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			|| DosShellStarts(dosGe_, kFmxOnce)
 			|| DosShellStarts(dosGe_, kFmpOnce)
 			|| DosShellStarts(dosGe_, kN3gvOnce)
-			|| DosShellStarts(dosGe_, kMakoOnce))));
+			|| DosShellStarts(dosGe_, kMakoOnce)
+			|| DosShellStarts(dosGe_, kSnd5Once))));
 		if (repeatPlay) {
 			if (dosGe_)
 				BindDosTriggerSong(dosGe_, titleCode);
@@ -12341,7 +12451,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			/* BGML_98（他スピーカリップも）は IRQ0/INT08 からメロディを駆動。BootDos は PIC マスク 0xFF で開始。プレイヤは INT 7F で外し得るが、レンダ全体で IF/IRQ0 を生かす。FMD MIDI も同じ IRQ0 解除（INT0B は未フック）。
 			   FMP3 -m は Timer B シーケンサ。PIT カウンタは較正用に回すが IRQ0 はマスクのまま
 			   （BIOS INT08 が FMP ロックと競合し MIDI が PIT+TB で走る）。 */
-			if (fmpSeq_ && mpuUart_)
+			if (fmpSeq_ && mpuUart_ && !Pc98Fmp2UsesPit(dosGe_))
 				picMask_ = (uint8_t)(picMask_ | 0x01);
 			else
 				picMask_ = (uint8_t)(picMask_ & 0xfeu);
@@ -13113,6 +13223,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"MAKO_98", "MAKO", "mako", "MAKOP",
 				/* mlfplay cmd2 は INT60 AH=4 停止。cmd0 が既に AH=1 停止 + AH=2 + 読込 + AH=0 再生。 */
 				"mlfplay",
+				/* kbreed98 cmd0 は INT2F BX=3 DX=2 で再生開始。cmd2 は DX=3 で [249] を落とし止める。 */
+				"kbreed98",
 				NULL
 			};
 			if (DosShellStarts(dosGe_, kGluePlay)

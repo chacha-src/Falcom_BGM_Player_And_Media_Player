@@ -360,6 +360,8 @@ static int sAcPlygonet = 0;
 static int sAcPolynetw = 0;
 /* multi32 の 2 秒ドローン再投入は orunners / harddunk / scross だけ。titlef の 0x05 はループ。 */
 static int sAcMultiShort = 0;
+/* skisuprg: 0x06/07/09/0B は 8 秒、0x0D は 6 秒で止まるので 1 秒ごとに同じ 0x10xx を戻す。0x01 は 2 秒なので 0.25 秒。0 は無効。 */
+static int sAcSkiRepost = 0;
 /* scramble: ワンショットの長さに合わせてラッチを戻す。0 は無効。 */
 static int sAcScrRep = 0;
 /* arknoid2: 短い曲だけ DF80 リングへ同じコマンドを足す。0 は無効。 */
@@ -394,6 +396,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	sAcPlygonet = 0;
 	sAcPolynetw = 0;
 	sAcMultiShort = 0;
+	sAcSkiRepost = 0;
 	if (!hw || !ge || !fs) return 0;
 	hw_ = (CHardAc*)hw;
 	hostRate_ = hw_->SampleRate();
@@ -739,6 +742,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
 			songCmdWord_ = (uint16_t)(0x1000u | (lo & 0xffu));
 			songCmd_ = (uint8_t)(lo & 0xffu);
+			if (_stricmp(ar, "skisuprg") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x01u)
+					sAcSkiRepost = 2;
+				else if (s == 0x06u || s == 0x07u || s == 0x09u
+					|| s == 0x0bu || s == 0x0du)
+					sAcSkiRepost = 1;
+			}
 		}
 	}
 	/* K054539（bucky/moomesa 等）: 曲表エントリは 14 バイト。[0]==0 かつ [1] の bit6 クリアは mute/停止行（bucky prefer 0xC0）。単チップセットだけがその表配置。dual K054539 mystwarr 族は BGM 帯全体が 0xCD-0xEC なので、この強制は全曲を 0x01 に静かに置換した。 */
@@ -941,10 +952,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = 0xd1u;
 	}
 	/* polynetw: 0x9C は入れ直しても 6 秒で平坦になる。最後の曲なので隣は 0x9B だけ。0x83 はそれと違う。 */
-	/* 1=orunners と harddunk。3=scross。titlef は 0 のまま（0x05 はループなので 2 秒タイマーに載せない）。 */
-	if (ge && ge->archive && (_stricmp(ge->archive, "orunners") == 0
-		|| _stricmp(ge->archive, "harddunk") == 0))
+	/* 1=orunners。2=harddunk。3=scross。titlef は 0 のまま（0x05 はループなので 2 秒タイマーに載せない）。 */
+	if (ge && ge->archive && _stricmp(ge->archive, "orunners") == 0)
 		sAcMultiShort = 1;
+	else if (ge && ge->archive && _stricmp(ge->archive, "harddunk") == 0)
+		sAcMultiShort = 2;
 	else if (ge && ge->archive && _stricmp(ge->archive, "scross") == 0)
 		sAcMultiShort = 3;
 	if (ge && ge->archive && _stricmp(ge->archive, "polynetw") == 0) {
@@ -5829,9 +5841,10 @@ void CDriverAc::TryInjectCommand()
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP) {
 		/* 数回再注入 — 最初の MIDI パケットは ISR 準備前に着地し得る。MultiPCM バンク／プログラムは持続 FIFO ドレインが要る。SCSP MIDI FIFO はファームが武装してからしかドレインされない。 */
-		if (cmdIndex_ >= 4) return;
+		if (cmdIndex_ >= (sAcSkiRepost == 2 ? 80 : (sAcSkiRepost ? 24 : 4))) return;
 		/* …ただしバイトが未読の間だけ。各注入は Stop + 曲選択をキューするので、68000 が選択を取ったあとの繰り返しは曲を再開: daytona は落ち着くまでオープニングを 2–3 回再トリガ。SCSP 残りは再試行が要る: シーケンサ武装前に MIDI をドレイン（dynabb/segawski 偶数 id はドレインのみ停止で SILENT）。 */
-		if (cmdIndex_ > 0 && hw_->SegaM1Audio() && !hw_->SegaMidiFifoPending()) {
+		if (cmdIndex_ > 0 && cmdIndex_ < 4
+			&& hw_->SegaM1Audio() && !hw_->SegaMidiFifoPending()) {
 			cmdIndex_ = 4;
 			return;
 		}
@@ -6791,12 +6804,11 @@ void CDriverAc::DeliverIrqs()
 	/* Taito SJ: ラッチ書込が NMI をパルス（AY#4 ポート B bit0 でゲート）。シーケンサは映像ハードの 60Hz IM1 IRQ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_SJ) {
 		if (hw_->PopeyeAy()) {
-			/* MAME tpp2: 垂直帰線が NMI。音はそこの AY 書きで進む。 */
+			/* MAME tpp2: リフレッシュの I bit0 が 1 の垂直帰線だけ NMI。音はそこの AY 書きで進む。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
-				/* 起動の 32KB チェックサム中に NMI を入れると、本体が 1 命令しか進まない。 */
-				if (cpu->r.pc < 0x4bf5 || cpu->r.pc > 0x4bfc) {
+				if (cpu->r.i & 1u) {
 					if (uint8_t* m = hw_->Mem()) {
 						if (m[0x8fd3])
 							m[0x8fd3]--;
@@ -8145,7 +8157,13 @@ int CDriverAc::Ms1Render(int16_t* stereo, int frames)
 		ms1Acc_ %= (int64_t)hostRate_;
 		Ms1RunCycles(cycles);
 		int16_t* p = stereo + (size_t)done * 2;
-		chip->Render(p, n);
+		if (hw_->Msgundam()) {
+			/* 同時に鳴る PCM が X1 の内部ゲイン 256 で 32767 に貼り付く。混ぜる前に下げる。 */
+			memset(p, 0, (size_t)n * 2u * sizeof(int16_t));
+			chip->MixAdd(p, n, 32);
+		} else {
+			chip->Render(p, n);
+		}
 		AcBoostYamaha(chip, p, n);
 		if (gx) {
 			/* K054539×2: 各チップをフルスケール近く。2 本目は MixAdd で約 3/4 にし、tkmmpzdm が 1 本目を埋めずに聞こえるようにする。 */
@@ -8254,10 +8272,12 @@ void CDriverAc::DecoRunCycles(int cycles)
 		return;
 	}
 	if (hw_->DecoBrkthruM6809() || hw_->TechnosDdM6809()
-		|| hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15) {
+		|| hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15
+		|| hw_->DecoCpuKind() == 17) {
 		mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
 		if (!cpu) return;
-		if (hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15) {
+		if (hw_->DecoCpuKind() == 14 || hw_->DecoCpuKind() == 15
+			|| hw_->DecoCpuKind() == 17) {
 			CChip* sn1 = hw_->SoundChip();
 			CChip* sn2 = hw_->Chip2();
 			unsigned long start = cpu->cycles;
@@ -8266,6 +8286,9 @@ void CDriverAc::DecoRunCycles(int cycles)
 			const int kMaxSteps = cycles * 8 + 1024;
 			while (cpu->cycles < target && steps < kMaxSteps) {
 				hw_->NamcoM6809SyncIrqs();
+				/* 初期化前の U=0 で JMP ,U が 0 番地へ落ち、NMI が戻らず起動が止まる。 */
+				if (hw_->DecoCpuKind() == 17 && cpu->pc.w == 0xB0C9u && cpu->U.w == 0)
+					cpu->U.w = 0xAFD6u;
 				const unsigned long before = cpu->cycles;
 				const int rc = mc6809_step(cpu);
 				steps++;
@@ -9059,13 +9082,20 @@ int CDriverAc::Sega68Render(int16_t* stereo, int frames)
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
 		if (n > (int)kChunk) n = (int)kChunk;
-		if (nextCmdAt_ != (uint64_t)~0ull
-			&& hw_->CpuCycles() >= nextCmdAt_ && cmdIndex_ < 4) {
-			TryInjectCommand();
-			if (cmdIndex_ < 4)
-				nextCmdAt_ = hw_->CpuCycles() + (uint64_t)cpuHz_ / 4;
-			else
-				nextCmdAt_ = (uint64_t)~0ull;
+		{
+			const int cap = sAcSkiRepost == 2 ? 80 : (sAcSkiRepost ? 24 : 4);
+			if (nextCmdAt_ != (uint64_t)~0ull
+				&& hw_->CpuCycles() >= nextCmdAt_ && cmdIndex_ < cap) {
+				TryInjectCommand();
+				if (cmdIndex_ < cap) {
+					uint64_t step = (uint64_t)cpuHz_ / 4;
+					if (sAcSkiRepost == 1 && cmdIndex_ >= 4)
+						step = (uint64_t)cpuHz_;
+					nextCmdAt_ = hw_->CpuCycles() + step;
+				} else {
+					nextCmdAt_ = (uint64_t)~0ull;
+				}
+			}
 		}
 		sega68Acc_ += (int64_t)cpuHz_ * (int64_t)n;
 		{
@@ -10265,7 +10295,32 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			   0x0D は E700 を戻しても頭に戻らない。harddunk 0x06 も同じ。orunners の同番号は足さない。 */
 			const int extra = (sAcMultiShort == 3 && (songCmd_ == 0x04u
 				|| songCmd_ == 0x09u));
-			if ((shortSong && sAcMultiShort) || extra) {
+			/* 0x0D と harddunk 0x06、orunners の平坦な 5 曲は PCM が和音を持ったまま
+			   Z80 が E700 を見ない。4 秒ごとに 0000 から起動し直し、RAM 消去のあとで同じコマンドを書く。
+			   orunners の 0x06 は別の曲。0xF4 は和音のまま最後まで鳴るので足さない。 */
+			const int reboot = (sAcMultiShort == 3 && songCmd_ == 0x0du)
+				|| (sAcMultiShort == 2 && songCmd_ == 0x06u)
+				|| (sAcMultiShort == 1 && (songCmd_ == 0x05u || songCmd_ == 0x08u
+					|| songCmd_ == 0xf2u || songCmd_ == 0xe4u || songCmd_ == 0xefu));
+			if (reboot && hostRate_ > 0) {
+				static uint8_t prevRb;
+				static int tickSc, armSc;
+				if (songCmd_ != prevRb) { prevRb = songCmd_; tickSc = 0; armSc = 0; }
+				if (armSc > 0) {
+					if (--armSc == 0) {
+						if (uint8_t* m = hw_->Mem())
+							m[0xe700] = songCmd_;
+					}
+				} else if (++tickSc >= hostRate_ * 4) {
+					tickSc = 0;
+					armSc = hostRate_ / 5;
+					if (armSc < 1) armSc = 1;
+					if (pcm) pcm->Reset();
+					cpu->r.iff1 = 0;
+					cpu->r.iff2 = 0;
+					cpu->r.pc = 0;
+				}
+			} else if ((shortSong && sAcMultiShort) || extra) {
 				if (d > 600) heard = 1;
 				if (heard && ++quiet > hostRate_ * 2) {
 					quiet = 0;

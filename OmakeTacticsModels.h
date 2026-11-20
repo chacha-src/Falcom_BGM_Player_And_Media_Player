@@ -110,6 +110,8 @@ void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int
 void ActorUpdate(Actor& a, float dt);
 float HumanBlinkSeed(int model, int face, int gender, int bust);
 float HumanBlink(float time, float seed);
+// 顔枠の「同じ絵」判定。表情・肌・服色を DrawParams に入れる。体の輪郭や歩行は触らない。
+void PortraitVisFill(const Renderer& r, const Actor& a, float time, DrawParams& d);
 float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int clip);
 // 構えで止める割合。人体のスキル別の型はその型の構えの時刻。
 float ActorWindup(const Actor& a, const Renderer& r, int clip);

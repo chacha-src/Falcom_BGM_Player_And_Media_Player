@@ -60,7 +60,8 @@ static INT32 UNPACK(UINT16 val)
 void SCSPDSP_Init(struct _SCSPDSP *DSP)
 {
 	memset(DSP,0,sizeof(struct _SCSPDSP));
-	DSP->RBL=0x8000;
+	/* Power-on RBL field 0 is 8K words. 0x8000 covers the 68k vectors. */
+	DSP->RBL=8*1024;
 	DSP->Stopped=1;
 }
 
@@ -281,7 +282,8 @@ void SCSPDSP_Step(struct _SCSPDSP *DSP)
 				FRC_REG=(SHIFTED>>11)&0x1FFF;
 		}
 
-		if(MRD || MWT)
+		/* 0xBF0 starts the DSP before the RBP write (doa). */
+		if((MRD || MWT) && DSP->RbSet)
 		//if(0)
 		{
 			ADDR=DSP->MADRS[MASA];

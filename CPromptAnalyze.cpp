@@ -21,11 +21,22 @@ const double kHopSec = 0.05;       // 50ms
 const int    kMaxFrames = 12000;   // ~10分
 const int    kMaxOutChars = 14000; // 4分×200-400コマンド想定
 const int    kMaxPending = 512 * 1024;
+const int    kFftN = 2048;
+const int    kMaxOnset = 60000;    // 10ms。テンポ用
+const int    kHopMonoCap = 16384;
 
 struct AnaState {
 	float rms[kMaxFrames];
-	float bass[kMaxFrames];
-	float tre[kMaxFrames];
+	float bass[kMaxFrames];   // 20–250Hz のエネルギー比
+	float mid[kMaxFrames];    // 250–2000Hz
+	float tre[kMaxFrames];    // 2–16kHz
+	float cen[kMaxFrames];    // スペクトル重心 Hz
+	float flux[kMaxFrames];
+	float flat[kMaxFrames];   // スペクトル平坦度 0..1
+	float wide[kMaxFrames];   // サイド / (ミッド+サイド)
+	float vocal[kMaxFrames];  // 中域が倍音的な度合い
+	double chroma[12];
+	double chromaLo[12];
 	int nFrames = 0;
 	int rate = 44100;
 	int ch = 2;
@@ -57,6 +68,15 @@ static void ReportProgress(int pct, LPCTSTR status)
 		g_anaProgCb(pct, status ? status : _T(""), g_anaProgUser);
 }
 
+static float g_fftRe[kFftN];
+static float g_fftIm[kFftN];
+static float g_prevMag[kFftN / 2];
+static int g_fftRev[kFftN];
+static int g_fftRevN = 0;
+static float g_hopMono[kHopMonoCap];
+static float g_onset[kMaxOnset];
+static int g_onsetN = 0;
+
 static void AnaClear()
 {
 	g_ana.nFrames = 0;
@@ -65,6 +85,66 @@ static void AnaClear()
 	g_ana.rate = 44100;
 	g_ana.ch = 2;
 	g_ana.bits = 16;
+	for (int i = 0; i < 12; ++i) {
+		g_ana.chroma[i] = 0;
+		g_ana.chromaLo[i] = 0;
+	}
+	memset(g_prevMag, 0, sizeof(g_prevMag));
+	g_onsetN = 0;
+}
+
+static float Log2f(float x)
+{
+	return logf(x) * 1.44269504f;
+}
+
+static void EnsureFftRev()
+{
+	if (g_fftRevN == kFftN) return;
+	g_fftRevN = kFftN;
+	int bits = 0;
+	for (int t = kFftN; t > 1; t >>= 1) ++bits;
+	for (int i = 0; i < kFftN; ++i) {
+		int r = 0, x = i;
+		for (int b = 0; b < bits; ++b) {
+			r = (r << 1) | (x & 1);
+			x >>= 1;
+		}
+		g_fftRev[i] = r;
+	}
+}
+
+static void FftForward2048(float* re, float* im)
+{
+	EnsureFftRev();
+	for (int i = 0; i < kFftN; ++i) {
+		const int j = g_fftRev[i];
+		if (j <= i) continue;
+		const float tr = re[i]; re[i] = re[j]; re[j] = tr;
+		const float ti = im[i]; im[i] = im[j]; im[j] = ti;
+	}
+	for (int len = 2; len <= kFftN; len <<= 1) {
+		const float ang = -6.2831853f / (float)len;
+		const float wlenRe = cosf(ang);
+		const float wlenIm = sinf(ang);
+		const int half = len >> 1;
+		for (int i = 0; i < kFftN; i += len) {
+			float wr = 1.f, wi = 0.f;
+			for (int j = 0; j < half; ++j) {
+				const int a = i + j;
+				const int b = a + half;
+				const float tr = wr * re[b] - wi * im[b];
+				const float ti = wr * im[b] + wi * re[b];
+				re[b] = re[a] - tr;
+				im[b] = im[a] - ti;
+				re[a] += tr;
+				im[a] += ti;
+				const float nwr = wr * wlenRe - wi * wlenIm;
+				wi = wr * wlenIm + wi * wlenRe;
+				wr = nwr;
+			}
+		}
+	}
 }
 
 static int BytesPerSample(int bits)
@@ -92,12 +172,19 @@ static float SampleAt(const uint8_t* p, int bits)
 	return (float)(*s) / 32768.f;
 }
 
-static void AnaPushFrame(float rms, float bass, float tre)
+static void AnaPushFrame(float rms, float bass, float mid, float tre, float cen, float flux, float flat, float wide, float vocal)
 {
 	if (g_ana.nFrames >= kMaxFrames) return;
-	g_ana.rms[g_ana.nFrames] = rms;
-	g_ana.bass[g_ana.nFrames] = bass;
-	g_ana.tre[g_ana.nFrames] = tre;
+	const int i = g_ana.nFrames;
+	g_ana.rms[i] = rms;
+	g_ana.bass[i] = bass;
+	g_ana.mid[i] = mid;
+	g_ana.tre[i] = tre;
+	g_ana.cen[i] = cen;
+	g_ana.flux[i] = flux;
+	g_ana.flat[i] = flat;
+	g_ana.wide[i] = wide;
+	g_ana.vocal[i] = vocal;
 	g_ana.nFrames++;
 	const double done = g_ana.nFrames * kHopSec;
 	int pct = 5;
@@ -135,26 +222,113 @@ static void AnaProcessBytes(const uint8_t* data, int nbytes)
 	while (g_ana.pendingN >= hopSamples * frameBytes
 		&& g_ana.nFrames < kMaxFrames) {
 		double sumSq = 0;
-		double sumDiff = 0;
-		double sumHi = 0;
-		float prev = 0;
+		double midE = 0, sideE = 0;
 		const uint8_t* base = g_ana.pending;
+		const int monoN = (hopSamples < kHopMonoCap) ? hopSamples : kHopMonoCap;
+		const int monoStride = (hopSamples + monoN - 1) / monoN;
+		int monoW = 0;
 		for (int i = 0; i < hopSamples; ++i) {
 			const uint8_t* fr = base + i * frameBytes;
-			float mono = 0;
-			for (int c = 0; c < chn; ++c)
-				mono += SampleAt(fr + c * bps, g_ana.bits);
-			mono /= (float)chn;
+			float mono;
+			if (chn >= 2) {
+				const float L = SampleAt(fr, g_ana.bits);
+				const float R = SampleAt(fr + bps, g_ana.bits);
+				const float mid = 0.5f * (L + R);
+				const float side = 0.5f * (L - R);
+				midE += (double)mid * (double)mid;
+				sideE += (double)side * (double)side;
+				mono = mid;
+			} else {
+				mono = SampleAt(fr, g_ana.bits);
+			}
 			sumSq += (double)mono * (double)mono;
-			const float d = mono - prev;
-			sumDiff += (double)d * (double)d;
-			sumHi += (double)fabsf(d);
-			prev = mono;
+			if ((i % monoStride) == 0 && monoW < kHopMonoCap)
+				g_hopMono[monoW++] = mono;
 		}
 		const float rms = (float)sqrt(sumSq / (double)hopSamples);
-		const float bass = (float)sqrt(sumDiff / (double)hopSamples);
-		const float tre = (float)(sumHi / (double)hopSamples);
-		AnaPushFrame(rms, bass, tre);
+		float wide = 0.f;
+		if (midE + sideE > 1e-12)
+			wide = (float)(sideE / (midE + sideE));
+
+		const int subN = 5;
+		if (monoW > 1) {
+			for (int s = 0; s < subN && g_onsetN < kMaxOnset; ++s) {
+				int a = s * monoW / subN;
+				int b = (s + 1) * monoW / subN;
+				if (b <= a) b = a + 1;
+				if (b > monoW) b = monoW;
+				double e = 0;
+				float prev = g_hopMono[a];
+				for (int k = a; k < b; ++k) {
+					const float d = g_hopMono[k] - prev;
+					e += (double)d * (double)d;
+					prev = g_hopMono[k];
+				}
+				g_onset[g_onsetN++] = (float)sqrt(e / (double)(b - a));
+			}
+		}
+
+		for (int i = 0; i < kFftN; ++i) {
+			g_fftIm[i] = 0.f;
+			if (monoW < 8) { g_fftRe[i] = 0.f; continue; }
+			const int si = (monoW >= kFftN) ? (int)((double)i * (monoW - 1) / (double)(kFftN - 1)) : i;
+			float s = (si < monoW) ? g_hopMono[si] : 0.f;
+			const float w = 0.5f * (1.f - cosf(6.2831853f * (float)i / (float)(kFftN - 1)));
+			g_fftRe[i] = s * w;
+		}
+		// N 点が hop 全体に広がるときはビン幅 = 1/hop。短い hop のゼロ詰めは元のサンプルレート。
+		const float binHz = (monoW >= kFftN)
+			? (float)g_ana.rate / (float)hopSamples
+			: (float)g_ana.rate / (float)kFftN;
+		FftForward2048(g_fftRe, g_fftIm);
+
+		double eLo = 0, eMid = 0, eHi = 0, eAll = 0;
+		double cNum = 0, cDen = 0;
+		double logSum = 0, linSum = 0;
+		double fluxAcc = 0;
+		int nBin = 0;
+		const int nMag = kFftN / 2;
+		for (int bin = 1; bin < nMag; ++bin) {
+			const float mag = sqrtf(g_fftRe[bin] * g_fftRe[bin] + g_fftIm[bin] * g_fftIm[bin]);
+			const float hz = (float)bin * binHz;
+			const float dmag = mag - g_prevMag[bin];
+			if (dmag > 0.f) fluxAcc += dmag;
+			g_prevMag[bin] = mag;
+			if (hz < 20.f || hz > 16000.f) continue;
+			eAll += mag;
+			cNum += (double)hz * (double)mag;
+			cDen += mag;
+			linSum += mag;
+			logSum += log((double)mag + 1e-12);
+			++nBin;
+			if (hz < 250.f) eLo += mag;
+			else if (hz < 2000.f) eMid += mag;
+			else eHi += mag;
+			if (hz >= 55.f && hz <= 5000.f && rms > 0.004f) {
+				int pc = (int)floorf(69.f + 12.f * Log2f(hz / 440.f) + 0.5f);
+				pc %= 12;
+				if (pc < 0) pc += 12;
+				const double wgt = (double)mag * (double)rms;
+				g_ana.chroma[pc] += wgt;
+				if (hz < 180.f) g_ana.chromaLo[pc] += wgt;
+			}
+		}
+		float loF = 0, midF = 0, hiF = 0, cen = 0, flat = 1, flux = 0;
+		if (eAll > 1e-8) {
+			loF = (float)(eLo / eAll);
+			midF = (float)(eMid / eAll);
+			hiF = (float)(eHi / eAll);
+		}
+		if (cDen > 1e-8) cen = (float)(cNum / cDen);
+		if (nBin > 8 && linSum > 1e-8) {
+			flat = (float)(exp(logSum / (double)nBin) / (linSum / (double)nBin));
+			if (flat < 0.f) flat = 0.f;
+			if (flat > 1.f) flat = 1.f;
+			flux = (float)(fluxAcc / (double)nBin);
+		}
+		float vocal = midF * (1.f - flat);
+		if (cen < 350.f || cen > 4200.f) vocal *= 0.45f;
+		AnaPushFrame(rms, loF, midF, hiF, cen, flux, flat, wide, vocal);
 		const int drop = hopSamples * frameBytes;
 		const int rest = g_ana.pendingN - drop;
 		if (rest > 0)
@@ -449,6 +623,169 @@ static ModeFxPref ModePrefs(int mode)
 	return p;
 }
 
+struct SongPortrait {
+	float bpm;
+	int keyRoot;
+	int minor;
+	float keyConf;
+	float bright;
+	float bassW;
+	float midW;
+	float airW;
+	float harm;
+	float groove;
+	float width;
+	float dyn;
+	float vocalish;
+	int inferred;
+};
+
+static const wchar_t* kPcName[12] = {
+	L"C", L"C#", L"D", L"D#", L"E", L"F", L"F#", L"G", L"G#", L"A", L"A#", L"B"
+};
+
+static float Corr12(const double* a, const float* b)
+{
+	double ma = 0, mb = 0;
+	for (int i = 0; i < 12; ++i) { ma += a[i]; mb += (double)b[i]; }
+	ma /= 12.0; mb /= 12.0;
+	double num = 0, da = 0, db = 0;
+	for (int i = 0; i < 12; ++i) {
+		const double x = a[i] - ma;
+		const double y = (double)b[i] - mb;
+		num += x * y;
+		da += x * x;
+		db += y * y;
+	}
+	if (da < 1e-12 || db < 1e-12) return 0.f;
+	return (float)(num / sqrt(da * db));
+}
+
+static float OnsetCorr(const float* env, int n, int lag)
+{
+	if (!env || lag < 1 || lag >= n - 4) return 0.f;
+	const int stride = (n > 8000) ? 2 : 1;
+	double mean = 0;
+	int cnt = 0;
+	for (int i = 0; i < n; i += stride) { mean += env[i]; ++cnt; }
+	if (cnt < 1) return 0.f;
+	mean /= (double)cnt;
+	double num = 0, d0 = 0, d1 = 0;
+	for (int i = 0; i + lag < n; i += stride) {
+		const double a = (double)env[i] - mean;
+		const double b = (double)env[i + lag] - mean;
+		num += a * b;
+		d0 += a * a;
+		d1 += b * b;
+	}
+	if (d0 < 1e-12 || d1 < 1e-12) return 0.f;
+	return (float)(num / sqrt(d0 * d1));
+}
+
+static float EstimateBpm()
+{
+	const float* env = nullptr;
+	int n = 0;
+	double step = kHopSec;
+	if (g_onsetN > 400) { env = g_onset; n = g_onsetN; step = 0.01; }
+	else if (g_ana.nFrames > 80) { env = g_ana.flux; n = g_ana.nFrames; step = kHopSec; }
+	else return 0.f;
+	const int lagMin = (int)(60.0 / 180.0 / step + 0.5);
+	const int lagMax = (int)(60.0 / 60.0 / step + 0.5);
+	float best = 0.f;
+	int bestLag = 0;
+	for (int lag = lagMin; lag <= lagMax && lag < n / 2; ++lag) {
+		const float score = OnsetCorr(env, n, lag) + 0.35f * OnsetCorr(env, n, lag * 2);
+		if (score > best) { best = score; bestLag = lag; }
+	}
+	if (bestLag <= 0 || best < 0.12f) return 0.f;
+	return (float)(60.0 / ((double)bestLag * step));
+}
+
+static void ReadKey(int& root, int& minor, float& conf)
+{
+	static const float kMaj[12] = { 6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f, 2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f };
+	static const float kMin[12] = { 6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f, 2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f };
+	double mix[12];
+	double sum = 0;
+	for (int i = 0; i < 12; ++i) {
+		mix[i] = g_ana.chroma[i] + 0.45 * g_ana.chromaLo[i];
+		sum += mix[i];
+	}
+	root = 0;
+	minor = 0;
+	conf = 0.f;
+	if (sum < 1e-6) return;
+	float best = -2.f, second = -2.f;
+	for (int r = 0; r < 12; ++r) {
+		double rot[12];
+		for (int i = 0; i < 12; ++i) rot[i] = mix[(i + r) % 12];
+		const float cMaj = Corr12(rot, kMaj);
+		const float cMin = Corr12(rot, kMin);
+		const float c = (cMaj >= cMin) ? cMaj : cMin;
+		const int isMin = (cMin > cMaj) ? 1 : 0;
+		if (c > best) { second = best; best = c; root = r; minor = isMin; }
+		else if (c > second) second = c;
+	}
+	conf = best - second;
+	if (conf < 0.f) conf = 0.f;
+	if (best < 0.12f) conf = 0.f;
+}
+
+static int InferMode(const SongPortrait& s)
+{
+	if (s.bpm >= 118.f && s.bassW >= 0.26f && s.groove >= 2.2f) return MP_ANA_CLUB;
+	if (s.bpm >= 120.f && s.airW >= 0.16f && s.groove >= 2.4f && s.harm < 0.55f) return MP_ANA_ELECTRO;
+	if (s.vocalish >= 0.22f && s.midW >= 0.28f && s.groove < 3.5f) return MP_ANA_VOCAL;
+	if (s.harm >= 0.62f && s.dyn >= 2.4f && s.groove < 1.8f)
+		return s.minor ? MP_ANA_CINEMATIC : MP_ANA_ORCHESTRAL;
+	if (s.groove < 1.15f && s.bright < 1700.f && s.harm >= 0.5f)
+		return s.minor ? MP_ANA_AMBIENT : MP_ANA_CHILL;
+	if (s.harm >= 0.58f && s.bassW < 0.22f && s.bright < 2800.f && s.groove < 2.2f) return MP_ANA_ACOUSTIC;
+	if (!s.minor && s.bpm >= 96.f && s.bpm <= 128.f && s.bright > 1800.f) return MP_ANA_SOFTPOP;
+	if (s.minor && s.dyn >= 2.0f) return MP_ANA_SERIOUS;
+	if (s.bpm >= 132.f && s.groove >= 2.8f) return MP_ANA_INTENSE;
+	return MP_ANA_BALANCED;
+}
+
+static SongPortrait ReadSong(int n, float med, float p90)
+{
+	SongPortrait s = {};
+	s.bpm = EstimateBpm();
+	ReadKey(s.keyRoot, s.minor, s.keyConf);
+	double b = 0, md = 0, a = 0, c = 0, fl = 0, w = 0, v = 0;
+	for (int i = 0; i < n; ++i) {
+		b += g_ana.bass[i];
+		md += g_ana.mid[i];
+		a += g_ana.tre[i];
+		c += g_ana.cen[i];
+		fl += g_ana.flat[i];
+		w += g_ana.wide[i];
+		v += g_ana.vocal[i];
+	}
+	const double inv = (n > 0) ? (1.0 / (double)n) : 0;
+	s.bassW = (float)(b * inv);
+	s.midW = (float)(md * inv);
+	s.airW = (float)(a * inv);
+	s.bright = (float)(c * inv);
+	s.harm = 1.f - (float)(fl * inv);
+	if (s.harm < 0.f) s.harm = 0.f;
+	if (s.harm > 1.f) s.harm = 1.f;
+	s.width = (float)(w * inv);
+	s.vocalish = (float)(v * inv);
+	s.dyn = (med > 1e-4f) ? (p90 / med) : 1.f;
+	const float thr = Percentile(g_ana.flux, n, 0.75f);
+	int peaks = 0;
+	for (int i = 1; i + 1 < n; ++i) {
+		if (g_ana.flux[i] > thr && g_ana.flux[i] >= g_ana.flux[i - 1] && g_ana.flux[i] >= g_ana.flux[i + 1])
+			++peaks;
+	}
+	const double sec = (double)n * kHopSec;
+	s.groove = (sec > 0.5) ? (float)((double)peaks / sec) : 0.f;
+	s.inferred = InferMode(s);
+	return s;
+}
+
 static CString BuildFromPatterns(int mode)
 {
 	CString out;
@@ -461,8 +798,12 @@ static CString BuildFromPatterns(int mode)
 	const float p90 = Percentile(g_ana.rms, n, 0.90f);
 	const float medBass = Percentile(g_ana.bass, n, 0.5f);
 	const float medTre = Percentile(g_ana.tre, n, 0.5f);
+	const float medFlux = Percentile(g_ana.flux, n, 0.5f);
+	const SongPortrait song = ReadSong(n, med, p90);
 	g_dsBasePct = CurrentDsPercent();
-	const ModeFxPref pref = ModePrefs(mode);
+	ModeFxPref pref = ModePrefs(mode);
+	if (mode == MP_ANA_BALANCED && song.inferred != MP_ANA_BALANCED)
+		pref = ModePrefs(song.inferred);
 	const BOOL heal = IsHealMode(mode);
 
 	// RMS 自己相関風の簡易周期推定 (30〜90秒帯)
@@ -493,17 +834,30 @@ static CString BuildFromPatterns(int mode)
 			if (bestCorr > 0.18 && bestLag > 0)
 				breathPeriod = bestLag * kHopSec;
 		}
-		if (heal && breathPeriod < 45.0)
+		if (song.bpm >= 60.f && song.bpm <= 190.f) {
+			const double bar = 60.0 / (double)song.bpm * 4.0;
+			double per = bar * (heal ? 8.0 : 4.0);
+			if (per < 8.0) per *= 2.0;
+			if (per > 36.0) per = bar * ((bar * 4.0 <= 36.0) ? 4.0 : 2.0);
+			if (per < 6.0) per = 8.0;
+			if (per > 36.0) per = 32.0;
+			breathPeriod = per;
+		}
+		else if (heal && breathPeriod < 45.0)
 			breathPeriod = 60.0;
 		else if (!heal && breathPeriod > 0.0 && breathPeriod < 30.0)
 			breathPeriod = 0.0;
 	}
-	const BOOL hasPct = (breathPeriod >= 30.0);
+	const BOOL hasPct = (breathPeriod >= 6.0);
 
 	{
+		const wchar_t* key = (song.keyConf >= 0.04f && song.keyRoot >= 0 && song.keyRoot < 12) ? kPcName[song.keyRoot] : L"?";
+		const wchar_t* qual = (song.keyConf >= 0.04f && song.minor) ? L"m" : L"";
 		CString note;
-		note.Format(L"# auto-analyze mode=%d %.1fs frames=%d dsBase=%dpct dense fxAB pct=%s\r\n",
-			mode, dur, n, g_dsBasePct, hasPct ? L"1" : L"0");
+		note.Format(L"# 読取 bpm=%.0f キー=%s%s 信頼=%.2f 中心=%.0fHz 低=%.0f%% 中=%.0f%% 高=%.0f%% 倍音=%.0f 広=%.0f 拍=%.1f/s mode=%d\r\n",
+			song.bpm, key, qual, song.keyConf, song.bright,
+			song.bassW * 100.f, song.midW * 100.f, song.airW * 100.f,
+			song.harm * 100.f, song.width * 100.f, song.groove, mode);
 		out = note;
 	}
 
@@ -536,56 +890,55 @@ static CString BuildFromPatterns(int mode)
 	// セクション演出 + 環境
 	{
 		const int q1 = n / 4, mid = n / 2, q3 = n * 3 / 4;
-		int midEnd = mid + hop;
-		if (midEnd > n - 1) midEnd = n - 1;
-		const float loudMid = MeanRange(g_ana.rms, n, mid, midEnd);
-		const float loudQ1 = MeanRange(g_ana.rms, n, q1, q1 + hop);
-		if (!heal && loudMid > p75)
-			AppendCmd(out, CmdAt(L"br", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
-		else if (loudQ1 < med * 0.85f || heal)
-			AppendCmd(out, CmdAt(L"sb", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
-		if (!heal && (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB
-			|| (p75 > med * 1.2f && med > 0.03f)))
-			AppendCmd(out, CmdAt(L"fa", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
-		else if (heal || mode == MP_ANA_CHILL || mode == MP_ANA_SERIOUS || mode == MP_ANA_SLEEP
-			|| (med < 0.05f && p90 < med * 1.4f))
-			AppendCmd(out, CmdAt(L"sl", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
-
-		// 追加演出プリセット (モード別)
-		{
-			const double tA = (n / 6) * kHopSec;
-			const double tB = (n * 2 / 3) * kHopSec;
-			const double tC = (n * 5 / 6) * kHopSec;
-			if (heal) {
-				AppendCmd(out, CmdAt(L"gn", tA, tA, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"wm", tB, tB, 0, 0, FALSE));
-			}
-			else if (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB) {
-				AppendCmd(out, CmdAt(L"pw", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"wi", tB, tB, 0, 0, FALSE));
-			}
-			else if (mode == MP_ANA_AMBIENT || mode == MP_ANA_CINEMATIC || mode == MP_ANA_ORCHESTRAL) {
-				AppendCmd(out, CmdAt(L"dr", tA, tA, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"wm", tB, tB, 0, 0, FALSE));
-			}
-			else if (mode == MP_ANA_VOCAL || mode == MP_ANA_SOFTPOP || mode == MP_ANA_ROMANTIC) {
-				AppendCmd(out, CmdAt(L"nr", tA, tA, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"wm", tC, tC, 0, 0, FALSE));
-			}
-			else if (mode == MP_ANA_RETRO || mode == MP_ANA_COMEDY) {
-				AppendCmd(out, CmdAt(L"cd", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"pw", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
-			}
-			else if (mode == MP_ANA_ACOUSTIC || mode == MP_ANA_CHILL) {
-				AppendCmd(out, CmdAt(L"wm", tA, tA, 0, 0, FALSE));
-				AppendCmd(out, CmdAt(L"dp", tB, tB, 0, 0, FALSE));
-			}
-			else {
-				AppendCmd(out, CmdAt(L"wm", tA, tA, 0, 0, FALSE));
-				if (loudMid > p75)
-					AppendCmd(out, CmdAt(L"wi", tB, tB, 0, 0, FALSE));
-			}
+		LPCTSTR loudP = L"br";
+		LPCTSTR quietP = L"gn";
+		if (heal) {
+			loudP = L"wm";
+			quietP = (song.bpm > 0.f && song.bpm < 92.f) ? L"sl" : L"gn";
 		}
+		else if (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB) {
+			loudP = (song.bpm >= 100.f || song.bpm <= 0.f) ? L"fa" : L"pw";
+			quietP = L"wi";
+		}
+		else if (mode == MP_ANA_COMEDY || mode == MP_ANA_RETRO) {
+			loudP = L"pw";
+			quietP = L"cd";
+		}
+		else if (mode == MP_ANA_VOCAL || mode == MP_ANA_SOFTPOP || mode == MP_ANA_ROMANTIC) {
+			loudP = L"br";
+			quietP = L"nr";
+		}
+		else if (mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_CINEMATIC || mode == MP_ANA_AMBIENT) {
+			loudP = song.minor ? L"dr" : L"wm";
+			quietP = L"dp";
+		}
+		else {
+			if (song.bpm >= 124.f && song.groove >= 2.2f) loudP = L"fa";
+			else if (song.bassW >= 0.32f && song.bpm >= 108.f) loudP = L"pw";
+			else if (song.minor && song.dyn >= 2.3f) loudP = L"dr";
+			else if (song.harm >= 0.60f && song.bright < 2000.f) loudP = L"wm";
+			if (song.minor && song.bright < 1700.f) quietP = L"sb";
+			else if (song.bpm > 0.f && song.bpm < 92.f) quietP = L"sl";
+			else if (song.harm >= 0.58f && song.airW < 0.14f) quietP = L"dp";
+			else if (song.width < 0.16f) quietP = L"nr";
+		}
+		int loudI = mid, quietI = q1;
+		{
+			const int win = (hop > 8) ? hop : 8;
+			int from = n / 12;
+			int to = n - n / 12;
+			if (to < from + win) { from = 0; to = n - 1; }
+			float loudV = -1.f, quietV = 1e9f;
+			for (int s = from; s + win < to; s += win) {
+				const float v = MeanRange(g_ana.rms, n, s, s + win);
+				if (v > loudV) { loudV = v; loudI = s; }
+				if (v < quietV) { quietV = v; quietI = s; }
+			}
+			if (abs(loudI - quietI) < win * 2)
+				quietI = (loudI > n / 2) ? n / 5 : (n * 4 / 5);
+		}
+		AppendCmd(out, CmdAt(quietP, quietI * kHopSec, quietI * kHopSec, 0, 0, FALSE));
+		AppendCmd(out, CmdAt(loudP, loudI * kHopSec, loudI * kHopSec, 0, 0, FALSE));
 
 		if (pref.envId > 0 && pref.envAmt > 0) {
 			// 複数区間で環境を動かす (導入→中盤ピーク→終盤フェード)
@@ -711,7 +1064,11 @@ static CString BuildFromPatterns(int mode)
 		const BOOL quiet = (m < med * 0.7f);
 		const BOOL loud = (m > p75);
 		const BOOL peak = (m > p90 && p90 > 0.01f);
-		const int wave = (seg % 8) - 4;
+		float env = 0.f;
+		if (p90 > med + 1e-5f) env = (m - med) / (p90 - med);
+		if (env > 1.4f) env = 1.4f;
+		if (env < -1.f) env = -1.f;
+		const int wave = (int)(env * (heal ? 2.f : 4.f));
 
 		int wantN = 100 + pref.clarity + wave * (heal ? 1 : 3);
 		int wantK = 100 + pref.balHi - wave;
@@ -765,25 +1122,63 @@ static CString BuildFromPatterns(int mode)
 			}
 		}
 
-		if (b > medBass * 1.12f) {
-			wantA = ModeBias(mode, heal ? 110 : 122, 0, 4, 0, 10, 0, 8, 6, 10, 4);
-			wantBb = ClampI(wantBb + (heal ? 4 : 12), 100, 140);
-			wantEe = ClampI(wantEe + (heal ? 3 : 10), 100, 135);
-			wantG = ClampI(wantG + (heal ? 3 : 8), 100, 130);
-			wantK = ClampI(wantK - (heal ? 3 : 8), 78, 120);
+		if (b > medBass * 1.08f) {
+			const int lift = (b > 0.42f || song.bassW > 0.38f) ? (heal ? 0 : -3) : (heal ? 5 : 8);
+			wantA = ClampI(100 + lift, 92, heal ? 112 : 118);
+			wantBb = ClampI(100 + lift, 94, 124);
+			wantEe = ClampI(100 + (lift * 2 / 3), 96, 122);
+			wantG = ClampI(100 + (lift / 2), 96, 120);
+			if (lift > 0)
+				wantK = ClampI(wantK - (heal ? 2 : 4), 82, 120);
+		} else if (b + 0.06f < medBass) {
+			wantA = ClampI(96, 92, 104);
+			wantBb = ClampI(97, 94, 104);
 		}
-		if (tr > medTre * 1.12f) {
-			wantO = ModeBias(mode, heal ? 108 : 124, 4, 0, 4, 8, 0, 10, 4, 4, 6);
-			wantIi = ClampI(wantIi + (heal ? 4 : 10), 100, 140);
-			wantL = ClampI(wantL + (heal ? 2 : 12), 100, 145);
-			wantJj = ClampI(wantJj + (heal ? 3 : 10), 100, 140);
-			wantKk = ClampI(wantKk + (heal ? 2 : 8), 100, 135);
-			wantMm = ClampI(wantMm + (heal ? 0 : 8), 100, 135);
-			wantHh = ClampI(wantHh + (heal ? 2 : 8), 100, 132);
-			wantFband = ClampI(wantFband + (heal ? 2 : 6), 100, 128);
-			wantN = ClampI(wantN + (heal ? 2 : 10), 85, 150);
-			wantS = ClampI(wantS + (heal ? 2 : 12), 90, 160);
-			wantK = ClampI(wantK + (heal ? 2 : 6), 85, 130);
+		if (tr > medTre * 1.08f) {
+			const float fla = MeanRange(g_ana.flat, n, i, i1);
+			const BOOL harsh = (tr > 0.28f && fla > 0.42f);
+			if (harsh) {
+				wantO = ClampI(heal ? 98 : 94, 90, 104);
+				wantL = ClampI(96, 92, 108);
+				wantMm = ClampI(96, 92, 108);
+				wantN = ClampI(wantN + (heal ? 2 : 6), 90, 140);
+			} else {
+				const int lift = heal ? 4 : 7;
+				wantO = ClampI(100 + lift / 2, 96, heal ? 112 : 116);
+				wantKk = ClampI(100 + lift, 96, 128);
+				wantL = ClampI(100 + lift, 96, 130);
+				wantIi = ClampI(100 + lift / 2, 96, 124);
+				wantN = ClampI(wantN + (heal ? 1 : 4), 90, 140);
+			}
+		} else if (tr + 0.05f < medTre) {
+			wantO = ClampI(97, 92, 104);
+			wantMm = ClampI(97, 92, 106);
+			wantG = ClampI(wantG + (heal ? 2 : 4), 96, 124);
+			wantHh = ClampI(wantHh + (heal ? 2 : 3), 96, 122);
+		}
+		{
+			const float flx = MeanRange(g_ana.flux, n, i, i1);
+			const float voc = MeanRange(g_ana.vocal, n, i, i1);
+			const float wid = MeanRange(g_ana.wide, n, i, i1);
+			const float cen = MeanRange(g_ana.cen, n, i, i1);
+			if (voc > song.vocalish + 0.04f && flx < medFlux * 1.35f) {
+				wantIi = ClampI(wantIi + (heal ? 3 : 6), 98, heal ? 120 : 132);
+				wantJj = ClampI(wantJj + (heal ? 2 : 5), 98, heal ? 118 : 130);
+				wantN = ClampI(wantN + (heal ? 2 : 5), 92, 142);
+				if (wantC > 100) wantC = FxA(ClampI(wantC - 100, 8, 28));
+			}
+			if (!heal && flx < medFlux * 0.72f && song.harm > 0.5f && wantR > 0 && wantR <= 100)
+				wantR = FxA(ClampI(wantR + 8, 12, 70));
+			if (!heal && song.bpm >= 112.f && flx > medFlux * 1.45f && wantR > 0 && wantR <= 100)
+				wantR = FxA(ClampI(wantR, 8, 32));
+			if (wid > 0.34f)
+				wantS = ClampI(wantS - 6, heal ? 90 : 80, heal ? 118 : 130);
+			else if (wid < 0.12f && loud)
+				wantS = ClampI(wantS + (heal ? 3 : 6), 90, heal ? 124 : 150);
+			if (cen + 500.f < song.bright) {
+				wantO = ClampI(wantO - 2, 92, 120);
+				wantHh = ClampI(wantHh + 2, 96, 124);
+			}
 		}
 
 		if (loud && seg > 1) {
@@ -865,6 +1260,26 @@ static CString BuildFromPatterns(int mode)
 		wantJj = ClampI(wantJj, 95, 142);
 		wantKk = ClampI(wantKk, 95, 138);
 		wantMm = ClampI(wantMm, 95, 138);
+		if (song.bpm >= 60.f) {
+			int songT = 100;
+			if (loud) songT = (song.bpm >= 138.f) ? 101 : (song.bpm >= 100.f ? 104 : 102);
+			else if (quiet) songT = (song.bpm <= 84.f) ? 99 : (heal ? 94 : 97);
+			wantT = (songT * 7 + wantT * 3) / 10;
+		}
+		{
+			int songP = 100;
+			if (song.keyConf >= 0.04f && song.minor && quiet) songP = heal ? 97 : 98;
+			else if (song.keyConf >= 0.04f && !song.minor && peak && !heal) songP = 101;
+			wantP = (songP * 8 + wantP * 2) / 10;
+		}
+		{
+			float rel = 0.f;
+			if (p90 > med + 1e-5f) rel = (m - med) / (p90 - med);
+			if (rel > 1.4f) rel = 1.4f;
+			if (rel < -1.f) rel = -1.f;
+			const int songD = 100 + (int)(rel * (heal ? 6.f : 9.f));
+			wantD = (songD * 6 + wantD * 4) / 10;
+		}
 		wantT = ClampI(wantT, 85, heal ? 102 : 122);
 		wantP = ClampI(wantP, 88, heal ? 108 : 118);
 		wantD = ClampI(wantD, 70, 120);
@@ -940,9 +1355,14 @@ static CString BuildFromPatterns(int mode)
 			const float a0 = MeanRange(g_ana.rms, n, i, i + hop / 3);
 			const float a1 = MeanRange(g_ana.rms, n, i + hop * 2 / 3, i1);
 			if (a0 > 0.008f && a1 > a0 * 1.3f && a1 > med) {
-				AppendCmd(out, CmdAt(L"t", t0, t1, 100, ModeBias(mode, 112, 4, -4, 0, 14, -6, 12, 0, 4, 6), TRUE));
-				AppendCmd(out, CmdAt(L"N", t0, t1, 100, ModeBias(mode, 122, 4, 0, 4, 12, 0, 10, 4, 4, 6), TRUE));
-				AppendCmd(out, CmdAt(L"S", t0, t1, 100, ModeBias(mode, 125, 4, 2, 6, 10, 2, 12, 8, 4, 8), TRUE));
+				int liftT = 104;
+				if (song.bpm >= 140.f) liftT = 101;
+				else if (song.bpm >= 110.f) liftT = 103;
+				else if (song.bpm > 0.f && song.bpm < 90.f) liftT = 102;
+				AppendCmd(out, CmdAt(L"t", t0, t1, 100, liftT, TRUE));
+				AppendCmd(out, CmdAt(L"N", t0, t1, 100, ClampI(106 + (song.vocalish > 0.2f ? 4 : 0), 100, 118), TRUE));
+				const int liftS = (song.width > 0.34f) ? 104 : 112;
+				AppendCmd(out, CmdAt(L"S", t0, t1, 100, liftS, TRUE));
 			}
 		}
 	}
@@ -1098,7 +1518,7 @@ BOOL MpPromptAnalyzeSelected(CString& outText, int mode, CString* errMsg)
 		return FALSE;
 	}
 
-	ReportProgress(96, LL14(L"コマンド生成中…", L"Generating commands...", L"Generation...", L"Generazione...", L"Generando...", L"명령 생성…", L"生成命令…", L"Generating...", L"Генерация...", L"Erzeuge...", L"Gerando...", L"Genereren...", L"Generowanie...", L"Uretiliyor..."));
+	ReportProgress(96, LL14(L"周波数と曲調からコマンドを作っています…", L"Building commands from spectrum and key...", L"Commandes depuis spectre et tonalite...", L"Comandi da spettro e tonalita...", L"Comandos desde espectro y tonalidad...", L"스펙트럼과 조성으로 명령을 만드는 중…", L"正在根据频谱和调性生成命令…", L"أوامر من الطيف والمقام…", L"Команды по спектру и тональности…", L"Befehle aus Spektrum und Tonart...", L"Comandos a partir do espectro e do tom...", L"Opdrachten uit spectrum en toonsoort...", L"Komendy ze spektrum i tonacji...", L"Spektrum ve tondan komutlar..."));
 	outText = BuildFromPatterns(mode);
 	AnaClear();
 	g_anaExpectSec = 0;

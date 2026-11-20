@@ -4,42 +4,13 @@
 #include "resource.h"
 #include "OmakeTacticsGame.h"
 
-class COmakeTacticsDlg;
-
-class CTacView : public CWnd
+class COmakeTacticsDlg : public CFrameWnd
 {
+	DECLARE_DYNAMIC(COmakeTacticsDlg)
 public:
-	COmakeTacticsDlg* m_owner = nullptr;
-	BOOL CreateView(CWnd* parent, const CRect& rc);
-	void ReleaseButtons();
-protected:
-	afx_msg void OnMouseMove(UINT nFlags, CPoint pt);
-	afx_msg void OnLButtonDown(UINT nFlags, CPoint pt);
-	afx_msg void OnLButtonUp(UINT nFlags, CPoint pt);
-	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint pt);
-	afx_msg void OnRButtonDown(UINT nFlags, CPoint pt);
-	afx_msg void OnRButtonUp(UINT nFlags, CPoint pt);
-	afx_msg void OnMButtonDown(UINT nFlags, CPoint pt);
-	afx_msg void OnMButtonUp(UINT nFlags, CPoint pt);
-	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
-	afx_msg void OnCaptureChanged(CWnd* pWnd);
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
-	afx_msg UINT OnGetDlgCode();
-	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
-	DECLARE_MESSAGE_MAP()
-	void Down(int btn, CPoint pt);
-	void Up(int btn, CPoint pt);
-	int m_btnMask = 0;
-};
-
-class COmakeTacticsDlg : public CCustomBlurDialogBase
-{
-public:
-	enum { IDD = IDD_OMAKE_TACTICS };
-	explicit COmakeTacticsDlg(CWnd* pParent = nullptr);
+	COmakeTacticsDlg();
 	virtual ~COmakeTacticsDlg();
+	BOOL CreateFrame();
 
 	void RequestDestroyWindow();
 	BOOL HandleKeyMessage(MSG* pMsg);
@@ -49,11 +20,24 @@ public:
 	BOOL GameReady() const { return m_gameOk; }
 
 protected:
-	virtual BOOL OnInitDialog();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual void PostNcDestroy();
-	virtual void OnOK() {}
-	virtual void OnCancel() { RequestDestroyWindow(); }
+	afx_msg int OnCreate(LPCREATESTRUCT cs);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint pt);
+	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint pt);
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint pt);
+	afx_msg void OnRButtonDown(UINT nFlags, CPoint pt);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint pt);
+	afx_msg void OnMButtonDown(UINT nFlags, CPoint pt);
+	afx_msg void OnMButtonUp(UINT nFlags, CPoint pt);
+	afx_msg void OnCaptureChanged(CWnd* pWnd);
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnPaint();
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
+	void Down(int btn, CPoint pt);
+	void Up(int btn, CPoint pt);
+	void ReleaseButtons();
+	int m_btnMask = 0;
 	afx_msg void OnTimer(UINT_PTR id);
 	afx_msg LRESULT OnTacPace(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -96,7 +80,6 @@ protected:
 	void HideImeEdit();
 	static DWORD WINAPI PaceThread(LPVOID param);
 
-	CTacView m_view;
 	otac::Game m_game;
 	BOOL m_gameOk = FALSE;
 	BOOL m_destroying = FALSE;

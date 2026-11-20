@@ -415,6 +415,9 @@ private:
 	float m_msPre, m_msTail, m_msScene, m_msBook;
 	float m_split[7];
 	int m_fpsN, m_fpsI;
+	int m_fpsBoot; // 3→1 は起動直後の全開実測。0 は未開始、-1 はリングを平均で埋めた後。
+	float m_gpuSpan[32];
+	int m_gpuN, m_gpuI;
 	LARGE_INTEGER m_fpsAt;
 	LARGE_INTEGER m_afterPr;
 	LARGE_INTEGER m_vsyncDue;

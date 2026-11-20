@@ -7,16 +7,20 @@
 #include "oggDlg.h"
 #include "UpdateCheck.h"
 #include <imm.h>
+#include <dwmapi.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #pragma comment(lib, "dinput8.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "imm32.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 using namespace otac;
 namespace otac { void TacShopSerReset(); }
 
 extern COggDlg* og;
+
+void TacHookSysCommands(HWND hwnd);
 
 static COmakeTacticsDlg* g_tac = nullptr;
 #ifndef WM_TAC_PACE
@@ -204,110 +208,14 @@ static void TacReadPad(HWND hw, PadState& out)
 }
 
 // ---------------------------------------------------------------------------
-// CTacView
-// ---------------------------------------------------------------------------
-BEGIN_MESSAGE_MAP(CTacView, CWnd)
-	ON_WM_MOUSEMOVE()
-	ON_WM_LBUTTONDOWN()
-	ON_WM_LBUTTONUP()
-	ON_WM_LBUTTONDBLCLK()
-	ON_WM_RBUTTONDOWN()
-	ON_WM_RBUTTONUP()
-	ON_WM_MBUTTONDOWN()
-	ON_WM_MBUTTONUP()
-	ON_WM_MOUSEWHEEL()
-	ON_WM_CAPTURECHANGED()
-	ON_WM_ERASEBKGND()
-	ON_WM_PAINT()
-	ON_WM_SETCURSOR()
-	ON_WM_GETDLGCODE()
-	ON_WM_MOUSEACTIVATE()
-END_MESSAGE_MAP()
-
-BOOL CTacView::CreateView(CWnd* parent, const CRect& rc)
-{
-	const CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(NULL, IDC_ARROW), NULL, NULL);
-	CRect scr = rc;
-	if (parent) parent->ClientToScreen(&scr);
-	// 転送用ビットマップを残す。直出しにすると Present はすぐ返るが、次の描画が
-	// バッファの解放待ちで 10ms と 30ms を行き来する。
-	return CreateEx(WS_EX_NOPARENTNOTIFY, cls, L"",
-		WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-		scr, parent, 0);
-}
-
-void CTacView::Down(int btn, CPoint pt)
-{
-	if (!m_btnMask) SetCapture();
-	m_btnMask |= 1 << btn;
-	if (m_owner && m_owner->GameReady()) m_owner->GameRef().OnMouseDown(btn, pt.x, pt.y);
-}
-void CTacView::Up(int btn, CPoint pt)
-{
-	const int had = m_btnMask & (1 << btn);
-	m_btnMask &= ~(1 << btn);
-	if (!m_btnMask && GetCapture() == this) ReleaseCapture();
-	if (had && m_owner && m_owner->GameReady()) m_owner->GameRef().OnMouseUp(btn, pt.x, pt.y);
-	if (had && m_owner && m_owner->GameReady() && m_owner->GameRef().WantsTextInput())
-		m_owner->EnsureImeFocus();
-}
-void CTacView::ReleaseButtons()
-{
-	m_btnMask = 0;
-	if (GetCapture() == this) ReleaseCapture();
-}
-void CTacView::OnMouseMove(UINT, CPoint pt)
-{
-	if (m_owner && m_owner->GameReady()) m_owner->GameRef().OnMouseMove(pt.x, pt.y);
-}
-void CTacView::OnLButtonDown(UINT, CPoint pt) { Down(0, pt); }
-void CTacView::OnLButtonUp(UINT, CPoint pt) { Up(0, pt); }
-void CTacView::OnLButtonDblClk(UINT, CPoint pt) { Down(0, pt); }
-void CTacView::OnRButtonDown(UINT, CPoint pt) { Down(1, pt); }
-void CTacView::OnRButtonUp(UINT, CPoint pt) { Up(1, pt); }
-void CTacView::OnMButtonDown(UINT, CPoint pt) { Down(2, pt); }
-void CTacView::OnMButtonUp(UINT, CPoint pt) { Up(2, pt); }
-BOOL CTacView::OnMouseWheel(UINT, short zDelta, CPoint)
-{
-	if (m_owner && m_owner->GameReady()) m_owner->GameRef().OnWheel(zDelta);
-	return TRUE;
-}
-void CTacView::OnCaptureChanged(CWnd* pWnd)
-{
-	if (pWnd != this && m_btnMask && m_owner && m_owner->GameReady()) {
-		CPoint pt;
-		::GetCursorPos(&pt);
-		ScreenToClient(&pt);
-		for (int b = 0; b < 3; b++)
-			if (m_btnMask & (1 << b)) m_owner->GameRef().OnMouseUp(b, pt.x, pt.y);
-	}
-	m_btnMask = 0;
-	CWnd::OnCaptureChanged(pWnd);
-}
-BOOL CTacView::OnEraseBkgnd(CDC*) { return TRUE; }
-void CTacView::OnPaint()
-{
-	CPaintDC dc(this);
-	if (m_owner && m_owner->GameReady()) return;
-	CRect rc;
-	GetClientRect(&rc);
-	dc.FillSolidRect(&rc, RGB(16, 18, 28));
-	dc.SetBkMode(TRANSPARENT);
-	dc.SetTextColor(RGB(230, 230, 240));
-	dc.DrawText(TT(TX_MISC_DXFAIL), &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-BOOL CTacView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
-{
-	if (nHitTest == HTCLIENT) { ::SetCursor(::LoadCursor(NULL, IDC_ARROW)); return TRUE; }
-	return CWnd::OnSetCursor(pWnd, nHitTest, message);
-}
-UINT CTacView::OnGetDlgCode() { return DLGC_WANTALLKEYS | DLGC_WANTARROWS | DLGC_WANTCHARS | DLGC_WANTTAB; }
-int CTacView::OnMouseActivate(CWnd*, UINT, UINT) { return MA_NOACTIVATE; }
-
-// ---------------------------------------------------------------------------
 // COmakeTacticsDlg
+// ダイアログ＋所有ポップアップだと DWM が合成する。非アクティブから戻したときだけ直出しになり、
+// 最小化でまた合成に落ちる。フレーム自身にスワップチェインを張る。
 // ---------------------------------------------------------------------------
-BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
+IMPLEMENT_DYNAMIC(COmakeTacticsDlg, CFrameWnd)
+
+BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CFrameWnd)
+	ON_WM_CREATE()
 	ON_WM_TIMER()
 	ON_MESSAGE(WM_TAC_PACE, OnTacPace)
 	ON_MESSAGE(WM_TAC_DESTROY, OnTacDestroy)
@@ -316,7 +224,18 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_WM_ENTERSIZEMOVE()
 	ON_WM_EXITSIZEMOVE()
 	ON_WM_NCHITTEST()
+	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_WM_LBUTTONDBLCLK()
+	ON_WM_RBUTTONDOWN()
+	ON_WM_RBUTTONUP()
+	ON_WM_MBUTTONDOWN()
+	ON_WM_MBUTTONUP()
+	ON_WM_CAPTURECHANGED()
+	ON_WM_ERASEBKGND()
+	ON_WM_PAINT()
+	ON_WM_SETCURSOR()
 	ON_WM_SHOWWINDOW()
 	ON_WM_DESTROY()
 	ON_WM_CLOSE()
@@ -332,10 +251,8 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_EN_SETFOCUS(IDC_TAC_IME, OnImeSetFocus)
 END_MESSAGE_MAP()
 
-COmakeTacticsDlg::COmakeTacticsDlg(CWnd* pParent)
-	: CCustomBlurDialogBase(IDD, pParent)
+COmakeTacticsDlg::COmakeTacticsDlg()
 {
-	m_view.m_owner = this;
 }
 
 COmakeTacticsDlg::~COmakeTacticsDlg()
@@ -348,44 +265,56 @@ static const wchar_t* TacCaption()
 	return TT(TX_TITLE);
 }
 
-BOOL COmakeTacticsDlg::OnInitDialog()
+BOOL COmakeTacticsDlg::CreateFrame()
 {
-	CCustomBlurDialogBase::OnInitDialog();
-	SetWindowText(TacCaption());
-
 	SaveData& sv = m_game.Save();
 	SaveDefaults(sv);
 	SaveLoad(sv);
+	int x = CW_USEDEFAULT, y = CW_USEDEFAULT, w = 1280, h = 800;
 	if (sv.winSizeVer >= 3 && sv.winW >= 640 && sv.winH >= 420) {
 		CRect r(sv.winX, sv.winY, sv.winX + sv.winW, sv.winY + sv.winH);
 		CRect vs(::GetSystemMetrics(SM_XVIRTUALSCREEN), ::GetSystemMetrics(SM_YVIRTUALSCREEN),
 			::GetSystemMetrics(SM_XVIRTUALSCREEN) + ::GetSystemMetrics(SM_CXVIRTUALSCREEN),
 			::GetSystemMetrics(SM_YVIRTUALSCREEN) + ::GetSystemMetrics(SM_CYVIRTUALSCREEN));
 		CRect inter;
-		if (inter.IntersectRect(&r, &vs) && inter.Width() > 120 && inter.Height() > 80)
-			SetWindowPos(NULL, r.left, r.top, r.Width(), r.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
-	} else {
-		// Per-Monitor V2 なので rcWork は物理ピクセル。4K / 2K / 1.5K とも拡大率に関わらず作業領域の7割。
-		HMONITOR mon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+		if (inter.IntersectRect(&r, &vs) && inter.Width() > 120 && inter.Height() > 80) {
+			x = r.left; y = r.top; w = r.Width(); h = r.Height();
+		}
+	}
+	if (x == CW_USEDEFAULT) {
+		HMONITOR mon = ::MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
 		MONITORINFO mi = { sizeof(mi) };
 		if (::GetMonitorInfo(mon, &mi)) {
 			const CRect wa(mi.rcWork);
-			int w = wa.Width() * 7 / 10;
-			int h = wa.Height() * 7 / 10;
+			w = wa.Width() * 7 / 10;
+			h = wa.Height() * 7 / 10;
 			if (w < 800) w = min(800, wa.Width());
 			if (h < 560) h = min(560, wa.Height());
 			if (w > wa.Width()) w = wa.Width();
 			if (h > wa.Height()) h = wa.Height();
-			SetWindowPos(NULL, wa.left + (wa.Width() - w) / 2, wa.top + (wa.Height() - h) / 2, w, h,
-				SWP_NOZORDER | SWP_NOACTIVATE);
+			x = wa.left + (wa.Width() - w) / 2;
+			y = wa.top + (wa.Height() - h) / 2;
 		}
 	}
+	HICON icon = ::LoadIcon(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDI_UI_TACTICS));
+	const CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(NULL, IDC_ARROW), NULL, icon);
+	// 転送面を作らない。起動時と最小化復帰は DWM 経由のまま、非アクティブから戻した時だけ直フリップになり fps が分かれていた。
+#ifndef WS_EX_NOREDIRECTIONBITMAP
+#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
+#endif
+	return CFrameWnd::CreateEx(WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP, cls, TacCaption(),
+		WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+		x, y, w, h, NULL, NULL, 0);
+}
 
+int COmakeTacticsDlg::OnCreate(LPCREATESTRUCT cs)
+{
+	if (CFrameWnd::OnCreate(cs) == -1) return -1;
+	SetWindowText(TacCaption());
 	CRect rc;
 	GetClientRect(&rc);
-	rc.top += CCC_GetCustomCaptionHeight(m_hWnd);
-	if (rc.bottom < rc.top + 8) rc.bottom = rc.top + 8;
-	m_view.CreateView(this, rc);
+	if (rc.Width() < 8) rc.right = rc.left + 8;
+	if (rc.Height() < 8) rc.bottom = rc.top + 8;
 	m_viewW = rc.Width();
 	m_viewH = rc.Height();
 	m_ime.Create(WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | ES_WANTRETURN, CRect(0, 0, 8, 8), this, IDC_TAC_IME);
@@ -405,31 +334,23 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 		m_ime.ShowWindow(SW_HIDE);
 	}
 	if (m_ime.GetSafeHwnd()) TacBindHIMC(m_ime.GetSafeHwnd(), m_imeCtx);
-	m_gameOk = m_game.Init(m_view.GetSafeHwnd(), m_viewW, m_viewH);
+	m_gameOk = m_game.Init(m_hWnd, m_viewW, m_viewH);
+	TacHookSysCommands(m_hWnd);
 	TacAudioStart(m_hWnd);
 
 	QueryPerformanceFrequency(&m_qpf);
 	QueryPerformanceCounter(&m_tickAt);
 	StartPace();
 	KickPace();
-	CCC_BringDialogToForeground(this);
-	ShowWindow(SW_SHOW);
-	SetForegroundWindow();
-	SetFocus();
-	SyncBorderlessZ();
-	return FALSE;
+	return 0;
 }
 
 void COmakeTacticsDlg::LayoutView()
 {
-	if (!m_view.GetSafeHwnd()) return;
+	if (!GetSafeHwnd() || IsIconic()) return;
 	CRect rc;
 	GetClientRect(&rc);
-	rc.top += CCC_GetCustomCaptionHeight(m_hWnd);
-	if (rc.bottom < rc.top + 8) rc.bottom = rc.top + 8;
-	CRect scr = rc;
-	ClientToScreen(&scr);
-	m_view.SetWindowPos(NULL, scr.left, scr.top, scr.Width(), scr.Height(), SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	if (rc.Width() < 8 || rc.Height() < 8) return;
 	if (rc.Width() != m_viewW || rc.Height() != m_viewH) {
 		m_viewW = rc.Width();
 		m_viewH = rc.Height();
@@ -437,15 +358,203 @@ void COmakeTacticsDlg::LayoutView()
 	}
 }
 
-static const DWORD kTacChrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER | WS_DLGFRAME;
+static const DWORD kTacChrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER;
+
+static void TacEnableSystemMenu(HWND hwnd)
+{
+	if (!hwnd) return;
+	HMENU menu = ::GetSystemMenu(hwnd, FALSE);
+	if (!menu) return;
+	const UINT cmd[] = { SC_CLOSE, SC_MINIMIZE, SC_MAXIMIZE, SC_RESTORE, SC_MOVE, SC_SIZE };
+	for (int i = 0; i < 6; i++)
+		::EnableMenuItem(menu, cmd[i], MF_BYCOMMAND | MF_ENABLED);
+}
+
+static LRESULT TacCaptionButton(LONG style, int relX, int left, int right)
+{
+	const BOOL hasMin = (style & WS_MINIMIZEBOX) != 0;
+	const BOOL hasMax = (style & WS_MAXIMIZEBOX) != 0;
+	const BOOL hasClose = (style & WS_SYSMENU) != 0;
+	int n = (hasMin ? 1 : 0) + (hasMax ? 1 : 0) + (hasClose ? 1 : 0);
+	if (n < 1) return HTCAPTION;
+	const int span = right - left;
+	const int bw = span / n;
+	int i = bw > 0 ? (relX - left) / bw : 0;
+	if (i < 0) i = 0;
+	if (i >= n) i = n - 1;
+	int k = 0;
+	if (hasMin) { if (i == k) return HTMINBUTTON; k++; }
+	if (hasMax) { if (i == k) return HTMAXBUTTON; k++; }
+	if (hasClose) return HTCLOSE;
+	return HTCAPTION;
+}
+
+// 転送面なし＋フリップだと、枠ボタンの当たりがクライアントになり × がゲームのクリックになる。
+static LRESULT TacFixNcHit(HWND hwnd, LPARAM lp, LRESULT hit)
+{
+	if (!hwnd) return hit;
+	const LONG style = ::GetWindowLong(hwnd, GWL_STYLE);
+	if (!(style & WS_CAPTION)) return hit;
+	if (hit == HTCLOSE || hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTHELP)
+		return hit;
+	POINT pt;
+	pt.x = (short)LOWORD(lp);
+	pt.y = (short)HIWORD(lp);
+	RECT wr;
+	if (!::GetWindowRect(hwnd, &wr)) return hit;
+	const int relX = pt.x - wr.left;
+	const int relY = pt.y - wr.top;
+	const int ww = wr.right - wr.left;
+	if (relX < 0 || relY < 0 || relX >= ww) return hit;
+
+	RECT buttons = {};
+	const BOOL haveBtns = SUCCEEDED(::DwmGetWindowAttribute(hwnd, DWMWA_CAPTION_BUTTON_BOUNDS, &buttons, sizeof(buttons)))
+		&& buttons.right > buttons.left && buttons.bottom > buttons.top;
+	if (haveBtns && relX >= buttons.left && relX < buttons.right && relY >= buttons.top && relY < buttons.bottom)
+		return TacCaptionButton(style, relX, buttons.left, buttons.right);
+
+	if (hit != HTCLIENT && hit != HTNOWHERE && hit != HTCAPTION && hit != HTBORDER)
+		return hit;
+
+	RECT cr;
+	if (!::GetClientRect(hwnd, &cr)) return hit;
+	POINT tl = { 0, 0 };
+	::ClientToScreen(hwnd, &tl);
+	const int cl = tl.x;
+	const int ct = tl.y;
+	const int crg = tl.x + (cr.right - cr.left);
+	const int cb = tl.y + (cr.bottom - cr.top);
+	if (pt.x >= cl && pt.x < crg && pt.y >= ct && pt.y < cb)
+		return hit;
+
+	const int fx = ::GetSystemMetrics(SM_CXFRAME) + ::GetSystemMetrics(SM_CXPADDEDBORDER);
+	const int fy = ::GetSystemMetrics(SM_CYFRAME) + ::GetSystemMetrics(SM_CXPADDEDBORDER);
+	const BOOL thick = (style & WS_THICKFRAME) != 0;
+	const BOOL left = pt.x < wr.left + fx;
+	const BOOL right = pt.x >= wr.right - fx;
+	const BOOL top = pt.y < wr.top + fy;
+	const BOOL bottom = pt.y >= wr.bottom - fy;
+	if (thick && (left || right || top || bottom)) {
+		if (top && left) return HTTOPLEFT;
+		if (top && right) return HTTOPRIGHT;
+		if (bottom && left) return HTBOTTOMLEFT;
+		if (bottom && right) return HTBOTTOMRIGHT;
+		if (left) return HTLEFT;
+		if (right) return HTRIGHT;
+		if (top) return HTTOP;
+		if (bottom) return HTBOTTOM;
+	}
+	if (pt.y < ct) {
+		if ((style & WS_SYSMENU) && relX < fx + ::GetSystemMetrics(SM_CXSMICON))
+			return HTSYSMENU;
+		if (!haveBtns && (style & WS_SYSMENU)) {
+			const int cx = ::GetSystemMetrics(SM_CXSIZE);
+			int n = 1;
+			if (style & WS_MINIMIZEBOX) n++;
+			if (style & WS_MAXIMIZEBOX) n++;
+			const int btnL = ww - fx - cx * n;
+			if (relX >= btnL) return TacCaptionButton(style, relX, btnL, ww - fx);
+		}
+		return HTCAPTION;
+	}
+	return hit;
+}
+
+// DXGI はスワップチェイン作成時に窓手続きを掴み、×・最小化・最大化を捨てる。
+// それより外側に置き、システムコマンドだけ DefWindowProc へ直に渡す。
+static WNDPROC g_tacAfxProc = NULL;
+static WNDPROC g_tacNextProc = NULL;
+static int g_tacProcDepth = 0;
+static LRESULT CALLBACK TacSysProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
+static LRESULT TacCallNext(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	WNDPROC next = g_tacNextProc;
+	if (!next || next == TacSysProc) next = g_tacAfxProc;
+	if (!next || next == TacSysProc) return ::DefWindowProc(hwnd, msg, wp, lp);
+	g_tacProcDepth++;
+	const LRESULT r = ::CallWindowProc(next, hwnd, msg, wp, lp);
+	g_tacProcDepth--;
+	return r;
+}
+
+static LRESULT CALLBACK TacSysProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	if (g_tacProcDepth > 0) {
+		if (g_tacAfxProc && g_tacAfxProc != TacSysProc)
+			return ::CallWindowProc(g_tacAfxProc, hwnd, msg, wp, lp);
+		return ::DefWindowProc(hwnd, msg, wp, lp);
+	}
+	if (msg == WM_NCDESTROY) {
+		WNDPROC afx = g_tacAfxProc;
+		g_tacAfxProc = NULL;
+		g_tacNextProc = NULL;
+		if (afx) return ::CallWindowProc(afx, hwnd, msg, wp, lp);
+		return ::DefWindowProc(hwnd, msg, wp, lp);
+	}
+	if (msg == WM_NCHITTEST) {
+		const LRESULT hit = TacCallNext(hwnd, msg, wp, lp);
+		return TacFixNcHit(hwnd, lp, hit);
+	}
+	if (msg == WM_NCLBUTTONDOWN || msg == WM_NCLBUTTONUP || msg == WM_NCLBUTTONDBLCLK
+		|| msg == WM_NCRBUTTONDOWN || msg == WM_NCRBUTTONUP || msg == WM_NCRBUTTONDBLCLK) {
+		const UINT hit = (UINT)wp;
+		if (hit == HTCLOSE || hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTHELP
+			|| hit == HTCAPTION || hit == HTSYSMENU
+			|| hit == HTLEFT || hit == HTRIGHT || hit == HTTOP || hit == HTBOTTOM
+			|| hit == HTTOPLEFT || hit == HTTOPRIGHT || hit == HTBOTTOMLEFT || hit == HTBOTTOMRIGHT)
+			return ::DefWindowProc(hwnd, msg, wp, lp);
+	}
+	if (msg == WM_SYSCOMMAND) {
+		const UINT cmd = ((UINT)wp) & 0xFFF0;
+		COmakeTacticsDlg* self = (COmakeTacticsDlg*)CWnd::FromHandlePermanent(hwnd);
+		if (cmd == SC_CLOSE) {
+			if (self) self->RequestDestroyWindow();
+			else ::DestroyWindow(hwnd);
+			return 0;
+		}
+		if (cmd == SC_MINIMIZE || cmd == SC_MAXIMIZE || cmd == SC_RESTORE
+			|| cmd == SC_MOVE || cmd == SC_SIZE
+			|| cmd == SC_MOUSEMENU || cmd == SC_KEYMENU || cmd == SC_DEFAULT) {
+			if (cmd == SC_MINIMIZE && self && self->GameReady() && self->GameRef().Exclusive())
+				self->GameRef().SetExclusive(FALSE);
+			if (cmd == SC_KEYMENU || cmd == SC_MOUSEMENU)
+				TacEnableSystemMenu(hwnd);
+			return ::DefWindowProc(hwnd, msg, wp, lp);
+		}
+	}
+	return TacCallNext(hwnd, msg, wp, lp);
+}
+
+void TacNoteFrameProc(HWND hwnd)
+{
+	if (!hwnd || g_tacAfxProc) return;
+	WNDPROC cur = (WNDPROC)::GetWindowLongPtr(hwnd, GWLP_WNDPROC);
+	if (cur && cur != TacSysProc) g_tacAfxProc = cur;
+}
+
+void TacHookSysCommands(HWND hwnd)
+{
+	if (!hwnd) return;
+	WNDPROC cur = (WNDPROC)::GetWindowLongPtr(hwnd, GWLP_WNDPROC);
+	if (!g_tacAfxProc && cur && cur != TacSysProc) g_tacAfxProc = cur;
+	if (cur == TacSysProc) return;
+	g_tacNextProc = cur;
+	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)TacSysProc);
+	TacEnableSystemMenu(hwnd);
+}
+
+void TacSysProcDetachSwap()
+{
+	g_tacNextProc = g_tacAfxProc;
+}
 
 void COmakeTacticsDlg::ApplyChrome(BOOL windowed)
 {
 	if (windowed) {
 		ModifyStyle(0, kTacChrome, SWP_FRAMECHANGED);
-		CCC_CaptionShow(m_hWnd, TRUE);
+		TacEnableSystemMenu(m_hWnd);
 	} else {
-		CCC_CaptionShow(m_hWnd, FALSE);
 		ModifyStyle(kTacChrome, 0, SWP_FRAMECHANGED);
 	}
 }
@@ -484,23 +593,10 @@ static BOOL TacInFamily(HWND h, HWND root)
 
 void COmakeTacticsDlg::SyncBorderlessZ()
 {
-	if (!GetSafeHwnd() || m_destroying || IsIconic() || !::IsWindowVisible(m_hWnd)) return;
-	if (!::IsWindowEnabled(m_hWnd)) return;
-	if (m_gameOk && otac::TacWinMode(m_game.Save()) == 2 && m_game.Exclusive()) return;
-	HWND fg = ::GetForegroundWindow();
-	DWORD pid = 0;
-	if (fg) ::GetWindowThreadProcessId(fg, &pid);
-	const BOOL otherApp = (fg && pid != ::GetCurrentProcessId());
+	if (!GetSafeHwnd() || m_destroying) return;
 	const LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
-	if (otherApp) {
-		if (ex & WS_EX_TOPMOST)
-			::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-		return;
-	}
-	if (!(ex & WS_EX_TOPMOST))
-		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-	if (fg && !TacInFamily(fg, m_hWnd))
-		::SetForegroundWindow(m_hWnd);
+	if (ex & WS_EX_TOPMOST)
+		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void COmakeTacticsDlg::ApplyWinMode()
@@ -519,6 +615,8 @@ void COmakeTacticsDlg::ApplyWinMode()
 	const int rx = saved.winX, ry = saved.winY, rw = saved.winW, rh = saved.winH;
 	m_exclFail = FALSE;
 	if (prev < 0 && mode == 0) {
+		// 起動時は枠付きのまま。スワップチェインが外した×・最小化・最大化を戻す。
+		ApplyChrome(TRUE);
 		m_winApplied = 0;
 		return;
 	}
@@ -543,7 +641,7 @@ void COmakeTacticsDlg::ApplyWinMode()
 	}
 	ApplyChrome(FALSE);
 	if (haveMon) {
-		::SetWindowPos(m_hWnd, mode == 1 ? HWND_TOPMOST : HWND_NOTOPMOST,
+		::SetWindowPos(m_hWnd, HWND_NOTOPMOST,
 			mon.left, mon.top, mon.right - mon.left, mon.bottom - mon.top,
 			SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 		if (mode == 1) ::SetForegroundWindow(m_hWnd);
@@ -578,7 +676,7 @@ void COmakeTacticsDlg::PollPad(float dt)
 
 void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 {
-	CCustomBlurDialogBase::OnTimer(id);
+	CWnd::OnTimer(id);
 }
 
 void COmakeTacticsDlg::KickPace()
@@ -643,7 +741,7 @@ void COmakeTacticsDlg::StopPace()
 
 void COmakeTacticsDlg::ReleaseUiInput()
 {
-	m_view.ReleaseButtons();
+	ReleaseButtons();
 	if (m_gameOk) m_game.ReleaseInput();
 }
 
@@ -652,16 +750,19 @@ void COmakeTacticsDlg::DrainInput()
 	if (m_destroying) return;
 	HWND root = GetSafeHwnd();
 	if (!root) return;
-	HWND hw[3] = { root, m_view.GetSafeHwnd(), m_ime.GetSafeHwnd() };
-	const UINT range[3][2] = {
+	HWND hw[2] = { root, m_ime.GetSafeHwnd() };
+	const UINT range[][2] = {
 		{ WM_MOUSEFIRST, WM_MOUSELAST },
 		{ WM_KEYFIRST, WM_IME_COMPOSITION },
 		{ WM_IME_SETCONTEXT, WM_IME_KEYUP },
+		{ WM_NCLBUTTONDOWN, WM_NCMBUTTONDBLCLK },
+		{ WM_SYSCOMMAND, WM_SYSCOMMAND },
+		{ WM_CLOSE, WM_CLOSE },
 	};
 	MSG msg;
 	int n = 0;
-	for (int pass = 0; pass < 3 && n < 48; pass++) {
-		for (int i = 0; i < 3 && n < 48; i++) {
+	for (int pass = 0; pass < (int)(sizeof(range) / sizeof(range[0])) && n < 48; pass++) {
+		for (int i = 0; i < 2 && n < 48; i++) {
 			if (!hw[i]) continue;
 			while (n < 48 && ::PeekMessage(&msg, hw[i], range[pass][0], range[pass][1], PM_REMOVE)) {
 				if (m_destroying || !GetSafeHwnd()) return;
@@ -689,35 +790,72 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 		return 0;
 	}
 	m_inPace = TRUE;
-	// 描画中に次の拍が来たら捨てず、終わった直後に続ける。捨てると 16ms 超過が 33ms 空きになり 30 と 60 を往復する。
-	// ここでフレームを連ねない。Present は待たずに返るので、連ねると待ちが次の描画へ入り GPU が空く。
 	InterlockedExchange(&m_pacePosted, 0);
-	DrainInput();
-	LARGE_INTEGER now;
-	QueryPerformanceCounter(&now);
-	float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_tickAt.QuadPart) / (double)m_qpf.QuadPart) : .016f;
-	if (dt < 0) dt = 0;
-	if (dt > 0.1f) dt = 0.1f;
-	m_tickAt = now;
-	int hz = m_game.PaceHz();
-	if (hz < 15) hz = 15;
-	m_paceHz = hz;
-	if (windowCheckFlag == 0) {
-		m_fg = (::GetForegroundWindow() == m_hWnd);
-		SyncBorderlessZ();
-		{
-			static int pri = -1;
-			int want = m_fg ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL;
-			if (pri != want) {
-				SetThreadPriority(GetCurrentThread(), want);
-				if (m_paceThread) SetThreadPriority(m_paceThread, want);
-				pri = want;
+	// 1枚ごとに拍スレッドと MFC の OnIdle へ戻ると、そのあいだ GPU が空く。
+	// 入力と破棄だけ汲み、枠が満杯の待ちは Present に置く。1/60 と 1/120 の段はここでは寝ない。
+	for (;;) {
+		MSG msg;
+		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				m_inPace = FALSE;
+				InterlockedExchange(&m_pacePosted, 0);
+				if (m_paceDone) SetEvent(m_paceDone);
+				return 0;
+			}
+			if (msg.message == WM_TAC_PACE) {
+				InterlockedExchange(&m_pacePosted, 0);
+				continue;
+			}
+			if (msg.message == WM_TAC_DESTROY) {
+				m_inPace = FALSE;
+				InterlockedExchange(&m_pacePosted, 0);
+				if (m_paceDone) SetEvent(m_paceDone);
+				::PostMessage(m_hWnd, WM_TAC_DESTROY, msg.wParam, msg.lParam);
+				return 0;
+			}
+			if (!PreTranslateMessage(&msg)) {
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+			if (m_destroying || !GetSafeHwnd() || m_sizing) {
+				m_inPace = FALSE;
+				InterlockedExchange(&m_pacePosted, 0);
+				if (m_paceDone) SetEvent(m_paceDone);
+				return 0;
 			}
 		}
-	}
-	windowCheckFlag++;
-	windowCheckFlag = windowCheckFlag % 10;
-	if (!IsIconic() && IsWindowVisible()) {
+		if (!m_gameOk || m_destroying) break;
+		if (IsIconic() || !IsWindowVisible()) {
+			::MsgWaitForMultipleObjects(0, NULL, FALSE, 50, QS_ALLINPUT);
+			continue;
+		}
+		DrainInput();
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_tickAt.QuadPart) / (double)m_qpf.QuadPart) : .016f;
+		if (dt < 0) dt = 0;
+		if (dt > 0.1f) dt = 0.1f;
+		m_tickAt = now;
+		int hz = m_game.PaceHz();
+		if (hz < 15) hz = 15;
+		m_paceHz = hz;
+		if (windowCheckFlag == 0) {
+			HWND fg = ::GetForegroundWindow();
+			m_fg = (fg == m_hWnd) || TacInFamily(fg, m_hWnd);
+			SyncBorderlessZ();
+			{
+				static int pri = -1;
+				int want = m_fg ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL;
+				if (pri != want) {
+					SetThreadPriority(GetCurrentThread(), want);
+					if (m_paceThread) SetThreadPriority(m_paceThread, want);
+					pri = want;
+				}
+			}
+		}
+		windowCheckFlag++;
+		windowCheckFlag = windowCheckFlag % 10;
 		if (!TacAudioOnThread()) TacAudioPump();
 		PollPad(dt);
 		PullImeToGame();
@@ -740,11 +878,8 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 
 void COmakeTacticsDlg::OnSize(UINT nType, int cx, int cy)
 {
-	CCustomBlurDialogBase::OnSize(nType, cx, cy);
-	if (nType == SIZE_MINIMIZED) {
-		if (m_view.GetSafeHwnd()) m_view.ShowWindow(SW_HIDE);
-		return;
-	}
+	CFrameWnd::OnSize(nType, cx, cy);
+	if (nType == SIZE_MINIMIZED) return;
 	if (m_sizing) {
 		LayoutView();
 		return;
@@ -777,50 +912,85 @@ void COmakeTacticsDlg::OnExitSizeMove()
 
 LRESULT COmakeTacticsDlg::OnNcHitTest(CPoint pt)
 {
-	if (IsZoomed() || (m_gameOk && otac::TacWinMode(m_game.Save())))
-		return CCustomBlurDialogBase::OnNcHitTest(pt);
-	CRect wr;
-	GetWindowRect(&wr);
-	const int grip = 8;
-	const BOOL L = pt.x < wr.left + grip;
-	const BOOL R = pt.x >= wr.right - grip;
-	const BOOL T = pt.y < wr.top + grip;
-	const BOOL B = pt.y >= wr.bottom - grip;
-	if (T && L) return HTTOPLEFT;
-	if (T && R) return HTTOPRIGHT;
-	if (B && L) return HTBOTTOMLEFT;
-	if (B && R) return HTBOTTOMRIGHT;
-	if (L) return HTLEFT;
-	if (R) return HTRIGHT;
-	if (T) return HTTOP;
-	if (B) return HTBOTTOM;
-	return CCustomBlurDialogBase::OnNcHitTest(pt);
+	const LRESULT hit = CFrameWnd::OnNcHitTest(pt);
+	return TacFixNcHit(m_hWnd, MAKELPARAM((UINT)(short)pt.x, (UINT)(short)pt.y), hit);
 }
 
-void COmakeTacticsDlg::OnLButtonDown(UINT nFlags, CPoint point)
+void COmakeTacticsDlg::Down(int btn, CPoint pt)
 {
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
-	if (capH > 0 && point.y >= 0 && point.y < capH && (!m_gameOk || otac::TacWinMode(m_game.Save()) == 0)) {
-		CWnd* hit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
-		if (!hit || hit == this) {
-			m_sizing = TRUE;
-			SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
-			m_sizing = FALSE;
-			QueryPerformanceCounter(&m_tickAt);
-			LayoutView();
-			KickPace();
-			return;
-		}
+	if (!m_btnMask) SetCapture();
+	m_btnMask |= 1 << btn;
+	if (m_gameOk) m_game.OnMouseDown(btn, pt.x, pt.y);
+}
+
+void COmakeTacticsDlg::Up(int btn, CPoint pt)
+{
+	const int had = m_btnMask & (1 << btn);
+	m_btnMask &= ~(1 << btn);
+	if (!m_btnMask && GetCapture() == this) ReleaseCapture();
+	if (had && m_gameOk) m_game.OnMouseUp(btn, pt.x, pt.y);
+	if (had && m_gameOk && m_game.WantsTextInput())
+		EnsureImeFocus();
+}
+
+void COmakeTacticsDlg::ReleaseButtons()
+{
+	m_btnMask = 0;
+	if (GetCapture() == this) ReleaseCapture();
+}
+
+void COmakeTacticsDlg::OnMouseMove(UINT, CPoint pt)
+{
+	if (m_gameOk) m_game.OnMouseMove(pt.x, pt.y);
+}
+
+void COmakeTacticsDlg::OnLButtonDown(UINT, CPoint pt) { Down(0, pt); }
+void COmakeTacticsDlg::OnLButtonUp(UINT, CPoint pt) { Up(0, pt); }
+void COmakeTacticsDlg::OnLButtonDblClk(UINT, CPoint pt) { Down(0, pt); }
+void COmakeTacticsDlg::OnRButtonDown(UINT, CPoint pt) { Down(1, pt); }
+void COmakeTacticsDlg::OnRButtonUp(UINT, CPoint pt) { Up(1, pt); }
+void COmakeTacticsDlg::OnMButtonDown(UINT, CPoint pt) { Down(2, pt); }
+void COmakeTacticsDlg::OnMButtonUp(UINT, CPoint pt) { Up(2, pt); }
+
+void COmakeTacticsDlg::OnCaptureChanged(CWnd* pWnd)
+{
+	if (pWnd != this && m_btnMask && m_gameOk) {
+		CPoint pt;
+		::GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		for (int b = 0; b < 3; b++)
+			if (m_btnMask & (1 << b)) m_game.OnMouseUp(b, pt.x, pt.y);
 	}
-	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
+	m_btnMask = 0;
+	CFrameWnd::OnCaptureChanged(pWnd);
+}
+
+BOOL COmakeTacticsDlg::OnEraseBkgnd(CDC*) { return TRUE; }
+
+void COmakeTacticsDlg::OnPaint()
+{
+	if (m_gameOk) {
+		::ValidateRect(m_hWnd, NULL);
+		return;
+	}
+	CPaintDC dc(this);
+	CRect rc;
+	GetClientRect(&rc);
+	dc.FillSolidRect(&rc, RGB(16, 18, 28));
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(RGB(230, 230, 240));
+	dc.DrawText(TT(TX_MISC_DXFAIL), &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+BOOL COmakeTacticsDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+	if (nHitTest == HTCLIENT) { ::SetCursor(::LoadCursor(NULL, IDC_ARROW)); return TRUE; }
+	return CFrameWnd::OnSetCursor(pWnd, nHitTest, message);
 }
 
 void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
-	if (bShow && CCC_GetCustomCaptionHeight(m_hWnd) > 0)
-		CWnd::OnShowWindow(bShow, nStatus);
-	else
-		CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	CFrameWnd::OnShowWindow(bShow, nStatus);
 	if (bShow) {
 		QueryPerformanceCounter(&m_tickAt);
 		if (m_gameOk) m_game.OnBecameActive();
@@ -830,7 +1000,7 @@ void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void COmakeTacticsDlg::OnGetMinMaxInfo(MINMAXINFO* mmi)
 {
-	CCustomBlurDialogBase::OnGetMinMaxInfo(mmi);
+	CFrameWnd::OnGetMinMaxInfo(mmi);
 	mmi->ptMinTrackSize.x = 800;
 	mmi->ptMinTrackSize.y = 560;
 	if (mmi->ptMaxTrackSize.x < 16000) mmi->ptMaxTrackSize.x = 16000;
@@ -839,7 +1009,7 @@ void COmakeTacticsDlg::OnGetMinMaxInfo(MINMAXINFO* mmi)
 
 void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
-	CCustomDialog::OnActivate(nState, pWndOther, bMinimized);
+	CFrameWnd::OnActivate(nState, pWndOther, bMinimized);
 	const BOOL fg = (nState != WA_INACTIVE && !bMinimized);
 	m_fg = fg;
 	if (fg) {
@@ -865,7 +1035,7 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 
 void COmakeTacticsDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
-	CCustomDialog::OnActivateApp(bActive, dwThreadID);
+	CFrameWnd::OnActivateApp(bActive, dwThreadID);
 	m_fg = bActive;
 	if (bActive) {
 		QueryPerformanceCounter(&m_tickAt);
@@ -956,25 +1126,17 @@ void COmakeTacticsDlg::PullImeToGame()
 
 void COmakeTacticsDlg::PlaceImeWindow()
 {
-	if (!m_gameOk || !m_ime.GetSafeHwnd() || !m_view.GetSafeHwnd()) return;
+	if (!m_gameOk || !m_ime.GetSafeHwnd()) return;
 	static LONG s_imePosBusy = 0;
 	if (InterlockedCompareExchange(&s_imePosBusy, 1, 0) != 0) return;
 	RECT box = {};
 	m_game.TextBoxRect(box);
-	POINT tl = { box.left, box.top };
-	POINT br = { box.right, box.bottom };
-	HWND view = m_view.GetSafeHwnd();
-	::ClientToScreen(view, &tl);
-	::ClientToScreen(view, &br);
-	CPoint dlgTl = tl, dlgBr = br;
-	ScreenToClient(&dlgTl);
-	ScreenToClient(&dlgBr);
 	int caretPx = (int)(m_game.TextCaretPx() + .5f);
 	if (caretPx < 0) caretPx = 0;
 	// キャラ名と同じ 1px。表示は HUD が描く。広い編集欄はスワップチェインに隠れて文字が見えなくなる。
-	int left = dlgTl.x + caretPx;
+	int left = box.left + caretPx;
 	int w = 1;
-	int h = dlgBr.y - dlgTl.y;
+	int h = box.bottom - box.top;
 	if (h < 8) h = 8;
 	int fontPx = (int)(m_game.TextFontPx() + .5f);
 	if (fontPx < 10) fontPx = 10;
@@ -994,10 +1156,10 @@ void COmakeTacticsDlg::PlaceImeWindow()
 	const BOOL busy = TacImeBusy(ih);
 	static int sx = -99999, sy = 0, sw = 0, sh = 0;
 	if (!m_ime.IsWindowVisible()) sx = -99999;
-	const BOOL same = (left == sx && dlgTl.y == sy && w == sw && h == sh);
+	const BOOL same = (left == sx && box.top == sy && w == sw && h == sh);
 	if (!same && !busy) {
-		m_ime.SetWindowPos(&wndTop, left, dlgTl.y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-		sx = left; sy = dlgTl.y; sw = w; sh = h;
+		m_ime.SetWindowPos(&wndTop, left, box.top, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		sx = left; sy = box.top; sw = w; sh = h;
 	} else if (!m_ime.IsWindowVisible()) {
 		m_ime.ShowWindow(SW_SHOWNA);
 	}
@@ -1089,7 +1251,7 @@ HBRUSH COmakeTacticsDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 		pDC->SetTextColor(RGB(255, 255, 255));
 		return (HBRUSH)m_imeBrush.GetSafeHandle();
 	}
-	return CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
+	return (HBRUSH)::GetStockObject(BLACK_BRUSH);
 }
 
 UINT COmakeTacticsDlg::OnGetDlgCode()
@@ -1113,10 +1275,9 @@ BOOL COmakeTacticsDlg::HandleKeyMessage(MSG* pMsg)
 	if (!ours && pMsg->hwnd != m_hWnd && !::IsChild(m_hWnd, pMsg->hwnd)
 		&& !(imeHw && pMsg->hwnd == imeHw))
 		return FALSE;
-	if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) {
-		if (pMsg->wParam == VK_F4 || pMsg->wParam == VK_MENU) return FALSE;
-	}
-	if (msg == WM_SYSCHAR) return FALSE;
+	// Alt+F4 / Alt+Space / Alt+Esc はゲームに渡さず、システムの閉じる・メニューへ戻す。
+	if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP || msg == WM_SYSCHAR)
+		return FALSE;
 
 	const BOOL typing = m_gameOk && (m_game.WantsTextInput() || (imeHw && ::GetFocus() == imeHw));
 	if (typing) {
@@ -1213,7 +1374,7 @@ BOOL COmakeTacticsDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (TacTakeWheel(this, pMsg)) return TRUE;
 	if (HandleKeyMessage(pMsg)) return TRUE;
-	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+	return CFrameWnd::PreTranslateMessage(pMsg);
 }
 
 void COmakeTacticsDlg::OnDestroy()
@@ -1236,7 +1397,7 @@ void COmakeTacticsDlg::OnDestroy()
 	}
 	TacReleasePadAll();
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
-	CCustomBlurDialogBase::OnDestroy();
+	CFrameWnd::OnDestroy();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->SetTimer(4923, 20, NULL);
 }
@@ -1245,6 +1406,7 @@ void COmakeTacticsDlg::RequestDestroyWindow()
 {
 	if (m_destroying) return;
 	m_destroying = TRUE;
+	if (m_gameOk && m_game.Exclusive()) m_game.SetExclusive(FALSE);
 	HideImeEdit();
 	if (GetSafeHwnd()) {
 		HWND parent = ::GetParent(m_hWnd);
@@ -1289,14 +1451,13 @@ void COmakeTacticsDlg::OnSysCommand(UINT nID, LPARAM lParam)
 		RequestDestroyWindow();
 		return;
 	}
-	CDialog::OnSysCommand(nID, lParam);
+	CFrameWnd::OnSysCommand(nID, lParam);
 }
 
 void COmakeTacticsDlg::PostNcDestroy()
 {
-	CCustomBlurDialogBase::PostNcDestroy();
 	if (g_tac == this) g_tac = nullptr;
-	delete this;
+	CFrameWnd::PostNcDestroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -1304,6 +1465,7 @@ void COmakeTacticsDlg::PostNcDestroy()
 // ---------------------------------------------------------------------------
 void OpenOmakeTacticsModeless(CWnd* p)
 {
+	(void)p;
 	if (g_tac && g_tac->GetSafeHwnd()) {
 		if (g_tac->Destroying()) return;
 		if (g_tac->IsIconic()) g_tac->ShowWindow(SW_RESTORE);
@@ -1315,8 +1477,8 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	CloseSoft3DRaceIfOpen();
 	CloseSoft3DMazeIfOpen();
 	if (!EnsureBonusImages(2)) return;
-	g_tac = new COmakeTacticsDlg(p);
-	if (!g_tac->Create(IDD_OMAKE_TACTICS, p)) {
+	g_tac = new COmakeTacticsDlg();
+	if (!g_tac->CreateFrame()) {
 		delete g_tac;
 		g_tac = nullptr;
 		return;
