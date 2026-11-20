@@ -25,6 +25,8 @@ int flacmode = 0;
 #include "mp3info.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "afxpriv.h"
+#include "OmakeTactics.h"
 #include "AudioDevSync.h"
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
@@ -2042,6 +2044,7 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_OGG_HELP, m_help);
 }
 BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
+	ON_MESSAGE(WM_KICKIDLE, OnKickIdle)
 	//{{AFX_MSG_MAP(COggDlg)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
@@ -33385,6 +33388,12 @@ void COggDlg::OnPause()
 		ps = 0;
 		SyncPauseButtonUi();
 	}
+}
+
+LRESULT COggDlg::OnKickIdle(WPARAM, LPARAM)
+{
+	// ここで描き続けると DoModal がこの送信から戻らず、画面は黒いままになる。描画は拍の SendMessage。
+	return 0;
 }
 
 BOOL COggDlg::PreTranslateMessage(MSG* pMsg)

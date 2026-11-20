@@ -23,6 +23,8 @@ extern COggDlg* og;
 void TacHookSysCommands(HWND hwnd);
 
 static COmakeTacticsDlg* g_tac = nullptr;
+// らいらXのボタン処理中は 1。このあいだに描き続けると、処理が戻らず画面が黒のままになる。
+static int s_tacOpenDepth = 0;
 #ifndef WM_TAC_PACE
 #define WM_TAC_PACE (WM_APP + 549)
 #endif
@@ -297,12 +299,9 @@ BOOL COmakeTacticsDlg::CreateFrame()
 		}
 	}
 	HICON icon = ::LoadIcon(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDI_UI_TACTICS));
-	const CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(NULL, IDC_ARROW), NULL, icon);
-	// 転送面を作らない。起動時と最小化復帰は DWM 経由のまま、非アクティブから戻した時だけ直フリップになり fps が分かれていた。
-#ifndef WS_EX_NOREDIRECTIONBITMAP
-#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
-#endif
-	return CFrameWnd::CreateEx(WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP, cls, TacCaption(),
+	const CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(NULL, IDC_ARROW),
+		(HBRUSH)::GetStockObject(BLACK_BRUSH), icon);
+	return CFrameWnd::CreateEx(WS_EX_APPWINDOW, cls, TacCaption(),
 		WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
 		x, y, w, h, NULL, NULL, 0);
 }
@@ -340,8 +339,6 @@ int COmakeTacticsDlg::OnCreate(LPCREATESTRUCT cs)
 
 	QueryPerformanceFrequency(&m_qpf);
 	QueryPerformanceCounter(&m_tickAt);
-	StartPace();
-	KickPace();
 	return 0;
 }
 
@@ -679,6 +676,39 @@ void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 	CWnd::OnTimer(id);
 }
 
+static void TacRaiseOnce(HWND h)
+{
+	if (!h) return;
+	::SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+	::SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+	::SetForegroundWindow(h);
+	::BringWindowToTop(h);
+}
+
+static int s_tacHoldDisp = 0;
+static void TacHoldDisplay(BOOL on)
+{
+	if (on) {
+		if (s_tacHoldDisp) return;
+		s_tacHoldDisp = 1;
+		::timeBeginPeriod(1);
+		::SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED);
+		::DwmEnableMMCSS(TRUE);
+	} else if (s_tacHoldDisp) {
+		s_tacHoldDisp = 0;
+		::SetThreadExecutionState(ES_CONTINUOUS);
+	}
+}
+
+void COmakeTacticsDlg::StartShown()
+{
+	if (!m_gameOk || m_destroying || !GetSafeHwnd()) return;
+	// ボタン処理が戻ってから、別スレッドが 1 枚ずつ SendMessage する。
+	// ここで描き続けると合成されず真っ黒。投稿して GetMessage を待つと、入力が無いとき約 3fps。
+	TacHoldDisplay(TRUE);
+	StartPace();
+}
+
 void COmakeTacticsDlg::KickPace()
 {
 	if (m_destroying || !m_hWnd) return;
@@ -695,16 +725,14 @@ DWORD WINAPI COmakeTacticsDlg::PaceThread(LPVOID param)
 		HANDLE stop = d->m_paceStop;
 		if (!stop || WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) break;
 		if (d->m_destroying) break;
-		d->KickPace();
-		HANDLE done = d->m_paceDone;
-		if (!done) {
-			if (WaitForSingleObject(stop, 8) == WAIT_OBJECT_0) break;
-			continue;
-		}
-		HANDLE w[2] = { done, stop };
-		DWORD r = WaitForMultipleObjects(2, w, FALSE, INFINITE);
-		if (r == WAIT_OBJECT_0 + 1) break;
+		HWND hwnd = d->m_hWnd;
+		if (!hwnd || !::IsWindow(hwnd)) break;
+		const LRESULT r = ::SendMessage(hwnd, WM_TAC_PACE, 0, 0);
+		if (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) break;
 		if (d->m_destroying) break;
+		if (r == 2 || r == 3) {
+			if (WaitForSingleObject(stop, r == 2 ? 50 : 1) == WAIT_OBJECT_0) break;
+		}
 	}
 	return 0;
 }
@@ -725,7 +753,15 @@ void COmakeTacticsDlg::StopPace()
 	if (m_paceStop) SetEvent(m_paceStop);
 	if (m_paceDone) SetEvent(m_paceDone);
 	if (m_paceThread) {
-		WaitForSingleObject(m_paceThread, INFINITE);
+		HANDLE th = m_paceThread;
+		for (;;) {
+			if (WaitForSingleObject(th, 0) == WAIT_OBJECT_0) break;
+			// 拍スレッドは SendMessage で止まっている。送られたメッセージを流さないと終わらない。
+			const DWORD r = MsgWaitForMultipleObjects(1, &th, FALSE, 50, QS_SENDMESSAGE);
+			if (r == WAIT_OBJECT_0) break;
+			MSG msg;
+			::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
+		}
 		CloseHandle(m_paceThread);
 		m_paceThread = NULL;
 	}
@@ -783,97 +819,95 @@ void COmakeTacticsDlg::DrainInput()
 
 LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 {
-	static int windowCheckFlag = 0;
-	if (m_destroying || m_inPace || !m_gameOk || m_sizing) {
-		InterlockedExchange(&m_pacePosted, 0);
-		if (m_paceDone && !m_inPace) SetEvent(m_paceDone);
-		return 0;
-	}
-	m_inPace = TRUE;
 	InterlockedExchange(&m_pacePosted, 0);
-	// 1枚ごとに拍スレッドと MFC の OnIdle へ戻ると、そのあいだ GPU が空く。
-	// 入力と破棄だけ汲み、枠が満杯の待ちは Present に置く。1/60 と 1/120 の段はここでは寝ない。
-	for (;;) {
-		MSG msg;
-		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			if (msg.message == WM_QUIT) {
-				::PostQuitMessage((int)msg.wParam);
-				m_inPace = FALSE;
-				InterlockedExchange(&m_pacePosted, 0);
-				if (m_paceDone) SetEvent(m_paceDone);
-				return 0;
-			}
-			if (msg.message == WM_TAC_PACE) {
-				InterlockedExchange(&m_pacePosted, 0);
-				continue;
-			}
-			if (msg.message == WM_TAC_DESTROY) {
-				m_inPace = FALSE;
-				InterlockedExchange(&m_pacePosted, 0);
-				if (m_paceDone) SetEvent(m_paceDone);
-				::PostMessage(m_hWnd, WM_TAC_DESTROY, msg.wParam, msg.lParam);
-				return 0;
-			}
-			if (!PreTranslateMessage(&msg)) {
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
-			}
-			if (m_destroying || !GetSafeHwnd() || m_sizing) {
-				m_inPace = FALSE;
-				InterlockedExchange(&m_pacePosted, 0);
-				if (m_paceDone) SetEvent(m_paceDone);
-				return 0;
-			}
-		}
-		if (!m_gameOk || m_destroying) break;
-		if (IsIconic() || !IsWindowVisible()) {
-			::MsgWaitForMultipleObjects(0, NULL, FALSE, 50, QS_ALLINPUT);
-			continue;
-		}
-		DrainInput();
-		LARGE_INTEGER now;
-		QueryPerformanceCounter(&now);
-		float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_tickAt.QuadPart) / (double)m_qpf.QuadPart) : .016f;
-		if (dt < 0) dt = 0;
-		if (dt > 0.1f) dt = 0.1f;
-		m_tickAt = now;
-		int hz = m_game.PaceHz();
-		if (hz < 15) hz = 15;
-		m_paceHz = hz;
-		if (windowCheckFlag == 0) {
-			HWND fg = ::GetForegroundWindow();
-			m_fg = (fg == m_hWnd) || TacInFamily(fg, m_hWnd);
-			SyncBorderlessZ();
-			{
-				static int pri = -1;
-				int want = m_fg ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL;
-				if (pri != want) {
-					SetThreadPriority(GetCurrentThread(), want);
-					if (m_paceThread) SetThreadPriority(m_paceThread, want);
-					pri = want;
-				}
-			}
-		}
-		windowCheckFlag++;
-		windowCheckFlag = windowCheckFlag % 10;
-		if (!TacAudioOnThread()) TacAudioPump();
-		PollPad(dt);
-		PullImeToGame();
-		m_game.Tick(dt);
-		SyncImeEdit();
-		ApplyWinMode();
-		if (m_game.WantsClose()) {
-			m_game.ClearClose();
+	if (m_paceDone && !m_inPace) SetEvent(m_paceDone);
+	if (m_destroying || !m_gameOk || !GetSafeHwnd()) return 0;
+	if (m_paceStop && WaitForSingleObject(m_paceStop, 0) == WAIT_OBJECT_0) return 0;
+	if (s_tacOpenDepth > 0 || m_inPace) return 0;
+	if (m_sizing || IsIconic() || !IsWindowVisible()) return 2;
+	m_inPace = TRUE;
+	MSG msg;
+	int n = 0;
+	while (n < 24 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
 			m_inPace = FALSE;
-			InterlockedExchange(&m_pacePosted, 0);
-			RequestDestroyWindow();
+			return 0;
+		}
+		if (msg.message == WM_TAC_PACE) continue;
+		if (msg.message == WM_TAC_DESTROY) {
+			m_inPace = FALSE;
+			::PostMessage(m_hWnd, WM_TAC_DESTROY, msg.wParam, msg.lParam);
+			return 0;
+		}
+		if (!PreTranslateMessage(&msg)) {
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+		n++;
+		if (m_destroying || !GetSafeHwnd()) {
+			m_inPace = FALSE;
 			return 0;
 		}
 	}
 	m_inPace = FALSE;
-	InterlockedExchange(&m_pacePosted, 0);
-	if (m_paceDone) SetEvent(m_paceDone);
-	return 0;
+	if (m_sizing || IsIconic() || !IsWindowVisible()) return 2;
+	RunIdleFrame();
+	return 1;
+}
+
+BOOL COmakeTacticsDlg::RunIdleFrame()
+{
+	if (s_tacOpenDepth > 0 || m_destroying || m_inPace || !m_gameOk || m_sizing) return FALSE;
+	if (!GetSafeHwnd() || IsIconic() || !IsWindowVisible()) return FALSE;
+	static int windowCheckFlag = 0;
+	m_inPace = TRUE;
+	DrainInput();
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_tickAt.QuadPart) / (double)m_qpf.QuadPart) : .016f;
+	if (dt < 0) dt = 0;
+	if (dt > 0.1f) dt = 0.1f;
+	m_tickAt = now;
+	int hz = m_game.PaceHz();
+	if (hz < 15) hz = 15;
+	m_paceHz = hz;
+	if (windowCheckFlag == 0) {
+		HWND fg = ::GetForegroundWindow();
+		m_fg = (fg == m_hWnd) || TacInFamily(fg, m_hWnd);
+		SyncBorderlessZ();
+		{
+			static int pri = -1;
+			int want = m_fg ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL;
+			if (pri != want) {
+				SetThreadPriority(GetCurrentThread(), want);
+				if (m_paceThread) SetThreadPriority(m_paceThread, want);
+				pri = want;
+			}
+		}
+	}
+	windowCheckFlag++;
+	windowCheckFlag = windowCheckFlag % 20;
+	if (!TacAudioOnThread()) TacAudioPump();
+	PollPad(dt);
+	PullImeToGame();
+	m_game.Tick(dt);
+	m_clientLive = TRUE;
+	SyncImeEdit();
+	ApplyWinMode();
+	m_inPace = FALSE;
+	if (m_game.WantsClose()) {
+		m_game.ClearClose();
+		RequestDestroyWindow();
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL OmakeTacticsIdleFrame()
+{
+	if (!g_tac) return FALSE;
+	return g_tac->RunIdleFrame();
 }
 
 void COmakeTacticsDlg::OnSize(UINT nType, int cx, int cy)
@@ -965,15 +999,29 @@ void COmakeTacticsDlg::OnCaptureChanged(CWnd* pWnd)
 	CFrameWnd::OnCaptureChanged(pWnd);
 }
 
-BOOL COmakeTacticsDlg::OnEraseBkgnd(CDC*) { return TRUE; }
+BOOL COmakeTacticsDlg::OnEraseBkgnd(CDC* pDC)
+{
+	if (m_clientLive) return TRUE;
+	if (!pDC) return TRUE;
+	CRect rc;
+	GetClientRect(&rc);
+	pDC->FillSolidRect(&rc, RGB(8, 10, 16));
+	return TRUE;
+}
 
 void COmakeTacticsDlg::OnPaint()
 {
-	if (m_gameOk) {
+	if (m_gameOk && m_clientLive) {
 		::ValidateRect(m_hWnd, NULL);
 		return;
 	}
 	CPaintDC dc(this);
+	if (m_gameOk) {
+		CRect rc;
+		GetClientRect(&rc);
+		dc.FillSolidRect(&rc, RGB(8, 10, 16));
+		return;
+	}
 	CRect rc;
 	GetClientRect(&rc);
 	dc.FillSolidRect(&rc, RGB(16, 18, 28));
@@ -1387,6 +1435,7 @@ void COmakeTacticsDlg::OnDestroy()
 		m_imeCtx = nullptr;
 	}
 	ReleaseUiInput();
+	TacHoldDisplay(FALSE);
 	StopPace();
 	TacAudioStop();
 	if (m_gameOk) {
@@ -1469,7 +1518,7 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	if (g_tac && g_tac->GetSafeHwnd()) {
 		if (g_tac->Destroying()) return;
 		if (g_tac->IsIconic()) g_tac->ShowWindow(SW_RESTORE);
-		g_tac->SetForegroundWindow();
+		TacRaiseOnce(g_tac->GetSafeHwnd());
 		return;
 	}
 	extern void CloseSoft3DRaceIfOpen();
@@ -1477,22 +1526,24 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	CloseSoft3DRaceIfOpen();
 	CloseSoft3DMazeIfOpen();
 	if (!EnsureBonusImages(2)) return;
+	s_tacOpenDepth++;
 	g_tac = new COmakeTacticsDlg();
 	if (!g_tac->CreateFrame()) {
 		delete g_tac;
 		g_tac = nullptr;
+		s_tacOpenDepth--;
 		return;
 	}
 	g_tac->ShowWindow(SW_SHOW);
-	g_tac->SetForegroundWindow();
-	g_tac->BringWindowToTop();
-	// 操作中は矢印グローバルホットキー（音量／シーク）を止める
+	TacRaiseOnce(g_tac->GetSafeHwnd());
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		::UnregisterHotKey(og->GetSafeHwnd(), 8000);
 		::UnregisterHotKey(og->GetSafeHwnd(), 8001);
 		::UnregisterHotKey(og->GetSafeHwnd(), 8002);
 		::UnregisterHotKey(og->GetSafeHwnd(), 8003);
 	}
+	s_tacOpenDepth--;
+	g_tac->StartShown();
 }
 
 void CloseOmakeTacticsIfOpen()

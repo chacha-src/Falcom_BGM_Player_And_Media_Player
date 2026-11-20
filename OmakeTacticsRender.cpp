@@ -12906,7 +12906,6 @@ void Renderer::EndReflectPass()
 	m_ctx->RSSetState(m_rsBack);
 	ID3D11RenderTargetView* none = NULL;
 	m_ctx->OMSetRenderTargets(1, &none, NULL);
-	UpdateFrameCB();
 }
 
 void Renderer::ReuseReflect(float planeY)

@@ -206,6 +206,21 @@ namespace PianoRoll108
         float dtMs = 16.0f;
     };
 
+    // 計測プローブ専用。製品経路では常に null。
+    struct PickWhy
+    {
+        int why[COUNT];
+        float keyObs[COUNT];
+        float hUse[COUNT];
+        float share[COUNT];
+        float hMax = 0.0f;
+        float bHi = 0.0f;
+        int preOn[COUNT];
+        float own2[COUNT];
+        float own3[COUNT];
+    };
+    inline PickWhy* g_pickWhy = nullptr;
+
     inline int KeyFromHzTune(float hz, float tuneSemis)
     {
         if (hz <= 1.0f) return -1;
@@ -326,6 +341,7 @@ namespace PianoRoll108
         bool* outPicked, float* outOwnPow, const PickParams& p)
     {
         if (!blend || !floorPow || !outPicked || !outOwnPow) return 0;
+        if (g_pickWhy) memset(g_pickWhy, 0, sizeof(*g_pickWhy));
         memset(outPicked, 0, sizeof(bool) * COUNT);
         if (p.outF0Hz) memset(p.outF0Hz, 0, sizeof(float) * COUNT);
         const HarmTable& ht = Harm();
@@ -774,13 +790,33 @@ namespace PianoRoll108
                         if (hUse[ki] > bMaxH[b]) bMaxH[b] = hUse[ki];
                     }
 
+                    if (g_pickWhy) {
+                        g_pickWhy->hMax = hMax;
+                        g_pickWhy->bHi = bMaxH[2];
+                        for (int ki = 0; ki < NMF_NK; ++ki) {
+                            const int k = NMF_K0 + ki;
+                            g_pickWhy->keyObs[k] = keyObs[ki];
+                            g_pickWhy->hUse[k] = hUse[ki];
+                            g_pickWhy->share[k] = shareVal[ki];
+                        }
+                    }
+                    auto markWhy = [&](int key, int code) {
+                        if (!g_pickWhy || key < 0 || key >= COUNT) return;
+                        if (g_pickWhy->why[key] == 0) g_pickWhy->why[key] = code;
+                    };
+
                     if (hMax > 1.0e-5f) {
                         for (int ki = 0; ki < NMF_NK; ++ki) {
-                            if (keyObs[ki] < 0.018f && hUse[ki] < hMax * 0.22f) continue;
                             const int k = NMF_K0 + ki;
-                            // 超高域(D6以上)のシンバル金属共鳴の常時点灯を防ぐ
-                            if (k >= 86 && keyPartials[ki] < 1 && keySnr[ki] < 18.0f && relShortN(k) < 0.22f)
+                            if (keyObs[ki] < 0.018f && hUse[ki] < hMax * 0.22f) {
+                                markWhy(k, 1);
                                 continue;
+                            }
+                            // 超高域(D6以上)のシンバル金属共鳴の常時点灯を防ぐ
+                            if (k >= 86 && keyPartials[ki] < 1 && keySnr[ki] < 18.0f && relShortN(k) < 0.22f) {
+                                markWhy(k, 2);
+                                continue;
+                            }
                             const int b = (k < BASS_END) ? 0 : ((k < MID_END) ? 1 : 2);
                             const float hN = hUse[ki] / hMax;
                             float th = (b == 0) ? 0.095f : ((b == 1) ? 0.175f : 0.092f);
@@ -789,29 +825,47 @@ namespace PianoRoll108
                             const bool mainOk = (hN >= th);
                             const bool bandOk = (bMaxH[b] > hMax * 0.14f && hUse[ki] >= bMaxH[b] * 0.48f && hN >= th * 0.45f);
                             const bool burstOk = (relShortN(k) >= 0.14f && hN >= th * 0.50f);
-                            if (!(mainOk || bandOk || burstOk)) continue;
+                            if (!(mainOk || bandOk || burstOk)) {
+                                markWhy(k, 3);
+                                continue;
+                            }
                             if (k >= BASS_END) {
                                 const float shReq = (k < MID_END) ? 0.55f : 0.32f;
                                 if (!(prevActive && prevActive[k])) {
-                                    if (shareVal[ki] < shReq) continue;
+                                    if (shareVal[ki] < shReq) {
+                                        markWhy(k, 4);
+                                        continue;
+                                    }
                                 }
                                 else {
-                                    if (shUse[ki] < shReq * 0.60f) continue;
+                                    if (shUse[ki] < shReq * 0.60f) {
+                                        markWhy(k, 4);
+                                        continue;
+                                    }
                                 }
                             }
                             if (hN < th * 1.60f && !(prevActive && prevActive[k]) && relShortN(k) < 0.12f
-                                && keyPartials[ki] < 1 && keySnr[ki] < 16.0f)
+                                && keyPartials[ki] < 1 && keySnr[ki] < 16.0f) {
+                                markWhy(k, 5);
                                 continue;
+                            }
                             seriesOn[k] = true;
                             seriesHz[k] = keyHz[ki];
                             seriesA[k] = (blend[k] > keyRawP[ki]) ? blend[k] : keyRawP[ki];
+                            if (g_pickWhy) g_pickWhy->preOn[k] = 1;
                         }
 
                         // 隣接半音のマージ漏れを抑制
                         for (int k = NMF_K0; k + 1 < NMF_K1; ++k) {
                             if (seriesOn[k] && seriesOn[k + 1]) {
-                                if (hUse[k - NMF_K0] >= hUse[k + 1 - NMF_K0]) seriesOn[k + 1] = false;
-                                else seriesOn[k] = false;
+                                if (hUse[k - NMF_K0] >= hUse[k + 1 - NMF_K0]) {
+                                    seriesOn[k + 1] = false;
+                                    markWhy(k + 1, 6);
+                                }
+                                else {
+                                    seriesOn[k] = false;
+                                    markWhy(k, 6);
+                                }
                             }
                         }
 
@@ -834,10 +888,12 @@ namespace PianoRoll108
                                 && obsAtN(fLo * 5.0f, 38.0f) < aLo * 0.24f
                                 && hUse[lo - NMF_K0] < hUse[oct - NMF_K0] * 0.90f) {
                                 seriesOn[lo] = false;
+                                markWhy(lo, 7);
                             }
                             if (seriesOn[lo] && seriesOn[oct] && aLo < aOct * 0.24f
                                 && obsAtN(fLo * 3.0f, 36.0f) < aOct * 0.25f) {
                                 seriesOn[lo] = false;
+                                markWhy(lo, 7);
                             }
                         }
 
@@ -861,6 +917,7 @@ namespace PianoRoll108
                                 if ((n == 5 || n == 7 || n == 11) && cJ + 5.0f < c12
                                     && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.98f) {
                                     seriesOn[hi] = false;
+                                    markWhy(hi, 8);
                                     break;
                                 }
                                 if (n >= 3 && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.95f) {
@@ -887,6 +944,7 @@ namespace PianoRoll108
                                     if (inComb && !sticksOut) {
                                         if (n >= 5 || hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * 0.65f) {
                                             seriesOn[hi] = false;
+                                            markWhy(hi, 9);
                                             break;
                                         }
                                     }
@@ -895,11 +953,13 @@ namespace PianoRoll108
                                     && hi3 < aHi * 0.24f
                                     && obsAtN(fLo * 3.0f, 36.0f) >= keyObs[lo - NMF_K0] * 0.22f) {
                                     seriesOn[hi] = false;
+                                    markWhy(hi, 10);
                                     break;
                                 }
                                 if (n >= 3 && can3 && hi3 < aHi * 0.26f
                                     && hUse[hi - NMF_K0] < hUse[lo - NMF_K0] * ((n == 3) ? 0.54f : 0.75f)) {
                                     seriesOn[hi] = false;
+                                    markWhy(hi, 11);
                                     break;
                                 }
                             }
@@ -922,9 +982,108 @@ namespace PianoRoll108
                                 seriesHz[lo] = fLo;
                                 seriesA[lo] = (blend[lo] > keyRawP[lo - NMF_K0]) ? blend[lo] : keyRawP[lo - NMF_K0];
                                 const float h3 = (fHi * 3.0f <= 4400.0f) ? obsAtN(fHi * 3.0f, 34.0f) : aHi;
-                                if (h3 < aHi * 0.28f && aHi < aLo * 1.15f)
+                                if (h3 < aHi * 0.28f && aHi < aLo * 1.15f) {
                                     seriesOn[hi] = false;
+                                    markWhy(hi, 12);
+                                }
                             }
+                        }
+
+                        // C5 以上で、3〜9半音離れたもう一つの高音峰があるとき、
+                        // その和音の一番強い上声を1音戻す。5度・長3度の弱い倍音は除く。
+                        auto highBlocked = [&](int hi, float aHi) -> bool {
+                            const float fHi = keyHz[hi - NMF_K0];
+                            int parentN = 0;
+                            float parentA = 0.0f;
+                            for (int lo = NMF_K0; lo < hi; ++lo) {
+                                if (!seriesOn[lo]) continue;
+                                const float aLo = keyObs[lo - NMF_K0];
+                                if (aLo <= parentA) continue;
+                                const float fLo = keyHz[lo - NMF_K0];
+                                const int n = (int)floorf(fHi / fLo + 0.5f);
+                                if (n < 2 || n > 12) continue;
+                                if (centsDist(fHi, fLo * (float)n) > 34.0f) continue;
+                                parentN = n;
+                                parentA = aLo;
+                            }
+                            if (parentN <= 0) return false;
+                            float need = 0.70f;
+                            if (parentN == 3 || parentN == 5 || parentN == 7 || parentN == 11)
+                                need = 0.92f;
+                            else if (parentN == 2 || parentN == 4 || parentN == 8)
+                                need = 0.55f;
+                            return aHi < parentA * need;
+                        };
+                        auto acceptHigh = [&](int key) {
+                            seriesOn[key] = true;
+                            seriesHz[key] = keyHz[key - NMF_K0];
+                            seriesA[key] = (blend[key] > keyRawP[key - NMF_K0])
+                                ? blend[key] : keyRawP[key - NMF_K0];
+                            if (g_pickWhy) g_pickWhy->why[key] = 0;
+                        };
+                        for (int take = 0; take < 1; ++take) {
+                            int best = -1;
+                            float bestA = 0.68f;
+                            for (int hi = MID_END; hi < NMF_K1; ++hi) {
+                                if (seriesOn[hi]) continue;
+                                if ((hi > NMF_K0 && seriesOn[hi - 1]) || (hi + 1 < NMF_K1 && seriesOn[hi + 1]))
+                                    continue;
+                                const float aHi = keyObs[hi - NMF_K0];
+                                if (aHi < bestA) continue;
+                                const float left = (hi > NMF_K0) ? keyObs[hi - 1 - NMF_K0] : 0.0f;
+                                const float right = (hi + 1 < NMF_K1) ? keyObs[hi + 1 - NMF_K0] : 0.0f;
+                                if (aHi < left * 1.25f || aHi < right * 1.25f) continue;
+                                bool partner = false;
+                                for (int pk = MID_END; pk < NMF_K1 && !partner; ++pk) {
+                                    const int dist = (pk > hi) ? (pk - hi) : (hi - pk);
+                                    if (dist < 3 || dist > 9) continue;
+                                    const float ap = keyObs[pk - NMF_K0];
+                                    if (ap < 0.60f) continue;
+                                    const float pl = (pk > NMF_K0) ? keyObs[pk - 1 - NMF_K0] : 0.0f;
+                                    const float pr = (pk + 1 < NMF_K1) ? keyObs[pk + 1 - NMF_K0] : 0.0f;
+                                    if (ap < pl * 1.12f || ap < pr * 1.12f) continue;
+                                    partner = true;
+                                }
+                                if (!partner) continue;
+                                if (highBlocked(hi, aHi)) continue;
+                                int crowd = 0;
+                                for (int j = hi - 6; j <= hi + 6; ++j) {
+                                    if (j < MID_END || j >= NMF_K1 || j == hi) continue;
+                                    if (keyObs[j - NMF_K0] >= 0.45f) ++crowd;
+                                }
+                                if (crowd >= 4) continue;
+                                best = hi;
+                                bestA = aHi;
+                            }
+                            if (best < 0) break;
+                            acceptHigh(best);
+                        }
+                        // 和音の相方が無い C6 の突出峰は、従来どおり1音だけ戻す。
+                        {
+                            int best = -1;
+                            float bestA = 0.62f;
+                            for (int hi = O5_HI; hi < NMF_K1; ++hi) {
+                                if (seriesOn[hi]) continue;
+                                const float aHi = keyObs[hi - NMF_K0];
+                                if (aHi < bestA) continue;
+                                const float left = (hi > NMF_K0) ? keyObs[hi - 1 - NMF_K0] : 0.0f;
+                                const float right = (hi + 1 < NMF_K1) ? keyObs[hi + 1 - NMF_K0] : 0.0f;
+                                if (aHi < left * 1.30f || aHi < right * 1.30f) continue;
+                                const float fHi = keyHz[hi - NMF_K0];
+                                bool subordinate = false;
+                                for (int lo = NMF_K0; lo < hi && !subordinate; ++lo) {
+                                    if (!seriesOn[lo]) continue;
+                                    const float fLo = keyHz[lo - NMF_K0];
+                                    const int n = (int)floorf(fHi / fLo + 0.5f);
+                                    if (n < 2 || n > 12) continue;
+                                    if (centsDist(fHi, fLo * (float)n) > 34.0f) continue;
+                                    if (aHi < keyObs[lo - NMF_K0] * 0.75f) subordinate = true;
+                                }
+                                if (subordinate) continue;
+                                best = hi;
+                                bestA = aHi;
+                            }
+                            if (best >= 0) acceptHigh(best);
                         }
                     }
                 }

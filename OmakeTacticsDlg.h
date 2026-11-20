@@ -13,6 +13,8 @@ public:
 	BOOL CreateFrame();
 
 	void RequestDestroyWindow();
+	void StartShown();
+	BOOL RunIdleFrame();
 	BOOL HandleKeyMessage(MSG* pMsg);
 	void EnsureImeFocus();
 	BOOL Destroying() const { return m_destroying; }
@@ -82,6 +84,7 @@ protected:
 
 	otac::Game m_game;
 	BOOL m_gameOk = FALSE;
+	BOOL m_clientLive = FALSE;
 	BOOL m_destroying = FALSE;
 	BOOL m_swapShown = FALSE;
 	BOOL m_fg = TRUE;

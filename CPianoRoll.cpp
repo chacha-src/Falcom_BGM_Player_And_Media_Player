@@ -1858,11 +1858,15 @@ void CPianoRoll::UpdateNoteStates()
     }
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
-    // C6 より上で、短い窓に出ていない整数倍は倍音なので落とす。足し込みはしない。
+    // C6 より上で、短い窓に出ていない弱い整数倍だけ落とす。
+    // 全体の 45% 以上ある峰は聞こえている音なので残す。
     if (m_burstN > 0) {
         float bMax = 0.0f;
         for (int i = 0; i < m_burstN; ++i)
             if (m_burstAmp[i] > bMax) bMax = m_burstAmp[i];
+        float specMax = 0.0f;
+        for (int k = 0; k < KEY_COUNT; ++k)
+            if (blend[k] > specMax) specMax = blend[k];
         auto centsBetween = [](float a, float b) -> float {
             if (a <= 1.0f || b <= 1.0f) return 9999.0f;
             return 1731.234049066756f * fabsf(logf(a / b));
@@ -1880,8 +1884,9 @@ void CPianoRoll::UpdateNoteStates()
             return best;
         };
         for (int hi = 84; hi <= 100; ++hi) {
-            // 短い窓にほとんど出ていない整数倍だけ落とす。鳴っている高音は残す。
+            // 短い窓に無く、親より明らかに小さい整数倍だけ落とす。
             if (!picked[hi] || relShort(hi) >= 0.01f) continue;
+            if (specMax > 0.0f && blend[hi] >= specMax * 0.45f) continue;
             for (int lo = 28; lo < hi && picked[hi]; ++lo) {
                 if (!picked[lo] || ownPow[lo] < ownPow[hi] * 1.05f) continue;
                 const float ratio = PianoKey::KeyHz(hi) / PianoKey::KeyHz(lo);

@@ -340,6 +340,7 @@ protected:
 	//{{AFX_MSG(COggDlg)
 	virtual BOOL OnInitDialog();
 	afx_msg LRESULT OnDeferredHeavyStartup(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnKickIdle(WPARAM wParam, LPARAM lCount);
 	void DeferredHeavyStartupImpl();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
