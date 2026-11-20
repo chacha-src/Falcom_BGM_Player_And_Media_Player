@@ -2662,12 +2662,10 @@ static void FeetOrigin(const Map& m, int& sx, int& sz, int& sL)
 	}
 }
 
-static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
+static int BfsFeetFrom(const Map& m, int sx, int sz, int sL, BYTE seen[LAY_N][MAPN][MAPN])
 {
 	memset(seen, 0, sizeof(BYTE) * LAY_N * MAPN * MAPN);
-	int sx, sz, sL;
-	FeetOrigin(m, sx, sz, sL);
-	if (sL < 0) return 0;
+	if (!Map::In(sx, sz) || sL < 0 || sL >= LAY_N || !CellStand(m.c[sz][sx], sL)) return 0;
 	int qh = 0, qt = 0, n = 0;
 	if (qt < LAY_Q) { g_layQx[qt] = sx; g_layQz[qt] = sz; g_layQL[qt] = sL; qt++; }
 	seen[sL][sz][sx] = 1;
@@ -2690,6 +2688,13 @@ static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
 		}
 	}
 	return n;
+}
+
+static int BfsFeet(const Map& m, BYTE seen[LAY_N][MAPN][MAPN])
+{
+	int sx, sz, sL;
+	FeetOrigin(m, sx, sz, sL);
+	return BfsFeetFrom(m, sx, sz, sL, seen);
 }
 
 static int FeetLinked(const Map& m)
@@ -9929,20 +9934,19 @@ static void AnchorSpiralUnits(Battle& b)
 		}
 		int best = 99999, bx = -1, bz = -1, bL = 0;
 		for (int pass = 0; pass < 2 && bx < 0; pass++) {
-			for (int rad = 0; rad <= 28 && bx < 0; rad++) {
-				for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
-					if (max(abs(dx), abs(dz)) != rad) continue;
-					int x = gx + dx, z = gz + dz;
-					if (!Map::In(x, z)) continue;
-					int nL = CellLayN(b.map.At(x, z));
-					for (int L = 0; L < nL; L++) {
-						if (!seen[L][z][x]) continue;
-						if (pass == 0 && lockH >= 0 && abs(LayerHt(b.map.At(x, z), L) - lockH) > 4) continue;
-						u.deck = L;
-						if (!FootFits(b, i, x, z)) continue;
-						int rank = abs(dx) + abs(dz);
-						if (rank < best) { best = rank; bx = x; bz = z; bL = L; }
-					}
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				int nL = CellLayN(b.map.At(x, z));
+				for (int L = 0; L < nL; L++) {
+					if (!seen[L][z][x]) continue;
+					if (pass == 0 && lockH >= 0 && abs(LayerHt(b.map.At(x, z), L) - lockH) > 4) continue;
+					int rank = abs(x - gx) + abs(z - gz);
+					if (rank >= best) continue;
+					u.deck = L;
+					u.x = x; u.z = z;
+					int fit = FootFits(b, i, x, z) && DeckSeen(b, i, seen);
+					u.x = -1; u.z = -1;
+					if (!fit) continue;
+					if (rank < best) { best = rank; bx = x; bz = z; bL = L; }
 				}
 			}
 		}
@@ -9953,6 +9957,387 @@ static void AnchorSpiralUnits(Battle& b)
 			u.x = ox; u.z = oz; u.deck = od;
 		}
 		b.RebuildOcc();
+	}
+}
+
+static void SoloPlain(Cell& c, int h)
+{
+	int hh = Clampi(h, 1, MAXH_SPIRAL);
+	c.t = T_PLAIN;
+	c.h = (WORD)hh;
+	c.prop = PK_NONE;
+	if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+	c.nLay = 1;
+}
+
+static int CellBusy(const Battle& b, int x, int z, int self)
+{
+	if (!Map::In(x, z)) return 1;
+	int nL = CellLayN(b.map.At(x, z));
+	for (int L = 0; L < nL; L++) {
+		int o = b.UnitAt(x, z, L);
+		if (o >= 0 && o != self) return 1;
+	}
+	return 0;
+}
+
+static int SeenTouch(const Map& m, const BYTE seen[LAY_N][MAPN][MAPN], int x, int z, int h)
+{
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int k = 0; k < 4; k++) {
+		int nx = x + dx[k], nz = z + dz[k];
+		if (!Map::In(nx, nz)) continue;
+		int nL = CellLayN(m.c[nz][nx]);
+		for (int L = 0; L < nL; L++) {
+			if (!seen[L][nz][nx]) continue;
+			if (SameStep(LayerHt(m.c[nz][nx], L), h, 2)) return 1;
+		}
+	}
+	return 0;
+}
+
+static int SpanBand(const Map& m, int x, int z, int span, int refH, int* outH)
+{
+	if (span < 1) span = 1;
+	if (span > 5) span = 5;
+	if (!Map::In(x, z) || !Map::In(x + span - 1, z + span - 1)) return 0;
+	int hmin = 99999, hmax = -99999;
+	for (int dz = 0; dz < span; dz++) for (int dx = 0; dx < span; dx++) {
+		const Cell& c = m.c[z + dz][x + dx];
+		int L = MatchDeckAt(c, refH, 0);
+		if (!CellStand(c, L)) return 0;
+		int h = LayerHt(c, L);
+		if (!SameStep(h, refH, 2)) return 0;
+		if (h < hmin) hmin = h;
+		if (h > hmax) hmax = h;
+	}
+	if (!SameStep(hmin, hmax, 2)) return 0;
+	if (outH) *outH = hmin;
+	return 1;
+}
+
+// 届かない足場まで、見た床を潰さず一段ずつ坂を足す。螺旋の床の高さは変えない。
+static int RampUnit(Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN])
+{
+	if (MapIsSpiral(b.map)) return 0;
+	Unit& u = b.u[ui];
+	if (!Map::In(u.x, u.z)) return 0;
+	int s = UnitSpan(u);
+	if (s < 1) s = 1;
+	int uL = u.deck;
+	if (uL < 0 || uL >= LAY_N) uL = 0;
+	const Cell& org = b.map.At(u.x, u.z);
+	int hU = LayerHt(org, LayerOn(org, uL) ? uL : 0);
+	static BYTE vis[MAPN][MAPN];
+	static int prev[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	memset(vis, 0, sizeof(vis));
+	int qh = 0, qt = 0;
+	qx[qt] = u.x; qz[qt] = u.z; qt++;
+	vis[u.z][u.x] = 1;
+	prev[u.z][u.x] = -1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int tx = -1, tz = -1, tL = 0;
+	while (qh < qt && tx < 0) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4 && tx < 0; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+			vis[nz][nx] = 1;
+			prev[nz][nx] = z * MAPN + x;
+			for (int L = 0; L < LAY_N; L++) if (seen[L][nz][nx]) { tx = nx; tz = nz; tL = L; break; }
+			if (tx >= 0) break;
+			if (qt < MAPN * MAPN) { qx[qt] = nx; qz[qt] = nz; qt++; }
+		}
+	}
+	if (tx < 0) return 0;
+	static int seqX[MAPN * 2], seqZ[MAPN * 2];
+	int ns = 0;
+	int cx = tx, cz = tz;
+	while (ns < MAPN * 2) {
+		seqX[ns] = cx; seqZ[ns] = cz; ns++;
+		if (cx == u.x && cz == u.z) break;
+		int p = prev[cz][cx];
+		if (p < 0) break;
+		cx = p % MAPN; cz = p / MAPN;
+	}
+	if (ns < 3 || ns > 18) return 0;
+	int hR = LayerHt(b.map.At(tx, tz), tL);
+	int mid = ns - 2;
+	if (abs(hU - hR) > mid * 2) return 0;
+	int h = hR;
+	int painted = 0;
+	int rad = s / 2;
+	for (int i = 1; i <= mid; i++) {
+		int dh = hU - h;
+		if (dh > 2) dh = 2;
+		if (dh < -2) dh = -2;
+		h = Clampi(h + dh, 1, MAXH_SPIRAL);
+		for (int oz = -rad; oz <= rad; oz++) for (int ox = -rad; ox <= rad; ox++) {
+			int x = seqX[i] + ox, z = seqZ[i] + oz;
+			if (!Map::In(x, z)) continue;
+			if (x >= u.x && x < u.x + s && z >= u.z && z < u.z + s) continue;
+			int held = 0;
+			for (int L = 0; L < LAY_N; L++) if (seen[L][z][x]) { held = 1; break; }
+			if (held || CellBusy(b, x, z, ui)) continue;
+			Cell& c = b.map.c[z][x];
+			if (c.t == T_DOOR) continue;
+			int beforeH = (int)c.h, beforeT = (int)c.t;
+			SoloPlain(c, h);
+			if ((int)c.h != beforeH || (int)c.t != beforeT) painted = 1;
+		}
+	}
+	return painted;
+}
+
+static int PlaceOnSeen(Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN], const BYTE mask[MAPN][MAPN], int preferX, int preferZ, int spanNeed)
+{
+	Unit& u = b.u[ui];
+	int ox = u.x, oz = u.z, od = u.deck;
+	int s = UnitSpan(u);
+	if (s < 1) s = 1;
+	u.x = -1; u.z = -1;
+	b.RebuildOcc();
+	int best = 999999, bx = -1, bz = -1, bL = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!Map::In(x + s - 1, z + s - 1)) continue;
+		if (mask && !mask[z][x]) continue;
+		int rank0 = abs(x - preferX) + abs(z - preferZ);
+		if (rank0 >= best) continue;
+		int nL = CellLayN(b.map.At(x, z));
+		for (int L = 0; L < nL; L++) {
+			if (!seen[L][z][x]) continue;
+			if (spanNeed > 1 && !SpanBand(b.map, x, z, spanNeed, LayerHt(b.map.At(x, z), L), 0)) continue;
+			u.deck = L;
+			u.x = x; u.z = z;
+			int fit = FootFits(b, ui, x, z) && DeckSeen(b, ui, seen);
+			int leave = fit && FootCanLeave(b, ui, x, z);
+			u.x = -1; u.z = -1;
+			if (!fit) continue;
+			int rank = abs(x - preferX) + abs(z - preferZ) + (leave ? 0 : 4000);
+			if (rank < best) { best = rank; bx = x; bz = z; bL = L; }
+		}
+	}
+	if (bx < 0) {
+		u.x = ox; u.z = oz; u.deck = od;
+		b.RebuildOcc();
+		return 0;
+	}
+	u.x = bx; u.z = bz; u.deck = bL;
+	b.RebuildOcc();
+	return 1;
+}
+
+static void PlantPad(Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN], int h, int ax, int az)
+{
+	Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	if (s < 1) s = 1;
+	int deep = s + 1;
+	int spiral = MapIsSpiral(b.map);
+	int ox = u.x, oz = u.z, od = u.deck;
+	u.x = -1; u.z = -1;
+	b.RebuildOcc();
+	int bx = -1, bz = -1, best = 999999;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!Map::In(x + s - 1, z + deep - 1)) continue;
+		int ok = 1, touch = 0;
+		for (int dz = 0; dz < deep && ok; dz++) for (int dx = 0; dx < s; dx++) {
+			int cx = x + dx, cz = z + dz;
+			if (CellBusy(b, cx, cz, ui)) { ok = 0; break; }
+			const Cell& c = b.map.At(cx, cz);
+			int empty = (c.t == T_VOID || c.t == T_CHASM);
+			if (spiral && !empty) {
+				if (c.nLay >= 2) { ok = 0; break; }
+				if (CellStand(c, 0) && !SameStep((int)c.h, h, 2)) { ok = 0; break; }
+			}
+			if (SeenTouch(b.map, seen, cx, cz, h)) touch = 1;
+		}
+		if (!ok || !touch) continue;
+		int rank = abs(x - ax) + abs(z - az);
+		if (rank < best) { best = rank; bx = x; bz = z; }
+	}
+	if (bx < 0) {
+		u.x = ox; u.z = oz; u.deck = od;
+		b.RebuildOcc();
+		return;
+	}
+	for (int dz = 0; dz < deep; dz++) for (int dx = 0; dx < s; dx++) {
+		int cx = bx + dx, cz = bz + dz;
+		Cell& c = b.map.c[cz][cx];
+		int L = MatchDeckAt(c, h, 0);
+		if (CellStand(c, L) && SameStep(LayerHt(c, L), h, 2) && c.nLay < 2) continue;
+		SoloPlain(c, h);
+	}
+	u.x = bx; u.z = bz; u.deck = 0;
+	b.RebuildOcc();
+}
+
+static void FloodSpan(const Map& m, int span, int sx, int sz, int refH, BYTE out[MAPN][MAPN])
+{
+	static short spanH[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	memset(out, 0, MAPN * MAPN);
+	int h0 = refH;
+	if (!SpanBand(m, sx, sz, span, refH, &h0)) return;
+	int qh = 0, qt = 0;
+	out[sz][sx] = 1;
+	spanH[sz][sx] = (short)h0;
+	qx[qt] = sx; qz[qt] = sz; qt++;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		int h = (int)spanH[z][x];
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || out[nz][nx]) continue;
+			int nh = h;
+			if (!SpanBand(m, nx, nz, span, h, &nh)) continue;
+			out[nz][nx] = 1;
+			spanH[nz][nx] = (short)nh;
+			if (qt < MAPN * MAPN) { qx[qt] = nx; qz[qt] = nz; qt++; }
+		}
+	}
+}
+
+static int PickFootSeed(Battle& b, int& sx, int& sz, int& sL)
+{
+	sx = b.map.nP > 0 ? b.map.pStartX[0] : MAPN / 2;
+	sz = b.map.nP > 0 ? b.map.pStartZ[0] : MAPN / 2;
+	sL = 0;
+	int pUi = -1;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
+		pUi = i;
+		break;
+	}
+	if (pUi >= 0 && Map::In(b.u[pUi].x, b.u[pUi].z)) {
+		Unit& p = b.u[pUi];
+		const Cell& c = b.map.At(p.x, p.z);
+		int curL = (p.deck >= 0 && p.deck < LAY_N) ? p.deck : 0;
+		int curH = LayerHt(c, LayerOn(c, curL) ? curL : 0);
+		if (!CellStand(c, curL)) {
+			int bestL = -1, bestDh = 99999;
+			int nL = CellLayN(c);
+			for (int L = 0; L < nL; L++) {
+				if (!CellStand(c, L)) continue;
+				int dh = abs(LayerHt(c, L) - curH);
+				if (dh < bestDh) { bestDh = dh; bestL = L; }
+			}
+			if (bestL >= 0) { p.deck = bestL; curL = bestL; }
+		}
+		sx = p.x; sz = p.z; sL = curL;
+	}
+	return pUi;
+}
+
+static void FillFootSeen(Battle& b, int pUi, BYTE seen[LAY_N][MAPN][MAPN])
+{
+	static BYTE alt[LAY_N][MAPN][MAPN];
+	int nMain = BfsFeet(b.map, seen);
+	if (pUi < 0) return;
+	Unit& p = b.u[pUi];
+	int L = (p.deck >= 0 && p.deck < LAY_N) ? p.deck : 0;
+	if (!Map::In(p.x, p.z) || !CellStand(b.map.At(p.x, p.z), L)) return;
+	int nAlt = BfsFeetFrom(b.map, p.x, p.z, L, alt);
+	if (nAlt > nMain) memcpy(seen, alt, sizeof(alt));
+}
+
+static int ComponentHeight(const Battle& b, int pUi, const BYTE seen[LAY_N][MAPN][MAPN], int ax, int az)
+{
+	if (pUi >= 0 && Map::In(b.u[pUi].x, b.u[pUi].z) && DeckSeen(b, pUi, seen)) {
+		const Cell& c = b.map.At(b.u[pUi].x, b.u[pUi].z);
+		int L = b.u[pUi].deck;
+		if (L < 0 || L >= LAY_N) L = 0;
+		return LayerHt(c, LayerOn(c, L) ? L : 0);
+	}
+	int best = 999999, h = 2;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = abs(x - ax) + abs(z - az);
+		if (d >= best) continue;
+		int nL = CellLayN(b.map.At(x, z));
+		for (int L = 0; L < nL; L++) {
+			if (!seen[L][z][x]) continue;
+			best = d;
+			h = LayerHt(b.map.At(x, z), L);
+			break;
+		}
+	}
+	return h;
+}
+
+// 配置後の全味方と全敵を、一番広い歩行成分の足跡へ載せる。届かない座標へは戻さない。
+static void AnchorAllUnits(Battle& b)
+{
+	static BYTE seen[LAY_N][MAPN][MAPN];
+	int sx = 0, sz = 0, sL = 0;
+	for (int round = 0; round < 4; round++) {
+		int pUi = PickFootSeed(b, sx, sz, sL);
+		FillFootSeen(b, pUi, seen);
+		if (pUi >= 0 && Map::In(b.u[pUi].x, b.u[pUi].z)) { sx = b.u[pUi].x; sz = b.u[pUi].z; }
+		int hP = ComponentHeight(b, pUi, seen, sx, sz);
+		int miss = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive) continue;
+			if (Map::In(u.x, u.z) && DeckSeen(b, i, seen)) continue;
+			miss = 1;
+			int px = u.x, pz = u.z;
+			if (round < 2 && RampUnit(b, i, seen)) continue;
+			if (PlaceOnSeen(b, i, seen, 0, px, pz, 0)) continue;
+			PlantPad(b, i, seen, hP, sx, sz);
+		}
+		if (!miss) break;
+	}
+	int pUi = PickFootSeed(b, sx, sz, sL);
+	FillFootSeen(b, pUi, seen);
+	int px = sx, pz = sz;
+	if (pUi >= 0 && Map::In(b.u[pUi].x, b.u[pUi].z)) { px = b.u[pUi].x; pz = b.u[pUi].z; }
+	int hP = ComponentHeight(b, pUi, seen, px, pz);
+	static BYTE mask[MAPN][MAPN];
+	for (int span = 2; span <= 5; span++) {
+		int seedX = -1, seedZ = -1, seedH = hP, bestD = 999999;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			int nL = CellLayN(b.map.At(x, z));
+			for (int L = 0; L < nL; L++) {
+				if (!seen[L][z][x]) continue;
+				int h = LayerHt(b.map.At(x, z), L);
+				if (!SpanBand(b.map, x, z, span, h, 0)) continue;
+				int d = abs(x - px) + abs(z - pz);
+				if (!SameStep(h, hP, 2)) d += 8000;
+				if (d < bestD) { bestD = d; seedX = x; seedZ = z; seedH = h; }
+				break;
+			}
+		}
+		if (seedX < 0) {
+			for (int i = 0; i < b.nUnits; i++) {
+				if (!b.u[i].alive || UnitSpan(b.u[i]) != span) continue;
+				PlantPad(b, i, seen, hP, px, pz);
+			}
+			FillFootSeen(b, pUi, seen);
+			continue;
+		}
+		FloodSpan(b.map, span, seedX, seedZ, seedH, mask);
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || UnitSpan(u) != span) continue;
+			int holdL = (u.deck >= 0 && u.deck < LAY_N) ? u.deck : 0;
+			int on = Map::In(u.x, u.z) && mask[u.z][u.x] && SpanBand(b.map, u.x, u.z, span, LayerHt(b.map.At(u.x, u.z), holdL), 0);
+			if (on && DeckSeen(b, i, seen)) continue;
+			int ox = u.x, oz = u.z;
+			if (!PlaceOnSeen(b, i, seen, mask, ox, oz, span)) PlantPad(b, i, seen, hP, px, pz);
+		}
+	}
+	pUi = PickFootSeed(b, sx, sz, sL);
+	FillFootSeen(b, pUi, seen);
+	px = sx; pz = sz;
+	if (pUi >= 0 && Map::In(b.u[pUi].x, b.u[pUi].z)) { px = b.u[pUi].x; pz = b.u[pUi].z; }
+	hP = ComponentHeight(b, pUi, seen, px, pz);
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!b.u[i].alive) continue;
+		if (Map::In(b.u[i].x, b.u[i].z) && DeckSeen(b, i, seen)) continue;
+		int ox = b.u[i].x, oz = b.u[i].z;
+		if (!PlaceOnSeen(b, i, seen, 0, ox, oz, 0)) PlantPad(b, i, seen, hP, px, pz);
 	}
 }
 
@@ -10441,6 +10826,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		}
 	}
 	AnchorSpiralUnits(b);
+	AnchorAllUnits(b);
 	if (b.sweep == TAC_VAR_SCAR) {
 		for (int i = 0; i < b.nUnits; i++) {
 			Unit& u = b.u[i];
