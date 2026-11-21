@@ -5412,6 +5412,9 @@ BOOL CAnalyzerDlg::OnEraseBkgnd(CDC* pDC)
 
 void CAnalyzerDlg::OnTimer(UINT_PTR nIDEvent)
 {
+	extern BOOL IsOmakeTacticsOpen();
+	if (IsOmakeTacticsOpen())
+		return;
 	if (nIDEvent == 2) {
 		if (m_soft3dApiDemo)
 			KickUiPresent();

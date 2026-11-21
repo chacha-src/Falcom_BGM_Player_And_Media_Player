@@ -24,6 +24,7 @@ enum { LAY_Q = MAPN * MAPN * LAY_N };
 static BYTE g_laySeen[LAY_N][MAPN][MAPN];
 static short g_layDist[LAY_N][MAPN][MAPN];
 static short g_stepDist[LAY_N][MAPN][MAPN];
+static BYTE g_mineChip[MAPN][MAPN];
 static int g_layQx[LAY_Q], g_layQz[LAY_Q], g_layQL[LAY_Q], g_layQd[LAY_Q], g_layNext[LAY_Q];
 static void ClearDecks(Cell& c);
 
@@ -4430,8 +4431,23 @@ int PromoteLevel(int tier)
 int ExpToNext(int lv)
 {
 	if (lv < 1) lv = 1;
-	if (lv >= TAC_LV_MAX) return 999999;
-	return 70 + lv * 10 + lv * lv / 10;
+	if (lv > TAC_LV_MAX) return 999999;
+	int base = 70 + lv * 10 + lv * lv / 10;
+	// 3次職（Lv35）までは従来どおり。そこから必要量を放射状に開く。
+	// 遅れているLv110帯は1ステージでおよそ2〜3。敵の伸び（約1.6）は追い越さない側。
+	if (lv <= 35) return base;
+	double t = (double)(lv - 35) / 30.0;
+	double e = (double)base * (1.0 + pow(t, 1.55));
+	if (e < (double)base) e = (double)base;
+	if (e > 2000000000.0) e = 2000000000.0;
+	return (int)(e + 0.5);
+}
+unsigned __int64 ExpToNextU(unsigned __int64 lv)
+{
+	if (lv < 1ull) lv = 1ull;
+	if (lv >= ~0ull) return 0ull;
+	if (lv > (unsigned __int64)TAC_LV_MAX) return 2000000000ull;
+	return (unsigned __int64)ExpToNext((int)lv);
 }
 void StageText(int stage, wchar_t* out, int cap)
 {
@@ -4470,6 +4486,26 @@ const wchar_t* TacNum(int v)
 	int i = 0;
 	if (neg && i < 31) out[i++] = L'-';
 	while (n > 0 && i < 31) out[i++] = tmp[--n];
+	out[i] = 0;
+	return out;
+}
+const wchar_t* TacNumU64(unsigned __int64 v)
+{
+	static wchar_t buf[8][40];
+	static int slot;
+	wchar_t* out = buf[slot & 7];
+	slot++;
+	wchar_t tmp[40];
+	int n = 0, dig = 0;
+	if (v == 0) tmp[n++] = L'0';
+	while (v && n < 38) {
+		if (dig && (dig % 3) == 0) tmp[n++] = L',';
+		tmp[n++] = (wchar_t)(L'0' + (int)(v % 10ull));
+		v /= 10ull;
+		dig++;
+	}
+	int i = 0;
+	while (n > 0 && i < 39) out[i++] = tmp[--n];
 	out[i] = 0;
 	return out;
 }
@@ -4899,6 +4935,51 @@ static const wchar_t* ImportLocName(int model)
 }
 
 enum { IMP_CAP = 2048, POOL_CAP = 8192, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
+static int s_playMesh[IMP_CAP];
+static int s_playN = -1;
+static void BuildPlayMesh()
+{
+	if (s_playN >= 0) return;
+	s_playN = 0;
+	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	for (int i = 0; i < nImp && s_playN < IMP_CAP; i++) {
+		const wchar_t* nm = kImportName[i];
+		if (!nm || !nm[0] || wcsncmp(nm, L"Hum", 3) == 0) continue;
+		int ok = 0;
+		if (wcsncmp(nm, L"Sum", 3) == 0) ok = 1;
+		else if (wcsstr(nm, L"Orc")) ok = 1;
+		else if (!wcscmp(nm, L"ScholarSwordsman") || !wcscmp(nm, L"MountainMan") || !wcscmp(nm, L"SheetGhost")
+			|| !wcscmp(nm, L"FattyImp") || !wcscmp(nm, L"BrazenMinotaur") || !wcscmp(nm, L"Drakebearer")
+			|| !wcscmp(nm, L"Treant") || !wcscmp(nm, L"TrenchNagaSiren") || !wcscmp(nm, L"Wyvern") || !wcscmp(nm, L"BelfryWyvern"))
+			ok = 1;
+		if (!ok) continue;
+		s_playMesh[s_playN++] = i;
+	}
+}
+int TacPlayMeshN()
+{
+	BuildPlayMesh();
+	return s_playN;
+}
+int TacPlayMeshPack(int i)
+{
+	BuildPlayMesh();
+	if (s_playN < 1) return 0;
+	int n = s_playN;
+	int ix = i % n;
+	if (ix < 0) ix += n;
+	return s_playMesh[ix];
+}
+int TacPlayMeshFind(int pack)
+{
+	BuildPlayMesh();
+	for (int i = 0; i < s_playN; i++) if (s_playMesh[i] == pack) return i;
+	return -1;
+}
+const wchar_t* TacPlayMeshLabel(int pack)
+{
+	return ImportLocName(pack);
+}
 static MonsterDef s_monImp[IMP_CAP];
 static int s_monImpOk = 0;
 static int s_poolN[4];
@@ -5045,9 +5126,9 @@ static int AilmentFor(const wchar_t* n, int i)
 		return SKL_E_CRUSH;
 	int k = i % 4;
 	if (k == 0) return SKL_E_SPIT;
-	if (k == 1) return SKL_E_CRUSH;
+	if (k == 1) return SKL_E_DRAIN;
 	if (k == 2) return SKL_DARKNESS;
-	return -1;
+	return SKL_E_VENOM;
 }
 static void EnsureMonsters()
 {
@@ -5134,8 +5215,11 @@ static void EnsureMonsters()
 		if (d.magAttack) d.skills[0] = SKL_FIRE;
 		else if (d.attackStyle == AS_SHOOT) d.skills[0] = SKL_SNIPE;
 		else if (d.moveType == MV_FLY) d.skills[0] = SKL_E_DRAIN;
-		else d.skills[0] = SKL_E_CRUSH;
-		d.skills[1] = (i % 4 == 0) ? SKL_E_VENOM : -1;
+		else {
+			static const int kMelee[4] = { SKL_E_CRUSH, SKL_E_DRAIN, SKL_CLEAVE, SKL_E_VENOM };
+			d.skills[0] = kMelee[i % 4];
+		}
+		d.skills[1] = (i % 4 == 0) ? SKL_E_VENOM : ((i % 4 == 2) ? SKL_E_SPIT : -1);
 		d.skills[2] = -1;
 		{
 			int ail = AilmentFor(nm, i);
@@ -5603,6 +5687,11 @@ int CharLearnAt(const CharData& c, int lv)
 
 int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learnedMax)
 {
+	if (c.lv >= TAC_LV_MAX) {
+		for (int s = 0; s < S_COUNT; s++) gains[s] = 0;
+		if (learned && learnedMax > 0) return 0;
+		return -1;
+	}
 	const ClassDef& cd = ClassInfo(c.cls);
 	int total = 0;
 	for (int s = 0; s < S_COUNT; s++) {
@@ -5842,6 +5931,17 @@ static void JobSlotSet(CharData& c, int i, int v)
 	if (i < 0 || i >= JOB_STEP_N) return;
 	if (i < JOB_PATH_N) { c.jobPath[i] = v; return; }
 	c.skillPad[i - JOB_PATH_N] = (v < 0) ? 0 : v;
+}
+int RosterHoldsClass(const CharData* roster, int cls)
+{
+	if (!roster || !TacHidClass(cls)) return 0;
+	for (int i = 0; i < MAX_ROSTER; i++) {
+		const CharData& c = roster[i];
+		if (!c.used) continue;
+		if (c.cls == cls || c.trialFrom == cls) return 1;
+		for (int s = 0; s < JOB_STEP_N; s++) if (JobSlot(c, s) == cls) return 1;
+	}
+	return 0;
 }
 void JobPathClear(CharData& c)
 {
@@ -6229,7 +6329,9 @@ int UnitMove(const Unit& u) { return UnitStat(u, S_MOV); }
 int UnitJump(const Unit& u) { return UnitStat(u, S_JMP); }
 int UnitMoveType(const Unit& u)
 {
-	int mt = IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType;
+	int mt;
+	if (UnitIsHumanFoe(u)) mt = ClassInfo(u.ch.cls).moveType;
+	else mt = IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType;
 	if (UnitHasPas(u, PAS_FLY)) mt = MV_FLY;
 	return mt;
 }
@@ -6306,6 +6408,7 @@ int UnitMotionStyle(const Unit& u, int skill)
 int UnitNameTx(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).nameTx : -1; }
 const wchar_t* UnitName(const Unit& u)
 {
+	if (UnitIsHumanFoe(u)) return HumFoeTitle(u);
 	if (!IsMon(u)) return u.ch.name;
 	const MonsterDef& md = MonsterInfo(u.monster);
 	if (md.look == LK_MESH) return MonsterLabel(u.monster);
@@ -6337,6 +6440,7 @@ void UnitHeldText(const Unit& u, wchar_t* out, int cap)
 	out[0] = 0;
 	wchar_t luck[160] = L"";
 	if (UnitIsLucky(u)) wcsncpy_s(luck, TT(TX_BT_LUCKY), _TRUNCATE);
+	else if (UnitIsHumanFoe(u)) wcsncpy_s(luck, TT(TX_BT_HUMAN), _TRUNCATE);
 	wchar_t act[160] = L"", pas[80] = L"", cr[160] = L"";
 	int seen[96];
 	int nSeen = 0;
@@ -6639,6 +6743,17 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 			u.ch.stat[S_MAG] = u.ch.stat[S_MAG] * 108 / 100;
 		}
 	}
+	{
+		// 序盤は少し厚い。レベルが進むほど攻撃の伸びを防御が追い、高ステージで素通りしない。
+		int defMul = 8 + (u.ch.lv > 1 ? (u.ch.lv - 1) / 16 : 0);
+		if (defMul > 22) defMul = 22;
+		u.ch.stat[S_DEF] *= defMul;
+		u.ch.stat[S_RES] *= defMul;
+	}
+	if (boss) {
+		u.ch.stat[S_DEF] = u.ch.stat[S_DEF] * 5 / 3;
+		u.ch.stat[S_RES] = u.ch.stat[S_RES] * 5 / 3;
+	}
 	for (int i = 0; i < 3; i++) {
 		int sk = md.skills[i];
 		if (sk < 0) continue;
@@ -6675,6 +6790,359 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		}
 	}
 }
+
+static int StageEnemyLevel(int stage);
+static int PickClassic(int stage, Rng& r);
+static bool PlaceFoot(Battle& b, int ui, int gx, int gz, int lockH = -1);
+
+enum {
+	HF_SPIRIT, HF_GREATSPIRIT, HF_SPIRITKING, HF_FALLEN,
+	HF_KNIGHT, HF_PALADIN, HF_DARKKNIGHT, HF_FALLENKNIGHT,
+	HF_THIEF, HF_GREATTHIEF, HF_NINJA,
+	HF_WITCH, HF_ARCHWITCH, HF_DEMONLORD,
+	HF_ADV, HF_KING, HF_WAYFARER,
+	HF_MAID, HF_BUTLER, HF_STUDENT,
+	HF_DANCER, HF_BARD, HF_PRIEST, HF_HIGHPRIEST,
+	HF_PIRATE, HF_CAPTAIN, HF_SCHOLAR, HF_SAGE,
+	HF_MERC, HF_HUNTER, HF_ASSASSIN, HF_QUEEN, HF_PRINCESS,
+	HF_NOBLE, HF_WARRIOR, HF_SWORD, HF_SORCERER, HF_NECRO,
+	HF_NUN, HF_MONK, HF_SCOUT, HF_LANCER, HF_BERSERK, HF_ALCHEM,
+	HF_KUNOICHI, HF_SAMURAI, HF_RONIN, HF_SAINT, HF_DARKMAGE, HF_DRAGOON,
+	HF_VAGABOND, HF_JESTER, HF_DUELIST, HF_RANGER, HF_TEMPLAR, HF_WARLOCK,
+	HF_SHAMAN, HF_CHAMPION, HF_WARLORD, HF_EMPRESS, HF_PRINCE,
+	HF_FENCER, HF_BANDIT, HF_SNIPER, HF_GUARDIAN, HF_SPELLBLADE,
+	HF_ORACLE, HF_HERETIC, HF_APOSTATE, HF_BRAWLER, HF_CORSAIR,
+	HF_INQUISITOR, HF_GEOMANCER, HF_COUNTESS, HF_BARON, HF_PROPHET,
+	HF_SENTINEL, HF_ARTISAN, HF_HERBAL, HF_GLADIATOR,
+	HF_N
+};
+
+static const wchar_t* HfName(const wchar_t* ja, const wchar_t* en, const wchar_t* ko, const wchar_t* zh)
+{
+	return LangPick14(ja, en, en, en, en, ko, zh, en, en, en, en, en, en, en);
+}
+
+const wchar_t* HumFoeTitle(const Unit& u)
+{
+	int t = u.ch.kills;
+	if (t < 0 || t >= HF_N) t = HF_ADV;
+	switch (t) {
+	case HF_SPIRIT: return LangPick14(L"精霊", L"Spirit", L"Esprit", L"Spirito", L"Espíritu", L"정령", L"精灵", L"روح", L"Дух", L"Geist", L"Espírito", L"Geest", L"Duch", L"Ruh");
+	case HF_GREATSPIRIT: return LangPick14(L"大精霊", L"Great Spirit", L"Grand esprit", L"Grande spirito", L"Gran espíritu", L"대정령", L"大精灵", L"روح عظيم", L"Великий дух", L"Großer Geist", L"Grande espírito", L"Grote geest", L"Wielki duch", L"Büyük ruh");
+	case HF_SPIRITKING: return LangPick14(L"精霊王", L"Spirit King", L"Roi des esprits", L"Re degli spiriti", L"Rey espíritu", L"정령왕", L"精灵王", L"ملك الأرواح", L"Царь духов", L"Geisterkönig", L"Rei espírito", L"Geestkoning", L"Król duchów", L"Ruh kralı");
+	case HF_FALLEN: return LangPick14(L"堕天使", L"Fallen Angel", L"Ange déchu", L"Angelo caduto", L"Ángel caído", L"타락천사", L"堕天使", L"ملاك ساقط", L"Падший ангел", L"Gefallener Engel", L"Anjo caído", L"Gevallen engel", L"Upadły anioł", L"Düşmüş melek");
+	case HF_KNIGHT: return LangPick14(L"騎士", L"Knight", L"Chevalier", L"Cavaliere", L"Caballero", L"기사", L"骑士", L"فارس", L"Рыцарь", L"Ritter", L"Cavaleiro", L"Ridder", L"Rycerz", L"Şövalye");
+	case HF_PALADIN: return LangPick14(L"聖騎士", L"Paladin", L"Paladin", L"Paladino", L"Paladín", L"성기사", L"圣骑士", L"حارس مقدس", L"Паладин", L"Paladin", L"Paladino", L"Paladijn", L"Paladyn", L"Paladin");
+	case HF_DARKKNIGHT: return LangPick14(L"黒騎士", L"Dark Knight", L"Chevalier noir", L"Cavaliere nero", L"Caballero oscuro", L"흑기사", L"黑骑士", L"فارس أسود", L"Тёмный рыцарь", L"Schwarzer Ritter", L"Cavaleiro negro", L"Zwarte ridder", L"Czarny rycerz", L"Kara şövalye");
+	case HF_FALLENKNIGHT: return LangPick14(L"落ちぶれ騎士", L"Fallen Knight", L"Chevalier déchu", L"Cavaliere decaduto", L"Caballero caído", L"몰락한 기사", L"落魄骑士", L"فارس ساقط", L"Падший рыцарь", L"Gefallener Ritter", L"Cavaleiro caído", L"Gevallen ridder", L"Upadły rycerz", L"Düşmüş şövalye");
+	case HF_THIEF: return LangPick14(L"盗賊", L"Thief", L"Voleur", L"Ladro", L"Ladrón", L"도적", L"盗贼", L"لص", L"Вор", L"Dieb", L"Ladrão", L"Dief", L"Złodziej", L"Hırsız");
+	case HF_GREATTHIEF: return LangPick14(L"大盗賊", L"Master Thief", L"Grand voleur", L"Gran ladro", L"Gran ladrón", L"대도적", L"大盗贼", L"لص كبير", L"Великий вор", L"Meisterdieb", L"Mestre ladrão", L"Meesterdief", L"Wielki złodziej", L"Usta hırsız");
+	case HF_NINJA: return LangPick14(L"落ちぶれ忍者", L"Fallen Ninja", L"Ninja déchu", L"Ninja decaduto", L"Ninja caído", L"몰락한 닌자", L"落魄忍者", L"نينجا ساقط", L"Падший ниндзя", L"Gefallener Ninja", L"Ninja caído", L"Gevallen ninja", L"Upadły ninja", L"Düşmüş ninja");
+	case HF_WITCH: return LangPick14(L"魔女", L"Witch", L"Sorcière", L"Strega", L"Bruja", L"마녀", L"魔女", L"ساحرة", L"Ведьма", L"Hexe", L"Bruxa", L"Heks", L"Wiedźma", L"Cadı");
+	case HF_ARCHWITCH: return LangPick14(L"大魔女", L"Archwitch", L"Archisorcière", L"Arcistrega", L"Archibruja", L"대마녀", L"大魔女", L"كبيرة الساحرات", L"Архиведьма", L"Erzhexe", L"Arquibruxa", L"Aartsheks", L"Arcyczarownica", L"Başcadı");
+	case HF_DEMONLORD: return LangPick14(L"魔王", L"Demon King", L"Roi démon", L"Re demone", L"Rey demonio", L"마왕", L"魔王", L"ملك الشياطين", L"Король демонов", L"Dämonenkönig", L"Rei demônio", L"Demonenkoning", L"Król demonów", L"İblis kral");
+	case HF_ADV: return LangPick14(L"冒険者", L"Adventurer", L"Aventurier", L"Avventuriero", L"Aventurero", L"모험가", L"冒险者", L"مغامر", L"Искатель", L"Abenteurer", L"Aventureiro", L"Avonturier", L"Poszukiwacz", L"Maceracı");
+	case HF_KING: return LangPick14(L"王", L"King", L"Roi", L"Re", L"Rey", L"왕", L"国王", L"ملك", L"Король", L"König", L"Rei", L"Koning", L"Król", L"Kral");
+	case HF_WAYFARER: return LangPick14(L"中世の旅人", L"Wayfarer", L"Voyageuse", L"Viandante", L"Viajera", L"중세의 나그네", L"中世旅人", L"مسافرة", L"Путница", L"Wanderin", L"Viajante", L"Reiziger", L"Wędrowniczka", L"Yolcu");
+	case HF_MAID: return LangPick14(L"メイド", L"Maid", L"Soubrette", L"Cameriera", L"Doncella", L"메이드", L"女仆", L"خادمة", L"Горничная", L"Zofe", L"Empregada", L"Dienstmeisje", L"Pokojówka", L"Hizmetçi");
+	case HF_BUTLER: return LangPick14(L"執事", L"Butler", L"Majordome", L"Maggiordomo", L"Mayordomo", L"집사", L"管家", L"كبير الخدم", L"Дворецкий", L"Butler", L"Mordomo", L"Butler", L"Kamerdyner", L"Uşak");
+	case HF_STUDENT: return LangPick14(L"学生", L"Student", L"Élève", L"Studente", L"Estudiante", L"학생", L"学生", L"طالب", L"Ученик", L"Schüler", L"Estudante", L"Leerling", L"Uczeń", L"Öğrenci");
+	case HF_DANCER: return HfName(L"踊り子", L"Dancer", L"무희", L"舞姬");
+	case HF_BARD: return HfName(L"吟遊詩人", L"Bard", L"음유시인", L"吟游诗人");
+	case HF_PRIEST: return HfName(L"神官", L"Priest", L"신관", L"神官");
+	case HF_HIGHPRIEST: return HfName(L"大神官", L"High Priest", L"대신관", L"大神官");
+	case HF_PIRATE: return HfName(L"海賊", L"Pirate", L"해적", L"海盗");
+	case HF_CAPTAIN: return HfName(L"船長", L"Captain", L"선장", L"船长");
+	case HF_SCHOLAR: return HfName(L"学者", L"Scholar", L"학자", L"学者");
+	case HF_SAGE: return HfName(L"賢者", L"Sage", L"현자", L"贤者");
+	case HF_MERC: return HfName(L"傭兵", L"Mercenary", L"용병", L"佣兵");
+	case HF_HUNTER: return HfName(L"狩人", L"Hunter", L"사냥꾼", L"猎人");
+	case HF_ASSASSIN: return HfName(L"暗殺者", L"Assassin", L"암살자", L"刺客");
+	case HF_QUEEN: return HfName(L"女王", L"Queen", L"여왕", L"女王");
+	case HF_PRINCESS: return HfName(L"姫", L"Princess", L"공주", L"公主");
+	case HF_NOBLE: return HfName(L"貴族", L"Noble", L"귀족", L"贵族");
+	case HF_WARRIOR: return HfName(L"戦士", L"Warrior", L"전사", L"战士");
+	case HF_SWORD: return HfName(L"剣士", L"Swordsman", L"검사", L"剑士");
+	case HF_SORCERER: return HfName(L"魔導士", L"Sorcerer", L"마도사", L"魔导士");
+	case HF_NECRO: return HfName(L"死霊術師", L"Necromancer", L"사령술사", L"死灵术士");
+	case HF_NUN: return HfName(L"修道女", L"Nun", L"수녀", L"修女");
+	case HF_MONK: return HfName(L"修道士", L"Monk", L"수도사", L"修士");
+	case HF_SCOUT: return HfName(L"斥候", L"Scout", L"정찰병", L"斥候");
+	case HF_LANCER: return HfName(L"槍兵", L"Lancer", L"창병", L"枪兵");
+	case HF_BERSERK: return HfName(L"狂戦士", L"Berserker", L"광전사", L"狂战士");
+	case HF_ALCHEM: return HfName(L"錬金術師", L"Alchemist", L"연금술사", L"炼金术师");
+	case HF_KUNOICHI: return HfName(L"くノ一", L"Kunoichi", L"쿠노이치", L"女忍者");
+	case HF_SAMURAI: return HfName(L"侍", L"Samurai", L"사무라이", L"武士");
+	case HF_RONIN: return HfName(L"浪人", L"Ronin", L"낭인", L"浪人");
+	case HF_SAINT: return HfName(L"聖女", L"Saint", L"성녀", L"圣女");
+	case HF_DARKMAGE: return HfName(L"闇魔導士", L"Dark Mage", L"암흑마도사", L"暗魔导士");
+	case HF_DRAGOON: return HfName(L"竜騎士", L"Dragoon", L"용기사", L"龙骑士");
+	case HF_VAGABOND: return HfName(L"流浪者", L"Vagabond", L"방랑자", L"流浪者");
+	case HF_JESTER: return HfName(L"道化", L"Jester", L"광대", L"小丑");
+	case HF_DUELIST: return HfName(L"決闘者", L"Duelist", L"결투가", L"决斗者");
+	case HF_RANGER: return HfName(L"レンジャー", L"Ranger", L"레인저", L"游侠");
+	case HF_TEMPLAR: return HfName(L"聖堂騎士", L"Templar", L"성당기사", L"圣堂骑士");
+	case HF_WARLOCK: return HfName(L"妖術師", L"Warlock", L"요술사", L"术士");
+	case HF_SHAMAN: return HfName(L"呪術師", L"Shaman", L"주술사", L"咒术师");
+	case HF_CHAMPION: return HfName(L"闘将", L"Champion", L"투장", L"斗将");
+	case HF_WARLORD: return HfName(L"軍王", L"Warlord", L"군왕", L"军王");
+	case HF_EMPRESS: return HfName(L"女帝", L"Empress", L"여제", L"女帝");
+	case HF_PRINCE: return HfName(L"王子", L"Prince", L"왕자", L"王子");
+	case HF_FENCER: return HfName(L"剣客", L"Fencer", L"검객", L"剑客");
+	case HF_BANDIT: return HfName(L"山賊", L"Bandit", L"산적", L"山贼");
+	case HF_SNIPER: return HfName(L"狙撃手", L"Sniper", L"저격수", L"狙击手");
+	case HF_GUARDIAN: return HfName(L"守護者", L"Guardian", L"수호자", L"守护者");
+	case HF_SPELLBLADE: return HfName(L"魔剣士", L"Spellblade", L"마검사", L"魔剑士");
+	case HF_ORACLE: return HfName(L"神託者", L"Oracle", L"신탁자", L"神谕者");
+	case HF_HERETIC: return HfName(L"異端者", L"Heretic", L"이단자", L"异端者");
+	case HF_APOSTATE: return HfName(L"背教者", L"Apostate", L"배교자", L"背教者");
+	case HF_BRAWLER: return HfName(L"拳士", L"Brawler", L"권사", L"拳士");
+	case HF_CORSAIR: return HfName(L"私掠船長", L"Corsair", L"사략선장", L"私掠船长");
+	case HF_INQUISITOR: return HfName(L"審問官", L"Inquisitor", L"심문관", L"审判官");
+	case HF_GEOMANCER: return HfName(L"風水師", L"Geomancer", L"풍수사", L"风水师");
+	case HF_COUNTESS: return HfName(L"女伯爵", L"Countess", L"여백작", L"女伯爵");
+	case HF_BARON: return HfName(L"男爵", L"Baron", L"남작", L"男爵");
+	case HF_PROPHET: return HfName(L"預言者", L"Prophet", L"예언자", L"预言者");
+	case HF_SENTINEL: return HfName(L"歩哨", L"Sentinel", L"보초", L"步哨");
+	case HF_ARTISAN: return HfName(L"職人", L"Artisan", L"장인", L"工匠");
+	case HF_HERBAL: return HfName(L"薬師", L"Herbalist", L"약사", L"药师");
+	case HF_GLADIATOR: return HfName(L"剣闘士", L"Gladiator", L"검투사", L"角斗士");
+	default: return LangPick14(L"学生", L"Student", L"Élève", L"Studente", L"Estudiante", L"학생", L"学生", L"طالب", L"Ученик", L"Schüler", L"Estudante", L"Leerling", L"Uczeń", L"Öğrenci");
+	}
+}
+
+static int HumFoePickTitle(int fem, int model, int av, int hair, int lv, int boss, Rng& r)
+{
+	int pool[56];
+	int n = 0;
+	auto add = [&](int t) {
+		if (t < 0 || t >= HF_N) return;
+		for (int i = 0; i < n; i++) if (pool[i] == t) return;
+		if (n < 56) pool[n++] = t;
+	};
+	int rank = 0;
+	if (lv >= 22) rank++;
+	if (lv >= 40) rank++;
+	if (lv >= 70) rank++;
+	if (boss) rank = max(rank, 3);
+	if (r.Chance(16)) rank++;
+	if (rank > 4) rank = 4;
+	if (fem && av == 21) {
+		add(HF_SPIRIT); add(HF_DANCER); add(HF_SAINT); add(HF_ORACLE); add(HF_PRIEST);
+		if (rank >= 1) add(HF_GREATSPIRIT);
+		if (rank >= 2) add(HF_SPIRITKING);
+		if (rank >= 3) add(HF_FALLEN);
+		if (boss) add(HF_EMPRESS);
+	}
+	if (model == 7) {
+		if (fem) { add(HF_WITCH); add(HF_WARLOCK); add(HF_COUNTESS); add(HF_HERETIC); if (rank >= 2) add(HF_ARCHWITCH); }
+		else { add(HF_KING); add(HF_BARON); add(HF_PRINCE); add(HF_NOBLE); if (rank >= 2) add(HF_DEMONLORD); if (rank >= 3) add(HF_WARLORD); }
+	}
+	if (model == 8) {
+		add(fem ? HF_WAYFARER : HF_ADV); add(HF_VAGABOND); add(HF_RANGER); add(HF_SCOUT); add(HF_HUNTER); add(HF_ARTISAN);
+	}
+	if (fem && av == 19) { add(HF_MAID); add(HF_DANCER); add(HF_NUN); add(HF_PRINCESS); add(HF_HERBAL); }
+	if (!fem && av == 13) { add(HF_BUTLER); add(HF_SCHOLAR); add(HF_PRIEST); add(HF_NOBLE); add(HF_MONK); }
+	if (av == 22 || av == 14 || av == 15) { add(HF_STUDENT); add(HF_SCHOLAR); add(HF_JESTER); add(HF_ARTISAN); add(HF_BARD); }
+	if (fem && (av == 16 || av == 17 || av == 27)) {
+		add(HF_THIEF); add(HF_KUNOICHI); add(HF_ASSASSIN); add(HF_DANCER); add(HF_SCOUT);
+		if (rank >= 1) add(HF_GREATTHIEF);
+		if (rank >= 2) add(HF_NINJA);
+	}
+	if (!fem && av >= 8 && av <= 11) {
+		add(HF_THIEF); add(HF_BANDIT); add(HF_ASSASSIN); add(HF_PIRATE); add(HF_SCOUT);
+		if (rank >= 1) add(HF_GREATTHIEF);
+		if (rank >= 2) add(HF_NINJA);
+	}
+	if (av <= 4 || av == 12) {
+		add(HF_KNIGHT); add(HF_WARRIOR); add(HF_SWORD); add(HF_LANCER); add(HF_GUARDIAN); add(HF_SENTINEL);
+		if (rank >= 1) add(HF_PALADIN);
+		if (rank >= 2) add(HF_DARKKNIGHT);
+		if (rank >= 3) add(HF_FALLENKNIGHT);
+		add(HF_TEMPLAR); add(HF_SAMURAI); add(HF_DRAGOON);
+	}
+	if (hair >= 8) { add(HF_BARD); add(HF_JESTER); add(HF_VAGABOND); add(HF_WAYFARER); }
+	if (fem) {
+		add(HF_DANCER); add(HF_PRIEST); add(HF_HUNTER); add(HF_SORCERER); add(HF_NUN);
+		add(HF_SAINT); add(HF_RANGER); add(HF_HERBAL); add(HF_SPELLBLADE);
+		if (rank >= 2) { add(HF_QUEEN); add(HF_COUNTESS); add(HF_HIGHPRIEST); }
+		if (boss) { add(HF_EMPRESS); add(HF_ARCHWITCH); add(HF_SPIRITKING); }
+	} else {
+		add(HF_MERC); add(HF_WARRIOR); add(HF_SWORD); add(HF_MONK); add(HF_BRAWLER);
+		add(HF_GLADIATOR); add(HF_FENCER); add(HF_SAMURAI); add(HF_RONIN);
+		if (rank >= 2) { add(HF_CHAMPION); add(HF_CAPTAIN); add(HF_SAGE); }
+		if (boss) { add(HF_KING); add(HF_WARLORD); add(HF_DEMONLORD); }
+	}
+	static const int kAny[] = {
+		HF_MERC, HF_HUNTER, HF_SCHOLAR, HF_PRIEST, HF_PIRATE, HF_SCOUT, HF_LANCER,
+		HF_ALCHEM, HF_SHAMAN, HF_GEOMANCER, HF_DUELIST, HF_SNIPER, HF_BANDIT,
+		HF_HERETIC, HF_APOSTATE, HF_PROPHET, HF_INQUISITOR, HF_CORSAIR, HF_NECRO,
+		HF_DARKMAGE, HF_BARD, HF_ARTISAN, HF_SENTINEL, HF_SPELLBLADE, HF_BERSERK
+	};
+	int anyN = (int)(sizeof(kAny) / sizeof(kAny[0]));
+	int start = (int)(r.Next() % (unsigned)anyN);
+	for (int k = 0; k < 10; k++) add(kAny[(start + k) % anyN]);
+	if (n <= 0) add(HF_ADV);
+	return pool[(int)(r.Next() % (unsigned)n)];
+}
+
+static int HumFoeClass(int title)
+{
+	switch (title) {
+	case HF_SPIRIT: case HF_GREATSPIRIT: case HF_SPIRITKING: case HF_FALLEN:
+	case HF_WITCH: case HF_ARCHWITCH: case HF_SORCERER: case HF_NECRO:
+	case HF_DARKMAGE: case HF_WARLOCK: case HF_SHAMAN: case HF_ALCHEM:
+	case HF_GEOMANCER: case HF_HERETIC: case HF_APOSTATE:
+		return C_MAGE;
+	case HF_THIEF: case HF_GREATTHIEF: case HF_NINJA: case HF_MAID:
+	case HF_ASSASSIN: case HF_KUNOICHI: case HF_PIRATE: case HF_BANDIT:
+	case HF_SCOUT: case HF_JESTER: case HF_CORSAIR:
+		return C_THIEF;
+	case HF_KNIGHT: case HF_PALADIN: case HF_DARKKNIGHT: case HF_FALLENKNIGHT:
+	case HF_KING: case HF_DEMONLORD: case HF_WARRIOR: case HF_SWORD:
+	case HF_LANCER: case HF_BERSERK: case HF_SAMURAI: case HF_RONIN:
+	case HF_DRAGOON: case HF_DUELIST: case HF_TEMPLAR: case HF_CHAMPION:
+	case HF_WARLORD: case HF_FENCER: case HF_GUARDIAN: case HF_GLADIATOR:
+	case HF_BRAWLER: case HF_SENTINEL: case HF_QUEEN: case HF_EMPRESS:
+		return C_FIGHTER;
+	case HF_ADV: case HF_WAYFARER: case HF_HUNTER: case HF_RANGER:
+	case HF_SNIPER: case HF_VAGABOND: case HF_MERC:
+		return C_ARCHER;
+	default:
+		return C_CLERIC;
+	}
+}
+
+static void DressHumanFoe(Unit& u, Rng& r)
+{
+	if (!u.alive || u.team != TEAM_ENEMY) return;
+	int keepBoss = u.boss;
+	int fem = r.Chance(52) ? 1 : 0;
+	u.ch.gender = fem;
+	CharSetKind(u.ch, CHAR_KIND_HUM);
+	CharSetModel(u.ch, r.Range(0, MODEL_N - 1));
+	int nAva = fem ? 32 : 19;
+	if (nAva < 1) nAva = 1;
+	int av = 1 + (int)(r.Next() % (unsigned)nAva);
+	CharSetAvatar(u.ch, av);
+	CharSetFace(u.ch, r.Range(0, 5));
+	CharSetHt(u.ch, r.Range(0, HT_N - 1));
+	CharSetFig(u.ch, r.Range(0, FIG_N - 1));
+	CharSetBust(u.ch, r.Range(0, BUST_N - 1));
+	CharSetOutfit(u.ch, r.Range(0, OUTFIT_COLORS - 1));
+	CharSetAvaCol(u.ch, r.Range(0, 7));
+	u.ch.hair = r.Range(0, HAIR_STYLES - 1);
+	u.ch.hairColor = r.Range(0, HAIR_COLORS - 1);
+	int model = CharModel(u.ch);
+	int title = HumFoePickTitle(fem, model, av, u.ch.hair, u.ch.lv, keepBoss, r);
+	if ((title == HF_SPIRIT || title == HF_GREATSPIRIT || title == HF_SPIRITKING || title == HF_FALLEN || title == HF_SAINT || title == HF_ORACLE) && r.Chance(48)) {
+		CharSetModel(u.ch, 1);
+		CharSetAvatar(u.ch, 21);
+		u.ch.gender = 1;
+		fem = 1;
+	} else if ((title == HF_WITCH || title == HF_ARCHWITCH) && r.Chance(55)) {
+		CharSetModel(u.ch, 7);
+		u.ch.gender = 1;
+		fem = 1;
+	} else if ((title == HF_KING || title == HF_DEMONLORD || title == HF_WARLORD || title == HF_BARON) && r.Chance(50)) {
+		CharSetModel(u.ch, 7);
+		u.ch.gender = 0;
+		fem = 0;
+	} else if ((title == HF_WAYFARER || title == HF_ADV || title == HF_VAGABOND) && r.Chance(45)) {
+		CharSetModel(u.ch, 8);
+	} else if ((title == HF_MAID) && r.Chance(70)) {
+		CharSetAvatar(u.ch, 19);
+		u.ch.gender = 1;
+		fem = 1;
+	} else if ((title == HF_BUTLER) && r.Chance(70)) {
+		CharSetAvatar(u.ch, 13);
+		u.ch.gender = 0;
+		fem = 0;
+	}
+	int cls = HumFoeClass(title);
+	u.ch.cls = cls;
+	CharSetBody(u.ch, (cls == C_MAGE || cls == C_CLERIC) ? B_MAGE : ((cls == C_THIEF) ? B_ROGUE : B_KNIGHT));
+	int helm = (cls == C_FIGHTER || title == HF_SAMURAI || title == HF_TEMPLAR || title == HF_KNIGHT || title == HF_PALADIN);
+	u.ch.hat = helm && r.Chance(42) ? 1 : (r.Chance(12) ? 1 : 0);
+	int cape = (title == HF_KING || title == HF_QUEEN || title == HF_EMPRESS || title == HF_NOBLE || title == HF_FALLEN
+		|| title == HF_SPIRITKING || title == HF_DEMONLORD || title == HF_WARLORD || title == HF_PALADIN);
+	u.ch.cape = cape ? 1 : (r.Chance(24) ? 1 : 0);
+	u.ch.kills = title;
+	u.lucky = 2 + (title & 7);
+	u.boss = keepBoss;
+	wcsncpy_s(u.ch.name, HumFoeTitle(u), _TRUNCATE);
+	u.span = 1;
+	if (!keepBoss) {
+		auto bump = [&](int s, int num, int den) {
+			long long v = (long long)u.ch.stat[s] * num / den;
+			if (v < u.ch.stat[s]) v = u.ch.stat[s];
+			if (v > 2000000000LL) v = 2000000000LL;
+			u.ch.stat[s] = (int)v;
+		};
+		bump(S_HP, 11, 10);
+		bump(S_STR, 11, 10);
+		bump(S_MAG, 11, 10);
+		bump(S_DEF, 21, 20);
+		bump(S_RES, 21, 20);
+	}
+	u.hp = u.ch.stat[S_HP];
+	u.hpShow = (float)u.hp;
+}
+
+static void PlantHumanFoes(Battle& b, Rng& r, int stage)
+{
+	int nHum = 0;
+	int pick = -1;
+	int bossUi = -1;
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY) continue;
+		if (u.boss) {
+			if (bossUi < 0) bossUi = i;
+			int chance = 22 + min(18, stage / 6);
+			if (!u.lucky && r.Chance(chance)) {
+				DressHumanFoe(u, r);
+				nHum++;
+			}
+			continue;
+		}
+		if (u.lucky) continue;
+		if (pick < 0) pick = i;
+		if (r.Chance(6)) {
+			DressHumanFoe(u, r);
+			nHum++;
+		}
+	}
+	if (bossUi >= 0 && !UnitIsHumanFoe(b.u[bossUi]) && stage > 0 && (stage % 8) == 0 && r.Chance(40)) {
+		DressHumanFoe(b.u[bossUi], r);
+		nHum++;
+	}
+	if (stage > 0 && (stage % 5) == 0 && nHum == 0) {
+		if (pick >= 0) {
+			DressHumanFoe(b.u[pick], r);
+			nHum++;
+		} else if (b.nUnits < MAX_UNITS) {
+			int mon = PickClassic(stage, r);
+			int ui = b.nUnits;
+			MakeEnemy(b.u[ui], mon, StageEnemyLevel(stage), 0, r);
+			DressHumanFoe(b.u[ui], r);
+			b.u[ui].alert = 1;
+			b.u[ui].grp = -1;
+			int gx = 8, gz = 8;
+			if (b.map.nE > 0) { gx = b.map.eStartX[0]; gz = b.map.eStartZ[0]; }
+			b.RebuildOcc();
+			if (PlaceFoot(b, ui, gx, gz)) {
+				b.nUnits = ui + 1;
+				nHum++;
+			} else {
+				memset(&b.u[ui], 0, sizeof(b.u[ui]));
+			}
+		}
+	}
+	if (nHum > 0) b.RebuildOcc();
+}
+
+static int s_aiPrevSkill[MAX_UNITS];
 
 static int StageEnemyLevel(int stage);
 void MonsterPreview(int id, int* lv, int* stat)
@@ -6879,17 +7347,21 @@ static int LayerLegal(const Cell& from, int fromLayer, const Cell& to, int L, in
 	int fromL = LayerOn(from, fromLayer) ? fromLayer : 0;
 	int fromH = LayerHt(from, fromL);
 	int toH = LayerHt(to, L);
-	int dl = L - fromL;
-	if (dl < 0) dl = -dl;
-	int hop = LayerHopMax(moveType);
 	int rise = StepRise(moveType);
-	// いちばん近い高さ＝同じリボン／連続した段。1歩の登り降りに収まるなら、層番号がずれても進める。
-	// 水・溶岩も滝の段差は降りられない。川面の連続した歩幅だけ通す。
-	// 立体の段は世界高さで見る。整数2段はそこでは9cmしかなく、描画がつなぐ床を拒む。
+	int hop = LayerHopMax(moveType);
+	if (!SameStep(fromH, toH, rise)) {
+		if (moveType != MV_FLY || !SameStep(fromH, toH, rise * hop)) return 0;
+	}
+	// 徒歩は同じ層番号が歩けるなら、上の床へ抜けたり下の床へ落ちたりしない。飛行は層をまたげる。
+	if (moveType != MV_FLY && fromL != L && LayerOpen(to, fromL, moveType) && SameStep(fromH, LayerHt(to, fromL), rise))
+		return 0;
 	int closest = ClosestOpenLayer(to, fromH, moveType);
 	if (L == closest && SameStep(fromH, toH, rise)) return 1;
-	// 徒歩は隣の層まで、飛行は2層まで。世界高さで離れすぎる別アームへは飛ばない。
-	if (dl <= hop && SameStep(fromH, toH, rise * hop)) return 1;
+	if (moveType == MV_FLY) {
+		int dl = L - fromL;
+		if (dl < 0) dl = -dl;
+		if (dl <= hop && SameStep(fromH, toH, rise * hop)) return 1;
+	}
 	return 0;
 }
 
@@ -6975,6 +7447,28 @@ static int ChooseLayer(const Cell& from, int fromLayer, const Cell& to, int jump
 	return best;
 }
 
+// 段差の先が、来た高さのまま続いていれば側面からの壁登り。正面の階段・坂は先が着地か続き。
+static int DeckClimbOk(const Map& m, int fx, int fz, int fromL, int tx, int tz, int toL, int mt)
+{
+	if (mt == MV_FLY) return 1;
+	if (!Map::In(fx, fz) || !Map::In(tx, tz)) return 0;
+	const Cell& f = m.At(fx, fz);
+	const Cell& t = m.At(tx, tz);
+	int fromH = LayerHt(f, LayerOn(f, fromL) ? fromL : 0);
+	int toH = LayerHt(t, toL);
+	if (abs(toH - fromH) <= 0) return 1;
+	int ddx = tx - fx, ddz = tz - fz;
+	if (ddx == 0 && ddz == 0) return 1;
+	int farx = tx + ddx, farz = tz + ddz;
+	if (!Map::In(farx, farz)) return 1;
+	int farL = ClosestOpenLayer(m.At(farx, farz), fromH, mt);
+	if (farL < 0) return 1;
+	int farH = LayerHt(m.At(farx, farz), farL);
+	if (abs(farH - fromH) <= 1 && abs(toH - fromH) > abs(farH - fromH) && abs(toH - farH) > 1)
+		return 0;
+	return 1;
+}
+
 // 足場の各マスは、原点の着地高さに一番近い層へ合わせる。立体交差で層番号がずれても同じ床なら通る。
 static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int fromLayer, int toLayer, int* climbsOut)
 {
@@ -6983,6 +7477,7 @@ static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 	int mt = UnitMoveType(u);
 	if (!Map::In(nx, nz) || !LayerOn(b.map.At(nx, nz), toLayer)) return false;
 	int refH = LayerHt(b.map.At(nx, nz), toLayer);
+	if (s <= 1 && !DeckClimbOk(b.map, x, z, fromLayer, nx, nz, toLayer, mt)) return false;
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
 		if (!Map::In(sx, sz) || !Map::In(tx, tz)) return false;
@@ -7164,14 +7659,18 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 int ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int maxN, int preferLayer)
 {
 	if (!Map::In(tx, tz)) return 0;
-	int on = -1;
-	if (preferLayer >= 0 && preferLayer < LAY_N && ReachCostAt(r, preferLayer, tx, tz) >= 0) on = preferLayer;
-	else {
-		int best = 99999;
-		for (int L = 0; L < LAY_N; L++) {
-			int c = ReachCostAt(r, L, tx, tz);
-			if (c >= 0 && c < best) { best = c; on = L; }
-		}
+	int on = -1, best = 99999;
+	for (int L = 0; L < LAY_N; L++) {
+		int c = ReachCostAt(r, L, tx, tz);
+		if (c < 0) continue;
+		int better = 0;
+		if (on < 0 || c < best) better = 1;
+		else if (c == best && preferLayer >= 0 && abs(L - preferLayer) < abs(on - preferLayer)) better = 1;
+		if (better) { best = c; on = L; }
+	}
+	if (preferLayer >= 0 && preferLayer < LAY_N) {
+		int homeC = ReachCostAt(r, preferLayer, tx, tz);
+		if (homeC >= 0 && homeC <= best + 1) on = preferLayer;
 	}
 	if (on < 0) return 0;
 	int tmp[MAPN * 2], n = 0;
@@ -7576,6 +8075,44 @@ static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
 }
 
 static float FormAllyMul(const Battle& b, const Unit& a, int skill, int tx, int tz);
+
+// 防御とは別のステージ補正。序盤はほぼそのまま。
+// 100で約25%、110で約26%。下限は4割なので、ステージ9999でも1ダメージにはならない。
+static float StageHitScale(int stage)
+{
+	if (stage < 1) stage = 1;
+	const float floor = 0.40f;
+	const float tau = 142.f;
+	float k = 1.f / (1.f + (float)(stage - 1) / tau);
+	return floor + (1.f - floor) * k;
+}
+
+// 物理100%・魔法威力12を同じ1発にする。多段は割らず、この1発を回数ぶん撃つ。
+static float SkillPowerBand(const SkillDef* sd, int magic)
+{
+	if (!sd) return 1.f;
+	if (magic) {
+		float m = (150.f + (float)sd->power * 5.f) / 210.f;
+		if (m < 0.55f) m = 0.55f;
+		if (m > 2.4f) m = 2.4f;
+		return m;
+	}
+	float p = (float)sd->power / 100.f;
+	if (p < 0.45f) p = 0.45f;
+	if (p > 4.f) p = 4.f;
+	return p;
+}
+
+static float PlayerHitGross(const Unit& a, int skill, int magic)
+{
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	int lv = a.ch.lv;
+	if (lv < 1) lv = 1;
+	float gross = 36.f + (float)lv * 6.5f + (float)lv * (float)lv * 0.08f;
+	gross += (float)UnitStat(a, magic ? S_MAG : S_STR) * 0.12f;
+	return gross * SkillPowerBand(sd, magic);
+}
+
 static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill, int& dmg, int& hit, int& crit)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
@@ -7590,12 +8127,15 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
 		float atkF = (float)atk;
 		if (sd && !IsSummonId(skill)) atkF *= TacAllyScale(a, 0.018f);
-		dm = atkF * mult - df * .8f;
-		if (!sd) BlendBasic(a, dm, df * .8f);
+		int mage = (a.team == TEAM_PLAYER && a.ch.cls >= 0 && ClassInfo(a.ch.cls).magic) ? 1 : 0;
+		if (mage) atkF *= 1.85f;
+		float resW = mage ? 0.50f : 0.80f;
+		dm = atkF * mult - df * resW;
+		if (!sd) BlendBasic(a, dm, df * resW);
 		else if (a.team == TEAM_PLAYER && !IsSummonId(skill)) {
 			float off = TacBasicOffense(a);
 			if (off > 0.f) {
-				float fair = off - df * .8f;
+				float fair = off - df * resW;
 				if (fair < 1.f) fair = 1.f;
 				float floorv = fair * 0.8f + dm * 0.2f;
 				if (dm < floorv) dm = floorv;
@@ -7612,8 +8152,8 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			if (want < floorv) want = floorv;
 			if (dm < want) dm = want;
 			dm *= 1.35f;
-		} else if (sd && sd->hits > 1) dm /= (float)sd->hits;
-		if (sd && !IsSummonId(skill) && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) dm *= 1.22f;
+		}
+		if (sd && !IsSummonId(skill) && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) dm *= 1.45f;
 		hit = 96 + UnitStat(a, S_DEX) / 2 - UnitStat(d, S_AGI) / 3 - tavo / 3 + (sd ? 6 : 0);
 		if (a.blind > 0) hit -= 28;
 		crit = 0;
@@ -7624,16 +8164,16 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		bool bowish = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1
 			|| skill == SKL_PIERCE || skill == SKL_SNIPE || skill == SKL_ARROWRAIN
 			|| skill == SKL_ARROWLINE || skill == SKL_ARROWFAN || skill == SKL_CRESCENT;
-		if (bowish) atk += UnitStat(a, S_DEX);
-		if (!sd && bowish) atk = atk * 6 / 5;
+		if (bowish) atk += UnitStat(a, S_DEX) / 2;
+		if (!sd && bowish) atk = atk * 11 / 10;
 		float mult = sd ? sd->power / 100.f : 1.f;
-		// 弓スキルは防御を大きく抜くので、倍率は抑えめ。会心で敵HPを丸ごと消さない。
-		if (bowish && sd) mult *= 1.10f;
+		// 弓は防御を少し抜く。倍率で防御そのものを消さない。
+		if (bowish && sd) mult *= 1.0f;
 		// 弓以外の物理。防御を引くと力100では数十ダメージになるので、レベルで戻す。
 		if (!bowish) mult *= TacAllyScale(a, 0.034f);
 		if (sd && IsFormSkill(skill)) mult *= FormAllyMul(b, a, skill, sd->rMax == 0 ? a.x : d.x, sd->rMax == 0 ? a.z : d.z);
 		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
-		if (bowish) df *= 0.42f; // 暗黒戦士級の高DEFでも2〜3ダメに潰れない
+		if (bowish) df *= 0.72f;
 		if (sd && sd->effect == EF_IGNDEF) df *= .5f;
 		{
 			int pen = UnitStat(a, S_PEN);
@@ -7642,7 +8182,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		}
 		dm = atk * mult - df;
 		if (bowish) {
-			int floorv = max(18, (UnitStat(a, S_STR) + UnitStat(a, S_DEX) * 2) / 3);
+			int floorv = max(6, (UnitStat(a, S_STR) + UnitStat(a, S_DEX)) / 6);
 			if (dm < (float)floorv) dm = (float)floorv;
 		}
 		if (!sd) BlendBasic(a, dm, df);
@@ -7663,7 +8203,27 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		int crit2 = PasScale(a, PAS_CRIT2, 18, 22);
 		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
 			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? ScaleFlat(10, MagOf(a, PAS_CRIT)) : 0) + (crit2 > 0 ? crit2 : 0);
+		if (a.team == TEAM_PLAYER) {
+			int cls = a.ch.cls;
+			if (cls == C_THIEF || cls == C_ASSASSIN || cls == C_SHADOW || cls == C_PHANTOM) crit = crit * 2 / 3;
+		}
 		crit = Clampi(crit, 0, sd ? 80 : 50);
+	}
+	// 味方の1発は職で揃える。回数では割らない。防御が高いほど残り割合が落ち、ゼロにはしない。
+	if (a.team == TEAM_PLAYER) {
+		float mit = (float)UnitStat(d, magic ? S_RES : S_DEF);
+		mit *= magic ? (1.f + tdef * .005f) : (1.f + tdef * .01f);
+		if (!magic && sd && sd->effect == EF_IGNDEF) mit *= 0.75f;
+		if (!magic) {
+			int pen = UnitStat(a, S_PEN);
+			if (pen > 40) pen = 40;
+			if (pen > 0) mit *= (100.f - (float)pen) / 100.f;
+		}
+		if (mit < 0.f) mit = 0.f;
+		float keep = 900.f / (900.f + mit);
+		if (keep < 0.08f) keep = 0.08f;
+		dm = PlayerHitGross(a, skill, magic ? 1 : 0) * keep * StageHitScale(b.stage);
+		if (dm < 1.f) dm = 1.f;
 	}
 	dm *= HeightMod(b, a, d) * DirMod(a, d);
 	{
@@ -7839,7 +8399,7 @@ static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
 	return InRangeOfUnit(b, d, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a, true);
 }
 
-int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
+int EstimateText(const Unit& a, int skill, wchar_t* out, int cap, int stage)
 {
 	if (!out || cap < 8) return 0;
 	out[0] = 0;
@@ -7867,7 +8427,7 @@ int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
 			float floorv = offense * 1.6f;
 			if (want < floorv) want = floorv;
 			dm = want * 0.75f;
-		} else if (nHit > 1) dm /= (float)nHit;
+		}
 	} else {
 		int atk = UnitStat(a, S_STR) + UnitWeaponPow(a);
 		if (sd && skill == SKL_HOLYBLADE) atk += UnitStat(a, S_MAG) / 2;
@@ -7888,6 +8448,7 @@ int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
 		}
 	}
 	int per = max(1, (int)(dm + 0.5f));
+	if (a.team == TEAM_PLAYER) per = max(1, (int)(PlayerHitGross(a, skill, magic) * StageHitScale(stage) + 0.5f));
 	const wchar_t* kind = magic
 		? LangPick14(L"魔法", L"Magic", L"Magie", L"Magia", L"Magia", L"마법", L"魔法", L"سحر", L"Магия", L"Magie", L"Magia", L"Magie", L"Magia", L"Büyü")
 		: LangPick14(L"物理", L"Phys", L"Phys", L"Fis", L"Fís", L"물리", L"物理", L"جسدي", L"Физ", L"Physisch", L"Fís", L"Fys", L"Fiz", L"Fizik");
@@ -7936,7 +8497,6 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	}
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	f.hits = sd ? max(1, sd->hits) : ((UnitStat(a, S_AGI) - UnitStat(d, S_AGI) >= 5) ? 2 : 1);
-	if (sd && sd->kind == SK_MAGIC && sd->hits >= 2 && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) f.hits += 1;
 	bool single = !sd || sd->area == 0;
 	f.canCounter = single && a.team != d.team && CanCounter(b, d, a);
 	if (f.canCounter) {
@@ -7961,11 +8521,23 @@ int SkillCastRangeMax(const Unit& u, int skill)
 int SkillMpCost(int maxMp, int skill)
 {
 	const SkillDef& s = SkillInfo(skill);
-	if (s.effect != EF_WARP) return s.mp;
-	if (maxMp < 1) maxMp = 1;
-	int c = maxMp * 70 / 100;
-	if (c < 500) c = 500;
-	return c;
+	if (s.effect == EF_WARP) {
+		if (maxMp < 1) maxMp = 1;
+		int c = maxMp * 70 / 100;
+		if (c < 500) c = 500;
+		return c;
+	}
+	if (s.mp <= 0) return 0;
+	if (s.kind != SK_PHYS && s.kind != SK_MAGIC) return s.mp;
+	// 1発あたりのMPを揃える。多段・高威力・広域ほど高く、雑魚に連発すると枯れる。
+	int hits = s.hits > 1 ? s.hits : 1;
+	int magic = s.kind == SK_MAGIC ? 1 : 0;
+	float area = 1.f + (float)(s.area > 0 ? s.area : 0) * 0.35f;
+	if (area > 3.f) area = 3.f;
+	int cost = (int)(8.f * (float)hits * SkillPowerBand(&s, magic) * area + 0.5f);
+	if (cost < s.mp) cost = s.mp;
+	if (cost < 1) cost = 1;
+	return cost;
 }
 
 int SkillAreaOf(const Unit& u, int skill)
@@ -8495,8 +9067,8 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 {
 	if (stage < 1) stage = 1;
 	int dl = d.ch.lv - a.ch.lv;
-	/* レベル差。格下でもゼロにはしない。上にはキャップしない。 */
-	double lvK = 1.0 + (double)dl * 0.12;
+	/* レベル差の上振れは半分。同レベル帯はそのまま。格下でもゼロにはしない。 */
+	double lvK = 1.0 + (double)dl * 0.06;
 	if (lvK < 0.2) lvK = 0.2;
 	int hp = d.ch.stat[S_HP];
 	double frac = 0.0;
@@ -8507,6 +9079,7 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
 	double e = (8.0 + (double)stage * 0.48) * (0.38 + 0.32 * frac) * lvK;
 	if (d.boss) e *= 1.25;
+	if (stage < 16) e *= 1.0 + (16 - stage) * 0.15;
 	// ラッキー☆の×3は AwardExp / Preview 側で明示適用（ここだと見積と実付与の差が分かりにくい）。
 	if (e < 1.0) return 1;
 	if (e > 2000000000.0) return 2000000000;
@@ -8787,6 +9360,14 @@ static void FairyAfter(Battle& b, Strike* out, int& n, int maxOut)
 	}
 }
 
+static int CritPay(int dmg)
+{
+	if (dmg < 1) return 1;
+	int v = dmg + dmg * 2 / 5;
+	if (v <= dmg) v = dmg + 1;
+	return v;
+}
+
 int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
 {
 	int n = 0;
@@ -8822,7 +9403,6 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		else { cx0 = b.u[di].x; cz0 = b.u[di].z; }
 		int nt = SkillTargets(b, ai, skill, cx0, cz0, targets, MAX_UNITS);
 		int waves = (sd->kind == SK_HEAL || sd->kind == SK_BUFF) ? 1 : max(1, sd->hits);
-		if (sd->kind == SK_MAGIC && sd->hits >= 2 && a.team == TEAM_PLAYER && ClassInfo(a.ch.cls).magic) waves += 1;
 		for (int wave = 0; wave < waves && n < maxOut; wave++)
 		for (int k = 0; k < nt && n < maxOut; k++) {
 			if (targets[k] < 0 || targets[k] >= b.nUnits) continue;
@@ -8873,13 +9453,13 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.hit = 1;
 					s.overkill = 1;
 					s.crit = (int)(r.Next() % 100) < crit;
-					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
+					s.dmg = scaleForm(s.crit ? CritPay(dmg) : dmg, cx0, cz0);
 					AddCp(a, 2 + s.dmg / 20);
 				} else {
 				s.hit = (int)(r.Next() % 100) < hit;
 				if (s.hit) {
 					s.crit = (int)(r.Next() % 100) < crit;
-					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
+					s.dmg = scaleForm(s.crit ? CritPay(dmg) : dmg, cx0, cz0);
 					if ((long long)s.dmg >= (long long)d.hp * 2) s.overkill = 1;
 					d.hp -= s.dmg;
 					AddCp(a, 2 + s.dmg / 20);
@@ -8922,7 +9502,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				s.hit = 1;
 				if (a.hp > 0) {
 					s.crit = (int)(r.Next() % 100) < crit;
-					s.dmg = s.crit ? dmg * 2 : dmg;
+					s.dmg = s.crit ? CritPay(dmg) : dmg;
 					if ((long long)s.dmg >= (long long)a.hp * 2) s.overkill = 1;
 					a.hp -= s.dmg;
 					int fromEl = EL_NONE;
@@ -8963,7 +9543,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		s.hit = (int)(r.Next() % 100) < hit;
 		if (s.hit) {
 			s.crit = (int)(r.Next() % 100) < crit;
-			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
+			s.dmg = atkTurn ? scaleForm(s.crit ? CritPay(dmg) : dmg, y.x, y.z) : (s.crit ? CritPay(dmg) : dmg);
 			if ((long long)s.dmg >= (long long)y.hp * 2) s.overkill = 1;
 			y.hp -= s.dmg;
 			AddCp(x, 2 + s.dmg / 20);
@@ -9047,7 +9627,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			StrikeCalc(b, d, a, -1, dmg, hit, crit);
 			cs.hit = 1;
 			cs.crit = (int)(r.Next() % 100) < crit;
-			cs.dmg = cs.crit ? dmg * 2 : dmg;
+			cs.dmg = cs.crit ? CritPay(dmg) : dmg;
 			if ((long long)cs.dmg >= (long long)a.hp * 2) cs.overkill = 1;
 			a.hp -= cs.dmg;
 			int fromEl = EL_NONE;
@@ -9065,7 +9645,44 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 	return n;
 }
 
-int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
+static BOOL CellInYellow(const Unit& caster, int skill, int cx, int cz, int tx, int tz)
+{
+	if (skill < 0) return FALSE;
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.kind == SK_HEAL || sd.kind == SK_BUFF || sd.kind == SK_PASSIVE) return FALSE;
+	if (sd.rMax == 0) {
+		int ar = SkillAreaOf(caster, skill);
+		return Dist(tx, tz, caster.x, caster.z) <= max(0, ar);
+	}
+	if (!(sd.area > 0 || sd.shape != SH_RADIUS)) return FALSE;
+	int len = SkillAreaOf(caster, skill);
+	if (len <= 0) len = 1;
+	return ShapeCell(sd.shape, len, caster.x, caster.z, cx, cz, tx, tz) ? TRUE : FALSE;
+}
+
+BOOL TacOnYellow(const Battle& b, int ally, int caster, int skill, int cx, int cz)
+{
+	if (ally < 0 || caster < 0 || ally >= b.nUnits || caster >= b.nUnits || ally == caster) return FALSE;
+	const Unit& m = b.u[ally];
+	if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) return FALSE;
+	if (m.sleep > 0 || m.stun > 0) return FALSE;
+	if (skill < 0) return FALSE;
+	const Unit& a = b.u[caster];
+	int sp = UnitSpan(m);
+	if (sp < 1) sp = 1;
+	for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
+		if (CellInYellow(a, skill, cx, cz, m.x + dx, m.z + dz)) return TRUE;
+	if (IsFormSkill(skill)) {
+		int mem[8];
+		int aimX = cx, aimZ = cz;
+		if (SkillInfo(skill).rMax == 0) { aimX = a.x; aimZ = a.z; }
+		int nm = FormMembers(b, caster, skill, aimX, aimZ, mem, 8);
+		for (int i = 0; i < nm; i++) if (mem[i] == ally) return TRUE;
+	}
+	return FALSE;
+}
+
+int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut, int cx, int cz)
 {
 	if (!out || n <= 0 || n >= maxOut) return n;
 	int ai = -1;
@@ -9088,11 +9705,17 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 		if (!have && nf < 8) foes[nf++] = s.defender;
 	}
 	if (ai < 0 || nf == 0) return n;
+	int castSkill = -1;
+	for (int k = 0; k < n; k++) {
+		if (out[k].counter || out[k].attacker != ai) continue;
+		if (out[k].skill >= 0) { castSkill = out[k].skill; break; }
+	}
 	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
 		if (i == ai) continue;
 		Unit& m = b.u[i];
 		if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
 		if (m.sleep > 0 || m.stun > 0) continue;
+		if (!TacOnYellow(b, i, ai, castSkill, cx, cz)) continue;
 		int di = -1;
 		for (int f = 0; f < nf; f++) {
 			Unit& e = b.u[foes[f]];
@@ -9113,7 +9736,7 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 		s.hit = (int)(r.Next() % 100) < hit;
 		if (s.hit) {
 			s.crit = (int)(r.Next() % 100) < crit;
-			s.dmg = s.crit ? dmg * 2 : dmg;
+			s.dmg = s.crit ? CritPay(dmg) : dmg;
 			if ((long long)s.dmg >= (long long)y.hp * 2) s.overkill = 1;
 			y.hp -= s.dmg;
 			if (y.hp <= 0) {
@@ -9588,7 +10211,7 @@ static bool FootCanLeave(const Battle& b, int ui, int x, int z)
 	return false;
 }
 
-static bool PlaceFoot(Battle& b, int ui, int gx, int gz, int lockH = -1)
+static bool PlaceFoot(Battle& b, int ui, int gx, int gz, int lockH)
 {
 	Unit& u = b.u[ui];
 	int s = UnitSpan(u);
@@ -10382,6 +11005,258 @@ static void FillSpiralPathH(const Map& m, short outH[MAPN][MAPN])
 	}
 }
 
+static int SpanStepDir(const Map& m, int x, int z, int L, int span, int sx, int sz)
+{
+	if (span < 1) span = 1;
+	if (!Map::In(x, z) || !Map::In(x + sx + span - 1, z + sz + span - 1)) return 0;
+	const Cell& org = m.c[z][x];
+	int fromL = LayerOn(org, L) ? L : 0;
+	int refH = LayerHt(org, fromL);
+	for (int iz = 0; iz < span; iz++) for (int ix = 0; ix < span; ix++) {
+		const Cell& f = m.c[z + iz][x + ix];
+		const Cell& t = m.c[z + sz + iz][x + sx + ix];
+		int fL = (ix == 0 && iz == 0) ? fromL : MatchDeckAt(f, refH, fromL);
+		if (!SameStep(LayerHt(f, fL), refH, 2)) return 0;
+		int dest = -1;
+		int nL = CellLayN(t);
+		for (int NL = 0; NL < nL; NL++) if (LayerLegal(f, fL, t, NL, MV_FOOT)) { dest = NL; break; }
+		if (dest < 0 || !SameStep(LayerHt(t, dest), refH, 2)) return 0;
+	}
+	return 1;
+}
+
+static int SpanHasExit(const Map& m, int x, int z, int L, int span)
+{
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int k = 0; k < 4; k++) if (SpanStepDir(m, x, z, L, span, dx[k], dz[k])) return 1;
+	return 0;
+}
+
+static int SpanMeetsParty(const Map& m, int sx, int sz, int sL, int span)
+{
+	static BYTE vis[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN], qL[MAPN * MAPN];
+	memset(vis, 0, sizeof(vis));
+	if (!Map::In(sx, sz)) return 0;
+	int qh = 0, qt = 0;
+	vis[sz][sx] = 1;
+	qx[0] = sx; qz[0] = sz; qL[0] = sL; qt = 1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh], L = qL[qh]; qh++;
+		if (WalkStepsAt(x, z, L) < 30000 && SpanHasExit(m, x, z, L, span)) return 1;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+			if (!SpanStepDir(m, x, z, L, span, dx[k], dz[k])) continue;
+			const Cell& f = m.c[z][x];
+			const Cell& t = m.c[nz][nx];
+			int fL = LayerOn(f, L) ? L : 0;
+			int dest = -1, nL = CellLayN(t);
+			for (int NL = 0; NL < nL; NL++) if (LayerLegal(f, fL, t, NL, MV_FOOT)) { dest = NL; break; }
+			if (dest < 0) continue;
+			vis[nz][nx] = 1;
+			if (qt < MAPN * MAPN) { qx[qt] = nx; qz[qt] = nz; qL[qt] = dest; qt++; }
+		}
+	}
+	return 0;
+}
+
+static void PaintRouteCell(Cell& c, int h, int spiral)
+{
+	if (spiral && c.t != T_VOID && c.t != T_CHASM) return;
+	int hh = Clampi(h, 1, MAXH_SPIRAL);
+	c.t = T_HILL;
+	c.h = (WORD)hh;
+	c.prop = PK_NONE;
+	if (c.gimm == GM_FENCE || c.gimm == GM_DROP) { c.gimm = 0; c.gparam = 0; }
+	if (!spiral) c.nLay = 1;
+	else if (c.nLay < 1) c.nLay = 1;
+}
+
+static int CarveFootRoad(Battle& b, int ui, int span)
+{
+	Unit& u = b.u[ui];
+	if (!Map::In(u.x, u.z)) return 0;
+	if (span < 1) span = 1;
+	if (span > 5) span = 5;
+	int uL = u.deck;
+	if (uL < 0 || uL >= LAY_N) uL = 0;
+	const Cell& org = b.map.At(u.x, u.z);
+	if (!LayerOn(org, uL)) uL = 0;
+	int hU = LayerHt(org, uL);
+	static BYTE vis[MAPN][MAPN];
+	static int prev[MAPN][MAPN];
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	memset(vis, 0, sizeof(vis));
+	int qh = 0, qt = 0;
+	qx[qt] = u.x; qz[qt] = u.z; qt++;
+	vis[u.z][u.x] = 1;
+	prev[u.z][u.x] = -1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int tx = -1, tz = -1, tL = 0;
+	while (qh < qt && tx < 0) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4 && tx < 0; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || vis[nz][nx]) continue;
+			vis[nz][nx] = 1;
+			prev[nz][nx] = z * MAPN + x;
+			int nL = CellLayN(b.map.At(nx, nz));
+			for (int L = 0; L < nL; L++) if (WalkStepsAt(nx, nz, L) < 30000) { tx = nx; tz = nz; tL = L; break; }
+			if (tx < 0 && qt < MAPN * MAPN) { qx[qt] = nx; qz[qt] = nz; qt++; }
+		}
+	}
+	if (tx < 0) return 0;
+	static int seqX[96], seqZ[96];
+	int ns = 0;
+	int cx = tx, cz = tz;
+	while (ns < 96) {
+		seqX[ns] = cx; seqZ[ns] = cz; ns++;
+		if (cx == u.x && cz == u.z) break;
+		int p = prev[cz][cx];
+		if (p < 0) break;
+		cx = p % MAPN; cz = p / MAPN;
+	}
+	if (ns < 2 || seqX[ns - 1] != u.x || seqZ[ns - 1] != u.z) return 0;
+	int spiral = MapIsSpiral(b.map);
+	int h = LayerHt(b.map.At(tx, tz), tL);
+	int painted = 0, paintedHome = 0;
+	for (int i = 1; i < ns; i++) {
+		int dh = hU - h;
+		if (dh > 2) dh = 2;
+		if (dh < -2) dh = -2;
+		h = Clampi(h + dh, 1, MAXH_SPIRAL);
+		for (int oz = 0; oz < span; oz++) for (int ox = 0; ox < span; ox++) {
+			int x = seqX[i] + ox, z = seqZ[i] + oz;
+			if (!Map::In(x, z)) continue;
+			int held = 0;
+			int nL = CellLayN(b.map.At(x, z));
+			for (int L = 0; L < nL; L++) if (WalkStepsAt(x, z, L) < 30000 && SameStep(LayerHt(b.map.At(x, z), L), h, 2)) held = 1;
+			if (held) continue;
+			int busy = 0;
+			for (int L = 0; L < nL; L++) {
+				int o = b.UnitAt(x, z, L);
+				if (o >= 0 && o != ui) busy = 1;
+			}
+			if (busy) continue;
+			Cell& c = b.map.c[z][x];
+			int beforeT = (int)c.t, beforeH = (int)c.h;
+			PaintRouteCell(c, h, spiral);
+			if ((int)c.t != beforeT || (int)c.h != beforeH) {
+				painted = 1;
+				if (x == u.x && z == u.z) paintedHome = 1;
+			}
+		}
+	}
+	if (paintedHome) {
+		u.deck = 0;
+		g_mineChip[u.z][u.x] = 0;
+	}
+	return painted;
+}
+
+static int MoveOntoWalk(Battle& b, int ui)
+{
+	Unit& u = b.u[ui];
+	int ox = u.x, oz = u.z, od = u.deck;
+	int span = UnitSpan(u);
+	if (span < 1) span = 1;
+	u.x = -1; u.z = -1;
+	b.RebuildOcc();
+	int best = 999999, bx = -1, bz = -1, bL = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!Map::In(x + span - 1, z + span - 1)) continue;
+		int rank0 = abs(x - ox) + abs(z - oz);
+		if (rank0 >= best) continue;
+		int nL = CellLayN(b.map.At(x, z));
+		for (int L = 0; L < nL; L++) {
+			if (WalkStepsAt(x, z, L) >= 30000) continue;
+			if (span > 1 && !SpanHasExit(b.map, x, z, L, span)) continue;
+			u.deck = L;
+			u.x = x; u.z = z;
+			int fit = FootFits(b, ui, x, z) ? 1 : 0;
+			u.x = -1; u.z = -1;
+			if (!fit) continue;
+			if (rank0 < best) { best = rank0; bx = x; bz = z; bL = L; }
+		}
+	}
+	if (bx < 0) {
+		u.x = ox; u.z = oz; u.deck = od;
+		b.RebuildOcc();
+		return 0;
+	}
+	u.x = bx; u.z = bz; u.deck = bL;
+	b.RebuildOcc();
+	return 1;
+}
+
+static void FloodHomeFoot(const Battle& b)
+{
+	int sx[32], sz[32], sL[32], n = 0;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!b.u[i].alive || b.u[i].team != TEAM_PLAYER || !Map::In(b.u[i].x, b.u[i].z)) continue;
+		SeedUnitSteps(b.u[i], b.map, sx, sz, sL, n, 32);
+		break;
+	}
+	FloodWalk(b, MV_FOOT, -1, sx, sz, sL, n);
+}
+
+static int OriginOnFoot(const Battle& b, int ui)
+{
+	const Unit& u = b.u[ui];
+	if (!Map::In(u.x, u.z)) return 0;
+	int L = u.deck;
+	if (L < 0 || L >= LAY_N) L = 0;
+	const Cell& c = b.map.At(u.x, u.z);
+	if (!LayerOn(c, L)) L = 0;
+	return WalkStepsAt(u.x, u.z, L) < 30000;
+}
+
+// 先頭の味方から、歩行ルールのBFSで全キャラとボスを含む全敵へ届くこと。
+// 2x2以上は1マス道の先に置くと一歩も出られないので、体の幅の道を掘る。
+static void EnsureFootRoutes(Battle& b)
+{
+	memset(g_mineChip, 0, sizeof(g_mineChip));
+	int home = -1;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (b.u[i].alive && b.u[i].team == TEAM_PLAYER && Map::In(b.u[i].x, b.u[i].z)) { home = i; break; }
+	}
+	if (home < 0) return;
+	for (int pass = 0; pass < 24; pass++) {
+		FloodHomeFoot(b);
+		int bad = -1;
+		for (int i = 0; i < b.nUnits; i++) {
+			if (i == home || !b.u[i].alive) continue;
+			if (OriginOnFoot(b, i)) continue;
+			if (b.u[i].boss) { bad = i; break; }
+			if (bad < 0) bad = i;
+		}
+		if (bad >= 0) {
+			int sp = UnitSpan(b.u[bad]);
+			if (sp < 1) sp = 1;
+			if (!CarveFootRoad(b, bad, sp)) MoveOntoWalk(b, bad);
+			continue;
+		}
+		int jam = -1;
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || UnitMoveType(u) == MV_FLY) continue;
+			int sp = UnitSpan(u);
+			if (sp < 1) sp = 1;
+			int L = u.deck;
+			if (L < 0 || L >= LAY_N) L = 0;
+			if (!SpanMeetsParty(b.map, u.x, u.z, L, sp)) {
+				if (u.boss) { jam = i; break; }
+				if (jam < 0) jam = i;
+			}
+		}
+		if (jam < 0) return;
+		int sp = UnitSpan(b.u[jam]);
+		if (!CarveFootRoad(b, jam, sp)) MoveOntoWalk(b, jam);
+	}
+}
+
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
@@ -10827,6 +11702,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	AnchorSpiralUnits(b);
 	AnchorAllUnits(b);
+	EnsureFootRoutes(b);
 	if (b.sweep == TAC_VAR_SCAR) {
 		for (int i = 0; i < b.nUnits; i++) {
 			Unit& u = b.u[i];
@@ -10865,6 +11741,8 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		if (!u.alive || u.team != TEAM_ENEMY || u.boss) continue;
 		if (r.Chance(6)) u.lucky = 1;
 	}
+	PlantHumanFoes(b, r, stage);
+	memset(s_aiPrevSkill, 0xFF, sizeof(s_aiPrevSkill));
 	b.stampede = 0;
 	b.stampedeLeft = 0;
 	b.stampedeLine = 0;
@@ -10955,6 +11833,7 @@ int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap)
 		if (b.stage <= 2) lv = max(1, lv - 1);
 		MakeEnemy(u, mon, lv, 0, r);
 		if (r.Chance(6)) u.lucky = 1;
+		else if (r.Chance(6)) DressHumanFoe(u, r);
 		u.span = 1;
 		u.x = -8;
 		u.z = -8;
@@ -11341,38 +12220,144 @@ void OpenDoor(Battle& b, int x, int z)
 	c.gparam = 0;
 }
 
-bool CanTerrace(const Battle& b, int ui, int tx, int tz)
+static int TerraceRock(int tr)
 {
-	if (ui < 0 || ui >= b.nUnits || !Map::In(tx, tz)) return false;
-	const Unit& u = b.u[ui];
-	if (!u.alive || u.team != TEAM_PLAYER) return false;
-	if (Dist(u.x, u.z, tx, tz) != 1) return false;
-	if (b.UnitAt(tx, tz) >= 0) return false;
-	const Cell& c = b.map.At(tx, tz);
-	if (c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM || c.t == T_DOOR) return false;
-	if (c.nLay >= 2 || b.map.At(u.x, u.z).nLay >= 2 || c.h > MAXH || b.map.At(u.x, u.z).h > MAXH) return false;
-	int jump = max(1, UnitJump(u));
-	int mt = UnitMoveType(u) == MV_FLY ? MV_FOOT : UnitMoveType(u);
-	if (CanStep(b.map, u.x, u.z, tx, tz, mt, jump)) return false;
-	bool wall = (c.t == T_MOUNTAIN || c.t == T_ROCK);
-	bool cliff = abs((int)c.h - (int)b.map.At(u.x, u.z).h) > jump;
-	return wall || cliff;
+	if (tr == T_ROCK || tr == T_MOUNTAIN) return 1;
+	if (tr == T_WATER || tr == T_LAVA || tr == T_DOOR || tr == T_VOID || tr == T_CHASM) return 0;
+	return TerrainInfo(tr).costFoot >= 99;
 }
 
-void DoTerrace(Battle& b, int ui, int tx, int tz)
+int TerraceKind(const Battle& b, int ui, int tx, int tz)
 {
-	if (!CanTerrace(b, ui, tx, tz)) return;
+	if (ui < 0 || ui >= b.nUnits || !Map::In(tx, tz)) return 0;
 	const Unit& u = b.u[ui];
-	Cell& c = b.map.At(tx, tz);
-	int sh = (int)b.map.At(u.x, u.z).h;
-	if ((int)c.h > sh) { if (c.h > 1) c.h--; }
-	else if ((int)c.h < sh) c.h++;
-	if (c.h < 1) c.h = 1;
+	if (!u.alive || u.team != TEAM_PLAYER || !Map::In(u.x, u.z)) return 0;
+	if (Dist(u.x, u.z, tx, tz) != 1) return 0;
+	if (b.UnitAt(tx, tz) >= 0) return 0;
+	const Cell& stand = b.map.At(u.x, u.z);
+	const Cell& c = b.map.At(tx, tz);
+	int uL = LayerOn(stand, u.deck) ? u.deck : 0;
+	int uh = LayerHt(stand, uL);
 	int jump = max(1, UnitJump(u));
-	if ((c.t == T_MOUNTAIN || c.t == T_ROCK) && abs((int)c.h - sh) <= jump) {
-		c.t = T_HILL;
-		c.prop = PK_NONE;
+	int nL = CellLayN(c);
+	int rock = 0, cliff = 0, legal = 0;
+	for (int L = 0; L < nL; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_WATER || tr == T_LAVA || tr == T_DOOR) continue;
+		if (LayerLegal(stand, uL, c, L, MV_FOOT)) { legal = 1; continue; }
+		if (tr == T_VOID || tr == T_CHASM) continue;
+		if (TerraceRock(tr)) rock = 1;
+		else if (abs(LayerHt(c, L) - uh) > jump) cliff = 1;
 	}
+	if (legal) return 0;
+	if (rock) return 2;
+	if (cliff) return 1;
+	return 0;
+}
+
+bool CanTerrace(const Battle& b, int ui, int tx, int tz)
+{
+	return TerraceKind(b, ui, tx, tz) != 0;
+}
+
+static int TerraceLayer(const Cell& stand, int uL, const Cell& c, int wantRock, int uh, int jump)
+{
+	int best = -1, bestD = 99999;
+	int nL = CellLayN(c);
+	for (int L = 0; L < nL; L++) {
+		int tr = LayerTr(c, L);
+		if (tr == T_WATER || tr == T_LAVA || tr == T_DOOR || tr == T_VOID || tr == T_CHASM) continue;
+		if (LayerLegal(stand, uL, c, L, MV_FOOT)) continue;
+		int isRock = TerraceRock(tr);
+		if (wantRock != isRock) continue;
+		int d = abs(LayerHt(c, L) - uh);
+		if (!wantRock && d <= jump) continue;
+		if (d < bestD) { bestD = d; best = L; }
+	}
+	return best;
+}
+
+const wchar_t* TerraceLabel(int cliff, int rock)
+{
+	if (rock && cliff) return LangPick14(L"登山/採掘", L"Climb/Mine", L"Escalader/Miner", L"Scalare/Scavare", L"Escalar/Picar", L"등반/채굴", L"攀登/采矿", L"تسلق/تعدين", L"Подъём/Добыча", L"Klettern/Abbau", L"Escalar/Minerar", L"Klimmen/Delven", L"Wspinaczka/Wydobycie", L"Tırman/Kaz");
+	if (rock) return LangPick14(L"採掘", L"Mine", L"Miner", L"Scavare", L"Picar", L"채굴", L"采矿", L"تعدين", L"Добыча", L"Abbau", L"Minerar", L"Delven", L"Wydobycie", L"Kaz");
+	return TT(TX_BT_CLIMB);
+}
+
+const wchar_t* TerraceHelp(int cliff, int rock)
+{
+	if (rock && cliff) return LangPick14(
+		L"段差は登山で滑らかにし、岩は採掘で数回削って通す。行動を1回使う。",
+		L"Climb smooths a step. Mining chips a rock several times until you can pass. Uses your action.",
+		L"L'escalade lisse un dénivelé. Miner entame un rocher plusieurs fois. Consomme l'action.",
+		L"Scalare spiana un dislivello. Scavare scheggia una roccia più volte. Consuma l'azione.",
+		L"Escalar allana un desnivel. Picar desgasta una roca varias veces. Gasta la acción.",
+		L"단차는 등반으로 매끄럽게 하고, 바위는 채굴로 여러 번 깎아 통과합니다. 행동을 1회 씁니다.",
+		L"高差用攀登削平，岩石用采矿削几次后通过。消耗一次行动。",
+		L"التسلق يمهّد الفرق. التعدين يكسر الصخر عدة مرات. يستهلك الفعل.",
+		L"Подъём сглаживает уступ. Добыча несколько раз скалывает скалу. Тратит ход.",
+		L"Klettern glättet eine Stufe. Abbau schlägt einen Fels mehrfach ab. Verbraucht die Aktion.",
+		L"Escalar alisa um degrau. Minerar lasca uma rocha várias vezes. Gasta a ação.",
+		L"Klimmen maakt een trede vlak. Delven hakt een rots een paar keer weg. Kost je actie.",
+		L"Wspinaczka wygładza próg. Wydobycie kilka razy kruszy skałę. Zużywa akcję.",
+		L"Tırman bir basamağı düzler. Kaz kayayı birkaç kez oyar. Bir eylem harcar.");
+	if (rock) return LangPick14(
+		L"隣の岩を数回削る。削り切ると通れる。行動を1回使う。",
+		L"Chip an adjacent rock several times. When it gives way, you can pass. Uses your action.",
+		L"Entame un rocher voisin plusieurs fois. Quand il cède, on passe. Consomme l'action.",
+		L"Scheggia una roccia vicina più volte. Quando cede, si passa. Consuma l'azione.",
+		L"Desgasta una roca vecina varias veces. Al ceder, se puede pasar. Gasta la acción.",
+		L"옆의 바위를 여러 번 깎습니다. 깎이면 통과할 수 있습니다. 행동을 1회 씁니다.",
+		L"将相邻的岩石削几次。削开后即可通过。消耗一次行动。",
+		L"اكسر صخرة مجاورة عدة مرات. حين تفسح، تعبر. يستهلك الفعل.",
+		L"Несколько раз скалывает соседнюю скалу. Когда она поддастся, можно пройти. Тратит ход.",
+		L"Schlägt einen Fels daneben mehrfach ab. Wenn er nachgibt, kommt man durch. Verbraucht die Aktion.",
+		L"Lasca uma rocha ao lado várias vezes. Quando cede, dá para passar. Gasta a ação.",
+		L"Hak een naastgelegen rots een paar keer weg. Als die wijkt, kun je erlangs. Kost je actie.",
+		L"Kilka razy kruszy sąsiednią skałę. Gdy puści, da się przejść. Zużywa akcję.",
+		L"Bitişik kayayı birkaç kez oyar. Açılınca geçilir. Bir eylem harcar.");
+	return TT(TX_BTD_CLIMB);
+}
+
+int DoTerrace(Battle& b, int ui, int tx, int tz)
+{
+	int kind = TerraceKind(b, ui, tx, tz);
+	if (!kind) return 0;
+	const Unit& u = b.u[ui];
+	const Cell& stand = b.map.At(u.x, u.z);
+	Cell& c = b.map.At(tx, tz);
+	int uL = LayerOn(stand, u.deck) ? u.deck : 0;
+	int uh = LayerHt(stand, uL);
+	int jump = max(1, UnitJump(u));
+	int L = TerraceLayer(stand, uL, c, kind == 2, uh, jump);
+	if (L < 0) return 0;
+	int tr = LayerTr(c, L);
+	int h = LayerHt(c, L);
+	if (kind == 2) {
+		int need = (tr == T_MOUNTAIN || c.prop == PK_MOUNT) ? 4 : 3;
+		int n = (int)g_mineChip[tz][tx] + 1;
+		if (n > 250) n = 250;
+		g_mineChip[tz][tx] = (BYTE)n;
+		if (n >= need) {
+			int hh = uh < 1 ? 1 : uh;
+			LayerSet(c, L, T_HILL, hh);
+			if (L == 0) c.prop = PK_NONE;
+			g_mineChip[tz][tx] = 0;
+			return -1;
+		}
+		int dh = uh - h;
+		if (dh > 2) dh = 2;
+		if (dh < -2) dh = -2;
+		if (dh == 0) dh = h > 1 ? -1 : 1;
+		LayerSet(c, L, tr, h + dh);
+		return n;
+	}
+	int dh = uh - h;
+	if (dh > 2) dh = 2;
+	if (dh < -2) dh = -2;
+	if (dh == 0) return 0;
+	LayerSet(c, L, tr, h + dh);
+	return 0;
 }
 
 bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ)
@@ -11623,7 +12608,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 	BOOL tryOugi = level >= 4 || (r.Next() % 100) < (level <= 1 ? 4 : (level == 3 ? 34 : 14));
 	BOOL allowSkill = level >= 2 || (r.Next() % 100) < 18;
 	// 攻撃スキルと奥義は約半分の手番だけ。残りは通常攻撃。回復と、追い詰められた防御は残す。
-	BOOL halfOff = level < 2 || (r.Next() % 100) < 50;
+	BOOL halfOff = (r.Next() % 100) < (level <= 1 ? 28 : (level >= 4 ? 42 : 36));
 	float noise = level <= 1 ? 2.8f : (level == 2 ? 2.2f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
@@ -11697,6 +12682,10 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 		if (!ReachCanStop(rc, x, z)) continue;
 		um.x = x; um.z = z;
 		int bestStopL = u.deck, bestStopC = 99999;
+		if (ReachCanStopLayer(rc, x, z, u.deck)) {
+			int hC = ReachCostAt(rc, u.deck, x, z);
+			if (hC >= 0) bestStopC = hC;
+		}
 		for (int L = 0; L < LAY_N; L++) {
 			if (!ReachCanStopLayer(rc, x, z, L)) continue;
 			int cL = ReachCostAt(rc, L, x, z);
@@ -11770,6 +12759,50 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 			sc += place + r.F(0, 14.f * noise);
 			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
+		if (u.team == TEAM_PLAYER) {
+			int rmin = UnitRangeMin(u), rmax = max(1, UnitRangeMax(u));
+			for (int tz = 0; tz < MAPN; tz++) for (int tx = 0; tx < MAPN; tx++) {
+				if (b.map.At(tx, tz).gimm != GM_CHEST) continue;
+				if (!InAttackRange(b, x, z, rmin, rmax, tx, tz, true)) continue;
+				float sc = 420.f + place + r.F(0, 8.f * noise);
+				if (u.hp * 2 <= max(1, u.ch.stat[S_HP])) sc += 18.f;
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = -2; p.skill = -1; p.castX = tx; p.castZ = tz; }
+			}
+			int sdx = 0, sdz = 0;
+			for (int i = 0; i < b.nUnits; i++) {
+				if (!CanShove(b, ui, i, &sdx, &sdz)) continue;
+				float sc = 70.f + place;
+				if (Map::In(sdx, sdz)) {
+					int tr = LayerTr(b.map.At(sdx, sdz), 0);
+					if (tr == T_LAVA || tr == T_CHASM || b.map.At(sdx, sdz).gimm == GM_DROP) sc += 240.f;
+				}
+				sc += r.F(0, 8.f * noise);
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = -2; p.castX = sdx; p.castZ = sdz; }
+			}
+			int ox = 0, oz = 0;
+			if (AdjDoor(b, ui, &ox, &oz) > 0) {
+				BOOL fence = b.map.At(ox, oz).gimm == GM_FENCE;
+				if (fence || CanOpenDoor(u)) {
+					float sc = 160.f + place + r.F(0, 6.f * noise);
+					if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = -3; p.skill = -1; p.castX = ox; p.castZ = oz; }
+				}
+			}
+			static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) {
+				int cx = x + cdx[k], cz = z + cdz[k];
+				if (!CanTerrace(b, ui, cx, cz)) continue;
+				float sc = 96.f + place + r.F(0, 5.f * noise);
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = -4; p.skill = -1; p.castX = cx; p.castZ = cz; }
+			}
+			for (int slot = 0; slot < 2; slot++) {
+				int id = EquippedSummonId(u.ch, slot);
+				if (id <= 0) continue;
+				int sk = SUMMON_BASE + id - 1;
+				if (!SkillWorth(b, ui, sk)) continue;
+				float sc = 110.f + place + r.F(0, 10.f * noise);
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = ui; p.skill = sk; p.castX = x; p.castZ = z; }
+			}
+		}
 		// スキル
 		for (int s = 0; s < SKL_COUNT; s++) {
 			if (!allowSkill) break;
@@ -11834,7 +12867,19 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 						else tot += q.ch.lv * .2f;
 					}
 					if (tot <= 0) continue;
-					sc += tot - sd.mp * .4f;
+					if (sd.effect == EF_STUN || sd.effect == EF_SLEEP || sd.effect == EF_FREEZE) {
+						int held = 0;
+						for (int k = 0; k < nt; k++) {
+							const Unit& q = b.u[targets[k]];
+							if (q.stun > 0 || q.sleep > 0 || q.freeze > 0) held++;
+						}
+						tot *= (held > 0) ? 0.18f : 0.42f;
+						tot -= 18.f;
+					}
+					if (s_aiPrevSkill[ui] == s) tot -= 55.f;
+					else if (s_aiPrevSkill[ui] >= 0) tot += 18.f;
+					if (s == SKL_E_CRUSH) tot *= 0.78f;
+					sc += tot - (float)SkillMpCost(u.ch.stat[S_MP], s) * .4f;
 					if (cornered) {
 						int gap = LayPath(x, z, bestStopL);
 						if (gap >= 30000) gap = FootDist(x, z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i]));
@@ -11889,7 +12934,13 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 					Forecast f;
 					CalcForecast(b, ui, i, cs, f);
 					if (f.dmg <= 0) continue;
-					sc += f.dmg * f.hit / 100.f * (ougi ? .25f : .35f);
+					float totC = f.dmg * f.hit / 100.f * (ougi ? .25f : .35f);
+					if (csd.effect == EF_STUN || csd.effect == EF_SLEEP || csd.effect == EF_FREEZE) {
+						const Unit& q = b.u[i];
+						totC *= (q.stun > 0 || q.sleep > 0 || q.freeze > 0) ? 0.18f : 0.42f;
+					}
+					if (s_aiPrevSkill[ui] == cs) totC -= 40.f;
+					sc += totC;
 					if (!cornered) {
 						int fromMe = WalkStepsAt(t.x, t.z, t.deck);
 						if (fromMe >= 30000) fromMe = Dist(ox, oz, t.x, t.z);
@@ -11912,7 +12963,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 		}
 	}
 	um.x = ox; um.z = oz; um.deck = oDeck;
-	if (p.target >= 0) return;
+	if (ui >= 0 && ui < MAX_UNITS) s_aiPrevSkill[ui] = p.skill;
+	if (p.target != -1) return;
 	// 半減以下は上で距離を取っている。ここで近づくと逃げが消える。
 	if (cornered) return;
 	// ボスは近づかれるまで待機
@@ -14129,14 +15181,17 @@ bool SaveLoad(SaveData& s)
 			}
 		}
 		{
-			int b = CharBody(c), m = CharModel(c);
+			int b = CharBody(c), m = CharModel(c), k = CharKindOf(c), mesh = CharMesh(c);
 			c.body = 0;
 			CharSetBody(c, b);
 			CharSetModel(c, m);
+			CharSetKind(c, k);
+			CharSetMesh(c, mesh);
 		}
 		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
 		c.hairColor = Clampi(c.hairColor, 0, HAIR_COLORS - 1);
 		CharSetOutfit(c, Clampi(CharOutfit(c), 0, OUTFIT_COLORS - 1));
+		CharSetAvatar(c, CharAvatar(c));
 	}
 	for (int i = 0; i < MAX_PARTY; i++)
 		if (s.party[i] < -1 || s.party[i] >= MAX_ROSTER || (s.party[i] >= 0 && !s.roster[s.party[i]].used)) s.party[i] = -1;

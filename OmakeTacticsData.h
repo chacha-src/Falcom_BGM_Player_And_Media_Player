@@ -431,7 +431,9 @@ const wchar_t* ClassBlurb(int cls);
 int JobCount();
 int PromoteLevel(int tier);
 int ExpToNext(int lv);
+unsigned __int64 ExpToNextU(unsigned __int64 lv);
 const wchar_t* TacNum(int v);
+const wchar_t* TacNumU64(unsigned __int64 v);
 int NextPromoteClass(int cls);
 bool IsUltimateSkill(int skill);
 enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY, IT_COUNT = 7, IT_RAISE = 7 };
@@ -529,7 +531,9 @@ int PaceRoleOfLv(int lv);
 enum { MAX_ROSTER = 100, MAX_PARTY = 15, MAX_ENEMY = 640, NAME_LEN = 16 };
 static_assert(MAX_PARTY == 15, "Map::pStart は 15 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
-enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 8, FIG_N = 5, MODEL_N = 7, HUM_HAIR_N = 16 };
+enum CharKind { CHAR_KIND_HUM, CHAR_KIND_KIT, CHAR_KIND_SKEL, CHAR_KIND_MESH, CHAR_KIND_N };
+enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 8, FIG_N = 5, MODEL_ETH_N = 7, MODEL_N = 9, HUM_HAIR_N = 16 };
+static_assert(MODEL_ETH_N == 7 && MODEL_N == 9 && MODEL_N <= 16, "CharModel は 4bit。0-6 が人種、7-8 が魔女などの素体");
 
 #pragma pack(push, 4)
 struct CharData {
@@ -550,15 +554,67 @@ struct CharData {
 	int jobPath[12]; // 1次職から順。-1 は空。version 6
 	int jobDone;     // 1=振り直し済み、または新規。0 は一度だけの案内が残っている
 	int skillBits[24]; // version 7。1語32技、0..767。reserved[6][7] は武具のまま
-	int skillPad[16];  // [0..7] は 13〜20次の職。0 は空。セーブサイズは変えない
+	int skillPad[16];  // [0..7] は 13〜20次の職。0 は空。[14][15] は表のLvを超えた本当のレベル。セーブサイズは変えない
 };
 #pragma pack(pop)
 
-// body の下位 8bit が体型。bit 8-11 がモデル番号。既存セーブは番号 0。
+// 表のLvは int のまま。9999 のあとだけ [14]=下位 [15]=上位 に本当のレベルを置く。戦闘や職には掛けない。
+inline unsigned __int64 CharTrueLv(const CharData& c)
+{
+	unsigned lo = (unsigned)c.skillPad[14];
+	unsigned hi = (unsigned)c.skillPad[15];
+	unsigned __int64 ext = ((unsigned __int64)hi << 32) | (unsigned __int64)lo;
+	if (c.lv >= TAC_LV_MAX && ext > (unsigned __int64)TAC_LV_MAX) return ext;
+	if (c.lv < 1) return 1ull;
+	return (unsigned __int64)(unsigned)c.lv;
+}
+inline void CharSetTrueLv(CharData& c, unsigned __int64 v)
+{
+	if (v < 1ull) v = 1ull;
+	if (v <= (unsigned __int64)TAC_LV_MAX) {
+		c.lv = (int)v;
+		c.skillPad[14] = 0;
+		c.skillPad[15] = 0;
+		return;
+	}
+	c.lv = TAC_LV_MAX;
+	c.skillPad[14] = (int)(unsigned)(v & 0xffffffffu);
+	c.skillPad[15] = (int)(unsigned)((v >> 32) & 0xffffffffu);
+}
+inline void CharExpView(const CharData& c, unsigned __int64& lv, int& exp, int& need, int& left)
+{
+	lv = CharTrueLv(c);
+	exp = c.exp > 0 ? c.exp : 0;
+	if (lv >= ~0ull) { need = 0; left = 0; return; }
+	unsigned __int64 n = ExpToNextU(lv);
+	if (n > 2000000000ull) n = 2000000000ull;
+	need = (int)n;
+	long long d = (long long)need - (long long)exp;
+	if (d < 0) d = 0;
+	if (d > 2000000000LL) d = 2000000000LL;
+	left = (int)d;
+}
+
+// body の下位 8bit が体型。bit 8-11 がモデル番号。bit 12-13 が種族（0人間 1ファンタジー 2骸骨 3魔物）。bit 14-24 が魔物パック番号。既存セーブは番号 0・人間。
+inline const char* HumBodyName(int female, int model)
+{
+	static const char* const kFem[9] = { "HumF0", "HumF1", "HumF2", "HumF3", "HumF4", "HumF5", "HumF6", "HumWitch", "HumMedieval" };
+	static const char* const kMal[9] = { "HumM0", "HumM1", "HumM2", "HumM3", "HumM4", "HumM5", "HumM6", "HumKing", "HumAdventurer" };
+	int m = Clampi(model, 0, MODEL_N - 1);
+	return female ? kFem[m] : kMal[m];
+}
 inline int CharBody(const CharData& c) { return Clampi(c.body & 255, 0, B_COUNT - 1); }
 inline int CharModel(const CharData& c) { return Clampi((c.body >> 8) & 15, 0, MODEL_N - 1); }
+inline int CharKindOf(const CharData& c) { return Clampi((c.body >> 12) & 3, 0, CHAR_KIND_N - 1); }
+inline int CharMesh(const CharData& c) { return (int)(((unsigned)c.body >> 14) & 2047u); }
 inline void CharSetBody(CharData& c, int v) { c.body = (c.body & ~255) | (Clampi(v, 0, B_COUNT - 1) & 255); }
 inline void CharSetModel(CharData& c, int v) { c.body = (c.body & ~(15 << 8)) | ((Clampi(v, 0, MODEL_N - 1) & 15) << 8); }
+inline void CharSetKind(CharData& c, int v) { c.body = (c.body & ~(3 << 12)) | ((Clampi(v, 0, CHAR_KIND_N - 1) & 3) << 12); }
+inline void CharSetMesh(CharData& c, int v) {
+	unsigned b = (unsigned)c.body;
+	b = (b & ~(2047u << 14)) | (((unsigned)Clampi(v, 0, 2047) & 2047u) << 14);
+	c.body = (int)b;
+}
 
 // outfit の上位ビットに身長・胸・体型・顔・アバター・アバター色。既存セーブは 0 なので普通体型、色は染め色のまま。
 inline int CharOutfit(const CharData& c) { return c.outfit & 255; }
@@ -570,11 +626,11 @@ inline void CharSetOutfit(CharData& c, int v) { c.outfit = (c.outfit & ~255) | (
 inline void CharSetHt(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 8)) | ((Clampi(v, 0, HT_N - 1) + 1) << 8); }
 inline void CharSetBust(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 12)) | ((Clampi(v, 0, BUST_N - 1) + 8) << 12); }
 inline void CharSetFig(CharData& c, int v) { c.outfit = (c.outfit & ~(7 << 16)) | ((Clampi(v, 0, FIG_N - 1) + 1) << 16); }
-// 顔の型 (bit 19-22, 0=既定) とアバター (bit 23-28, 0=なし)
+// 顔の型 (bit 19-22, 0=既定) とアバター (bit 23-28)。0 は旧「なし」で、1 番として読む。
 inline int CharFace(const CharData& c) { return (c.outfit >> 19) & 15; }
 inline void CharSetFace(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 19)) | ((Clampi(v, 0, 15)) << 19); }
-inline int CharAvatar(const CharData& c) { return (c.outfit >> 23) & 63; }
-inline void CharSetAvatar(CharData& c, int v) { c.outfit = (c.outfit & ~(63 << 23)) | ((Clampi(v, 0, 63)) << 23); }
+inline int CharAvatar(const CharData& c) { int v = (c.outfit >> 23) & 63; return v < 1 ? 1 : v; }
+inline void CharSetAvatar(CharData& c, int v) { c.outfit = (c.outfit & ~(63 << 23)) | ((Clampi(v, 1, 63)) << 23); }
 // アバター色 (bit 29-31)。0 は服の染め色のまま。符号ビットを含むので unsigned で読む。
 inline int CharAvaCol(const CharData& c) { return (int)(((unsigned)c.outfit >> 29) & 7u); }
 inline void CharSetAvaCol(CharData& c, int v) {
@@ -597,7 +653,7 @@ void CharGiveSkill(CharData& c, int s);
 
 // 進化
 struct EvoOption { int target; int needGroup; };   // needGroup=-1 で不問
-int EvoOptions(int cls, EvoOption out[4], int secret = 0); // secret=1 で 13次以降。ジョブツリーは 0
+int EvoOptions(int cls, EvoOption out[4], int secret = 0); // secret=1 で 13次以降。未所持はツリーに出さない
 int JobLineOf(int cls);                            // 0剣 1拳 2弓 3盗 4魔 5聖。不明は -1
 bool JobLineFar(int root, int cls);                // 起点の系統から大きく外れている
 int JobWrongStep(const CharData& c);               // 振り直しを始める段。0始まり。無しは -1
@@ -610,7 +666,12 @@ bool EvoGroupSatisfied(int needGroup, const CharData* partners, int n);
 void EvoApply(CharData& main, int target, const CharData* partners, int n);
 void EvoBrief(int cls, wchar_t* out, int cap);     // 進化先の説明。役割が分かる3行
 enum { JOB_PATH_N = 12, JOB_STEP_N = 20, TAC_HID_N = 96 };
+inline BOOL TacHidClass(int cls)
+{
+	return cls >= C_JOB0 + JobCount() && cls < C_JOB0 + JobCount() + TAC_HID_N;
+}
 int JobPathCount(const CharData& c);
+int RosterHoldsClass(const CharData* roster, int cls);
 void JobPathText(const CharData& c, wchar_t* out, int cap);
 int JobStepsForLevel(int lv);
 void JobPathClear(CharData& c);
@@ -650,6 +711,10 @@ const wchar_t* MonsterLabel(int m);
 const wchar_t* MonsterLabelAt(int m, int lang);
 int MonsterGait(int monster);
 int MonsterCatalog(int* out, int cap);
+int TacPlayMeshN();
+int TacPlayMeshPack(int i);
+int TacPlayMeshFind(int pack);
+const wchar_t* TacPlayMeshLabel(int pack);
 bool MonsterKnown(int id, int stageCleared);
 int FoeKills(int monster);
 void FoeNoteKill(int monster);
@@ -668,7 +733,7 @@ struct Unit {
 	int rosterIdx;       // 味方: ロースター番号
 	int monster;         // 敵: MonsterId
 	int boss;
-	int lucky;           // 1=ラッキー。ボスではない雑魚。経験値3倍
+	int lucky;           // 1=ラッキー☆経験値3倍。2以上=人モデル敵（マークと経験値5倍）。ボスには付けない
 	CharData ch;         // 戦闘中の能力（敵も同形式）
 	int hp, mp;
 	int x, z;
@@ -710,8 +775,23 @@ inline int UnitSpan(const Unit& u)
 }
 inline int UnitIsLucky(const Unit& u)
 {
-	return u.lucky && !u.boss && u.team == TEAM_ENEMY;
+	return u.lucky == 1 && !u.boss && u.team == TEAM_ENEMY;
 }
+inline int UnitIsHumanFoe(const Unit& u)
+{
+	return u.lucky >= 2 && u.team == TEAM_ENEMY;
+}
+inline const wchar_t* UnitFoeMark(const Unit& u)
+{
+	if (u.boss) return L"★";
+	if (UnitIsLucky(u)) return L"☆";
+	if (UnitIsHumanFoe(u)) {
+		static const wchar_t* const kMk[8] = { L"✡", L"☄", L"✦", L"✧", L"⚝", L"☾", L"☀", L"⚡" };
+		return kMk[(u.lucky - 2) & 7];
+	}
+	return L"";
+}
+const wchar_t* HumFoeTitle(const Unit& u);
 int UnitStat(const Unit& u, int s);     // バフ込み
 float AilmentBreak(const Unit& d, int el); // 状態と属性の相性。弱点なら 2
 void UnitWeakText(const Unit& u, wchar_t* out, int cap); // 弱点に、状態の三つ巴で残った属性を足す
@@ -842,10 +922,12 @@ struct Forecast {
 	int weak;               // 弱点の一致数。1で2倍、2で4倍
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
-// 防御を引く前の参考。skill<0 は通常攻撃。当たる回数ぶんの合計も返す。威力のない補助は 0。
-int EstimateText(const Unit& a, int skill, wchar_t* out, int cap);
+// 防御を引く前の参考。ステージ補正は掛ける。skill<0 は通常攻撃。威力のない補助は 0。
+int EstimateText(const Unit& a, int skill, wchar_t* out, int cap, int stage);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
-int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut);
+int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut, int cx, int cz);
+// 黄色い効果マス（範囲技・自分中心・陣形）に乗っている味方。赤い照準範囲は含めない。
+BOOL TacOnYellow(const Battle& b, int ally, int caster, int skill, int cx, int cz);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
 // 倒れた味方が乗られているとき、隣から空きを探す。敵に近づく側には出さない。
 bool FindRaiseTile(const Battle& b, const Unit& corpse, int& ox, int& oz);
@@ -939,7 +1021,10 @@ bool CanOpenDoor(const Unit& u);
 int  AdjDoor(const Battle& b, int ui, int* ox, int* oz);
 void OpenDoor(Battle& b, int x, int z);
 bool CanTerrace(const Battle& b, int ui, int tx, int tz);
-void DoTerrace(Battle& b, int ui, int tx, int tz);
+int TerraceKind(const Battle& b, int ui, int tx, int tz);
+const wchar_t* TerraceLabel(int cliff, int rock);
+const wchar_t* TerraceHelp(int cliff, int rock);
+int DoTerrace(Battle& b, int ui, int tx, int tz);
 bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ);
 void DoShove(Battle& b, int ui, int ti);
 

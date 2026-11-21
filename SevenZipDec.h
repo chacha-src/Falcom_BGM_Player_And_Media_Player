@@ -15,6 +15,9 @@ struct SevenZipArc {
 	Byte* outBuffer;
 	size_t outBufferSize;
 	int opened;
+	int ripPe;
+	Byte* ripCopy;
+	size_t ripCopyCap;
 };
 
 int SevenZipPathIs7zW(const wchar_t* path);

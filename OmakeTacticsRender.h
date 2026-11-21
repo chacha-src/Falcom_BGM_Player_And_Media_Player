@@ -269,7 +269,11 @@ public:
 	// アセット
 	typedef void (*TacLoadPulseFn)(int cur, int total, void* user);
 	void SetLoadPulse(TacLoadPulseFn fn, void* user) { m_loadFn = fn; m_loadUser = user; }
-	void LoadPulse(int cur, int total) { if (m_loadFn && total > 0) m_loadFn(cur, total, m_loadUser); }
+	void LoadPulse(int cur, int total) {
+		extern void OmakeTacticsPumpInput();
+		OmakeTacticsPumpInput();
+		if (m_loadFn && total > 0) m_loadFn(cur, total, m_loadUser);
+	}
 	BOOL LoadAssets();
 	int CountAssetPulses() const;
 	int CountGearMeshes() const;
@@ -298,8 +302,12 @@ public:
 	int m_bodySlot[MON_CATALOG];   // 人型パック番号 → 予約した枠。それ以外は -1
 	int m_body0M, m_body0R, m_body0C, m_bodyN;
 	int m_keepModels, m_keepRigs, m_keepCreatures;
+	int m_pinMesh[32];
+	int m_pinMeshN;
 	volatile long m_gearShown, m_avaReady;
 	void EnsureBody(const char* name);
+	void PinMeshes(const int* pack, int n);
+	void EnsureMesh(int pack);
 	const BYTE* m_monBytes;
 	DWORD m_monBytesN;
 	void LoadBattleCreatures(const int* pack, int n);
@@ -327,6 +335,7 @@ public:
 		float bustLag[3] = {};
 		float bustVel[3] = {};
 		float bustPrev[3] = {};
+		float bustTime = 0.f;
 		int bustPrevOk = 0;
 		unsigned bustFrame = 0;
 		unsigned gpuSkinFrame = 0;
@@ -358,6 +367,10 @@ public:
 		DWORD frame;
 		unsigned key;
 		DWORD stamp;
+		float bustLag[3], bustVel[3], bustPrev[3];
+		float bustTime;
+		int bustPrevOk;
+		unsigned bustFrame;
 	};
 	struct HairOut {
 		const void* owner;
@@ -537,6 +550,7 @@ public:
 	}
 	// 描き直さない枠があるときだけ、前の面を写す。全員描くなら写さない。
 	void SetPortraitPreserve(BOOL keep) { m_ptPreserve = keep ? 1 : 0; }
+	void SetChrome(int tier) { m_chrome = tier < 0 ? 0 : (tier > 4 ? 4 : tier); }
 	unsigned PortraitVisKey(const Pose& pose, const DrawParams& dp) const;
 	BOOL PortraitCanSkip(int slot, unsigned key, unsigned extra) const;
 	void PortraitDidDraw(int slot, unsigned key, unsigned extra);
@@ -553,6 +567,7 @@ public:
 	// カットシーンのキャラ描画前。滝の定数と分割を捨て、布も置き直す。
 	void ResetActorPipe();
 	void SetCutActors(BOOL on) { m_cutActors = on; }
+	BOOL CutActors() const { return m_cutActors; }
 	// 作成プレビューは布の見え方をそのままにする。戦闘・カット・拠点は 1。
 	void SetStageWind(BOOL on) { m_stageWind = on; }
 	BOOL StageWind() const { return m_stageWind; }
@@ -733,7 +748,7 @@ private:
 		}
 	};
 	Fix<ClothInst, CLOTH_INST> m_clothInst;
-	void RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp);
+	void RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp, const float* bustLag = NULL);
 	void FlushClothPend();
 	void FlushHairPend();
 	void ReleaseClothInst();
@@ -1085,6 +1100,7 @@ private:
 	int m_textHead[TAC_TEXTH];
 	BOOL m_inPortrait;
 	int m_ptPreserve;
+	int m_chrome;
 	BOOL m_instOn;
 	int m_portraitSlot;
 	float m_ptClear[4];

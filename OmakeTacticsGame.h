@@ -92,6 +92,10 @@ public:
 	void GoHomeFromBattle();
 	SaveData& Save() { return m_save; }
 	int PaceHz() const;
+	void SetPaceFg(BOOL on) { m_paceFg = on ? TRUE : FALSE; }
+	BOOL PastLoad() const { return m_loaded && m_screen != SC_LOADING && m_screen != SC_FAIL; }
+	void BeginPaceLoop();
+	BOOL TakePaceDue(LARGE_INTEGER& due);
 	void Persist();
 
 	void OnMouseMove(int x, int y);
@@ -236,6 +240,7 @@ private:
 	void DrawCreateUi();
 	void DrawCreate3D();
 	void RefreshPreview();
+	void SyncPinnedMeshes();
 	void PlayShown(Actor& a, int& mot, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart);
 	void QueuePreviewRise(int mot);
 	void AdvancePreviewMot();
@@ -341,6 +346,7 @@ private:
 	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
+	void DrawCutArenaDress(DWORD ec, V3 eye, V3 look);
 	void BindSummonCut();
 	void SummonImpactFx();
 	void SummonApply(int phase, float u);
@@ -416,11 +422,14 @@ private:
 	float m_split[7];
 	int m_fpsN, m_fpsI;
 	int m_fpsBoot; // 3→1 は起動直後の全開実測。0 は未開始、-1 はリングを平均で埋めた後。
+	BOOL m_paceFg;
+	BOOL m_paceWait;
+	BOOL m_recovering;
 	float m_gpuSpan[32];
 	int m_gpuN, m_gpuI;
-	LARGE_INTEGER m_fpsAt;
+	LARGE_INTEGER m_fpsAt;    // 平均だけ。Present の終わりから次の Present の終わり。待ちには使わない。
 	LARGE_INTEGER m_afterPr;
-	LARGE_INTEGER m_vsyncDue;
+	LARGE_INTEGER m_vsyncDue; // この周だけの時計。起点を入れて、残りがあるときだけ起点から一拍先。次の周へ拍を足さない。
 	HWND m_hwnd;
 	int m_w, m_h;
 	float m_ui;
@@ -489,7 +498,7 @@ private:
 	int m_codexShape;        // 0全部 1単体 2範囲 3広域 4直線 5扇
 	int m_codexEl;           // 0全部。以降は属性
 	int m_codexSort;         // 0職 1名前 2MP 3習得
-	int m_growPath[14];      // ジョブツリーで上から選んだ職
+	int m_growPath[20];      // ジョブツリーで上から選んだ職。20次まで
 	int m_growN;
 	float m_growScroll;
 	int m_growSeen;
@@ -788,6 +797,13 @@ private:
 	float m_fairyScreenT, m_fairyScreenMax;
 	float m_fairyFxT;
 	V3 m_fairyPosA, m_fairyPosD;
+	Actor m_fairyAct;
+	int m_fairyGhost;
+	float m_fairyGhostT, m_fairyGhostDur;
+	V3 m_fairyGhostFrom, m_fairyGhostThru, m_fairyGhostPast;
+	void EnsureFairyGhost();
+	void TickFairyGhost(float dt);
+	void DrawFairyGhost();
 	Fix<Popup, 64> m_deferPopups;
 	int m_expGain[MAX_UNITS];
 	LevelUpInfo m_lvq[MAX_PARTY * 4];

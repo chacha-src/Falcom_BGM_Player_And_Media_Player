@@ -2164,8 +2164,8 @@ void CCustomPopupMenu::EnsureChromePrefix()
 					L"Список поддержки Cemu", L"Cemu-Unterstützungsliste", L"Lista suportada Cemu", L"Cemu-ondersteuningslijst",
 					L"Lista obslugi Cemu", L"Cemu destek listesi"),
 				cemuReady
-					? LL14(L"arcdata.7z / zip の対応タイトルを一覧表示します",
-						L"Show titles supported by arcdata.7z/zip",
+					? LL14(L"arcdata.oxz / 7z / zip の対応タイトルを一覧表示します",
+						L"Show titles supported by arcdata.oxz/7z/zip",
 						L"Afficher les titres supportes par arcdata.zip",
 						L"Mostra i titoli supportati da arcdata.zip",
 						L"Mostrar titulos compatibles de arcdata.zip",

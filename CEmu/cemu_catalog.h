@@ -18,7 +18,7 @@ typedef void (*CEmuCatalogProgressFn)(int pos, int max, void* user);
 void CEmuCatalogInit(CEmuCatalog* cat);
 void CEmuCatalogClear(CEmuCatalog* cat);
 
-/* xml は data ルートからも読む。arcdata.7z があれば優先、なければ arcdata.zip。exe 隣。
+/* xml は data ルートからも読む。arcdata.oxz → 7z → zip。exe 隣。
    キャッシュ鍵はアーカイブサイズのみ。
    ディスクキャッシュは zstd+可変長（v3）。exe 差し替えでは無効化しない。 */
 int CEmuCatalogLoad(CEmuCatalog* cat, const wchar_t* dataRoot);
@@ -31,7 +31,7 @@ void CEmuCatalogInvalidateCache(void);
 /* arcdata.7z / zip が未更新なら 1（起動 UI 用。サイズ+parse ver。フォルダ配置は見ない） */
 int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot);
 
-/* exe 隣の arcdata.7z（あれば）または arcdata.zip パス（存在しなくても zip パスを返す） */
+/* exe 隣の arcdata.oxz / 7z（あれば）。無ければ arcdata.zip のパス（無くても返す） */
 void CEmuCatalogGetExeArcdataPath(wchar_t* out, int outChars);
 
 const CEmuGameEntry* CEmuCatalogFindArchive(const CEmuCatalog* cat,

@@ -1789,36 +1789,39 @@ static BOOL RenderDownloadArcdataZip(CString& errOut, BOOL* outSkipped)
 	if (slash) *(slash + 1) = 0;
 	else exePath[0] = 0;
 
+	wchar_t destZst[MAX_PATH] = {};
+	_snwprintf_s(destZst, _TRUNCATE, L"%sarcdata.oxz", exePath);
 	wchar_t dest7z[MAX_PATH] = {};
 	_snwprintf_s(dest7z, _TRUNCATE, L"%sarcdata.7z", exePath);
 	wchar_t destZip[MAX_PATH] = {};
 	_snwprintf_s(destZip, _TRUNCATE, L"%sarcdata.zip", exePath);
 	wchar_t tmpPath[MAX_PATH] = {};
 
+	static const wchar_t* kUrlZst = L"https://ppp.oohara.jp/download/arcdata.oxz";
 	static const wchar_t* kUrl7z = L"https://ppp.oohara.jp/download/arcdata.7z";
 	static const wchar_t* kUrlZip = L"https://ppp.oohara.jp/download/arcdata.zip";
-	const time_t remote7z = RenderHttpLastModified(kUrl7z);
+	const time_t remoteZst = RenderHttpLastModified(kUrlZst);
+	const time_t remote7z = (remoteZst != 0) ? 0 : RenderHttpLastModified(kUrl7z);
 	const wchar_t* kUrl = kUrlZip;
 	wchar_t* destPath = destZip;
-	if (remote7z != 0) {
+	time_t remote = 0;
+	if (remoteZst != 0) {
+		kUrl = kUrlZst;
+		destPath = destZst;
+		remote = remoteZst;
+	} else if (remote7z != 0) {
 		kUrl = kUrl7z;
 		destPath = dest7z;
-		const BOOL haveLocal7z =
-			(GetFileAttributesW(dest7z) != INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
-		if (haveLocal7z) {
-			const time_t localMt = RenderFileMtimeUtc(dest7z);
-			if (remote7z <= localMt + 120) {
-				if (outSkipped) *outSkipped = TRUE;
-				return TRUE;
-			}
-		}
+		remote = remote7z;
 	} else {
+		remote = RenderHttpLastModified(kUrlZip);
+	}
+	{
 		const BOOL haveLocal =
-			(GetFileAttributesW(destZip) != INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
+			(GetFileAttributesW(destPath) != INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
 		if (haveLocal) {
-			const time_t localMt = RenderFileMtimeUtc(destZip);
-			const time_t remoteMt = RenderHttpLastModified(kUrlZip);
-			if (remoteMt == 0 || localMt == 0 || remoteMt <= localMt + 120) {
+			const time_t localMt = RenderFileMtimeUtc(destPath);
+			if (remote == 0 || localMt == 0 || remote <= localMt + 120) {
 				if (outSkipped) *outSkipped = TRUE;
 				return TRUE;
 			}
@@ -1921,7 +1924,7 @@ static BOOL RenderDownloadArcdataZip(CString& errOut, BOOL* outSkipped)
 	if (!MoveFileW(tmpPath, destPath)) {
 		if (!CopyFileW(tmpPath, destPath, FALSE)) {
 			DeleteFileW(tmpPath);
-			errOut = LL14(L"arcdata.7z / zip を保存できません。", L"Could not save arcdata.7z/zip.",
+			errOut = LL14(L"arcdata.oxz / 7z / zip を保存できません。", L"Could not save arcdata.oxz/7z/zip.",
 				L"Impossible d'enregistrer arcdata.", L"Impossibile salvare arcdata.",
 				L"No se pudo guardar arcdata.", L"arcdata 를 저장할 수 없습니다.",
 				L"无法保存 arcdata。", L"تعذر حفظ arcdata.", L"Не удалось сохранить arcdata.",
@@ -1932,18 +1935,17 @@ static BOOL RenderDownloadArcdataZip(CString& errOut, BOOL* outSkipped)
 		}
 		DeleteFileW(tmpPath);
 	}
-	if (destPath == dest7z)
-		DeleteFileW(destZip);
-	else
-		DeleteFileW(dest7z);
+	if (destPath != destZst) DeleteFileW(destZst);
+	if (destPath != dest7z) DeleteFileW(dest7z);
+	if (destPath != destZip) DeleteFileW(destZip);
 	return TRUE;
 }
 
 void CRender::OnEmuArcdataDl()
 {
 	const int ans = AfxMessageBox(LL14(
-		L"hoot 互換の arcdata.7z / zip を確認します。\n7z があれば優先して取得し、サーバ側が新しいときだけダウンロードし、\n実行ファイルと同じ場所に保存します。\nよろしいですか？",
-		L"Check hoot-compatible arcdata.7z/zip.\nPrefer 7z when present. Download only if the server copy is newer,\nand save it next to the executable.\nContinue?",
+		L"hoot 互換の arcdata.oxz / 7z / zip を確認します。\noxz があれば優先し、なければ 7z、さらになければ zip を取得します。\nサーバ側が新しいときだけダウンロードし、実行ファイルと同じ場所に保存します。\nよろしいですか？",
+		L"Check hoot-compatible arcdata.oxz / 7z / zip.\nPrefer oxz, then 7z, then zip. Download only if the server copy is newer,\nand save it next to the executable.\nContinue?",
 		L"Verifier arcdata.zip (hoot).\nTelecharger seulement si plus recent.\nContinuer ?",
 		L"Controllare arcdata.zip (hoot).\nScaricare solo se piu recente.\nContinuare?",
 		L"Comprobar arcdata.zip (hoot).\nDescargar solo si es mas reciente.\nContinuar?",
@@ -1971,7 +1973,7 @@ void CRender::OnEmuArcdataDl()
 
 	if (!ok) {
 		if (err.IsEmpty())
-			err = LL14(L"arcdata.7z / zip の取得に失敗しました。", L"Failed to obtain arcdata.7z/zip.",
+			err = LL14(L"arcdata.oxz / 7z / zip の取得に失敗しました。", L"Failed to obtain arcdata.oxz/7z/zip.",
 				L"Echec de l'obtention d'arcdata.zip.", L"Acquisizione arcdata.zip non riuscita.",
 				L"Fallo al obtener arcdata.zip.", L"arcdata.zip 확보 실패.", L"获取 arcdata.zip 失败。",
 				L"فشل الحصول على arcdata.zip.", L"Не удалось получить arcdata.zip.",
@@ -1984,8 +1986,8 @@ void CRender::OnEmuArcdataDl()
 
 	if (skipped) {
 		AfxMessageBox(LL14(
-			L"arcdata.7z / zip は最新です。\nダウンロードは行いませんでした。",
-			L"arcdata.7z/zip is already up to date.\nNo download was performed.",
+			L"arcdata.oxz / 7z / zip は最新です。\nダウンロードは行いませんでした。",
+			L"arcdata.oxz/7z/zip is already up to date.\nNo download was performed.",
 			L"arcdata.zip est deja a jour.\nAucun telechargement.",
 			L"arcdata.zip e gia aggiornato.\nNessun download.",
 			L"arcdata.zip ya esta actualizado.\nNo se descargo.",
@@ -2004,8 +2006,8 @@ void CRender::OnEmuArcdataDl()
 
 	/* 配置完了を先に通知（保存先は常に exe 隣） */
 	AfxMessageBox(LL14(
-		L"完了しました。\narcdata.7z または arcdata.zip を実行ファイルと同じ場所に保存しました。",
-		L"Done.\narcdata.7z or arcdata.zip was saved next to the executable.",
+		L"完了しました。\narcdata.oxz、7z、または zip を実行ファイルと同じ場所に保存しました。",
+		L"Done.\narcdata.oxz, 7z, or zip was saved next to the executable.",
 		L"Termine.\narcdata.zip enregistre a cote de l'exe.",
 		L"Completato.\narcdata.zip salvato accanto all'exe.",
 		L"Completado.\narcdata.zip guardado junto al exe.",

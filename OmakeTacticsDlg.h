@@ -20,6 +20,7 @@ public:
 	BOOL Destroying() const { return m_destroying; }
 	otac::Game& GameRef() { return m_game; }
 	BOOL GameReady() const { return m_gameOk; }
+	void PumpLiveInput();
 
 protected:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -75,6 +76,7 @@ protected:
 	void StartPace();
 	void StopPace();
 	void DrainInput();
+	void PumpPace();
 	void ReleaseUiInput();
 	void SyncImeEdit();
 	void PullImeToGame();

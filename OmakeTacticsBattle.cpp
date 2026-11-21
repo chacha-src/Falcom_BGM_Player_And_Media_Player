@@ -20,6 +20,8 @@ static float FitLo(float v, float lo, float hi)
 
 static int WeatherTx(int w);
 static int HourTx(int h);
+static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t);
+static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t);
 
 enum {
 	ID_BT_NOMOVE = 448,
@@ -216,6 +218,12 @@ void Game::LoadBattleCast()
 		if (n >= 256) break;
 		ids[n++] = md.model;
 	}
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& u = m_b.u[i];
+		if (!UnitIsHumanFoe(u)) continue;
+		m_r.EnsureBody(HumBodyName(u.ch.gender == 1, CharModel(u.ch)));
+	}
+	m_r.EnsureBody("HumF1");
 	for (int i = 0; i < m_b.nUnits && n < 256; i++) {
 		const Unit& u = m_b.u[i];
 		if (u.team != TEAM_PLAYER) continue;
@@ -229,6 +237,7 @@ void Game::LoadBattleCast()
 			if (!have) ids[n++] = mesh;
 		}
 	}
+	SyncPinnedMeshes();
 	m_r.LoadBattleCreatures(ids, n);
 }
 
@@ -237,7 +246,7 @@ void Game::BindImportedActors()
 	BOOL missing = FALSE, need = FALSE;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
-		if (u.team == TEAM_PLAYER || u.monster < 0) continue;
+		if (u.team == TEAM_PLAYER || UnitIsHumanFoe(u) || u.monster < 0) continue;
 		const MonsterDef& md = MonsterInfo(u.monster);
 		if (md.look != LK_MESH || md.model < 0) continue;
 		int mi = m_r.CreatureModel(md.model);
@@ -252,7 +261,7 @@ void Game::BindImportedActors()
 	if (!need) return;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
-		if (u.team == TEAM_PLAYER || u.monster < 0) continue;
+		if (u.team == TEAM_PLAYER || UnitIsHumanFoe(u) || u.monster < 0) continue;
 		const MonsterDef& md = MonsterInfo(u.monster);
 		if (md.look != LK_MESH || md.model < 0) continue;
 		int mi = m_r.CreatureModel(md.model);
@@ -268,13 +277,111 @@ void Game::ActorForUnit(int i)
 {
 	Unit& u = m_b.u[i];
 	if (u.team == TEAM_PLAYER) ActorFromChar(m_act[i], m_lib, m_r, u.ch);
-	else ActorFromMonster(m_act[i], m_lib, m_r, u.monster, u.boss);
-	if (UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f) m_act[i].hover = .35f;
+	else if (UnitIsHumanFoe(u)) {
+		ActorFromChar(m_act[i], m_lib, m_r, u.ch);
+		m_act[i].wings = 0;
+		m_act[i].hover = 0;
+		m_act[i].legOk = 0;
+	} else ActorFromMonster(m_act[i], m_lib, m_r, u.monster, u.boss);
+	if (!UnitIsHumanFoe(u) && UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f) m_act[i].hover = .35f;
 	if (!u.alive || u.hp <= 0) HoldCorpse(m_act[i]);
 	else {
 		ActorPlay(m_act[i], CL_IDLE, 1, 0);
 		m_act[i].t = m_rng.F(0, 2);
 	}
+}
+
+void Game::EnsureFairyGhost()
+{
+	CharData c;
+	memset(&c, 0, sizeof(c));
+	c.used = 1;
+	c.gender = 1;
+	c.cls = C_MAGE;
+	CharSetKind(c, CHAR_KIND_HUM);
+	CharSetModel(c, 1);
+	CharSetAvatar(c, 21);
+	CharSetFace(c, 1);
+	CharSetHt(c, 2);
+	CharSetFig(c, 1);
+	CharSetBust(c, 2);
+	CharSetOutfit(c, 3);
+	CharSetAvaCol(c, 2);
+	CharSetBody(c, B_MAGE);
+	c.hair = 2;
+	c.hairColor = 3;
+	c.hat = 0;
+	c.cape = 0;
+	m_r.EnsureBody("HumF1");
+	ActorFromChar(m_fairyAct, m_lib, m_r, c);
+	m_fairyAct.wings = 0;
+	m_fairyAct.hover = 0;
+	m_fairyAct.legOk = 0;
+	m_fairyAct.flyLean = 0;
+	m_fairyAct.flap = 0;
+	m_fairyAct.gait = GAIT_BIPED;
+	ActorPlay(m_fairyAct, CL_2H_SPIN, 1, 0.f);
+	m_fairyAct.animSpeed = 1.38f;
+}
+
+void Game::TickFairyGhost(float dt)
+{
+	if (!m_fairyGhost) return;
+	m_fairyGhostT += dt;
+	ActorUpdate(m_fairyAct, dt);
+	m_fairyAct.wings = 0;
+	m_fairyAct.hover = 0;
+	m_fairyAct.legOk = 0;
+	m_fairyAct.flyLean = 0;
+	m_fairyAct.flap = 0;
+	m_fairyAct.gait = GAIT_BIPED;
+	if (m_fairyGhostT >= m_fairyGhostDur) {
+		m_fairyGhost = 0;
+		m_fairyGhostT = 0;
+	}
+}
+
+void Game::DrawFairyGhost()
+{
+	if (!m_fairyGhost) return;
+	float dur = m_fairyGhostDur > 0.05f ? m_fairyGhostDur : 2.05f;
+	float u = Clampf(m_fairyGhostT / dur, 0.f, 1.f);
+	V3 a = m_fairyGhostFrom, b = m_fairyGhostThru, c = m_fairyGhostPast;
+	V3 p;
+	V3 dir;
+	if (u < 0.36f) {
+		float t = Smooth01(u / 0.36f);
+		p = Lerp(a, b, t);
+		p.y += sinf(t * PI) * 0.58f;
+		dir = b - a;
+	} else {
+		float t = Smooth01((u - 0.36f) / 0.64f);
+		p = Lerp(b, c, t);
+		p.y += (1.f - t) * 0.22f + t * 0.62f;
+		dir = c - b;
+	}
+	if (Len(v3(dir.x, 0, dir.z)) < 0.04f) dir = v3(0, 0, 1);
+	float yaw = atan2f(dir.x, dir.z);
+	float fade = 1.f;
+	if (u > 0.62f) fade = 1.f - Smooth01((u - 0.62f) / 0.38f);
+	int al = (int)(fade * 218.f);
+	if (al < 8) al = 8;
+	DrawParams dp;
+	dp.tint = RGBA8(255, 214, 255, al);
+	dp.emissive = 1.42f + 0.28f * sinf(m_time * 8.f);
+	dp.flash = 0.48f;
+	dp.rim = 1.f;
+	dp.dissolve = (1.f - fade) * 0.88f;
+	dp.outline = 0.02f;
+	dp.outlineColor = RGBA8(255, 186, 255);
+	dp.noTess = 1;
+	ActorPose(m_fairyAct, m_lib, m_r);
+	BOOL cut = m_r.CutActors();
+	m_r.SetCutActors(FALSE);
+	m_r.SetDepthTest(FALSE);
+	ActorDraw(m_r, m_lib, m_fairyAct, ActorWorld(m_fairyAct, p, yaw), dp, m_time);
+	m_r.SetDepthTest(TRUE);
+	m_r.SetCutActors(cut);
 }
 
 static const DWORD kSnapMagic = 0x31504153u;
@@ -1140,6 +1247,8 @@ void Game::ResumeBattle(int kind)
 	memset(m_hurtT, 0, sizeof(m_hurtT));
 	memset(m_lungeY, 0, sizeof(m_lungeY));
 	m_critScreenT = m_fairyScreenT = m_fairyFxT = 0.f;
+	m_fairyGhost = 0;
+	m_fairyGhostT = m_fairyGhostDur = 0;
 	m_bgmTick = 1;
 	m_bgmWatch = -1;
 	m_lvqN = m_lvqCur = 0; m_promoAsk = 0; m_menuConfirm = 0; m_proj.active = 0;
@@ -1260,6 +1369,8 @@ void Game::StartBattle(int stage)
 	memset(m_hurtT, 0, sizeof(m_hurtT));
 	memset(m_lungeY, 0, sizeof(m_lungeY));
 	m_critScreenT = m_fairyScreenT = m_fairyFxT = 0.f;
+	m_fairyGhost = 0;
+	m_fairyGhostT = m_fairyGhostDur = 0;
 	ResetGroundMarks(FALSE);
 	m_gustHN = 0;
 	m_gustCool = 2.5f;
@@ -1447,6 +1558,17 @@ static void BurstToGate(Unit& u, int unitIndex, Rng& rng, long long& pool, Level
 		}
 		if (!stepped) break;
 	}
+	if (u.ch.lv < TAC_LV_MAX || pool <= 0) return;
+	unsigned __int64 past = CharTrueLv(u.ch);
+	int extra = 0;
+	while (extra < 8 && past < ~0ull) {
+		unsigned __int64 need = ExpToNextU(past);
+		if (need < 1ull || (unsigned __int64)pool < need) break;
+		pool -= (long long)need;
+		past++;
+		extra++;
+	}
+	if (past > (unsigned __int64)TAC_LV_MAX) CharSetTrueLv(u.ch, past);
 }
 
 void Game::EndBattle(int victory)
@@ -1686,6 +1808,27 @@ void Game::DemoDrive(float dt)
 	if (m_phase == PH_P_MOVE) {
 		if (m_demoAct == 0) {
 			AiDecide(m_b, m_cur, m_ai, m_rng, 2);
+			if (m_ai.target != -2 && m_ai.target != -3 && m_ai.target != -4 && m_ai.skill != -2) {
+				float bestI = -1e9f;
+				int gi = -1, ti = -1;
+				int nGood = GoodCount();
+				for (int g = 0; g < nGood; g++) {
+					if (GoodHave(m_save, g) <= 0) continue;
+					const GoodDef* gd = GoodAt(g);
+					for (int i = 0; i < m_b.nUnits; i++) {
+						if (!ItemHelps(m_b, gd, u, m_b.u[i])) continue;
+						float sc = 92.f;
+						if (m_b.u[i].hp * 2 <= max(1, m_b.u[i].ch.stat[S_HP])) sc += 88.f;
+						if (gd->item == IT_RAISE || gd->extra == 106 || gd->extra == 116) sc += 140.f;
+						if (sc > bestI) { bestI = sc; gi = g; ti = i; }
+					}
+				}
+				if (gi >= 0 && bestI >= 170.f) {
+					m_ai.skill = -3;
+					m_ai.target = ti;
+					m_ai.castX = gi;
+				}
+			}
 			m_demoAct = 1;
 			m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
 		}
@@ -1743,17 +1886,31 @@ void Game::DemoDrive(float dt)
 		return;
 	}
 	if (m_phase == PH_P_CMD) {
-		BOOL skillOk = m_ai.skill >= 0 && !IsSummonId(m_ai.skill) && SkillWorth(m_b, m_cur, m_ai.skill);
-		int choice = skillOk ? 1 : (m_ai.target >= 0 ? 0 : 2);
+		BOOL skillOk = m_ai.skill >= 0 && !IsSummonId(m_ai.skill) && m_ai.skill != -2 && m_ai.skill != -3 && SkillWorth(m_b, m_cur, m_ai.skill);
+		int choice = 2;
+		if (m_ai.target == -2) choice = 0;
+		else if (m_ai.target == -3) choice = 7;
+		else if (m_ai.target == -4) choice = 8;
+		else if (m_ai.skill == -2) choice = 6;
+		else if (m_ai.skill == -3) choice = 4;
+		else if (m_ai.skill >= 0 && IsSummonId(m_ai.skill)) choice = 5;
+		else if (skillOk) choice = 1;
+		else if (m_ai.target >= 0) choice = 0;
 		int show = m_demoTick < 2 ? m_demoTick : choice;
 		if (show == 0) m_focusId = ID_BT_ATTACK;
 		else if (show == 1) m_focusId = ID_BT_SKILL;
+		else if (show == 4) m_focusId = ID_BT_ITEM;
+		else if (show == 5) m_focusId = ID_BT_SUMMON;
+		else if (show == 6) m_focusId = ID_BT_SHOVE;
+		else if (show == 7) m_focusId = ID_BT_DOOR;
+		else if (show == 8) m_focusId = ID_BT_CLIMB;
 		else m_focusId = ID_BT_WAIT;
 		m_demoStep += dt;
 		if (m_demoStep < 0.34f) return;
 		m_demoStep = 0;
 		m_demoTick++;
-		if (m_demoTick < 3) return;
+		int need = (choice <= 2) ? 3 : 2;
+		if (m_demoTick < need) return;
 		if (choice == 1) {
 			int sk = m_ai.skill;
 			m_skillShape = 0;
@@ -1800,6 +1957,39 @@ void Game::DemoDrive(float dt)
 			ComputeOverlays();
 			m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
 			return;
+		}
+		if (choice == 4) {
+			m_phase = PH_P_ITEM; m_itemAim = -1; m_itemPage = 0; m_navMode = TRUE; m_focusId = ID_BT_IT0;
+			return;
+		}
+		if (choice == 5) {
+			m_phase = PH_P_SUMMON; m_navMode = TRUE; m_focusId = ID_BT_SUM0;
+			return;
+		}
+		if (choice == 6) {
+			m_phase = PH_P_SHOVE; m_navMode = FALSE;
+			if (m_ai.target >= 0 && m_ai.target < m_b.nUnits) {
+				m_cx = m_b.u[m_ai.target].x; m_cz = m_b.u[m_ai.target].z; m_cursorValid = TRUE;
+			}
+			return;
+		}
+		if (choice == 7) {
+			int ox = 0, oz = 0;
+			if (AdjDoor(m_b, m_cur, &ox, &oz) > 0) {
+				BOOL brk = m_b.map.At(ox, oz).gimm == GM_FENCE;
+				OpenDoor(m_b, ox, oz);
+				AddPopup(CellCenter(ox, oz) + v3(0, .6f, 0), TT(brk ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
+				TacSfx(TS_DOOR);
+				m_r.BuildTerrain(m_b.map);
+				FinishUnitTurn(1);
+				return;
+			}
+		}
+		if (choice == 8) {
+			int tx = -1, tz = -1;
+			static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) if (CanTerrace(m_b, m_cur, u.x + cdx[k], u.z + cdz[k])) { tx = u.x + cdx[k]; tz = u.z + cdz[k]; break; }
+			if (tx >= 0) { ApplyTerrace(tx, tz); return; }
 		}
 		if (!m_moved && u.buffDef < 1) u.buffDef = 1;
 		if (!m_moved) {
@@ -1855,6 +2045,65 @@ void Game::DemoDrive(float dt)
 		if (m_cx == tx && m_cz == tz) {
 			BattleConfirmCursor();
 			if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) FinishUnitTurn(1);
+			return;
+		}
+		if (m_cx < tx) m_cx++;
+		else if (m_cx > tx) m_cx--;
+		else if (m_cz < tz) m_cz++;
+		else if (m_cz > tz) m_cz--;
+		m_cursorValid = TRUE;
+		TacSfx(TS_CURSOR);
+		UpdateHover();
+		return;
+	}
+	if (m_phase == PH_P_ITEM) {
+		m_demoStep += dt;
+		if (m_demoStep < 0.28f) return;
+		m_demoStep = 0;
+		int good = m_ai.castX;
+		int tg = m_ai.target;
+		if (m_itemAim < 0) {
+			if (good < 0 || GoodHave(m_save, good) <= 0) { FinishUnitTurn(1); return; }
+			m_itemAim = good;
+			m_navMode = TRUE;
+			m_focusId = ID_BT_ITT0;
+			return;
+		}
+		if (tg < 0 || tg >= m_b.nUnits) { FinishUnitTurn(1); return; }
+		UseConsumable(m_itemAim, tg);
+		return;
+	}
+	if (m_phase == PH_P_SUMMON) {
+		m_demoStep += dt;
+		if (m_demoStep < 0.34f) return;
+		int sk = m_ai.skill;
+		int slot = 0;
+		for (int s = 0; s < 2; s++) {
+			int id = EquippedSummonId(u.ch, s);
+			if (id > 0 && SUMMON_BASE + id - 1 == sk) slot = s;
+		}
+		m_focusId = ID_BT_SUM0 + slot;
+		m_cmdSkill = sk;
+		m_phase = PH_P_SKILLTARGET;
+		m_navMode = FALSE;
+		ComputeOverlays();
+		PickSkillCursor(sk);
+		m_ai.castX = m_cx;
+		m_ai.castZ = m_cz;
+		return;
+	}
+	if (m_phase == PH_P_SHOVE) {
+		int tx = u.x, tz = u.z;
+		if (m_ai.target >= 0 && m_ai.target < m_b.nUnits) {
+			tx = m_b.u[m_ai.target].x;
+			tz = m_b.u[m_ai.target].z;
+		}
+		m_demoStep += dt;
+		if (m_demoStep < 0.12f) return;
+		m_demoStep = 0;
+		if (m_cx == tx && m_cz == tz) {
+			BattleConfirmCursor();
+			if (m_phase == PH_P_SHOVE) FinishUnitTurn(1);
 			return;
 		}
 		if (m_cx < tx) m_cx++;
@@ -1985,6 +2234,26 @@ static unsigned long long TacLayBit(int L)
 	return 1ull << L;
 }
 
+// そのマスで、基準の床に一番近い通行層。地面が奈落でも上の床は残す。
+static int OverlayFloor(const Map& m, int x, int z, int preferL, float preferY)
+{
+	if (!Map::In(x, z)) return -1;
+	const Cell& c = m.At(x, z);
+	int n = CellLayN(c);
+	int best = -1;
+	float bestDy = 1e9f;
+	for (int L = 0; L < n; L++) {
+		if (!LayerOn(c, L)) continue;
+		int tr = LayerTr(c, L);
+		if (tr == T_VOID || tr == T_CHASM) continue;
+		float y = m.WalkY(x, z, L);
+		float dy = fabsf(y - preferY);
+		if (L == preferL) dy -= 0.35f;
+		if (best < 0 || dy < bestDy) { best = L; bestDy = dy; }
+	}
+	return best;
+}
+
 void Game::ComputeOverlays()
 {
 	memset(m_ovMove, 0, sizeof(m_ovMove));
@@ -2061,15 +2330,13 @@ void Game::ComputeOverlays()
 		int aL = LayerOn(m_b.map.At(u.x, u.z), u.deck) ? u.deck : 0;
 		if (sd.rMax == 0) {
 			int ar = SkillAreaOf(u, m_cmdSkill);
+			float preferY = m_b.map.WalkY(u.x, u.z, aL);
 			for (int dz = -ar; dz <= ar; dz++) for (int dx = -ar; dx <= ar; dx++) {
 				if (abs(dx) + abs(dz) > ar) continue;
 				int tx = u.x + dx, tz = u.z + dz;
-				if (!Map::In(tx, tz) || TacOffMap(m_b.map.At(tx, tz))) continue;
-				unsigned long long bits = 0;
-				int nL = CellLayN(m_b.map.At(tx, tz));
-				for (int L = 0; L < nL; L++) if (LayerOn(m_b.map.At(tx, tz), L) && LayerTr(m_b.map.At(tx, tz), L) != T_VOID) bits |= TacLayBit(L);
-				if (!bits) continue;
-				m_ovAtkLay[tz][tx] |= bits;
+				int L = OverlayFloor(m_b.map, tx, tz, aL, preferY);
+				if (L < 0) continue;
+				m_ovAtkLay[tz][tx] |= TacLayBit(L);
 				m_ovAtk[tz][tx] = 3;
 			}
 		} else {
@@ -2480,17 +2747,21 @@ void Game::BuildOverlayQuads()
 		if (m_cLayer <= 0 || !Map::In(x, z) || !LayerOn(m.At(x, z), m_cLayer)) return -999.f;
 		return m.WalkY(x, z, m_cLayer);
 	};
+	int wantL = 0;
+	float wantY = 0.f;
+	if (m_cur >= 0 && Map::In(u.x, u.z)) {
+		wantL = LayerOn(m.At(u.x, u.z), u.deck) ? u.deck : 0;
+		wantY = m.WalkY(u.x, u.z, wantL);
+	}
+	if (m_cursorValid && Map::In(m_cx, m_cz) && LayerOn(m.At(m_cx, m_cz), m_cLayer)) {
+		wantL = m_cLayer;
+		wantY = m.WalkY(m_cx, m_cz, m_cLayer);
+	}
 	auto paintOpen = [&](int x, int z, DWORD c, float lift) {
-		if (!Map::In(x, z) || TacOffMap(m.At(x, z))) return;
-		int aL = (m_cur >= 0 && LayerOn(m.At(u.x, u.z), u.deck)) ? u.deck : 0;
-		int n = 0;
-		int nL = CellLayN(m.At(x, z));
-		for (int L = 0; L < nL; L++) {
-			if (!LayerOn(m.At(x, z), L) || StandRangeAdd(m, u.x, u.z, aL, x, z, L) < 0) continue;
-			quad(x, z, c, lift, m.WalkY(x, z, L), L, 4);
-			n++;
-		}
-		if (!n) quad(x, z, c, lift, layY(x, z), layY(x, z) > -900.f ? m_cLayer : -1, 4);
+		if (!Map::In(x, z)) return;
+		int L = OverlayFloor(m, x, z, wantL, wantY);
+		if (L < 0) return;
+		quad(x, z, c, lift, m.WalkY(x, z, L), L, 4);
 	};
 	if (!dynOnly) {
 		enum { BANDV = 65536 };
@@ -2718,32 +2989,20 @@ static int MoveFieldNear(const Reach& r, int x, int z, int margin)
 	return 0;
 }
 
-// 青マスが一つの層だけなら、いまの階を優先する。別の層にも青マスがあるときは、そのうち高い床へ載せる。
+// 青マスが一つの層だけなら、いまの階を優先する。同じ高さで届くなら上の床へ吸い上げない。
 static int MoveRangeLayer(const Reach& r, const Map& m, int x, int z, int unitL, float unitY)
 {
 	if (!Map::In(x, z)) return -1;
 	const Cell& c = m.At(x, z);
 	int n = CellLayN(c), best = -1, bestSc = -1;
-	int nBlue = 0, upper = -1;
-	float upperY = -1e9f;
 	for (int L = 0; L < n; L++) {
 		if (ReachCostAt(r, L, x, z) < 0) continue;
-		nBlue++;
 		float y = m.WalkY(x, z, L);
-		if (upper < 0 || y > upperY + 0.02f || (fabsf(y - upperY) <= 0.02f && L > upper)) {
-			upperY = y;
-			upper = L;
-		}
 		int sc = 4;
 		if (ReachCanStopLayer(r, x, z, L)) sc += 4;
-		if (unitY > -1e8f && fabsf(y - unitY) <= 0.95f) sc += 6;
-		else if (L == unitL && (unitY <= -1e8f || fabsf(y - unitY) <= 1.8f)) sc += 2;
+		if (unitY > -1e8f && fabsf(y - unitY) <= 0.95f) sc += 12;
+		else if (L == unitL && (unitY <= -1e8f || fabsf(y - unitY) <= 1.8f)) sc += 8;
 		if (sc > bestSc) { bestSc = sc; best = L; }
-	}
-	if (nBlue >= 2 && upper >= 0) {
-		if (unitY > -1e8f && best >= 0 && fabsf(m.WalkY(x, z, best) - unitY) <= 0.95f && fabsf(upperY - unitY) > 2.4f)
-			return best;
-		return upper;
 	}
 	if (best >= 0) return best;
 	if (!MoveFieldNear(r, x, z, kMoveLayerMargin)) return -1;
@@ -2937,17 +3196,15 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz, int* outLayer) const
 		}
 	}
 	if (outLayer && moving && nx >= 0) {
-		bx = nx; bz = nz; bl = nL;
+		bx = nx; bz = nz;
+		int homeL = MoveRangeLayer(m_reach, m, nx, nz, unitL, unitY);
+		if (homeL >= 0) bl = homeL;
+		else bl = nL;
 	}
 	if (bx < 0) return FALSE;
 	if (outLayer && moving) {
-		int onBlue = ReachCostAt(m_reach, bl, bx, bz) >= 0;
-		if (onBlue)
-			RepickUpperBlue(m_reach, m, org, dir, bx, bz, bl);
-		else if (!RepickUpperBlue(m_reach, m, org, dir, bx, bz, bl)) {
-			int ml = MoveRangeLayer(m_reach, m, bx, bz, unitL, unitY);
-			if (ml >= 0) bl = ml;
-		}
+		int ml = MoveRangeLayer(m_reach, m, bx, bz, unitL, unitY);
+		if (ml >= 0) bl = ml;
 	}
 	cx = bx; cz = bz;
 	if (outLayer) *outLayer = bl;
@@ -2989,11 +3246,11 @@ void Game::SyncCursorLayer()
 	const Cell& c = m_b.map.At(m_cx, m_cz);
 	if (m_cLayer < 0 || m_cLayer >= LAY_N) m_cLayer = 0;
 	if (m_phase == PH_P_MOVE && !m_layerLock) {
-		if (ReachCostAt(m_reach, m_cLayer, m_cx, m_cz) >= 0) return;
 		int unitL = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].deck : m_cLayer;
 		float unitY = (m_cur >= 0 && m_cur < m_b.nUnits) ? m_b.u[m_cur].py : 0.f;
 		int ml = MoveRangeLayer(m_reach, m_b.map, m_cx, m_cz, unitL, unitY);
 		if (ml >= 0) { m_cLayer = ml; return; }
+		if (ReachCostAt(m_reach, m_cLayer, m_cx, m_cz) >= 0) return;
 	}
 	if (LayerOn(c, m_cLayer)) {
 		int t = LayerTr(c, m_cLayer);
@@ -3051,7 +3308,9 @@ void Game::CycleLayer(int dir)
 void Game::UpdateHover()
 {
 	if (m_screen != SC_BATTLE) return;
-	if (m_mouseSeen && !m_navMode && !m_seqCut && !m_demo) {
+	BOOL menuLook = (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON);
+	BOOL mouseMiss = FALSE;
+	if (m_mouseSeen && !m_seqCut && !m_demo && (!m_navMode || menuLook)) {
 		BOOL overUi = FALSE;
 		for (auto& b : m_btnsPrev) if (m_mx >= b.x && m_my >= b.y && m_mx < b.x + b.w && m_my < b.y + b.h) overUi = TRUE;
 		int prevX = m_cx, prevZ = m_cz, prevL = m_cLayer;
@@ -3083,30 +3342,35 @@ void Game::UpdateHover()
 			m_cx = cx; m_cz = cz; m_cursorValid = TRUE;
 			if (moved) m_layerLock = 0;
 			if (!m_layerLock && (moved || lay != m_cLayer)) m_cLayer = lay;
+		} else if (!overUi) {
+			mouseMiss = TRUE;
 		}
 	}
 	SyncCursorLayer();
 	if (m_phase == PH_P_MOVE && !m_layerLock && m_cur >= 0 && m_cur < m_b.nUnits && m_cursorValid && Map::In(m_cx, m_cz)) {
 		const Unit& cu = m_b.u[m_cur];
 		int ml = MoveRangeLayer(m_reach, m_b.map, m_cx, m_cz, cu.deck, cu.py);
+		if (ml >= 0) m_cLayer = ml;
 		float cy = m_b.map.WalkY(m_cx, m_cz, m_cLayer);
 		if (ml >= 0 || ReachBestCost(m_reach, m_cx, m_cz) >= 0 || fabsf(cy - cu.py) <= 0.55f)
 			m_camPan.y = 0.f;
 	}
-	m_hoverUnit = m_cursorValid ? m_b.UnitAt(m_cx, m_cz, m_cLayer) : -1;
-	// 飛行は占有が deck のまま上に見えることがある。同じ高さ帯だけ拾う。
-	if (m_hoverUnit < 0 && m_cursorValid && Map::In(m_cx, m_cz)) {
-		float yCur = m_b.map.WalkY(m_cx, m_cz, m_cLayer);
-		int n = CellLayN(m_b.map.At(m_cx, m_cz));
-		for (int L = 0; L < n; L++) {
-			int who = m_b.UnitAt(m_cx, m_cz, L);
-			if (who < 0 || !m_b.u[who].alive) continue;
-			if (fabsf(m_b.map.WalkY(m_cx, m_cz, L) - yCur) <= 0.9f) { m_hoverUnit = who; break; }
+	if (mouseMiss) {
+		m_hoverUnit = -1;
+	} else {
+		m_hoverUnit = m_cursorValid ? m_b.UnitAt(m_cx, m_cz, m_cLayer) : -1;
+		if (m_hoverUnit < 0 && m_cursorValid && Map::In(m_cx, m_cz))
+			m_hoverUnit = m_b.UnitAt(m_cx, m_cz);
+		if (m_hoverUnit >= 0 && !m_b.u[m_hoverUnit].alive && m_b.u[m_hoverUnit].team != TEAM_PLAYER) m_hoverUnit = -1;
+		if (m_hoverUnit >= 0 && m_cursorValid && Map::In(m_cx, m_cz)) {
+			const Unit& hu = m_b.u[m_hoverUnit];
+			int s = UnitSpan(hu);
+			if (m_cx < hu.x || m_cz < hu.z || m_cx >= hu.x + s || m_cz >= hu.z + s)
+				m_hoverUnit = -1;
 		}
+		if (m_hoverUnit < 0 && m_cursorValid && m_phase == PH_P_SKILLTARGET)
+			m_hoverUnit = CorpseAt(m_b, m_cx, m_cz);
 	}
-	if (m_hoverUnit >= 0 && !m_b.u[m_hoverUnit].alive && m_b.u[m_hoverUnit].team != TEAM_PLAYER) m_hoverUnit = -1;
-	if (m_hoverUnit < 0 && m_cursorValid)
-		m_hoverUnit = CorpseAt(m_b, m_cx, m_cz);
 	if (m_phase == PH_P_SKILLTARGET) AimFormFace();
 	{
 		static int s_px = -999, s_pz = -999, s_pl = -1, s_pu = -1, s_ph = -1, s_pn = 0;
@@ -3468,11 +3732,13 @@ void Game::BattleConfirmCursor()
 void Game::ApplyTerrace(int tx, int tz)
 {
 	if (m_cur < 0 || !CanTerrace(m_b, m_cur, tx, tz)) { TacSfx(TS_ERROR); return; }
-	DoTerrace(m_b, m_cur, tx, tz);
+	int chip = DoTerrace(m_b, m_cur, tx, tz);
 	m_r.BuildTerrain(m_b.map);
 	const Cell& c = m_b.map.At(tx, tz);
 	wchar_t s[48];
-	swprintf_s(s, L"%s  H%d", TT(TX_BT_CLIMB), (int)c.h);
+	if (chip > 0) swprintf_s(s, L"%s %d", TerraceLabel(0, 1), chip);
+	else if (chip < 0) swprintf_s(s, L"%s", TerraceLabel(0, 1));
+	else swprintf_s(s, L"%s  H%d", TT(TX_BT_CLIMB), (int)c.h);
 	AddPopup(CellCenter(tx, tz) + v3(0, .8f, 0), s, RGBA8(230, 210, 160), 1, MSG_SLAB);
 	TacSfx(TS_OK_BATTLE);
 	ComputeOverlays();
@@ -3663,8 +3929,11 @@ void Game::BattleCancel()
 void Game::StartMove(int ui, int tx, int tz, int next)
 {
 	Unit& u = m_b.u[ui];
-	int prefer = m_cLayer;
-	if (u.team != TEAM_PLAYER && m_ai.moveL >= 0 && m_ai.moveL < LAY_N) prefer = m_ai.moveL;
+	int prefer = u.deck;
+	if (u.team == TEAM_PLAYER && m_layerLock && m_cLayer >= 0 && m_cLayer < LAY_N && ReachCostAt(m_reach, m_cLayer, tx, tz) >= 0)
+		prefer = m_cLayer;
+	else if (u.team != TEAM_PLAYER && m_ai.moveL >= 0 && m_ai.moveL < LAY_N && ReachCostAt(m_reach, m_ai.moveL, tx, tz) >= 0)
+		prefer = m_ai.moveL;
 	m_moveN = ReachPath(m_reach, u.x, u.z, tx, tz, m_movePts, MAPN * 4, prefer);
 	if (m_moveN < 1) { m_movePts[0] = PackCell(u.x, u.z, u.deck); m_moveN = 1; }
 	m_moveUnit = ui;
@@ -3923,6 +4192,8 @@ void Game::PickSkillCursor(int skill)
 	} else { m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE; }
 }
 
+static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int layer, BYTE* link);
+
 // ============================================================ アクション
 static int CutPatFor(const Unit& u, int skill);
 static int CutClipFor(const Unit& u, int skill, int variant);
@@ -3959,7 +4230,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		AddPopup(p + v3(0, m_act[ui].height + .3f, 0), SkillLabel(skill), RGBA8(180, 140, 255), 1, MSG_ORBIT);
 		TacSfx(TS_WARP);
 	}
-	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 96);
+	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 96, cx, cz);
 	m_cutAimX = cx;
 	m_cutAimZ = cz;
 	m_seqN = 0;
@@ -4112,6 +4383,13 @@ void Game::GatherCut()
 		int nm = FormMembers(m_b, m_cutA, m_seqSkill, ax, az, mem, 8);
 		for (int i = 0; i < nm; i++) add(mem[i]);
 	}
+	if (m_cutA >= 0 && m_cutA < m_b.nUnits && m_b.u[m_cutA].team == TEAM_PLAYER) {
+		BYTE link[MAX_UNITS];
+		int layer = m_b.u[m_cutA].deck;
+		if (m_cutD >= 0 && m_cutD < m_b.nUnits) layer = m_b.u[m_cutD].deck;
+		MarkJoiners(m_b, m_cutA, m_seqSkill, m_cutAimX, m_cutAimZ, layer, link);
+		for (int i = 0; i < m_b.nUnits; i++) if (link[i]) add(i);
+	}
 	// カットシーン舞台の原点を必ず実在する地面上に置く
 	float ax = 0.f, az = 0.f, ay = 0.f;
 	int an = 0;
@@ -4212,23 +4490,32 @@ void Game::LayoutSpecialCut()
 				float x = (i == 0) ? -.42f : -1.45f - (i - 1) * .2f;
 				m_cutAllyPos[i] = v3(x, 0, z);
 			}
-		} else if (m_cutA >= 0) {
+		} else if (m_cutA >= 0 && m_cutA < m_b.nUnits) {
 			const Unit& u = m_b.u[m_cutA];
-			float ex = sinf(u.face), ez = cosf(u.face);
-			if (m_cutD >= 0) {
-				ex = (float)(m_b.u[m_cutD].x - u.x);
-				ez = (float)(m_b.u[m_cutD].z - u.z);
-			}
-			float elen = sqrtf(ex * ex + ez * ez);
-			if (elen < .01f) { ex = 1.f; ez = 0.f; }
-			else { ex /= elen; ez /= elen; }
-			for (int i = 0; i < m_cutAllyN; i++) {
-				int id = m_cutAlly[i];
-				float dx = (float)(m_b.u[id].x - u.x);
-				float dz = (float)(m_b.u[id].z - u.z);
-				float fwd = dx * ex + dz * ez;
-				float lat = dx * ez - dz * ex;
-				m_cutAllyPos[i] = v3(Clampf(-1.2f + fwd * .92f, -3.2f, .45f), 0, Clampf(lat * .92f, -1.7f, 1.7f));
+			BOOL spread = (u.team == TEAM_PLAYER);
+			if (spread) {
+				for (int i = 0; i < m_cutAllyN; i++) {
+					int col = i % 3;
+					int row = i / 3;
+					m_cutAllyPos[i] = v3(-0.85f - (float)row * 0.72f, 0.f, ((float)col - 1.f) * 0.62f);
+				}
+			} else {
+				float ex = sinf(u.face), ez = cosf(u.face);
+				if (m_cutD >= 0) {
+					ex = (float)(m_b.u[m_cutD].x - u.x);
+					ez = (float)(m_b.u[m_cutD].z - u.z);
+				}
+				float elen = sqrtf(ex * ex + ez * ez);
+				if (elen < .01f) { ex = 1.f; ez = 0.f; }
+				else { ex /= elen; ez /= elen; }
+				for (int i = 0; i < m_cutAllyN; i++) {
+					int id = m_cutAlly[i];
+					float dx = (float)(m_b.u[id].x - u.x);
+					float dz = (float)(m_b.u[id].z - u.z);
+					float fwd = dx * ex + dz * ez;
+					float lat = dx * ez - dz * ex;
+					m_cutAllyPos[i] = v3(Clampf(-1.2f + fwd * .92f, -3.2f, .45f), 0, Clampf(lat * .92f, -1.7f, 1.7f));
+				}
 			}
 		}
 	}
@@ -4335,11 +4622,14 @@ void Game::PoseFormAllies()
 void Game::PoseLinkAllies()
 {
 	if (m_cutKind == 2 || m_cutA < 0) return;
+	BOOL playerCast = (m_cutA < m_b.nUnits && m_b.u[m_cutA].team == TEAM_PLAYER);
 	for (int i = 0; i < m_cutAllyN; i++) {
 		int id = m_cutAlly[i];
 		if (id == m_cutA || id < 0 || PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) continue;
-		BOOL join = FALSE;
-		for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+		BOOL join = playerCast;
+		if (!join) {
+			for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+		}
 		if (!join) continue;
 		int clip = CutClipFor(m_b.u[id], -1, i & 1);
 		Actor& ac = m_act[id];
@@ -4602,8 +4892,8 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			if (sfxOnce(8)) TacSfx(TS_CRIT);
 			pop(s, RGBA8(255, 210, 255), 2, MSG_BURST, .12f, 0);
 			Shake(.78f);
-			m_fairyScreenT = m_fairyScreenMax = 1.10f;
-			m_fairyFxT = max(m_fairyFxT, 1.15f);
+			m_fairyScreenT = m_fairyScreenMax = 2.05f;
+			m_fairyFxT = max(m_fairyFxT, 2.05f);
 			m_fairyPosA = ActorPos(h.attacker);
 			m_fairyPosD = mid;
 			if (visible || !cutView) {
@@ -4824,6 +5114,7 @@ void Game::UpdateSeq(float dt)
 		if (mul < 0.05f) mul = 0.05f;
 		dt /= mul;
 	}
+	TickFairyGhost(dt);
 	if (m_seqCut) {
 		m_cutStageT += dt;
 		if (m_cutStage == 0) {
@@ -4848,8 +5139,11 @@ void Game::UpdateSeq(float dt)
 				if (m_cutKind == 3) BindSummonCut();
 				if (m_seqSkill >= 0) {
 					const SkillDef& sd = SkillInfo(m_seqSkill);
-					Burst(m_cutPosA + v3(0, .1f, 0), 30, 2.f, .14f, 1.2f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 2, 1, -2.5f, 0, 1.5f);
-					Burst(m_cutPosA + v3(0, .05f, 0), 2, 0, .8f, 1.f, 1.f, 1.f, 1.f, 1, 1, 0, 0, 0, 1.6f);
+					float cr = (ElemColor(sd.element) & 255) / 255.f, cg = ((ElemColor(sd.element) >> 8) & 255) / 255.f, cb = ((ElemColor(sd.element) >> 16) & 255) / 255.f;
+					Burst(m_cutPosA + v3(0, .1f, 0), 48, 2.4f, .16f, 1.4f, cr, cg, cb, 2, 1, -2.5f, 0, 1.5f);
+					Burst(m_cutPosA + v3(0, .05f, 0), 4, 0, .9f, 1.2f, 1.f, 1.f, 1.f, 1, 1, 0, 0, 0, 1.8f);
+					Burst(m_cutPosA + v3(0, 1.1f, 0), 22, 1.6f, .08f, 1.1f, cr, cg, cb, 3, 1, -0.4f, 0.05f, 0.8f);
+					if (m_cutD >= 0) Burst(m_cutPosD + v3(0, .6f, 0), 16, 1.2f, .1f, 1.f, cr, cg, cb, 2, 1, 0.2f, 0, 0.7f);
 					if (m_cutKind == 3 && IsSummonId(m_seqSkill)) {
 						int rk = SummonRank(m_seqSkill - SUMMON_BASE);
 						if (rk >= 1) {
@@ -4951,7 +5245,8 @@ void Game::UpdateSeq(float dt)
 				return;
 			}
 			if (m_seqCut) {
-				if (m_fairyScreenT > 0.25f) return;
+				if (m_fairyGhost && m_fairyGhostT < m_fairyGhostDur) return;
+				if (m_fairyScreenT > 0.12f) return;
 				m_cutStage = 3; m_cutStageT = 0;
 			} else FinishSeq();
 		}
@@ -5085,10 +5380,25 @@ void Game::UpdateSeq(float dt)
 			else TacSfxMotion(st.skill, sd ? sd->kind : SK_PHYS, sd ? sd->element : EL_NONE, style);
 		}
 		if (st.counter == 2) {
-			m_stepTi = max(m_stepTi, 0.72f);
-			m_fairyFxT = m_stepTi + 1.15f;
+			m_stepTi = max(m_stepTi, 0.78f);
+			m_fairyFxT = m_stepTi + 1.85f;
 			m_fairyPosA = ActorPos(A);
 			m_fairyPosD = ActorPos(D);
+			EnsureFairyGhost();
+			m_fairyGhost = 1;
+			m_fairyGhostT = 0;
+			m_fairyGhostDur = 2.15f;
+			m_fairyGhostFrom = ActorPos(A) + v3(0, 0.18f, 0);
+			m_fairyGhostThru = ActorPos(D) + v3(0, m_act[D].height * 0.48f, 0);
+			{
+				V3 dir = m_fairyGhostThru - m_fairyGhostFrom;
+				dir.y = 0;
+				float L = Len(dir);
+				if (L < 0.08f) dir = v3(sinf(ActorFace(A)), 0, cosf(ActorFace(A)));
+				else dir = dir * (1.f / L);
+				m_fairyGhostPast = m_fairyGhostThru + dir * 2.35f + v3(0, 0.42f, 0);
+			}
+			m_fairyScreenT = m_fairyScreenMax = 2.15f;
 			TacSfx(TS_LEARN);
 			Burst(m_fairyPosA + v3(0, .8f, 0), 22, 2.8f, .12f, .85f, 1.f, .62f, .96f, 2, 1, -1.6f, 0, .6f);
 			Burst(m_fairyPosA + v3(0, .1f, 0), 2, 0, .9f, .75f, .62f, .96f, 1.f, 1, 1, 0, 0, 0, 1.75f);
@@ -5142,11 +5452,14 @@ void Game::UpdateSeq(float dt)
 				else if (id != A) m_lunge[id] = 0;
 			}
 		} else if (m_seqCut && m_cutStage == 2 && A == m_cutA) {
+			BOOL playerCast = (m_cutA >= 0 && m_cutA < m_b.nUnits && m_b.u[m_cutA].team == TEAM_PLAYER);
 			for (int i = 0; i < m_cutAllyN; i++) {
 				int id = m_cutAlly[i];
 				if (id == A) continue;
-				BOOL join = FALSE;
-				for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+				BOOL join = playerCast;
+				if (!join) {
+					for (int k = 0; k < m_strkN; k++) if (m_strk[k].attacker == id && m_strk[k].counter == 0) { join = TRUE; break; }
+				}
 				if (join && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id], m_dispHp[id])) m_lunge[id] = m_lunge[A] * .8f;
 				else m_lunge[id] = 0;
 			}
@@ -5245,7 +5558,7 @@ void Game::UpdateSeq(float dt)
 		: follow
 		? (m_stepTi + 0.34f + (kill ? .55f : 0.f))
 		: (max(m_stepL * .9f, m_stepTi + .5f + span * kGap) + (kill ? .55f : .1f));
-	if (st.counter == 2) endT = max(endT, m_stepTi + 1.15f);
+	if (st.counter == 2) endT = max(endT, max(m_stepTi + 1.85f, m_fairyGhostDur));
 	if (m_seqT >= endT) {
 		aa.animSpeed = 1.f;
 		BOOL chain = FALSE;
@@ -5417,6 +5730,12 @@ void Game::AwardExp()
 	long long gain[MAX_UNITS] = {};
 	int coopHit[MAX_UNITS] = {};
 	unsigned char luckyHit[MAX_UNITS] = {};
+	unsigned char humanHit[MAX_UNITS] = {};
+	long long linkPool = 0;
+	int linkOn = 0;
+	unsigned char anyLucky = 0;
+	unsigned char anyHuman = 0;
+	int anyCoop = 0;
 	int aoeN[MAX_UNITS] = {};
 	unsigned char aoeSeen[MAX_PARTY][(MAX_UNITS + 7) / 8] = {};
 	int aoeMap[MAX_UNITS];
@@ -5458,10 +5777,13 @@ void Game::AwardExp()
 			if (s.overkill && e > 1) e *= 2;
 			e /= 2;
 			if (e < 1) e = 1;
-			// ☆ラッキーはここで明示的に3倍（表示の「☆×3」と一致させる）。
+			// ☆ラッキーはここで明示的に3倍（表示の「☆×3」と一致させる）。人型は5倍。
 			if (UnitIsLucky(d)) {
 				e *= 3;
 				luckyHit[s.attacker] = 1;
+			} else if (UnitIsHumanFoe(d) && !d.boss) {
+				e *= 5;
+				humanHit[s.attacker] = 1;
 			}
 		}
 		if (s.hit && e > 1 && d.team == TEAM_ENEMY) {
@@ -5473,12 +5795,66 @@ void Game::AwardExp()
 				coopHit[s.attacker] = 1;
 			}
 		}
-		gain[s.attacker] += e;
+		int share = 0;
+		if (!s.counter || s.counter == 2) {
+			if (s.skill < 0 || s.counter == 2) share = 1;
+			else {
+				int kind = SkillInfo(s.skill).kind;
+				if (kind != SK_HEAL && kind != SK_BUFF && kind != SK_PASSIVE) share = 1;
+			}
+		}
+		if (share) {
+			linkPool += e;
+			linkOn = 1;
+			if (luckyHit[s.attacker]) anyLucky = 1;
+			if (humanHit[s.attacker]) anyHuman = 1;
+			if (coopHit[s.attacker]) anyCoop = 1;
+		} else gain[s.attacker] += e;
+	}
+	if (linkOn && linkPool > 0) {
+		int who[MAX_PARTY];
+		int nShare = 0;
+		auto takeShare = [&](int i) {
+			if (i < 0 || i >= m_b.nUnits || nShare >= MAX_PARTY) return;
+			for (int k = 0; k < nShare; k++) if (who[k] == i) return;
+			const Unit& u = m_b.u[i];
+			if (u.team != TEAM_PLAYER || !u.alive || u.hp <= 0) return;
+			if (u.sleep > 0 || u.stun > 0) return;
+			who[nShare++] = i;
+		};
+		int actor = m_cutA;
+		if (actor < 0) {
+			for (int k = 0; k < m_strkN; k++) {
+				if (m_strk[k].counter) continue;
+				if (m_strk[k].attacker >= 0 && m_b.u[m_strk[k].attacker].team == TEAM_PLAYER) { actor = m_strk[k].attacker; break; }
+			}
+		}
+		takeShare(actor);
+		if (actor >= 0 && actor < m_b.nUnits) {
+			BYTE link[MAX_UNITS];
+			int layer = m_b.u[actor].deck;
+			if (m_cutD >= 0 && m_cutD < m_b.nUnits) layer = m_b.u[m_cutD].deck;
+			MarkJoiners(m_b, actor, m_seqSkill, m_cutAimX, m_cutAimZ, layer, link);
+			for (int i = 0; i < m_b.nUnits; i++) if (link[i]) takeShare(i);
+		}
+		// 1人ならそのまま。2人以上は人数倍して 1.05 を掛け、人数で割る。2人なら 100*2*1.05/2 = 105。
+		long long each = linkPool;
+		if (nShare >= 2) {
+			each = linkPool * (long long)nShare * 105 / 100 / nShare;
+			if (each < 1) each = 1;
+		}
+		for (int k = 0; k < nShare; k++) {
+			int i = who[k];
+			gain[i] += each;
+			if (anyLucky) luckyHit[i] = 1;
+			if (anyHuman) humanHit[i] = 1;
+			if (anyCoop) coopHit[i] = 1;
+		}
 	}
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		if (u.team != TEAM_PLAYER || !gain[i]) continue;
-		long long g = ExpShareAoe(gain[i], aoeN[i]);
+		long long g = linkOn ? gain[i] : ExpShareAoe(gain[i], aoeN[i]);
 		if (UnitHasPas(u, PAS_EXP2)) g = g * (100 + 40 * (PasMag(u, PAS_EXP2) < 100 ? 100 : PasMag(u, PAS_EXP2)) / 100) / 100;
 		else if (UnitHasPas(u, PAS_EXP)) g = g * (100 + 20 * (PasMag(u, PAS_EXP) < 100 ? 100 : PasMag(u, PAS_EXP)) / 100) / 100;
 		if (g < 1) g = 1;
@@ -5497,7 +5873,7 @@ void Game::AwardExp()
 			if (acc > 2147483647LL) acc = 2147483647LL;
 			m_expGain[i] = (int)acc;
 		}
-		int fromLv = u.ch.lv;
+		unsigned __int64 fromTrue = CharTrueLv(u.ch);
 		long long pool = (long long)u.ch.exp + g;
 		int q0 = m_lvqN;
 		BurstToGate(u, i, m_rng, pool, m_lvq, m_lvqN, MAX_PARTY * 4);
@@ -5509,23 +5885,31 @@ void Game::AwardExp()
 				AddLog(lvline, RGBA8(255, 226, 150));
 			}
 		}
-		if (u.ch.lv >= TAC_LV_MAX) pool = 0;
+		if (CharTrueLv(u.ch) >= ~0ull) pool = 0;
 		if (pool < 0) pool = 0;
 		if (pool > 2000000000LL) pool = 2000000000LL;
 		u.ch.exp = (int)pool;
-		if (u.ch.lv != fromLv) {
-			wchar_t nm[40], lvline[120];
-			UnitTitle(u, nm, 40);
-			swprintf_s(lvline, L"%s  %s  %s%d → %s%d", nm, TT(TX_BT_LEVELUP), TT(TX_MISC_LV), fromLv, TT(TX_MISC_LV), u.ch.lv);
-			AddLog(lvline, RGBA8(140, 255, 150));
+		{
+			unsigned __int64 nowTrue = CharTrueLv(u.ch);
+			if (nowTrue != fromTrue) {
+				wchar_t nm[40], lvline[180];
+				UnitTitle(u, nm, 40);
+				swprintf_s(lvline, L"%s  %s  %s%s → %s%s", nm, TT(TX_BT_LEVELUP), TT(TX_MISC_LV), TacNumU64(fromTrue), TT(TX_MISC_LV), TacNumU64(nowTrue));
+				AddLog(lvline, RGBA8(140, 255, 150));
+			}
 		}
 		{
 			wchar_t s[160];
-			int need = ExpToNext(u.ch.lv);
-			int left = u.ch.lv >= TAC_LV_MAX ? 0 : (int)min(2000000000LL, max(0LL, (long long)need - pool));
+			unsigned __int64 needU = ExpToNextU(CharTrueLv(u.ch));
+			long long left64 = (long long)needU - pool;
+			if (left64 < 0) left64 = 0;
+			if (left64 > 2000000000LL) left64 = 2000000000LL;
+			int left = (int)left64;
 			long long show = g > 2000000000LL ? 2000000000LL : g;
 			if (luckyHit[i])
 				swprintf_s(s, L"%s +%s  ☆×3  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_EXP_LEFT), TacNum(left));
+			else if (humanHit[i])
+				swprintf_s(s, L"%s +%s  ✡×5  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_EXP_LEFT), TacNum(left));
 			else if (coopHit[i])
 				swprintf_s(s, L"%s +%s %s  %s %s", TT(TX_MISC_EXP), TacNum((int)show), TT(TX_BT_COOP), TT(TX_EXP_LEFT), TacNum(left));
 			else
@@ -5543,10 +5927,20 @@ void Game::AwardExp()
 // ============================================================ 毎フレーム
 void Game::UpdateUnitsVisual(float dt)
 {
+	if (m_phase != PH_ACTION) TickFairyGhost(dt);
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		Actor& a = m_act[i];
 		ActorUpdate(a, dt);
+		if (UnitIsHumanFoe(u)) {
+			a.wings = 0;
+			a.hover = 0;
+			a.legOk = 0;
+			a.flyLean = 0;
+			a.flap = 0;
+			if (a.gait == GAIT_FLY) a.gait = GAIT_BIPED;
+			u.hover = 0;
+		}
 		if (a.wings > 0 && a.clip == CL_DEATH && a.t < 4.f) {
 			if (a.wingTear < 0.03f) {
 				ShedFeathers(a, ActorPos(i), ActorFace(i), TRUE);
@@ -5923,53 +6317,16 @@ void Game::ClearRipples()
 	}
 }
 
-// スキルや通常攻撃に加わって打つ味方。手番の三角とは別の印にする。
+// 黄色い効果マスに乗っている味方だけ「連」。赤い照準範囲では付けない。
 static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int layer, BYTE* link)
 {
+	(void)layer;
 	memset(link, 0, MAX_UNITS);
-	if (cur < 0 || cur >= b.nUnits) return;
-	int foes[16];
-	int nf = 0;
-	auto addFoe = [&](int id) {
-		if (id < 0 || id >= b.nUnits || nf >= 16) return;
-		const Unit& e = b.u[id];
-		if (e.team == TEAM_PLAYER || !e.alive || e.hp <= 0) return;
-		for (int i = 0; i < nf; i++) if (foes[i] == id) return;
-		foes[nf++] = id;
-	};
-	if (skill >= 0) {
-		const SkillDef& sd = SkillInfo(skill);
-		BOOL offensive = sd.kind != SK_HEAL && sd.kind != SK_BUFF && sd.kind != SK_PASSIVE;
-		if (offensive) {
-			int tg[MAX_UNITS];
-			int n = SkillTargets(b, cur, skill, cx, cz, tg, MAX_UNITS);
-			for (int k = 0; k < n; k++) addFoe(tg[k]);
-		}
-		if (IsFormSkill(skill)) {
-			int mem[8];
-			int nm = FormMembers(b, cur, skill, cx, cz, mem, 8);
-			for (int i = 0; i < nm; i++) {
-				int id = mem[i];
-				if (id < 0 || id >= b.nUnits || id == cur) continue;
-				const Unit& m = b.u[id];
-				if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
-				if (m.sleep > 0 || m.stun > 0) continue;
-				link[id] = 1;
-			}
-		}
-	} else {
-		addFoe(b.UnitAt(cx, cz, layer));
-	}
+	if (cur < 0 || cur >= b.nUnits || skill < 0) return;
 	for (int i = 0; i < b.nUnits; i++) {
-		if (i == cur || link[i]) continue;
-		const Unit& m = b.u[i];
-		if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
-		if (m.sleep > 0 || m.stun > 0) continue;
-		for (int f = 0; f < nf; f++) {
-			if (!InRangeOfUnit(b, m, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), b.u[foes[f]], true)) continue;
-			link[i] = 1;
-			break;
-		}
+		if (i == cur) continue;
+		if (!TacOnYellow(b, i, cur, skill, cx, cz)) continue;
+		link[i] = 1;
 	}
 }
 
@@ -6404,6 +6761,7 @@ void Game::DrawBattle3D()
 		float pulse = turnMark ? .88f + .12f * sinf(m_time * 6.f) : .5f;
 		DWORD tc = u.team == TEAM_PLAYER ? RGBA8(90, 170, 255, (int)(255 * pulse * (turnMark ? 1.f : .55f))) : RGBA8(255, 80, 70, (int)(255 * pulse * (turnMark ? 1.f : .55f)));
 		if (u.boss) tc = RGBA8(255, 200, 60, (int)(255 * pulse * (turnMark ? 1.f : .7f)));
+		else if (UnitIsHumanFoe(u)) tc = RGBA8(210, 90, 255, (int)(255 * pulse * (turnMark ? 1.f : .7f)));
 		else if (UnitIsLucky(u)) tc = RGBA8(70, 220, 255, (int)(255 * pulse * (turnMark ? 1.f : .7f)));
 		if (!u.alive) {
 			float k = 0.62f + 0.22f * (0.5f + 0.5f * sinf(m_time * 2.3f + (float)i));
@@ -6614,6 +6972,14 @@ void Game::DrawBattle3D()
 				if (ghost) cp.tint = 0x60FFFFFF;
 				V3 hp = drawPos + v3(0, m_act[i].height + .22f + sinf(m_time * 2.f) * .04f, 0);
 				m_r.DrawStatic(m_lib.crown, MMul(MMul(MScale(.9f, .9f, .9f), MRotY(m_time)), MTrans(hp.x, hp.y, hp.z)), cp);
+			} else if (UnitIsHumanFoe(u) && u.alive) {
+				DrawParams lp;
+				lp.noTess = 1;
+				lp.emissive = 1.2f;
+				lp.outline = .006f;
+				lp.tint = ghost ? RGBA8(210, 90, 255, 160) : RGBA8(210, 90, 255);
+				V3 hp = drawPos + v3(0, m_act[i].height + .18f + sinf(m_time * 3.f) * .04f, 0);
+				m_r.DrawStatic(m_lib.orb, MMul(MMul(MScale(.2f, .2f, .2f), MRotY(m_time * 2.4f)), MTrans(hp.x, hp.y, hp.z)), lp);
 			} else if (UnitIsLucky(u) && u.alive) {
 				DrawParams lp;
 				lp.noTess = 1;
@@ -6630,6 +6996,7 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	DrawDebris();
+	DrawFairyGhost();
 	if (m_fairyFxT > 0.f) {
 		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
 		V3 fp = Lerp(m_fairyPosD + v3(0, 0.65f, 0), m_fairyPosA + v3(0, 1.15f, 0), max(0.f, (fu - 0.55f) / 0.45f));
@@ -7351,6 +7718,108 @@ static void CutLeaveCam(int fam, float u, V3 focus, float h, V3 posA, V3 posD, V
 	}
 }
 
+void Game::DrawCutArenaDress(DWORD ec, V3 eye, V3 look)
+{
+	int er = ec & 255, eg = (ec >> 8) & 255, eb = (ec >> 16) & 255;
+	float t = m_time;
+	float in = 1.f;
+	if (m_cutStage == 1) in = Smooth01(m_cutStageT / 0.38f);
+	else if (m_cutStage == 3) in = 1.f - Smooth01(m_cutStageT / 0.40f);
+	int aSolid = (int)(235.f * in);
+	int aGhost = (int)(92.f * in);
+	if (aSolid < 8 && aGhost < 8) return;
+	V3 mid = Lerp(m_cutPosA, m_cutD >= 0 ? m_cutPosD : (m_cutPosA + v3(1.2f, 0, 0)), 0.45f);
+	mid.y = 0.02f;
+	auto tintA = [&](int r, int g, int b, int a) { return RGBA8(r, g, b, Clampi(a, 0, 255)); };
+	DrawParams fl = {};
+	fl.noTess = 1; fl.twoSided = 1; fl.emissive = 0.85f; fl.rim = 1.f;
+	fl.tint = tintA(er, eg, eb, (int)(70.f * in));
+	m_r.DrawStatic(m_lib.orb, MMul(MScale(3.6f, 0.025f, 3.6f), MTrans(mid.x, mid.y, mid.z)), fl);
+	fl.tint = tintA(er / 2 + 40, eg / 2 + 30, eb / 2 + 20, (int)(50.f * in));
+	m_r.DrawStatic(m_lib.orb, MMul(MScale(5.4f, 0.018f, 5.4f), MTrans(mid.x, mid.y - 0.01f, mid.z)), fl);
+	DrawParams rg = {};
+	rg.noTess = 1; rg.twoSided = 1; rg.emissive = 1.2f; rg.flash = 0.35f; rg.rim = 1.f;
+	for (int i = 0; i < 4; i++) {
+		float rad = 1.15f + i * 0.72f + 0.08f * sinf(t * (1.4f + i * 0.3f));
+		rg.tint = tintA(er, eg, eb, (int)((110 - i * 18) * in));
+		M4 w = MMul(MMul(MScale(rad, 0.04f + i * 0.01f, rad), MRotY(t * (0.55f - i * 0.18f))), MTrans(mid.x, 0.05f + i * 0.012f, mid.z));
+		m_r.DrawStatic(m_lib.ring, w, rg);
+	}
+	int nCol = 10;
+	for (int i = 0; i < nCol; i++) {
+		float ang = t * 0.22f + i * (6.28318f / nCol);
+		float rad = 2.55f + 0.18f * sinf(t * 1.7f + i);
+		V3 p = mid + v3(cosf(ang) * rad, 0.f, sinf(ang) * rad * 0.82f);
+		float h = 1.15f + 0.35f * sinf(t * 1.1f + i * 0.7f);
+		DrawParams py = {};
+		py.noTess = 1; py.twoSided = 1; py.emissive = 0.75f; py.rim = 0.9f;
+		py.tint = tintA(er, eg, eb, aGhost + 20);
+		m_r.DrawStatic(m_lib.pyr, MMul(MScale(0.16f, h, 0.16f), MTrans(p.x, h * 0.5f, p.z)), py);
+		DrawParams ob = {};
+		ob.noTess = 1; ob.twoSided = 1; ob.emissive = 1.3f; ob.flash = 0.4f; ob.rim = 1.f;
+		ob.tint = tintA(min(255, er + 40), min(255, eg + 30), min(255, eb + 20), aSolid);
+		float os = 0.09f + 0.03f * sinf(t * 4.f + i);
+		m_r.DrawStatic(m_lib.orb, MMul(MScale(os, os, os), MTrans(p.x, h + 0.12f, p.z)), ob);
+	}
+	int nOrb = 16;
+	for (int i = 0; i < nOrb; i++) {
+		float u = fmodf(t * 0.18f + i * 0.061f, 1.f);
+		float ang = i * 2.399f + t * 0.4f;
+		float rad = 0.7f + u * 2.8f;
+		float y = 0.35f + sinf(t * 2.2f + i) * 0.55f + (i & 1) * 0.35f;
+		V3 p = mid + v3(cosf(ang) * rad, y, sinf(ang) * rad * 0.75f);
+		DrawParams ob = {};
+		ob.noTess = 1; ob.twoSided = 1; ob.emissive = 1.15f; ob.flash = 0.25f; ob.rim = 1.f;
+		int aa = (int)((80.f + 50.f * sinf(t * 3.f + i)) * in * (1.f - u));
+		ob.tint = tintA(er, eg, eb, aa);
+		float s = 0.045f + 0.03f * (1.f - u);
+		m_r.DrawStatic(m_lib.orb, MMul(MScale(s, s, s), MTrans(p.x, p.y, p.z)), ob);
+	}
+	int pat = m_cutPat;
+	if (m_lib.ice.vb && (pat == 6 || pat == 11 || (m_seqSkill >= 0 && SkillInfo(m_seqSkill).element == EL_ICE))) {
+		for (int i = 0; i < 8; i++) {
+			float ang = t * 0.5f + i * 0.785f;
+			V3 p = mid + v3(cosf(ang) * 1.6f, 0.4f + 0.3f * sinf(t * 1.4f + i), sinf(ang) * 1.4f);
+			DrawParams ic = {};
+			ic.noTess = 1; ic.twoSided = 1; ic.emissive = 0.9f; ic.rim = 1.f; ic.dissolve = 0.18f;
+			ic.tint = tintA(180, 220, 255, (int)(140.f * in));
+			M4 w = MMul(MMul(MScale(0.22f, 0.55f, 0.22f), MRotY(ang)), MTrans(p.x, p.y, p.z));
+			m_r.DrawStatic(m_lib.ice, w, ic);
+		}
+	}
+	V3 fwd = look - eye;
+	float flen = Len(fwd);
+	if (flen < 0.01f) fwd = v3(0, 0, 1);
+	else fwd = fwd * (1.f / flen);
+	V3 right = Cross(fwd, v3(0, 1, 0));
+	float rlen = Len(right);
+	if (rlen < 0.01f) right = v3(1, 0, 0);
+	else right = right * (1.f / rlen);
+	V3 up = Cross(right, fwd);
+	int nFg = 14;
+	for (int i = 0; i < nFg; i++) {
+		float side = ((i & 1) ? 1.f : -1.f) * (0.35f + (i / 2) * 0.16f);
+		float along = 0.42f + (i % 5) * 0.22f;
+		float lift = -0.15f + (i % 3) * 0.18f + 0.08f * sinf(t * 1.6f + i);
+		V3 p = eye + fwd * along + right * side + up * lift;
+		DrawParams gh = {};
+		gh.noTess = 1; gh.twoSided = 1; gh.emissive = 0.55f; gh.rim = 0.8f; gh.dissolve = 0.32f;
+		int aa = (int)((48.f + 28.f * sinf(t * 2.4f + i * 0.9f)) * in);
+		gh.tint = tintA(er / 2 + 30, eg / 2 + 24, eb / 2 + 18, aa);
+		float s = 0.07f + 0.04f * (i % 3);
+		M4 w = MMul(MMul(MScale(s, s * (1.6f + (i % 2)), s), MRotY(t * 0.7f + i)), MTrans(p.x, p.y, p.z));
+		const GpuMesh& msh = (i % 3) == 0 ? m_lib.pyr : ((i % 3) == 1 || !m_lib.ice.vb ? m_lib.orb : m_lib.ice);
+		m_r.DrawStatic(msh, w, gh);
+	}
+	if (m_cutKind == 1 || m_ult) {
+		DrawParams ve = {};
+		ve.noTess = 1; ve.twoSided = 1; ve.emissive = 1.4f; ve.flash = 0.55f; ve.rim = 1.f;
+		ve.tint = tintA(er, eg, eb, (int)(90.f * in));
+		float vh = 2.4f + 0.3f * sinf(t * 2.f);
+		m_r.DrawStatic(m_lib.orb, MMul(MScale(0.18f, vh, 0.18f), MTrans(m_cutPosA.x, vh * 0.45f, m_cutPosA.z)), ve);
+	}
+}
+
 void Game::DrawCutIn3D()
 {
 	m_r.SetTheme(m_b.map.theme);
@@ -7596,9 +8065,9 @@ void Game::DrawCutIn3D()
 	if (m_cutA >= 0 && m_cutA < m_b.nUnits) cutFadeY = m_b.u[m_cutA].py;
 	else if (fadeAbove >= 0 && Map::In(fadeX, fadeZ)) cutFadeY = m_b.map.WalkY(fadeX, fadeZ, fadeAbove);
 	m_r.SetFadeAbove(fadeAbove, fadeX, fadeZ, cutFadeY);
-	float fogNear = 12.f, fogFar = 52.f;
-	if (max(m_cutAllyN, m_cutFoeN) > 6) { fogNear = 16.f; fogFar = 78.f; }
-	m_r.SetFog(fogNear, fogFar, 0.18f, e.fog);
+	float fogNear = 8.f, fogFar = 28.f;
+	if (max(m_cutAllyN, m_cutFoeN) > 6) { fogNear = 12.f; fogFar = 44.f; }
+	m_r.SetFog(fogNear, fogFar, 0.28f, e.fog);
 	float amb = e.amb;
 	int hr = TacHour(m_b.weather);
 	if (hr == HR_NIGHT || hr == HR_MOON || hr == HR_STAR) amb *= 0.92f;
@@ -7639,12 +8108,11 @@ void Game::DrawCutIn3D()
 			if (d > 0.35f && d < nearSub) nearSub = d;
 		}
 		if (nearSub < 0.6f) nearSub = Len(look - eye);
-		// 手前の地形・水面・小物だけ捨てる。人・モンスターは後でフェードを切って描く。
-		// 境界を体の 0.8m 手前で止めると、残った床がスカートに被さる。
-		float solid = nearSub + 0.06f;
-		float hide = solid - 0.50f;
-		if (hide < 0.05f) hide = 0.05f;
-		if (solid < hide + 0.08f) solid = hide + 0.08f;
+		// 手前の地形は切らず、長い帯で半透明にする。
+		float solid = nearSub + 0.10f;
+		float hide = solid - 3.2f;
+		if (hide < 0.08f) hide = 0.08f;
+		if (solid < hide + 0.35f) solid = hide + 0.35f;
 		cutHide = hide;
 		cutSolid = solid;
 		m_r.SetCamNear(hide, solid, 1.f);
@@ -7652,7 +8120,7 @@ void Game::DrawCutIn3D()
 		{
 			V3 ap = look;
 			if (m_cutA >= 0 && m_cutA < m_b.nUnits) ap = ActorPos(m_cutA);
-			m_r.SetCoverGhost(ap.x, ap.y, ap.z, ap.x, ap.y, ap.z, 0, 4.1f, ap.y, 1);
+			m_r.SetCoverGhost(ap.x, ap.y, ap.z, ap.x, ap.y, ap.z, 0, 7.2f, ap.y, 1);
 		}
 	}
 	int ids[CUT_ALLY_MAX + CUT_FOE_MAX];
@@ -7747,14 +8215,19 @@ void Game::DrawCutIn3D()
 	m_r.CommitFrame();
 	m_r.ResetActorPipe();
 	m_r.BeginInstBatch();
+	float cutIn = 1.f, cutOut = 0.f;
+	if (m_cutStage == 1) cutIn = Smooth01(m_cutStageT / 0.32f);
+	else if (m_cutStage == 3) cutOut = Smooth01(m_cutStageT / 0.42f);
+	float cutFade = (1.f - cutIn) * 0.70f + cutOut * 0.76f;
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
 		const Unit& u = m_b.u[ids[k]];
 		DrawParams dp;
-		dp.outline = .013f;
-		dp.flash = u.flash;
-		dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
-		dp.rim = .55f;
+		dp.outline = .016f;
+		dp.flash = max(u.flash, (1.f - cutIn) * 0.45f);
+		float die = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
+		dp.dissolve = die > cutFade ? die : cutFade;
+		dp.rim = .88f;
 		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
 	}
 	if (m_sumOn && !m_sumHide) {
@@ -7839,6 +8312,8 @@ void Game::DrawCutIn3D()
 			m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(rsc, 0.06f, rsc), MRotY(m_time * 3.5f)), MTrans(m_cutPosA.x, m_cutPosA.y + 0.08f, m_cutPosA.z)), rp);
 		}
 	}
+	DrawCutArenaDress(ec, eye, look);
+	DrawFairyGhost();
 	if (m_fairyFxT > 0.f) {
 		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
 		V3 fp = Lerp(m_fairyPosD + v3(0, 0.65f, 0), m_fairyPosA + v3(0, 1.15f, 0), max(0.f, (fu - 0.55f) / 0.45f));
@@ -7994,18 +8469,25 @@ static int WrapSpaceLines(Renderer& r, const wchar_t* src, float maxW, float px,
 
 static DWORD FoeInk(const Unit& u)
 {
+	if (UnitIsHumanFoe(u)) return RGBA8(210, 90, 255);
 	if (UnitIsLucky(u)) return RGBA8(70, 220, 255);
 	if (u.boss) return RGBA8(255, 200, 60);
 	return RGBA8(255, 100, 90);
 }
 static DWORD FoeBarCol(const Unit& u)
 {
+	if (UnitIsHumanFoe(u)) return RGBA8(200, 80, 255);
 	if (UnitIsLucky(u)) return RGBA8(50, 220, 255);
 	if (u.boss) return RGBA8(255, 200, 70);
 	return RGBA8(240, 70, 60);
 }
 static DWORD HpFillCol(const Unit& u, float frac)
 {
+	if (UnitIsHumanFoe(u)) {
+		if (frac > .5f) return RGBA8(220, 110, 255);
+		if (frac > .25f) return RGBA8(170, 70, 210);
+		return RGBA8(90, 30, 140);
+	}
 	if (UnitIsLucky(u)) {
 		if (frac > .5f) return RGBA8(80, 235, 255);
 		if (frac > .25f) return RGBA8(70, 170, 230);
@@ -8017,6 +8499,7 @@ static DWORD HpFillCol(const Unit& u, float frac)
 }
 static DWORD HpBackCol(const Unit& u)
 {
+	if (UnitIsHumanFoe(u)) return RGBA8(48, 16, 64);
 	return UnitIsLucky(u) ? RGBA8(16, 48, 72) : RGBA8(40, 120, 50);
 }
 
@@ -8069,7 +8552,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		}
 		float gapN = U(big ? 20.f : 18.f);
 		float gapRow = U(16);
-		float gapLucky = UnitIsLucky(u) ? gapRow : 0;
+		float gapLucky = (UnitIsLucky(u) || UnitIsHumanFoe(u)) ? gapRow : 0;
 		float gapHp = U(big ? 20.f : 22.f);
 		float gapMp = (!big && u.ch.stat[S_MP] > 0) ? U(20) : 0;
 		float gapStat = big ? U(18) : 0;
@@ -8098,7 +8581,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
 		float cy = y + U(12);
 		float textLim = y + h - U(6);
-		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? (UnitIsLucky(u) ? RGBA8(180, 240, 255) : RGBA8(255, 255, 255)) : RGBA8(255, 176, 168), 0, 1);
+		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? (UnitIsHumanFoe(u) ? RGBA8(230, 190, 255) : (UnitIsLucky(u) ? RGBA8(180, 240, 255) : RGBA8(255, 255, 255))) : RGBA8(255, 176, 168), 0, 1);
 		cy += gapN;
 		m_r.HudText(lv, tx, cy, FitTextPx(lv, tw, U(13), 0), RGBA8(255, 226, 150), 0, 0);
 		cy += gapRow;
@@ -8109,6 +8592,10 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		if (UnitIsLucky(u)) {
 			const wchar_t* luck = TT(TX_BT_LUCKY_HELP);
 			m_r.HudText(luck, tx, cy, FitTextPx(luck, tw, U(12), 0), RGBA8(140, 230, 255), 0, 0);
+			cy += gapLucky;
+		} else if (UnitIsHumanFoe(u)) {
+			const wchar_t* hum = TT(TX_BT_HUMAN_HELP);
+			m_r.HudText(hum, tx, cy, FitTextPx(hum, tw, U(12), 0), RGBA8(214, 160, 255), 0, 0);
 			cy += gapLucky;
 		}
 		if (big) {
@@ -8204,10 +8691,10 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 	wchar_t l[128];
 	float cy = y + U(34);
 	if (u.team == TEAM_PLAYER) {
-		int need = ExpToNext(u.ch.lv);
-		int showExp = u.ch.lv >= TAC_LV_MAX ? 0 : u.ch.exp;
-		int showNeed = u.ch.lv >= TAC_LV_MAX ? 0 : need;
-		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNum(u.ch.lv), ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
+		unsigned __int64 tlv; int showExp, showNeed, leftExp;
+		CharExpView(u.ch, tlv, showExp, showNeed, leftExp);
+		(void)leftExp;
+		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNumU64(tlv), ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
 		m_r.HudText(l, tx, cy, FitTextPx(l, tw, U(12), 0), RGBA8(255, 226, 150), 0, 0);
 		cy += U(16);
 		if (pathLines > 0 && cy + U(14) < y + h - U(28)) {
@@ -8219,7 +8706,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			cy += U(14);
 		}
 		if (cy + U(6) < y + h - U(8)) {
-			float expF = (u.ch.lv >= TAC_LV_MAX || showNeed <= 0) ? 1.f : (float)showExp / (float)showNeed;
+			float expF = (showNeed <= 0) ? 1.f : (float)showExp / (float)showNeed;
 			if (expF < 0.f) expF = 0.f;
 			if (expF > 1.f) expF = 1.f;
 			Bar(tx, cy + U(1), tw, U(4), expF, RGBA8(120, 210, 255), RGBA8(36, 64, 110));
@@ -8693,7 +9180,7 @@ void Game::DrawMinimap(float x, float y, float s, int layer)
 		int deck = u.deck;
 		if (deck < 0 || deck >= LAY_N || !LayerOn(m_b.map.At(u.x, u.z), deck)) deck = 0;
 		if (deck != layer) continue;
-		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (UnitIsLucky(u) ? RGBA8(70, 220, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert == 2 ? RGBA8(255, 170, 60) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50)))));
+		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (UnitIsHumanFoe(u) ? RGBA8(210, 90, 255) : (UnitIsLucky(u) ? RGBA8(70, 220, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert == 2 ? RGBA8(255, 170, 60) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50))))));
 		float d = max(cs * .72f, i == m_cur ? cs * .95f : cs * .78f);
 		float sx, sy;
 		toScreen(u.px, u.pz, sx, sy);
@@ -8849,7 +9336,8 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 					if (over && e > 1) e *= 2;
 					e /= 2;
 					if (e < 1) e = 1;
-					if (UnitIsLucky(d)) e *= 3; // 見積もりも実付与と同じ☆×3
+					if (UnitIsLucky(d)) e *= 3;
+					else if (UnitIsHumanFoe(d) && !d.boss) e *= 5;
 					swingOpt += e;
 					if (hp > 0) {
 						hp -= dmg;
@@ -8866,13 +9354,27 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 			counted++;
 		}
 	}
-	rawOpt = ExpShareAoe(rawOpt, counted);
-	rawPes = ExpShareAoe(rawPes, counted);
+	(void)counted;
+	BOOL shareExp = TRUE;
+	if (skill >= 0) {
+		int k = SkillInfo(skill).kind;
+		if (k == SK_HEAL || k == SK_BUFF || k == SK_PASSIVE) shareExp = FALSE;
+	}
+	if (shareExp) {
+		BYTE link[MAX_UNITS];
+		MarkJoiners(m_b, m_cur, skill, ax, az, m_cLayer, link);
+		int nShare = 1;
+		for (int i = 0; i < m_b.nUnits; i++) if (link[i]) nShare++;
+		if (nShare >= 2) {
+			rawOpt = rawOpt * (long long)nShare * 105 / 100 / nShare;
+			rawPes = rawPes * (long long)nShare * 105 / 100 / nShare;
+		}
+	}
 	opt = ApplyExpMods(m_b, a, rawOpt);
 	pes = ApplyExpMods(m_b, a, rawPes);
 	nTg = single && counted > 0 ? 1 : counted;
-	if (opt > 0 && a.ch.lv < TAC_LV_MAX) {
-		long long need = (long long)ExpToNext(a.ch.lv) - (long long)a.ch.exp;
+	if (opt > 0 && CharTrueLv(a.ch) < ~0ull) {
+		long long need = (long long)ExpToNextU(CharTrueLv(a.ch)) - (long long)a.ch.exp;
 		if (need < 0) need = 0;
 		if (pes >= need) showLv = 2;
 		else if (opt >= need && canMiss) showLv = 1;
@@ -9487,7 +9989,7 @@ void Game::DrawBattleStatus(BOOL edit)
 		if (summon && hov > 0) {
 			wchar_t est[160];
 			float by = py + ph - U(96);
-			if (EstimateText(u, SUMMON_BASE + hov - 1, est, 160)) {
+			if (EstimateText(u, SUMMON_BASE + hov - 1, est, 160, m_battleStage)) {
 				m_r.HudText(est, px + U(16), by - U(4), FitTextPx(est, pw - U(32), U(13), 0), RGBA8(255, 214, 140), 0, 0);
 			}
 			m_r.HudTextBox(SummonDesc(hov), px + U(16), by, pw - U(32), U(40), U(12), RGBA8(210, 220, 235));
@@ -9839,27 +10341,23 @@ void Game::DrawCommandMenu()
 	const Unit& u = m_b.u[m_cur];
 	float w = min(U(220.f), max(72.f, (float)m_w - 16.f));
 	float bh = min(U(40.f), max(18.f, (float)m_h * 0.055f));
-	float sx, sy;
-	float x = m_w * .62f, y = m_h * .36f;
-	if (m_r.ProjectMenu(v3(u.px, u.py + m_act[m_cur].height, u.pz), sx, sy)) {
-		float xHi = (float)m_w - w - 8.f;
-		if (m_hud.col > w + 24.f) xHi = min(xHi, m_hud.col - w - 8.f);
-		x = FitLo(sx + U(70), 8.f, max(8.f, xHi));
-		y = FitLo(sy - U(80), 8.f, max(8.f, (float)m_h * 0.72f));
-	}
+	// 画面に固定。カメラやユニット投影には追従しない。上端固定なのでタブがページで跳ねない。
+	float pinY = max(m_hud.margin + U(10), U(64.f));
+	auto pinX = [&](float mw) {
+		float x0 = m_hud.orderX - mw - U(12);
+		if (x0 < m_hud.margin) x0 = m_hud.margin;
+		if (x0 + mw > (float)m_w - U(8)) x0 = max(m_hud.margin, (float)m_w - mw - U(8));
+		return x0;
+	};
+	float x = pinX(w), y = pinY;
 	if (m_phase == PH_P_ITEM) {
 		float iw = min(U(380.f), (float)m_w - U(24));
 		float gap = U(6), margin = U(10);
 		float descH = U(64);
 		auto place = [&](int rows) {
 			float ph = bh * rows + gap * max(0, rows - 1) + U(16) + descH + gap;
-			float topMin = margin + U(8);
-			float topMax = (float)m_h - margin - ph + U(8);
-			if (topMax < topMin) topMax = topMin;
-			y = Clampf(y, topMin, topMax);
-			float xMax = (float)m_w - iw - margin;
-			if (xMax < margin) xMax = margin;
-			x = Clampf(x, margin, xMax);
+			y = pinY;
+			x = pinX(iw);
 			Panel(x - U(8), y - U(8), iw + U(16), ph);
 		};
 		if (m_itemAim < 0) {
@@ -9953,13 +10451,8 @@ void Game::DrawCommandMenu()
 		int shown = max(0, b - a);
 		{
 			float ph = rowH * (shown + 2 + (pages > 1 ? 1 : 0) + (tn < 1 ? 1 : 0)) + gap * max(0, shown) + U(16) + descH;
-			float topMin = margin + U(8);
-			float topMax = (float)m_h - margin - ph + U(8);
-			if (topMax < topMin) topMax = topMin;
-			y = Clampf(y, topMin, topMax);
-			float xMax = (float)m_w - iw - margin;
-			if (xMax < margin) xMax = margin;
-			x = Clampf(x, margin, xMax);
+			y = pinY;
+			x = pinX(iw);
 			Panel(x - U(8), y - U(8), iw + U(16), ph);
 		}
 		m_r.HudText(gd ? GoodFace(m_itemAim) : L"?", x + U(8), y + U(14), U(15), RGBA8(255, 226, 150), 0, 1);
@@ -9967,10 +10460,10 @@ void Game::DrawCommandMenu()
 		float yy = y + U(30) + descH + gap;
 		for (int k = a; k < b; k++) {
 			const Unit& tgU = m_b.u[tg[k]];
-			wchar_t nm[64], sub[80];
+			wchar_t nm[64], sub[128];
 			UnitTitle(tgU, nm, 64);
 			int mx = max(1, tgU.ch.stat[S_HP]);
-			swprintf_s(sub, L"%s  %s%s  HP %s/%s", ClassName(tgU.ch.cls), TT(TX_MISC_LV), TacNum(tgU.ch.lv), TacNum(tgU.hp), TacNum(mx));
+			swprintf_s(sub, L"%s  %s%s  HP %s/%s", ClassName(tgU.ch.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(tgU.ch)), TacNum(tgU.hp), TacNum(mx));
 			BOOL help = gd && ItemHelps(m_b, gd, u, tgU);
 			if (Btn(ID_BT_ITT0 + (k - a), x, yy, iw, rowH, L"", help, FALSE, U(14))) { UseConsumable(m_itemAim, tg[k]); return; }
 			float ps = rowH - U(10);
@@ -10006,8 +10499,8 @@ void Game::DrawCommandMenu()
 		float gap = U(6);
 		int rows = 3;
 		float ph = bh * rows + gap * 2 + U(112);
-		x = min(max(U(8), x), max(U(8), (float)m_w - sw - U(12)));
-		y = min(y, max(U(8), (float)m_h - ph - U(8)));
+		x = pinX(sw);
+		y = pinY;
 		Panel(x - U(8), y - U(8), sw + U(16), ph, .5f);
 		m_r.HudText(SummonWord(), x + sw * .5f, y + U(16), U(18), RGBA8(255, 210, 140), 1, 1);
 		float yy = y + U(36);
@@ -10021,7 +10514,7 @@ void Game::DrawCommandMenu()
 			else {
 				const SkillDef& sd = SkillInfo(sk);
 				int hp = SummonHpCost(u, sk);
-				swprintf_s(row, L"%s   MP%d  HP%d  CP%d  %s%d", SummonName(id), sd.mp, hp, SummonCpCost(u, sk), TT(TX_SHAPE_WIDE), sd.area);
+				swprintf_s(row, L"%s   MP%d  HP%d  CP%d  %s%d", SummonName(id), SkillMpCost(u.ch.stat[S_MP], sk), hp, SummonCpCost(u, sk), TT(TX_SHAPE_WIDE), sd.area);
 				ok = SkillWorth(m_b, m_cur, sk);
 			}
 			if ((m_navMode && m_focusId == ID_BT_SUM0 + slot) || (!m_navMode && m_mouseSeen && Hit(x, yy, sw, bh))) hov = id;
@@ -10041,7 +10534,7 @@ void Game::DrawCommandMenu()
 			wchar_t est[160];
 			int sk = SUMMON_BASE + hov - 1;
 			float boxY = yy + bh + U(8);
-			if (EstimateText(u, sk, est, 160)) {
+			if (EstimateText(u, sk, est, 160, m_battleStage)) {
 				m_r.HudText(est, x, boxY + U(8), FitTextPx(est, sw, U(13), 0), RGBA8(255, 214, 140), 0, 0);
 				boxY += U(18);
 			}
@@ -10058,10 +10551,15 @@ void Game::DrawCommandMenu()
 		BOOL fence = doorAdj && m_b.map.At(doorX, doorZ).gimm == GM_FENCE;
 		BOOL canDoor = doorAdj && (fence || CanOpenDoor(u));
 		BOOL canClimb = FALSE;
+		int seeCliff = 0, seeRock = 0;
 		{
 			static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
-			for (int k = 0; k < 4 && !canClimb; k++)
-				if (CanTerrace(m_b, m_cur, u.x + cdx[k], u.z + cdz[k])) canClimb = TRUE;
+			for (int k = 0; k < 4; k++) {
+				int kind = TerraceKind(m_b, m_cur, u.x + cdx[k], u.z + cdz[k]);
+				if (kind == 1) seeCliff = 1;
+				if (kind == 2) seeRock = 1;
+			}
+			canClimb = (seeCliff || seeRock) ? TRUE : FALSE;
 		}
 		int haveItem = ConsumableCount(m_save);
 		BOOL stuckMove = FALSE;
@@ -10092,10 +10590,8 @@ void Game::DrawCommandMenu()
 				need = avail;
 			}
 		}
-		y = FitLo(y, edge, max(edge, (float)m_h - edge - need));
-		float xHi = (float)m_w - cw - edge;
-		if (m_hud.col > cw + 20.f) xHi = min(xHi, m_hud.col - cw - edge);
-		x = FitLo(x, edge, max(edge, xHi));
+		y = pinY;
+		x = pinX(cw);
 		Panel(x - U(8), y - U(8), cw + U(16), bh * n + gapc * max(0, n - 1) + extra, .55f);
 		BOOL hasSkill = FALSE, skillLive = FALSE;
 		for (int s = 0; s < SKL_COUNT; s++) {
@@ -10251,8 +10747,12 @@ void Game::DrawCommandMenu()
 			return;
 		}
 		if (canDoor) yy += bh + U(6);
-		if (canClimb) mark(ID_BT_CLIMB, yy, TX_BTD_CLIMB);
-		if (canClimb && Btn(ID_BT_CLIMB, x, yy, cw, bh, TT(TX_BT_CLIMB))) {
+		if (canClimb) {
+			mark(ID_BT_CLIMB, yy, TX_BTD_CLIMB);
+			if ((m_navMode && m_focusId == ID_BT_CLIMB) || (!m_navMode && m_mouseSeen && Hit(x, yy, cw, bh)))
+				descW = TerraceHelp(seeCliff, seeRock);
+		}
+		if (canClimb && Btn(ID_BT_CLIMB, x, yy, cw, bh, TerraceLabel(seeCliff, seeRock))) {
 			int tx = -1, tz = -1;
 			if (m_cursorValid && CanTerrace(m_b, m_cur, m_cx, m_cz)) { tx = m_cx; tz = m_cz; }
 			else {
@@ -10282,7 +10782,7 @@ void Game::DrawCommandMenu()
 		}
 		if (desc == TX_BTD_ATTACK) {
 			wchar_t est[160];
-			if (EstimateText(u, -1, est, 160))
+			if (EstimateText(u, -1, est, 160, m_battleStage))
 				m_r.HudText(est, x + U(4), boxTop + used + U(8), FitTextPx(est, cw - U(8), U(13), 0), RGBA8(255, 214, 140), 0, 0);
 		}
 		return;
@@ -10400,8 +10900,8 @@ void Game::DrawCommandMenu()
 		int shown = b - a;
 		float rows = (float)(shown + nc + 1 + (pages > 1 ? 1 : 0));
 		float ph = tabH + gap + extra + (bh + gap) * rows + descBlock;
-		x = min(max(U(8), x), max(U(8), (float)m_w - sw - U(12)));
-		y = min(y, max(U(8), (float)m_h - ph - U(8)));
+		x = pinX(sw);
+		y = pinY;
 		if (y < U(8)) y = U(8);
 		Panel(x - U(8), y - U(8), sw + U(16), ph, .48f);
 		float tw = (sw - gap * 3.f) / 4.f;
@@ -10528,7 +11028,7 @@ void Game::DrawCommandMenu()
 			footLine(l, RGBA8(255, 210, 120), ly);
 			{
 				wchar_t est[160];
-				if (EstimateText(u, hovCraft, est, 160)) footLine(est, RGBA8(255, 214, 140), ly);
+				if (EstimateText(u, hovCraft, est, 160, m_battleStage)) footLine(est, RGBA8(255, 214, 140), ly);
 			}
 			m_r.HudTextBox(CraftDesc(hovCraft), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 		} else if (hov >= 0) {
@@ -10543,7 +11043,7 @@ void Game::DrawCommandMenu()
 			if (attr[0]) footLine(attr, RGBA8(255, 214, 140), ly);
 			{
 				wchar_t est[160];
-				if (EstimateText(u, hov, est, 160)) footLine(est, RGBA8(186, 230, 255), ly);
+				if (EstimateText(u, hov, est, 160, m_battleStage)) footLine(est, RGBA8(186, 230, 255), ly);
 			}
 			m_r.HudTextBox(SkillBlurb(hov), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 			if (IsFormSkill(hov)) DrawFormGuide(hov, u.x, u.z, x - U(8), y - U(8), sw + U(16), ph);
@@ -10595,10 +11095,12 @@ void Game::DrawPromoteOffer()
 	if (h > (float)m_h - U(16)) h = (float)m_h - U(16);
 	float x = (m_w - w) * .5f, y = max(U(8), (m_h - h) * .5f);
 	Panel(x, y, w, h, .92f);
-	m_r.HudText(grace ? TT(TX_EV_TRIAL) : TT(TX_EV_JOB), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
+	BOOL hidT = FALSE;
+	for (int k = 0; k < nt; k++) if (TacHidClass(tgt[k])) hidT = TRUE;
+	m_r.HudText(grace ? TT(TX_EV_TRIAL) : (hidT ? TT(TX_HID_TITLE) : TT(TX_EV_JOB)), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
 	wchar_t who[192];
-	if (grace) swprintf_s(who, L"%s  %s  %s%d  Lv%d", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), u.ch.lv, u.ch.trialLv + 3);
-	else swprintf_s(who, L"%s  %s  %s%d", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), u.ch.lv);
+	if (grace) swprintf_s(who, L"%s  %s  %s%s  Lv%d", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(u.ch)), u.ch.trialLv + 3);
+	else swprintf_s(who, L"%s  %s  %s%s", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(u.ch)));
 	m_r.HudText(who, x + w * .5f, y + U(54), FitTextPx(who, w - U(24), U(15), 0), RGBA8(230, 230, 240), 1, 0);
 	m_r.HudText(TT(TX_EV_GRACE), x + w * .5f, y + U(74), U(13), RGBA8(170, 220, 170), 1, 0);
 	float ty = y + U(96);
@@ -10619,7 +11121,7 @@ void Game::DrawPromoteOffer()
 		m_evFlash = 1.15f;
 		m_flashWhite = 1.f;
 		Burst(v3(u.px, u.py + .2f, u.pz), 36, 4.f, .16f, 1.1f, 1.f, .9f, .45f, 2, 1, 2.f, 0, 1.2f);
-		AddBanner(TT(TX_EV_DONE), ClassName(u.ch.cls), RGBA8(255, 226, 120), 1, 2.8f, MSG_DEPTH);
+		AddBanner(TacHidClass(pick) ? TT(TX_HID_DONE) : TT(TX_EV_DONE), ClassName(u.ch.cls), RGBA8(255, 226, 120), 1, 2.8f, MSG_DEPTH);
 		TacSfx(TS_PROMOTE);
 		AdvanceLevelUp();
 	};
@@ -10845,6 +11347,17 @@ void Game::DrawCutInUi()
 		};
 		col(m_cutAlly, m_cutAllyN, 0);
 		col(m_cutFoe, m_cutFoeN, 1);
+		{
+			int va = m_cutKind ? 150 : 108;
+			if (m_ult) va = 170;
+			float vw = (float)m_w * 0.16f, vh = (float)m_h * 0.14f;
+			m_r.HudRectGrad(0, 0, (float)m_w, vh, RGBA8(0, 0, 0, va), RGBA8(0, 0, 0, 0));
+			m_r.HudRectGrad(0, (float)m_h - vh, (float)m_w, vh, RGBA8(0, 0, 0, 0), RGBA8(0, 0, 0, va));
+			m_r.HudRect(0, 0, vw, (float)m_h, RGBA8(0, 0, 0, va * 2 / 5));
+			m_r.HudRect((float)m_w - vw, 0, vw, (float)m_h, RGBA8(0, 0, 0, va * 2 / 5));
+			int ea = m_cutKind ? 28 : 18;
+			m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(edge & 255, (edge >> 8) & 255, (edge >> 16) & 255, ea));
+		}
 		if (m_seqSkill >= 0) {
 			const SkillDef& sd = SkillInfo(m_seqSkill);
 			DWORD ec = m_cutKind == 2 ? RGBA8(150, 214, 255) : ElemColor(sd.element);
@@ -10947,6 +11460,8 @@ void Game::DrawCutInUi()
 				}
 			}
 		}
+		if (cover > 0.02f)
+			m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(4, 6, 12, (int)(90.f * cover)));
 		// 切り替え頂点のフラッシュ帯と紋章フレア
 		float peak = powf(cover, 3.0f);
 		if (peak > 0.04f) {
@@ -11293,13 +11808,13 @@ void Game::DrawBattleUi()
 				const Unit& u = m_b.u[ids[k]];
 				float ay = top + k * row;
 				float rh = row;
-				wchar_t nm[48], lv[32], job[64], fr[64];
+				wchar_t nm[48], lv[48], job[64], fr[64];
 				UnitTitle(u, nm, 48);
-				swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNum(u.ch.lv));
+				unsigned __int64 tlv; int showExp, showNeed, leftExp;
+				CharExpView(u.ch, tlv, showExp, showNeed, leftExp);
+				(void)leftExp;
+				swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNumU64(tlv));
 				wcscpy_s(job, ClassName(u.ch.cls));
-				int need = ExpToNext(u.ch.lv);
-				int showExp = u.ch.lv >= TAC_LV_MAX ? 0 : u.ch.exp;
-				int showNeed = u.ch.lv >= TAC_LV_MAX ? 0 : need;
 				swprintf_s(fr, L"%s %s/%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed));
 				BOOL rowHit = Hit(x0, ay, colW, rh);
 				if (rowHit) m_r.HudRect(x0, ay, colW, max(1.f, rh - 1.f), u.alive ? RGBA8(255, 255, 255, 28) : RGBA8(255, 160, 140, 46));
@@ -11348,7 +11863,7 @@ void Game::DrawBattleUi()
 				m_r.HudText(fr, x0 + colW - pad, y2, FitTextPx(fr, expMax, fs2, 0), ic, 2, 0);
 				if (showExpBar) {
 					float ey = ay + rh - padY - (showBars ? barH + gapIn : 0.f) - expBarH;
-					float expF = (u.ch.lv >= TAC_LV_MAX || showNeed <= 0) ? 1.f : (float)showExp / (float)showNeed;
+					float expF = (showNeed <= 0) ? 1.f : (float)showExp / (float)showNeed;
 					if (expF < 0.f) expF = 0.f;
 					if (expF > 1.f) expF = 1.f;
 					Bar(x0 + pad, ey, inner, expBarH, expF, u.alive ? RGBA8(120, 210, 255) : RGBA8(90, 110, 130), RGBA8(24, 36, 56));
@@ -11484,6 +11999,8 @@ void Game::DrawBattleUi()
 		m_r.HudRect(sx - bw * .5f, sy, bw * Clampf(frac, 0, 1), U(4), fadeA(col));
 		if (UnitIsLucky(u) && u.alive)
 			m_r.HudText(L"☆", sx - bw * .5f - U(2), sy - U(1), U(11), fadeA(RGBA8(80, 235, 255)), 2, 0, 1, fade);
+		else if (UnitIsHumanFoe(u) && u.alive)
+			m_r.HudText(UnitFoeMark(u), sx - bw * .5f - U(2), sy - U(1), U(11), fadeA(RGBA8(220, 140, 255)), 2, 0, 1, fade);
 		if (u.team == TEAM_ENEMY && cells > 0 && (off || cells >= 4)) {
 			wchar_t dlab[24];
 			swprintf_s(dlab, L"%d%s", cells, LangPick14(L"マス", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
@@ -11718,8 +12235,10 @@ void Game::DrawBattleUi()
 			swprintf_s(l, L"%s  %s  %s %d", TT(TX_BT_TERRAIN), TT(td.nameTx), gm, (int)c.gparam + 1);
 		else if (c.gimm)
 			swprintf_s(l, L"%s  %s  %s", TT(TX_BT_TERRAIN), TT(td.nameTx), gm);
-		else if (m_cur >= 0 && CanTerrace(m_b, m_cur, m_cx, m_cz))
-			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), curHt, TT(TX_BT_CLIMB));
+		else if (m_cur >= 0 && CanTerrace(m_b, m_cur, m_cx, m_cz)) {
+			int kind = TerraceKind(m_b, m_cur, m_cx, m_cz);
+			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), curHt, TerraceLabel(kind == 1, kind == 2));
+		}
 		else if (curTr == T_WATER && c.gimm == GM_NONE && c.gparam > 0 && c.gparam <= 4)
 			swprintf_s(l, L"%s  %s  %s %d  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_BT_DEPTH), (int)c.gparam, curHt);
 		else if (c.prop == PK_MOUNT && (c.gparam & 15) >= 1 && (c.gparam & 15) <= 3)

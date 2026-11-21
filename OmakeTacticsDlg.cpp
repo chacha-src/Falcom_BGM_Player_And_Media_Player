@@ -23,6 +23,32 @@ extern COggDlg* og;
 void TacHookSysCommands(HWND hwnd);
 
 static COmakeTacticsDlg* g_tac = nullptr;
+// ロード完了から少しのあいだ、クリックなしで自プロセスの窓が被さったら一度だけ戻す。
+static DWORD s_frontUntil = 0;
+static int s_frontUsed = 0;
+static int s_tacStarting = 0;
+static int s_paceArmed = 0;
+static DWORD s_holdFgUntil = 0;
+static int s_holdAfterLoad = 0;
+
+static BOOL TacKeepFg()
+{
+	return s_holdFgUntil && ::GetTickCount() < s_holdFgUntil;
+}
+static void TacClearWaitCursor();
+static void TacDropHostNoise(HWND root);
+
+static void TacParkHostUi(HWND keep)
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->ParkHostUiForTactics(keep);
+}
+
+static void TacUnparkHostUi()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->UnparkHostUiAfterTactics();
+}
 // らいらXのボタン処理中は 1。このあいだに描き続けると、処理が戻らず画面が黒のままになる。
 static int s_tacOpenDepth = 0;
 #ifndef WM_TAC_PACE
@@ -591,10 +617,13 @@ static BOOL TacInFamily(HWND h, HWND root)
 void COmakeTacticsDlg::SyncBorderlessZ()
 {
 	if (!GetSafeHwnd() || m_destroying) return;
+	// 前面のあいだは下げない。NOACTIVATE で最前面を外すと、操作中なのに本体の裏へ回る。
+	if (m_fg) return;
 	const LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
 	if (ex & WS_EX_TOPMOST)
 		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
+
 
 void COmakeTacticsDlg::ApplyWinMode()
 {
@@ -679,10 +708,20 @@ void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 static void TacRaiseOnce(HWND h)
 {
 	if (!h) return;
-	::SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-	::SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+	HWND fg = ::GetForegroundWindow();
+	DWORD fgTid = 0;
+	const DWORD selfTid = ::GetCurrentThreadId();
+	if (fg) fgTid = ::GetWindowThreadProcessId(fg, NULL);
+	BOOL att = FALSE;
+	if (fg && fgTid && fgTid != selfTid)
+		att = ::AttachThreadInput(fgTid, selfTid, TRUE);
+	::AllowSetForegroundWindow(ASFW_ANY);
+	// 最前面にして外すと、外した瞬間に本体の裏へ落ちる。最前面の帯には入れない。
+	::SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 	::SetForegroundWindow(h);
 	::BringWindowToTop(h);
+	::SetFocus(h);
+	if (att) ::AttachThreadInput(fgTid, selfTid, FALSE);
 }
 
 static int s_tacHoldDisp = 0;
@@ -706,6 +745,17 @@ void COmakeTacticsDlg::StartShown()
 	// ボタン処理が戻ってから、別スレッドが 1 枚ずつ SendMessage する。
 	// ここで描き続けると合成されず真っ黒。投稿して GetMessage を待つと、入力が無いとき約 3fps。
 	TacHoldDisplay(TRUE);
+	::DisableProcessWindowsGhosting();
+	if (GetSafeHwnd())
+		::SetClassLongPtr(GetSafeHwnd(), GCLP_HCURSOR, (LONG_PTR)::LoadCursor(NULL, IDC_ARROW));
+	TacClearWaitCursor();
+	s_frontUntil = 0;
+	s_frontUsed = 0;
+	s_paceArmed = 0;
+	s_holdAfterLoad = 0;
+	s_holdFgUntil = ::GetTickCount() + 25000;
+	m_fg = TRUE;
+	m_game.SetPaceFg(TRUE);
 	StartPace();
 }
 
@@ -781,40 +831,157 @@ void COmakeTacticsDlg::ReleaseUiInput()
 	if (m_gameOk) m_game.ReleaseInput();
 }
 
+void COmakeTacticsDlg::PumpPace()
+{
+	LARGE_INTEGER due;
+	if (!m_gameOk || !m_game.TakePaceDue(due)) return;
+	HWND self = m_hWnd;
+	for (;;) {
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		if (now.QuadPart >= due.QuadPart) break;
+		if (m_destroying || !GetSafeHwnd()) break;
+		MSG msg;
+		if (::PeekMessage(&msg, NULL, WM_QUIT, WM_QUIT, PM_REMOVE)) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		if (self && ::PeekMessage(&msg, self, WM_TAC_DESTROY, WM_TAC_DESTROY, PM_REMOVE)) {
+			::PostMessage(self, WM_TAC_DESTROY, msg.wParam, msg.lParam);
+			break;
+		}
+		// 余りがあるときだけ、マウスとキーを拾って待つ。WaitForSingleObject は使わない。
+		DrainInput();
+	}
+}
+
+void COmakeTacticsDlg::PumpLiveInput()
+{
+	if (m_destroying || !GetSafeHwnd()) return;
+	static int s_busy = 0;
+	if (s_busy) return;
+	static DWORD s_last = 0;
+	const DWORD now = ::GetTickCount();
+	if (s_last && (now - s_last) < 4) return;
+	s_last = now;
+	s_busy = 1;
+	DrainInput();
+	s_busy = 0;
+}
+
+void OmakeTacticsPumpInput()
+{
+	if (g_tac) g_tac->PumpLiveInput();
+}
+
+static BOOL TacMsgOurs(HWND root, HWND h)
+{
+	return (h && root && (h == root || ::IsChild(root, h) || TacInFamily(h, root))) ? TRUE : FALSE;
+}
+
+static void TacClearWaitCursor()
+{
+	if (CWinApp* app = AfxGetApp()) {
+		app->DoWaitCursor(-1);
+		app->DoWaitCursor(0);
+	}
+	::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+}
+
+// 本体の WM_TIMER / WM_PAINT を Dispatch せず捨てる。捨てないとキューが空にならず、
+// 起動フィードバックの砂時計が約1秒残って、その間クリックが届かない。
+static void TacDropHostNoise(HWND root)
+{
+	if (!root) return;
+	MSG msg;
+	int n = 0;
+	while (n < 48) {
+		if (!::PeekMessage(&msg, NULL, WM_TIMER, WM_TIMER, PM_NOREMOVE)) break;
+		if (TacMsgOurs(root, msg.hwnd)) break;
+		if (!msg.hwnd || !::PeekMessage(&msg, msg.hwnd, WM_TIMER, WM_TIMER, PM_REMOVE)) break;
+		n++;
+	}
+	n = 0;
+	while (n < 16) {
+		if (!::PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_NOREMOVE)) break;
+		if (TacMsgOurs(root, msg.hwnd)) break;
+		if (msg.hwnd) ::ValidateRect(msg.hwnd, NULL);
+		if (!msg.hwnd || !::PeekMessage(&msg, msg.hwnd, WM_PAINT, WM_PAINT, PM_REMOVE)) break;
+		n++;
+	}
+	::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
+}
+
+static BOOL TacPeekInput(HWND root, MSG* msg, UINT lo, UINT hi)
+{
+	if (!root || !msg) return FALSE;
+	MSG p = {};
+	if (!::PeekMessage(&p, NULL, lo, hi, PM_NOREMOVE)) return FALSE;
+	if (p.message == WM_QUIT) {
+		if (!::PeekMessage(msg, NULL, WM_QUIT, WM_QUIT, PM_REMOVE)) return FALSE;
+		return TRUE;
+	}
+	if (!p.hwnd) return FALSE;
+	DWORD pid = 0;
+	::GetWindowThreadProcessId(p.hwnd, &pid);
+	if (pid != ::GetCurrentProcessId()) return FALSE;
+	const BOOL ours = TacMsgOurs(root, p.hwnd);
+	const BOOL input =
+		(p.message >= WM_MOUSEFIRST && p.message <= WM_MOUSELAST)
+		|| (p.message >= WM_KEYFIRST && p.message <= WM_KEYLAST)
+		|| (p.message >= WM_NCMOUSEMOVE && p.message <= WM_NCMBUTTONDBLCLK);
+	if (!ours) {
+		if (!input) return FALSE;
+		if (!::PeekMessage(msg, p.hwnd, p.message, p.message, PM_REMOVE)) return FALSE;
+		if (msg->message >= WM_MOUSEFIRST && msg->message <= WM_MOUSELAST) {
+			POINT pt = { (short)LOWORD(msg->lParam), (short)HIWORD(msg->lParam) };
+			::ClientToScreen(msg->hwnd, &pt);
+			::ScreenToClient(root, &pt);
+			msg->lParam = MAKELPARAM((WORD)pt.x, (WORD)pt.y);
+		}
+		msg->hwnd = root;
+		return TRUE;
+	}
+	return ::PeekMessage(msg, p.hwnd, p.message, p.message, PM_REMOVE) ? TRUE : FALSE;
+}
+
 void COmakeTacticsDlg::DrainInput()
 {
 	if (m_destroying) return;
 	HWND root = GetSafeHwnd();
 	if (!root) return;
-	HWND hw[2] = { root, m_ime.GetSafeHwnd() };
+	TacDropHostNoise(root);
 	const UINT range[][2] = {
 		{ WM_MOUSEFIRST, WM_MOUSELAST },
 		{ WM_KEYFIRST, WM_IME_COMPOSITION },
 		{ WM_IME_SETCONTEXT, WM_IME_KEYUP },
-		{ WM_NCLBUTTONDOWN, WM_NCMBUTTONDBLCLK },
+		{ WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK },
 		{ WM_SYSCOMMAND, WM_SYSCOMMAND },
 		{ WM_CLOSE, WM_CLOSE },
 	};
 	MSG msg;
 	int n = 0;
-	for (int pass = 0; pass < (int)(sizeof(range) / sizeof(range[0])) && n < 48; pass++) {
-		for (int i = 0; i < 2 && n < 48; i++) {
-			if (!hw[i]) continue;
-			while (n < 48 && ::PeekMessage(&msg, hw[i], range[pass][0], range[pass][1], PM_REMOVE)) {
-				if (m_destroying || !GetSafeHwnd()) return;
-				if (msg.message == WM_QUIT) {
-					::PostQuitMessage((int)msg.wParam);
-					return;
-				}
-				if (!PreTranslateMessage(&msg)) {
-					::TranslateMessage(&msg);
-					::DispatchMessage(&msg);
-				}
-				if (m_destroying || !GetSafeHwnd()) return;
-				n++;
+	for (int pass = 0; pass < (int)(sizeof(range) / sizeof(range[0])) && n < 64; pass++) {
+		while (n < 64 && TacPeekInput(root, &msg, range[pass][0], range[pass][1])) {
+			if (m_destroying || !GetSafeHwnd()) return;
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				return;
 			}
+			if (msg.message == WM_SYSCOMMAND || msg.message == WM_CLOSE) {
+				if (!TacMsgOurs(root, msg.hwnd))
+					continue;
+			}
+			if (!PreTranslateMessage(&msg)) {
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+			if (m_destroying || !GetSafeHwnd()) return;
+			n++;
 		}
 	}
+	TacDropHostNoise(root);
+	TacClearWaitCursor();
 }
 
 LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
@@ -825,33 +992,21 @@ LRESULT COmakeTacticsDlg::OnTacPace(WPARAM, LPARAM)
 	if (m_paceStop && WaitForSingleObject(m_paceStop, 0) == WAIT_OBJECT_0) return 0;
 	if (s_tacOpenDepth > 0 || m_inPace) return 0;
 	if (m_sizing || IsIconic() || !IsWindowVisible()) return 2;
-	m_inPace = TRUE;
-	MSG msg;
-	int n = 0;
-	while (n < 24 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-		if (msg.message == WM_QUIT) {
+	// 描画の前にホストのキューを最大 24 個さばくと、その時間が拍の外に足され、
+	// 1/72 なら 13.9ms に描画分が乗って 50fps 前後で GPU が空く。ここでは終了だけ見る。
+	{
+		MSG msg;
+		if (::PeekMessage(&msg, NULL, WM_QUIT, WM_QUIT, PM_REMOVE)) {
 			::PostQuitMessage((int)msg.wParam);
-			m_inPace = FALSE;
 			return 0;
 		}
-		if (msg.message == WM_TAC_PACE) continue;
-		if (msg.message == WM_TAC_DESTROY) {
-			m_inPace = FALSE;
+		if (::PeekMessage(&msg, m_hWnd, WM_TAC_DESTROY, WM_TAC_DESTROY, PM_REMOVE)) {
 			::PostMessage(m_hWnd, WM_TAC_DESTROY, msg.wParam, msg.lParam);
 			return 0;
 		}
-		if (!PreTranslateMessage(&msg)) {
-			::TranslateMessage(&msg);
-			::DispatchMessage(&msg);
-		}
-		n++;
-		if (m_destroying || !GetSafeHwnd()) {
-			m_inPace = FALSE;
-			return 0;
-		}
+		while (::PeekMessage(&msg, m_hWnd, WM_TAC_PACE, WM_TAC_PACE, PM_REMOVE))
+			InterlockedExchange(&m_pacePosted, 0);
 	}
-	m_inPace = FALSE;
-	if (m_sizing || IsIconic() || !IsWindowVisible()) return 2;
 	RunIdleFrame();
 	return 1;
 }
@@ -862,6 +1017,7 @@ BOOL COmakeTacticsDlg::RunIdleFrame()
 	if (!GetSafeHwnd() || IsIconic() || !IsWindowVisible()) return FALSE;
 	static int windowCheckFlag = 0;
 	m_inPace = TRUE;
+	m_game.BeginPaceLoop();
 	DrainInput();
 	LARGE_INTEGER now;
 	QueryPerformanceCounter(&now);
@@ -872,10 +1028,51 @@ BOOL COmakeTacticsDlg::RunIdleFrame()
 	int hz = m_game.PaceHz();
 	if (hz < 15) hz = 15;
 	m_paceHz = hz;
-	if (windowCheckFlag == 0) {
+	{
 		HWND fg = ::GetForegroundWindow();
-		m_fg = (fg == m_hWnd) || TacInFamily(fg, m_hWnd);
-		SyncBorderlessZ();
+		const BOOL mine = (fg == m_hWnd) || TacInFamily(fg, m_hWnd);
+		if (mine) {
+			m_fg = TRUE;
+			s_paceArmed = 1;
+		} else if (!s_paceArmed || TacKeepFg()) {
+			m_fg = TRUE;
+			if (windowCheckFlag == 0) TacRaiseOnce(m_hWnd);
+		} else {
+			DWORD pid = 0;
+			if (fg) ::GetWindowThreadProcessId(fg, &pid);
+			m_fg = (pid == ::GetCurrentProcessId());
+		}
+	}
+	m_game.SetPaceFg(m_fg);
+	if (m_game.PastLoad()) {
+		const DWORD now = ::GetTickCount();
+		if (!s_frontUntil) s_frontUntil = now + 12000;
+		if (!s_holdAfterLoad) {
+			s_holdAfterLoad = 1;
+			if ((int)(s_holdFgUntil - now) < 12000) s_holdFgUntil = now + 12000;
+		}
+		if (TacKeepFg()) {
+			if (windowCheckFlag == 0) TacParkHostUi(m_hWnd);
+			HWND foc = ::GetFocus();
+			if (!foc || !TacMsgOurs(m_hWnd, foc))
+				::SetFocus(m_hWnd);
+		}
+	}
+	if (!s_frontUsed && s_frontUntil && ::GetTickCount() < s_frontUntil && !m_fg) {
+		HWND fg = ::GetForegroundWindow();
+		DWORD pid = 0;
+		if (fg && !TacInFamily(fg, m_hWnd))
+			::GetWindowThreadProcessId(fg, &pid);
+		const SHORT click = (SHORT)(::GetAsyncKeyState(VK_LBUTTON) | ::GetAsyncKeyState(VK_RBUTTON) | ::GetAsyncKeyState(VK_MBUTTON));
+		if (pid == ::GetCurrentProcessId() && (click & 0x8000) == 0) {
+			s_frontUsed = 1;
+			TacRaiseOnce(m_hWnd);
+			m_fg = TRUE;
+			m_game.SetPaceFg(TRUE);
+		}
+	}
+	if (windowCheckFlag == 0) {
+		if (!m_fg) SyncBorderlessZ();
 		{
 			static int pri = -1;
 			int want = m_fg ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL;
@@ -895,6 +1092,7 @@ BOOL COmakeTacticsDlg::RunIdleFrame()
 	m_clientLive = TRUE;
 	SyncImeEdit();
 	ApplyWinMode();
+	PumpPace();
 	m_inPace = FALSE;
 	if (m_game.WantsClose()) {
 		m_game.ClearClose();
@@ -1032,7 +1230,10 @@ void COmakeTacticsDlg::OnPaint()
 
 BOOL COmakeTacticsDlg::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
-	if (nHitTest == HTCLIENT) { ::SetCursor(::LoadCursor(NULL, IDC_ARROW)); return TRUE; }
+	if (nHitTest == HTCLIENT) {
+		TacClearWaitCursor();
+		return TRUE;
+	}
 	return CFrameWnd::OnSetCursor(pWnd, nHitTest, message);
 }
 
@@ -1059,8 +1260,9 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
 	CFrameWnd::OnActivate(nState, pWndOther, bMinimized);
 	const BOOL fg = (nState != WA_INACTIVE && !bMinimized);
-	m_fg = fg;
 	if (fg) {
+		s_paceArmed = 1;
+		m_fg = TRUE;
 		QueryPerformanceCounter(&m_tickAt);
 		if (m_gameOk && !m_swapShown) {
 			m_swapShown = TRUE;
@@ -1071,11 +1273,14 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 		else if (GetSafeHwnd())
 			SetFocus();
 		if (m_gameOk) {
+			m_game.SetPaceFg(TRUE);
 			m_game.OnBecameActive();
 			KickPace();
 		}
-		SyncBorderlessZ();
-	} else {
+		TacRaiseOnce(m_hWnd);
+	} else if (s_paceArmed && !TacKeepFg()) {
+		m_fg = FALSE;
+		if (m_gameOk) m_game.SetPaceFg(FALSE);
 		ReleaseUiInput();
 		SyncBorderlessZ();
 	}
@@ -1084,15 +1289,19 @@ void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 void COmakeTacticsDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
 	CFrameWnd::OnActivateApp(bActive, dwThreadID);
-	m_fg = bActive;
 	if (bActive) {
+		s_paceArmed = 1;
+		m_fg = TRUE;
 		QueryPerformanceCounter(&m_tickAt);
 		if (m_gameOk) {
+			m_game.SetPaceFg(TRUE);
 			m_game.OnBecameActive();
 			KickPace();
 		}
-		SyncBorderlessZ();
-	} else {
+		TacRaiseOnce(m_hWnd);
+	} else if (s_paceArmed && !TacKeepFg()) {
+		m_fg = FALSE;
+		if (m_gameOk) m_game.SetPaceFg(FALSE);
 		ReleaseUiInput();
 		SyncBorderlessZ();
 	}
@@ -1318,7 +1527,7 @@ BOOL COmakeTacticsDlg::HandleKeyMessage(MSG* pMsg)
 	if (msg < WM_KEYFIRST && !imeMsg) return FALSE;
 	if (msg > WM_KEYLAST && !imeMsg) return FALSE;
 	HWND fg = ::GetForegroundWindow();
-	const BOOL ours = (fg == m_hWnd || (fg && ::IsChild(m_hWnd, fg)));
+	const BOOL ours = (fg == m_hWnd || (fg && ::IsChild(m_hWnd, fg)) || TacKeepFg());
 	HWND imeHw = m_ime.GetSafeHwnd();
 	if (!ours && pMsg->hwnd != m_hWnd && !::IsChild(m_hWnd, pMsg->hwnd)
 		&& !(imeHw && pMsg->hwnd == imeHw))
@@ -1447,6 +1656,7 @@ void COmakeTacticsDlg::OnDestroy()
 	TacReleasePadAll();
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
 	CFrameWnd::OnDestroy();
+	TacUnparkHostUi();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->SetTimer(4923, 20, NULL);
 }
@@ -1461,6 +1671,7 @@ void COmakeTacticsDlg::RequestDestroyWindow()
 		HWND parent = ::GetParent(m_hWnd);
 		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		ShowWindow(SW_HIDE);
+		TacUnparkHostUi();
 		if (parent && ::IsWindow(parent) && ::IsWindowVisible(parent) && !::IsIconic(parent))
 			::SetForegroundWindow(parent);
 		if (!::PostMessage(m_hWnd, WM_TAC_DESTROY, 0, 0))
@@ -1526,14 +1737,25 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	CloseSoft3DRaceIfOpen();
 	CloseSoft3DMazeIfOpen();
 	if (!EnsureBonusImages(2)) return;
+	s_tacStarting = 1;
+	s_paceArmed = 0;
+	// ボタン処理の途中で Peek+Dispatch すると終了や再入が混ざる。隠すだけしてキューは触らない。
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->ParkHostUiForTactics(NULL);
 	s_tacOpenDepth++;
 	g_tac = new COmakeTacticsDlg();
 	if (!g_tac->CreateFrame()) {
 		delete g_tac;
 		g_tac = nullptr;
 		s_tacOpenDepth--;
+		s_tacStarting = 0;
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->UnparkHostUiAfterTactics();
 		return;
 	}
+	if (g_tac->IsWindowVisible()) g_tac->ShowWindow(SW_HIDE);
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->ParkHostUiForTactics(g_tac->GetSafeHwnd());
 	g_tac->ShowWindow(SW_SHOW);
 	TacRaiseOnce(g_tac->GetSafeHwnd());
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
@@ -1544,6 +1766,7 @@ void OpenOmakeTacticsModeless(CWnd* p)
 	}
 	s_tacOpenDepth--;
 	g_tac->StartShown();
+	s_tacStarting = 0;
 }
 
 void CloseOmakeTacticsIfOpen()
@@ -1556,6 +1779,7 @@ void CloseOmakeTacticsIfOpen()
 
 BOOL IsOmakeTacticsOpen()
 {
+	if (s_tacStarting) return TRUE;
 	return (g_tac && g_tac->GetSafeHwnd() && ::IsWindow(g_tac->GetSafeHwnd()) && g_tac->IsWindowVisible()) ? TRUE : FALSE;
 }
 
@@ -1566,7 +1790,11 @@ BOOL IsOmakeTacticsActive()
 
 BOOL OmakeTacticsPreTranslate(MSG* pMsg)
 {
-	if (!IsOmakeTacticsOpen() || !pMsg) return FALSE;
+	if (!IsOmakeTacticsOpen() || !pMsg || !g_tac) return FALSE;
+	HWND tac = g_tac->GetSafeHwnd();
+	if (pMsg->message == WM_TIMER && pMsg->hwnd && tac
+		&& pMsg->hwnd != tac && !::IsChild(tac, pMsg->hwnd))
+		return TRUE;
 	if (TacTakeWheel(g_tac, pMsg)) return TRUE;
 	return g_tac->HandleKeyMessage(pMsg);
 }

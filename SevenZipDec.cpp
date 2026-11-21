@@ -1,7 +1,10 @@
 ﻿#include "stdafx.h"
 #include "SevenZipDec.h"
+#include "OxzFilt.h"
 #include "lzma_sdk/7zAlloc.h"
 #include "lzma_sdk/7zCrc.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define kInputBufSize ((size_t)1 << 18)
 
@@ -57,6 +60,10 @@ int SevenZipOpenW(SevenZipArc* a, const wchar_t* path)
 		SevenZipClose(a);
 		return 0;
 	}
+	{
+		const size_t n = wcslen(path);
+		a->ripPe = (n >= 4 && _wcsicmp(path + n - 4, L".oxz") == 0) ? 1 : 0;
+	}
 	a->opened = 1;
 	return 1;
 }
@@ -70,6 +77,9 @@ void SevenZipClose(SevenZipArc* a)
 		a->outBuffer = NULL;
 		a->outBufferSize = 0;
 	}
+	free(a->ripCopy);
+	a->ripCopy = NULL;
+	a->ripCopyCap = 0;
 	SzArEx_Free(&a->db, &a->allocImp);
 	if (a->lookStream.buf) {
 		ISzAlloc_Free(&a->allocImp, a->lookStream.buf);
@@ -95,8 +105,21 @@ int SevenZipExtractIndex(SevenZipArc* a, UInt32 i, const Byte** data, size_t* si
 		&a->blockIndex, &a->outBuffer, &a->outBufferSize,
 		&offset, &outSizeProcessed, &a->allocImp, &a->allocTempImp) != SZ_OK)
 		return 0;
-	if (data)
+	if (a->ripPe && outSizeProcessed >= 2
+		&& a->outBuffer[offset] == 'M' && a->outBuffer[offset + 1] == 'Z') {
+		if (a->ripCopyCap < outSizeProcessed) {
+			Byte* nbuf = (Byte*)realloc(a->ripCopy, outSizeProcessed);
+			if (!nbuf) return 0;
+			a->ripCopy = nbuf;
+			a->ripCopyCap = outSizeProcessed;
+		}
+		memcpy(a->ripCopy, a->outBuffer + offset, outSizeProcessed);
+		OxzRipConvert(a->ripCopy, outSizeProcessed, 0);
+		if (data)
+			*data = a->ripCopy;
+	} else if (data) {
 		*data = a->outBuffer + offset;
+	}
 	if (size)
 		*size = outSizeProcessed;
 	return 1;

@@ -1,0 +1,153 @@
+#include "OxzLang.h"
+#include <windows.h>
+#include <stdlib.h>
+
+static int g_lang = 1;
+
+static const wchar_t* kTxt[OS_COUNT][14] = {
+	{ L"oxz 書庫", L"oxz archive", L"Archive oxz", L"Archivio oxz", L"Archivo oxz", L"oxz 보관함", L"oxz 压缩包", L"أرشيف oxz", L"Архив oxz", L"oxz-Archiv", L"Arquivo oxz", L"oxz-archief", L"Archiwum oxz", L"oxz arşivi" },
+	{ L"開く", L"Open", L"Ouvrir", L"Apri", L"Abrir", L"열기", L"打开", L"فتح", L"Открыть", L"Öffnen", L"Abrir", L"Openen", L"Otwórz", L"Aç" },
+	{ L"新規", L"New", L"Nouveau", L"Nuovo", L"Nuevo", L"새로", L"新建", L"جديد", L"Новый", L"Neu", L"Novo", L"Nieuw", L"Nowy", L"Yeni" },
+	{ L"ファイル追加", L"Add files", L"Ajouter des fichiers", L"Aggiungi file", L"Añadir archivos", L"파일 추가", L"添加文件", L"إضافة ملفات", L"Добавить файлы", L"Dateien hinzufügen", L"Adicionar ficheiros", L"Bestanden toevoegen", L"Dodaj pliki", L"Dosya ekle" },
+	{ L"フォルダ追加", L"Add folder", L"Ajouter un dossier", L"Aggiungi cartella", L"Añadir carpeta", L"폴더 추가", L"添加文件夹", L"إضافة مجلد", L"Добавить папку", L"Ordner hinzufügen", L"Adicionar pasta", L"Map toevoegen", L"Dodaj folder", L"Klasör ekle" },
+	{ L"削除", L"Delete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Eliminar", L"Verwijderen", L"Usuń", L"Sil" },
+	{ L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Cambiar nombre", L"이름 바꾸기", L"重命名", L"إعادة تسمية", L"Переименовать", L"Umbenennen", L"Mudar o nome", L"Naam wijzigen", L"Zmień nazwę", L"Yeniden adlandır" },
+	{ L"展開", L"Extract", L"Extraire", L"Estrai", L"Extraer", L"풀기", L"解压", L"استخراج", L"Распаковать", L"Entpacken", L"Extrair", L"Uitpakken", L"Rozpakuj", L"Aç" },
+	{ L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Guardar", L"Opslaan", L"Zapisz", L"Kaydet" },
+	{ L"設定", L"Settings", L"Réglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Definições", L"Instellingen", L"Ustawienia", L"Ayarlar" },
+	{ L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat" },
+	{ L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasör" },
+	{ L"言語", L"Language", L"Langue", L"Lingua", L"Idioma", L"언어", L"语言", L"اللغة", L"Язык", L"Sprache", L"Idioma", L"Taal", L"Język", L"Dil" },
+	{ L"インストール", L"Install", L"Installer", L"Installa", L"Instalar", L"설치", L"安装", L"تثبيت", L"Установить", L"Installieren", L"Instalar", L"Installeren", L"Zainstaluj", L"Yükle" },
+	{ L"解除", L"Remove", L"Retirer", L"Rimuovi", L"Quitar", L"제거", L"卸载", L"إزالة", L"Удалить программу", L"Entfernen", L"Remover", L"Verwijderen", L"Usuń program", L"Kaldır" },
+	{ L"インストール済み", L"Installed", L"Installé", L"Installato", L"Instalado", L"설치됨", L"已安装", L"مثبت", L"Установлено", L"Installiert", L"Instalado", L"Geïnstalleerd", L"Zainstalowano", L"Yüklü" },
+	{ L"未インストール", L"Not installed", L"Non installé", L"Non installato", L"No instalado", L"설치 안 됨", L"未安装", L"غير مثبت", L"Не установлено", L"Nicht installiert", L"Não instalado", L"Niet geïnstalleerd", L"Nie zainstalowano", L"Yüklü değil" },
+	{ L"oxz に圧縮", L"Compress to oxz", L"Compresser en oxz", L"Comprimi in oxz", L"Comprimir en oxz", L"oxz로 압축", L"压缩为 oxz", L"ضغط إلى oxz", L"Сжать в oxz", L"In oxz komprimieren", L"Comprimir para oxz", L"Comprimeren naar oxz", L"Kompresuj do oxz", L"oxz olarak sıkıştır" },
+	{ L"ここに展開", L"Extract here", L"Extraire ici", L"Estrai qui", L"Extraer aquí", L"여기에 풀기", L"解压到此处", L"استخراج هنا", L"Распаковать сюда", L"Hier entpacken", L"Extrair aqui", L"Hier uitpakken", L"Rozpakuj tutaj", L"Buraya aç" },
+	{ L"フォルダに展開", L"Extract to folder", L"Extraire dans un dossier", L"Estrai in una cartella", L"Extraer en carpeta", L"폴더에 풀기", L"解压到文件夹", L"استخراج إلى مجلد", L"Распаковать в папку", L"In Ordner entpacken", L"Extrair para pasta", L"Uitpakken naar map", L"Rozpakuj do folderu", L"Klasöre aç" },
+	{ L"秒", L"s", L"s", L"s", L"s", L"초", L"秒", L"ث", L"с", L"s", L"s", L"s", L"s", L"sn" },
+	{ L"%u 項目", L"%u items", L"%u éléments", L"%u elementi", L"%u elementos", L"%u개", L"%u 项", L"%u عناصر", L"%u элементов", L"%u Einträge", L"%u itens", L"%u items", L"%u pozycji", L"%u öğe" },
+	{ L"バイト", L"bytes", L"octets", L"byte", L"bytes", L"바이트", L"字节", L"بايت", L"байт", L"Bytes", L"bytes", L"bytes", L"bajtów", L"bayt" },
+	{ L"保存しました。", L"Saved.", L"Enregistré.", L"Salvato.", L"Guardado.", L"저장했습니다.", L"已保存。", L"تم الحفظ.", L"Сохранено.", L"Gespeichert.", L"Guardado.", L"Opgeslagen.", L"Zapisano.", L"Kaydedildi." },
+	{ L"書庫を作りました。", L"Archive created.", L"Archive créée.", L"Archivio creato.", L"Archivo creado.", L"보관함을 만들었습니다.", L"已创建压缩包。", L"تم إنشاء الأرشيف.", L"Архив создан.", L"Archiv erstellt.", L"Arquivo criado.", L"Archief gemaakt.", L"Utworzono archiwum.", L"Arşiv oluşturuldu." },
+	{ L"追加しました。同名は上書きしています。", L"Added. Existing names were replaced.", L"Ajouté. Les noms déjà présents ont été remplacés.", L"Aggiunto. I nomi già presenti sono stati sostituiti.", L"Añadido. Los nombres ya presentes se reemplazaron.", L"추가했습니다. 같은 이름은 덮어썼습니다.", L"已添加。同名已经覆盖。", L"تمت الإضافة. استُبدلت الأسماء الموجودة.", L"Добавлено. Одинаковые имена заменены.", L"Hinzugefügt. Vorhandene Namen wurden ersetzt.", L"Adicionado. Os nomes já presentes foram substituídos.", L"Toegevoegd. Bestaande namen zijn vervangen.", L"Dodano. Istniejące nazwy zastąpiono.", L"Eklendi. Aynı adlar değiştirildi." },
+	{ L"展開しました。", L"Extracted.", L"Extrait.", L"Estratto.", L"Extraído.", L"풀었습니다.", L"已解压。", L"تم الاستخراج.", L"Распаковано.", L"Entpackt.", L"Extraído.", L"Uitgepakt.", L"Rozpakowano.", L"Açıldı." },
+	{ L"展開しています。", L"Extracting.", L"Extraction en cours.", L"Estrazione in corso.", L"Extrayendo.", L"푸는 중입니다.", L"正在解压。", L"جارٍ الاستخراج.", L"Идёт распаковка.", L"Wird entpackt.", L"A extrair.", L"Bezig met uitpakken.", L"Trwa rozpakowywanie.", L"Açılıyor." },
+	{ L"圧縮しています。展開はすぐ終わります。", L"Compressing. Extracting stays quick.", L"Compression. L'extraction reste rapide.", L"Compressione. L'estrazione resta rapida.", L"Comprimiendo. Extraer sigue siendo rápido.", L"압축 중입니다. 풀기는 바로 끝납니다.", L"正在压缩。解压很快。", L"جارٍ الضغط. الاستخراج يبقى سريعًا.", L"Идёт сжатие. Распаковка остаётся быстрой.", L"Wird komprimiert. Entpacken bleibt schnell.", L"A comprimir. Extrair continua rápido.", L"Bezig met comprimeren. Uitpakken blijft snel.", L"Trwa kompresja. Rozpakowanie zostaje szybkie.", L"Sıkıştırılıyor. Açmak hızlı kalır." },
+	{ L"一覧へドロップで追加。同名は上書き。oxz を一つドロップで開く。Delete で削除。", L"Drop here to add. The same name is replaced. One oxz opens. Delete removes.", L"Déposez ici pour ajouter. Un même nom est remplacé. Un oxz seul ouvre. Suppr efface.", L"Trascina qui per aggiungere. Lo stesso nome è sostituito. Un solo oxz apre. Canc elimina.", L"Suelta aquí para añadir. El mismo nombre se reemplaza. Un oxz abre. Supr borra.", L"여기에 놓으면 추가됩니다. 같은 이름은 덮어씁니다. oxz 하나는 엽니다. Delete 로 지웁니다.", L"拖到这里添加。同名会覆盖。拖入一个 oxz 会打开。Delete 删除。", L"أفلت هنا للإضافة. الاسم نفسه يُستبدل. ملف oxz واحد يفتح. Delete يحذف.", L"Перетащите сюда, чтобы добавить. Одинаковое имя заменяется. Один oxz открывается. Delete удаляет.", L"Hierher ziehen zum Hinzufügen. Der gleiche Name wird ersetzt. Ein oxz öffnet. Entf löscht.", L"Largue aqui para adicionar. O mesmo nome é substituído. Um oxz abre. Delete remove.", L"Hier neerzetten voegt toe. Dezelfde naam wordt vervangen. Eén oxz opent. Delete verwijdert.", L"Upuść tutaj, aby dodać. Ta sama nazwa jest zastępowana. Jeden oxz otwiera. Delete usuwa.", L"Buraya bırakınca eklenir. Aynı ad değişir. Tek oxz açar. Delete siler." },
+	{ L"新しい書庫です。追加してから保存してください。", L"This is a new archive. Add files, then save.", L"Nouvelle archive. Ajoutez des fichiers, puis enregistrez.", L"Nuovo archivio. Aggiungi i file, poi salva.", L"Archivo nuevo. Añade archivos y guarda.", L"새 보관함입니다. 넣은 뒤 저장하세요.", L"这是新的压缩包。添加文件后保存。", L"هذا أرشيف جديد. أضف الملفات ثم احفظ.", L"Это новый архив. Добавьте файлы и сохраните.", L"Dies ist ein neues Archiv. Dateien hinzufügen, dann speichern.", L"Este é um arquivo novo. Adicione ficheiros e guarde.", L"Dit is een nieuw archief. Voeg bestanden toe en sla op.", L"To nowe archiwum. Dodaj pliki i zapisz.", L"Bu yeni bir arşiv. Dosya ekleyip kaydedin." },
+	{ L"選択した項目を消します。", L"Remove the selected items?", L"Supprimer les éléments choisis ?", L"Eliminare gli elementi scelti?", L"¿Eliminar los elementos elegidos?", L"선택한 항목을 지울까요?", L"要删除所选项目吗？", L"حذف العناصر المحددة؟", L"Удалить выбранное?", L"Ausgewählte Einträge entfernen?", L"Remover os itens escolhidos?", L"Geselecteerde items verwijderen?", L"Usunąć zaznaczone elementy?", L"Seçilenler silinsin mi?" },
+	{ L"保存するファイルがありません。", L"There is nothing to save.", L"Il n'y a rien à enregistrer.", L"Non c'è nulla da salvare.", L"No hay nada que guardar.", L"저장할 파일이 없습니다.", L"没有可保存的文件。", L"لا يوجد ما يُحفظ.", L"Нечего сохранять.", L"Es gibt nichts zu speichern.", L"Não há nada para guardar.", L"Er is niets om op te slaan.", L"Nie ma czego zapisać.", L"Kaydedilecek bir şey yok." },
+	{ L"編集中のフォルダの中には保存できません。", L"You cannot save inside the folder being edited.", L"Impossible d'enregistrer dans le dossier en cours d'édition.", L"Non si può salvare nella cartella in modifica.", L"No se puede guardar dentro de la carpeta que se está editando.", L"편집 중인 폴더 안에는 저장할 수 없습니다.", L"不能保存到正在编辑的文件夹里面。", L"لا يمكن الحفظ داخل المجلد الجاري تحريره.", L"Нельзя сохранить внутрь редактируемой папки.", L"Speichern in dem Ordner, der gerade bearbeitet wird, geht nicht.", L"Não é possível guardar dentro da pasta que está a ser editada.", L"Opslaan in de map die u bewerkt, kan niet.", L"Nie można zapisać wewnątrz folderu, który jest edytowany.", L"Düzenlenen klasörün içine kaydedilemez." },
+	{ L"展開できませんでした。", L"Could not extract.", L"Impossible d'extraire.", L"Impossibile estrarre.", L"No se pudo extraer.", L"풀 수 없습니다.", L"无法解压。", L"تعذر الاستخراج.", L"Не удалось распаковать.", L"Entpacken ist fehlgeschlagen.", L"Não foi possível extrair.", L"Uitpakken is mislukt.", L"Nie udało się rozpakować.", L"Açılamadı." },
+	{ L"圧縮に失敗しました。", L"Compression failed.", L"La compression a échoué.", L"La compressione non è riuscita.", L"La compresión falló.", L"압축에 실패했습니다.", L"压缩失败。", L"فشل الضغط.", L"Сжатие не удалось.", L"Komprimieren ist fehlgeschlagen.", L"A compressão falhou.", L"Comprimeren is mislukt.", L"Kompresja nie powiodła się.", L"Sıkıştırma başarısız oldu." },
+	{ L"7za.exe がこのプログラムと同じ場所にありません。", L"7za.exe is not in the same folder as this program.", L"7za.exe n'est pas dans le même dossier que ce programme.", L"7za.exe non è nella stessa cartella del programma.", L"7za.exe no está en la misma carpeta que este programa.", L"7za.exe 가 이 프로그램과 같은 폴더에 없습니다.", L"7za.exe 不在本程序所在的文件夹。", L"‏7za.exe ليس في مجلد هذا البرنامج.", L"7za.exe нет в папке этой программы.", L"7za.exe liegt nicht im selben Ordner wie dieses Programm.", L"7za.exe não está na mesma pasta deste programa.", L"7za.exe staat niet in dezelfde map als dit programma.", L"7za.exe nie ma w tym samym folderze co ten program.", L"7za.exe bu programla aynı klasörde değil." },
+	{ L"開いている内容を、この oxz で置き換えます。", L"Replace what is open with this oxz?", L"Remplacer le contenu ouvert par cet oxz ?", L"Sostituire ciò che è aperto con questo oxz?", L"¿Reemplazar lo que está abierto por este oxz?", L"열어 둔 내용을 이 oxz 로 바꿀까요?", L"要用这个 oxz 替换当前打开的内容吗？", L"استبدال المحتوى المفتوح بهذا oxz؟", L"Заменить открытое этим oxz?", L"Das Geöffnete durch dieses oxz ersetzen?", L"Substituir o que está aberto por este oxz?", L"Het geopende vervangen door dit oxz?", L"Zastąpić otwartą treść tym oxz?", L"Açık olan bu oxz ile değiştirilsin mi?" },
+	{ L"その名前には変更できません。", L"That name cannot be used.", L"Ce nom ne peut pas être utilisé.", L"Questo nome non si può usare.", L"Ese nombre no se puede usar.", L"그 이름으로는 바꿀 수 없습니다.", L"不能改成这个名字。", L"لا يمكن استخدام هذا الاسم.", L"Это имя использовать нельзя.", L"Dieser Name kann nicht verwendet werden.", L"Esse nome não pode ser usado.", L"Die naam kan niet worden gebruikt.", L"Tej nazwy nie można użyć.", L"Bu ad kullanılamaz." },
+	{ L"名前を変更できませんでした。", L"Could not rename.", L"Impossible de renommer.", L"Impossibile rinominare.", L"No se pudo cambiar el nombre.", L"이름을 바꾸지 못했습니다.", L"无法重命名。", L"تعذرت إعادة التسمية.", L"Не удалось переименовать.", L"Umbenennen ist fehlgeschlagen.", L"Não foi possível mudar o nome.", L"De naam kon niet worden gewijzigd.", L"Nie udało się zmienić nazwy.", L"Ad değiştirilemedi." },
+	{ L"中身がありません。", L"There is nothing inside.", L"Il n'y a rien dedans.", L"Dentro non c'è nulla.", L"Dentro no hay nada.", L"내용이 없습니다.", L"里面没有内容。", L"لا يوجد شيء بالداخل.", L"Внутри ничего нет.", L"Darin ist nichts.", L"Não há nada lá dentro.", L"Er zit niets in.", L"W środku nic nie ma.", L"İçinde bir şey yok." },
+	{ L"保存先へ移せませんでした。", L"Could not move the archive into place.", L"Impossible de placer l'archive à l'endroit voulu.", L"Impossibile spostare l'archivio al posto giusto.", L"No se pudo mover el archivo a su sitio.", L"보관함을 저장 위치로 옮기지 못했습니다.", L"无法把压缩包移到保存位置。", L"تعذر نقل الأرشيف إلى مكان الحفظ.", L"Не удалось переместить архив на место.", L"Das Archiv konnte nicht an den Speicherort verschoben werden.", L"Não foi possível mover o arquivo para o destino.", L"Het archief kon niet naar de opslagplaats worden verplaatst.", L"Nie udało się przenieść archiwum na miejsce.", L"Arşiv kayıt yerine taşınamadı." },
+	{ L"作業を始められませんでした。", L"Could not start the work.", L"Impossible de commencer le travail.", L"Impossibile cominciare il lavoro.", L"No se pudo empezar el trabajo.", L"작업을 시작하지 못했습니다.", L"无法开始这项工作。", L"تعذر بدء العمل.", L"Не удалось начать работу.", L"Die Arbeit konnte nicht begonnen werden.", L"Não foi possível começar o trabalho.", L"Het werk kon niet worden gestart.", L"Nie udało się rozpocząć pracy.", L"İş başlatılamadı." },
+	{ L"すべてのファイル", L"All files", L"Tous les fichiers", L"Tutti i file", L"Todos los archivos", L"모든 파일", L"所有文件", L"كل الملفات", L"Все файлы", L"Alle Dateien", L"Todos os ficheiros", L"Alle bestanden", L"Wszystkie pliki", L"Tüm dosyalar" },
+	{ L"oxz 書庫 (*.oxz)", L"oxz archive (*.oxz)", L"Archive oxz (*.oxz)", L"Archivio oxz (*.oxz)", L"Archivo oxz (*.oxz)", L"oxz 보관함 (*.oxz)", L"oxz 压缩包 (*.oxz)", L"أرشيف oxz ‏(*.oxz)", L"Архив oxz (*.oxz)", L"oxz-Archiv (*.oxz)", L"Arquivo oxz (*.oxz)", L"oxz-archief (*.oxz)", L"Archiwum oxz (*.oxz)", L"oxz arşivi (*.oxz)" },
+	{ L"追加するフォルダ", L"Folder to add", L"Dossier à ajouter", L"Cartella da aggiungere", L"Carpeta que se añade", L"추가할 폴더", L"要添加的文件夹", L"المجلد الذي سيُضاف", L"Добавляемая папка", L"Ordner zum Hinzufügen", L"Pasta a adicionar", L"Toe te voegen map", L"Folder do dodania", L"Eklenecek klasör" },
+	{ L"展開先のフォルダ", L"Folder to extract into", L"Dossier où extraire", L"Cartella in cui estrarre", L"Carpeta donde extraer", L"풀 위치 폴더", L"解压到的文件夹", L"المجلد الذي يُستخرج إليه", L"Папка для распаковки", L"Ordner zum Entpacken", L"Pasta para extrair", L"Map om in uit te pakken", L"Folder do rozpakowania", L"Açılacak klasör" },
+	{ L"oxz 書庫", L"oxz archive", L"Archive oxz", L"Archivio oxz", L"Archivo oxz", L"oxz 보관함", L"oxz 压缩包", L"أرشيف oxz", L"Архив oxz", L"oxz-Archiv", L"Arquivo oxz", L"oxz-archief", L"Archiwum oxz", L"oxz arşivi" },
+	{ L"OxzShell.dll か 7za.exe が、このプログラムと同じ場所にありません。", L"OxzShell.dll or 7za.exe is not in the same folder as this program.", L"OxzShell.dll ou 7za.exe n'est pas dans le même dossier que ce programme.", L"OxzShell.dll o 7za.exe non è nella stessa cartella del programma.", L"OxzShell.dll o 7za.exe no está en la misma carpeta que este programa.", L"OxzShell.dll 또는 7za.exe 가 이 프로그램과 같은 폴더에 없습니다.", L"OxzShell.dll 或 7za.exe 不在本程序所在的文件夹。", L"OxzShell.dll أو 7za.exe ليس في مجلد هذا البرنامج.", L"OxzShell.dll или 7za.exe нет в папке этой программы.", L"OxzShell.dll oder 7za.exe liegt nicht im selben Ordner wie dieses Programm.", L"OxzShell.dll ou 7za.exe não está na mesma pasta deste programa.", L"OxzShell.dll of 7za.exe staat niet in dezelfde map als dit programma.", L"OxzShell.dll albo 7za.exe nie ma w tym samym folderze co ten program.", L"OxzShell.dll veya 7za.exe bu programla aynı klasörde değil." },
+	{ L"インストールしました。右クリックの oxz で、開く、展開、テスト、圧縮ができます。右ドラッグでは、ここに解凍、フォルダを作って解凍、ここに oxz を作成できます。oxz の上へのドロップも使えます。メニューが出ないときはエクスプローラーを開き直してください。", L"Installed. The oxz menu can open, extract, test, and compress. A right-drag can extract here, extract into a new folder, and create an oxz here. Dropping onto an oxz also works. If the menu is missing, open Explorer again.", L"Installé. Le menu et le dépôt sur un oxz fonctionnent. Si le menu manque, rouvrez l'Explorateur.", L"Installato. Il menu e il rilascio su un oxz funzionano. Se il menu manca, riapri Esplora file.", L"Instalado. El menú y soltar sobre un oxz ya funcionan. Si falta el menú, vuelve a abrir el Explorador.", L"설치했습니다. 오른쪽 클릭과 oxz 위에 놓기를 쓸 수 있습니다. 메뉴가 없으면 탐색기를 다시 여세요.", L"已经安装。右键菜单和拖到 oxz 上都可以用。如果没有菜单，请重新打开资源管理器。", L"تم التثبيت. قائمة النقر والإفلات على oxz يعملان. إن غابت القائمة، أعد فتح المستكشف.", L"Установлено. Меню и перетаскивание на oxz работают. Если меню нет, откройте Проводник снова.", L"Installiert. Menü und Ablegen auf ein oxz funktionieren. Fehlt das Menü, öffnen Sie den Explorer erneut.", L"Instalado. O menu e largar sobre um oxz funcionam. Se o menu faltar, abra o Explorador de novo.", L"Geïnstalleerd. Het menu en neerzetten op een oxz werken. Ontbreekt het menu, open Verkenner opnieuw.", L"Zainstalowano. Menu i upuszczanie na oxz działają. Jeśli menu nie ma, otwórz Eksplorator ponownie.", L"Yüklendi. Sağ tık ve oxz üzerine bırakma çalışır. Menü yoksa Gezgini yeniden açın." },
+	{ L"インストールできませんでした。", L"Could not install.", L"Impossible d'installer.", L"Impossibile installare.", L"No se pudo instalar.", L"설치하지 못했습니다.", L"无法安装。", L"تعذر التثبيت.", L"Не удалось установить.", L"Installation ist fehlgeschlagen.", L"Não foi possível instalar.", L"Installeren is mislukt.", L"Nie udało się zainstalować.", L"Yüklenemedi." },
+	{ L"解除しました。", L"Removed.", L"Retiré.", L"Rimosso.", L"Quitado.", L"제거했습니다.", L"已经卸载。", L"تمت الإزالة.", L"Удалено.", L"Entfernt.", L"Removido.", L"Verwijderd.", L"Usunięto.", L"Kaldırıldı." },
+	{ L"解除できませんでした。", L"Could not remove.", L"Impossible de retirer.", L"Impossibile rimuovere.", L"No se pudo quitar.", L"제거하지 못했습니다.", L"无法卸载。", L"تعذرت الإزالة.", L"Не удалось удалить.", L"Entfernen ist fehlgeschlagen.", L"Não foi possível remover.", L"Verwijderen is mislukt.", L"Nie udało się usunąć.", L"Kaldırılamadı." },
+	{ L"管理者の確認がキャンセルされました。", L"The administrator confirmation was canceled.", L"La confirmation d'administrateur a été annulée.", L"La conferma dell'amministratore è stata annullata.", L"Se canceló la confirmación de administrador.", L"관리자 확인이 취소되었습니다.", L"管理员确认已取消。", L"أُلغي تأكيد المسؤول.", L"Подтверждение администратора отменено.", L"Die Administratorbestätigung wurde abgebrochen.", L"A confirmação de administrador foi cancelada.", L"De beheerdersvraag is geannuleerd.", L"Potwierdzenie administratora zostało anulowane.", L"Yönetici onayı iptal edildi." },
+	{ L"インストールは Program Files\\OxzGui にコピーし、右クリックの oxz に、開く、展開、テスト、圧縮を登録します。右ドラッグでは、ここに解凍、フォルダを作って解凍、ここに oxz を作成できます。oxz の上へファイルやフォルダを落とすと、同名は上書き、無いものは追加して、書庫を作り直します。圧縮には時間がかかり、展開はすぐ終わります。ボタンを押すと管理者の確認が出ます。言語を変えたあとは、メニューの文言を揃えるためにもう一度インストールしてください。", L"Install copies this program to Program Files\\OxzGui and adds an oxz menu for open, extract, test, and compress. A right-drag can extract here, extract into a new folder, and create an oxz here. Dropping files or folders onto an oxz replaces names already inside, adds the rest, and compresses the archive again. Compressing can take a while. Extracting stays quick. The button asks for administrator permission. After you change the language, install once more so the menu text matches.", L"L'installation copie ce programme dans Program Files\\OxzGui et ajoute la compression et l'extraction au clic droit. Déposer des fichiers ou des dossiers sur un oxz remplace les noms déjà présents, ajoute les autres et recompresse l'archive. La compression peut prendre du temps. L'extraction reste rapide. Le bouton demande l'accord de l'administrateur. Après un changement de langue, installez une fois de plus pour le texte du menu.", L"L'installazione copia questo programma in Program Files\\OxzGui e aggiunge compressione ed estrazione al clic destro. Rilasciare file o cartelle su un oxz sostituisce i nomi già presenti, aggiunge gli altri e ricomprime l'archivio. La compressione può richiedere tempo. L'estrazione resta rapida. Il pulsante chiede il permesso dell'amministratore. Dopo un cambio di lingua, installa di nuovo per il testo del menu.", L"La instalación copia este programa en Program Files\\OxzGui y añade comprimir y extraer al clic derecho. Soltar archivos o carpetas sobre un oxz sustituye los nombres que ya están, añade el resto y vuelve a comprimir. Comprimir puede tardar. Extraer sigue siendo rápido. El botón pide permiso de administrador. Tras cambiar el idioma, instala otra vez para el texto del menú.", L"설치는 이 프로그램을 Program Files\\OxzGui 에 복사하고, 오른쪽 클릭에 압축과 풀기를 넣습니다. oxz 위에 파일이나 폴더를 놓으면 같은 이름은 덮어쓰고, 없는 것은 추가한 뒤 보관함을 다시 압축합니다. 압축은 시간이 걸릴 수 있고, 풀기는 바로 끝납니다. 버튼을 누르면 관리자 확인이 나옵니다. 언어를 바꾼 뒤에는 메뉴 문구를 맞추려고 한 번 더 설치하세요.", L"安装会把本程序复制到 Program Files\\OxzGui，并在右键中加入压缩和解压。把文件或文件夹拖到 oxz 上时，已有的同名会被覆盖，没有的会被加入，然后重新压缩。压缩可能较久，解压很快。按下按钮会请求管理员权限。更改语言后，请再安装一次，让菜单文字一致。", L"التثبيت ينسخ هذا البرنامج إلى Program Files\\OxzGui ويضيف الضغط والاستخراج إلى النقرة اليمين. إفلات ملفات أو مجلدات على oxz يستبدل الأسماء الموجودة ويضيف الباقي ثم يعيد ضغط الأرشيف. قد يأخذ الضغط وقتًا. الاستخراج يبقى سريعًا. الزر يطلب إذن المسؤول. بعد تغيير اللغة، ثبّت مرة أخرى ليطابق نص القائمة.", L"Установка копирует эту программу в Program Files\\OxzGui и добавляет сжатие и распаковку в меню по правому щелчку. Если перетащить файлы или папки на oxz, уже существующие имена заменяются, остальные добавляются, и архив сжимается снова. Сжатие может занять время. Распаковка остаётся быстрой. Кнопка запросит разрешение администратора. После смены языка установите ещё раз, чтобы текст меню совпал.", L"Die Installation kopiert dieses Programm nach Program Files\\OxzGui und trägt Komprimieren und Entpacken im Rechtsklick ein. Dateien oder Ordner auf ein oxz abzulegen ersetzt vorhandene Namen, fügt neue hinzu und komprimiert das Archiv neu. Komprimieren kann dauern. Entpacken bleibt schnell. Die Schaltfläche bittet um die Administratorerlaubnis. Nach einem Sprachwechsel noch einmal installieren, damit der Menütext passt.", L"A instalação copia este programa para Program Files\\OxzGui e acrescenta comprimir e extrair ao clique direito. Largar ficheiros ou pastas sobre um oxz substitui os nomes que já existem, acrescenta os outros e volta a comprimir. Comprimir pode demorar. Extrair continua rápido. O botão pede autorização de administrador. Depois de mudar o idioma, instale outra vez para o texto do menu ficar certo.", L"Installeren kopieert dit programma naar Program Files\\OxzGui en zet comprimeren en uitpakken in het rechtermuisklikmenu. Bestanden of mappen op een oxz zetten vervangt namen die er al zijn, voegt de rest toe en comprimeert opnieuw. Comprimeren kan duren. Uitpakken blijft snel. De knop vraagt toestemming van de beheerder. Installeer na een taalwijziging nog een keer, zodat de menutekst klopt.", L"Instalacja kopiuje ten program do Program Files\\OxzGui i dodaje kompresję oraz rozpakowanie do menu podręcznego. Upuszczenie plików lub folderów na oxz zastępuje nazwy, które już są, dodaje resztę i kompresuje archiwum ponownie. Kompresja może potrwać. Rozpakowanie zostaje szybkie. Przycisk poprosi o zgodę administratora. Po zmianie języka zainstaluj jeszcze raz, aby tekst menu się zgadzał.", L"Yükleme bu programı Program Files\\OxzGui içine kopyalar ve sağ tıklamaya sıkıştırma ile açmayı ekler. Dosya veya klasörü bir oxz üzerine bırakmak içerideki aynı adları değiştirir, olmayanları ekler ve arşivi yeniden sıkıştırır. Sıkıştırma sürebilir. Açmak hızlı kalır. Düğme yönetici izni ister. Dil değişince menü yazısı için bir kez daha yükleyin." },
+	{ L"追加するものがありません。", L"There is nothing to add.", L"Il n'y a rien à ajouter.", L"Non c'è nulla da aggiungere.", L"No hay nada que añadir.", L"추가할 것이 없습니다.", L"没有要添加的内容。", L"لا يوجد ما يُضاف.", L"Нечего добавлять.", L"Es gibt nichts hinzuzufügen.", L"Não há nada para adicionar.", L"Er is niets om toe te voegen.", L"Nie ma czego dodać.", L"Eklenecek bir şey yok." },
+	{ L"設定", L"Settings", L"Réglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Definições", L"Instellingen", L"Ustawienia", L"Ayarlar" },
+	{ L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad" },
+	{ L"サイズ", L"Size", L"Taille", L"Dimensione", L"Tamaño", L"크기", L"大小", L"الحجم", L"Размер", L"Größe", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut" },
+	{ L"更新日時", L"Modified", L"Modifié", L"Modificato", L"Modificado", L"수정", L"修改", L"عُدّل", L"Изменён", L"Geändert", L"Modificado", L"Gewijzigd", L"Zmieniono", L"Değişti" },
+	{ L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz", L"oxz" },
+	{ L"圧縮...", L"Compress...", L"Compresser...", L"Comprimi...", L"Comprimir...", L"압축...", L"压缩...", L"ضغط...", L"Сжать...", L"Komprimieren...", L"Comprimir...", L"Comprimeren...", L"Kompresuj...", L"Sıkıştır..." },
+	{ L"「%s」に圧縮", L"Compress to \"%s\"", L"Compresser vers « %s »", L"Comprimi in \"%s\"", L"Comprimir en \"%s\"", L"\"%s\"(으)로 압축", L"压缩到“%s”", L"ضغط إلى \"%s\"", L"Сжать в «%s»", L"Komprimieren in „%s“", L"Comprimir para \"%s\"", L"Comprimeren naar \"%s\"", L"Kompresuj do „%s”", L"\"%s\" olarak sıkıştır" },
+	{ L"展開...", L"Extract...", L"Extraire...", L"Estrai...", L"Extraer...", L"풀기...", L"解压...", L"استخراج...", L"Распаковать...", L"Entpacken...", L"Extrair...", L"Uitpakken...", L"Rozpakuj...", L"Aç..." },
+	{ L"「%s\\」に展開", L"Extract to \"%s\\\"", L"Extraire vers « %s\\ »", L"Estrai in \"%s\\\"", L"Extraer en \"%s\\\"", L"\"%s\\\"에 풀기", L"解压到“%s\\”", L"استخراج إلى \"%s\\\"", L"Распаковать в «%s\\»", L"Entpacken nach „%s\\“", L"Extrair para \"%s\\\"", L"Uitpakken naar \"%s\\\"", L"Rozpakuj do „%s\\”", L"\"%s\\\" klasörüne aç" },
+	{ L"アーカイブをテスト", L"Test archive", L"Tester l'archive", L"Prova archivio", L"Probar archivo", L"보관함 테스트", L"测试压缩包", L"اختبار الأرشيف", L"Проверить архив", L"Archiv testen", L"Testar arquivo", L"Archief testen", L"Testuj archiwum", L"Arşivi sına" },
+	{ L"ここに解凍", L"Extract here", L"Extraire ici", L"Estrai qui", L"Extraer aquí", L"여기에 풀기", L"解压到此处", L"استخراج هنا", L"Распаковать сюда", L"Hier entpacken", L"Extrair aqui", L"Hier uitpakken", L"Rozpakuj tutaj", L"Buraya aç" },
+	{ L"ここにフォルダを作成して解凍", L"Extract into a new folder here", L"Extraire ici dans un nouveau dossier", L"Estrai qui in una nuova cartella", L"Extraer aquí en una carpeta nueva", L"여기에 폴더를 만들어 풀기", L"在此处建文件夹并解压", L"استخراج هنا في مجلد جديد", L"Распаковать здесь в новую папку", L"Hier in einen neuen Ordner entpacken", L"Extrair aqui para uma pasta nova", L"Hier uitpakken in een nieuwe map", L"Rozpakuj tutaj do nowego folderu", L"Burada klasör oluşturup aç" },
+	{ L"ここに '%s' を作成", L"Create '%s' here", L"Créer « %s » ici", L"Crea '%s' qui", L"Crear '%s' aquí", L"여기에 '%s' 만들기", L"在此处创建“%s”", L"إنشاء '%s' هنا", L"Создать «%s» здесь", L"„%s“ hier erstellen", L"Criar '%s' aqui", L"'%s' hier maken", L"Utwórz tutaj „%s”", L"Burada '%s' oluştur" },
+	{ L"ここに書庫を作成", L"Create an archive here", L"Créer une archive ici", L"Crea un archivio qui", L"Crear un archivo aquí", L"여기에 보관함 만들기", L"在此处创建压缩包", L"إنشاء أرشيف هنا", L"Создать архив здесь", L"Hier ein Archiv erstellen", L"Criar um arquivo aqui", L"Hier een archief maken", L"Utwórz tutaj archiwum", L"Burada arşiv oluştur" },
+	{ L"書庫は正常です。", L"The archive is OK.", L"L'archive est saine.", L"L'archivio è integro.", L"El archivo está bien.", L"보관함은 정상입니다.", L"压缩包正常。", L"الأرشيف سليم.", L"Архив в порядке.", L"Das Archiv ist in Ordnung.", L"O arquivo está bom.", L"Het archief is in orde.", L"Archiwum jest w porządku.", L"Arşiv sağlam." },
+	{ L"書庫を確認できませんでした。", L"Could not verify the archive.", L"Impossible de vérifier l'archive.", L"Impossibile verificare l'archivio.", L"No se pudo comprobar el archivo.", L"보관함을 확인하지 못했습니다.", L"无法确认压缩包。", L"تعذر التحقق من الأرشيف.", L"Не удалось проверить архив.", L"Das Archiv konnte nicht geprüft werden.", L"Não foi possível verificar o arquivo.", L"Het archief kon niet worden gecontroleerd.", L"Nie udało się sprawdzić archiwum.", L"Arşiv doğrulanamadı." },
+};
+
+static const wchar_t* kName[14] = {
+	L"日本語", L"English", L"Français", L"Italiano", L"Español", L"한국어", L"中文", L"العربية", L"Русский", L"Deutsch", L"Português", L"Nederlands", L"Polski", L"Türkçe"
+};
+static_assert(sizeof(kTxt) / sizeof(kTxt[0]) == OS_COUNT, "lang rows");
+
+void OxzLangInit()
+{
+	DWORD v = 99;
+	DWORD cb = sizeof(v);
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"lang", RRF_RT_REG_DWORD, NULL, &v, &cb) == ERROR_SUCCESS && v <= 13) {
+		g_lang = (int)v;
+		return;
+	}
+	wchar_t env[8];
+	DWORD n = GetEnvironmentVariableW(L"OGG_UI_LANG", env, 8);
+	if (n > 0 && n < 8) {
+		int e = _wtoi(env);
+		if (e >= 0 && e <= 13) {
+			g_lang = e;
+			return;
+		}
+	}
+	switch (PRIMARYLANGID(GetUserDefaultUILanguage())) {
+	case LANG_JAPANESE: g_lang = 0; break;
+	case LANG_ENGLISH: g_lang = 1; break;
+	case LANG_FRENCH: g_lang = 2; break;
+	case LANG_ITALIAN: g_lang = 3; break;
+	case LANG_SPANISH: g_lang = 4; break;
+	case LANG_KOREAN: g_lang = 5; break;
+	case LANG_CHINESE: g_lang = 6; break;
+	case LANG_ARABIC: g_lang = 7; break;
+	case LANG_RUSSIAN: g_lang = 8; break;
+	case LANG_GERMAN: g_lang = 9; break;
+	case LANG_PORTUGUESE: g_lang = 10; break;
+	case LANG_DUTCH: g_lang = 11; break;
+	case LANG_POLISH: g_lang = 12; break;
+	case LANG_TURKISH: g_lang = 13; break;
+	default: g_lang = 1; break;
+	}
+}
+
+int OxzLang()
+{
+	return g_lang;
+}
+
+void OxzLangSet(int lang)
+{
+	if (lang < 0 || lang > 13) lang = 1;
+	g_lang = lang;
+	DWORD v = (DWORD)lang;
+	RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"lang", REG_DWORD, &v, sizeof(v));
+}
+
+int OxzLangIsRtl()
+{
+	return g_lang == 7;
+}
+
+const wchar_t* OxzTxt(int id)
+{
+	if (id < 0 || id >= OS_COUNT) return L"";
+	const wchar_t* s = kTxt[id][g_lang];
+	if (!s || !s[0]) s = kTxt[id][1];
+	return s ? s : L"";
+}
+
+const wchar_t* OxzLangName(int lang)
+{
+	if (lang < 0 || lang > 13) lang = 1;
+	return kName[lang];
+}

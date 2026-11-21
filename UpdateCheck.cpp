@@ -18,15 +18,19 @@
 #include "minizip/iowin32.h"
 #endif
 #include "SevenZipDec.h"
+#include "ZpaqRun.h"
 
-// 09a があれば優先。なければ 08g。各版は .7z があればそれを使い、なければ .zip。
+// 09a があれば優先。なければ 08g。各版は .oxz → .7z → .zip。展開は exe 内。
+static const TCHAR* UPDATE_URL_PRIMARY_ZST = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.oxz");
 static const TCHAR* UPDATE_URL_PRIMARY_7Z = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.7z");
 static const TCHAR* UPDATE_URL_PRIMARY = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.zip");
+static const TCHAR* UPDATE_URL_FALLBACK_ZST = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.oxz");
 static const TCHAR* UPDATE_URL_FALLBACK_7Z = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.7z");
 static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("ogghost32.exe");
 static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
+static const TCHAR* TARGET_README_NAME = _T("readme_avx2.txt");
 static const TCHAR* TARGET_TAC_OGG = _T("tactics.ogg"); // 直下にあれば tacticsbgm へ入れる既知名の代表
 static const TCHAR* TACTICS_OGG_URL_BASE = _T("https://ppp.oohara.jp/download/");
 static const TCHAR* kTacOggNames[] = {
@@ -63,6 +67,7 @@ static const ULONGLONG UPDATE_ZIP_MIN_BYTES = 200000ULL;
 static const ULONGLONG UPDATE_MAIN_EXE_MIN_BYTES = 1000000ULL; // oggYSEDbgm_uni_avx2.exe
 static const ULONGLONG UPDATE_HOST_EXE_MIN_BYTES = 20000ULL;   // ogghost32.exe
 static const ULONGLONG UPDATE_CHM_MIN_BYTES = 20000ULL;        // oggYSEDbgm_uni_avx2.chm（任意・無くても更新成功）
+static const ULONGLONG UPDATE_README_MIN_BYTES = 64ULL;        // readme_avx2.txt（任意・無くても更新成功）
 static const ULONGLONG UPDATE_D3D_MIN_BYTES = 100000ULL;       // d3dcompiler_47.dll（任意・無くても更新成功）
 static const ULONGLONG UPDATE_TAC_OGG_MIN_BYTES = 256ULL;      // tactics.ogg（任意・無くても更新成功）
 
@@ -763,20 +768,31 @@ static time_t HttpGetLastModified(const CString& url)
 
 static BOOL UpdateUrlIs7z(const CString& url)
 {
+	if (url.GetLength() >= 4 && url.Right(4).CompareNoCase(_T(".oxz")) == 0)
+		return FALSE;
 	return (url.GetLength() >= 3 && url.Right(3).CompareNoCase(_T(".7z")) == 0) ? TRUE : FALSE;
 }
 
-// 利用可能な更新アーカイブを決定する（09a.7z → 09a.zip → 08g.7z → 08g.zip）。
+static const TCHAR* UpdateArchiveExt(const CString& url)
+{
+	if (url.GetLength() >= 4 && url.Right(4).CompareNoCase(_T(".oxz")) == 0)
+		return _T(".oxz");
+	if (UpdateUrlIs7z(url))
+		return _T(".7z");
+	return _T(".zip");
+}
+
+// 利用可能な更新アーカイブ（09a.oxz → 09a.7z → 09a.zip → 08g の同じ順）。
 static CString ResolveUpdateUrl(time_t* outModified)
 {
 	if (outModified)
 		*outModified = 0;
 
 	static const TCHAR* cands[] = {
-		UPDATE_URL_PRIMARY_7Z, UPDATE_URL_PRIMARY,
-		UPDATE_URL_FALLBACK_7Z, UPDATE_URL_FALLBACK
+		UPDATE_URL_PRIMARY_ZST, UPDATE_URL_PRIMARY_7Z, UPDATE_URL_PRIMARY,
+		UPDATE_URL_FALLBACK_ZST, UPDATE_URL_FALLBACK_7Z, UPDATE_URL_FALLBACK
 	};
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < 6; ++i) {
 		const time_t t = HttpGetLastModified(cands[i]);
 		if (t != 0) {
 			if (outModified)
@@ -989,6 +1005,17 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULO
 static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName,
 	ULONGLONG minBytes, bool requirePe = true)
 {
+	if (ZpaqPathIsW(zipPath)) {
+		CString outPath = destDir + _T("\\") + targetFileName;
+		unsigned long long written = 0;
+		if (!ZpaqExtractLeafW(zipPath, targetFileName, outPath, &written, NULL))
+			return false;
+		const bool peOk = !requirePe || IsLikelyPeExe(outPath, minBytes);
+		if (written >= minBytes && peOk)
+			return true;
+		DeleteFile(outPath);
+		return false;
+	}
 	if (SevenZipPathIs7zW(zipPath)) {
 		SevenZipArc a;
 		if (!SevenZipOpenW(&a, zipPath))
@@ -1203,6 +1230,30 @@ static bool TacOggLocalFresh(const CString& dest, time_t arcUtc, ULONGLONG arcSz
 	return false;
 }
 
+static void UpdateRmTree(const CString& dir);
+
+static void TacCopyWantedOgg(const CString& dir, const CString& rel, const CString& bgmDir)
+{
+	CFileFind ff;
+	BOOL more = ff.FindFile(dir + _T("\\*.*"));
+	while (more) {
+		more = ff.FindNextFile();
+		if (ff.IsDots()) continue;
+		CString name = rel.IsEmpty() ? ff.GetFileName() : (rel + _T("\\") + ff.GetFileName());
+		if (ff.IsDirectory()) {
+			TacCopyWantedOgg(ff.GetFilePath(), name, bgmDir);
+			continue;
+		}
+		if (!TacBgmWantedW(name)) continue;
+		const wchar_t* file = name;
+		for (const wchar_t* p = name; *p; ++p)
+			if (*p == L'\\' || *p == L'/') file = p + 1;
+		CString dest = bgmDir + _T("\\") + file;
+		if (!TacOggLocalFresh(dest, 0, (ULONGLONG)ff.GetLength()))
+			CopyFile(ff.GetFilePath(), dest, FALSE);
+	}
+}
+
 // 書庫内の tacticsbgm\*.ogg（無ければ直下の既知 ogg）を destDir\tacticsbgm へ出す。無くても更新は成功。
 static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 {
@@ -1211,6 +1262,18 @@ static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 		bgmDir += _T("\\");
 	bgmDir += _T("tacticsbgm");
 	CreateDirectory(bgmDir, NULL);
+
+	if (ZpaqPathIsW(zipPath)) {
+		TCHAR tempRoot[MAX_PATH] = {};
+		GetTempPath(MAX_PATH, tempRoot);
+		CString stage;
+		stage.Format(_T("%sogg_zpaq_bgm_%u"), tempRoot, GetTickCount());
+		CreateDirectory(stage, NULL);
+		if (ZpaqExtractToDirW(zipPath, stage) == 0)
+			TacCopyWantedOgg(stage, _T(""), bgmDir);
+		UpdateRmTree(stage);
+		return;
+	}
 
 	if (SevenZipPathIs7zW(zipPath)) {
 		SevenZipArc a;
@@ -1344,7 +1407,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	CreateDirectory(destDir, NULL);
 
 	TCHAR zipPath[MAX_PATH];
-	_stprintf_s(zipPath, UpdateUrlIs7z(updateUrl) ? _T("%s\\ogg_update.7z") : _T("%s\\ogg_update.zip"), destDir);
+	_stprintf_s(zipPath, _T("%s\\ogg_update%s"), destDir, UpdateArchiveExt(updateUrl));
 
 	if (!HttpDownloadToFile(updateUrl, zipPath))
 	{
@@ -1390,6 +1453,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	}
 	// ヘルプ CHM は任意（古い ZIP には無い）。あれば一緒に展開
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
+	ExtractZipToDir(zipPath, destDir, TARGET_README_NAME, UPDATE_README_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, destDir);
 	{
@@ -1427,59 +1491,59 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	UpdateBusyAlert(LL14(
 		L"自動更新に失敗したため、更新ファイルを「ダウンロード」フォルダへ展開しました。\n"
 		L"本プログラムを終了し、展開先の oggYSEDbgm_uni_avx2.exe と ogghost32.exe\n"
-		L"（あれば oggYSEDbgm_uni_avx2.chm と tacticsbgm フォルダも）をインストールフォルダへ上書きコピーしてください。\n"
+		L"（あれば oggYSEDbgm_uni_avx2.chm, readme_avx2.txt と tacticsbgm フォルダも）をインストールフォルダへ上書きコピーしてください。\n"
 		L"（エクスプローラでフォルダを開きました）",
 		L"Automatic update failed, so the update files were extracted to your Downloads folder.\n"
 		L"Please quit this program, then copy oggYSEDbgm_uni_avx2.exe and ogghost32.exe\n"
-		L"(and oggYSEDbgm_uni_avx2.chm and the tacticsbgm folder if present) into the install folder.\n"
+		L"(and oggYSEDbgm_uni_avx2.chm, readme_avx2.txt and the tacticsbgm folder if present) into the install folder.\n"
 		L"(The folder was opened in Explorer.)",
 		L"La mise a jour automatique a echoue ; les fichiers ont ete extraits dans Telechargements.\n"
 		L"Quittez ce programme, puis copiez oggYSEDbgm_uni_avx2.exe et ogghost32.exe\n"
-		L"(et oggYSEDbgm_uni_avx2.chm et le dossier tacticsbgm s'ils sont presents) dans le dossier d'installation.\n"
+		L"(et oggYSEDbgm_uni_avx2.chm, readme_avx2.txt et le dossier tacticsbgm s'ils sont presents) dans le dossier d'installation.\n"
 		L"(Le dossier a ete ouvert dans l'Explorateur.)",
 		L"Aggiornamento automatico non riuscito; i file sono stati estratti in Download.\n"
 		L"Chiudi questo programma, quindi copia oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm e la cartella tacticsbgm se presenti) nella cartella di installazione.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm, readme_avx2.txt e la cartella tacticsbgm se presenti) nella cartella di installazione.\n"
 		L"(La cartella e stata aperta in Esplora risorse.)",
 		L"La actualizacion automatica fallo; los archivos se extrajeron en Descargas.\n"
 		L"Cierre este programa y copie oggYSEDbgm_uni_avx2.exe y ogghost32.exe\n"
-		L"(y oggYSEDbgm_uni_avx2.chm y la carpeta tacticsbgm si existen) sobre el folder de instalacion.\n"
+		L"(y oggYSEDbgm_uni_avx2.chm, readme_avx2.txt y la carpeta tacticsbgm si existen) sobre el folder de instalacion.\n"
 		L"(Se abrio la carpeta en el Explorador.)",
 		L"자동 업데이트에 실패하여 업데이트 파일을 다운로드 폴더에 풀었습니다.\n"
 		L"이 프로그램을 종료한 뒤 oggYSEDbgm_uni_avx2.exe 와 ogghost32.exe\n"
-		L"(있으면 oggYSEDbgm_uni_avx2.chm 과 tacticsbgm 폴더도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
+		L"(있으면 oggYSEDbgm_uni_avx2.chm, readme_avx2.txt 과 tacticsbgm 폴더도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
 		L"(탐색기에서 폴더를 열었습니다)",
 		L"自动更新失败，已将更新文件解压到“下载”文件夹。\n"
 		L"请退出本程序，然后将 oggYSEDbgm_uni_avx2.exe 与 ogghost32.exe\n"
-		L"（如有 oggYSEDbgm_uni_avx2.chm 与 tacticsbgm 文件夹也一并）覆盖复制到安装文件夹。\n"
+		L"（如有 oggYSEDbgm_uni_avx2.chm, readme_avx2.txt 与 tacticsbgm 文件夹也一并）覆盖复制到安装文件夹。\n"
 		L"（已在资源管理器中打开该文件夹）",
 		L"فشل التحديث التلقائي، وتم استخراج ملفات التحديث إلى مجلد التنزيلات.\n"
 		L"يرجى إنهاء هذا البرنامج ثم نسخ oggYSEDbgm_uni_avx2.exe و ogghost32.exe\n"
-		L"(و oggYSEDbgm_uni_avx2.chm ومجلد tacticsbgm إن وُجدا) فوق الملفات في مجلد التثبيت.\n"
+		L"(و oggYSEDbgm_uni_avx2.chm, readme_avx2.txt ومجلد tacticsbgm إن وُجدا) فوق الملفات في مجلد التثبيت.\n"
 		L"(تم فتح المجلد في المستكشف)",
 		L"Автообновление не удалось; файлы распакованы в папку Загрузки.\n"
 		L"Закройте программу и скопируйте oggYSEDbgm_uni_avx2.exe и ogghost32.exe\n"
-		L"(и oggYSEDbgm_uni_avx2.chm и папку tacticsbgm при наличии) поверх файлов в папке установки.\n"
+		L"(и oggYSEDbgm_uni_avx2.chm, readme_avx2.txt и папку tacticsbgm при наличии) поверх файлов в папке установки.\n"
 		L"(Папка открыта в Проводнике.)",
 		L"Automatisches Update fehlgeschlagen; Dateien wurden nach Downloads entpackt.\n"
 		L"Beenden Sie das Programm und kopieren Sie oggYSEDbgm_uni_avx2.exe und ogghost32.exe\n"
-		L"(sowie oggYSEDbgm_uni_avx2.chm und den Ordner tacticsbgm falls vorhanden) uber die Dateien im Installationsordner.\n"
+		L"(sowie oggYSEDbgm_uni_avx2.chm, readme_avx2.txt und den Ordner tacticsbgm falls vorhanden) uber die Dateien im Installationsordner.\n"
 		L"(Der Ordner wurde im Explorer geoffnet.)",
 		L"A atualizacao automatica falhou; os arquivos foram extraidos em Downloads.\n"
 		L"Encerre este programa e copie oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm e a pasta tacticsbgm se houver) sobre os da pasta de instalacao.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm, readme_avx2.txt e a pasta tacticsbgm se houver) sobre os da pasta de instalacao.\n"
 		L"(A pasta foi aberta no Explorer.)",
 		L"Automatische update mislukt; bestanden zijn uitgepakt in Downloads.\n"
 		L"Sluit dit programma en kopieer oggYSEDbgm_uni_avx2.exe en ogghost32.exe\n"
-		L"(en oggYSEDbgm_uni_avx2.chm en de map tacticsbgm indien aanwezig) over die in de installatiemap.\n"
+		L"(en oggYSEDbgm_uni_avx2.chm, readme_avx2.txt en de map tacticsbgm indien aanwezig) over die in de installatiemap.\n"
 		L"(De map is geopend in Verkenner.)",
 		L"Automatyczna aktualizacja nie powiodla sie; pliki rozpakowano do Pobrane.\n"
 		L"Zamknij program i skopiuj oggYSEDbgm_uni_avx2.exe oraz ogghost32.exe\n"
-		L"(oraz oggYSEDbgm_uni_avx2.chm i folder tacticsbgm jesli sa) na pliki w folderze instalacji.\n"
+		L"(oraz oggYSEDbgm_uni_avx2.chm, readme_avx2.txt i folder tacticsbgm jesli sa) na pliki w folderze instalacji.\n"
 		L"(Folder otwarto w Eksploratorze.)",
 		L"Otomatik guncelleme basarisiz; dosyalar Indirilenler klasorune acildi.\n"
 		L"Bu programi kapatip oggYSEDbgm_uni_avx2.exe ve ogghost32.exe dosyalarini\n"
-		L"(varsa oggYSEDbgm_uni_avx2.chm ve tacticsbgm klasoru de) kurulum klasorundekilerin uzerine kopyalayin.\n"
+		L"(varsa oggYSEDbgm_uni_avx2.chm, readme_avx2.txt ve tacticsbgm klasoru de) kurulum klasorundekilerin uzerine kopyalayin.\n"
 		L"(Klasor Gezgin'de acildi.)"));
 	return true;
 }
@@ -1983,7 +2047,7 @@ bool DoUpdateAndRestart()
 
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
-	_stprintf_s(zipPath, UpdateUrlIs7z(updateUrl) ? _T("%sogg_update.7z") : _T("%sogg_update.zip"), tempPath);
+	_stprintf_s(zipPath, _T("%sogg_update%s"), tempPath, UpdateArchiveExt(updateUrl));
 	_stprintf_s(extractDir, _T("%sogg_update_extract"), tempPath);
 	_stprintf_s(batPath, _T("%sogg_updater.bat"), tempPath);
 
@@ -2035,6 +2099,7 @@ bool DoUpdateAndRestart()
 	}
 	// オフラインヘルプ CHM（ZIP に含まれていれば展開。無くても更新は続行）
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
+	ExtractZipToDir(zipPath, extractDir, TARGET_README_NAME, UPDATE_README_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, extractDir);
 	{
@@ -2132,6 +2197,7 @@ bool DoUpdateAndRestart()
 	CStringA targetExeA(TARGET_EXE_NAME);
 	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
 	CStringA targetChmA(TARGET_CHM_NAME);
+	CStringA targetReadmeA(TARGET_README_NAME);
 	CStringA targetD3dA(TARGET_D3D_NAME);
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
@@ -2142,6 +2208,14 @@ bool DoUpdateAndRestart()
 			targetChmPathA = targetChmPathA.Left(slashChm + 1) + targetChmA;
 		else
 			targetChmPathA = targetChmA;
+	}
+	CStringA targetReadmePathA = targetExePathA;
+	{
+		const int slashReadme = targetReadmePathA.ReverseFind('\\');
+		if (slashReadme >= 0)
+			targetReadmePathA = targetReadmePathA.Left(slashReadme + 1) + targetReadmeA;
+		else
+			targetReadmePathA = targetReadmeA;
 	}
 	CStringA targetD3dPathA = targetExePathA;
 	{
@@ -2233,6 +2307,7 @@ bool DoUpdateAndRestart()
 		"if errorlevel 1 goto retry\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"%s"
 		"del /f /q \"%s\\KpiHost64.exe\" >nul 2>&1\r\n"
 		"goto :eof\r\n"
@@ -2254,6 +2329,7 @@ bool DoUpdateAndRestart()
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,          // 本体 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA, // CHM（あれば・失敗してもOK）
 		(LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)targetD3dPathA,  // d3dcompiler（あれば）
+		(LPCSTR)extractDirA, (LPCSTR)targetReadmeA, (LPCSTR)extractDirA, (LPCSTR)targetReadmeA, (LPCSTR)targetReadmePathA, // readme_avx2.txt（あれば）
 		(LPCSTR)tacCopyA,                                            // tacticsbgm の各 ogg をファイル名指定で上書き
 		(LPCSTR)exeDirA                                                   // 旧 KpiHost64.exe 削除
 	);
@@ -2537,7 +2613,7 @@ void EnsureD3dCompilerAvailable()
 		if (updateUrl.IsEmpty())
 			return;
 		CString zipPath;
-		zipPath.Format(UpdateUrlIs7z(updateUrl) ? _T("%sogg_d3d_fetch.7z") : _T("%sogg_d3d_fetch.zip"), tempPath);
+		zipPath.Format(_T("%sogg_d3d_fetch%s"), tempPath, UpdateArchiveExt(updateUrl));
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
@@ -2681,6 +2757,11 @@ void EnsureOggHost32Available()
 	extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
 
 	if (!HostExeFileLooksOk(extracted)) {
+		CString leftoverZst;
+		leftoverZst.Format(_T("%sogg_update.oxz"), tempPath);
+		ExtractHostFromZipIfNeeded(leftoverZst, extractDir);
+	}
+	if (!HostExeFileLooksOk(extracted)) {
 		CString leftover7z;
 		leftover7z.Format(_T("%sogg_update.7z"), tempPath);
 		ExtractHostFromZipIfNeeded(leftover7z, extractDir);
@@ -2698,10 +2779,16 @@ void EnsureOggHost32Available()
 			if (HostExeFileLooksOk(dlHost))
 				extracted = dlHost;
 			else {
-				CString dl7z;
-				dl7z.Format(_T("%s\\ogg_update.7z"), (LPCTSTR)dlDir);
-				if (ExtractHostFromZipIfNeeded(dl7z, extractDir))
+				CString dlZst;
+				dlZst.Format(_T("%s\\ogg_update.oxz"), (LPCTSTR)dlDir);
+				if (ExtractHostFromZipIfNeeded(dlZst, extractDir))
 					extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+				if (!HostExeFileLooksOk(extracted)) {
+					CString dl7z;
+					dl7z.Format(_T("%s\\ogg_update.7z"), (LPCTSTR)dlDir);
+					if (ExtractHostFromZipIfNeeded(dl7z, extractDir))
+						extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+				}
 				if (!HostExeFileLooksOk(extracted)) {
 					CString dlZip;
 					dlZip.Format(_T("%s\\ogg_update.zip"), (LPCTSTR)dlDir);
@@ -2720,7 +2807,7 @@ void EnsureOggHost32Available()
 		if (updateUrl.IsEmpty())
 			return;
 		CString zipPath;
-		zipPath.Format(UpdateUrlIs7z(updateUrl) ? _T("%sogg_host_fetch.7z") : _T("%sogg_host_fetch.zip"), tempPath);
+		zipPath.Format(_T("%sogg_host_fetch%s"), tempPath, UpdateArchiveExt(updateUrl));
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
@@ -2899,8 +2986,87 @@ static bool BonusSafeRel(const wchar_t* name)
 	return true;
 }
 
+static void UpdateRmTree(const CString& dir)
+{
+	CFileFind ff;
+	BOOL more = ff.FindFile(dir + _T("\\*.*"));
+	while (more) {
+		more = ff.FindNextFile();
+		if (ff.IsDots()) continue;
+		if (ff.IsDirectory())
+			UpdateRmTree(ff.GetFilePath());
+		else
+			DeleteFile(ff.GetFilePath());
+	}
+	RemoveDirectory(dir);
+}
+
+static void BonusMkDirDeep(const CString& path)
+{
+	for (int i = 3; i < path.GetLength(); ++i) {
+		if (path[i] == _T('\\'))
+			CreateDirectory(path.Left(i), NULL);
+	}
+	CreateDirectory(path, NULL);
+}
+
+static void BonusCopyTree(const CString& dir, const CString& rel, const CString& destRoot, bool* any)
+{
+	CFileFind ff;
+	BOOL more = ff.FindFile(dir + _T("\\*.*"));
+	while (more) {
+		more = ff.FindNextFile();
+		if (ff.IsDots()) continue;
+		CString name = rel.IsEmpty() ? ff.GetFileName() : (rel + _T("\\") + ff.GetFileName());
+		if (!BonusSafeRel(name)) continue;
+		if (ff.IsDirectory()) {
+			BonusMkDirDeep(destRoot + _T("\\") + name);
+			BonusCopyTree(ff.GetFilePath(), name, destRoot, any);
+			continue;
+		}
+		CString dest = destRoot + _T("\\") + name;
+		const int slash = dest.ReverseFind(_T('\\'));
+		if (slash > 0)
+			BonusMkDirDeep(dest.Left(slash));
+		if (CopyFile(ff.GetFilePath(), dest, FALSE))
+			*any = true;
+	}
+}
+
 static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, const CString& title)
 {
+	if (ZpaqPathIsW(arcPath)) {
+		CString t;
+		t.Format(LL14(
+			L"%sを展開しています…",
+			L"Extracting %s…",
+			L"Extraction de %s…",
+			L"Estrazione di %s…",
+			L"Extrayendo %s…",
+			L"%s 푸는 중…",
+			L"正在解压%s…",
+			L"جارٍ استخراج %s…",
+			L"Распаковка «%s»…",
+			L"%s wird entpackt…",
+			L"A extrair %s…",
+			L"%s uitpakken…",
+			L"Rozpakowywanie: %s…",
+			L"%s açılıyor…"), (LPCTSTR)title);
+		UpdateBusyPaintLive(t, 0);
+		TCHAR tempRoot[MAX_PATH] = {};
+		GetTempPath(MAX_PATH, tempRoot);
+		CString stage;
+		stage.Format(_T("%sogg_zpaq_bonus_%u"), tempRoot, GetTickCount());
+		CreateDirectory(stage, NULL);
+		if (ZpaqExtractToDirW(arcPath, stage) != 0) {
+			UpdateRmTree(stage);
+			return false;
+		}
+		bool any = false;
+		BonusCopyTree(stage, _T(""), destRoot, &any);
+		UpdateRmTree(stage);
+		return any;
+	}
 	SevenZipArc a;
 	if (!SevenZipOpenW(&a, arcPath)) return false;
 	bool any = false;
@@ -2950,7 +3116,7 @@ static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, cons
 
 bool EnsureBonusImages(int kind)
 {
-	static const TCHAR* kZip[3] = { _T("oggmeiro.7z"), _T("oggrace.7z"), _T("oggtactics.7z") };
+	static const TCHAR* kStem[3] = { _T("oggmeiro"), _T("oggrace"), _T("oggtactics") };
 	static const TCHAR* kUtc[3] = { _T("meiro.utc"), _T("race.utc"), _T("tactics.utc") };
 	static const TCHAR* kKey[3] = { _T("meiro\\m_wall0.png"), _T("race\\r_forest.png"), _T("tactics\\tac_tex.bin") };
 	if (kind < 0 || kind > 2) return false;
@@ -2980,7 +3146,8 @@ bool EnsureBonusImages(int kind)
 	}
 	CString key = root + _T("\\") + kKey[kind];
 	CString utcPath = root + _T("\\") + kUtc[kind];
-	CString url = CString(_T("https://ppp.oohara.jp/download/")) + kZip[kind];
+	CString urlZst = CString(_T("https://ppp.oohara.jp/download/")) + kStem[kind] + _T(".oxz");
+	CString url7z = CString(_T("https://ppp.oohara.jp/download/")) + kStem[kind] + _T(".7z");
 	const wchar_t* title = LL14(
 		L"迷路のデータ", L"Maze data", L"Images du labyrinthe", L"Immagini del labirinto", L"Imágenes del laberinto",
 		L"미로 이미지", L"迷宫图片", L"صور المتاهة", L"Картинки лабиринта", L"Labyrinth-Bilder",
@@ -3002,7 +3169,14 @@ bool EnsureBonusImages(int kind)
 		if (kind == 2) EnsureTacticsOggAvailable(true);
 		return true;
 	}
-	const __int64 remote = (__int64)HttpGetLastModified(url);
+	__int64 remote = (__int64)HttpGetLastModified(urlZst);
+	CString url = urlZst;
+	const TCHAR* fetchName = _T("\\_fetch.oxz");
+	if (remote <= 0) {
+		remote = (__int64)HttpGetLastModified(url7z);
+		url = url7z;
+		fetchName = _T("\\_fetch.7z");
+	}
 	if (remote <= 0) {
 		UpdateBusyClose();
 		CString msg;
@@ -3029,7 +3203,7 @@ bool EnsureBonusImages(int kind)
 		if (kind == 2) EnsureTacticsOggAvailable(true);
 		return true;
 	}
-	CString tmp = root + _T("\\_fetch.7z");
+	CString tmp = root + fetchName;
 	CString start;
 	start.Format(LL14(
 		L"%sを受け取っています…\n0%%",

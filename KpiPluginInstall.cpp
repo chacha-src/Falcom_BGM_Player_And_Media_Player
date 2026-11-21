@@ -6,6 +6,7 @@
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
 #include "SevenZipDec.h"
+#include "ZpaqRun.h"
 
 #pragma comment(lib, "wininet.lib")
 
@@ -351,12 +352,137 @@ static BOOL KpiInstallExtract7z(const TCHAR* zipPath, const TCHAR* destDir, CStr
 	return TRUE;
 }
 
+static void KpiRmTree(const CString& dir)
+{
+	CFileFind ff;
+	BOOL more = ff.FindFile(dir + L"\\*.*");
+	while (more) {
+		more = ff.FindNextFile();
+		if (ff.IsDots()) continue;
+		if (ff.IsDirectory())
+			KpiRmTree(ff.GetFilePath());
+		else
+			DeleteFile(ff.GetFilePath());
+	}
+	RemoveDirectory(dir);
+}
+
+static void KpiZpaqSetMtime(const CString& path, const FILETIME* ft)
+{
+	HANDLE h;
+	if (!ft) return;
+	h = CreateFile(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	SetFileTime(h, NULL, NULL, ft);
+	CloseHandle(h);
+}
+
+static void KpiZpaqCopyDir(const CString& stage, const CString& rel, const TCHAR* destDir,
+	BOOL mergeNewerOnly, BOOL silentExistingOnly, int* extracted)
+{
+	CFileFind ff;
+	BOOL more = ff.FindFile(stage + L"\\*.*");
+	while (more) {
+		more = ff.FindNextFile();
+		CString childRel;
+		CString safe;
+		CString outPath;
+		if (ff.IsDots()) continue;
+		KpiInstallPumpThrottled();
+		childRel = rel.IsEmpty() ? ff.GetFileName() : (rel + L"\\" + ff.GetFileName());
+		if (!KpiInstallSafeRelPathW(childRel, safe) || KpiInstallZipRelIsJunk(safe))
+			continue;
+		outPath.Format(L"%s\\%s", destDir, (LPCTSTR)safe);
+		if (ff.IsDirectory()) {
+			if (!silentExistingOnly)
+				KpiInstallMkDirDeep(outPath);
+			KpiZpaqCopyDir(ff.GetFilePath(), childRel, destDir, mergeNewerOnly, silentExistingOnly, extracted);
+			continue;
+		}
+		if (silentExistingOnly) {
+			if (KpiInstallZipRelIsWav(safe) || KpiInstallZipRelIsYm2608Rom(safe) || KpiInstallZipRelIsC86ctl(safe))
+				continue;
+			if (!KpiInstallFileExists(outPath) && !KpiInstallZipRelSilentNewOk(safe))
+				continue;
+		}
+		if (mergeNewerOnly) {
+			FILETIME srcFt = {};
+			time_t srcT;
+			time_t tDst;
+			ff.GetLastWriteTime(&srcFt);
+			srcT = KpiInstallFileMtimeUtc(ff.GetFilePath());
+			tDst = KpiInstallFileMtimeUtc(outPath);
+			if (tDst != 0 && (srcT == 0 || srcT <= tDst + 2))
+				continue;
+			(void)srcFt;
+		}
+		{
+			const int slash = outPath.ReverseFind(L'\\');
+			if (slash > 0)
+				KpiInstallMkDirDeep(outPath.Left(slash));
+		}
+		DeleteFile(outPath);
+		if (CopyFile(ff.GetFilePath(), outPath, FALSE)) {
+			FILETIME srcFt = {};
+			ff.GetLastWriteTime(&srcFt);
+			KpiZpaqSetMtime(outPath, &srcFt);
+			(*extracted)++;
+		}
+	}
+}
+
+static BOOL KpiInstallExtractZpaq(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut,
+	BOOL mergeNewerOnly, BOOL silentExistingOnly)
+{
+	TCHAR temp[MAX_PATH] = {};
+	CString stage;
+	int extracted = 0;
+	errOut.Empty();
+	if (!GetTempPath(MAX_PATH, temp)) {
+		errOut = LL14(L"一時フォルダを使えません。", L"Could not use the temp folder.",
+			L"Dossier temporaire indisponible.", L"Cartella temporanea non disponibile.",
+			L"No se pudo usar la carpeta temporal.", L"임시 폴더를 쓸 수 없습니다.",
+			L"无法使用临时文件夹。", L"تعذر استخدام المجلد المؤقت.",
+			L"Временная папка недоступна.", L"Temp-Ordner nicht verfuegbar.",
+			L"Pasta temporaria indisponivel.", L"Tijdelijke map niet beschikbaar.",
+			L"Folder tymczasowy niedostepny.", L"Gecici klasor kullanilamadi.");
+		return FALSE;
+	}
+	stage.Format(L"%sogg_zpaq_kpi", temp);
+	KpiRmTree(stage);
+	CreateDirectory(stage, NULL);
+	if (ZpaqExtractToDirW(zipPath, stage) != 0) {
+		KpiRmTree(stage);
+		errOut = LL14(L"zpaq を開けません。", L"Could not open zpaq.", L"zpaq illisible.",
+			L"zpaq non apribile.", L"No se pudo abrir el zpaq.", L"zpaq를 열 수 없습니다.",
+			L"无法打开 zpaq。", L"تعذر فتح zpaq.", L"Не удалось открыть zpaq.", L"zpaq nicht offenbar.",
+			L"Nao foi possivel abrir o zpaq.", L"zpaq openen mislukt.", L"Nie mozna otworzyc zpaq.",
+			L"zpaq acilamadi.");
+		return FALSE;
+	}
+	KpiZpaqCopyDir(stage, L"", destDir, mergeNewerOnly, silentExistingOnly, &extracted);
+	KpiRmTree(stage);
+	if (extracted <= 0 && !mergeNewerOnly) {
+		errOut = LL14(L"zpaq からファイルを展開できませんでした。", L"Could not extract files from zpaq.",
+			L"Extraction zpaq impossible.", L"Estrazione zpaq non riuscita.", L"No se pudo extraer el zpaq.",
+			L"zpaq에서 파일을 펼 수 없습니다.", L"无法从 zpaq 解压文件。", L"تعذر استخراج الملفات من zpaq.",
+			L"Не удалось распаковать zpaq.", L"zpaq konnte nicht entpackt werden.",
+			L"Nao foi possivel extrair o zpaq.", L"zpaq uitpakken mislukt.", L"Nie mozna rozpakowac zpaq.",
+			L"zpaq acilamadi.");
+		return FALSE;
+	}
+	return TRUE;
+}
+
 /* mergeNewerOnly: ZIP の方が新しい→上書き。ローカルが新しければスキップ。
    silentExistingOnly: 既存ファイルのみ更新。例外は kbsasami/kbfmmidi の kpi/txt/wopn と
    kbsasami_host32/64 の新規。wav / YM2608 ROM / c86ctl はサイレントでは出さない。 */
 static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut,
 	BOOL mergeNewerOnly, BOOL silentExistingOnly = FALSE)
 {
+	if (ZpaqPathIsW(zipPath))
+		return KpiInstallExtractZpaq(zipPath, destDir, errOut, mergeNewerOnly, silentExistingOnly);
 	if (SevenZipPathIs7zW(zipPath))
 		return KpiInstallExtract7z(zipPath, destDir, errOut, mergeNewerOnly, silentExistingOnly);
 	errOut.Empty();
@@ -501,8 +627,8 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 	TCHAR tmp[MAX_PATH] = {};
 	GetTempPath(MAX_PATH, tmp);
 	TCHAR zipPath[MAX_PATH] = {};
-	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins.7z", tmp);
-	DeleteFile(zipPath);
+	DeleteFile(CString(tmp) + L"ogg_kpi_Plugins.oxz");
+	DeleteFile(CString(tmp) + L"ogg_kpi_Plugins.7z");
 	DeleteFile(CString(tmp) + L"ogg_kpi_Plugins.zip");
 
 	if (progress) progress(0, ctx);
@@ -522,22 +648,32 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 	InternetSetOption(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
 
-	const TCHAR* url7z = L"https://ppp.oohara.jp/download/Plugins.7z";
-	const TCHAR* urlZip = L"https://ppp.oohara.jp/download/Plugins.zip";
+	const TCHAR* urls[3] = {
+		L"https://ppp.oohara.jp/download/Plugins.oxz",
+		L"https://ppp.oohara.jp/download/Plugins.7z",
+		L"https://ppp.oohara.jp/download/Plugins.zip"
+	};
+	const TCHAR* exts[3] = { L".oxz", L".7z", L".zip" };
 	const DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE
 		| INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI
 		| INTERNET_FLAG_SECURE
 		| INTERNET_FLAG_IGNORE_CERT_DATE_INVALID | INTERNET_FLAG_IGNORE_CERT_CN_INVALID;
-	HINTERNET hUrl = InternetOpenUrl(hInet, url7z, NULL, 0, flags, 0);
+	HINTERNET hUrl = NULL;
 	DWORD status = 0, slen = sizeof(status);
-	if (!hUrl || !HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
-		|| status < 200 || status >= 300) {
-		if (hUrl) InternetCloseHandle(hUrl);
-		_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins.zip", tmp);
+	for (int ui = 0; ui < 3; ui++) {
+		_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins%s", tmp, exts[ui]);
 		DeleteFile(zipPath);
-		hUrl = InternetOpenUrl(hInet, urlZip, NULL, 0, flags, 0);
+		if (hUrl) InternetCloseHandle(hUrl);
+		hUrl = InternetOpenUrl(hInet, urls[ui], NULL, 0, flags, 0);
 		status = 0;
 		slen = sizeof(status);
+		if (hUrl && HttpQueryInfo(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &slen, NULL)
+			&& status >= 200 && status < 300)
+			break;
+		if (hUrl) {
+			InternetCloseHandle(hUrl);
+			hUrl = NULL;
+		}
 	}
 	if (!hUrl) {
 		InternetCloseHandle(hInet);
@@ -652,16 +788,27 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 
 // ---------------------------------------------------------------------------
 // Plugins.zip サイレント更新（kbsasami / 既存 KPI の日付マージ）
-// 7z: https://ppp.oohara.jp/download/Plugins.7z （あれば優先）
-// ZIP: https://ppp.oohara.jp/download/Plugins.zip
+// oxz → 7z → zip。展開は exe 内。
+// https://ppp.oohara.jp/download/Plugins.oxz
+// https://ppp.oohara.jp/download/Plugins.7z
+// https://ppp.oohara.jp/download/Plugins.zip
 // DL 条件: kbsasami.kpi が無い、または アーカイブ Last-Modified が exe より新しい
 // 展開: kbsasami/kbfmmidi の kpi/txt/wopn と kbsasami_host32/64 は新規可。他は既存のみ。
 // wav / リズム ROM / c86ctl は出さない。
 // 一式（リズム含む）はメニューから Plugins.zip を手動取得したときだけ。
 // ---------------------------------------------------------------------------
 
+static const TCHAR* PLUGINS_ZST_URL = L"https://ppp.oohara.jp/download/Plugins.oxz";
 static const TCHAR* PLUGINS_7Z_URL = L"https://ppp.oohara.jp/download/Plugins.7z";
 static const TCHAR* PLUGINS_ZIP_URL = L"https://ppp.oohara.jp/download/Plugins.zip";
+
+static const TCHAR* KpiArchiveExt(LPCTSTR url)
+{
+	size_t n = url ? _tcslen(url) : 0;
+	if (n >= 4 && _tcsicmp(url + n - 4, L".oxz") == 0) return L".oxz";
+	if (n >= 3 && _tcsicmp(url + n - 3, L".7z") == 0) return L".7z";
+	return L".zip";
+}
 
 static time_t KpiInstallFileMtimeUtc(LPCTSTR path)
 {
@@ -736,14 +883,19 @@ static time_t KpiInstallHttpLastModified(LPCTSTR url)
 
 static LPCTSTR KpiInstallPluginsArchiveUrl(time_t* outMod)
 {
+	const time_t tZst = KpiInstallHttpLastModified(PLUGINS_ZST_URL);
+	if (tZst != 0) {
+		if (outMod) *outMod = tZst;
+		return PLUGINS_ZST_URL;
+	}
 	const time_t t7 = KpiInstallHttpLastModified(PLUGINS_7Z_URL);
 	if (t7 != 0) {
 		if (outMod) *outMod = t7;
 		return PLUGINS_7Z_URL;
 	}
-	const time_t tZ = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
-	if (tZ != 0) {
-		if (outMod) *outMod = tZ;
+	const time_t tZip = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
+	if (tZip != 0) {
+		if (outMod) *outMod = tZip;
 		return PLUGINS_ZIP_URL;
 	}
 	if (outMod)
@@ -887,8 +1039,7 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 	TCHAR tmp[MAX_PATH] = {};
 	GetTempPath(MAX_PATH, tmp);
 	TCHAR zipPath[MAX_PATH] = {};
-	const size_t urlN = _tcslen(pluginsUrl);
-	const TCHAR* ext = (urlN >= 3 && _tcsicmp(pluginsUrl + urlN - 3, L".7z") == 0) ? L".7z" : L".zip";
+	const TCHAR* ext = KpiArchiveExt(pluginsUrl);
 	_sntprintf_s(zipPath, _TRUNCATE, L"%sogg_kpi_Plugins_silent%s", tmp, ext);
 	if (!KpiInstallHttpDownloadFile(pluginsUrl, zipPath))
 		return FALSE;
@@ -1422,8 +1573,7 @@ static BOOL KpiInstallFetchOfficialFmpmdDlls(LPCTSTR fmpmdDir, WORD want)
 		LPCTSTR pluginsUrl = KpiInstallPluginsArchiveUrl(&ignored);
 		if (pluginsUrl) {
 			TCHAR zipPath[MAX_PATH * 2] = {};
-			const size_t urlN = _tcslen(pluginsUrl);
-			const TCHAR* ext = (urlN >= 3 && _tcsicmp(pluginsUrl + urlN - 3, L".7z") == 0) ? L".7z" : L".zip";
+			const TCHAR* ext = KpiArchiveExt(pluginsUrl);
 			_sntprintf_s(zipPath, _TRUNCATE, L"%s\\_plugins%s", work, ext);
 			if (KpiInstallHttpDownloadFile(pluginsUrl, zipPath)) {
 				UpdateBusyShowExtract(KpiInstallUrlLeaf(pluginsUrl));

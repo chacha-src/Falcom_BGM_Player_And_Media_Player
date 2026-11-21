@@ -1820,6 +1820,9 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
+	extern BOOL IsOmakeTacticsOpen();
+	if (IsOmakeTacticsOpen())
+		return;
 	// プロンプト実行中はスライダー→savedata の上書きをしない（実行側がオーナー）。
 	// 表示だけ時々同期する。
 	extern BOOL MpPromptIsActive();

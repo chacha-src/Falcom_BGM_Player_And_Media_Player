@@ -167,6 +167,8 @@ public:
 	int WrdViewIsVisible() const;
 	void HideMidiMonitorForMinimize(); /* FM/MIDI モニタ・譜面・VSTホスト等も隠す */
 	void RestoreMidiMonitorAfterMinimize();
+	void ParkHostUiForTactics(HWND keep);
+	void UnparkHostUiAfterTactics();
 	void ShowPianoRollTune();
 	void FeedPianoRoll(const void* pData, int bytes);
 	// x,y は論理座標(*4)。戻り値は描画文字列のピクセル幅(hFont / GetTextExtent)。

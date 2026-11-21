@@ -968,6 +968,18 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="minizip\iowin32.c" />
     <ClCompile Include="KpiPluginInstall.cpp" />
     <ClCompile Include="SevenZipDec.cpp" />
+    <ClCompile Include="ZpaqRun.cpp" />
+    <ClCompile Include="OxzFilt.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="zpaq\zpaq.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="zpaq\libzpaq.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="lzma_sdk\7zAlloc.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -1067,6 +1079,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
     <ClInclude Include="SevenZipDec.h" />
+    <ClInclude Include="ZpaqRun.h" />
     <ClInclude Include="PianoRollPeakSpectrum.h" />
     <ClInclude Include="NoteEnvelopeModel.h" />
     <ClInclude Include="NoteFundamentalPick.h" />

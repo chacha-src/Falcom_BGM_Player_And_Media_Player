@@ -4,6 +4,7 @@
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
 #include "SevenZipDec.h"
+#include "ZpaqRun.h"
 #include <string.h>
 #include <shlobj.h>
 #include <zstd.h>
@@ -1468,6 +1469,9 @@ void CEmuCatalogGetExeArcdataPath(wchar_t* out, int outChars)
 	if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
 	wchar_t* slash = wcsrchr(exe, L'\\');
 	if (slash) *(slash + 1) = 0;
+	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%sarcdata.oxz", exe);
+	if (out[0] && GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES)
+		return;
 	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%sarcdata.7z", exe);
 	if (out[0] && GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES)
 		return;
@@ -2553,6 +2557,189 @@ int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot)
 	return match ? 1 : 0;
 }
 
+struct CEmuXmlFile {
+	wchar_t path[MAX_PATH];
+	char norm[256];
+	char* data;
+	size_t sz;
+};
+
+static void CEmuRmTree(const wchar_t* dir)
+{
+	wchar_t pat[MAX_PATH];
+	WIN32_FIND_DATAW fd;
+	HANDLE h;
+	if (!dir || !dir[0]) return;
+	_snwprintf_s(pat, MAX_PATH, _TRUNCATE, L"%s\\*", dir);
+	h = FindFirstFileW(pat, &fd);
+	if (h != INVALID_HANDLE_VALUE) {
+		do {
+			wchar_t child[MAX_PATH];
+			if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0
+				|| (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0)))
+				continue;
+			_snwprintf_s(child, MAX_PATH, _TRUNCATE, L"%s\\%s", dir, fd.cFileName);
+			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+				CEmuRmTree(child);
+			else
+				DeleteFileW(child);
+		} while (FindNextFileW(h, &fd));
+		FindClose(h);
+	}
+	RemoveDirectoryW(dir);
+}
+
+static void CEmuXmlCollect(const wchar_t* dir, const wchar_t* rel,
+	CEmuXmlFile** items, int* n, int* cap)
+{
+	wchar_t pat[MAX_PATH];
+	WIN32_FIND_DATAW fd;
+	HANDLE h;
+	_snwprintf_s(pat, MAX_PATH, _TRUNCATE, L"%s\\*", dir);
+	h = FindFirstFileW(pat, &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do {
+		wchar_t child[MAX_PATH];
+		wchar_t childRel[MAX_PATH];
+		size_t len;
+		if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0
+			|| (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0)))
+			continue;
+		_snwprintf_s(child, MAX_PATH, _TRUNCATE, L"%s\\%s", dir, fd.cFileName);
+		if (rel && rel[0])
+			_snwprintf_s(childRel, MAX_PATH, _TRUNCATE, L"%s/%s", rel, fd.cFileName);
+		else
+			_snwprintf_s(childRel, MAX_PATH, _TRUNCATE, L"%s", fd.cFileName);
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			CEmuXmlCollect(child, childRel, items, n, cap);
+			continue;
+		}
+		len = wcslen(fd.cFileName);
+		if (len < 4 || _wcsicmp(fd.cFileName + len - 4, L".xml") != 0) continue;
+		if (*n >= *cap) {
+			int nc = *cap ? *cap * 2 : 64;
+			CEmuXmlFile* ni = (CEmuXmlFile*)realloc(*items, (size_t)nc * sizeof(CEmuXmlFile));
+			if (!ni) continue;
+			*items = ni;
+			*cap = nc;
+		}
+		memset(&(*items)[*n], 0, sizeof(CEmuXmlFile));
+		wcsncpy_s((*items)[*n].path, child, _TRUNCATE);
+		WideCharToMultiByte(CP_UTF8, 0, childRel, -1, (*items)[*n].norm, 255, NULL, NULL);
+		{
+			char norm[256];
+			memset(norm, 0, sizeof(norm));
+			CEmuCatalogNormZipPath((*items)[*n].norm, norm, 256);
+			memcpy((*items)[*n].norm, norm, sizeof(norm));
+		}
+		(*n)++;
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+}
+
+static int CEmuReadSmall(const wchar_t* path, char** data, size_t* sz, size_t limit)
+{
+	HANDLE h;
+	LARGE_INTEGER li;
+	DWORD rd = 0;
+	*data = NULL;
+	*sz = 0;
+	h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	if (!GetFileSizeEx(h, &li) || li.QuadPart <= 0 || (unsigned long long)li.QuadPart > limit) {
+		CloseHandle(h);
+		return 0;
+	}
+	*data = (char*)malloc((size_t)li.QuadPart + 1);
+	if (!*data) { CloseHandle(h); return 0; }
+	if (!ReadFile(h, *data, (DWORD)li.QuadPart, &rd, NULL) || rd != (DWORD)li.QuadPart) {
+		free(*data);
+		*data = NULL;
+		CloseHandle(h);
+		return 0;
+	}
+	(*data)[rd] = 0;
+	*sz = rd;
+	CloseHandle(h);
+	return 1;
+}
+
+static int CEmuCatalogLoadArcdataZpaq(CEmuCatalog* cat, const wchar_t* arcPath,
+	CEmuCatalogProgressFn progress, void* progressUser)
+{
+	wchar_t tempRoot[MAX_PATH];
+	wchar_t stage[MAX_PATH];
+	CEmuXmlFile* items = NULL;
+	int n = 0, cap = 0, i, k, total = 0, xmlN = 0, done = 0;
+	char (*hootLists)[256] = NULL;
+	int hootN = 0;
+	unsigned char* used = NULL;
+	if (!cat || !arcPath) return 0;
+	if (!GetTempPathW(MAX_PATH, tempRoot)) return 0;
+	_snwprintf_s(stage, MAX_PATH, _TRUNCATE, L"%semu_zpaq", tempRoot);
+	CEmuRmTree(stage);
+	CreateDirectoryW(stage, NULL);
+	if (ZpaqExtractToDirW(arcPath, stage) != 0) {
+		CEmuRmTree(stage);
+		return 0;
+	}
+	CEmuXmlCollect(stage, L"", &items, &n, &cap);
+	for (i = 0; i < n; i++) {
+		size_t limit = CEmuCatalogZipPathEq(items[i].norm, "hoot.xml")
+			? (4u * 1024u * 1024u) : (16u * 1024u * 1024u);
+		if (!CEmuReadSmall(items[i].path, &items[i].data, &items[i].sz, limit)) continue;
+		if (!CEmuCatalogZipPathEq(items[i].norm, "hoot.xml"))
+			xmlN++;
+	}
+	for (i = 0; i < n; i++) {
+		if (!items[i].data || !CEmuCatalogZipPathEq(items[i].norm, "hoot.xml")) continue;
+		if (items[i].sz > 4u * 1024u * 1024u) break;
+		hootLists = (char (*)[256])malloc(sizeof(*hootLists) * 1024);
+		if (hootLists)
+			hootN = CEmuCatalogParseHootLists(items[i].data, hootLists, 1024);
+		break;
+	}
+	used = (unsigned char*)calloc((size_t)(n > 0 ? n : 1), 1);
+	if (!used) {
+		free(hootLists);
+		for (k = 0; k < n; k++) free(items[k].data);
+		free(items);
+		CEmuRmTree(stage);
+		return 0;
+	}
+	if (xmlN <= 0) xmlN = 1;
+	for (i = 0; i < hootN; i++) {
+		const char* dd = NULL;
+		if (!hootLists[i][0]) continue;
+		if (_stricmp(hootLists[i], "hoot.xml") == 0) continue;
+		for (k = 0; k < n; k++) {
+			if (used[k] || !items[k].data) continue;
+			if (!CEmuCatalogZipPathEq(items[k].norm, hootLists[i])) continue;
+			used[k] = 1;
+			CEmuCatalogXmlDataDirHint(items[k].norm, &dd);
+			total += CEmuCatalogParseBuffer(cat, items[k].data, dd);
+			done++;
+			CEmuCatalogProgress(progress, progressUser, done, xmlN);
+			break;
+		}
+	}
+	for (k = 0; k < n; k++) {
+		const char* dd = NULL;
+		if (used[k] || !items[k].data) continue;
+		if (CEmuCatalogZipPathEq(items[k].norm, "hoot.xml")) continue;
+		CEmuCatalogXmlDataDirHint(items[k].norm, &dd);
+		total += CEmuCatalogParseBuffer(cat, items[k].data, dd);
+		done++;
+		CEmuCatalogProgress(progress, progressUser, done, xmlN);
+	}
+	for (k = 0; k < n; k++) free(items[k].data);
+	free(items);
+	free(used);
+	free(hootLists);
+	CEmuRmTree(stage);
+	return total;
+}
+
 int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 	CEmuCatalogProgressFn progress, void* progressUser)
 {
@@ -2582,7 +2769,9 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 	}
 
 	if (chosenArc[0]) {
-		if (SevenZipPathIs7zW(chosenArc))
+		if (ZpaqPathIsW(chosenArc))
+			CEmuCatalogLoadArcdataZpaq(cat, chosenArc, progress, progressUser);
+		else if (SevenZipPathIs7zW(chosenArc))
 			CEmuCatalogLoadArcdata7z(cat, chosenArc, progress, progressUser);
 		else
 			CEmuCatalogLoadArcdataZip(cat, chosenArc, progress, progressUser);

@@ -1252,30 +1252,80 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	ActorInit(a);
 	a.gait = GAIT_BIPED;
 	a.body = CharBody(c);
-	a.model = lib.bodyModel[a.body];
-	if (a.model < 0) return;
-	a.rig = r.models[a.model].rig;
 	a.female = c.gender == 1;
 	a.scale = a.female ? .40f : .43f;
-	{
-		char humName[16];
-		sprintf_s(humName, a.female ? "HumF%d" : "HumM%d", CharModel(c));
-		r.EnsureBody(humName);
-		int hi = r.FindModel(humName);
-		if (hi < 0) {
-			const char* old = a.female ? ((a.body == B_MAGE) ? "HumWitch" : "HumMedieval") : ((a.body == B_KNIGHT) ? "HumKing" : "HumAdventurer");
-			r.EnsureBody(old);
-			hi = r.FindModel(old);
-		}
-		if (hi >= 0 && r.models[hi].nJ > 8) {
+	const int kind = CharKindOf(c);
+	BOOL meshOk = FALSE;
+	if (kind == CHAR_KIND_MESH) {
+		int pack = CharMesh(c);
+		r.EnsureMesh(pack);
+		int mi = r.CreatureModel(pack);
+		if (mi >= 0 && mi < (int)r.models.size() && r.models[mi].live) {
+			int mon = M_COUNT + pack;
+			MonsterPrepareScale(mon);
+			const MonsterDef& md = MonsterInfo(mon);
+			a.gait = MonsterGait(mon);
+			a.look = LK_MESH;
 			a.proc = 3;
-			a.model = hi;
-			a.rig = r.models[hi].rig;
-			a.scale = .92f;
-			a.mods.Reset(r.models[hi].nJ);
+			a.model = mi;
+			a.rig = r.models[mi].rig;
+			a.avatar = 0;
+			float sc = md.scale > 0.02f ? md.scale : 1.f;
+			a.scale = sc;
+			{
+				float bodyw = TacMonsterWide(pack);
+				float foot = TacMonsterFoot(pack);
+				if (bodyw < foot) bodyw = foot;
+				if (bodyw > 0.02f && bodyw * a.scale > 2.5f)
+					a.scale = 2.5f / bodyw;
+			}
+			a.height = 1.7f * a.scale;
+			if (md.footSpan >= 1 && md.footSpan <= 5) {
+				float tall = TacMonsterTall(pack);
+				if (tall > 0.02f) a.height = tall * a.scale;
+				if (a.height < 0.55f) a.height = 0.55f;
+			}
+			a.hover = md.moveType == MV_FLY ? .4f : 0;
+			a.mods.Reset(r.models[mi].nJ);
+			meshOk = TRUE;
 		}
 	}
-	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0) {
+	if (!meshOk) {
+		if (kind == CHAR_KIND_SKEL) {
+			int si = Clampi(a.body, 0, 3);
+			if (lib.skelModel[si] < 0) {
+				si = 0;
+				for (int i = 0; i < 4; i++) if (lib.skelModel[i] >= 0) { si = i; break; }
+			}
+			a.body = si;
+			a.model = lib.skelModel[si];
+		} else {
+			a.model = lib.bodyModel[a.body];
+		}
+		if (a.model < 0) return;
+		a.rig = r.models[a.model].rig;
+		if (kind == CHAR_KIND_HUM) {
+			const char* humName = HumBodyName(a.female, CharModel(c));
+			r.EnsureBody(humName);
+			int hi = r.FindModel(humName);
+			if (hi < 0) {
+				const char* old = a.female ? ((a.body == B_MAGE) ? "HumWitch" : "HumMedieval") : ((a.body == B_KNIGHT) ? "HumKing" : "HumAdventurer");
+				r.EnsureBody(old);
+				hi = r.FindModel(old);
+			}
+			if (hi >= 0 && r.models[hi].nJ > 8) {
+				a.proc = 3;
+				a.model = hi;
+				a.rig = r.models[hi].rig;
+				a.scale = .92f;
+				a.mods.Reset(r.models[hi].nJ);
+			}
+		} else {
+			a.proc = 0;
+			a.avatar = 0;
+		}
+	}
+	if (kind != CHAR_KIND_MESH && a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0) {
 		const char* mn = r.models[a.model].name;
 		const BOOL digit = (!strncmp(mn, "HumF", 4) || !strncmp(mn, "HumM", 4)) && mn[4] >= '0' && mn[4] <= '9';
 		if (!digit) EnsureHumHair(lib, r, a.model, Clampi(c.hair, 0, HAIR_STYLES - 1));
@@ -1287,13 +1337,19 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	}
 	a.hue = OutfitHue(CharOutfit(c));
 	a.face = CharFace(c);
-	a.blinkSeed = HumanBlinkSeed(CharModel(c), a.face, c.gender, CharBust(c));
+	a.blinkSeed = (kind == CHAR_KIND_HUM) ? HumanBlinkSeed(CharModel(c), a.face, c.gender, CharBust(c)) : 0;
 	a.avatar = CharAvatar(c);
-	if (a.proc != 3 || a.avatar > r.AvatarCount(a.female ? 1 : 0)) a.avatar = 0;
+	if (kind == CHAR_KIND_MESH || a.proc != 3) a.avatar = 0;
+	else {
+		if (a.avatar < 1) a.avatar = 1;
+		int nAva = r.AvatarCount(a.female ? 1 : 0);
+		if (nAva > 0 && a.avatar > nAva) a.avatar = 1;
+	}
 	// 男性は胸板の厚み（筋肉の量）。保存の値は女性と同じ欄で、未設定は 2。
 	a.bust = CharBust(c);
 	a.hairCol = HairColor(c.hairColor);
 	a.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
+	if (kind == CHAR_KIND_SKEL || kind == CHAR_KIND_MESH) a.hair = 0;
 	if (!a.avatar) {
 		if (a.body == B_ROGUE_HOOD) a.hair = 0;
 		if (c.hat && a.body == B_KNIGHT) a.hair = 0;
@@ -1342,13 +1398,23 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	bool namedHead = ga && ga->att1 && (strstr(ga->att1, "Helmet") || strstr(ga->att1, "Hat") || strstr(ga->att1, "Crown"));
 	bool helm = namedHead || (ga && ga->joint1 == 2 && gearMeshOk(ga->mesh1));
 	bool capeOn = ga && ga->att1 && strstr(ga->att1, "Cape");
-	if (c.hat && !helm && !builtInHat) {
-		static const char* const hats[B_COUNT] = { "Knight_Helmet", "Barbarian_Hat", "Mage_Hat", NULL, NULL };
-		if (hats[a.body]) AddAtt(a, r, hats[a.body]);
-	}
-	if (c.cape && !capeOn && !a.avatar) {
-		static const char* const capes[B_COUNT] = { "Knight_Cape", "Barbarian_Cape", "Mage_Cape", "Rogue_Cape", "Rogue_Cape" };
-		AddAtt(a, r, capes[a.body]);
+	if (kind == CHAR_KIND_MESH) {
+	} else if (kind == CHAR_KIND_SKEL) {
+		int si = Clampi(a.body, 0, 3);
+		if (c.hat && !helm) {
+			static const char* const hats[4] = { "Skeleton_Warrior_Helmet", NULL, "Skeleton_Rogue_Hood", "Skeleton_Mage_Hat" };
+			if (hats[si]) AddAtt(a, r, hats[si]);
+		}
+		if (c.cape && !capeOn && si == 2) AddAtt(a, r, "Skeleton_Rogue_Cape");
+	} else {
+		if (c.hat && !helm && !builtInHat) {
+			static const char* const hats[B_COUNT] = { "Knight_Helmet", "Barbarian_Hat", "Mage_Hat", NULL, NULL };
+			if (hats[a.body]) AddAtt(a, r, hats[a.body]);
+		}
+		if (c.cape && !capeOn && !a.avatar) {
+			static const char* const capes[B_COUNT] = { "Knight_Cape", "Barbarian_Cape", "Mage_Cape", "Rogue_Cape", "Rogue_Cape" };
+			AddAtt(a, r, capes[a.body]);
+		}
 	}
 	a.wepAtt = a.nAtt;
 	a.wepGear = a.nGear;
@@ -1363,7 +1429,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 	if (cd.tier >= 3) a.scale *= 1.06f;
 	const Model& m = r.models[a.model];
 	a.mods.Reset(m.nJ);
-	if (a.female && m.rig >= 0) {
+	if (a.female && m.rig >= 0 && kind != CHAR_KIND_SKEL && kind != CHAR_KIND_MESH) {
 		const Rig& g = r.rigs[m.rig];
 		static const struct { const char* n; float x, y, z; } kOwn[] = {
 			{ "chest", .82f, 1.f, .86f }, { "spine", .8f, 1.f, .86f }, { "hips", 1.16f, 1.f, 1.08f },
@@ -1387,7 +1453,7 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		// 人間は CS が身長を掛ける。手続きメッシュはワールド倍率のまま。
 		if (a.proc != 3) a.scale *= a.htScale;
 	}
-	if (m.rig >= 0 && m.rig < (int)r.rigs.size()) {
+	if (kind != CHAR_KIND_MESH && m.rig >= 0 && m.rig < (int)r.rigs.size()) {
 		const Rig& g = r.rigs[m.rig];
 		auto mulOwn = [&](const char* n, float x, float y, float z) {
 			int j = g.Find(n);
@@ -1452,8 +1518,13 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 			mulOwn("chest", kBx[b], kBy[b], kBz[b]);
 		}
 	}
-	a.height = (a.proc == 3 ? 1.75f : 2.35f) * a.scale * (a.proc == 3 && a.htScale > 0.05f ? a.htScale : 1.f);
-	a.hover = a.wings ? .35f : 0;
+	if (kind == CHAR_KIND_MESH) {
+		if (a.htScale > 0.05f) a.height *= a.htScale;
+		if (a.wings && a.hover < 0.2f) a.hover = .35f;
+	} else {
+		a.height = (a.proc == 3 ? 1.75f : 2.35f) * a.scale * (a.proc == 3 && a.htScale > 0.05f ? a.htScale : 1.f);
+		a.hover = a.wings ? .35f : 0;
+	}
 	if (a.proc == 3 && a.rig >= 0 && a.rig < (int)r.rigs.size()) {
 		int hj = r.rigs[a.rig].Find("Hair");
 		if (hj >= 0 && hj < MAXJ) {
@@ -2738,7 +2809,7 @@ void PortraitVisFill(const Renderer& r, const Actor& a, float time, DrawParams& 
 	d.skinTone = 0;
 	if (digitBody) {
 		int ix = humM->name[4] - '0';
-		if (ix >= 0 && ix < MODEL_N) d.skinTone = ix + 1;
+		if (ix >= 0 && ix < MODEL_ETH_N) d.skinTone = ix + 1;
 	} else if (!strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing")) d.skinTone = 4;
 	else if (!strcmp(humM->name, "HumMedieval")) d.skinTone = 5;
 	else if (!strcmp(humM->name, "HumWitch")) d.skinTone = 6;
@@ -2776,7 +2847,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 			d.noTess = 1;
-			d.fly = a.legOk ? 1.f : 0.f;
+			d.fly = (a.hover > 0.05f && a.legOk) ? 1.f : 0.f;
 		}
 		float hs = a.htScale > 0.05f ? a.htScale : 1.f;
 		d.bodyScale = hs;
@@ -2790,7 +2861,7 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (humM && (strncmp(humM->name, "HumF", 4) == 0 || strncmp(humM->name, "HumM", 4) == 0) && humM->name[4] >= '0' && humM->name[4] <= '9') digitBody = TRUE;
 		if (digitBody) {
 			int ix = humM->name[4] - '0';
-			if (ix >= 0 && ix < MODEL_N) d.skinTone = ix + 1;
+			if (ix >= 0 && ix < MODEL_ETH_N) d.skinTone = ix + 1;
 		}
 		// 区間行列を持たない素体も、名前で肌色を決めて同じ服を着せる。
 		if (humM && !digitBody) {
@@ -2800,19 +2871,14 @@ BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 		d.hideMeshHair = (hum && a.hair > 0) ? 1 : 0;
 		BOOL ava = FALSE;
-		// 未選択は元の粗い体に戻さず、同じ滑らかな体へ既定の服を着せる。1〜6 系の元メッシュは脚が潰れている。
-		// 男性は 9 番（tucked shirt・ズボン・靴）、女性は 12 番（スーツ・ブーツ）。肩当てとマントは残す。
 		int avaId = a.avatar;
 		BOOL bareBase = FALSE;
-		if (humM && avaId <= 0) {
-			const BOOL mal = strncmp(humM->name, "HumM", 4) == 0 || !strcmp(humM->name, "HumAdventurer") || !strcmp(humM->name, "HumKing");
-			const BOOL fem = strncmp(humM->name, "HumF", 4) == 0 || !strcmp(humM->name, "HumMedieval") || !strcmp(humM->name, "HumWitch");
-			if (mal) { avaId = 9; bareBase = TRUE; }
-			else if (fem) { avaId = 12; bareBase = TRUE; }
-		}
+		if (hum && avaId <= 0) avaId = 1;
 		if (hum && avaId > 0) {
 			d.clothTint = a.avaTint;
 			ava = r.DrawAvatar(a.model, avaId, a.bust, a.pose, world, d, &a);
+			if (!ava && avaId != 1 && !r.AvatarHide())
+				ava = r.DrawAvatar(a.model, 1, a.bust, a.pose, world, d, &a);
 			// 衣装ができるまで体を出さない。裸が一瞬見えるのを避ける。
 			if (!ava && r.AvatarHide()) return FALSE;
 		}

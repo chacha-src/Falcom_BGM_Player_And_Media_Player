@@ -30841,12 +30841,17 @@ UINT TheadLoop(LPVOID)
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
 
-		/* 再生中 / Soft3D 表示中は vblank 待ち。停止中は UI コアを空ける。 */
+		/* 再生中 / Soft3D 表示中は vblank 待ち。停止中は UI コアを空ける。
+		   タクティクス中は UI へ tick を投げない。投げると描画の待ちに 1 拍分乗る。 */
 		extern BOOL IsSoft3DMazeOpen();
 		extern BOOL IsSoft3DRaceOpen();
 		extern BOOL IsOmakeTacticsOpen();
+		if (IsOmakeTacticsOpen()) {
+			Sleep(16);
+			continue;
+		}
 		const int needFast = (playy != 0
-			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen() || IsOmakeTacticsOpen()) ? 1 : 0;
+			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen()) ? 1 : 0;
 
 		extern CMediaPlayerDlg* mp;
 		CMediaPlayerDlg* pMp = mp;
@@ -30967,7 +30972,8 @@ void timerog1(UINT nIDEvent)
 {
 	if (nIDEvent == 59878) {
 		og->KillTimer(59878);
-		OggPresentStartupSubUi();
+		if (!IsOmakeTacticsOpen())
+			OggPresentStartupSubUi();
 		return;
 	}
 
@@ -31353,6 +31359,8 @@ void COggDlg::OnTimer(UINT nIDEvent)
 {
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0)
 		|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
+	if (IsOmakeTacticsOpen())
 		return;
 	if (nIDEvent == IDT_OGG_RESUME_PROMPT) {
 		KillTimer(IDT_OGG_RESUME_PROMPT);
@@ -33398,6 +33406,9 @@ LRESULT COggDlg::OnKickIdle(WPARAM, LPARAM)
 
 BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 {
+	extern BOOL OmakeTacticsPreTranslate(MSG*);
+	if (OmakeTacticsPreTranslate(pMsg))
+		return TRUE;
 	// メディアプレイヤーモード: DoModal 中は mp の PreTranslateMessage が呼ばれない。
 	// あいまい検索欄の Enter をここで中継し、og の IDOK(終了)へ流さない。
 	if (savedata.playerMode == 1) {
@@ -33406,9 +33417,6 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		extern BOOL Soft3DRacePreTranslate(MSG*);
 		if (Soft3DRacePreTranslate(pMsg))
-			return TRUE;
-		extern BOOL OmakeTacticsPreTranslate(MSG*);
-		if (OmakeTacticsPreTranslate(pMsg))
 			return TRUE;
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
@@ -36757,6 +36765,8 @@ static void OggPresentStartupSubUi()
 
 LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 {
+	if (IsOmakeTacticsOpen())
+		return 0;
 	// MP ボタン / 起動復元から PostMessage 経由。Create/Destroy をネストさせない。
 	if (wParam == 1)
 		TogglePianoRoll();
@@ -39028,6 +39038,7 @@ void COggDlg::OnStnDblclickStatict()
 }
 void COggDlg::OnBnClickedButton59()
 {
+	if (IsOmakeTacticsOpen()) return;
 	if (!m_EqualizerDlg)
 		return;
 	if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
@@ -39048,6 +39059,7 @@ void COggDlg::OnBnClickedButton59()
 
 void COggDlg::TogglePianoRoll()
 {
+	if (IsOmakeTacticsOpen()) return;
 	if (!m_PianoRollDlg)
 		return;
 	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
@@ -39072,6 +39084,7 @@ void COggDlg::TogglePianoRoll()
 
 void COggDlg::ToggleAnalyzer()
 {
+	if (IsOmakeTacticsOpen()) return;
 	if (!m_AnalyzerDlg)
 		return;
 	if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -39173,6 +39186,84 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 		restore(m_WrdViewDlg, kHideFmMidi_Wrd, mask);
 }
 
+static HWND s_tacHostPark[256];
+static int s_tacHostParkN = 0;
+
+static void TacHostParkHwnd(HWND h, HWND keep)
+{
+	if (!h || h == keep || !::IsWindow(h)) return;
+	if (keep && (h == keep || ::IsChild(keep, h) || ::GetAncestor(h, GA_ROOT) == keep)) return;
+	if (!::IsWindowVisible(h)) return;
+	TCHAR cls[40];
+	if (::GetClassName(h, cls, 40)) {
+		if (_tcsicmp(cls, TOOLTIPS_CLASS) == 0) return;
+		if (_tcsicmp(cls, _T("IME")) == 0) return;
+		if (_tcsnicmp(cls, _T("MSCTFIME"), 8) == 0) return;
+	}
+	for (int i = 0; i < s_tacHostParkN; ++i) {
+		if (s_tacHostPark[i] != h) continue;
+		if (::IsWindowVisible(h))
+			::ShowWindow(h, SW_HIDE);
+		return;
+	}
+	if (s_tacHostParkN >= (int)(sizeof(s_tacHostPark) / sizeof(s_tacHostPark[0]))) return;
+	s_tacHostPark[s_tacHostParkN++] = h;
+	::ShowWindow(h, SW_HIDE);
+}
+
+static void TacHostParkWnd(CWnd* w, HWND keep)
+{
+	if (w) TacHostParkHwnd(w->GetSafeHwnd(), keep);
+}
+
+static BOOL CALLBACK TacHostParkEnum(HWND h, LPARAM lp)
+{
+	DWORD pid = 0;
+	::GetWindowThreadProcessId(h, &pid);
+	if (pid != ::GetCurrentProcessId()) return TRUE;
+	TacHostParkHwnd(h, (HWND)lp);
+	return TRUE;
+}
+
+void COggDlg::ParkHostUiForTactics(HWND keep)
+{
+	extern CMediaPlayerDlg* mp;
+	TacHostParkWnd(mp, keep);
+	TacHostParkWnd(this, keep);
+	TacHostParkWnd(pl, keep);
+	TacHostParkWnd(m_EqualizerDlg, keep);
+	TacHostParkWnd(m_PianoRollDlg, keep);
+	TacHostParkWnd(m_PianoRollTuneDlg, keep);
+	TacHostParkWnd(m_AnalyzerDlg, keep);
+	TacHostParkWnd(m_MidiMonitorDlg, keep);
+	TacHostParkWnd(m_FmMonitorDlg, keep);
+	TacHostParkWnd(m_WrdViewDlg, keep);
+	TacHostParkWnd(MpPromptDlgInstance(), keep);
+	TacHostParkWnd(MpCommandRollDlgInstance(), keep);
+	TacHostParkWnd(CSasamiMidiScoreDlg::Instance(), keep);
+	TacHostParkWnd(CSasamiFmScoreDlg::Instance(), keep);
+	TacHostParkWnd(CSasamiTextDlg::Instance(), keep);
+	TacHostParkWnd(CSasamiPianoRollDlg::InstanceMidi(), keep);
+	TacHostParkWnd(CSasamiPianoRollDlg::InstanceFm(), keep);
+	TacHostParkWnd(CSasamiNotePaletteDlg::Instance(), keep);
+	TacHostParkWnd(CSasamiLayoutPaletteDlg::Instance(), keep);
+	TacHostParkWnd(CSasamiNotePropsDlg::Instance(), keep);
+	TacHostParkWnd(g_vstHostDlg, keep);
+	if (pMainFrame1) TacHostParkWnd(pMainFrame1, keep);
+	if (mi) TacHostParkWnd(mi, keep);
+	::EnumWindows(TacHostParkEnum, (LPARAM)keep);
+}
+
+void COggDlg::UnparkHostUiAfterTactics()
+{
+	for (int i = s_tacHostParkN - 1; i >= 0; --i) {
+		HWND h = s_tacHostPark[i];
+		if (h && ::IsWindow(h))
+			::ShowWindow(h, SW_SHOWNOACTIVATE);
+	}
+	s_tacHostParkN = 0;
+}
+
 int COggDlg::MidiMonitorIsVisible() const
 {
 	HWND h = (m_MidiMonitorDlg) ? m_MidiMonitorDlg->GetSafeHwnd() : NULL;
@@ -39188,6 +39279,7 @@ int COggDlg::FmMonitorIsVisible() const
 
 void COggDlg::ToggleMidiMonitor()
 {
+	if (IsOmakeTacticsOpen()) return;
 	if (!m_MidiMonitorDlg)
 		return;
 	if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
@@ -39295,6 +39387,7 @@ void COggDlg::ShowWrdView(const wchar_t* wrdPath)
 
 void COggDlg::ToggleWrdView()
 {
+	if (IsOmakeTacticsOpen()) return;
 	if (!m_WrdViewDlg)
 		return;
 	if (!::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {

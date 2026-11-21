@@ -435,6 +435,15 @@
     <ClCompile Include="SevenZipDec.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ZpaqRun.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="zpaq\zpaq.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="zpaq\libzpaq.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="lzma_sdk\7zAlloc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -2036,6 +2045,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SevenZipDec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ZpaqRun.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h">

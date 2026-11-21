@@ -5458,6 +5458,9 @@ void CMediaPlayerDlg::OnTimer(UINT_PTR nIDEvent)
 void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 #endif
 {
+	extern BOOL IsOmakeTacticsOpen();
+	if (IsOmakeTacticsOpen())
+		return;
 	if (nIDEvent == IDT_OGG_RESUME_PROMPT) {
 		KillTimer(IDT_OGG_RESUME_PROMPT);
 		OggRunResumePrompt();

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "OmakeTacticsGame.h"
 #include "OmakeTacticsAudio.h"
+extern void OmakeTacticsPumpInput();
 #include <afxdlgs.h>
 #include <math.h>
 #include <stdio.h>
@@ -64,6 +65,7 @@ enum {
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR, ID_CR_AVACOL, ID_CR_MODEL, ID_CR_WING, ID_CR_GROUND,
+	ID_CR_KIND = 1574, ID_CR_MESH = 1573,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
 	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1, ID_PT_PAS0 = 370, ID_PT_PAS1,
@@ -81,7 +83,7 @@ enum {
 	ID_SLOT_ROW0 = 981, ID_SLOT_USE = 991, ID_SLOT_REN, ID_SLOT_COPY, ID_SLOT_DEL, ID_SLOT_BACK, ID_SLOT_YES, ID_SLOT_NO,
 	ID_SLOT_OUT = 998, ID_SLOT_IN,
 	ID_JOB_GO = 2200, ID_JOB_SKIP, ID_JOB_YES, ID_JOB_NO, ID_JOB_BACK, ID_JOB_NEXT, ID_JOB_OPT0 = 2210,
-	ID_GROW_ROOT0 = 2300, ID_GROW_NODE0 = 2320, ID_GROW_BACK = 2390,
+	ID_GROW_ROOT0 = 2300, ID_GROW_NODE0 = 2320, ID_GROW_BACK = 2396,
 	ID_CDX_BRANCH = 2400,
 	ID_BASE_PACE = 3100, ID_BASE_CUT
 };
@@ -176,6 +178,9 @@ Game::Game()
 	m_fpsN = 0;
 	m_fpsI = 0;
 	m_fpsBoot = 0;
+	m_paceFg = TRUE;
+	m_paceWait = FALSE;
+	m_recovering = FALSE;
 	ZeroMemory(m_gpuSpan, sizeof(m_gpuSpan));
 	m_gpuN = 0;
 	m_gpuI = 0;
@@ -227,7 +232,7 @@ Game::Game()
 	m_codexEl = 0;
 	m_codexSort = 0;
 	m_growPath[0] = C_SOLDIER;
-	for (int gi = 1; gi < 14; gi++) m_growPath[gi] = -1;
+	for (int gi = 1; gi < 20; gi++) m_growPath[gi] = -1;
 	m_growN = 1;
 	m_growScroll = 0.f;
 	m_growSeen = 0;
@@ -432,6 +437,9 @@ Game::Game()
 	m_flashWhite = 0;
 	m_critScreenT = m_critScreenMax = 0;
 	m_fairyScreenT = m_fairyScreenMax = 0;
+	m_fairyGhost = 0;
+	m_fairyGhostT = m_fairyGhostDur = 0;
+	m_fairyGhostFrom = m_fairyGhostThru = m_fairyGhostPast = v3(0, 0, 0);
 	m_fairyFxT = 0;
 	m_fairyPosA = m_fairyPosD = v3(0, 0, 0);
 	m_cutAnchor = v3(0, 0, 0);
@@ -485,6 +493,7 @@ void Game::LoadPulseCb(int cur, int n, void* user)
 	if (cur > n) cur = n;
 	int a = g->m_loadA, b = g->m_loadB;
 	if (b < a) b = a;
+	OmakeTacticsPumpInput();
 	g->NoteLoad(a + (int)((long long)(b - a) * cur / n));
 }
 
@@ -539,6 +548,9 @@ void Game::NoteLoad(int permille)
 	if (permille < m_loadPm) permille = m_loadPm;
 	if (permille > 1000) permille = 1000;
 	m_loadPm = permille;
+	OmakeTacticsPumpInput();
+	// 起動の読み込み画面以外で全面を Present すると、その絵のまま戻らず落ちる。
+	if (m_screen != SC_LOADING) return;
 	int pct = m_loadPm / 10;
 	unsigned now = GetTickCount();
 	if (pct == m_loadShown && permille < 1000) return;
@@ -559,7 +571,7 @@ int Game::MeasureLoadUnits(int& showUnits)
 		nShow++;
 		const CharData& c = m_save.roster[ri];
 		char nm[16];
-		sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
+		sprintf_s(nm, "%s", HumBodyName(c.gender == 1, CharModel(c)));
 		int have = 0;
 		for (int k = 0; k < nBody; k++) if (!strcmp(seen[k], nm)) have = 1;
 		if (!have && nBody < MAX_PARTY) { sprintf_s(seen[nBody], "%s", nm); nBody++; }
@@ -614,12 +626,20 @@ void Game::CloseLoadSlice()
 
 BOOL Game::LoadEverything()
 {
+	static int s_loadDepth = 0;
+	if (s_loadDepth) return FALSE;
+	struct LoadDepth {
+		int& d;
+		LoadDepth(int& d) : d(d) { d++; }
+		~LoadDepth() { d--; }
+	} depth(s_loadDepth);
 	m_loadLive = TRUE;
 	m_loadPm = 0;
 	m_loadShown = -1;
 	m_loadPaint = 0;
 	m_loadHave = 0;
 	m_sliceBase = m_sliceUnits = 0;
+	OmakeTacticsPumpInput();
 	NoteLoad(0);
 	int showUnits = 0;
 	m_loadUnits = MeasureLoadUnits(showUnits);
@@ -641,7 +661,7 @@ BOOL Game::LoadEverything()
 			if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
 			const CharData& c = m_save.roster[ri];
 			char nm[16];
-			sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
+			sprintf_s(nm, "%s", HumBodyName(c.gender == 1, CharModel(c)));
 			int have = 0;
 			for (int k = 0; k < nSeen; k++) if (!strcmp(seen[k], nm)) have = 1;
 			if (have) continue;
@@ -682,7 +702,9 @@ void Game::Shutdown()
 
 BOOL Game::Recover()
 {
+	if (m_recovering) return FALSE;
 	if (m_recoverTries > 5) return FALSE;
+	m_recovering = TRUE;
 	m_recoverTries++;
 	ReleaseLibrary(m_lib);
 	m_r.Release();
@@ -691,8 +713,8 @@ BOOL Game::Recover()
 	if (m_save.quality == TAC_Q_AUTO) { m_save.spare[2] = 6; m_qApply = 6; m_syncRun = TacHzIndexOf(60); }
 	else m_syncRun = -1;
 	m_syncArmN = 0;
-	if (!m_r.Init(m_hwnd, m_qApply)) return FALSE;
-	if (!LoadEverything()) return FALSE;
+	if (!m_r.Init(m_hwnd, m_qApply)) { m_recovering = FALSE; return FALSE; }
+	if (!LoadEverything()) { m_recovering = FALSE; return FALSE; }
 	InvalidatePortraits();
 	if (m_screen == SC_BATTLE || m_screen == SC_RESULT) {
 		m_importBind = 0;
@@ -706,6 +728,9 @@ BOOL Game::Recover()
 		BuildShowcase();
 	}
 	if (m_screen == SC_CREATE) RefreshPreview();
+	m_recovering = FALSE;
+	m_vsyncDue.QuadPart = 0;
+	m_paceWait = FALSE;
 	return TRUE;
 }
 
@@ -844,8 +869,9 @@ void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 	if (u.team == TEAM_PLAYER) swprintf_s(out, n, L"%s", u.ch.name);
 	else {
 		const MonsterDef& md = MonsterInfo(u.monster);
-		const wchar_t* mark = u.boss ? L"★" : (UnitIsLucky(u) ? L"☆" : L"");
-		if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", mark, MonsterLabel(u.monster));
+		const wchar_t* mark = UnitFoeMark(u);
+		if (UnitIsHumanFoe(u)) swprintf_s(out, n, L"%s%s", mark, HumFoeTitle(u));
+		else if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", mark, MonsterLabel(u.monster));
 		else if (md.nameB >= 0) swprintf_s(out, n, L"%s%s %s", mark, TT(md.nameTx), TT(md.nameB));
 		else swprintf_s(out, n, L"%s%s", mark, TT(md.nameTx));
 	}
@@ -947,7 +973,11 @@ void Game::PulseQuality(float work, float span)
 	if (s_jab != 1 && s_jabGuard <= 0) {
 		static int s_paceDn = 0;
 		int lower = 0;
-		if (m_fps > 1.f && hz > 60 && m_fps < (float)hz * 0.90f) {
+		// 表示 fps が拍の9割に届かない、では下げない。待ちで頭を押さえているあいだは届かないのが普通。
+		// 描画そのものが今の拍に入らないときだけ、1段下げる。
+		float paceMs = m_workAvg * 1000.f;
+		float periodMs = 1000.f / (float)(hz > 0 ? hz : 60);
+		if (hz > 60 && paceMs > 0.20f && paceMs > periodMs * 1.08f) {
 			static const int kStep[] = { 60, 72, 90, 120, 144, 165, 240 };
 			for (int s = 0; s < 7; ++s)
 				if (kStep[s] < hz && kStep[s] > lower) lower = kStep[s];
@@ -1104,7 +1134,7 @@ void Game::PulseQuality(float work, float span)
 			if (s_jabBack > TAC_NOTCH_LIMIT) applyNotch(s_jabBack);
 			return;
 		}
-		if (g <= 0.05f && s_jab != 1) return;
+		// GPU の印がまだ無いだけで戻ると、描画が 1ms でも拍が 1/120 のままになる。印が無くても描画 ms で上げる。
 		// 表示の ms は 1 枚のまま。段の上げ下げだけ、直近の中央値を見る。1枚の 4.9 と 17.5 では動かさない。
 		const bool gReady = m_gpuN >= 8;
 		const float gUse = gReady ? TacRingMedian(m_gpuSpan, TAC_FPS_WIN, m_gpuN, m_gpuI) : g;
@@ -1137,16 +1167,17 @@ void Game::PulseQuality(float work, float span)
 			// 1 枚の短い ms だけで 120 にすると、次の拍で落ちて往復する。
 			float jabG = (s_jabGn >= 4) ? TacRingMedian(s_jabG, 8, s_jabGn, s_jabGn) : 0.f;
 			s_jabGn = 0;
+			float drawMs = m_workAvg * 1000.f;
 			int best = 0;
 			for (int c = 0; c < nRep; ++c) {
 				int h = kRep[c];
 				if (h <= cur || h > capHz) continue;
 				float room = 1000.f / (float)h;
-				if (jabG > 0.5f && jabG <= room * 1.02f && m_fps >= (float)h * 0.90f && h > best) best = h;
+				if (jabG > 0.5f && jabG <= room * 1.02f && drawMs > 0.05f && drawMs <= room * 0.92f && h > best) best = h;
 			}
 			if (capHz > cur && capHz <= 540 && TacHzAt(TacHzIndexOf(capHz)) == capHz) {
 				float room = 1000.f / (float)capHz;
-				if (jabG > 0.5f && jabG <= room * 1.02f && m_fps >= (float)capHz * 0.90f && capHz > best) best = capHz;
+				if (jabG > 0.5f && jabG <= room * 1.02f && drawMs > 0.05f && drawMs <= room * 0.92f && capHz > best) best = capHz;
 			}
 			int back = s_jabBack;
 			s_jab = 0;
@@ -1187,14 +1218,22 @@ void Game::PulseQuality(float work, float span)
 			if (m_qSlots > TAC_NOTCH_OPEN) m_qSlots = TAC_NOTCH_OPEN;
 		} else m_qSlots = 0;
 		const int held = (notch >= TAC_NOTCH_LIMIT) ? m_qSlots : 0;
-		// 実フレームが 120 の 9 割に届いていないのに表示だけ 1/120 へ上げると、次の拍で落ちて往復する。
-		const bool fits120 = gReady && gUse > 0.5f && gUse <= 8.5f && cpuMs > 0.05f && cpuMs <= 8.5f && m_fps >= 120.f * 0.90f;
 		(void)drawFits60;
-		if (fits120 && cur >= 30 && cur < 120) {
-			applyHz(120);
-			return;
+		// 描画 ms が収まるいちばん速い拍へ。8.3ms なら 1/120。待ちで潰した fps も GPU 印も見ない。
+		if (cpuMs > 0.05f && cur >= 30 && cur < capHz) {
+			int best = cur;
+			for (int c = 0; c < nRep; ++c) {
+				int h = kRep[c];
+				if (h <= cur || h > capHz) continue;
+				float room = 1000.f / (float)h;
+				if (cpuMs <= room + 0.25f && h > best) best = h;
+			}
+			if (best > cur) {
+				applyHz(best);
+				return;
+			}
 		}
-		const bool overNow = over && !(fits120 && cur <= 120);
+		const bool overNow = over && !(cpuMs > 0.05f && cpuMs <= period);
 		float slackLine = 0.90f;
 		const bool slack = gReady && gUse <= period * slackLine;
 		if (m_qHold == 4) {
@@ -1211,8 +1250,8 @@ void Game::PulseQuality(float work, float span)
 		if (notch >= TAC_NOTCH_LIMIT && cur > 30 && m_qHold == 0 && m_syncArmN >= 90) {
 			int h = nextUp(cur);
 			float room = (h > 0) ? (1000.f / (float)h) : 0.f;
-			if (h > cur && h <= capHz && h != m_syncArm && cpuMs > 0.05f && cpuMs <= room
-				&& m_fps >= (float)h * 0.90f)
+			if (h > cur && h <= capHz && h != m_syncArm && cpuMs > 0.05f && cpuMs <= room * 0.92f
+				&& (!gReady || gUse <= room))
 				wantHz = h;
 		}
 		if (s_jabCool > 0) s_jabCool--;
@@ -1220,7 +1259,7 @@ void Game::PulseQuality(float work, float span)
 			int h = nextUp(cur);
 			if (h > cur && h <= capHz && h != m_syncArm) {
 				float room = 1000.f / (float)h;
-				if (m_fps < (float)h * 0.90f || (gReady && gUse > room)) {
+				if (cpuMs > room * 0.92f || (gReady && gUse > room)) {
 					if (++s_jabWait >= 90) {
 						s_jabWait = 0;
 						s_jab = 1;
@@ -1423,8 +1462,8 @@ void Game::Tick(float dt)
 				if (left < 1) left = 1;
 				OpenLoadSlice(left);
 				EnterBase();
-				CloseLoadSlice();
 				m_screen = SC_LOADING;
+				CloseLoadSlice();
 				WarmHomeAvatars();
 				NoteLoad(1000);
 				m_r.DropLoadSky();
@@ -1444,11 +1483,16 @@ void Game::Tick(float dt)
 				}
 				m_r.SetLoadPulse(NULL, NULL);
 				m_loadLive = FALSE;
-				holdGame = TRUE;
+				if (m_qCoolT < 0.8f) m_qCoolT = 0.8f;
+				OmakeTacticsPumpInput();
+				PrepareMenuPortraits();
+				RenderPortraits();
+				holdGame = FALSE;
 			}
 		}
 	}
 	if (m_r.Ready() && m_r.DeviceLost()) {
+		if (m_recovering) return;
 		if (!Recover()) { m_screen = SC_FAIL; return; }
 	}
 	float gdt = dt * ((m_fastFwd && !m_demo) ? 3.f : 1.f);
@@ -1491,17 +1535,22 @@ void Game::Tick(float dt)
 		if (m_demo) DemoLeave();
 		else GoHomeFromBattle();
 	}
-	QueryPerformanceCounter(&t1);
+	LARGE_INTEGER tPost;
+	QueryPerformanceCounter(&tPost);
 	QueryPerformanceFrequency(&freq);
-	// ここで周期を足さない。120 を超えていた頃は Present が戻ったら次のフレームへ進んでいた。
 	m_r.EndFrameTextGc();
-	float work = 0.f;
+	// Present の終わりから次の Present の終わりが fps。戻った直後は非同期なので描画だけの時間。
+	// キューが満杯で Present だけ止まったときは、その待ちを描画に数えない。
+	double freqD = freq.QuadPart ? (double)freq.QuadPart : 1.0;
+	double submit = (double)(tPr.QuadPart - t0.QuadPart) / freqD;
+	double post = (double)(tPost.QuadPart - t0.QuadPart) / freqD;
+	double shown = (post - submit > 0.002) ? submit : post;
+	if (shown < 0) shown = 0;
+	float work = (float)shown;
 	float span = 0.f;
-	if (freq.QuadPart)
-		work = (float)((double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
+	float busy = (float)shown;
 	if (m_fpsAt.QuadPart && freq.QuadPart) {
-		span = (float)((double)(t1.QuadPart - m_fpsAt.QuadPart) / (double)freq.QuadPart);
-		float busy = (float)((double)(tPr.QuadPart - t0.QuadPart) / (double)freq.QuadPart);
+		span = (float)((double)(tPost.QuadPart - m_fpsAt.QuadPart) / freqD);
 		// 来た間隔は長さで捨てない。リングに入っている本数で割ったものが平均。
 		// 起動の3フレームは全開のまま測り、平均が揃ってからリング全体へ広げる。それまでは段を動かさない。
 		if (span > 0.f && m_fpsBoot > 0) {
@@ -1553,10 +1602,42 @@ void Game::Tick(float dt)
 			span = mean;
 		}
 	}
-	m_fpsAt = t1;
+	m_fpsAt = tPost;
+	// Present(0) は待たない。平均の m_fpsAt とは別の、この周だけの時計で残りを見る。
+	// 起点から一拍を超えていたら待たない。超えた周に、もう一拍足すと GPU が半分か空く。
+	{
+		int waitHz = m_paceFg ? paceHz : 30;
+		if (waitHz < 15) waitHz = 15;
+		LONGLONG per = (LONGLONG)((1.0 / (double)waitHz) * freqD);
+		if (per < 1) per = 1;
+		LONGLONG origin = m_vsyncDue.QuadPart;
+		m_paceWait = FALSE;
+		if (freq.QuadPart && origin && tPost.QuadPart > origin) {
+			LONGLONG used = tPost.QuadPart - origin;
+			if (used < per) {
+				m_vsyncDue.QuadPart = origin + per;
+				if (m_vsyncDue.QuadPart > tPost.QuadPart)
+					m_paceWait = TRUE;
+			}
+		}
+	}
 	if (m_fpsBoot > 0) return;
 	if (!m_r.PresentBusy())
 		PulseQuality(work, span);
+}
+
+void Game::BeginPaceLoop()
+{
+	QueryPerformanceCounter(&m_vsyncDue);
+	m_paceWait = FALSE;
+}
+
+BOOL Game::TakePaceDue(LARGE_INTEGER& due)
+{
+	if (!m_paceWait) return FALSE;
+	m_paceWait = FALSE;
+	due = m_vsyncDue;
+	return due.QuadPart > 0;
 }
 
 	static_assert(TAC_BGM_MARCHEN - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
@@ -1608,6 +1689,7 @@ void Game::SyncBgm()
 			else deadN++;
 		}
 		int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
+		int killCut = 0;
 		if (m_phase == PH_ACTION) {
 			int anyBoss = 0, bossUp = 0, foeUp = 0, anyFoe = 0;
 			for (int i = 0; i < m_b.nUnits; i++) {
@@ -1619,7 +1701,8 @@ void Game::SyncBgm()
 				foeUp = 1;
 				if (u.boss) bossUp = 1;
 			}
-			fightWon = (anyFoe && ((anyBoss && !bossUp) || (!anyBoss && !foeUp))) ? 1 : 0;
+			if (anyFoe && ((anyBoss && !bossUp) || (!anyBoss && !foeUp))) killCut = 1;
+			fightWon = 0;
 		}
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
@@ -1627,7 +1710,7 @@ void Game::SyncBgm()
 			if (bossN >= 2) bossLow = (bHp * 2 < bMx) ? 1 : 0;
 			else if (bossN == 1) bossLow = (bHp * 5 < bMx * 3) ? 1 : 0;
 			int poolLow = (eMx > 0 && eHp * 10 <= eMx * 3) ? 1 : 0;
-			nearWin = (bossLow || poolLow) ? 1 : 0;
+			nearWin = (bossLow || poolLow || killCut) ? 1 : 0;
 		}
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
@@ -1660,7 +1743,7 @@ void Game::SyncBgm()
 		TacBgmScene(scene);
 		lastScene = scene;
 		// デモは勝利目前の曲へ切り替わった瞬間に切る。危険曲へ上書きされたフレームでは切らない。
-		if (m_demo == 2 && scene == TAC_BGM_WIN) DemoLeave();
+		if (m_demo == 2 && (scene == TAC_BGM_WIN || scene == TAC_BGM_CLEAR)) DemoLeave();
 	}
 	TacBgmTempo(1.f);
 }
@@ -1677,6 +1760,24 @@ void Game::SetupCamera(V3 target, float yaw, float pitch, float dist, float fov)
 
 void Game::RenderFrame()
 {
+	OmakeTacticsPumpInput();
+	int mark = m_save.stageCleared;
+	if (m_save.stageSel > mark) mark = m_save.stageSel;
+	if (m_screen == SC_BATTLE && m_battleStage > mark) mark = m_battleStage;
+	unsigned __int64 bestLv = 1;
+	for (int i = 0; i < MAX_ROSTER; i++) {
+		if (!m_save.roster[i].used) continue;
+		unsigned __int64 t = CharTrueLv(m_save.roster[i]);
+		if (t > bestLv) bestLv = t;
+	}
+	int lvMark = bestLv >= 9999ull ? 9999 : (int)bestLv;
+	if (lvMark > mark) mark = lvMark;
+	int tier = 0;
+	if (mark >= 9999) tier = 4;
+	else if (mark >= 6000) tier = 3;
+	else if (mark >= 3000) tier = 2;
+	else if (mark >= 1000) tier = 1;
+	m_r.SetChrome(tier);
 	m_renderDt = Clampf(m_time - m_lastRenderTime, 0, .1f);
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
@@ -1861,7 +1962,7 @@ void Game::OnMouseMove(int x, int y)
 		ClampPreviewPan(m_previewPan, h);
 	}
 	if (m_lDown && m_monDrag) m_monYaw += (x - m_mx) * .012f;
-	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS);
+	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON);
 	BOOL lookPan = m_lDown && !m_downUi && m_screen == SC_BASE && m_mapLook;
 	if (m_rDown || m_mDown || scout || lookPan) {
 		int dx = x - m_dragLastX, dy = y - m_dragLastY;
@@ -2271,7 +2372,6 @@ void Game::OnBecameActive()
 	if (m_qCoolT < 0.6f) m_qCoolT = 0.6f;
 	m_fpsAt.QuadPart = 0;
 	m_afterPr.QuadPart = 0;
-	m_vsyncDue.QuadPart = 0;
 	m_fpsN = 0;
 	m_fpsI = 0;
 	m_fpsWin = 0;
@@ -3132,7 +3232,7 @@ void Game::DrawSkillTip()
 			else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
 			else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
 			if (sd.effect == EF_WARP) swprintf_s(extra, L"MP 70%%   %s", tag);
-			else swprintf_s(extra, L"MP %d   %s", sd.mp, tag);
+			else swprintf_s(extra, L"MP %d   %s", SkillMpCost(1, m_skillTipId), tag);
 		}
 	} else if (m_skillTip == 1) {
 		const SkillDef& sd = SkillInfo(m_skillTipId);
@@ -3156,7 +3256,7 @@ void Game::DrawSkillTip()
 		eu.alive = 1;
 		eu.ch = m_save.roster[m_partySel];
 		CraftBindUnit(eu);
-		EstimateText(eu, m_skillTipId, est, 160);
+		EstimateText(eu, m_skillTipId, est, 160, m_save.stageSel);
 	}
 	float tw = min(U(460), (float)m_w - U(16));
 	float th = (extra[0] ? U(128) : U(108)) + (est[0] ? U(18) : 0);
@@ -3615,8 +3715,8 @@ void Game::RenderPortraits()
 				DWORD bg0, bg1;
 				if (u.team == TEAM_PLAYER) PortraitJobBg(u.ch.cls, bg0, bg1);
 				else {
-					bg0 = UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60));
-					bg1 = UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20);
+					bg0 = UnitIsHumanFoe(u) ? RGBA8(160, 70, 200) : (UnitIsLucky(u) ? RGBA8(30, 130, 180) : (u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60)));
+					bg1 = UnitIsHumanFoe(u) ? RGBA8(48, 16, 64) : (UnitIsLucky(u) ? RGBA8(8, 36, 64) : RGBA8(50, 14, 20));
 				}
 				return RenderActorPortrait(s, m_act[ui], bg0, bg1, u.team != TEAM_PLAYER, TRUE);
 			}
@@ -3627,6 +3727,17 @@ void Game::RenderPortraits()
 				return RenderActorPortrait(s, m_ptCache[s], bg0, bg1, 0, FALSE);
 			}
 			const MonsterDef& md = MonsterInfo(u.monster);
+			if (UnitIsHumanFoe(u)) {
+				if (m_ptCacheWant[s] != want || m_ptCacheLook[s] != -u.lucky) {
+					ActorFromChar(m_ptCache[s], m_lib, m_r, u.ch);
+					m_ptCache[s].wings = 0;
+					m_ptCache[s].hover = 0;
+					m_ptCache[s].legOk = 0;
+					m_ptCacheWant[s] = want;
+					m_ptCacheLook[s] = -u.lucky;
+				}
+				return RenderActorPortrait(s, m_ptCache[s], RGBA8(160, 70, 200), RGBA8(48, 16, 64), 1, FALSE);
+			}
 			if (m_ptCacheWant[s] != want || m_ptCacheLook[s] != u.monster) {
 				ActorFromMonster(m_ptCache[s], m_lib, m_r, u.monster, u.boss);
 				m_ptCacheWant[s] = want;
@@ -3684,13 +3795,29 @@ void Game::RenderPortraits()
 	if (due > 0 && held == due) return;
 	const BOOL keepOld = (nWant > 8) || held > 0;
 	m_r.SetPortraitPreserve(keepOld ? TRUE : FALSE);
+	auto paintSlot = [&](int s, int want) {
+		OmakeTacticsPumpInput();
+		if (!paint(s, want)) return;
+		m_portraitKey[s] = want;
+	};
+	// 動いている先頭枠が毎フレーム予算を使うと、未描画の枠が一生空のままになる。
+	// まだ絵が無い枠を先に塗り、揃ったフレームから今までどおり動く顔を更新する。
+	int filled = 0;
 	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
 		int want = m_portraitWant[s];
 		if (want <= 0) { m_portraitKey[s] = want; continue; }
-		if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
-		if (keepOld && heldNow(s, want)) continue;
-		if (!paint(s, want)) continue;
-		m_portraitKey[s] = want;
+		if (m_portraitKey[s] == want) continue;
+		paintSlot(s, want);
+		filled++;
+	}
+	if (filled <= 0) {
+		for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
+			int want = m_portraitWant[s];
+			if (want <= 0) continue;
+			if (nWant > 8 && s > 0 && m_portraitKey[s] == want && ((unsigned)s & 1u) != (m_r.m_frame & 1u)) continue;
+			if (keepOld && heldNow(s, want)) continue;
+			paintSlot(s, want);
+		}
 	}
 	m_r.FinishPortraits();
 	m_r.SetCamera(camView, camProj, camEye, camT);
@@ -5971,6 +6098,7 @@ void Game::BuildShowcase()
 	for (int i = 0; i < MAX_PARTY; i++) {
 		int r = m_save.party[i];
 		if (r < 0 || r >= MAX_ROSTER || !m_save.roster[r].used) continue;
+		OmakeTacticsPumpInput();
 		if (slicing) {
 			m_loadA = spanA + (spanB - spanA) * got / want;
 			m_loadB = spanA + (spanB - spanA) * (got + 1) / want;
@@ -6142,8 +6270,28 @@ void Game::GoHomeFromBattle()
 	EnterBase();
 }
 
+void Game::SyncPinnedMeshes()
+{
+	int ids[32];
+	int n = 0;
+	auto add = [&](const CharData& c, BOOL force) {
+		if (!force && !c.used) return;
+		if (CharKindOf(c) != CHAR_KIND_MESH) return;
+		int p = CharMesh(c);
+		for (int i = 0; i < n; i++) if (ids[i] == p) return;
+		if (n < 32) ids[n++] = p;
+	};
+	if (m_screen == SC_CREATE) add(m_edit, TRUE);
+	for (int i = 0; i < MAX_PARTY; i++) {
+		int ri = m_save.party[i];
+		if (ri >= 0 && ri < MAX_ROSTER) add(m_save.roster[ri], FALSE);
+	}
+	m_r.PinMeshes(ids, n);
+}
+
 void Game::EnterBase()
 {
+	SyncPinnedMeshes();
 	m_r.LoadBattleCreatures(NULL, 0);
 	m_importBind = 0;
 	m_textFocus = 0;
@@ -6226,6 +6374,7 @@ void Game::WarmHomeAvatars()
 		// 1回目は予約だけ。生成はフレームが進んでから。ここで済ませないと、ホームのあと別画面になる。
 		for (int i = 0; i < n; i++) drawOne(i);
 		for (int pass = 0; pass < 4; pass++) {
+			OmakeTacticsPumpInput();
 			pend = m_r.CountPendingAvatars(n, model, ava, cup);
 			if (pend <= 0) break;
 			m_r.m_frame++;
@@ -6530,6 +6679,15 @@ static int CodexAreaCap(const ClassDef& cd)
 static int CodexJobKey(int cls)
 {
 	const ClassDef& cd = ClassInfo(cls);
+	if (TacHidClass(cls)) {
+		int id = cls - (C_JOB0 + JobCount());
+		if (id < 0) id = 0;
+		if (id > 95) id = 95;
+		int tier = cd.tier;
+		if (tier < 0) tier = 0;
+		if (tier > 30) tier = 30;
+		return 9 * 100000 + tier * 1000 + 300 + id;
+	}
 	int g = cd.group;
 	if (g < 0 || g >= G_COUNT) g = 0;
 	int tier = cd.tier;
@@ -6597,7 +6755,7 @@ static int CodexJobList(int* dst, int cap)
 	for (int i = 0; i < n; i++) dst[i] = e[i].cls;
 	return n;
 }
-static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv)
+static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv, const CharData* roster)
 {
 	how[0] = 0;
 	*key = 0;
@@ -6710,6 +6868,25 @@ static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv)
 			*lv = showLv;
 		}
 	}
+	if (how[0] == 0 && roster && skill >= SKL_HID0) {
+		int show = -1, showLv = 0, more = 0;
+		for (int i = 0; i < TAC_HID_N; i++) {
+			int cls = C_JOB0 + JobCount() + i;
+			if (!RosterHoldsClass(roster, cls)) continue;
+			int lv = CodexLearnLv(cls, skill);
+			if (lv <= 0) continue;
+			more++;
+			if (show < 0 || lv < showLv) { show = cls; showLv = lv; }
+		}
+		if (show >= 0) {
+			const wchar_t* nm = ClassTitle(show);
+			if (!nm) nm = TT(ClassInfo(show).nameTx);
+			const wchar_t* extra = more > 1 ? LangPick14(L"・他", L" +", L" +", L" +", L" +", L" 외", L"·其他", L" +", L" +", L" +", L" +", L" +", L" +", L" +") : L"";
+			swprintf_s(how, howN, L"%s  Lv%d%s", nm, showLv, extra);
+			*key = CodexJobKey(show);
+			*lv = showLv;
+		}
+	}
 }
 static int CmpCodex(const void* pa, const void* pb)
 {
@@ -6743,7 +6920,7 @@ static int SkillShapeBucket(const SkillDef& sd)
 	if (sd.area <= 0) return 1;
 	return 2;
 }
-static int CodexFamJobs(int fam, int* dst, int cap)
+static int CodexFamJobs(int fam, int* dst, int cap, const CharData* roster)
 {
 	int n = 0;
 	auto push = [&](int c) { if (n < cap) dst[n++] = c; };
@@ -6756,6 +6933,15 @@ static int CodexFamJobs(int fam, int* dst, int cap)
 	} else if (fam >= 3 && fam <= 10) {
 		int want = fam - 3;
 		for (int i = 0; i < JobCount(); i++) if (JobFamOf(C_JOB0 + i) == want) push(C_JOB0 + i);
+		static const int kLine[8] = { 0, 4, 5, 2, 1, 4, 1, 3 };
+		if (roster) {
+			for (int i = 0; i < TAC_HID_N; i++) {
+				int cls = C_JOB0 + JobCount() + i;
+				if (JobLineOf(cls) != kLine[want]) continue;
+				if (!RosterHoldsClass(roster, cls)) continue;
+				push(cls);
+			}
+		}
 	}
 	return n;
 }
@@ -6907,6 +7093,7 @@ int Game::FoeList(int* out, int cap) const
 
 void Game::EnsureMonPreview()
 {
+	SyncPinnedMeshes();
 	static int ids[FOE_LIST_MAX];
 	int n = FoeList(ids, FOE_LIST_MAX);
 	if (n <= 0) {
@@ -7246,7 +7433,7 @@ void Game::DrawCodex()
 		if (m_codexSort < 0 || m_codexSort > 3) m_codexSort = 0;
 		if (m_codexShape < 0 || m_codexShape > 5) m_codexShape = 0;
 		int famJobs[240];
-		int nFam = CodexFamJobs(m_codexFam, famJobs, 240);
+		int nFam = CodexFamJobs(m_codexFam, famJobs, 240, m_save.roster);
 		if (m_codexFam == 0) {
 			if (m_codexJob != 0 && m_codexJob != -1) m_codexJob = 0;
 		} else if (m_codexJob > 0) {
@@ -7297,9 +7484,28 @@ void Game::DrawCodex()
 		}
 		if (jPages > 1 && Btn(ID_CDX_JPREV, x + w - U(24) - arrowW * 2 - gap, jy, arrowW, jh, L"◀")) m_codexJobPage = (m_codexJobPage + jPages - 1) % jPages;
 		if (jPages > 1 && Btn(ID_CDX_JNEXT, x + w - U(24) - arrowW, jy, arrowW, jh, L"▶")) m_codexJobPage = (m_codexJobPage + 1) % jPages;
+		int heldHid[TAC_HID_N];
+		int nHeld = 0;
+		if (m_codexJob <= 0) {
+			for (int i = 0; i < TAC_HID_N && nHeld < TAC_HID_N; i++) {
+				int cls = C_JOB0 + JobCount() + i;
+				if (!RosterHoldsClass(m_save.roster, cls)) continue;
+				if (m_codexFam >= 3 && m_codexFam <= 10) {
+					BOOL in = FALSE;
+					for (int k = 0; k < nFam; k++) if (famJobs[k] == cls) in = TRUE;
+					if (!in) continue;
+				} else if (m_codexFam != 0) continue;
+				heldHid[nHeld++] = cls;
+			}
+		}
 		auto jobHas = [&](int s) -> BOOL {
 			if (SkillInfo(s).enemyOnly) return FALSE;
-			if (s >= SKL_HID0) return FALSE;
+			if (s >= SKL_HID0) {
+				if (m_codexJob > 0)
+					return TacHidClass(m_codexJob) && RosterHoldsClass(m_save.roster, m_codexJob) && CodexLearnLv(m_codexJob, s) > 0;
+				for (int i = 0; i < nHeld; i++) if (CodexLearnLv(heldHid[i], s) > 0) return TRUE;
+				return FALSE;
+			}
 			if (m_codexJob == -1) return IsFormSkill(s);
 			if (IsFormSkill(s)) return m_codexFam == 0 && m_codexJob == 0;
 			if (m_codexJob > 0) return CodexLearnLv(m_codexJob, s) > 0;
@@ -7370,7 +7576,7 @@ void Game::DrawCodex()
 			}
 			CodexHit& h = hits[n];
 			h.skill = s;
-			h.mp = sd.mp;
+			h.mp = (sd.effect == EF_WARP) ? sd.mp : SkillMpCost(1, s);
 			wcscpy_s(h.name, SkillLabel(s));
 			if (m_codexJob == -1) {
 				swprintf_s(h.how, L"%s", TT(TX_SK_TAB_FORM));
@@ -7384,7 +7590,7 @@ void Game::DrawCodex()
 				h.lv = lv;
 				h.key = 0;
 			} else {
-				CodexFillHow(s, h.how, 160, &h.key, &h.lv);
+				CodexFillHow(s, h.how, 160, &h.key, &h.lv, m_save.roster);
 			}
 			n++;
 		}
@@ -7418,13 +7624,26 @@ void Game::DrawCodex()
 		if (Btn(ID_CDX_PREV, x + U(24), y + h - U(40), U(120), U(32), L"◀")) m_codexPage = (m_codexPage + pages - 1) % pages;
 		if (Btn(ID_CDX_NEXT, x + U(156), y + h - U(40), U(120), U(32), L"▶")) m_codexPage = (m_codexPage + 1) % pages;
 	} else if (m_codex == 2) {
-		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 1000, 9999 };
+		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 999, 1000, 3000, 6000, 9999 };
+		unsigned __int64 bestLv = 1;
+		for (int i = 0; i < MAX_ROSTER; i++) {
+			if (!m_save.roster[i].used) continue;
+			unsigned __int64 t = CharTrueLv(m_save.roster[i]);
+			if (t > bestLv) bestLv = t;
+		}
+		int tableHi = 999;
+		if (bestLv >= 1000ull) {
+			if (bestLv < 3000ull) tableHi = 3000;
+			else if (bestLv < 6000ull) tableHi = 6000;
+			else tableHi = 9999;
+		}
 		m_r.HudText(TT(TX_CDX_EXP), x + U(24), yy, U(16), RGBA8(255, 226, 150), 0, 1);
 		yy += U(26);
-		for (int i = 0; i < 12; i++) {
+		for (int i = 0; i < 15; i++) {
 			int lv = showLv[i];
+			if (lv > tableHi) continue;
 			wchar_t row[96];
-			swprintf_s(row, L"Lv %d    %s %d", lv, TT(TX_CDX_NEXT), ExpToNext(lv));
+			swprintf_s(row, L"Lv %s    %s %s", TacNum(lv), TT(TX_CDX_NEXT), TacNum(ExpToNext(lv)));
 			m_r.HudText(row, x + U(36), yy, U(15), RGBA8(230, 230, 240), 0, 0);
 			yy += U(22);
 		}
@@ -7490,7 +7709,9 @@ void Game::DrawCodex()
 				const ClassDef& cd = ClassInfo(cls);
 				static const int gx[G_COUNT] = { TX_G_MELEE, TX_G_SWIFT, TX_G_MAGIC, TX_G_HOLY };
 				int g = Clampi(cd.group, 0, G_COUNT - 1);
-				swprintf_s(growBuf, L"%s\n%s", TT(gx[g]), ClassBlurb(cls));
+				const wchar_t* bl = ClassBlurb(cls);
+				if ((!bl || !bl[0]) && TacHidClass(cls)) bl = TT(TX_HID_LINE);
+				swprintf_s(growBuf, L"%s\n%s", TT(gx[g]), bl ? bl : L"");
 				growTip = growBuf;
 				gax = hx; gay = hy; gaw = hw; gah = hh;
 			};
@@ -7503,23 +7724,23 @@ void Game::DrawCodex()
 				}
 			}
 			ry += U(30);
-			if (m_growN < 1 || m_growN > 14 || m_growPath[0] < 0) { m_growPath[0] = C_SOLDIER; m_growN = 1; }
+			if (m_growN < 1 || m_growN > 20 || m_growPath[0] < 0) { m_growPath[0] = C_SOLDIER; m_growN = 1; }
 			int rootI = 0;
 			for (int i = 0; i < 6; i++) if (kRoot[i] == m_growPath[0]) rootI = i;
 			float prevCx = rx + (bw + gapb) * rootI + bw * .5f;
 			float prevBot = ry - U(4);
 			int rowsN = 0;
-			int rowOpt[14][4];
-			int rowNopt[14];
-			int rowPick[14];
-			for (int d = 0; d < m_growN && rowsN < 14; d++) {
+			int rowOpt[19][4];
+			int rowNopt[19];
+			int rowPick[19];
+			for (int d = 0; d < m_growN && rowsN < 19; d++) {
 				EvoOption raw[4];
-				int nr = EvoOptions(m_growPath[d], raw);
+				int nr = EvoOptions(m_growPath[d], raw, 1);
 				int n = 0;
 				EvoOption o[4];
 				for (int k = 0; k < nr && n < 4; k++) {
 					if (raw[k].target < 0) continue;
-					if (ClassInfo(raw[k].target).tier >= 13) continue;
+					if (TacHidClass(raw[k].target) && !RosterHoldsClass(m_save.roster, raw[k].target)) continue;
 					if (m_growPath[0] >= 0 && JobLineFar(m_growPath[0], raw[k].target)) continue;
 					o[n++] = raw[k];
 				}
@@ -7609,7 +7830,7 @@ void Game::DrawCodex()
 						if (Btn(ID_GROW_NODE0 + r * 4 + i, cx, by, childW, btnH, ClassName(rowOpt[r][i]), TRUE, on, U(14))) {
 							m_growPath[r + 1] = rowOpt[r][i];
 							m_growN = r + 2;
-							if (m_growN > 14) m_growN = 14;
+							if (m_growN > 20) m_growN = 20;
 						}
 					}
 				}
@@ -9721,8 +9942,8 @@ void Game::DrawPerfHud()
 	if (m_fps < 1.f) return;
 	float fps = m_fps;
 	if (fps > 999.f) fps = 999.f;
-	float ms = m_r.GpuMs();
-	if (ms < 0.05f) ms = m_workAvg * 1000.f;
+	float ms = m_workAvg * 1000.f;
+	if (ms < 0.05f) ms = m_r.GpuMs();
 	if (ms < 0.05f && fps > 1.f) ms = 1000.f / fps;
 	if (ms > 999.f) ms = 999.f;
 	int q = QualityNow();
@@ -10234,7 +10455,7 @@ void Game::DrawBaseUi()
 			}
 			if (chh > ps + 28.f) {
 				wchar_t l[80];
-				swprintf_s(l, L"%s %s %s", ClassName(c.cls), TT(TX_MISC_LV), TacNum(c.lv));
+				swprintf_s(l, L"%s %s %s", ClassName(c.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)));
 				float lfs = min(U(12), max(8.f, chh * .1f));
 				m_r.HudText(l, cx + cw * .5f, ry + ps + min(U(32), (chh - ps) * .7f), FitTextPx(l, cw - 8.f, lfs, 0), RGBA8(210, 210, 200), 1, 0);
 			}
@@ -10261,7 +10482,7 @@ void Game::DrawBaseUi()
 			float hw = tw - ps - U(22);
 			m_r.HudText(c.name, hx, ty + U(18), FitTextPx(c.name, hw, U(16), 1), RGBA8(255, 236, 190), 0, 1);
 			wchar_t line[96];
-			swprintf_s(line, L"%s  %s %s", ClassName(c.cls), TT(TX_MISC_LV), TacNum(c.lv));
+			swprintf_s(line, L"%s  %s %s", ClassName(c.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)));
 			m_r.HudText(line, hx, ty + U(38), FitTextPx(line, hw, U(13), 0), RGBA8(210, 214, 230), 0, 0);
 			const wchar_t* wpn = (c.reserved[6] > 0) ? GearName(c.reserved[6]) : TT(TX_PT_NONE);
 			const wchar_t* arm = (c.reserved[7] > 0) ? GearName(c.reserved[7]) : TT(TX_PT_NONE);
@@ -10436,6 +10657,7 @@ void Game::EnterCreate(int editIdx)
 		m_edit.hat = 0;
 		m_edit.cape = 1;
 		m_edit.lv = 1;
+		CharSetAvatar(m_edit, 1);
 		RandomName(m_edit.name, m_edit.gender, m_rng);
 	}
 	m_previewYaw = 0;
@@ -10626,6 +10848,7 @@ int Game::DrawMotRow(int id0, float cx, float y, float avail, int mot, BOOL alt,
 
 void Game::RefreshPreview()
 {
+	SyncPinnedMeshes();
 	int fall = m_preview.fallKind;
 	CharData c = m_edit;
 	ActorFromChar(m_preview, m_lib, m_r, c);
@@ -10754,14 +10977,49 @@ void Game::DrawCreateUi()
 	}
 	yy += rh + gap + U(4);
 	BOOL changed = FALSE;
-	if (int d = Sel(ID_CR_GENDER, bx, yy, bw, rh, TT(TX_CR_GENDER), TT(m_edit.gender ? TX_CR_FEMALE : TX_CR_MALE))) { (void)d; m_edit.gender = !m_edit.gender; CharSetAvatar(m_edit, 0); changed = TRUE; }
+	if (int d = Sel(ID_CR_GENDER, bx, yy, bw, rh, TT(TX_CR_GENDER), TT(m_edit.gender ? TX_CR_FEMALE : TX_CR_MALE))) { (void)d; m_edit.gender = !m_edit.gender; CharSetAvatar(m_edit, 1); changed = TRUE; }
 	note(ID_CR_GENDER, TX_CRH_GENDER);
 	yy += rh + gap;
-	if (int d = Sel(ID_CR_MODEL, bx, yy, bw, rh, TT(TX_CR_MODEL), TT(TX_MDL_0 + CharModel(m_edit)))) {
-		CharSetModel(m_edit, (CharModel(m_edit) + d + MODEL_N) % MODEL_N); changed = TRUE;
+	{
+		int kinds[CHAR_KIND_N];
+		int nk = 0;
+		kinds[nk++] = CHAR_KIND_HUM;
+		kinds[nk++] = CHAR_KIND_KIT;
+		for (int i = 0; i < 4; i++) if (m_lib.skelModel[i] >= 0) { kinds[nk++] = CHAR_KIND_SKEL; break; }
+		if (m_r.m_monN > 0 && TacPlayMeshN() > 0) kinds[nk++] = CHAR_KIND_MESH;
+		int cur = CharKindOf(m_edit);
+		int ci = 0;
+		for (int i = 0; i < nk; i++) if (kinds[i] == cur) ci = i;
+		static const int kindTx[CHAR_KIND_N] = { TX_KIND_HUM, TX_KIND_KIT, TX_KIND_SKEL, TX_KIND_MESH };
+		if (int d = Sel(ID_CR_KIND, bx, yy, bw, rh, TT(TX_CR_KIND), TT(kindTx[kinds[ci]]))) {
+			ci = (ci + d + nk) % nk;
+			CharSetKind(m_edit, kinds[ci]);
+			if (kinds[ci] == CHAR_KIND_HUM) CharSetAvatar(m_edit, CharAvatar(m_edit));
+			if (kinds[ci] == CHAR_KIND_SKEL && CharBody(m_edit) > 3) CharSetBody(m_edit, 3);
+			if (kinds[ci] == CHAR_KIND_MESH && TacPlayMeshFind(CharMesh(m_edit)) < 0)
+				CharSetMesh(m_edit, TacPlayMeshPack(0));
+			changed = TRUE;
+		}
+		note(ID_CR_KIND, TX_CRH_KIND);
+		yy += rh + gap;
 	}
-	note(ID_CR_MODEL, TX_CRH_MODEL);
-	yy += rh + gap;
+	const int kind = CharKindOf(m_edit);
+	const BOOL isHum = kind == CHAR_KIND_HUM;
+	const BOOL isSkel = kind == CHAR_KIND_SKEL;
+	const BOOL isMesh = kind == CHAR_KIND_MESH;
+	if (isHum) {
+		int mx = CharModel(m_edit);
+		const wchar_t* mdlLab = TT(TX_MDL_0 + mx);
+		if (mx >= MODEL_ETH_N) {
+			if (m_edit.gender) mdlLab = TT(mx == MODEL_ETH_N ? TX_MDL_WITCH : TX_MDL_MEDIEVAL);
+			else mdlLab = TT(mx == MODEL_ETH_N ? TX_MDL_KING : TX_MDL_ADV);
+		}
+		if (int d = Sel(ID_CR_MODEL, bx, yy, bw, rh, TT(TX_CR_MODEL), mdlLab)) {
+			CharSetModel(m_edit, (mx + d + MODEL_N) % MODEL_N); changed = TRUE;
+		}
+		note(ID_CR_MODEL, TX_CRH_MODEL);
+		yy += rh + gap;
+	}
 	BOOL isNew = m_editIdx < 0;
 	BOOL classLock = !isNew && m_edit.lv >= 2;
 	if (Sel(ID_CR_LINEAGE, bx, yy, bw, rh, TT(TX_CR_LINEAGE), TT(m_lineage ? TX_CR_MAGIC : TX_CR_WARRIOR), classLock ? 0 : 1)) {
@@ -10786,51 +11044,86 @@ void Game::DrawCreateUi()
 			ci = (ci + d + n) % n;
 			m_edit.cls = lst[ci];
 			static const int bodyFor[6] = { B_KNIGHT, B_BARBARIAN, B_ROGUE, B_ROGUE_HOOD, B_MAGE, B_MAGE };
-			if (m_edit.cls < 6) CharSetBody(m_edit, bodyFor[m_edit.cls]);
+			if (m_edit.cls < 6) {
+				int b = bodyFor[m_edit.cls];
+				if (isSkel && b > 3) b = 2;
+				CharSetBody(m_edit, b);
+			}
 			changed = TRUE;
 		}
 		note(ID_CR_CLASS, classLock ? TX_CRH_LOCK : TX_CRH_CLASS);
 		yy += rh + gap;
 	}
 	static const int bodyTx[B_COUNT] = { TX_BODY_KNIGHT, TX_BODY_BARBARIAN, TX_BODY_MAGE, TX_BODY_ROGUE, TX_BODY_HOODED };
-	if (int d = Sel(ID_CR_BODY, bx, yy, bw, rh, TT(TX_CR_BODY), TT(bodyTx[CharBody(m_edit)]))) { CharSetBody(m_edit, (CharBody(m_edit) + d + B_COUNT) % B_COUNT); changed = TRUE; }
-	note(ID_CR_BODY, TX_CRH_BODY);
-	yy += rh + gap;
-	{
+	static const int skelTx[4] = { TX_BODY_SKEL0, TX_BODY_SKEL1, TX_BODY_SKEL2, TX_BODY_SKEL3 };
+	if (isMesh) {
+		int n = TacPlayMeshN();
+		if (n < 1) n = 1;
+		int ix = TacPlayMeshFind(CharMesh(m_edit));
+		if (ix < 0) ix = 0;
+		int pack = TacPlayMeshPack(ix);
+		wchar_t lab[72];
+		swprintf_s(lab, L"%d/%d  %s", ix + 1, n, TacPlayMeshLabel(pack));
+		if (int d = Sel(ID_CR_MESH, bx, yy, bw, rh, TT(TX_CR_MESH), lab)) {
+			ix = (ix + d + n) % n;
+			CharSetMesh(m_edit, TacPlayMeshPack(ix));
+			changed = TRUE;
+		}
+		note(ID_CR_MESH, TX_CRH_MESH);
+		yy += rh + gap;
+	} else if (isSkel) {
+		int n = 4;
+		int b = Clampi(CharBody(m_edit), 0, 3);
+		if (int d = Sel(ID_CR_BODY, bx, yy, bw, rh, TT(TX_CR_BODY), TT(skelTx[b]))) { CharSetBody(m_edit, (b + d + n) % n); changed = TRUE; }
+		note(ID_CR_BODY, TX_CRH_BODY);
+		yy += rh + gap;
+	} else {
+		if (int d = Sel(ID_CR_BODY, bx, yy, bw, rh, TT(TX_CR_BODY), TT(bodyTx[CharBody(m_edit)]))) {
+			CharSetBody(m_edit, (CharBody(m_edit) + d + B_COUNT) % B_COUNT); changed = TRUE;
+		}
+		note(ID_CR_BODY, TX_CRH_BODY);
+		yy += rh + gap;
+	}
+	if (isHum && CharModel(m_edit) < MODEL_ETH_N) {
 		int nf = Clampi(m_r.FaceCount(m_edit.gender ? 1 : 0), 1, 6);
 		int fc = CharFace(m_edit) % nf;
 		if (int d = Sel(ID_CR_FACE, bx, yy, bw, rh, TT(TX_CR_FACE), TT((m_edit.gender ? TX_FACE_F0 : TX_FACE_M0) + fc))) {
 			CharSetFace(m_edit, (fc + d + nf) % nf); changed = TRUE;
 		}
 		note(ID_CR_FACE, TX_CRH_FACE);
-	}
-	yy += rh + gap;
-	{
-		const int g = m_edit.gender ? 1 : 0;
-		const int nMax = 63;
-		const int named = g ? TX_AVA_F31 - TX_AVA_F0 + 1 : TX_AVA_M18 - TX_AVA_M0 + 1;
-		int n = Clampi(m_r.AvatarCount(g), 0, nMax) + 1;
-		int av = Clampi(CharAvatar(m_edit), 0, n - 1);
-		const wchar_t* face = TT(TX_AVA_NONE);
-		if (av > 0 && av - 1 < named) face = TT((g ? TX_AVA_F0 : TX_AVA_M0) + av - 1);
-		else if (av > 0) face = AvaMoreName(g, av - 1 - named);
-		if (int d = Sel(ID_CR_AVATAR, bx, yy, bw, rh, TT(TX_CR_AVATAR), face)) {
-			CharSetAvatar(m_edit, (av + d + n) % n); changed = TRUE;
+		yy += rh + gap;
+		{
+			const int g = m_edit.gender ? 1 : 0;
+			const int nMax = 63;
+			const int named = g ? TX_AVA_F31 - TX_AVA_F0 + 1 : TX_AVA_M18 - TX_AVA_M0 + 1;
+			int n = Clampi(m_r.AvatarCount(g), 1, nMax);
+			int av = CharAvatar(m_edit);
+			if (av < 1) av = 1;
+			if (av > n) av = 1;
+			const wchar_t* face = TT((g ? TX_AVA_F0 : TX_AVA_M0));
+			if (av - 1 < named) face = TT((g ? TX_AVA_F0 : TX_AVA_M0) + av - 1);
+			else face = AvaMoreName(g, av - 1 - named);
+			if (int d = Sel(ID_CR_AVATAR, bx, yy, bw, rh, TT(TX_CR_AVATAR), face)) {
+				int next = av + d;
+				if (next < 1) next = n;
+				else if (next > n) next = 1;
+				CharSetAvatar(m_edit, next); changed = TRUE;
+			}
+			note(ID_CR_AVATAR, TX_CRH_AVATAR);
 		}
-		note(ID_CR_AVATAR, TX_CRH_AVATAR);
-	}
-	yy += rh + gap;
-	{
-		int col = CharAvaCol(m_edit);
-		if (int d = Sel(ID_CR_AVACOL, bx, yy, bw, rh, TT(TX_CR_AVACOL), TT(TX_AVC_0 + col))) {
-			CharSetAvaCol(m_edit, (col + d + 8) % 8); changed = TRUE;
+		yy += rh + gap;
+		{
+			int col = CharAvaCol(m_edit);
+			if (int d = Sel(ID_CR_AVACOL, bx, yy, bw, rh, TT(TX_CR_AVACOL), TT(TX_AVC_0 + col))) {
+				CharSetAvaCol(m_edit, (col + d + 8) % 8); changed = TRUE;
+			}
+			note(ID_CR_AVACOL, TX_CRH_AVACOL);
+			DWORD tc = AvaClothTint(col);
+			if (tc) m_r.HudRect(bx + bw * .4f + U(26), yy + U(9), U(16), rh - U(18), tc | 0xFF000000);
 		}
-		note(ID_CR_AVACOL, TX_CRH_AVACOL);
-		DWORD tc = AvaClothTint(col);
-		if (tc) m_r.HudRect(bx + bw * .4f + U(26), yy + U(9), U(16), rh - U(18), tc | 0xFF000000);
+		yy += rh + gap;
 	}
-	yy += rh + gap;
-	{
+	if (!isSkel && !isMesh) {
 		static const int kHairTx[HAIR_STYLES] = {
 			TX_HAIR_DEFAULT, TX_HAIR_SHORT, TX_HAIR_LONG, TX_HAIR_PONY, TX_HAIR_TWIN, TX_HAIR_BOB,
 			TX_HAIR_STRAIGHT, TX_HAIR_WAIST, TX_HAIR_AFRO, TX_HAIR_UPDO, TX_HAIR_BUN, TX_HAIR_FEATHER
@@ -10839,17 +11132,17 @@ void Game::DrawCreateUi()
 			m_edit.hair = (m_edit.hair + d + HAIR_STYLES) % HAIR_STYLES; changed = TRUE;
 		}
 		note(ID_CR_HAIR, TX_CRH_HAIR);
+		yy += rh + gap;
+		{
+			wchar_t v[16];
+			swprintf_s(v, L"%d", m_edit.hairColor + 1);
+			if (int d = Sel(ID_CR_HAIRCOL, bx, yy, bw, rh, TT(TX_CR_HAIRCOLOR), v)) { m_edit.hairColor = (m_edit.hairColor + d + HAIR_COLORS) % HAIR_COLORS; changed = TRUE; }
+			note(ID_CR_HAIRCOL, TX_CRH_HAIRCOL);
+			DWORD hc = HairColor(m_edit.hairColor);
+			m_r.HudRect(bx + bw * .4f + U(26), yy + U(9), U(16), rh - U(18), hc | 0xFF000000);
+		}
+		yy += rh + gap;
 	}
-	yy += rh + gap;
-	{
-		wchar_t v[16];
-		swprintf_s(v, L"%d", m_edit.hairColor + 1);
-		if (int d = Sel(ID_CR_HAIRCOL, bx, yy, bw, rh, TT(TX_CR_HAIRCOLOR), v)) { m_edit.hairColor = (m_edit.hairColor + d + HAIR_COLORS) % HAIR_COLORS; changed = TRUE; }
-		note(ID_CR_HAIRCOL, TX_CRH_HAIRCOL);
-		DWORD hc = HairColor(m_edit.hairColor);
-		m_r.HudRect(bx + bw * .4f + U(26), yy + U(9), U(16), rh - U(18), hc | 0xFF000000);
-	}
-	yy += rh + gap;
 	{
 		wchar_t v[16];
 		swprintf_s(v, L"%d", CharOutfit(m_edit) + 1);
@@ -10864,13 +11157,15 @@ void Game::DrawCreateUi()
 	}
 	note(ID_CR_HEIGHT, TX_CRH_HEIGHT);
 	yy += rh + gap;
-	if (int d = Sel(ID_CR_FIG, bx, yy, bw, rh, TT(TX_CR_FIG), TT(TX_FIG_0 + CharFig(m_edit)))) {
-		CharSetFig(m_edit, (CharFig(m_edit) + d + FIG_N) % FIG_N); changed = TRUE;
+	if (!isMesh) {
+		if (int d = Sel(ID_CR_FIG, bx, yy, bw, rh, TT(TX_CR_FIG), TT(TX_FIG_0 + CharFig(m_edit)))) {
+			CharSetFig(m_edit, (CharFig(m_edit) + d + FIG_N) % FIG_N); changed = TRUE;
+		}
+		note(ID_CR_FIG, TX_CRH_FIG);
+		yy += rh + gap;
 	}
-	note(ID_CR_FIG, TX_CRH_FIG);
-	yy += rh + gap;
-	// 女性は胸の大きさ、男性は胸板の厚み。保存は同じ欄。
-	{
+	// 女性は胸の大きさ、男性は胸板の厚み。保存は同じ欄。骸骨と魔物は胸の型が無い。
+	if (!isSkel && !isMesh) {
 		const BOOL fem = m_edit.gender != 0;
 		if (int d = Sel(ID_CR_BUST, bx, yy, bw, rh, TT(fem ? TX_CR_BUST : TX_CR_PEC), TT((fem ? TX_BUST_0 : TX_PEC_0) + CharBust(m_edit)))) {
 			CharSetBust(m_edit, (CharBust(m_edit) + d + BUST_N) % BUST_N); changed = TRUE;
@@ -10878,12 +11173,16 @@ void Game::DrawCreateUi()
 		note(ID_CR_BUST, fem ? TX_CRH_BUST : TX_CRH_PEC);
 		yy += rh + gap;
 	}
-	if (Sel(ID_CR_HAT, bx, yy, bw, rh, TT(TX_CR_HAT), TT(m_edit.hat ? TX_CR_ON : TX_CR_OFF))) { m_edit.hat = !m_edit.hat; changed = TRUE; }
-	note(ID_CR_HAT, TX_CRH_HAT);
-	yy += rh + gap;
-	if (Sel(ID_CR_CAPE, bx, yy, bw, rh, TT(TX_CR_CAPE), TT(m_edit.cape ? TX_CR_ON : TX_CR_OFF))) { m_edit.cape = !m_edit.cape; changed = TRUE; }
-	note(ID_CR_CAPE, TX_CRH_CAPE);
-	yy += rh + gap + U(6);
+	if (!isMesh) {
+		if (Sel(ID_CR_HAT, bx, yy, bw, rh, TT(TX_CR_HAT), TT(m_edit.hat ? TX_CR_ON : TX_CR_OFF))) { m_edit.hat = !m_edit.hat; changed = TRUE; }
+		note(ID_CR_HAT, TX_CRH_HAT);
+		yy += rh + gap;
+		if (Sel(ID_CR_CAPE, bx, yy, bw, rh, TT(TX_CR_CAPE), TT(m_edit.cape ? TX_CR_ON : TX_CR_OFF))) { m_edit.cape = !m_edit.cape; changed = TRUE; }
+		note(ID_CR_CAPE, TX_CRH_CAPE);
+		yy += rh + gap + U(6);
+	} else {
+		yy += U(6);
+	}
 	if (changed) RefreshPreview();
 	{
 		float ix, iy, iw, ih;
@@ -11381,8 +11680,8 @@ void Game::DrawPartyUi()
 		}
 		DrawPortrait(RosterPortrait(i), cx + (cw - ps) * .5f, cy + U(6), ps, inParty ? RGBA8(120, 180, 255) : RGBA8(110, 100, 80));
 		m_r.HudText(c.name, cx + cw * .5f, cy + U(6) + ps + U(12), FitTextPx(c.name, cw - U(8), U(13), 1), m_partySel == i ? RGBA8(40, 24, 8) : RGBA8(255, 255, 255), 1, 1, m_partySel != i);
-		wchar_t l[48];
-		swprintf_s(l, L"%s%s", TT(TX_MISC_LV), TacNum(c.lv));
+		wchar_t l[64];
+		swprintf_s(l, L"%s%s", TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)));
 		m_r.HudText(l, cx + cw * .5f, cy + U(6) + ps + U(28), FitTextPx(l, cw - U(8), U(11), 0), m_partySel == i ? RGBA8(60, 40, 10) : RGBA8(210, 210, 200), 1, 0, m_partySel != i);
 		if (inParty) m_r.HudText(L"★", cx + U(12), cy + U(14), U(14), RGBA8(255, 220, 90), 1, 1);
 	}
@@ -11455,12 +11754,12 @@ void Game::DrawPartyUi()
 	float infoY = y + U(70);
 	float histDrop = DrawJobPath(m_r, c, dx + ps2 + U(26), infoY, dw - ps2 - U(40), U(12), RGBA8(210, 220, 235), maxHist);
 	infoY += histDrop + (histDrop > 0 ? U(4) : 0);
-	wchar_t l[96];
-	int need = ExpToNext(c.lv);
-	int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
-	swprintf_s(l, L"%s %s   %s %s/%s  %s %s", TT(TX_MISC_LV), TacNum(c.lv), TT(TX_MISC_EXP), TacNum(c.exp), TacNum(need), TT(TX_EXP_LEFT), TacNum(left));
+	wchar_t l[160];
+	unsigned __int64 tlv; int showExp, need, left;
+	CharExpView(c, tlv, showExp, need, left);
+	swprintf_s(l, L"%s %s   %s %s/%s  %s %s", TT(TX_MISC_LV), TacNumU64(tlv), TT(TX_MISC_EXP), TacNum(showExp), TacNum(need), TT(TX_EXP_LEFT), TacNum(left));
 	m_r.HudText(l, dx + ps2 + U(26), infoY, FitTextPx(l, dw - ps2 - U(40), U(14), 0), RGBA8(220, 220, 220), 0, 0);
-	Bar(dx + ps2 + U(26), infoY + U(12), dw - ps2 - U(44), U(8), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
+	Bar(dx + ps2 + U(26), infoY + U(12), dw - ps2 - U(44), U(8), need > 0 ? showExp / (float)need : 1.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 	swprintf_s(l, L"%s %s  /  %s %s", TT(TX_BT_DEFEATED), TacNum(c.kills), TT(TX_BT_STAGE), TacNum(c.battles));
 	m_r.HudText(l, dx + ps2 + U(26), infoY + U(26), FitTextPx(l, dw - ps2 - U(40), U(12), 0), RGBA8(190, 190, 190), 0, 0);
 	int gearBonus[S_COUNT];
@@ -11641,8 +11940,7 @@ void Game::DrawPartyUi()
 						const SkillDef& sd = SkillInfo(sks[si].id);
 						wcscpy_s(nm, SkillLabel(sks[si].id));
 						if (sd.kind != SK_PASSIVE) {
-							if (sd.effect == EF_WARP) swprintf_s(mp, L"MP%d", SkillMpCost(c.stat[S_MP], sks[si].id));
-							else swprintf_s(mp, L"MP%d", sd.mp);
+							swprintf_s(mp, L"MP%d", SkillMpCost(c.stat[S_MP], sks[si].id));
 							showMp = TRUE;
 						}
 					}
@@ -11939,14 +12237,14 @@ void Game::DrawEvoCut()
 	if (show > 0.02f && m_evoTo >= 0) {
 		float pulse = 1.f + 0.06f * sinf(t * 8.f);
 		float titleY = H * 0.12f + sinf(t * 2.2f) * U(4);
-		m_r.HudText(TT(TX_EV_TITLE), cx, titleY, U(36) * pulse, RGBA8(255, 226, 150), 1, 1, 1, show);
+		m_r.HudText(TacHidClass(m_evoTo) ? TT(TX_HID_TITLE) : TT(TX_EV_TITLE), cx, titleY, U(36) * pulse, RGBA8(255, 226, 150), 1, 1, 1, show);
 		// 新職名を画面中央に超大きく
 		float nameSz = min(U(92.f), W * 0.12f) * pulse;
 		m_r.HudText(ClassName(m_evoTo), cx, cy + U(48), nameSz, RGBA8(255, 246, 214), 1, 1, 1, show);
 		wchar_t line[180];
 		swprintf_s(line, L"%s    %s  →  %s", nm, m_evoFrom >= 0 ? ClassName(m_evoFrom) : L"", ClassName(m_evoTo));
 		m_r.HudText(line, cx, H * 0.84f, U(24), RGBA8(240, 232, 255), 1, 0, 1, show);
-		m_r.HudText(LangPick14(L"職が進化した！", L"Job evolved!", L"Classe évoluée !", L"Classe evoluta!", L"¡Clase evolucionada!", L"직업이 진화했다!", L"职业进化了！", L"تطور الصف!", L"Класс эволюционировал!", L"Beruf entwickelt!", L"Classe evoluiu!", L"Klasse geëvolueerd!", L"Klasa ewoluowała!", L"Sınıf evrildi!"),
+		m_r.HudText(TacHidClass(m_evoTo) ? TT(TX_HID_LINE) : LangPick14(L"職が進化した！", L"Job evolved!", L"Classe évoluée !", L"Classe evoluta!", L"¡Clase evolucionada!", L"직업이 진화했다!", L"职业进化了！", L"تطور الصف!", L"Класс эволюционировал!", L"Beruf entwickelt!", L"Classe evoluiu!", L"Klasse geëvolueerd!", L"Klasa ewoluowała!", L"Sınıf evrildi!"),
 			cx, H * 0.90f, U(18), RGBA8(255, 210, 140), 1, 0, 1, show * 0.9f);
 	}
 }
@@ -12149,8 +12447,8 @@ void Game::DrawJobRedo()
 	swprintf_s(head, L"%s   %d / %d", c.name, ord, total);
 	m_r.HudText(head, x + U(88), y + U(28), U(18), RGBA8(255, 255, 255), 0, 1);
 	DrawPortrait(RosterPortrait(m_jobWho), x + U(16), y + U(14), U(64), RGBA8(200, 170, 110));
-	wchar_t now[96];
-	swprintf_s(now, L"%s  %s  Lv%d", TT(TX_JOB_NOW), ClassName(c.cls), c.lv);
+	wchar_t now[128];
+	swprintf_s(now, L"%s  %s  Lv%s", TT(TX_JOB_NOW), ClassName(c.cls), TacNumU64(CharTrueLv(c)));
 	m_r.HudText(now, x + w - U(20), y + U(26), U(14), RGBA8(220, 210, 170), 2, 0);
 	BOOL strUp = c.stat[S_STR] >= c.stat[S_MAG];
 	BOOL hpUp = c.stat[S_HP] >= c.stat[S_MP];
@@ -12327,8 +12625,6 @@ void Game::DrawEvolveUi()
 	if (m_evoCut) { DrawEvoCut(); return; }
 	float x = U(20), y = U(20), w = (float)m_w - U(40), h = (float)m_h - U(40);
 	Panel(x, y, w, h);
-	m_r.HudText(TT(TX_EV_TITLE), x + U(20), y + U(26), U(22), RGBA8(255, 226, 150), 0, 1);
-	m_r.HudText(TT(TX_EV_HINT_MAIN), x + w - U(20), y + U(26), U(13), RGBA8(210, 210, 220), 2, 0);
 	float colW = (w - U(60)) / 3.f;
 	float c0 = x + U(20), c1 = c0 + colW + U(10), c2 = c1 + colW + U(10);
 	float top = y + U(56);
@@ -12342,8 +12638,21 @@ void Game::DrawEvolveUi()
 			m_evPick = 0;
 		}
 	}
+	BOOL hidFace = FALSE;
+	if (m_evMain >= 0) {
+		const CharData& held = m_save.roster[m_evMain];
+		int from = EvoTrialOpen(held) ? held.trialFrom : held.cls;
+		hidFace = TacHidClass(held.cls) || TacHidClass(from);
+		if (!hidFace) {
+			EvoOption peek[4];
+			int pn = EvoOptions(from, peek, 1);
+			for (int k = 0; k < pn; k++) if (TacHidClass(peek[k].target)) hidFace = TRUE;
+		}
+	}
+	m_r.HudText(hidFace ? TT(TX_HID_TITLE) : TT(TX_EV_TITLE), x + U(20), y + U(26), U(22), RGBA8(255, 226, 150), 0, 1);
+	m_r.HudText(TT(TX_EV_HINT_MAIN), x + w - U(20), y + U(26), U(13), RGBA8(210, 210, 220), 2, 0);
 	// 1列目: 本体
-	m_r.HudText(TT(TX_EV_MAIN), c0, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
+	m_r.HudText(hidFace ? TT(TX_HID_WHO) : TT(TX_EV_MAIN), c0, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
 	int mains[MAX_ROSTER];
 	int nElig = 0;
 	for (int i = 0; i < MAX_ROSTER; i++) {
@@ -12380,8 +12689,8 @@ void Game::DrawEvolveUi()
 	for (int k = m_evMainPage * fitMain; k < nElig && k < (m_evMainPage + 1) * fitMain; k++) {
 		int i = mains[k];
 		const CharData& c = m_save.roster[i];
-		wchar_t l[96];
-		swprintf_s(l, L"%s  %s %s%d", c.name, ClassName(c.cls), TT(TX_MISC_LV), c.lv);
+		wchar_t l[160];
+		swprintf_s(l, L"%s  %s %s%s", c.name, ClassName(c.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)));
 		if (Btn(ID_EV_MAIN0 + i, c0 + rowH, ry, colW - rowH, rowH - U(6), l, TRUE, m_evMain == i, U(14))) {
 			m_evMain = i; m_evTarget = -1; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 1; m_evPartPage = 0;
 		}
@@ -12403,7 +12712,7 @@ void Game::DrawEvolveUi()
 		BOOL trial = EvoTrialOpen(mc);
 		wchar_t head[96];
 		if (trial) swprintf_s(head, L"%s  Lv%d", TT(TX_EV_TRIAL), mc.trialLv + 3);
-		else wcscpy_s(head, TT(TX_EV_TARGET));
+		else wcscpy_s(head, hidFace ? TT(TX_HID_INTO) : TT(TX_EV_TARGET));
 		m_r.HudText(head, c1, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
 		wchar_t path[640];
 		JobPathText(mc, path, 640);
@@ -12485,7 +12794,7 @@ void Game::DrawEvolveUi()
 		}
 		if (m_evTarget >= 0 && EvoPartnersNeeded(mc) <= 0) {
 			m_btnSfx = -2;
-			const wchar_t* doLb = (stayCls >= 0 && m_evTarget == stayCls && stayLb[0]) ? stayLb : TT(TX_EV_DO);
+			const wchar_t* doLb = (stayCls >= 0 && m_evTarget == stayCls && stayLb[0]) ? stayLb : (TacHidClass(m_evTarget) ? TT(TX_HID_DO) : TT(TX_EV_DO));
 			if (Btn(ID_EV_DO, c1, y + h - U(56), colW * .72f, U(40), doLb, TRUE, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
 		}
 	}
@@ -12535,9 +12844,9 @@ void Game::DrawEvolveUi()
 			const CharData& c = m_save.roster[i];
 			BOOL can = partOk[k] != 0;
 			BOOL picked = can && (m_evPartner[0] == i || m_evPartner[1] == i);
-			wchar_t l[96];
-			if (can) swprintf_s(l, L"%s  %s %s%d", c.name, ClassName(c.cls), TT(TX_MISC_LV), c.lv);
-			else swprintf_s(l, L"%s  %s %s%d  (%s%d)", c.name, ClassName(c.cls), TT(TX_MISC_LV), c.lv, TT(TX_MISC_LV), needLv);
+			wchar_t l[160];
+			if (can) swprintf_s(l, L"%s  %s %s%s", c.name, ClassName(c.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)));
+			else swprintf_s(l, L"%s  %s %s%s  (%s%d)", c.name, ClassName(c.cls), TT(TX_MISC_LV), TacNumU64(CharTrueLv(c)), TT(TX_MISC_LV), needLv);
 			if (Btn(ID_EV_PART0 + i, c2 + rowH, py, colW - rowH, rowH - U(6), l, can, picked, U(14))) {
 				if (picked) { if (m_evPartner[0] == i) m_evPartner[0] = -1; if (m_evPartner[1] == i) m_evPartner[1] = -1; }
 				else {
@@ -12562,7 +12871,7 @@ void Game::DrawEvolveUi()
 		BOOL ok = n >= need && EvoGroupSatisfied(needGroup, ps, n);
 		if (n >= need && !ok) m_r.HudText(TT(TX_EV_NEED_GROUP), c2 + colW * .5f, y + h - U(72), U(13), RGBA8(255, 150, 140), 1, 1);
 		m_btnSfx = -2;
-		if (Btn(ID_EV_DO, c2, y + h - U(56), colW * .6f, U(40), TT(TX_EV_DO), ok, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
+		if (Btn(ID_EV_DO, c2, y + h - U(56), colW * .6f, U(40), TacHidClass(m_evTarget) ? TT(TX_HID_DO) : TT(TX_EV_DO), ok, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
 	} else m_evPartPages = 1;
 	if (Btn(ID_EV_BACK, x + w - U(160) - U(20), y + h - U(56), U(160), U(40), TT(TX_CR_BACK))) {
 		if (m_evFromParty) { m_evFromParty = 0; EnterParty(); return; }
@@ -12590,17 +12899,17 @@ void Game::DrawResultUi()
 		DrawPortrait(RosterPortrait(r), x + U(30), ry, rowH - U(8), RGBA8(120, 160, 255));
 		m_r.HudText(c.name, x + U(30) + rowH + U(4), ry + rowH * .28f, U(17), RGBA8(255, 255, 255), 0, 1);
 		m_r.HudText(ClassName(c.cls), x + U(30) + rowH + U(4), ry + rowH * .62f, U(13), RGBA8(255, 226, 150), 0, 0);
-		wchar_t l[96];
-		if (c.lv > m_resultLv0[i]) swprintf_s(l, L"%s %s → %s", TT(TX_MISC_LV), TacNum(m_resultLv0[i]), TacNum(c.lv));
-		else swprintf_s(l, L"%s %s", TT(TX_MISC_LV), TacNum(c.lv));
+		wchar_t l[160];
+		unsigned __int64 tlv; int showExp, need, left;
+		CharExpView(c, tlv, showExp, need, left);
+		if (c.lv > m_resultLv0[i]) swprintf_s(l, L"%s %s → %s", TT(TX_MISC_LV), TacNum(m_resultLv0[i]), TacNumU64(tlv));
+		else swprintf_s(l, L"%s %s", TT(TX_MISC_LV), TacNumU64(tlv));
 		float nameEnd = x + U(30) + rowH + U(4) + U(160);
 		float lvW = max(40.f, x + w * .62f - nameEnd);
 		m_r.HudText(l, nameEnd + lvW * .5f, ry + rowH * .3f, FitTextPx(l, lvW, U(16), 1), c.lv > m_resultLv0[i] ? RGBA8(140, 255, 150) : RGBA8(230, 230, 230), 1, 1);
-		int need = ExpToNext(c.lv);
-		int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
 		swprintf_s(l, L"%s +%s  %s %s", TT(TX_BT_EXP), TacNum(m_resultExp[i]), TT(TX_EXP_LEFT), TacNum(left));
 		m_r.HudText(l, nameEnd + lvW * .5f, ry + rowH * .64f, FitTextPx(l, lvW, U(13), 0), RGBA8(200, 220, 255), 1, 0);
-		Bar(x + w * .66f, ry + rowH * .4f, w * .28f, U(10), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
+		Bar(x + w * .66f, ry + rowH * .4f, w * .28f, U(10), need > 0 ? showExp / (float)need : 1.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 		ry += rowH;
 	}
 	float by = y + h - U(60);
