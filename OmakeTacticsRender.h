@@ -722,10 +722,11 @@ public:
 	void DrawGear(int i, const M4& world, const DrawParams& dp);
 	int AddProcModel(const Model& m, const Buf<VtxK>& v, const Buf<WORD>& idx);
 	BOOL MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const WORD* idx, UINT ni, BOOL dynamic = FALSE);
+	BOOL LoadPngTex(const BYTE* data, UINT len, int slot);
 	BOOL MakeMesh32(GpuMesh& out, const void* v, UINT stride, UINT nv, const UINT* idx, UINT ni);
 
 	// ポーズ
-	void EvalPose(const Model& m, int clipA, float tA, int loopA, int clipB, float tB, int loopB, float blend, const PoseMods* mods, Pose& out) const;
+	void EvalPose(const Model& m, int clipA, float tA, int loopA, int clipB, float tB, int loopB, float blend, const PoseMods* mods, Pose& out, const Q4* holdQ = NULL, const V3* holdP = NULL, int holdN = 0) const;
 	void EvalPoseLocal(const Model& m, const Q4* rot, const V3* trans, const PoseMods* mods, Pose& out) const;
 	void FinishPose(const Model& m, Pose& p, const PoseMods* mods = NULL) const;
 
@@ -920,7 +921,6 @@ private:
 	BOOL ApplyPost();
 	BOOL CreateProcTextures();
 	void PollStageLook();
-	BOOL LoadPngTex(const BYTE* data, UINT len, int slot);
 	TextSprite* GetText(const wchar_t* s, float px, int bold, int shadow, int box, float boxW, float boxH);
 	void FlushHud();
 	void UpdateFrameCB();

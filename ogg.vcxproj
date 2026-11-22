@@ -1338,6 +1338,7 @@ if errorlevel 1 exit /b 1</Command>
       <AdditionalOptions>/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="TagEditDlg.cpp" />
+    <ClCompile Include="TagGridDlg.cpp" />
     <ClCompile Include="TagBatchEditDlg.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
@@ -1528,6 +1529,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="ScLiveSettingsDlg.h" />
     <ClInclude Include="ScWgcCapture.h" />
     <ClInclude Include="TagEditDlg.h" />
+    <ClInclude Include="TagGridDlg.h" />
     <ClInclude Include="TagBatchEditDlg.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />

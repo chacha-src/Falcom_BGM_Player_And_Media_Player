@@ -185,9 +185,8 @@ CString CId3tagv2::GetId3String(const char szId[])
 
 			// 言語文字列読み飛ばし、説明文取得
 			CString desc = ReadEncodedTextString(data[0], &data[4], p->second.GetSize()-4, &dwReadSize);
-			if(desc.Left(4) == _T("iTun"))
+			if(desc.Left(4) == _T("iTun") || desc == _T("LYRICS"))
 			{
-				// iTunes固有のコメントはスキップ (iTunNORM, iTunSMPB, etc.)
 				continue;
 			}
 			//本文
@@ -407,9 +406,8 @@ void CId3tagv2::SetId3String(const char szId[],LPCTSTR szString,LPCTSTR szDescri
 			// 言語文字列読み飛ばし、説明文取得
 			DWORD dwReadSize;
 			CString desc = ReadEncodedTextString(data[0], &data[4], p->second.GetSize()-4, &dwReadSize);
-			if(desc.Left(4) == _T("iTun"))
+			if(desc.Left(4) == _T("iTun") || desc == _T("LYRICS"))
 			{
-				// iTunes固有のコメントはスキップ (iTunNORM, iTunSMPB, etc.)
 				continue;
 			}
 
@@ -881,6 +879,94 @@ void CId3tagv2::SetComposer(LPCTSTR composer)
 {
 	//作曲
 	SetId3String("TCOM",composer);
+}
+
+CString CId3tagv2::GetDisc()
+{
+	return GetId3String("TPOS");
+}
+
+void CId3tagv2::SetDisc(LPCTSTR disc)
+{
+	SetId3String("TPOS", disc);
+}
+
+CString CId3tagv2::GetBpm()
+{
+	return GetId3String("TBPM");
+}
+
+void CId3tagv2::SetBpm(LPCTSTR bpm)
+{
+	SetId3String("TBPM", bpm);
+}
+
+CString CId3tagv2::GetLyricist()
+{
+	return GetId3String("TEXT");
+}
+
+void CId3tagv2::SetLyricist(LPCTSTR lyricist)
+{
+	SetId3String("TEXT", lyricist);
+}
+
+CString CId3tagv2::GetLyrics()
+{
+	DWORD dwId;
+	memcpy(&dwId, "COMM", 4);
+	pair< multimap< DWORD , CId3Frame >::iterator, multimap< DWORD , CId3Frame >::iterator > pp;
+	for (pp = m_frames.equal_range(dwId); pp.first != pp.second; ++pp.first)
+	{
+		if (pp.first->second.GetSize() < 5) continue;
+		unsigned char *data = pp.first->second.GetData();
+		DWORD dwReadSize = 0;
+		CString desc = ReadEncodedTextString(data[0], &data[4], pp.first->second.GetSize() - 4, &dwReadSize);
+		if (desc != _T("LYRICS")) continue;
+		return ReadEncodedTextString(data[0], &data[4 + dwReadSize], pp.first->second.GetSize() - 4 - dwReadSize, NULL);
+	}
+	return _T("");
+}
+
+void CId3tagv2::SetLyrics(LPCTSTR lyrics)
+{
+	DWORD dwId;
+	memcpy(&dwId, "COMM", 4);
+	pair< multimap< DWORD , CId3Frame >::iterator, multimap< DWORD , CId3Frame >::iterator > pp;
+	for (pp = m_frames.equal_range(dwId); pp.first != pp.second; )
+	{
+		if (pp.first->second.GetSize() < 5) { ++pp.first; continue; }
+		unsigned char *data = pp.first->second.GetData();
+		DWORD dwReadSize = 0;
+		CString desc = ReadEncodedTextString(data[0], &data[4], pp.first->second.GetSize() - 4, &dwReadSize);
+		if (desc == _T("LYRICS"))
+			pp.first = m_frames.erase(pp.first);
+		else
+			++pp.first;
+	}
+	if (!lyrics || !lyrics[0]) return;
+	int encPrev = m_encode;
+	m_encode = ID3V2CHARENCODE_UTF_16;
+	int tneed = TstrToData(lyrics, -1, NULL, 0, DTC_CODE_UTF16LE);
+	int size = 4 + 2 + 16 + 2 + 2 + tneed;
+	unsigned char *data = (unsigned char *)malloc(size);
+	if (!data) { m_encode = encPrev; return; }
+	data[0] = 1;
+	data[1] = 'e'; data[2] = 'n'; data[3] = 'g';
+	data[4] = 0xff; data[5] = 0xfe;
+	int dlen = TstrToData(_T("LYRICS"), -1, (char *)&data[6], 16, DTC_CODE_UTF16LE);
+	int nul = 6 + dlen;
+	data[nul] = 0; data[nul + 1] = 0;
+	data[nul + 2] = 0xff; data[nul + 3] = 0xfe;
+	int tlen = TstrToData(lyrics, -1, (char *)&data[nul + 4], tneed, DTC_CODE_UTF16LE);
+	int total = nul + 4 + tlen;
+	m_encode = encPrev;
+	CId3Frame frame;
+	frame.SetId(dwId);
+	frame.SetFlags(0);
+	frame.SetData(data, total);
+	m_frames.insert(pair<DWORD, CId3Frame>(dwId, frame));
+	free(data);
 }
 
 CString CId3tagv2::GetOrigArtist()

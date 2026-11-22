@@ -8,6 +8,7 @@
 #include <string>
 #include "OxzId.h"
 #include "OxzLang.h"
+#include "OxzExt.h"
 
 static HINSTANCE g_hinst = NULL;
 static volatile long g_objs = 0;
@@ -251,7 +252,8 @@ private:
 
 enum {
 	ACT_OPEN = 1, ACT_EXTRACT_DLG, ACT_EXTRACT_HERE, ACT_EXTRACT_TO, ACT_TEST,
-	ACT_COMPRESS_DLG, ACT_COMPRESS, ACT_DRAG_HERE, ACT_DRAG_FOLDER, ACT_DRAG_CREATE
+	ACT_COMPRESS_DLG, ACT_COMPRESS, ACT_DRAG_HERE, ACT_DRAG_FOLDER, ACT_DRAG_CREATE,
+	ACT_TAG = 20, ACT_CONV = 21, ACT_PACK_EACH = 22
 };
 
 struct OxzCmd { int act; std::wstring extra; };
@@ -270,9 +272,37 @@ static bool IsDirPath(const std::wstring& path)
 	return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-static bool IsOxzFile(const std::wstring& path)
+static bool EndsI(const std::wstring& path, const wchar_t* ext)
 {
-	return EndsOxz(path) && !IsDirPath(path);
+	size_t n = path.size();
+	size_t e = ext ? wcslen(ext) : 0;
+	return e && e <= n && _wcsicmp(path.c_str() + n - e, ext) == 0;
+}
+
+static bool IsExtractable(const std::wstring& path)
+{
+	if (IsDirPath(path)) return false;
+	for (int i = 0; kOxzExtractExts[i]; ++i)
+		if (EndsI(path, kOxzExtractExts[i])) return true;
+	return false;
+}
+
+static void StripArcExt(std::wstring& name)
+{
+	for (int i = 0; kOxzExtractExts[i]; ++i) {
+		if (!EndsI(name, kOxzExtractExts[i])) continue;
+		name.resize(name.size() - wcslen(kOxzExtractExts[i]));
+		break;
+	}
+	if (EndsI(name, L".tar")) name.resize(name.size() - 4);
+}
+
+static bool IsAudioPath(const std::wstring& path)
+{
+	if (path.size() < 5 || IsDirPath(path)) return false;
+	const wchar_t* e = path.c_str() + path.size() - 4;
+	if (path.size() >= 5 && _wcsicmp(path.c_str() + path.size() - 5, L".flac") == 0) return true;
+	return _wcsicmp(e, L".wav") == 0 || _wcsicmp(e, L".mp3") == 0;
 }
 
 static std::wstring BaseOf(const std::wstring& path)
@@ -367,6 +397,9 @@ static const wchar_t* VerbOf(int act)
 	case ACT_COMPRESS: return L"oxz.compress";
 	case ACT_DRAG_HERE: return L"oxz.draghere";
 	case ACT_DRAG_FOLDER: return L"oxz.dragfolder";
+	case ACT_TAG: return L"oxz.tagedit";
+	case ACT_CONV: return L"oxz.convert";
+	case ACT_PACK_EACH: return L"oxz.packeach";
 	default: return L"oxz.create";
 	}
 }
@@ -453,7 +486,7 @@ public:
 			int oxzCount = 0;
 			std::wstring one;
 			for (size_t i = 0; i < m_files.size(); ++i) {
-				if (!IsOxzFile(m_files[i])) continue;
+				if (!IsExtractable(m_files[i])) continue;
 				oxzCount++;
 				one = m_files[i];
 			}
@@ -484,6 +517,7 @@ public:
 					if (AddItem(hmenu, OxzTxt(OS_DRAG_FOLDER), ACT_DRAG_FOLDER, m_folder, at)) at++;
 				}
 				if (AddItem(hmenu, Format1(OS_DRAG_CREATE, BaseOf(dest)), ACT_DRAG_CREATE, dest, at)) at++;
+				if (m_files.size() > 1 && AddItem(hmenu, OxzTxt(OS_PACK_EACH_HERE), ACT_PACK_EACH, m_folder, at)) at++;
 				HMENU formats = CreatePopupMenu();
 				if (formats) {
 					AddItem(formats, OxzTxt(OS_MENU), ACT_DRAG_CREATE, dest);
@@ -516,11 +550,12 @@ public:
 			if (verbW && !IS_INTRESOURCE(verbW)) {
 				for (size_t i = 0; i < m_cmds.size(); ++i)
 					if (wcscmp(verbW, VerbOf(m_cmds[i].act)) == 0) { offset = i; break; }
+			} else if (!verbW && info->lpVerb && !IS_INTRESOURCE(info->lpVerb)) {
+				return E_FAIL;
 			} else if (verbW) {
 				offset = LOWORD((ULONG_PTR)verbW);
-			} else if (info->lpVerb && !IS_INTRESOURCE(info->lpVerb)) {
-				return E_FAIL;
-			} else if (info->lpVerb) {
+			} else {
+				// The first command is offset 0. MAKEINTRESOURCE(0) is a null pointer.
 				offset = LOWORD((ULONG_PTR)info->lpVerb);
 			}
 			if (offset >= m_cmds.size()) return E_INVALIDARG;
@@ -584,16 +619,25 @@ private:
 			AddItem(sub, OxzTxt(OS_SHELL_HERE), ACT_EXTRACT_HERE, L"");
 			if (oxzCount == 1) {
 				std::wstring stem = BaseOf(one);
-				if (EndsOxz(stem)) stem.resize(stem.size() - 4);
+				StripArcExt(stem);
 				if (stem.empty()) stem = L"oxz";
 				AddItem(sub, Format1(OS_EXTRACT_TO_NAME, stem), ACT_EXTRACT_TO, L"");
 			}
-			else AddItem(sub, OxzTxt(OS_SHELL_TO), ACT_EXTRACT_TO, L"");
+			else AddItem(sub, OxzTxt(OS_EXTRACT_EACH), ACT_EXTRACT_TO, L"");
 			AddItem(sub, OxzTxt(OS_TEST), ACT_TEST, L"");
 			AddSep(sub);
 		}
 		AddItem(sub, OxzTxt(OS_COMPRESS_DLG), ACT_COMPRESS_DLG, L"");
 		AddItem(sub, Format1(OS_COMPRESS_TO, BaseOf(dest)), ACT_COMPRESS, dest);
+		if (!m_drag && m_files.size() > 1) AddItem(sub, OxzTxt(OS_PACK_EACH), ACT_PACK_EACH, L"");
+		int audio = 0;
+		for (size_t i = 0; i < m_files.size(); ++i)
+			if (IsAudioPath(m_files[i])) audio++;
+		if (audio) {
+			AddSep(sub);
+			AddItem(sub, OxzTxt(OS_TAGEDIT), ACT_TAG, L"");
+			AddItem(sub, OxzTxt(OS_CONVERT), ACT_CONV, L"");
+		}
 	}
 	bool Run(const OxzCmd& c)
 	{
@@ -606,7 +650,13 @@ private:
 		if (c.act == ACT_EXTRACT_DLG || c.act == ACT_EXTRACT_HERE || c.act == ACT_EXTRACT_TO || c.act == ACT_TEST || c.act == ACT_DRAG_HERE || c.act == ACT_DRAG_FOLDER) {
 			use.clear();
 			for (size_t i = 0; i < m_files.size(); ++i)
-				if (IsOxzFile(m_files[i])) use.push_back(m_files[i]);
+				if (IsExtractable(m_files[i])) use.push_back(m_files[i]);
+			if (use.empty()) return false;
+		}
+		if (c.act == ACT_TAG || c.act == ACT_CONV) {
+			use.clear();
+			for (size_t i = 0; i < m_files.size(); ++i)
+				if (IsAudioPath(m_files[i])) use.push_back(m_files[i]);
 			if (use.empty()) return false;
 		}
 		std::wstring list = OxzListFile();
@@ -617,11 +667,16 @@ private:
 		case ACT_EXTRACT_HERE: args = L"/exthere " + OxzQ(list); break;
 		case ACT_EXTRACT_TO: args = L"/extractto " + OxzQ(list); break;
 		case ACT_TEST: args = L"/test " + OxzQ(list); break;
+		case ACT_TAG: args = L"/tagedit " + OxzQ(list); break;
+		case ACT_CONV: args = L"/convert " + OxzQ(list); break;
 		case ACT_COMPRESS_DLG: args = L"/editlist " + OxzQ(list); break;
 		case ACT_COMPRESS:
 		case ACT_DRAG_CREATE: args = L"/packto " + OxzQ(c.extra) + L" /list " + OxzQ(list); break;
 		case ACT_DRAG_HERE: args = L"/extdest " + OxzQ(c.extra) + L" /list " + OxzQ(list); break;
 		case ACT_DRAG_FOLDER: args = L"/extdest " + OxzQ(c.extra) + L" /sub /list " + OxzQ(list); break;
+		case ACT_PACK_EACH:
+			args = c.extra.empty() ? (L"/packeach " + OxzQ(list)) : (L"/packeachto " + OxzQ(c.extra) + L" /list " + OxzQ(list));
+			break;
 		default: return false;
 		}
 		return OxzLaunch(args);

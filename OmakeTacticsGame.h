@@ -377,6 +377,7 @@ private:
 	void PoseLinkAllies();
 	void CutDressFx();
 	float CutIntroLen() const;
+	float CutExitSpan() const;
 	void ActorForUnit(int ui);
 	void LoadBattleCast();
 	// 読み込み済みの輸入メッシュを、まだ結んでいない敵アクターへ付け直す。
@@ -397,11 +398,13 @@ private:
 	void SpawnDebris(V3 p, V3 vel, int kind, int n, float sc, DWORD tint);
 	void UpdateDebris(float dt);
 	void DrawDebris(const M4* mapXform = NULL);
+	void DrawCc0Props(const Particle* ps, int nPart, const CutFxPt* fx, int nfx);
 	void ResetGroundMarks(BOOL home);
 	void StampGroundDrag(float x0, float z0, float x1, float z1, float width, float strength, int kind, BOOL home = FALSE);
 	void StampGroundRing(float cx, float cz, float rad, float strength, int kind, BOOL home = FALSE);
 	void SyncGroundMarks(BOOL home, float dt);
 	void UpdateParticles(float dt);
+	void ClingBodies(float dt);
 	void TickClimate(float dt);
 	void TickAeolian(float dt);
 	void UpdateWeatherEvents(float dt);

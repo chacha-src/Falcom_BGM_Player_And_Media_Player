@@ -124,7 +124,7 @@ Texture2D ShadowMap : register(t1);
 Texture2D DepthMap : register(t2); // グレード専用。近いほど 0、空は 1。
 Texture2DArray Ground : register(t3); // 0..7 地面アルベド(a=AO) 8..15 法線。スロット表の外。
 Texture2DArray Mat : register(t4);    // 樹皮・葉・岩・木材。各アルベドと法線。
-	Texture2DArray Photo : register(t5);  // 0..13 実写アルベド(a>0.5で有効) 14..27 法線
+	Texture2DArray Photo : register(t5);  // 0..16 実写アルベド(a>0.5で有効) 17..33 法線 34水 35水法線 36溶岩 37溶岩法線
 Texture2D SphereMap : register(t6);   // 反射ベクトルの球体マップ
 TextureCube EnvMap : register(t7);    // ステージの環境キューブ
 Texture2D LiveRef : register(t8);     // キャラ・敵・上位レイヤーを映した反射
@@ -1667,6 +1667,10 @@ GOut PSWater(PSIn i)
 	float3 v = normalize(Eye.xyz - i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
 	float3 albedo = tx.rgb * i.c.rgb * Tint.rgb;
+	{
+		float4 wph = Photo.Sample(SL, float3(i.uv * 3.0, 34));
+		if (wph.a > 0.5) albedo = lerp(albedo, wph.rgb, 0.28);
+	}
 	float alpha = Tint.a;
 	float t = Eye.w;
 	float thw = FogColor.a;
@@ -1685,6 +1689,10 @@ GOut PSWater(PSIn i)
 	dh += rdh;
 	h += dot(rdh, rdh) * 0.15;
 	float3 wn = DetailN(normalize(float3(-dh.x, 1, -dh.y)), i.w);
+	{
+		float3 wnm = Photo.Sample(SL, float3(xz * 0.42 + float2(t * 0.03, t * 0.01), 35)).rgb * 2 - 1;
+		wn = normalize(wn + float3(wnm.x, 0, -wnm.y) * 0.55);
+	}
 	float ndv = saturate(dot(wn, v));
 	float fr = pow(1. - ndv, 4.);
 	float crest = smoothstep(amp * 0.55, amp * 1.35, h);
@@ -1831,6 +1839,12 @@ GOut PSLava(PSIn i)
 	if (i.n.y < 0.35)
 		return LavaFall(i);
 	float3 col = LavaColor(i.w.xz, t, v);
+	{
+		float4 lph = Photo.Sample(SL, float3(i.w.xz * 0.35, 36));
+		if (lph.a > 0.5) col = lerp(col, lph.rgb * float3(1.45, 0.72, 0.32), 0.55);
+		float3 lnm = Photo.Sample(SL, float3(i.w.xz * 0.35, 37)).rgb * 2 - 1;
+		col *= lerp(0.78, 1.18, saturate(lnm.z * 0.5 + 0.5));
+	}
 	[branch] if (ReflectInfo.z < 0.5) {
 		if (Q.x > 4.5) {
 			float2 o = (Q.x > 5.5) ? float2(0.03, 0.014) : float2(0.04, 0.018);
@@ -2407,7 +2421,7 @@ GOut GroundPS(PSIn i, float theme)
 			float2 st = dir / steps;
 			float h = 1;
 			[loop] for (int s = 0; s < steps; s++) {
-				float lum = dot(Photo.SampleLevel(SL, float3(puv, theme + 14), 0).rgb, float3(0.30, 0.59, 0.11));
+				float lum = dot(Photo.SampleLevel(SL, float3(puv, theme + 17), 0).rgb, float3(0.30, 0.59, 0.11));
 				if (lum >= h) break;
 				h -= 1.0 / steps;
 				puv -= st;
@@ -2446,9 +2460,9 @@ GOut GroundPS(PSIn i, float theme)
 				else if (theme > 4.5 && theme < 5.5) albedo *= lerp(float3(1, 1, 1), float3(0.9, 0.62, 0.5), 0.34);
 			}
 			if (tier > 1.5 || dedicated) {
-				float3 pn = Photo.Sample(SL, float3(puv, theme + 14)).rgb;
+				float3 pn = Photo.Sample(SL, float3(puv, theme + 17)).rgb;
 			if (tier > 4.5 && !(theme > 9.5 && theme < 12.5)) {
-				float3 pn2 = Photo.Sample(SL, float3(i.w.xz * 0.46, theme + 14)).rgb;
+				float3 pn2 = Photo.Sample(SL, float3(i.w.xz * 0.46, theme + 17)).rgb;
 				pn = lerp(pn, pn2, 0.35);
 			}
 				nLit = DetailN(Bump(n, pn), i.w);

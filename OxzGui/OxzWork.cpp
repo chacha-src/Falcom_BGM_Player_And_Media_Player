@@ -1,4 +1,5 @@
 #include "OxzWork.h"
+#include "OxzArc.h"
 #include "OxzLang.h"
 #include "OxzFilt.h"
 #include <windows.h>
@@ -653,27 +654,43 @@ static int OxzRun7za(const std::wstring& args, const wchar_t* cwd, int base, int
 	return code == 0 ? 0 : (int)code;
 }
 
-int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span)
+static int OxzExtract7za(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span, int rip)
 {
 	if (!OxzHas7za()) { err = OxzTxt(OS_NO7ZA); return 2; }
 	if (span < 1) span = 1;
-	OxzProgArchive(arc);
-	CreateDirectoryW(dest, NULL);
-	int zSpan = span * 85 / 100;
+	int zSpan = rip ? span * 85 / 100 : span;
 	if (zSpan < 1) zSpan = span;
 	int ripSpan = span - zSpan;
 	std::wstring args = L"x -y -sccUTF-8 -bb1 -bsp1 -bso1 " + OxzQuote(std::wstring(L"-o") + dest) + L" " + OxzQuote(arc);
 	int rc = OxzRun7za(args, NULL, base, zSpan);
 	if (rc != 0) { err = OxzTxt(OS_OPEN_FAIL); return rc; }
-	unsigned files = 0;
-	unsigned long long nbytes = 0;
-	OxzCountDir(dest, files, nbytes);
-	{
+	if (rip) {
+		unsigned files = 0;
+		unsigned long long nbytes = 0;
+		OxzCountDir(dest, files, nbytes);
 		OxzScopeHold hold(base + zSpan, ripSpan, files, 0);
 		OxzRipTree(dest, 0);
 	}
-	OxzProgFile(NULL, files, files ? files : 1, 100, OxzMapped(base, span, 100));
+	OxzProgFile(NULL, 0, 0, 100, OxzMapped(base, span, 100));
 	return 0;
+}
+
+int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span)
+{
+	if (span < 1) span = 1;
+	OxzProgArchive(arc);
+	CreateDirectoryW(dest, NULL);
+	int kind = OxzArchiveKind(arc);
+	int rip = OxzIsOxz(arc) ? 1 : 0;
+	if (kind >= 1 && kind <= 4) {
+		std::wstring nativeErr;
+		int rc = OxzExtractNative(arc, dest, kind, rip, nativeErr, base, span);
+		if (rc == 0) return 0;
+		if (OxzHas7za()) return OxzExtract7za(arc, dest, err, base, span, rip);
+		err = nativeErr.empty() ? OxzTxt(OS_OPEN_FAIL) : nativeErr;
+		return rc;
+	}
+	return OxzExtract7za(arc, dest, err, base, span, rip);
 }
 
 int OxzExtractPlain(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span)

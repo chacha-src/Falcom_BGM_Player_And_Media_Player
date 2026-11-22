@@ -58,10 +58,18 @@ static void MergeFields(FileTagFields& dest, const FileTagFields& src)
 	SetIfEmpty(dest.title, src.title);
 	SetIfEmpty(dest.artist, src.artist);
 	SetIfEmpty(dest.album, src.album);
+	SetIfEmpty(dest.albumArtist, src.albumArtist);
 	SetIfEmpty(dest.year, src.year);
 	SetIfEmpty(dest.track, src.track);
+	SetIfEmpty(dest.disc, src.disc);
 	SetIfEmpty(dest.genre, src.genre);
 	SetIfEmpty(dest.comment, src.comment);
+	SetIfEmpty(dest.composer, src.composer);
+	SetIfEmpty(dest.lyricist, src.lyricist);
+	SetIfEmpty(dest.copyright, src.copyright);
+	SetIfEmpty(dest.encoder, src.encoder);
+	SetIfEmpty(dest.bpm, src.bpm);
+	SetIfEmpty(dest.lyrics, src.lyrics);
 	if (dest.loop1 == 0 && src.loop1)
 		dest.loop1 = src.loop1;
 	if (dest.loop2 == 0 && src.loop2)
@@ -94,18 +102,34 @@ static void ApplyVorbisCommentLine(const CString& cc, FileTagFields& out)
 		SetIfEmpty(out.title, val);
 	else if (key == _T("ARTIST"))
 		SetIfEmpty(out.artist, val);
-	else if (key == _T("ALBUMARTIST") || key == _T("ALBUM ARTIST"))
+	else if (key == _T("ALBUMARTIST") || key == _T("ALBUM ARTIST")) {
+		SetIfEmpty(out.albumArtist, val);
 		SetIfEmpty(out.artist, val);
+	}
 	else if (key == _T("ALBUM"))
 		SetIfEmpty(out.album, val);
 	else if (key == _T("DATE") || key == _T("YEAR") || key == _T("ORIGINALDATE") || key == _T("ORIGINALYEAR"))
 		SetIfEmpty(out.year, val);
 	else if (key == _T("TRACK") || key == _T("TRACKNUMBER") || key == _T("TRACKNUM"))
 		SetIfEmpty(out.track, val);
+	else if (key == _T("DISCNUMBER") || key == _T("DISC"))
+		SetIfEmpty(out.disc, val);
 	else if (key == _T("GENRE"))
 		SetIfEmpty(out.genre, val);
-	else if (key == _T("COMMENT") || key == _T("DESCRIPTION") || key == _T("UNSYNCEDLYRICS"))
+	else if (key == _T("COMMENT") || key == _T("DESCRIPTION"))
 		SetIfEmpty(out.comment, val);
+	else if (key == _T("COMPOSER"))
+		SetIfEmpty(out.composer, val);
+	else if (key == _T("LYRICIST"))
+		SetIfEmpty(out.lyricist, val);
+	else if (key == _T("COPYRIGHT"))
+		SetIfEmpty(out.copyright, val);
+	else if (key == _T("ENCODED-BY") || key == _T("ENCODEDBY") || key == _T("ENCODER"))
+		SetIfEmpty(out.encoder, val);
+	else if (key == _T("BPM"))
+		SetIfEmpty(out.bpm, val);
+	else if (key == _T("LYRICS") || key == _T("UNSYNCEDLYRICS"))
+		SetIfEmpty(out.lyrics, val);
 	else if (key == _T("LOOPSTART"))
 		out.loop1 = _tstoi(val);
 	else if (key == _T("LOOPEND"))
@@ -129,7 +153,8 @@ static void ReadId3Tags(LPCTSTR path, FileTagFields& out)
 	SetIfEmpty(out.title, ta2.GetTitle());
 	if (b == -1) { ensureV1(); SetIfEmpty(out.title, ta1.GetTitle()); }
 	SetIfEmpty(out.artist, ta2.GetArtist());
-	if (out.artist.IsEmpty()) SetIfEmpty(out.artist, ta2.GetAlbumArtist());
+	SetIfEmpty(out.albumArtist, ta2.GetAlbumArtist());
+	if (out.artist.IsEmpty()) SetIfEmpty(out.artist, out.albumArtist);
 	if (b == -1) { ensureV1(); SetIfEmpty(out.artist, ta1.GetArtist()); }
 	SetIfEmpty(out.album, ta2.GetAlbum());
 	if (b == -1) { ensureV1(); SetIfEmpty(out.album, ta1.GetAlbum()); }
@@ -147,6 +172,13 @@ static void ReadId3Tags(LPCTSTR path, FileTagFields& out)
 	SetIfEmpty(out.comment, ta2.GetComment());
 	if (b == -1)
 		SetIfEmpty(out.comment, ta1.GetComment());
+	SetIfEmpty(out.disc, ta2.GetDisc());
+	SetIfEmpty(out.composer, ta2.GetComposer());
+	SetIfEmpty(out.lyricist, ta2.GetLyricist());
+	SetIfEmpty(out.copyright, ta2.GetCopyright());
+	SetIfEmpty(out.encoder, ta2.GetEncoder());
+	SetIfEmpty(out.bpm, ta2.GetBpm());
+	SetIfEmpty(out.lyrics, ta2.GetLyrics());
 	// コメント内の LOOPSTART/LOOPLENGTH を拾う(書き込み側と対)
 	if (!out.comment.IsEmpty()) {
 		CString c = out.comment;
@@ -618,7 +650,11 @@ static void ApplyMp4TagItem(const char* item, const char* value, FileTagFields& 
 	name.MakeLower();
 	if (name == _T("title") || name == _T("name"))
 		SetIfEmpty(out.title, val);
-	else if (name == _T("artist") || name == _T("album artist") || name == _T("albumartist"))
+	else if (name == _T("album artist") || name == _T("albumartist") || name == _T("aart")) {
+		SetIfEmpty(out.albumArtist, val);
+		SetIfEmpty(out.artist, val);
+	}
+	else if (name == _T("artist"))
 		SetIfEmpty(out.artist, val);
 	else if (name == _T("album"))
 		SetIfEmpty(out.album, val);
@@ -630,6 +666,18 @@ static void ApplyMp4TagItem(const char* item, const char* value, FileTagFields& 
 		SetIfEmpty(out.genre, val);
 	else if (name == _T("comment") || name == _T("description"))
 		SetIfEmpty(out.comment, val);
+	else if (name == _T("composer") || name == _T("writer"))
+		SetIfEmpty(name == _T("writer") ? out.lyricist : out.composer, val);
+	else if (name == _T("copyright"))
+		SetIfEmpty(out.copyright, val);
+	else if (name == _T("tempo") || name == _T("bpm"))
+		SetIfEmpty(out.bpm, val);
+	else if (name == _T("lyrics") || name == _T("unsynced lyrics"))
+		SetIfEmpty(out.lyrics, val);
+	else if (name == _T("disc") || name == _T("disk"))
+		SetIfEmpty(out.disc, val);
+	else if (name == _T("encoded by") || name == _T("encoder"))
+		SetIfEmpty(out.encoder, val);
 }
 
 static void ReadMp4UdtaStringFromBuffer(const BYTE* buf, int read, const char key4[4], CString& dest)
@@ -853,17 +901,28 @@ static void ReadWavRiffInfoTags(LPCTSTR path, FileTagFields& out)
 					break;
 				if (subsize > 0x100000u)
 					break;
-				char val[1024];
-				UINT toRead = subsize < (sizeof(val) - 1) ? subsize : (UINT)(sizeof(val) - 1);
+				UINT toRead = subsize < 262144u ? subsize : 262144u;
+				std::vector<char> val((size_t)toRead + 1, 0);
 				if (toRead > 0) {
-					if (f.Read(val, toRead) != toRead)
+					if (f.Read(val.data(), toRead) != toRead)
 						break;
 					if (subsize > toRead)
 						f.Seek((LONGLONG)(subsize - toRead), CFile::current);
-					val[toRead] = 0;
-					TCHAR t[1024];
-					WavBytesToTchar(val, t, 1024);
-					if (t[0] != 0) {
+				}
+				int need = MultiByteToWideChar(CP_UTF8, 8, val.data(), -1, NULL, 0);
+				UINT cp = CP_UTF8;
+				DWORD fl = 8;
+				if (need <= 0) {
+					cp = CP_ACP;
+					fl = 0;
+					need = MultiByteToWideChar(CP_ACP, 0, val.data(), -1, NULL, 0);
+				}
+				CString t;
+				if (need > 1) {
+					MultiByteToWideChar(cp, fl, val.data(), -1, t.GetBuffer(need), need);
+					t.ReleaseBuffer();
+				}
+				if (!t.IsEmpty()) {
 						if (subid == 0x44524349) // ICRD
 							SetIfEmpty(out.year, t);
 						else if (subid == 0x524E4749) // IGNR
@@ -878,7 +937,22 @@ static void ReadWavRiffInfoTags(LPCTSTR path, FileTagFields& out)
 							SetIfEmpty(out.artist, t);
 						else if (subid == 0x44525049) // IPRD (album/product)
 							SetIfEmpty(out.album, t);
-					}
+						else if (subid == 0x53554D49)
+							SetIfEmpty(out.composer, t);
+						else if (subid == 0x504F4349)
+							SetIfEmpty(out.copyright, t);
+						else if (subid == 0x54465349)
+							SetIfEmpty(out.encoder, t);
+						else if (subid == 0x52414149)
+							SetIfEmpty(out.albumArtist, t);
+						else if (subid == 0x594C4149)
+							SetIfEmpty(out.lyricist, t);
+						else if (subid == 0x4D504249)
+							SetIfEmpty(out.bpm, t);
+						else if (subid == 0x43534449)
+							SetIfEmpty(out.disc, t);
+						else if (subid == 0x52594C49)
+							SetIfEmpty(out.lyrics, t);
 				}
 				k += 8ULL + (ULONGLONG)((subsize + 1u) & ~1u);
 			}
@@ -1111,6 +1185,14 @@ static bool WriteMp3Id3Tags(LPCTSTR path, const FileTagFields& in)
 	tag.SetTrackNo(in.track);
 	tag.SetGenre(in.genre);
 	tag.SetComment(BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
+	tag.SetAlbumArtist(in.albumArtist);
+	tag.SetDisc(in.disc);
+	tag.SetComposer(in.composer);
+	tag.SetLyricist(in.lyricist);
+	tag.SetCopyright(in.copyright);
+	tag.SetEncoder(in.encoder);
+	tag.SetBpm(in.bpm);
+	tag.SetLyrics(in.lyrics);
 	return tag.Save(path) == 0;
 }
 
@@ -1166,6 +1248,14 @@ static bool BuildId3v2FileBlob(const FileTagFields& in, const BYTE* cover, int c
 		tag.SetTrackNo(in.track);
 		tag.SetGenre(in.genre);
 		tag.SetComment(BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
+		tag.SetAlbumArtist(in.albumArtist);
+		tag.SetDisc(in.disc);
+		tag.SetComposer(in.composer);
+		tag.SetLyricist(in.lyricist);
+		tag.SetCopyright(in.copyright);
+		tag.SetEncoder(in.encoder);
+		tag.SetBpm(in.bpm);
+		tag.SetLyrics(in.lyrics);
 		if (cover && coverLen > 0)
 			tag.SetPicture(cover, (DWORD)coverLen, mime && mime[0] ? mime : "image/jpeg");
 		if (tag.Save(tmpFile) != ERROR_SUCCESS) {
@@ -1358,6 +1448,14 @@ static bool WriteFlacTags(LPCTSTR path, const FileTagFields& in)
 	ok = FlacSetVorbisField(vc, "DATE", in.year) && ok;
 	ok = FlacSetVorbisField(vc, "TRACKNUMBER", in.track) && ok;
 	ok = FlacSetVorbisField(vc, "GENRE", in.genre) && ok;
+	ok = FlacSetVorbisField(vc, "ALBUMARTIST", in.albumArtist) && ok;
+	ok = FlacSetVorbisField(vc, "DISCNUMBER", in.disc) && ok;
+	ok = FlacSetVorbisField(vc, "COMPOSER", in.composer) && ok;
+	ok = FlacSetVorbisField(vc, "LYRICIST", in.lyricist) && ok;
+	ok = FlacSetVorbisField(vc, "COPYRIGHT", in.copyright) && ok;
+	ok = FlacSetVorbisField(vc, "ENCODED-BY", in.encoder) && ok;
+	ok = FlacSetVorbisField(vc, "BPM", in.bpm) && ok;
+	ok = FlacSetVorbisField(vc, "LYRICS", in.lyrics) && ok;
 	{
 		CString cmt = BuildLoopAwareComment(in.comment, in.loop1, in.loop2);
 		ok = FlacSetVorbisField(vc, "COMMENT", cmt) && ok;
@@ -1460,6 +1558,14 @@ static bool WriteWavTags(LPCTSTR path, const FileTagFields& in)
 	WavAppendInfoChunk(infoBody, 0x524E4749, in.genre);   // IGNR
 	WavAppendInfoChunk(infoBody, 0x4B525449, in.track);   // ITRK
 	WavAppendInfoChunk(infoBody, 0x544D4349, BuildLoopAwareComment(in.comment, in.loop1, in.loop2)); // ICMT
+	WavAppendInfoChunk(infoBody, 0x53554D49, in.composer);  // IMUS
+	WavAppendInfoChunk(infoBody, 0x504F4349, in.copyright); // ICOP
+	WavAppendInfoChunk(infoBody, 0x54465349, in.encoder);   // ISFT
+	WavAppendInfoChunk(infoBody, 0x52414149, in.albumArtist); // IAAR
+	WavAppendInfoChunk(infoBody, 0x594C4149, in.lyricist);  // IALY
+	WavAppendInfoChunk(infoBody, 0x4D504249, in.bpm);       // IBPM
+	WavAppendInfoChunk(infoBody, 0x43534449, in.disc);      // IDSC
+	WavAppendInfoChunk(infoBody, 0x52594C49, in.lyrics);    // ILYR
 
 	if (infoBody.size() > 4) {
 		DWORD listSize = (DWORD)infoBody.size();
@@ -1567,6 +1673,14 @@ static bool WriteMp4Tags(LPCTSTR path, const FileTagFields& in)
 	Mp4MetaAdd(meta, "track", in.track);
 	Mp4MetaAdd(meta, "genre", in.genre);
 	Mp4MetaAdd(meta, "comment", BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
+	Mp4MetaAdd(meta, "album artist", in.albumArtist);
+	Mp4MetaAdd(meta, "disc", in.disc);
+	Mp4MetaAdd(meta, "composer", in.composer);
+	Mp4MetaAdd(meta, "writer", in.lyricist);
+	Mp4MetaAdd(meta, "copyright", in.copyright);
+	Mp4MetaAdd(meta, "encoded by", in.encoder);
+	Mp4MetaAdd(meta, "tempo", in.bpm);
+	Mp4MetaAdd(meta, "lyrics", in.lyrics);
 
 	const bool ok = (meta.count > 0) && (mp4ff_meta_update(&cb, &meta) != 0);
 	Mp4MetaFree(meta);
@@ -1583,7 +1697,121 @@ static void OggWriteU32(std::vector<BYTE>& b, uint32_t v)
 	b.push_back((BYTE)((v >> 24) & 0xFF));
 }
 
-static std::vector<BYTE> BuildVorbisCommentPacket(const FileTagFields& in)
+static void OggKeepPictureComments(const ogg_packet& op, std::vector<CStringA>& out)
+{
+	const BYTE* p = op.packet;
+	const int n = (int)op.bytes;
+	if (!p || n < 7 || memcmp(p, "\x03vorbis", 7) != 0)
+		return;
+	int i = 7;
+	auto u32 = [&](uint32_t& v) -> bool {
+		if (i + 4 > n) return false;
+		v = (uint32_t)p[i] | ((uint32_t)p[i + 1] << 8) | ((uint32_t)p[i + 2] << 16) | ((uint32_t)p[i + 3] << 24);
+		i += 4;
+		return true;
+	};
+	uint32_t vlen = 0;
+	if (!u32(vlen) || vlen > (uint32_t)(n - i)) return;
+	i += (int)vlen;
+	uint32_t cnt = 0;
+	if (!u32(cnt)) return;
+	for (uint32_t c = 0; c < cnt; ++c) {
+		uint32_t len = 0;
+		if (!u32(len) || len > (uint32_t)(n - i)) return;
+		CStringA line((const char*)p + i, (int)len);
+		i += (int)len;
+		const int eq = line.Find('=');
+		if (eq <= 0) continue;
+		CStringA key = line.Left(eq);
+		key.MakeUpper();
+		if (key == "METADATA_BLOCK_PICTURE" || key == "COVERART" || key == "COVERARTMIME")
+			out.push_back(line);
+	}
+}
+
+static void OggPicSize(const BYTE* d, int n, const char* mime, uint32_t& w, uint32_t& h, uint32_t& depth)
+{
+	w = h = depth = 0;
+	if (!d || n < 24) return;
+	if (mime && _stricmp(mime, "image/png") == 0 && n >= 24 && memcmp(d, "\x89PNG", 4) == 0) {
+		w = ((uint32_t)d[16] << 24) | ((uint32_t)d[17] << 16) | ((uint32_t)d[18] << 8) | d[19];
+		h = ((uint32_t)d[20] << 24) | ((uint32_t)d[21] << 16) | ((uint32_t)d[22] << 8) | d[23];
+		depth = 32;
+		return;
+	}
+	if (d[0] == 0xFF && d[1] == 0xD8) {
+		int p = 2;
+		while (p + 8 < n) {
+			if (d[p] != 0xFF) { p++; continue; }
+			while (p < n && d[p] == 0xFF) p++;
+			if (p >= n) break;
+			const BYTE m = d[p++];
+			if (m == 0xD8 || m == 0xD9) continue;
+			if (p + 1 >= n) break;
+			const int seglen = ((int)d[p] << 8) | d[p + 1];
+			if (seglen < 2 || p + seglen > n) break;
+			if (m == 0xC0 || m == 0xC1 || m == 0xC2) {
+				h = ((uint32_t)d[p + 3] << 8) | d[p + 4];
+				w = ((uint32_t)d[p + 5] << 8) | d[p + 6];
+				depth = 24;
+				return;
+			}
+			p += seglen;
+		}
+	}
+}
+
+static CStringA OggB64(const BYTE* d, int n)
+{
+	static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	CStringA o;
+	if (!d || n <= 0) return o;
+	o.Preallocate((n + 2) / 3 * 4);
+	int i = 0;
+	while (i + 3 <= n) {
+		const unsigned v = ((unsigned)d[i] << 16) | ((unsigned)d[i + 1] << 8) | d[i + 2];
+		o += t[(v >> 18) & 63];
+		o += t[(v >> 12) & 63];
+		o += t[(v >> 6) & 63];
+		o += t[v & 63];
+		i += 3;
+	}
+	if (i < n) {
+		unsigned v = (unsigned)d[i] << 16;
+		if (i + 1 < n) v |= (unsigned)d[i + 1] << 8;
+		o += t[(v >> 18) & 63];
+		o += t[(v >> 12) & 63];
+		o += (i + 1 < n) ? t[(v >> 6) & 63] : '=';
+		o += '=';
+	}
+	return o;
+}
+
+static CStringA OggPictureComment(const BYTE* data, int dataLen, const char* mime)
+{
+	const char* use = (mime && mime[0]) ? mime : "image/jpeg";
+	uint32_t w = 0, h = 0, depth = 0;
+	OggPicSize(data, dataLen, use, w, h, depth);
+	std::vector<BYTE> blk;
+	auto be = [&](uint32_t v) {
+		blk.push_back((BYTE)(v >> 24));
+		blk.push_back((BYTE)(v >> 16));
+		blk.push_back((BYTE)(v >> 8));
+		blk.push_back((BYTE)v);
+	};
+	be(3);
+	be((uint32_t)strlen(use));
+	blk.insert(blk.end(), (const BYTE*)use, (const BYTE*)use + strlen(use));
+	be(0);
+	be(w); be(h); be(depth); be(0);
+	be((uint32_t)dataLen);
+	blk.insert(blk.end(), data, data + dataLen);
+	CStringA line = "METADATA_BLOCK_PICTURE=";
+	line += OggB64(blk.data(), (int)blk.size());
+	return line;
+}
+
+static std::vector<BYTE> BuildVorbisCommentPacket(const FileTagFields& in, const std::vector<CStringA>& extra)
 {
 	std::vector<BYTE> pkt;
 	pkt.push_back(0x03);
@@ -1609,6 +1837,14 @@ static std::vector<BYTE> BuildVorbisCommentPacket(const FileTagFields& in)
 	add("TRACKNUMBER", in.track);
 	add("GENRE", in.genre);
 	add("COMMENT", BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
+	add("ALBUMARTIST", in.albumArtist);
+	add("DISCNUMBER", in.disc);
+	add("COMPOSER", in.composer);
+	add("LYRICIST", in.lyricist);
+	add("COPYRIGHT", in.copyright);
+	add("ENCODED-BY", in.encoder);
+	add("BPM", in.bpm);
+	add("LYRICS", in.lyrics);
 	if (in.loop1 > 0) {
 		CString s; s.Format(_T("%d"), in.loop1);
 		add("LOOPSTART", s);
@@ -1617,6 +1853,8 @@ static std::vector<BYTE> BuildVorbisCommentPacket(const FileTagFields& in)
 		CString s; s.Format(_T("%d"), in.loop2);
 		add("LOOPEND", s);
 	}
+	for (size_t i = 0; i < extra.size(); ++i)
+		if (!extra[i].IsEmpty()) comments.push_back(extra[i]);
 
 	OggWriteU32(pkt, (uint32_t)comments.size());
 	for (size_t i = 0; i < comments.size(); i++) {
@@ -1627,7 +1865,58 @@ static std::vector<BYTE> BuildVorbisCommentPacket(const FileTagFields& in)
 	return pkt;
 }
 
-static bool WriteOggVorbisTags(LPCTSTR path, const FileTagFields& in)
+static std::vector<BYTE> OggPacketWithPicture(const ogg_packet& op, const CStringA& pictureLine, bool* ok)
+{
+	std::vector<BYTE> pkt;
+	if (ok) *ok = false;
+	const BYTE* p = op.packet;
+	const int n = (int)op.bytes;
+	if (!p || n < 7 || memcmp(p, "\x03vorbis", 7) != 0)
+		return pkt;
+	int i = 7;
+	auto u32 = [&](uint32_t& v) -> bool {
+		if (i + 4 > n) return false;
+		v = (uint32_t)p[i] | ((uint32_t)p[i + 1] << 8) | ((uint32_t)p[i + 2] << 16) | ((uint32_t)p[i + 3] << 24);
+		i += 4;
+		return true;
+	};
+	uint32_t vlen = 0;
+	if (!u32(vlen) || vlen > (uint32_t)(n - i)) return pkt;
+	const int vendorAt = i;
+	i += (int)vlen;
+	uint32_t cnt = 0;
+	if (!u32(cnt)) return pkt;
+	std::vector<CStringA> comments;
+	for (uint32_t c = 0; c < cnt; ++c) {
+		uint32_t len = 0;
+		if (!u32(len) || len > (uint32_t)(n - i)) return pkt;
+		CStringA line((const char*)p + i, (int)len);
+		i += (int)len;
+		const int eq = line.Find('=');
+		CStringA key = eq > 0 ? line.Left(eq) : CStringA();
+		key.MakeUpper();
+		if (key == "METADATA_BLOCK_PICTURE" || key == "COVERART" || key == "COVERARTMIME")
+			continue;
+		comments.push_back(line);
+	}
+	if (!pictureLine.IsEmpty())
+		comments.push_back(pictureLine);
+	pkt.push_back(0x03);
+	pkt.push_back('v'); pkt.push_back('o'); pkt.push_back('r');
+	pkt.push_back('b'); pkt.push_back('i'); pkt.push_back('s');
+	OggWriteU32(pkt, vlen);
+	pkt.insert(pkt.end(), p + vendorAt, p + vendorAt + (int)vlen);
+	OggWriteU32(pkt, (uint32_t)comments.size());
+	for (size_t c = 0; c < comments.size(); ++c) {
+		OggWriteU32(pkt, (uint32_t)comments[c].GetLength());
+		pkt.insert(pkt.end(), (const BYTE*)(LPCSTR)comments[c], (const BYTE*)(LPCSTR)comments[c] + comments[c].GetLength());
+	}
+	pkt.push_back(1);
+	if (ok) *ok = true;
+	return pkt;
+}
+
+static bool WriteOggVorbisTagsEx(LPCTSTR path, const FileTagFields& in, const BYTE* pic, int picLen, const char* mime, bool pictureOnly)
 {
 	FILE* fp = _tfopen(path, _T("rb"));
 	if (!fp)
@@ -1698,7 +1987,25 @@ static bool WriteOggVorbisTags(LPCTSTR path, const FileTagFields& in)
 		return false;
 	}
 
-	std::vector<BYTE> newComment = BuildVorbisCommentPacket(in);
+	std::vector<BYTE> newComment;
+	if (pictureOnly) {
+		bool picOk = false;
+		CStringA line = (pic && picLen > 0) ? OggPictureComment(pic, picLen, mime) : CStringA();
+		newComment = OggPacketWithPicture(headers[1], line, &picOk);
+		if (!picOk) {
+			for (size_t i = 0; i < headers.size(); i++)
+				free(headers[i].packet);
+			if (streamInited) ogg_stream_clear(&os_in);
+			ogg_sync_clear(&oy);
+			fclose(fp);
+			return false;
+		}
+	}
+	else {
+		std::vector<CStringA> pictures;
+		OggKeepPictureComments(headers[1], pictures);
+		newComment = BuildVorbisCommentPacket(in, pictures);
+	}
 	free(headers[1].packet);
 	headers[1].packet = (unsigned char*)malloc(newComment.size());
 	if (!headers[1].packet) {
@@ -1794,6 +2101,17 @@ static bool WriteOggVorbisTags(LPCTSTR path, const FileTagFields& in)
 		}
 	}
 	return true;
+}
+
+static bool WriteOggVorbisTags(LPCTSTR path, const FileTagFields& in)
+{
+	return WriteOggVorbisTagsEx(path, in, NULL, 0, NULL, false);
+}
+
+static bool EmbedCoverOgg(LPCTSTR path, const BYTE* data, int dataLen, const char* mime)
+{
+	FileTagFields empty;
+	return WriteOggVorbisTagsEx(path, empty, data, dataLen, mime, true);
 }
 
 static bool WriteFileTagFieldsImpl(LPCTSTR path, const FileTagFields& in)
@@ -3245,6 +3563,8 @@ bool EmbedCoverArt(LPCTSTR path, const BYTE* data, int dataLen, const char* mime
 		return EmbedCoverWav(path, data, dataLen, mime);
 	if (IsExt(ext, _T(".dsf")))
 		return FileTag_EmbedCoverDsf(path, data, dataLen, mime);
+	if (IsExt(ext, _T(".ogg")))
+		return EmbedCoverOgg(path, data, dataLen, mime);
 	return false;
 }
 

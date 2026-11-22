@@ -711,6 +711,9 @@ const wchar_t* MonsterLabel(int m);
 const wchar_t* MonsterLabelAt(int m, int lang);
 int MonsterGait(int monster);
 int MonsterCatalog(int* out, int cap);
+int MonsterListGen();
+int MonsterIsGiant(int id);
+int MonsterPreviewChar(int id, CharData& ch);
 int TacPlayMeshN();
 int TacPlayMeshPack(int i);
 int TacPlayMeshFind(int pack);
@@ -1050,7 +1053,7 @@ struct AiPlan {
 	int castX, castZ;
 	int wild;         // 0=通常 1=混乱（敵味方問わず） 2=自分を攻撃
 };
-void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level = 2);
+void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level = 2, int showcase = 0);
 void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------

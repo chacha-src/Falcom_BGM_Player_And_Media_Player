@@ -4987,6 +4987,32 @@ static int s_poolI[4][POOL_CAP];
 #include "tactics_src/foe_vault.inc"
 static MonsterDef s_foeEx[4096];
 static_assert(kFoeExN <= 4096, "追加敵は 4096 まで");
+// 1x1 の種を 2x2 / 3x3 / 4x4 にした別個体。追加敵配列は満杯なので、その後ろの番号を使う。
+enum { GIANT_CAP = 4096, GIANT_NAME = 72 };
+static MonsterDef s_giant[GIANT_CAP];
+static short s_ghuman[GIANT_CAP];
+static BYTE s_gfit[GIANT_CAP];
+static int s_giantN = 0;
+static int s_catGen = 0;
+static wchar_t s_gname[GIANT_CAP][14][GIANT_NAME];
+#include "tactics_src/giant_prefix.inc"
+static int GiantLoId() { return M_COUNT + kImportN + kFoeExN; }
+static int GiantIndex(int id)
+{
+	int g = id - GiantLoId();
+	if (g < 0 || g >= s_giantN || g >= GIANT_CAP) return -1;
+	return g;
+}
+static const wchar_t* GiantLabelAt(int id, int lang)
+{
+	int g = GiantIndex(id);
+	if (g < 0) return NULL;
+	if (lang < 0 || lang > 13) lang = 1;
+	if (!s_gname[g][lang][0]) return L"?";
+	return s_gname[g][lang];
+}
+static void BuildGiants();
+static void FitGiant(MonsterDef& d);
 static const wchar_t* FoeExName(int ex, int lang)
 {
 	if (ex < 0 || ex >= kFoeExN) return L"?";
@@ -5355,6 +5381,7 @@ static void EnsureMonsters()
 			if (pool != POOL_HUM && s_poolN[pool] < POOL_CAP) s_poolI[pool][s_poolN[pool]++] = id;
 		}
 	}
+	BuildGiants();
 	}
 	s_monImpOk = 1;
 }
@@ -5368,12 +5395,21 @@ const MonsterDef& MonsterInfo(int m)
 		int ex = m - (M_COUNT + kImportN);
 		if (ex >= 0 && ex < kFoeExN && ex < 4096) return s_foeEx[ex];
 	}
+	{
+		int g = GiantIndex(m);
+		if (g >= 0) return s_giant[g];
+	}
 	if (m < 0 || m >= M_COUNT) m = 0;
 	return kMon[m];
 }
 
 const wchar_t* MonsterLabel(int m)
 {
+	EnsureMonsters();
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13) lang = 1;
+	const wchar_t* gn = GiantLabelAt(m, lang);
+	if (gn) return gn;
 	int ex = m - (M_COUNT + kImportN);
 	if (ex >= 0 && ex < kFoeExN) return FoeExName(ex, savedata.lang);
 	const MonsterDef& d = MonsterInfo(m);
@@ -5383,6 +5419,9 @@ const wchar_t* MonsterLabel(int m)
 
 const wchar_t* MonsterLabelAt(int m, int lang)
 {
+	EnsureMonsters();
+	const wchar_t* gn = GiantLabelAt(m, lang);
+	if (gn) return gn;
 	int ex = m - (M_COUNT + kImportN);
 	if (ex >= 0 && ex < kFoeExN) return FoeExName(ex, lang);
 	const MonsterDef& d = MonsterInfo(m);
@@ -5446,7 +5485,10 @@ bool MonsterKnown(int id, int cleared)
 	if (cleared < 1 || id < 0) return false;
 	EnsureMonsters();
 	if (id >= M_COUNT + kImportN) {
-		if (id >= M_COUNT + kImportN + kFoeExN) return false;
+		int g = GiantIndex(id);
+		if (g >= 0) {
+			if (s_giant[g].weight <= 0) return false;
+		} else if (id >= M_COUNT + kImportN + kFoeExN) return false;
 	} else if (id >= M_COUNT) {
 		int model = id - M_COUNT;
 		if (model < 0 || model >= kImportN || wcsncmp(kImportName[model], L"Sum", 3) == 0 || ImportPool(kImportName[model]) == POOL_HUM) return false;
@@ -5474,20 +5516,26 @@ static int MonCatCmp(const void* pa, const void* pb)
 int MonsterCatalog(int* out, int cap)
 {
 	EnsureMonsters();
-	static MonCatKey keys[8192];
-	static int sn = -1;
-	if (sn < 0) {
+	enum { CAT_CAP = 16384 };
+	static MonCatKey keys[CAT_CAP];
+	static int sn = -1, gen = -2;
+	if (sn < 0 || gen != s_catGen) {
 		int n = 0;
-		for (int i = 0; i < M_COUNT && n < 8192; i++) keys[n++].id = i;
+		for (int i = 0; i < M_COUNT && n < CAT_CAP; i++) keys[n++].id = i;
 		int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
-		for (int i = 0; i < nImp && n < 8192; i++) {
+		for (int i = 0; i < nImp && n < CAT_CAP; i++) {
 			if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
 			keys[n++].id = M_COUNT + i;
 		}
-		for (int i = 0; i < kFoeExN && n < 8192; i++) keys[n++].id = M_COUNT + kImportN + i;
+		for (int i = 0; i < kFoeExN && n < CAT_CAP; i++) keys[n++].id = M_COUNT + kImportN + i;
+		for (int i = 0; i < s_giantN && n < CAT_CAP; i++) {
+			if (s_giant[i].weight <= 0) continue;
+			keys[n++].id = GiantLoId() + i;
+		}
 		for (int i = 0; i < n; i++) keys[i].debut = MonsterFirstStage(keys[i].id);
 		qsort(keys, (size_t)n, sizeof(MonCatKey), MonCatCmp);
 		sn = n;
+		gen = s_catGen;
 	}
 	if (!out || cap <= 0) return sn;
 	int w = sn < cap ? sn : cap;
@@ -6408,6 +6456,7 @@ int UnitMotionStyle(const Unit& u, int skill)
 int UnitNameTx(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).nameTx : -1; }
 const wchar_t* UnitName(const Unit& u)
 {
+	if (GiantIndex(u.monster) >= 0) return MonsterLabel(u.monster);
 	if (UnitIsHumanFoe(u)) return HumFoeTitle(u);
 	if (!IsMon(u)) return u.ch.name;
 	const MonsterDef& md = MonsterInfo(u.monster);
@@ -6615,8 +6664,117 @@ static void ClampImportFoot(MonsterDef& d)
 	ClampBodyToFive(d);
 }
 
+static int GiantMul(int v, float m)
+{
+	if (v <= 0) return v;
+	int n = (int)((float)v * m + 0.5f);
+	if (n < 1) n = 1;
+	if (n > 9999) n = 9999;
+	return n;
+}
+
+static void GiantTune(MonsterDef& d, int span)
+{
+	float hp = span == 2 ? 2.6f : (span == 3 ? 3.9f : 5.6f);
+	float at = span == 2 ? 1.34f : (span == 3 ? 1.68f : 2.08f);
+	float df = span == 2 ? 1.24f : (span == 3 ? 1.5f : 1.78f);
+	float ag = span == 2 ? 1.04f : (span == 3 ? 0.96f : 0.88f);
+	float gr = span == 2 ? 1.12f : (span == 3 ? 1.22f : 1.35f);
+	for (int s = 0; s < S_COUNT; s++) {
+		float m = at;
+		if (s == S_HP || s == S_MP) m = hp;
+		else if (s == S_DEF || s == S_RES) m = df;
+		else if (s == S_AGI) m = ag;
+		else if (s == S_MOV || s == S_JMP || s == S_RNG) m = 1.f;
+		d.base[s] = GiantMul(d.base[s], m);
+		if (d.grow[s] > 0 && (s == S_HP || s == S_STR || s == S_DEF || s == S_MAG)) {
+			int g = (int)((float)d.grow[s] * gr + 0.5f);
+			if (g > 400) g = 400;
+			d.grow[s] = g;
+		}
+	}
+	if (span >= 3 && d.base[S_MOV] > 2) d.base[S_MOV] -= 1;
+	if (d.base[S_MOV] < 2) d.base[S_MOV] = 2;
+	int add = span == 2 ? 8 : (span == 3 ? 28 : 56);
+	int floorS = span == 2 ? 6 : (span == 3 ? 22 : 48);
+	d.minStage += add;
+	if (d.minStage < floorS) d.minStage = floorS;
+	if (d.minStage > TAC_STAGE_MAX - 24) d.minStage = TAC_STAGE_MAX - 24;
+	if (d.maxStage > 0) {
+		d.maxStage += add + 60;
+		if (d.maxStage >= TAC_STAGE_MAX) d.maxStage = 0;
+	}
+	d.weight = 6;
+	d.footSpan = span;
+}
+
+// 指定マスを維持する。背が段の隙間を超えるときは身長で倍率を止め、マスは落とさない。
+static void ApplyGiantBody(MonsterDef& d, int span)
+{
+	if (span < 2) span = 2;
+	if (span > 4) span = 4;
+	float foot = 0.2f;
+	float tall = 1.75f;
+	int measured = 0;
+	if (d.model == -2) {
+		foot = 0.2f;
+		tall = 1.75f;
+		measured = 1;
+	} else if (d.look == LK_MESH && d.model >= 0 && TacMonsterReady(d.model)) {
+		float f = TacMonsterFoot(d.model);
+		float t = TacMonsterTall(d.model);
+		if (f > 0.02f) { foot = f; measured = 1; }
+		if (t > 0.02f) tall = t;
+	} else if (d.look != LK_MESH) {
+		foot = ClassicFoot(d.look);
+		static const float kH[6] = { 1.7f, 0.62f, 1.45f, 1.75f, 1.65f, 1.7f };
+		int lk = d.look;
+		if (lk < 0 || lk > 5) lk = 0;
+		tall = kH[lk];
+		measured = 1;
+	}
+	if (!measured) {
+		static const float kProv[5] = { 1.f, 1.f, 1.62f, 2.35f, 2.95f };
+		d.scale = kProv[span];
+		d.footSpan = span;
+		return;
+	}
+	float capH = span == 2 ? 2.75f : (span == 3 ? 4.2f : 5.4f);
+	float sc = ((float)span * kFootFill) / foot;
+	if (tall > 0.02f && tall * sc > capH) sc = capH / tall;
+	if (sc < 0.35f) sc = 0.35f;
+	d.scale = sc;
+	d.footSpan = span;
+}
+
+static void FitGiant(MonsterDef& d)
+{
+	int gi = (int)(&d - s_giant);
+	if (gi < 0 || gi >= s_giantN || gi >= GIANT_CAP) return;
+	if (s_gfit[gi]) return;
+	int span = d.footSpan;
+	if (span < 2) span = 2;
+	if (span > 4) span = 4;
+	if (d.look == LK_MESH && d.model >= 0) {
+		if (!TacMonsterReady(d.model)) return;
+		float foot = TacMonsterFoot(d.model);
+		if (foot > 0.02f && SpanFromHalf(foot) >= span) {
+			d.weight = 0;
+			s_gfit[gi] = 1;
+			s_catGen++;
+			return;
+		}
+	}
+	ApplyGiantBody(d, span);
+	s_gfit[gi] = 1;
+}
+
 void MonsterPrepareScale(int monster)
 {
+	{
+		int g = GiantIndex(monster);
+		if (g >= 0) { FitGiant(s_giant[g]); return; }
+	}
 	if (monster >= M_COUNT && monster < M_COUNT + kImportN && (monster - M_COUNT) < IMP_CAP) {
 		ClampImportFoot(s_monImp[monster - M_COUNT]);
 		return;
@@ -6629,6 +6787,10 @@ void MonsterPrepareScale(int monster)
 
 static int MonsterSpan(const MonsterDef& md, int boss)
 {
+	if (&md >= s_giant && &md < s_giant + GIANT_CAP) {
+		FitGiant(const_cast<MonsterDef&>(md));
+		if (md.footSpan >= 1 && md.footSpan <= 5) return md.footSpan;
+	}
 	if (md.look == LK_MESH && &md >= s_monImp && &md < s_monImp + IMP_CAP)
 		ClampImportFoot(const_cast<MonsterDef&>(md));
 	if (md.look == LK_MESH && &md >= s_foeEx && &md < s_foeEx + 4096)
@@ -6643,6 +6805,8 @@ static int MonsterSpan(const MonsterDef& md, int boss)
 	}
 	return SpanFromHalf(half * sc);
 }
+
+static void DressHumanFoe(Unit& u, Rng& r, int lockTitle = -1);
 
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 {
@@ -6768,6 +6932,13 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	u.mp = u.ch.stat[S_MP];
 	u.cp = 0;
 	u.span = MonsterSpan(md, boss);
+	{
+		int g = GiantIndex(monster);
+		if (g >= 0 && s_ghuman[g] >= 0) {
+			DressHumanFoe(u, r, s_ghuman[g]);
+			u.span = MonsterSpan(md, boss);
+		}
+	}
 	{
 		int line = monster % 6;
 		if (monster >= 0 && monster < M_COUNT) {
@@ -7013,9 +7184,163 @@ static int HumFoeClass(int title)
 	}
 }
 
-static void DressHumanFoe(Unit& u, Rng& r)
+static const wchar_t* GiantPre(int tier, int slot, int slime, int lang)
+{
+	if (tier < 0) tier = 0;
+	if (tier > 2) tier = 2;
+	if (lang < 0 || lang > 13) lang = 1;
+	if (slime) {
+		if (slot < 0) slot = 0;
+		return kGSlim[tier][slot & 3][lang];
+	}
+	if (slot < 0) slot = 0;
+	return kGPre[tier][slot & 7][lang];
+}
+
+static int NameIsSlime(const wchar_t* en)
+{
+	if (!en) return 0;
+	if (wcsstr(en, L"Slime") || wcsstr(en, L"slime")) return 1;
+	if (wcsstr(en, L"Blob") || wcsstr(en, L"Glub") || wcsstr(en, L"Mush")) return 1;
+	if (wcsstr(en, L"Ooze") || wcsstr(en, L"Pudding")) return 1;
+	return 0;
+}
+
+static void GiantJoin(wchar_t* dst, const wchar_t* pre, const wchar_t* base, int lang)
+{
+	if (!pre || !pre[0]) pre = L"?";
+	if (!base || !base[0]) base = L"?";
+	if (lang == 0 || lang == 5 || lang == 6) swprintf_s(dst, GIANT_NAME, L"%s・%s", pre, base);
+	else swprintf_s(dst, GIANT_NAME, L"%s %s", pre, base);
+}
+
+static void FillGiantName(int i, int tier, int slot, int slime, int kind, int key, int title)
+{
+	int old = savedata.lang;
+	wchar_t both[96];
+	for (int lang = 0; lang < 14; lang++) {
+		const wchar_t* base = L"?";
+		if (kind == 2) {
+			savedata.lang = lang;
+			Unit u;
+			memset(&u, 0, sizeof(u));
+			u.ch.kills = title;
+			base = HumFoeTitle(u);
+		} else if (kind == 1) {
+			base = ImportLocAt(key, lang);
+		} else {
+			const MonsterDef& src = kMon[key];
+			if (src.nameB >= 0) {
+				swprintf_s(both, L"%s %s", TTAt(src.nameTx, lang), TTAt(src.nameB, lang));
+				base = both;
+			} else base = TTAt(src.nameTx, lang);
+		}
+		GiantJoin(s_gname[i][lang], GiantPre(tier, slot, slime, lang), base, lang);
+	}
+	savedata.lang = old;
+}
+
+static int PushGiant(const MonsterDef& src, int span, int slime, int kind, int key, int title)
+{
+	if (span < 2 || span > 4) return -1;
+	if (s_giantN >= GIANT_CAP) return -1;
+	int i = s_giantN++;
+	s_giant[i] = src;
+	s_ghuman[i] = (short)title;
+	s_gfit[i] = 0;
+	if (title >= 0) {
+		s_giant[i].look = LK_KAYKIT;
+		s_giant[i].model = -2;
+		s_giant[i].minStage = 3 + (title * 64) / (HF_N > 1 ? HF_N : 1);
+	}
+	GiantTune(s_giant[i], span);
+	ApplyGiantBody(s_giant[i], span);
+	int tier = span - 2;
+	int slot;
+	if (slime && kind == 0 && key == M_SLIME) slot = 0;
+	else if (slime && kind == 0 && key == M_POISON_SLIME) slot = (span == 2) ? 2 : 1;
+	else slot = (key * 5 + tier * 3) % (slime ? 4 : 8);
+	FillGiantName(i, tier, slot, slime, kind, key, title);
+	return i;
+}
+
+static void BuildGiants()
+{
+	if (s_giantN > 0) return;
+	EnsureSheets();
+	for (int id = 0; id < M_COUNT; id++) {
+		int slime = NameIsSlime(TTAt(kMon[id].nameTx, 1)) || id == M_SLIME || id == M_POISON_SLIME;
+		for (int span = 2; span <= 4; span++)
+			if (PushGiant(kMon[id], span, slime, 0, id, -1) < 0) return;
+	}
+	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	for (int i = 0; i < nImp; i++) {
+		const wchar_t* nm = kImportName[i];
+		if (!nm || wcsncmp(nm, L"Sum", 3) == 0) continue;
+		int slime = NameIsSlime(ImportLocAt(i, 1)) || NameIsSlime(nm);
+		for (int span = 2; span <= 4; span++)
+			if (PushGiant(s_monImp[i], span, slime, 1, i, -1) < 0) return;
+	}
+	for (int t = 0; t < HF_N; t++) {
+		for (int span = 2; span <= 4; span++)
+			if (PushGiant(kMon[M_DARK_KNIGHT], span, 0, 2, t, t) < 0) return;
+	}
+}
+
+int MonsterIsGiant(int id)
+{
+	EnsureMonsters();
+	return GiantIndex(id) >= 0 ? 1 : 0;
+}
+
+int MonsterListGen()
+{
+	EnsureMonsters();
+	return s_catGen;
+}
+
+int MonsterPreviewChar(int id, CharData& ch)
+{
+	EnsureMonsters();
+	int g = GiantIndex(id);
+	if (g < 0 || s_ghuman[g] < 0) return 0;
+	int title = s_ghuman[g];
+	if (title < 0 || title >= HF_N) return 0;
+	memset(&ch, 0, sizeof(ch));
+	int fem = 0;
+	switch (title) {
+	case HF_WITCH: case HF_ARCHWITCH: case HF_MAID: case HF_QUEEN: case HF_PRINCESS:
+	case HF_EMPRESS: case HF_NUN: case HF_KUNOICHI: case HF_SAINT: case HF_ORACLE:
+	case HF_COUNTESS: case HF_DANCER:
+		fem = 1;
+		break;
+	default:
+		fem = 0;
+		break;
+	}
+	ch.gender = fem;
+	CharSetKind(ch, CHAR_KIND_HUM);
+	CharSetModel(ch, 0);
+	CharSetAvatar(ch, 1);
+	CharSetFace(ch, 0);
+	CharSetHt(ch, 2);
+	CharSetFig(ch, 2);
+	CharSetBust(ch, 2);
+	CharSetOutfit(ch, 0);
+	CharSetAvaCol(ch, 0);
+	ch.hair = 2;
+	ch.hairColor = 1;
+	ch.cls = HumFoeClass(title);
+	CharSetBody(ch, (ch.cls == C_MAGE || ch.cls == C_CLERIC) ? B_MAGE : ((ch.cls == C_THIEF) ? B_ROGUE : B_KNIGHT));
+	ch.kills = title;
+	ch.lv = 1;
+	return 1;
+}
+
+static void DressHumanFoe(Unit& u, Rng& r, int lockTitle)
 {
 	if (!u.alive || u.team != TEAM_ENEMY) return;
+	int keepSpan = u.span;
 	int keepBoss = u.boss;
 	int fem = r.Chance(52) ? 1 : 0;
 	u.ch.gender = fem;
@@ -7034,7 +7359,7 @@ static void DressHumanFoe(Unit& u, Rng& r)
 	u.ch.hair = r.Range(0, HAIR_STYLES - 1);
 	u.ch.hairColor = r.Range(0, HAIR_COLORS - 1);
 	int model = CharModel(u.ch);
-	int title = HumFoePickTitle(fem, model, av, u.ch.hair, u.ch.lv, keepBoss, r);
+	int title = (lockTitle >= 0 && lockTitle < HF_N) ? lockTitle : HumFoePickTitle(fem, model, av, u.ch.hair, u.ch.lv, keepBoss, r);
 	if ((title == HF_SPIRIT || title == HF_GREATSPIRIT || title == HF_SPIRITKING || title == HF_FALLEN || title == HF_SAINT || title == HF_ORACLE) && r.Chance(48)) {
 		CharSetModel(u.ch, 1);
 		CharSetAvatar(u.ch, 21);
@@ -7071,7 +7396,7 @@ static void DressHumanFoe(Unit& u, Rng& r)
 	u.lucky = 2 + (title & 7);
 	u.boss = keepBoss;
 	wcsncpy_s(u.ch.name, HumFoeTitle(u), _TRUNCATE);
-	u.span = 1;
+	u.span = keepSpan > 1 ? keepSpan : 1;
 	if (!keepBoss) {
 		auto bump = [&](int s, int num, int den) {
 			long long v = (long long)u.ch.stat[s] * num / den;
@@ -7097,6 +7422,7 @@ static void PlantHumanFoes(Battle& b, Rng& r, int stage)
 	for (int i = 0; i < b.nUnits; i++) {
 		Unit& u = b.u[i];
 		if (!u.alive || u.team != TEAM_ENEMY) continue;
+		if (u.span > 1) continue;
 		if (u.boss) {
 			if (bossUi < 0) bossUi = i;
 			int chance = 22 + min(18, stage / 6);
@@ -7230,6 +7556,69 @@ static int MatchDeckAt(const Cell& c, int refH, int fallbackL)
 	}
 	if (best >= 0) return best;
 	return Clampi(fallbackL, 0, n - 1);
+}
+
+static float MonsterBodyY(const MonsterDef& md)
+{
+	if (md.model == -2) {
+		float sc = md.scale > 0.2f ? md.scale : 1.6f;
+		return 1.75f * sc;
+	}
+	if (md.look == LK_MESH && md.model >= 0) {
+		float tall = TacMonsterTall(md.model);
+		float sc = md.scale > 0.02f ? md.scale : 1.f;
+		if (tall < 0.2f) tall = 1.7f;
+		return tall * sc;
+	}
+	if (md.look == LK_KAYKIT) {
+		float sc = md.scale > 0.02f ? md.scale : 1.f;
+		return 2.3f * 0.43f * sc;
+	}
+	static const float kH[6] = { 1.7f, 0.62f, 1.45f, 1.75f, 1.65f, 1.7f };
+	int lk = md.look;
+	if (lk < 0 || lk > 5) lk = 0;
+	float sc = md.scale > 0.02f ? md.scale : 1.f;
+	return kH[lk] * sc;
+}
+
+static float UnitBodyY(const Unit& u)
+{
+	if (u.monster < 0) return 1.75f;
+	const MonsterDef& md = MonsterInfo(u.monster);
+	int g = GiantIndex(u.monster);
+	if (g >= 0) FitGiant(s_giant[g]);
+	float y = MonsterBodyY(MonsterInfo(u.monster));
+	if (u.boss) y *= 1.15f;
+	if (y < 0.4f) y = 0.4f;
+	return y;
+}
+
+// 頭上の床までの空きが身長に足りないマスは、立たせない。上の層は消さない。
+static int DeckFits(const Map& m, int x, int z, int layer, int span, float bodyY)
+{
+	if (bodyY < 0.4f) bodyY = 0.4f;
+	if (span < 1) span = 1;
+	if (span > 5) span = 5;
+	const float need = bodyY + 0.32f;
+	if (!Map::In(x, z)) return 0;
+	int originL = LayerOn(m.At(x, z), layer) ? layer : 0;
+	int refH = LayerHt(m.At(x, z), originL);
+	for (int dz = 0; dz < span; dz++) for (int dx = 0; dx < span; dx++) {
+		int cx = x + dx, cz = z + dz;
+		if (!Map::In(cx, cz)) return 0;
+		const Cell& c = m.At(cx, cz);
+		int L = (dx == 0 && dz == 0) ? originL : MatchDeckAt(c, refH, originL);
+		if (!LayerOn(c, L)) L = 0;
+		float y0 = TacHToY(LayerHt(c, L));
+		int nLay = CellLayN(c);
+		for (int i = 0; i < nLay; i++) {
+			if (i == L) continue;
+			float y = TacHToY(LayerHt(c, i));
+			if (y <= y0 + 0.05f) continue;
+			if (y - y0 < need) return 0;
+		}
+	}
+	return 1;
 }
 
 static void SeedUnitSteps(const Unit& u, const Map& m, int* sx, int* sz, int* sL, int& n, int cap)
@@ -7476,6 +7865,7 @@ static bool FootLand(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 	int s = UnitSpan(u);
 	int mt = UnitMoveType(u);
 	if (!Map::In(nx, nz) || !LayerOn(b.map.At(nx, nz), toLayer)) return false;
+	if (!DeckFits(b.map, nx, nz, toLayer, s, UnitBodyY(u))) return false;
 	int refH = LayerHt(b.map.At(nx, nz), toLayer);
 	if (s <= 1 && !DeckClimbOk(b.map, x, z, fromLayer, nx, nz, toLayer, mt)) return false;
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
@@ -7512,6 +7902,7 @@ static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz, int 
 	int from0 = LayerOn(f0, fromLayer) ? fromLayer : 0;
 	int layer = ChooseLayer(f0, from0, t0, jp, mt);
 	if (layer < 0) return false;
+	if (!DeckFits(b.map, nx, nz, layer, s, UnitBodyY(u))) return false;
 	int refH = LayerHt(t0, layer);
 	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
 		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
@@ -7670,7 +8061,7 @@ int ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int ma
 	}
 	if (preferLayer >= 0 && preferLayer < LAY_N) {
 		int homeC = ReachCostAt(r, preferLayer, tx, tz);
-		if (homeC >= 0 && homeC <= best + 1) on = preferLayer;
+		if (homeC >= 0) on = preferLayer;
 	}
 	if (on < 0) return 0;
 	int tmp[MAPN * 2], n = 0;
@@ -10045,7 +10436,7 @@ static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 	static int cacheKey = -999999;
 	static int pool[6][160];
 	static int pn[6];
-	int key = stage * 2 + (boss ? 1 : 0);
+	int key = stage * 2 + (boss ? 1 : 0) + s_catGen * 131072;
 	if (cacheKey != key) {
 		cacheKey = key;
 		for (int s = 0; s < 6; s++) pn[s] = 0;
@@ -10090,6 +10481,37 @@ static int PickMonsterOfSpan(int stage, int span, int boss, Rng& r)
 				pool[s][pn[s]++] = id;
 				if (late) kn[s][kind]++;
 			}
+		}
+		int g0 = M_COUNT + nImp + kFoeExN;
+		static int gMatch[6][512];
+		int gSeen[6];
+		for (int gs = 0; gs < 6; gs++) gSeen[gs] = 0;
+		for (int gid = g0; gid < g0 + s_giantN; gid++) {
+			const MonsterDef& gmd = MonsterInfo(gid);
+			if (gmd.weight <= 0) continue;
+			int sp = MonsterSpan(gmd, boss ? 1 : 0);
+			if (gmd.weight <= 0) continue;
+			if (sp < 2 || sp > 4) continue;
+			int glo = MonsterFirstStage(gid);
+			if (glo > stage) continue;
+			int gtop = gmd.maxStage > 0 ? gmd.maxStage : TAC_STAGE_MAX;
+			if (stage > gtop) continue;
+			int seen = gSeen[sp]++;
+			if (seen < 512) gMatch[sp][seen] = gid;
+			else gMatch[sp][(gid + stage) % 512] = gid;
+		}
+		for (int sp = 2; sp <= 4; sp++) {
+			int nm = gSeen[sp] < 512 ? gSeen[sp] : 512;
+			if (nm <= 0) continue;
+			int keep = nm < 48 ? nm : 48;
+			int room = 160 - pn[sp];
+			if (room < keep) {
+				int drop = keep - room;
+				if (drop > pn[sp]) drop = pn[sp];
+				pn[sp] -= drop;
+			}
+			for (int gi = 0; gi < keep && pn[sp] < 160; gi++)
+				pool[sp][pn[sp]++] = gMatch[sp][(gi * nm) / keep];
 		}
 	}
 	if (pn[span] <= 0) return -1;
@@ -10206,6 +10628,7 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 	}
 	if (mt != MV_FLY && !SameStep(hmin, hmax, jp)) return false;
 	if (s > 1 && mt != MV_FLY && room < s) return false;
+	if (!DeckFits(b.map, ax, az, dL, s, UnitBodyY(u))) return false;
 	return true;
 }
 
@@ -10783,6 +11206,8 @@ static void PlantPad(Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN], int 
 			if (SeenTouch(b.map, seen, cx, cz, h)) touch = 1;
 		}
 		if (!ok || !touch) continue;
+		int standL = MatchDeckAt(b.map.At(x, z), h, 0);
+		if (!DeckFits(b.map, x, z, standL, s, UnitBodyY(u))) continue;
 		int rank = abs(x - ax) + abs(z - az);
 		if (rank < best) { best = rank; bx = x; bz = z; }
 	}
@@ -10795,7 +11220,7 @@ static void PlantPad(Battle& b, int ui, const BYTE seen[LAY_N][MAPN][MAPN], int 
 		int cx = bx + dx, cz = bz + dz;
 		Cell& c = b.map.c[cz][cx];
 		int L = MatchDeckAt(c, h, 0);
-		if (CellStand(c, L) && SameStep(LayerHt(c, L), h, 2) && c.nLay < 2) continue;
+		if (CellStand(c, L) && SameStep(LayerHt(c, L), h, 2)) continue;
 		SoloPlain(c, h);
 	}
 	u.x = bx; u.z = bz; u.deck = 0;
@@ -11479,6 +11904,11 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (!FitSpanAt(b, gx, gz, refH, span, &px, &pz)) continue;
 			int id = PickMonsterOfSpan(stage, span, boss, r);
 			if (id < 0) continue;
+			if (MonsterInfo(id).weight <= 0) continue;
+			float by = MonsterBodyY(MonsterInfo(id));
+			if (boss) by *= 1.15f;
+			int stand = MatchDeckAt(b.map.At(px, pz), refH, layer);
+			if (!DeckFits(b.map, px, pz, stand, span, by)) continue;
 			Unit& u = b.u[n];
 			MakeEnemy(u, id, lv, boss, r);
 			u.face = faceToE + 3.14159f;
@@ -12554,7 +12984,7 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 	}
 }
 
-void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
+void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level, int showcase)
 {
 	const Unit& u = b.u[ui];
 	p.moveX = u.x; p.moveZ = u.z; p.moveL = u.deck; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 0;
@@ -12617,6 +13047,12 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 	BOOL allowSkill = level >= 2 || (r.Next() % 100) < 18;
 	// 攻撃スキルと奥義は約半分の手番だけ。残りは通常攻撃。回復と、追い詰められた防御は残す。
 	BOOL halfOff = (r.Next() % 100) < (level <= 1 ? 28 : (level >= 4 ? 42 : 36));
+	if (showcase) {
+		allowSkill = TRUE;
+		halfOff = TRUE;
+		tryArt = TRUE;
+		tryOugi = (r.Next() % 100) < 40;
+	}
 	float noise = level <= 1 ? 2.8f : (level == 2 ? 2.2f : (level == 3 ? 0.35f : 0.06f));
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
@@ -12899,6 +13335,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 				}
 				if (sd.kind != SK_HEAL && sd.kind != SK_BUFF) sc += focusBias(i, 36.f, 22.f, 14.f);
 				sc += r.F(0, 10.f * noise);
+				if (showcase) sc += 22.f;
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
 			}
 		}
@@ -12966,6 +13403,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level)
 					sc += focusBias(i, 28.f, 18.f, 12.f);
 					sc += r.F(0, 10.f * noise);
 				}
+				if (showcase) sc += ougi ? 28.f : 18.f;
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.moveL = bestStopL; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
 		}

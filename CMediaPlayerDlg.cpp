@@ -55,6 +55,7 @@ extern "C" int ScStaffPreviewStopFromHost(void);
 #include "MpPlayerAddons.h"
 #include "MpFeatureExtras.h"
 #include "TagEditDlg.h"
+#include "TagGridDlg.h"
 #include "TagBatchEditDlg.h"
 #include "FileTagInfo.h"
 #include "Render.h"
@@ -2435,7 +2436,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botDj.GetSafeHwnd())
 		addTip(m_botDj, LL14(L"DJパッドを開きます。", L"Open DJ Pad.", L"Ouvrir le pad DJ.", L"Apri pad DJ.", L"Abrir pad DJ.", L"DJ 패드 열기.", L"打开 DJ 垫。", L"فتح لوحة DJ.", L"Открыть DJ-панель.", L"DJ-Pad öffnen.", L"Abrir pad DJ.", L"DJ-pad openen.", L"Otworz pad DJ.", L"DJ panelini ac."));
 	if (m_botTag.GetSafeHwnd())
-		addTip(m_botTag, LL14(L"選択曲のタグを編集します (F2)。", L"Edit tags of the selection (F2).", L"Editer les tags (F2).", L"Modifica tag (F2).", L"Editar etiquetas (F2).", L"선택 곡 태그 편집 (F2).", L"编辑所选标签 (F2)。", L"تحرير وسوم التحديد (F2).", L"Править теги выбранного (F2).", L"Tags der Auswahl bearbeiten (F2).", L"Editar tags da selecao (F2).", L"Tags van selectie bewerken (F2).", L"Edytuj tagi zaznaczenia (F2).", L"Secimin etiketlerini duzenle (F2)."));
+		addTip(m_botTag, LL14(L"タグのメニューを開きます。選択曲の編集と、プレイリスト外の一覧編集 (F2 は選択曲)。", L"Open the tag menu. Edit the selection, or a grid that is not tied to the playlist (F2 edits the selection).", L"Ouvre le menu des tags. Edition de la selection, ou une grille hors liste (F2 = selection).", L"Apre il menu tag. Modifica la selezione, o una griglia fuori playlist (F2 = selezione).", L"Abre el menu de etiquetas. Editar la seleccion, o una tabla fuera de la lista (F2 = seleccion).", L"태그 메뉴를 엽니다. 선택 곡 편집과, 재생목록과 무관한 목록 (F2는 선택 곡).", L"打开标签菜单。可编辑所选，或与播放列表无关的一览 (F2 为所选)。", L"يفتح قائمة الوسوم. تحرير التحديد، أو جدول خارج القائمة (F2 للتحديد).", L"Открыть меню тегов. Правка выбора или таблица вне плейлиста (F2 — выбор).", L"Tag-Menue. Auswahl bearbeiten oder eine Tabelle ausserhalb der Playlist (F2 = Auswahl).", L"Abre o menu de tags. Editar a selecao, ou uma grelha fora da lista (F2 = selecao).", L"Tagmenu. Selectie bewerken, of een tabel los van de afspeellijst (F2 = selectie).", L"Menu tagow. Edycja zaznaczenia albo tabela poza playlista (F2 = zaznaczenie).", L"Etiket menusu. Secimi duzenle, veya liste disi tablo (F2 = secim)."));
 	if (m_botBpm.GetSafeHwnd())
 		addTip(m_botBpm, LL14(L"BPM を多段計測します（拍子・音符価も推定）。", L"Multipass BPM measure (also meter and note value).", L"Mesure BPM multipasse (mesure et valeur de note).", L"Misura BPM multipass (metro e valore nota).", L"Medir BPM multipase (compas y valor de nota).", L"BPM 다단 측정(박자·음표도 추정).", L"多段测量 BPM（并估计拍号与音符）。", L"قياس BPM متعدد (وميزان وقيمة نغمة).", L"Многопроходное BPM (также размер и длительность).", L"BPM mehrfach messen (auch Taktart und Notenwert).", L"Medir BPM multipasse (compasso e valor de nota).", L"BPM multipass meten (ook maatsoort en nootwaarde).", L"Wieloprzebiegowy BPM (tez metrum i wartosc nuty).", L"Cok gecisli BPM olc (olcu ve nota degeri de)."));
 	if (m_botSleep.GetSafeHwnd())
@@ -13189,7 +13190,42 @@ void CMediaPlayerDlg::UpdateDeskLrcBtnChrome()
 	m_deskLrc.Invalidate(FALSE);
 }
 
-void CMediaPlayerDlg::OnTagEdit() { OpenTagEditForSelection(); }
+void CMediaPlayerDlg::OnTagEdit()
+{
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+	menu.SetSkipChrome(TRUE);
+	menu.AddCommand(1,
+		LL14(L"選択曲のタグ編集", L"Edit selection", L"Editer la selection", L"Modifica selezione", L"Editar seleccion", L"선택 곡 편집", L"编辑所选", L"تحرير التحديد", L"Править выбор", L"Auswahl bearbeiten", L"Editar selecao", L"Selectie bewerken", L"Edytuj zaznaczenie", L"Secimi duzenle"),
+		LL14(L"今選んでいる曲のタグを開きます。F2 と同じです。", L"Open tags for the current selection. Same as F2.", L"Ouvre les tags de la selection. Comme F2.", L"Apre i tag della selezione. Come F2.", L"Abre las etiquetas de la seleccion. Igual que F2.", L"지금 고른 곡의 태그를 엽니다. F2 와 같습니다.", L"打开所选曲目的标签。与 F2 相同。", L"يفتح وسوم التحديد. مثل F2.", L"Открыть теги выбора. Как F2.", L"Tags der Auswahl oeffnen. Wie F2.", L"Abre as tags da selecao. Igual a F2.", L"Tags van de selectie openen. Hetzelfde als F2.", L"Otwiera tagi zaznaczenia. Jak F2.", L"Secimin etiketlerini acar. F2 ile ayni."));
+	menu.AddCommand(2,
+		LL14(L"タグ一覧（ドロップで追加）", L"Tag grid (drop to add)", L"Grille de tags (deposer)", L"Griglia tag (trascina)", L"Tabla de etiquetas (soltar)", L"태그 목록 (드롭으로 추가)", L"标签表（拖入添加）", L"جدول الوسوم (أفلت للإضافة)", L"Сетка тегов (перетащите)", L"Tag-Tabelle (ablegen)", L"Grelha de tags (largar)", L"Tagtabel (neerzetten)", L"Tabela tagow (upusc)", L"Etiket tablosu (birak)"),
+		LL14(L"プレイリストとは別に、右クリックで型や連番やジャケットをまとめて直します。", L"A grid apart from the playlist. Right-click for patterns, numbers, and covers.", L"Une grille hors liste. Clic droit pour modele, numeros et pochettes.", L"Una griglia fuori playlist. Clic destro per modello, numeri e copertine.", L"Una tabla fuera de la lista. Clic derecho para patron, numeros y portadas.", L"재생목록과 별개로, 오른쪽 클릭으로 형식·번호·재킷을 한꺼번에 고칩니다.", L"与播放列表分开。右键可改格式、编号和封面。", L"جدول خارج القائمة. النقرة اليمنى للنمط والترقيم والغلاف.", L"Таблица вне плейлиста. Правый щелчок — шаблон, номера, обложки.", L"Tabelle ausserhalb der Playlist. Rechtsklick fuer Muster, Nummern, Cover.", L"Uma grelha fora da lista. Clique direito para padrao, numeros e capas.", L"Een tabel los van de afspeellijst. Rechtsklik voor patroon, nummers en hoezen.", L"Tabela poza playlista. Prawy przycisk: wzor, numery, okladki.", L"Calma listesinden ayri tablo. Sag tik: kalip, numara, kapak."));
+	CRect r;
+	if (m_botTag.GetSafeHwnd()) m_botTag.GetWindowRect(&r);
+	else GetWindowRect(&r);
+	const UINT cmd = menu.Track(CPoint(r.left, r.top), this);
+	if (cmd == 1) OpenTagEditForSelection();
+	else if (cmd == 2) OpenTagGrid();
+}
+
+void CMediaPlayerDlg::OpenTagGrid()
+{
+	std::vector<CString> paths;
+	if (pl && pl->pc && ::IsWindow(m_list.GetSafeHwnd())) {
+		for (int d = -1; (d = m_list.GetNextItem(d, LVNI_SELECTED)) != -1; ) {
+			const int pc = MpDispToPc(this, d);
+			if (pc < 0 || pc >= pl->playcnt) continue;
+			CString p = PlPhysicalMediaPath(pl->pc[pc].fol);
+			if (p.IsEmpty()) p = pl->pc[pc].fol;
+			if (!p.IsEmpty()) paths.push_back(p);
+		}
+	}
+	CTagGridDlg dlg(this);
+	dlg.Seed(paths);
+	dlg.DoModal();
+	RefreshList(TRUE);
+}
 void CMediaPlayerDlg::OnTagBatch() { OpenTagBatchForSelection(); }
 
 void CMediaPlayerDlg::OnJacketReloadAlt()

@@ -1098,6 +1098,85 @@ static void BuildIce(Renderer& r, GpuMesh& out)
 	GeoToStatic(r, g, out);
 }
 
+static void LoadCutCc0(Renderer& r, Library& lib)
+{
+	for (int i = 0; i < 8; i++) lib.cutCc0[i].tex = -1;
+	wchar_t dir[MAX_PATH];
+	GetModuleFileNameW(NULL, dir, MAX_PATH);
+	wchar_t* sl = wcsrchr(dir, L'\\');
+	if (sl) *sl = 0;
+	wchar_t path[MAX_PATH];
+	swprintf_s(path, L"%s\\tacticsbgm\\resource\\tactics\\cut_cc0.bin", dir);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD sz = GetFileSize(h, NULL);
+	if (sz < 16 || sz > 256u * 1024u * 1024u) { CloseHandle(h); return; }
+	HANDLE hm = CreateFileMappingW(h, NULL, PAGE_READONLY, 0, 0, NULL);
+	const BYTE* b = hm ? (const BYTE*)MapViewOfFile(hm, FILE_MAP_READ, 0, 0, 0) : NULL;
+	if (!b || memcmp(b, "CUTC", 4) != 0) {
+		if (b) UnmapViewOfFile(b);
+		if (hm) CloseHandle(hm);
+		CloseHandle(h);
+		return;
+	}
+	const BYTE* p = b + 4;
+	const BYTE* end = b + sz;
+	UINT ver = 0, ntex = 0, nmesh = 0;
+	if (p + 12 > end) { UnmapViewOfFile(b); CloseHandle(hm); CloseHandle(h); return; }
+	memcpy(&ver, p, 4); p += 4;
+	memcpy(&ntex, p, 4); p += 4;
+	memcpy(&nmesh, p, 4); p += 4;
+	if (ver != 1 || ntex > 8 || nmesh > 8) { UnmapViewOfFile(b); CloseHandle(hm); CloseHandle(h); return; }
+	int slotOf[8];
+	for (int i = 0; i < 8; i++) slotOf[i] = -1;
+	for (UINT i = 0; i < ntex; i++) {
+		if (p + 36 > end) break;
+		char name[32];
+		memcpy(name, p, 32); p += 32;
+		name[31] = 0;
+		UINT nb = 0;
+		memcpy(&nb, p, 4); p += 4;
+		if (p + nb > end) break;
+		int slot = -1;
+		if (strcmp(name, "rock") == 0) slot = 0;
+		else if (strcmp(name, "ice") == 0) slot = 1;
+		else if (strcmp(name, "leaf") == 0) slot = 2;
+		else if (strcmp(name, "metal") == 0) slot = 3;
+		else if (strcmp(name, "dust") == 0) slot = 4;
+		if (slot >= 0 && r.LoadPngTex(p, nb, slot)) slotOf[i] = slot;
+		p += nb;
+	}
+	for (UINT i = 0; i < nmesh && i < 8; i++) {
+		if (p + 44 > end) break;
+		char name[32];
+		memcpy(name, p, 32); p += 32;
+		name[31] = 0;
+		UINT ti = 0, nv = 0, ni = 0;
+		memcpy(&ti, p, 4); p += 4;
+		memcpy(&nv, p, 4); p += 4;
+		memcpy(&ni, p, 4); p += 4;
+		size_t vb = (size_t)nv * 36u;
+		size_t ib = ((size_t)ni * 2u + 3u) & ~3u;
+		if (!nv || ni < 3 || nv > 20000 || ni > 60000 || p + vb + ib > end) break;
+		int slot = 0;
+		if (strcmp(name, "rock1") == 0) slot = 1;
+		else if (strcmp(name, "rock2") == 0) slot = 2;
+		else if (strcmp(name, "ice") == 0) slot = 3;
+		else if (strcmp(name, "leaf") == 0) slot = 4;
+		else if (strcmp(name, "metal") == 0) slot = 5;
+		else if (strcmp(name, "dust") == 0) slot = 6;
+		else if (strcmp(name, "pillar") == 0) slot = 7;
+		if (r.MakeMesh(lib.cutCc0[slot], p, 36, nv, (const WORD*)(p + vb), ni)) {
+			int ts = (ti < ntex) ? slotOf[ti] : -1;
+			lib.cutCc0[slot].tex = ts;
+		}
+		p += vb + ib;
+	}
+	UnmapViewOfFile(b);
+	CloseHandle(hm);
+	CloseHandle(h);
+}
+
 BOOL BuildLibrary(Renderer& r, Library& lib)
 {
 	ReleaseLibrary(lib);
@@ -1135,6 +1214,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	BuildSq(r, lib.sq); step();
 	BuildOrb(r, lib.orb); step();
 	BuildIce(r, lib.ice); step();
+	LoadCutCc0(r, lib);
 	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
 	// 印の位置だと骨を差し替えられ、メッシュだけがタイルの赤丸から外れて巨大になる。
 	r.m_keepModels = (int)r.models.size();
@@ -1160,6 +1240,7 @@ void ReleaseLibrary(Library& lib)
 	lib.sq.Release();
 	lib.orb.Release();
 	lib.ice.Release();
+	for (int i = 0; i < 8; i++) lib.cutCc0[i].Release();
 	lib.ready = 0;
 }
 
@@ -1407,7 +1488,8 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		}
 		if (c.cape && !capeOn && si == 2) AddAtt(a, r, "Skeleton_Rogue_Cape");
 	} else {
-		if (c.hat && !helm && !builtInHat) {
+		// アバターの頭は実寸の頭蓋。KayKit の兜を頭骨へ乗せると殻が潰れて地毛が禿げて見える。
+		if (c.hat && !helm && !builtInHat && !a.avatar) {
 			static const char* const hats[B_COUNT] = { "Knight_Helmet", "Barbarian_Hat", "Mage_Hat", NULL, NULL };
 			if (hats[a.body]) AddAtt(a, r, hats[a.body]);
 		}
@@ -1662,9 +1744,63 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 	}
 }
 
+static Q4 QFromRot(const M4& m)
+{
+	V3 x = v3(m.m[0], m.m[1], m.m[2]);
+	V3 y = v3(m.m[4], m.m[5], m.m[6]);
+	V3 z = v3(m.m[8], m.m[9], m.m[10]);
+	float lx = Len(x), ly = Len(y), lz = Len(z);
+	if (lx > 1e-8f) x = x * (1.f / lx);
+	if (ly > 1e-8f) y = y * (1.f / ly);
+	if (lz > 1e-8f) z = z * (1.f / lz);
+	float tr = x.x + y.y + z.z;
+	Q4 q;
+	if (tr > 0.f) {
+		float s = sqrtf(tr + 1.f) * 2.f;
+		q.w = 0.25f * s;
+		q.x = (y.z - z.y) / s;
+		q.y = (z.x - x.z) / s;
+		q.z = (x.y - y.x) / s;
+	} else if (x.x > y.y && x.x > z.z) {
+		float s = sqrtf(1.f + x.x - y.y - z.z) * 2.f;
+		q.w = (y.z - z.y) / s;
+		q.x = 0.25f * s;
+		q.y = (x.y + y.x) / s;
+		q.z = (x.z + z.x) / s;
+	} else if (y.y > z.z) {
+		float s = sqrtf(1.f + y.y - x.x - z.z) * 2.f;
+		q.w = (z.x - x.z) / s;
+		q.x = (x.y + y.x) / s;
+		q.y = 0.25f * s;
+		q.z = (y.z + z.y) / s;
+	} else {
+		float s = sqrtf(1.f + z.z - x.x - y.y) * 2.f;
+		q.w = (x.y - y.x) / s;
+		q.x = (x.z + z.x) / s;
+		q.y = (y.z + z.y) / s;
+		q.z = 0.25f * s;
+	}
+	float l = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+	if (l > 1e-8f) { q.x /= l; q.y /= l; q.z /= l; q.w /= l; }
+	else { q.x = q.y = q.z = 0.f; q.w = 1.f; }
+	return q;
+}
+
 void ActorPlay(Actor& a, int clip, int loop, float blendTime)
 {
 	if (clip == a.clip && loop && a.loop) return;
+	a.holdN = 0;
+	if (blendTime > 0.f && a.poseValid && a.pose.nJ > 0) {
+		int n = a.pose.nJ;
+		if (n > MAXJ) n = MAXJ;
+		for (int j = 0; j < n; j++) {
+			const M4& L = a.pose.local[j];
+			a.holdP[j] = v3(L.m[12], L.m[13], L.m[14]);
+			a.holdQ[j] = QFromRot(L);
+		}
+		a.holdN = n;
+		if (blendTime < 0.16f) blendTime = 0.16f;
+	}
 	static unsigned roll = 1;
 	roll = roll * 1664525u + 1013904223u;
 	a.motPick = 1 + (int)(roll % 8);
@@ -2115,7 +2251,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		a.modelPtr = &m;
 		int ca = MonsterClip(r, m, a.clip, a.skillPose, a.fallKind, a.riseKind, a.motPick);
 		int cb = MonsterClip(r, m, a.prev, a.prevSkill, a.fallKind, a.riseKind, a.motPick);
-		r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
+		r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose, a.blend < 1.f ? a.holdQ : NULL, a.blend < 1.f ? a.holdP : NULL, a.blend < 1.f ? a.holdN : 0);
 		// 持ち物のある手の指だけ握りの型に替える。素手の指はクリップに捕った動きのまま。
 		if (a.gripClip >= 0 && m.rig >= 0 && m.rig < (int)r.rigs.size() && a.gripClip < (int)r.rigs[m.rig].clips.size() && (a.grip[0] || a.grip[1])) {
 			const Clip& gc = r.rigs[m.rig].clips[a.gripClip];
@@ -2146,7 +2282,14 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 			V3 tr[MAXJ], trB[MAXJ];
 			PoseMods pm, pmB;
 			ProcAnim(a.look, a.clip, a.t, rot, tr, pm, m.nJ);
-			if (a.blend < 1.f) {
+			if (a.blend < 1.f && a.holdN > 0) {
+				int n = m.nJ;
+				if (n > a.holdN) n = a.holdN;
+				for (int j = 0; j < n; j++) {
+					rot[j] = QNlerp(a.holdQ[j], rot[j], a.blend);
+					tr[j] = Lerp(a.holdP[j], tr[j], a.blend);
+				}
+			} else if (a.blend < 1.f) {
 				ProcAnim(a.look, a.prev, a.pt, rotB, trB, pmB, m.nJ);
 				for (int j = 0; j < m.nJ; j++) {
 					rot[j] = QNlerp(rotB[j], rot[j], a.blend);
@@ -2159,7 +2302,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		} else {
 			if (a.rig < 0 || a.rig >= 4) return;
 			int ca = lib.clipMap[a.rig][a.clip], cb = lib.clipMap[a.rig][a.prev];
-			r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
+			r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose, a.blend < 1.f ? a.holdQ : NULL, a.blend < 1.f ? a.holdP : NULL, a.blend < 1.f ? a.holdN : 0);
 		}
 		a.poseValid = 1;
 		a.poseFrame = r.m_frame;

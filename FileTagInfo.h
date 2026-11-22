@@ -4,10 +4,18 @@ struct FileTagFields {
 	CString title;
 	CString artist;
 	CString album;
+	CString albumArtist;
 	CString year;
 	CString track;
+	CString disc;
 	CString genre;
 	CString comment;
+	CString composer;
+	CString lyricist;
+	CString copyright;
+	CString encoder;
+	CString bpm;
+	CString lyrics;
 	int loop1;
 	int loop2;
 
@@ -16,10 +24,18 @@ struct FileTagFields {
 		title.Empty();
 		artist.Empty();
 		album.Empty();
+		albumArtist.Empty();
 		year.Empty();
 		track.Empty();
+		disc.Empty();
 		genre.Empty();
 		comment.Empty();
+		composer.Empty();
+		lyricist.Empty();
+		copyright.Empty();
+		encoder.Empty();
+		bpm.Empty();
+		lyrics.Empty();
 		loop1 = loop2 = 0;
 	}
 	bool HasAnyTagField() const {
@@ -42,7 +58,7 @@ enum { FILETAG_COVER_MAX = 8 * 1024 * 1024 };
 // 戻り値は画像バイト数(0=見つからない)。mimeOut には "image/jpeg" 等が入る。
 int ExtractCoverArt(LPCTSTR path, BYTE* buf, int bufCap, char* mimeOut, int mimeCap);
 
-// 既存の mp3 / flac / wav / dsf へジャケットを埋め込む。成功で true。
+// 既存の mp3 / flac / wav / dsf / ogg へジャケットを埋め込む。成功で true。
 bool EmbedCoverArt(LPCTSTR path, const BYTE* data, int dataLen, const char* mime);
 
 // srcPath のテキストタグ(+copyCover ならジャケット)を、書き出し済みの dstPath へ写す。

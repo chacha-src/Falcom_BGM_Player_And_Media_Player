@@ -57,6 +57,26 @@ void CTagEditDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TAGEDIT_GENRE, m_genre);
 	DDX_Control(pDX, IDC_TAGEDIT_COMMENT_L, m_commentL);
 	DDX_Control(pDX, IDC_TAGEDIT_COMMENT, m_comment);
+	DDX_Control(pDX, IDC_TAGEDIT_AA_L, m_aaL);
+	DDX_Control(pDX, IDC_TAGEDIT_AA, m_aa);
+	DDX_Control(pDX, IDC_TAGEDIT_DISC_L, m_discL);
+	DDX_Control(pDX, IDC_TAGEDIT_DISC, m_disc);
+	DDX_Control(pDX, IDC_TAGEDIT_BPM_L, m_bpmL);
+	DDX_Control(pDX, IDC_TAGEDIT_BPM, m_bpm);
+	DDX_Control(pDX, IDC_TAGEDIT_COMP_L, m_compL);
+	DDX_Control(pDX, IDC_TAGEDIT_COMP, m_comp);
+	DDX_Control(pDX, IDC_TAGEDIT_LYR_L, m_lyrL);
+	DDX_Control(pDX, IDC_TAGEDIT_LYR, m_lyr);
+	DDX_Control(pDX, IDC_TAGEDIT_COPY_L, m_copyL);
+	DDX_Control(pDX, IDC_TAGEDIT_COPY, m_copy);
+	DDX_Control(pDX, IDC_TAGEDIT_ENC_L, m_encL);
+	DDX_Control(pDX, IDC_TAGEDIT_ENC, m_enc);
+	DDX_Control(pDX, IDC_TAGEDIT_LYRICS_L, m_lyricsL);
+	DDX_Control(pDX, IDC_TAGEDIT_LYRICS, m_lyrics);
+	DDX_Control(pDX, IDC_TAGEDIT_PAT_L, m_patL);
+	DDX_Control(pDX, IDC_TAGEDIT_PAT, m_pat);
+	DDX_Control(pDX, IDC_TAGEDIT_TONAME, m_toName);
+	DDX_Control(pDX, IDC_TAGEDIT_NUMBER, m_number);
 	DDX_Control(pDX, IDC_TAGEDIT_COVER_L, m_coverL);
 	DDX_Control(pDX, IDC_TAGEDIT_COVER_PIC, m_coverPic);
 	DDX_Control(pDX, IDC_TAGEDIT_COVER, m_cover);
@@ -73,6 +93,8 @@ BEGIN_MESSAGE_MAP(CTagEditDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TAGEDIT_SAVE, OnBnClickedSave)
 	ON_BN_CLICKED(IDC_TAGEDIT_CLOSE, OnBnClickedClose)
 	ON_BN_CLICKED(IDC_TAGEDIT_BATCH, OnBnClickedBatch)
+	ON_BN_CLICKED(IDC_TAGEDIT_TONAME, OnBnClickedToName)
+	ON_BN_CLICKED(IDC_TAGEDIT_NUMBER, OnBnClickedNumber)
 	ON_BN_CLICKED(IDC_TAGEDIT_COVER_CLEAR, OnBnClickedCoverClear)
 	ON_BN_CLICKED(IDC_TE_HELP, OnBnClickedHelp)
 	ON_WM_DROPFILES()
@@ -194,6 +216,28 @@ BOOL CTagEditDlg::OnInitDialog()
 		L"Жанр", L"Genre", L"Genero", L"Genre", L"Gatunek", L"Tur"));
 	m_commentL.SetWindowText(LL14(L"コメント", L"Comment", L"Commentaire", L"Commento", L"Comentario", L"설명", L"注释", L"Comment",
 		L"Комментарий", L"Kommentar", L"Comentario", L"Opmerking", L"Komentarz", L"Yorum"));
+	m_aaL.SetWindowText(LL14(L"アルバムの人", L"Album artist", L"Artiste album", L"Artista album", L"Artista album", L"앨범 아티스트", L"专辑艺人", L"فنان الألبوم",
+		L"Артист альбома", L"Albumkünstler", L"Artista do album", L"Albumartiest", L"Artysta albumu", L"Album sanatcisi"));
+	m_discL.SetWindowText(LL14(L"ディスク", L"Disc", L"Disque", L"Disco", L"Disco", L"디스크", L"碟号", L"قرص",
+		L"Диск", L"Disc", L"Disco", L"Schijf", L"Plyta", L"Disk"));
+	m_bpmL.SetWindowText(L"BPM");
+	m_compL.SetWindowText(LL14(L"作曲", L"Composer", L"Compositeur", L"Compositore", L"Compositor", L"작곡", L"作曲", L"ملحن",
+		L"Композитор", L"Komponist", L"Compositor", L"Componist", L"Kompozytor", L"Besteci"));
+	m_lyrL.SetWindowText(LL14(L"作詞", L"Lyricist", L"Parolier", L"Paroliere", L"Letrista", L"작사", L"作词", L"كاتب الكلمات",
+		L"Автор текста", L"Texter", L"Letrista", L"Tekstschrijver", L"Autor tekstu", L"Soz yazari"));
+	m_copyL.SetWindowText(LL14(L"著作権", L"Copyright", L"Copyright", L"Copyright", L"Copyright", L"저작권", L"版权", L"حقوق",
+		L"Права", L"Copyright", L"Copyright", L"Copyright", L"Prawa", L"Telif"));
+	m_encL.SetWindowText(LL14(L"エンコーダ", L"Encoder", L"Encodeur", L"Encoder", L"Codificador", L"인코더", L"编码器", L"المرمز",
+		L"Кодер", L"Encoder", L"Codificador", L"Encoder", L"Koder", L"Kodlayici"));
+	m_lyricsL.SetWindowText(LL14(L"歌詞", L"Lyrics", L"Paroles", L"Testo", L"Letra", L"가사", L"歌词", L"الكلمات",
+		L"Текст", L"Text", L"Letra", L"Tekst", L"Tekst", L"Sozler"));
+	m_patL.SetWindowText(LL14(L"ファイル名", L"Filename", L"Nom", L"Nome", L"Nombre", L"파일명", L"文件名", L"الاسم",
+		L"Имя файла", L"Dateiname", L"Nome", L"Bestandsnaam", L"Nazwa", L"Dosya adi"));
+	m_toName.SetWindowText(LL14(L"名前へ", L"To name", L"Vers le nom", L"Nel nome", L"Al nombre", L"이름에", L"写入文件名", L"إلى الاسم",
+		L"В имя", L"In Name", L"Para o nome", L"Naar naam", L"Do nazwy", L"Ada"));
+	m_number.SetWindowText(LL14(L"連番", L"Number", L"Numeroter", L"Numera", L"Numerar", L"번호", L"编号", L"ترقيم",
+		L"Номера", L"Nummer", L"Numerar", L"Nummer", L"Numeruj", L"Numara"));
+	m_pat.SetWindowText(L"%artist% - %title%");
 	m_save.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"Save",
 		L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"Close",
@@ -218,6 +262,14 @@ BOOL CTagEditDlg::OnInitDialog()
 		m_track.SetWindowText(L"");
 		m_genre.SetWindowText(L"");
 		m_comment.SetWindowText(L"");
+		m_aa.SetWindowText(L"");
+		m_disc.SetWindowText(L"");
+		m_bpm.SetWindowText(L"");
+		m_comp.SetWindowText(L"");
+		m_lyr.SetWindowText(L"");
+		m_copy.SetWindowText(L"");
+		m_enc.SetWindowText(L"");
+		m_lyrics.SetWindowText(L"");
 		m_hint.SetWindowText(LL14(
 			L"複数選択: 空欄は変更しません。入力した項目だけ全選択へ適用します。",
 			L"Multi-select: blank = no change. Filled fields apply to all.",
@@ -242,6 +294,14 @@ BOOL CTagEditDlg::OnInitDialog()
 		m_track.SetWindowText(tags.track);
 		m_genre.SetWindowText(tags.genre);
 		m_comment.SetWindowText(tags.comment);
+		m_aa.SetWindowText(tags.albumArtist);
+		m_disc.SetWindowText(tags.disc);
+		m_bpm.SetWindowText(tags.bpm);
+		m_comp.SetWindowText(tags.composer);
+		m_lyr.SetWindowText(tags.lyricist);
+		m_copy.SetWindowText(tags.copyright);
+		m_enc.SetWindowText(tags.encoder);
+		m_lyrics.SetWindowText(tags.lyrics);
 		m_hint.SetWindowText(L"");
 	}
 	m_status.SetWindowText(L"");
@@ -260,6 +320,11 @@ BOOL CTagEditDlg::OnInitDialog()
 		CRect rCover;
 		m_coverPic.GetWindowRect(&rCover); ScreenToClient(&rCover);
 		int y = rCover.bottom + 8;
+		placeY(m_patL, y + 2);
+		placeY(m_pat, y);
+		placeY(m_toName, y);
+		placeY(m_number, y);
+		y += (std::max)(heightOf(m_pat), 18) + 6;
 		placeY(m_hint, y);
 		y += (std::max)(heightOf(m_hint), 14) + 6;
 		placeY(m_save, y);
@@ -395,9 +460,116 @@ void CTagEditDlg::OnBnClickedBatch()
 	dlg.DoModal();
 }
 
+static CString TagEdit_ApplyPat(CString pat, const FileTagFields& f)
+{
+	auto put = [&](const wchar_t* key, const CString& val) {
+		CString token = L"%";
+		token += key;
+		token += L"%";
+		pat.Replace(token, val);
+	};
+	put(L"title", f.title);
+	put(L"artist", f.artist);
+	put(L"album", f.album);
+	put(L"albumartist", f.albumArtist);
+	put(L"year", f.year);
+	put(L"track", f.track);
+	put(L"disc", f.disc);
+	put(L"genre", f.genre);
+	put(L"composer", f.composer);
+	put(L"bpm", f.bpm);
+	const wchar_t* bad = L"\\/:*?\"<>|";
+	for (int i = 0; pat[i]; ++i) {
+		if (wcschr(bad, pat[i])) pat.SetAt(i, L'_');
+	}
+	pat.Trim();
+	return pat;
+}
+
+static void TagEdit_Overlay(FileTagFields& f, CTagEditDlg* dlg, BOOL multi)
+{
+	auto take = [&](CCustomEdit& ed, CString& dest) {
+		CString s; ed.GetWindowText(s);
+		if (!multi || !s.IsEmpty()) dest = s;
+	};
+	take(dlg->m_title, f.title);
+	take(dlg->m_artist, f.artist);
+	take(dlg->m_album, f.album);
+	take(dlg->m_aa, f.albumArtist);
+	take(dlg->m_year, f.year);
+	take(dlg->m_track, f.track);
+	take(dlg->m_disc, f.disc);
+	take(dlg->m_genre, f.genre);
+	take(dlg->m_comp, f.composer);
+	take(dlg->m_bpm, f.bpm);
+}
+
+void CTagEditDlg::OnBnClickedToName()
+{
+	CString pat;
+	m_pat.GetWindowText(pat);
+	if (pat.IsEmpty()) return;
+	std::vector<playlistdata0*> targets;
+	if (multiFile) {
+		for (size_t i = 0; i < pcs.size(); ++i) targets.push_back(&pcs[i]);
+	} else targets.push_back(&pc);
+	int okN = 0;
+	for (size_t i = 0; i < targets.size(); ++i) {
+		CString path = PlPhysicalMediaPath(targets[i]->fol);
+		if (path.IsEmpty()) path = targets[i]->fol;
+		if (path.IsEmpty()) continue;
+		FileTagFields f;
+		ReadFileTagFields(path, f);
+		TagEdit_Overlay(f, this, multiFile ? TRUE : FALSE);
+		CString base = TagEdit_ApplyPat(pat, f);
+		if (base.IsEmpty()) continue;
+		int slash = (std::max)(path.ReverseFind(L'\\'), path.ReverseFind(L'/'));
+		CString dir = slash >= 0 ? path.Left(slash + 1) : L"";
+		CString ext;
+		int dot = path.ReverseFind(L'.');
+		if (dot > slash) ext = path.Mid(dot);
+		CString dest = dir + base + ext;
+		if (dest.CompareNoCase(path) == 0) { okN++; continue; }
+		if (GetFileAttributes(dest) != INVALID_FILE_ATTRIBUTES) continue;
+		if (!MoveFile(path, dest)) continue;
+		_tcsncpy(targets[i]->fol, dest, _countof(targets[i]->fol) - 1);
+		targets[i]->fol[_countof(targets[i]->fol) - 1] = 0;
+		okN++;
+	}
+	CString msg;
+	msg.Format(LL14(L"ファイル名を %d 件反映しました", L"Renamed %d file(s)", L"Renomme %d", L"Rinominati %d", L"Renombrados %d", L"%d개 이름을 반영", L"已改名 %d 个", L"Renamed %d", L"Переименовано %d", L"%d umbenannt", L"Renomeados %d", L"%d hernoemd", L"Zmieniono %d", L"%d adlandirildi"), okN);
+	m_status.SetWindowText(msg);
+}
+
+void CTagEditDlg::OnBnClickedNumber()
+{
+	std::vector<playlistdata0*> targets;
+	if (multiFile) {
+		for (size_t i = 0; i < pcs.size(); ++i) targets.push_back(&pcs[i]);
+	} else targets.push_back(&pc);
+	int n = 1, okN = 0;
+	for (size_t i = 0; i < targets.size(); ++i, ++n) {
+		CString path = PlPhysicalMediaPath(targets[i]->fol);
+		if (path.IsEmpty()) path = targets[i]->fol;
+		if (path.IsEmpty() || TagEdit_IsUnsupportedWrite(path)) continue;
+		FileTagFields f;
+		ReadFileTagFields(path, f);
+		f.track.Format(L"%02d", n);
+		if (WriteFileTagFields(path, f)) okN++;
+	}
+	if (!targets.empty()) {
+		CString t; t.Format(L"%02d", 1);
+		if (targets.size() == 1) m_track.SetWindowText(t);
+	}
+	CString msg;
+	msg.Format(LL14(L"トラック番号を %d 件振りました", L"Numbered %d track(s)", L"Numerote %d", L"Numerati %d", L"Numerados %d", L"%d곡 번호를 매김", L"已编号 %d 首", L"Numbered %d", L"Пронумеровано %d", L"%d nummeriert", L"Numerados %d", L"%d genummerd", L"Ponumerowano %d", L"%d numaralandi"), okN);
+	m_status.SetWindowText(msg);
+}
+
 void CTagEditDlg::OnBnClickedSave()
 {
 	CString title, artist, album, year, track, genre, comment;
+	CString aa, disc, bpm, comp, lyr, copyr, enc, lyrics;
 	m_title.GetWindowText(title);
 	m_artist.GetWindowText(artist);
 	m_album.GetWindowText(album);
@@ -405,6 +577,14 @@ void CTagEditDlg::OnBnClickedSave()
 	m_track.GetWindowText(track);
 	m_genre.GetWindowText(genre);
 	m_comment.GetWindowText(comment);
+	m_aa.GetWindowText(aa);
+	m_disc.GetWindowText(disc);
+	m_bpm.GetWindowText(bpm);
+	m_comp.GetWindowText(comp);
+	m_lyr.GetWindowText(lyr);
+	m_copy.GetWindowText(copyr);
+	m_enc.GetWindowText(enc);
+	m_lyrics.GetWindowText(lyrics);
 
 	std::vector<playlistdata0*> targets;
 	if (multiFile) {
@@ -462,6 +642,14 @@ void CTagEditDlg::OnBnClickedSave()
 			if (!track.IsEmpty()) fields.track = track;
 			if (!genre.IsEmpty()) fields.genre = genre;
 			if (!comment.IsEmpty()) fields.comment = comment;
+			if (!aa.IsEmpty()) fields.albumArtist = aa;
+			if (!disc.IsEmpty()) fields.disc = disc;
+			if (!bpm.IsEmpty()) fields.bpm = bpm;
+			if (!comp.IsEmpty()) fields.composer = comp;
+			if (!lyr.IsEmpty()) fields.lyricist = lyr;
+			if (!copyr.IsEmpty()) fields.copyright = copyr;
+			if (!enc.IsEmpty()) fields.encoder = enc;
+			if (!lyrics.IsEmpty()) fields.lyrics = lyrics;
 		}
 		else {
 			fields.title = title;
@@ -471,12 +659,22 @@ void CTagEditDlg::OnBnClickedSave()
 			fields.track = track;
 			fields.genre = genre;
 			fields.comment = comment;
+			fields.albumArtist = aa;
+			fields.disc = disc;
+			fields.bpm = bpm;
+			fields.composer = comp;
+			fields.lyricist = lyr;
+			fields.copyright = copyr;
+			fields.encoder = enc;
+			fields.lyrics = lyrics;
 		}
 
 		bool textOk = true;
 		if (multiFile) {
 			const bool anyInput = !artist.IsEmpty() || !album.IsEmpty()
-				|| !year.IsEmpty() || !track.IsEmpty() || !genre.IsEmpty() || !comment.IsEmpty();
+				|| !year.IsEmpty() || !track.IsEmpty() || !genre.IsEmpty() || !comment.IsEmpty()
+				|| !aa.IsEmpty() || !disc.IsEmpty() || !bpm.IsEmpty() || !comp.IsEmpty()
+				|| !lyr.IsEmpty() || !copyr.IsEmpty() || !enc.IsEmpty() || !lyrics.IsEmpty();
 			if (anyInput)
 				textOk = WriteFileTagFields(path, fields);
 		}

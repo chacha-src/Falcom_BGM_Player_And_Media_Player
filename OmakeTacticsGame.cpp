@@ -881,7 +881,8 @@ void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 	else {
 		const MonsterDef& md = MonsterInfo(u.monster);
 		const wchar_t* mark = UnitFoeMark(u);
-		if (UnitIsHumanFoe(u)) swprintf_s(out, n, L"%s%s", mark, HumFoeTitle(u));
+		if (MonsterIsGiant(u.monster)) swprintf_s(out, n, L"%s%s", mark, MonsterLabel(u.monster));
+		else if (UnitIsHumanFoe(u)) swprintf_s(out, n, L"%s%s", mark, HumFoeTitle(u));
 		else if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", mark, MonsterLabel(u.monster));
 		else if (md.nameB >= 0) swprintf_s(out, n, L"%s%s %s", mark, TT(md.nameTx), TT(md.nameB));
 		else swprintf_s(out, n, L"%s%s", mark, TT(md.nameTx));
@@ -1706,6 +1707,14 @@ void Game::SyncBgm()
 			if (u.alive && u.hp > 0) hp += u.hp;
 			else deadN++;
 		}
+		int bosses = 0, bossesUp = 0;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (u.team != TEAM_ENEMY || !u.boss) continue;
+			bosses++;
+			if (u.alive && u.hp > 0) bossesUp++;
+		}
+		if (bosses > 0 && bossesUp == 0 && players > 0) m_bossDown = 1;
 		int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
 		int killCut = 0;
 		if (m_phase == PH_ACTION) {
@@ -1715,12 +1724,12 @@ void Game::SyncBgm()
 				if (u.team != TEAM_ENEMY) continue;
 				anyFoe = 1;
 				if (u.boss) anyBoss = 1;
-				if (m_dispHp[i] <= 0.5f) continue;
+				int shown = (u.alive && u.hp > 0 && m_dispHp[i] > 0.5f) ? 1 : 0;
+				if (!shown) continue;
 				foeUp = 1;
 				if (u.boss) bossUp = 1;
 			}
 			if (anyFoe && ((anyBoss && !bossUp) || (!anyBoss && !foeUp))) killCut = 1;
-			fightWon = 0;
 		}
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
@@ -1730,6 +1739,7 @@ void Game::SyncBgm()
 			int poolLow = (eMx > 0 && eHp * 10 <= eMx * 3) ? 1 : 0;
 			nearWin = (bossLow || poolLow || killCut) ? 1 : 0;
 		}
+		if (killCut && players > 0) fightWon = 1;
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
 		int dangerNow = 0;
@@ -1742,7 +1752,11 @@ void Game::SyncBgm()
 			m_bgmHoldWin = nearWin;
 			m_bgmHoldDanger = dangerNow;
 		}
-		if (fightWon) m_bgmHoldDanger = 0;
+		if (fightWon) {
+			m_bgmHoldDanger = 0;
+			m_bgmHoldWin = 1;
+			m_bgmWatch = m_bgmTick;
+		}
 		m_b.bgmWin = m_bgmHoldWin;
 		const int fewLeft = m_bgmHoldWin != 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
@@ -3556,6 +3570,7 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		float cx = 0, cy = 0, cz = 0, cr = 0;
 		float posedR = 0.f;
 		BOOL posed = FALSE;
+		float hs = (a.proc == 3 && a.htScale > 1.001f) ? a.htScale : 1.f;
 		if (a.proc == 3 && a.poseValid) {
 			if (a.frameModel == a.model && a.frameClip == a.clip && a.frameR > 0.15f) {
 				cx = a.frameC[0]; cy = a.frameC[1]; cz = a.frameC[2]; cr = a.frameR; posed = TRUE;
@@ -3564,23 +3579,22 @@ BOOL Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 				a.frameClip = a.clip; a.frameModel = a.model; posed = TRUE;
 			}
 		}
-		if (posed) posedR = cr * fabsf(a.scale);
-		// バインド寸法は数センチのまま、描画は骨格の倍率で広がる。その寸法で枠を切るとカメラが体内に入る。
 		float h = a.height > 0.25f ? a.height : 1.2f;
-		if (posed && posedR > 0.15f && posedR < 12.f && posedR < h * 4.f) {
-			look = MXformPt(world, v3(cx, cy, cz));
-			rad = posedR * (posedR > h * 2.2f ? 0.95f : 0.78f);
+		if (posed) posedR = cr * fabsf(a.scale) * hs;
+		// 測った半径が身長と合うときだけ使う。バインドの数センチや、髪の倍率前の頭だと足しか映らない。
+		if (posed && posedR > h * 0.22f && posedR < h * 1.8f) {
+			look = MXformPt(world, v3(cx * hs, cy * hs, cz * hs));
+			rad = posedR * 1.08f;
 			body = TRUE;
 		} else {
-			look = v3(0, h * 0.55f, 0);
+			look = v3(0, midY, 0);
 			rad = h * 0.62f;
 			body = TRUE;
 		}
 	}
 	if (body) {
-		d = rad * 1.28f / tanf(.3f);
-		if (fitBody && !(a.proc == 3)) look = v3(0, midY, 0);
-		eye = look + v3(d * .2f, d * .05f, -d);
+		d = rad * 1.36f / tanf(.3f);
+		eye = look + v3(d * .12f, d * .04f, -d);
 	} else if (a.proc == 3) {
 		look = ActorJointWorld(a, world, 0);
 		V3 chest = ActorJointWorld(a, world, 2);
@@ -5367,6 +5381,64 @@ void Game::UpdateParticles(float dt)
 	}
 	UpdateWeatherEvents(dt);
 	if (m_shake > 0) m_shake = max(0.f, m_shake - dt * 2.5f);
+	ClingBodies(dt);
+}
+
+void Game::ClingBodies(float dt)
+{
+	if (dt <= 0.f || (int)m_parts.size() > 3000) return;
+	static float s_acc = 0.f;
+	s_acc += dt;
+	if (s_acc < 0.09f) return;
+	s_acc = 0.f;
+	const TacClimate& clim = TacClimateRead();
+	int wx = clim.live ? clim.wx : WX_CLEAR;
+	if (!clim.live && m_screen == SC_BATTLE) wx = TacWx(m_b.weather);
+	BOOL wet = (wx == WX_RAIN || wx == WX_STORM);
+	BOOL snow = (wx == WX_SNOW || wx == WX_HAIL);
+	BOOL ash = (wx == WX_ASH || wx == WX_SAND);
+	BOOL petal = (wx == WX_PETAL);
+	auto mote = [&](V3 p, V3 v, float life, float sz, float r, float g, float b, float grav) {
+		if ((int)m_parts.size() >= 3400) return;
+		Particle q = {};
+		q.p = p; q.v = v;
+		q.life = q.max = life;
+		q.size = sz; q.size1 = sz * 0.35f;
+		q.r = r; q.g = g; q.b = b; q.a = 1;
+		q.shape = 0; q.add = 1; q.grav = grav; q.drag = 0.6f;
+		m_parts.push_back(q);
+	};
+	auto cling = [&](V3 feet, float h, int seed) {
+		if (h < 0.4f) h = 1.2f;
+		float u = ((seed * 37) % 100) / 100.f;
+		V3 at = feet + v3(((seed % 7) - 3) * 0.07f, h * (0.25f + u * 0.62f), ((seed % 5) - 2) * 0.07f);
+		if (wet) mote(at, v3(clim.windX * 0.15f, -1.8f, clim.windZ * 0.15f), 0.45f, 0.035f, 0.82f, 0.9f, 1.f, 9.f);
+		else if (snow) mote(at, v3(clim.windX * 0.2f, -0.35f, clim.windZ * 0.2f), 0.9f, 0.05f, 0.94f, 0.96f, 1.f, 1.2f);
+		else if (ash) mote(at, v3(clim.windX * 0.25f, 0.15f, clim.windZ * 0.25f), 0.7f, 0.04f, 0.45f, 0.32f, 0.22f, -0.2f);
+		else if (petal) mote(at, v3(clim.windX * 0.3f, -0.2f, clim.windZ * 0.3f), 0.8f, 0.055f, 1.f, 0.62f, 0.72f, 0.4f);
+	};
+	if (m_screen == SC_BATTLE) {
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.hp <= 0) continue;
+			if ((int)m_parts.size() > 3300) break;
+			V3 feet = v3(u.px, u.py, u.pz);
+			float h = m_act[i].height > 0.4f ? m_act[i].height : 1.3f;
+			cling(feet, h, i + (int)(m_time * 8.f));
+			V3 chest = feet + v3(0, h * 0.55f, 0);
+			if (u.poison > 0) mote(chest, v3(0, 0.6f, 0), 0.7f, 0.06f, 0.45f, 0.95f, 0.35f, -0.4f);
+			if (u.burn > 0) mote(chest + v3(0, 0.2f, 0), v3(m_rng.F(-0.3f, 0.3f), 1.1f, m_rng.F(-0.3f, 0.3f)), 0.4f, 0.05f, 1.f, 0.4f, 0.08f, -0.2f);
+			if (u.bleed > 0) mote(chest, v3(0, -1.4f, 0), 0.45f, 0.04f, 0.85f, 0.08f, 0.08f, 8.f);
+			if (u.stun > 0) mote(feet + v3(0, h + 0.15f, 0), v3(m_rng.F(-0.8f, 0.8f), 0.4f, m_rng.F(-0.8f, 0.8f)), 0.25f, 0.045f, 1.f, 0.92f, 0.35f, 0.f);
+		}
+	} else if ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt) {
+		int n = m_showN;
+		if (n > MAX_PARTY) n = MAX_PARTY;
+		for (int i = 0; i < n; i++) {
+			float h = m_showAct[i].height > 0.4f ? m_showAct[i].height : 1.3f;
+			cling(m_showPos[i], h, i + 40);
+		}
+	}
 }
 
 // 天候に合わせたまれな出来事。雷・にわか雹・地震。エフェクトと盤面を一体で動かす。
@@ -7202,7 +7274,7 @@ static int CodexFamJobs(int fam, int* dst, int cap, const CharData* roster)
 static BOOL PreviewAlt(int style);
 static void MonPreviewIn(int id, const Actor& a, int& style, BOOL& fly);
 
-enum { FOE_LIST_MAX = 8192 };
+enum { FOE_LIST_MAX = 16384 };
 
 static wchar_t FoldCh(wchar_t c)
 {
@@ -7305,9 +7377,10 @@ int Game::FoeList(int* out, int cap) const
 {
 	static int cache[FOE_LIST_MAX];
 	static int cn = -1;
-	static int cStage = -999999, cBand = -1, cSeen = -1;
+	static int cStage = -999999, cBand = -1, cSeen = -1, cGen = -1;
 	static wchar_t cFind[24];
-	BOOL same = cn >= 0 && cStage == m_save.stageCleared && cBand == m_monBand && cSeen == (m_monSeenOnly ? 1 : 0) && wcscmp(cFind, m_monFind) == 0;
+	int gen = MonsterListGen();
+	BOOL same = cn >= 0 && cStage == m_save.stageCleared && cBand == m_monBand && cSeen == (m_monSeenOnly ? 1 : 0) && cGen == gen && wcscmp(cFind, m_monFind) == 0;
 	if (!same) {
 		int ids[FOE_LIST_MAX];
 		int n = MonsterCatalog(ids, FOE_LIST_MAX);
@@ -7336,6 +7409,7 @@ int Game::FoeList(int* out, int cap) const
 		cStage = m_save.stageCleared;
 		cBand = m_monBand;
 		cSeen = m_monSeenOnly ? 1 : 0;
+		cGen = gen;
 		wcscpy_s(cFind, m_monFind);
 	}
 	if (!out || cap <= 0) return cn < 0 ? 0 : cn;
@@ -7369,11 +7443,25 @@ void Game::EnsureMonPreview()
 	}
 	if (m_monShown == id) return;
 	const MonsterDef& md = MonsterInfo(id);
-	if (md.look == LK_MESH && md.model >= 0) {
-		int pack[1] = { md.model };
-		m_r.LoadBattleCreatures(pack, 1);
-	} else m_r.LoadBattleCreatures(NULL, 0);
-	ActorFromMonster(m_monAct, m_lib, m_r, id, 0);
+	CharData preview;
+	if (MonsterPreviewChar(id, preview)) {
+		m_r.LoadBattleCreatures(NULL, 0);
+		ActorFromChar(m_monAct, m_lib, m_r, preview);
+		m_monAct.wings = 0;
+		m_monAct.hover = 0;
+		m_monAct.legOk = 0;
+		if (md.scale > 1.05f) {
+			m_monAct.htScale = md.scale;
+			float sc = m_monAct.scale > 0.02f ? m_monAct.scale : 1.f;
+			m_monAct.height = 1.75f * sc * md.scale;
+		}
+	} else {
+		if (md.look == LK_MESH && md.model >= 0) {
+			int pack[1] = { md.model };
+			m_r.LoadBattleCreatures(pack, 1);
+		} else m_r.LoadBattleCreatures(NULL, 0);
+		ActorFromMonster(m_monAct, m_lib, m_r, id, 0);
+	}
 	int style = 0;
 	BOOL fly = FALSE;
 	MonPreviewIn(id, m_monAct, style, fly);
@@ -7431,13 +7519,15 @@ void Game::DrawMonCodex()
 {
 	static int ids[FOE_LIST_MAX];
 	int view = StageFoeViewHi(m_save.stageCleared);
-	static int nAllCache = -1, nAllView = -1;
-	if (nAllView != view) {
+	static int nAllCache = -1, nAllView = -1, nAllGen = -1;
+	int listGen = MonsterListGen();
+	if (nAllView != view || nAllGen != listGen) {
 		int nCat = MonsterCatalog(ids, FOE_LIST_MAX);
 		int nAll = 0;
 		for (int i = 0; i < nCat; i++) if (MonsterDebut(ids[i]) <= view) nAll++;
 		nAllCache = nAll;
 		nAllView = view;
+		nAllGen = listGen;
 	}
 	int nAll = nAllCache;
 	float x = U(24), y = U(24), w = min(U(520.f), (float)m_w * .46f), h = (float)m_h - U(108);

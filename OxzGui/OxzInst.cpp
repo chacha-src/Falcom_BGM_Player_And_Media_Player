@@ -2,6 +2,7 @@
 #include "OxzId.h"
 #include "OxzLang.h"
 #include "OxzWork.h"
+#include "OxzExt.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <objbase.h>
@@ -17,7 +18,7 @@ static void OxzSetDword(HKEY root, const wchar_t* key, const wchar_t* name, DWOR
 	RegCloseKey(h);
 }
 
-static void OxzStore(const wchar_t* name, const std::wstring& label, const std::wstring& command, const std::wstring& icon, int sep)
+static void OxzStore(const wchar_t* name, const std::wstring& label, const std::wstring& command, const std::wstring& icon, int sep, int each = 0)
 {
 	std::wstring k = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CommandStore\\shell\\") + name;
 	RegDeleteTreeW(HKEY_LOCAL_MACHINE, k.c_str());
@@ -27,6 +28,7 @@ static void OxzStore(const wchar_t* name, const std::wstring& label, const std::
 	}
 	OxzSetSz(HKEY_LOCAL_MACHINE, k.c_str(), L"MUIVerb", label);
 	OxzSetSz(HKEY_LOCAL_MACHINE, k.c_str(), L"Icon", icon);
+	if (each) OxzSetSz(HKEY_LOCAL_MACHINE, k.c_str(), L"MultiSelectModel", L"Document");
 	OxzSetSz(HKEY_LOCAL_MACHINE, (k + L"\\command").c_str(), NULL, command);
 }
 
@@ -109,16 +111,27 @@ static void OxzWriteVerbs(const std::wstring& exe)
 	OxzSetSz(HKEY_LOCAL_MACHINE, L"Software\\Classes\\OxzArchive\\shellex\\DropHandler", NULL, drop);
 	OxzStore(L"OxzGui.Open", OxzTxt(OS_OPEN), q + L" \"%1\"", icon, 0);
 	OxzStore(L"OxzGui.ExtractDlg", OxzTxt(OS_EXTRACT_DLG), q + L" /extractdlg \"%1\"", icon, 0);
-	OxzStore(L"OxzGui.Here", OxzTxt(OS_SHELL_HERE), q + L" /exthere \"%1\"", icon, 0);
-	OxzStore(L"OxzGui.To", OxzTxt(OS_SHELL_TO), q + L" /extractto \"%1\"", icon, 0);
+	OxzStore(L"OxzGui.Here", OxzTxt(OS_SHELL_HERE), q + L" /exthere \"%1\"", icon, 0, 1);
+	OxzStore(L"OxzGui.To", OxzTxt(OS_SHELL_TO), q + L" /extractto \"%1\"", icon, 0, 1);
 	OxzStore(L"OxzGui.Test", OxzTxt(OS_TEST), q + L" /test \"%1\"", icon, 0);
 	OxzStore(L"OxzGui.Sep", L"", L"", icon, 1);
 	OxzStore(L"OxzGui.CompressDlg", OxzTxt(OS_COMPRESS_DLG), q + L" /editlist \"%1\"", icon, 0);
 	OxzStore(L"OxzGui.Compress", OxzTxt(OS_SHELL_PACK), q + L" /packone \"%1\"", icon, 0);
+	OxzStore(L"OxzGui.PackEach", OxzTxt(OS_PACK_EACH), q + L" /packone \"%1\"", icon, 0, 1);
 	OxzStore(L"OxzGui.CompressDlgDir", OxzTxt(OS_COMPRESS_DLG), q + L" /editlist \"%V\"", icon, 0);
 	OxzStore(L"OxzGui.CompressDir", OxzTxt(OS_SHELL_PACK), q + L" /packdir \"%V\"", icon, 0);
-	OxzCascade(L"Software\\Classes\\AllFilesystemObjects\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.CompressDlg;OxzGui.Compress", L"System.FileExtension:<>\".oxz\"");
-	OxzCascade(L"Software\\Classes\\OxzArchive\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress", NULL);
+	std::wstring skip;
+	for (int i = 0; kOxzExtractExts[i]; ++i) {
+		if (!skip.empty()) skip += L" AND ";
+		skip += L"System.FileExtension:<>\"";
+		skip += kOxzExtractExts[i];
+		skip += L"\"";
+		if (_wcsicmp(kOxzExtractExts[i], L".oxz") == 0) continue;
+		std::wstring assoc = std::wstring(L"Software\\Classes\\SystemFileAssociations\\") + kOxzExtractExts[i] + L"\\shell\\Oxz";
+		OxzCascade(assoc.c_str(), OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
+	}
+	OxzCascade(L"Software\\Classes\\AllFilesystemObjects\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", skip.c_str());
+	OxzCascade(L"Software\\Classes\\OxzArchive\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
 	OxzCascade(L"Software\\Classes\\Directory\\Background\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.CompressDlgDir;OxzGui.CompressDir", NULL);
 	OxzSetSz(HKEY_LOCAL_MACHINE, L"Software\\Classes\\AllFilesystemObjects\\shellex\\ContextMenuHandlers\\Oxz", NULL, menu);
 	OxzSetSz(HKEY_LOCAL_MACHINE, L"Software\\Classes\\Directory\\Background\\shellex\\ContextMenuHandlers\\Oxz", NULL, menu);
@@ -178,6 +191,11 @@ bool OxzRemoveInstall(std::wstring& err)
 	OxzDeleteKey(L"Software\\Classes\\.oxz");
 	OxzDeleteKey(L"Software\\Classes\\OxzArchive");
 	OxzDeleteKey(L"Software\\Classes\\AllFilesystemObjects\\shell\\OxzPack");
+	for (int i = 0; kOxzExtractExts[i]; ++i) {
+		if (_wcsicmp(kOxzExtractExts[i], L".oxz") == 0) continue;
+		std::wstring assoc = std::wstring(L"Software\\Classes\\SystemFileAssociations\\") + kOxzExtractExts[i] + L"\\shell\\Oxz";
+		OxzDeleteKey(assoc.c_str());
+	}
 	OxzDeleteKey(L"Software\\Classes\\AllFilesystemObjects\\shell\\Oxz");
 	OxzDeleteKey(L"Software\\Classes\\AllFilesystemObjects\\shellex\\ContextMenuHandlers\\Oxz");
 	OxzDeleteKey(L"Software\\Classes\\Directory\\Background\\shell\\OxzPack");
@@ -191,9 +209,9 @@ bool OxzRemoveInstall(std::wstring& err)
 	OxzDeleteKey(L"Software\\Classes\\OxzArchive\\shell\\Oxz");
 	const wchar_t* store[] = {
 		L"OxzGui.Open", L"OxzGui.ExtractDlg", L"OxzGui.Here", L"OxzGui.To", L"OxzGui.Test",
-		L"OxzGui.Sep", L"OxzGui.CompressDlg", L"OxzGui.Compress", L"OxzGui.CompressDlgDir", L"OxzGui.CompressDir"
+		L"OxzGui.Sep", L"OxzGui.CompressDlg", L"OxzGui.Compress", L"OxzGui.PackEach", L"OxzGui.CompressDlgDir", L"OxzGui.CompressDir"
 	};
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < 11; ++i) {
 		std::wstring k = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CommandStore\\shell\\") + store[i];
 		OxzDeleteKey(k.c_str());
 	}

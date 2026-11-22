@@ -133,6 +133,9 @@ call :job cs_5_0 CSSoft shaders\omake_tactics_soft.hlsl tac_CSSoft tac_cssoft
 call :job cs_5_0 CSSoftWrite shaders\omake_tactics_soft.hlsl tac_CSSoftWrite tac_cssoftw
 call :job cs_5_0 CSHair shaders\omake_tactics_hair.hlsl tac_CSHair tac_cshair
 call :job cs_5_0 CSHairWrite shaders\omake_tactics_hair.hlsl tac_CSHairWrite tac_cshairw
+call :job vs_5_0 VSCut shaders\omake_tactics_cut.hlsl tac_cut_VSCut tac_cut_vscut
+call :job gs_5_0 GSCut shaders\omake_tactics_cut.hlsl tac_cut_GSCut tac_cut_gscut
+call :job ps_5_0 PSCut shaders\omake_tactics_cut.hlsl tac_cut_PSCut tac_cut_pscut
 
 powershell -NoProfile -Command ^
   "$jobs = Get-Content -LiteralPath $env:JOBS; $n = 0; $sw = [System.IO.StreamWriter]::new($env:STALE, $false);" ^

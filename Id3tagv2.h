@@ -249,6 +249,14 @@ public:
 	void SetComment(LPCTSTR comment);
 	CString GetComposer();
 	void SetComposer(LPCTSTR composer);
+	CString GetDisc();
+	void SetDisc(LPCTSTR disc);
+	CString GetBpm();
+	void SetBpm(LPCTSTR bpm);
+	CString GetLyricist();
+	void SetLyricist(LPCTSTR lyricist);
+	CString GetLyrics();
+	void SetLyrics(LPCTSTR lyrics);
 	CString GetOrigArtist();
 	void SetOrigArtist(LPCTSTR origArtist);
 	CString GetCopyright();

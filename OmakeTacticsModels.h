@@ -32,6 +32,7 @@ struct Library {
 	GpuMesh sq;
 	GpuMesh orb;
 	GpuMesh ice;
+	GpuMesh cutCc0[8]; // 0-2岩 3氷 4葉 5金属 6小石 7柱。CC0写真付き
 	int ready;
 };
 
@@ -76,6 +77,9 @@ struct Actor {
 	PoseMods mods;
 	int clip, prev;
 	float t, pt, blend, blendDur;
+	Q4 holdQ[MAXJ];     // 切替直前に出ていた骨。次のモーションへ補間する
+	V3 holdP[MAXJ];
+	int holdN;
 	int loop, ploop;
 	float animSpeed;
 	float idleOfs;      // 待機の開始位置（秒）。全員が同じ拍で動かないようにする

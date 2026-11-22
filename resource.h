@@ -85,6 +85,8 @@
 #define IDD_TRANSCODE                   207
 #define IDD_MP_CHEATSHEET               208
 #define IDD_TAGEDIT                     209
+#define IDD_TAGGRID                     400
+#define IDD_TAGPRESET                   401
 #define IDD_MP_CMDROLL                  211
 #define IDD_MP_CMDPLACE                 212
 #define IDD_MP_CMDROLL_HELP             213
@@ -1482,6 +1484,54 @@
 #define IDC_MP_BPM_CLOSE                4194
 #define IDC_MP_BPM_ABORT                4195
 #define IDC_TAGEDIT_BATCH               4196
+#define IDC_TAGEDIT_AA_L                5107
+#define IDC_TAGEDIT_AA                  5108
+#define IDC_TAGEDIT_DISC_L              5109
+#define IDC_TAGEDIT_DISC                5110
+#define IDC_TAGEDIT_BPM_L               5111
+#define IDC_TAGEDIT_BPM                 5112
+#define IDC_TAGEDIT_COMP_L              5113
+#define IDC_TAGEDIT_COMP                5114
+#define IDC_TAGEDIT_LYR_L               5115
+#define IDC_TAGEDIT_LYR                 5116
+#define IDC_TAGEDIT_COPY_L              5117
+#define IDC_TAGEDIT_COPY                5118
+#define IDC_TAGEDIT_ENC_L               5119
+#define IDC_TAGEDIT_ENC                 5120
+#define IDC_TAGEDIT_LYRICS_L            5121
+#define IDC_TAGEDIT_LYRICS              5122
+#define IDC_TAGEDIT_PAT_L               5123
+#define IDC_TAGEDIT_PAT                 5124
+#define IDC_TAGEDIT_TONAME              5125
+#define IDC_TAGEDIT_NUMBER              5126
+#define IDC_TG_ADD                      5127
+#define IDC_TG_DIR                      5128
+#define IDC_TG_PAT                      5129
+#define IDC_TG_NAME                     5130
+#define IDC_TG_NUM                      5131
+#define IDC_TG_SAVE                     5132
+#define IDC_TG_CLOSE                    5133
+#define IDC_TG_LIST                     5134
+#define IDC_TG_COVER                    5135
+#define IDC_TG_COVER_BROWSE             5136
+#define IDC_TG_COVER_CLEAR              5137
+#define IDC_TG_LYRICS_L                 5138
+#define IDC_TG_LYRICS                   5139
+#define IDC_TG_LYR_APPLY                5140
+#define IDC_TG_STATUS                   5141
+#define IDC_TG_COVER_H                  5142
+#define IDC_TG_CELL                     5143
+#define IDC_TP_LIST                     5144
+#define IDC_TP_NAME                     5145
+#define IDC_TP_PAT                      5146
+#define IDC_TP_LEGEND                   5147
+#define IDC_TP_ADD                      5148
+#define IDC_TP_UPD                      5149
+#define IDC_TP_DEL                      5150
+#define IDC_TP_CLOSE                    5151
+#define IDC_TG_HINT                     5152
+#define IDC_TP_NAME_L                   5153
+#define IDC_TP_PAT_L                    5154
 #define IDC_TB_HELP                     4197
 #define IDC_TB_ORIG_L                   4198
 #define IDC_TB_EDIT_L                   4199
@@ -2446,9 +2496,9 @@
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        400
+#define _APS_NEXT_RESOURCE_VALUE        402
 #define _APS_NEXT_COMMAND_VALUE         33350
-#define _APS_NEXT_CONTROL_VALUE         5107
+#define _APS_NEXT_CONTROL_VALUE         5155
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

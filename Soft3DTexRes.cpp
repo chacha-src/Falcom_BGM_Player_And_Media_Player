@@ -188,12 +188,13 @@ BOOL BonusTexNamed(const char* rel, const BYTE** data, DWORD* len)
 	char want[56] = {};
 	int i = 0;
 	for (; rel[i] && i < 55; i++) want[i] = (rel[i] == '\\') ? '/' : rel[i];
-	static const wchar_t* kRel[3] = {
+	static const wchar_t* kRel[4] = {
+		L"tactics\\tac_world.bin",
 		L"tactics\\tac_tex.bin",
 		L"meiro\\m_pbr.bin",
 		L"race\\r_pbr.bin",
 	};
-	for (int b = 0; b < 3; b++) {
+	for (int b = 0; b < 4; b++) {
 		if (!S3OpenBin(&s_bins[b], kRel[b])) continue;
 		if (S3BinFind(&s_bins[b], want, data, len)) return TRUE;
 	}

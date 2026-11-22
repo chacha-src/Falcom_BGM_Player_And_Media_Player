@@ -644,7 +644,7 @@ static HRESULT LoadCutBlob(const char* entry, const char* profile, ID3DBlob** ou
 {
 	if (!out) return E_INVALIDARG;
 	*out = NULL;
-	if (SUCCEEDED(Soft3DLoadCso(L"tac", entry, profile, 0, L"omake_tactics_cut.hlsl", (void**)out)) && *out)
+	if (SUCCEEDED(Soft3DLoadCso(L"tac_cut", entry, profile, 0, L"omake_tactics_cut.hlsl", (void**)out)) && *out)
 		return S_OK;
 	const wchar_t* paths[] = {
 		L"c:\\projects\\APPLICATION3\\ogg_all2022\\shaders\\omake_tactics_cut.hlsl",
@@ -1973,10 +1973,11 @@ static int StageTierQ(int q)
 static int PhotoSideFor(int q)
 {
 	int t = StageTierQ(q);
-	if (t <= 0) return 256;
-	if (t == 1) return 256;
-	if (t == 2) return 512;
-	return 1024;
+	if (t <= 0) return 512;
+	if (t == 1) return 512;
+	if (t == 2) return 1024;
+	if (t == 3) return 1024;
+	return 2048;
 }
 static int EnvFaceFor(int t)
 {
@@ -2074,7 +2075,7 @@ static BOOL DecodeScaled(const BYTE* data, int len, int side, DWORD* dst)
 static BOOL LoadNamedArray(ID3D11Device* dev, int n, int side, const char* fmt, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
 {
 	*tex = NULL; *srv = NULL;
-	if (n < 1 || n > 256 || side < 32 || side > 512) return FALSE;
+	if (n < 1 || n > 256 || side < 32 || side > 2048) return FALSE;
 	DWORD* px = (DWORD*)malloc((size_t)n * side * side * 4);
 	if (!px) return FALSE;
 	{
@@ -2148,6 +2149,7 @@ static BOOL LoadSkinArray(ID3D11Device* dev, ID3D11Texture2D** tex, ID3D11Shader
 
 static BOOL LoadGroundX(ID3D11Device* dev, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
 {
+	if (LoadNamedArray(dev, 17, 1024, "tactics/world/ph%02d_b.png", tex, srv)) return TRUE;
 	return LoadNamedArray(dev, 14, 512, "tactics/terrain/ph%d_b.jpg", tex, srv);
 }
 
@@ -2371,36 +2373,53 @@ static BOOL BuildEnv(ID3D11Device* dev, ID3D11DeviceContext* ctx, int theme, int
 
 static BOOL BuildPhoto(ID3D11Device* dev, ID3D11DeviceContext* ctx, int side, TacPhotoPack& p)
 {
-	if (side <= 0 || side > 1024) return FALSE;
+	if (side <= 0 || side > 2048) return FALSE;
 	size_t pix = (size_t)side * side;
-	static DWORD px[1024 * 1024];
+	DWORD* px = (DWORD*)malloc(pix * sizeof(DWORD));
+	if (!px) return FALSE;
 	int live = 0;
 	D3D11_TEXTURE2D_DESC td = {};
-	enum { TAC_PHOTO_THEMES = 14 };
-	td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 0; td.ArraySize = (UINT)(TAC_PHOTO_THEMES * 2);
+	enum { TAC_PHOTO_THEMES = 17, TAC_PHOTO_SLICES = 38 };
+	td.Width = (UINT)side; td.Height = (UINT)side; td.MipLevels = 0; td.ArraySize = (UINT)TAC_PHOTO_SLICES;
 	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
 	td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 	td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
 	ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
-	if (FAILED(dev->CreateTexture2D(&td, NULL, &t)) || !t) return FALSE;
+	if (FAILED(dev->CreateTexture2D(&td, NULL, &t)) || !t) { free(px); return FALSE; }
 	t->GetDesc(&td);
 	for (int theme = 0; theme < TAC_PHOTO_THEMES; theme++) {
 		for (int nrm = 0; nrm < 2; nrm++) {
 			const BYTE* data = NULL; DWORD n = 0;
 			int slice = theme + nrm * TAC_PHOTO_THEMES;
-			if (LockRc(IDR_TAC_PH0 + slice, &data, &n) && DecodeScaled(data, (int)n, side, px)) {
-				if (!nrm) live++;
-			} else memset(px, 0, pix * sizeof(DWORD));
+			char name[64];
+			sprintf_s(name, "tactics/world/ph%02d_%c.png", theme, nrm ? 'n' : 'a');
+			BOOL got = BonusTexNamed(name, &data, &n) && data && n >= 32 && DecodeScaled(data, (int)n, side, px);
+			if (!got && slice < 20 && LockRc(IDR_TAC_PH0 + slice, &data, &n) && DecodeScaled(data, (int)n, side, px)) got = TRUE;
+			if (got) { if (!nrm) live++; }
+			else memset(px, 0, pix * sizeof(DWORD));
 			UINT sub = D3D11CalcSubresource(0, (UINT)slice, td.MipLevels);
 			ctx->UpdateSubresource(t, sub, NULL, px, (UINT)side * 4, 0);
 		}
 	}
+	static const char* kExtra[4] = {
+		"tactics/world/water_a.png", "tactics/world/water_n.png",
+		"tactics/world/lava_a.png", "tactics/world/lava_n.png"
+	};
+	for (int e = 0; e < 4; e++) {
+		const BYTE* data = NULL; DWORD n = 0;
+		int slice = TAC_PHOTO_THEMES * 2 + e;
+		if (BonusTexNamed(kExtra[e], &data, &n) && data && n >= 32 && DecodeScaled(data, (int)n, side, px)) live++;
+		else memset(px, 0, pix * sizeof(DWORD));
+		UINT sub = D3D11CalcSubresource(0, (UINT)slice, td.MipLevels);
+		ctx->UpdateSubresource(t, sub, NULL, px, (UINT)side * 4, 0);
+	}
+	free(px);
 	if (live <= 0) { TAC_REL(t); return FALSE; }
 	D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
 	sv.Format = td.Format;
 	sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 	sv.Texture2DArray.MipLevels = td.MipLevels;
-	sv.Texture2DArray.ArraySize = (UINT)(TAC_PHOTO_THEMES * 2);
+	sv.Texture2DArray.ArraySize = (UINT)TAC_PHOTO_SLICES;
 	if (FAILED(dev->CreateShaderResourceView(t, &sv, &s)) || !s) {
 		TAC_REL(s); TAC_REL(t); return FALSE;
 	}
@@ -2491,10 +2510,10 @@ void Renderer::PollStageLook()
 	}
 	BindLooks();
 	if (!m_photoSrv) {
-		DWORD blank[28];
-		for (int i = 0; i < 28; i++) blank[i] = 0;
+		DWORD blank[38];
+		for (int i = 0; i < 38; i++) blank[i] = 0;
 		ID3D11Texture2D* t = NULL; ID3D11ShaderResourceView* s = NULL;
-		if (MakeGpuArray(m_dev, m_ctx, 1, 28, blank, FALSE, &t, &s)) { m_photoTex = t; m_photoSrv = s; }
+		if (MakeGpuArray(m_dev, m_ctx, 1, 38, blank, FALSE, &t, &s)) { m_photoTex = t; m_photoSrv = s; }
 	}
 }
 
@@ -2562,6 +2581,9 @@ void Renderer::UploadGroundMarks(const BYTE* rgba256)
 
 BOOL Renderer::LoadPngTex(const BYTE* data, UINT len, int slot)
 {
+	if (slot < 0 || slot >= TEX_MAX) return FALSE;
+	TAC_REL(m_srv[slot]);
+	TAC_REL(m_tex[slot]);
 	IWICImagingFactory* f = TacWicFactory();
 	if (!f) return FALSE;
 	IWICStream* st = NULL; IWICBitmapDecoder* dec = NULL; IWICBitmapFrameDecode* fr = NULL; IWICFormatConverter* cv = NULL;
@@ -9169,6 +9191,71 @@ static int AvaClothKind(const char* nm)
 	return 1;
 }
 
+// 魔女・王・中世・冒険者は 0 系の区間行列を借りる。頂点は 0 系の位置のまま、頭の骨だけが別の場所にある。
+// そのままスキンすると頭が骨の外で潰れて禿げる。各骨のバインドへ載せ直してから布と頭蓋を測る。
+static void RetargetBorrowedSkin(Renderer::CreatureSkin& sk, float* jig, int jigN, const Model& md, const Renderer::AvaModel* am, const int* segJ, int ns, int nV)
+{
+	if (!am || !segJ || ns <= 0 || nV <= 0 || md.nJ <= 0) return;
+	if (TacNameEq32(am->name, md.name)) return;
+	if ((int)am->M.size() < ns * 12) return;
+	M4 Brow[64], Trow[256];
+	int boneSeg[256];
+	for (int j = 0; j < 256; j++) boneSeg[j] = -1;
+	const int nBone = md.nJ < 256 ? md.nJ : 256;
+	for (int s = 0; s < ns && s < 64; s++) {
+		const int j = segJ[s];
+		if (j < 0 || j >= nBone) continue;
+		const float* S = &am->M[(size_t)s * 12];
+		M4 B;
+		memset(&B, 0, sizeof(B));
+		B.m[0] = S[0]; B.m[1] = S[4]; B.m[2] = S[8];
+		B.m[4] = S[1]; B.m[5] = S[5]; B.m[6] = S[9];
+		B.m[8] = S[2]; B.m[9] = S[6]; B.m[10] = S[10];
+		B.m[12] = S[3]; B.m[13] = S[7]; B.m[14] = S[11];
+		B.m[15] = 1.f;
+		Brow[s] = B;
+		if (boneSeg[j] < 0) {
+			boneSeg[j] = s;
+			Trow[j] = MInverse(md.invBind[j]);
+		}
+	}
+	const int n = nV < (int)sk.bind.size() ? nV : (int)sk.bind.size();
+	for (int k = 0; k < n; k++) {
+		Renderer::CSkinV& d = sk.bind[k];
+		M4 B, T;
+		memset(&B, 0, sizeof(B));
+		memset(&T, 0, sizeof(T));
+		float wsum = 0.f;
+		for (int c = 0; c < 4; c++) {
+			const int j = (int)d.j[c];
+			const float w = d.w[c] / 255.f;
+			if (w <= 0.f || j < 0 || j >= nBone) continue;
+			const int s = boneSeg[j];
+			if (s < 0) continue;
+			for (int e = 0; e < 16; e++) {
+				B.m[e] += Brow[s].m[e] * w;
+				T.m[e] += Trow[j].m[e] * w;
+			}
+			wsum += w;
+		}
+		if (wsum < 0.5f) continue;
+		const M4 X = MMul(MInverse(B), T);
+		const float sc = fabsf(X.m[0]) + fabsf(X.m[5]) + fabsf(X.m[10]);
+		if (sc < 0.2f || sc > 8.f) continue;
+		const V3 p = MXformPt(X, v3(d.p[0], d.p[1], d.p[2]));
+		const float dx = p.x - d.p[0], dy = p.y - d.p[1], dz = p.z - d.p[2];
+		if (dx * dx + dy * dy + dz * dz > 4.f) continue;
+		const V3 nrm = MXformDir(X, v3(d.n[0], d.n[1], d.n[2]));
+		const float nl = sqrtf(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+		d.p[0] = p.x; d.p[1] = p.y; d.p[2] = p.z;
+		if (nl > 1e-6f) { d.n[0] = nrm.x / nl; d.n[1] = nrm.y / nl; d.n[2] = nrm.z / nl; }
+		if (jig && jigN >= (k + 1) * 3) {
+			const V3 g = MXformDir(X, v3(jig[k * 3], jig[k * 3 + 1], jig[k * 3 + 2]));
+			jig[k * 3] = g.x; jig[k * 3 + 1] = g.y; jig[k * 3 + 2] = g.z;
+		}
+	}
+}
+
 BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner)
 {
 	m_avaHide = 0;
@@ -10107,6 +10194,12 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		softN.arena = softV.arena = 1;
 		FlashAvaLocal(74);
 		// 男性の胸板の揺れの重みは、女性の胸の下の布の張りや胸の球には使わない。
+		{
+			int segUse[64];
+			for (int s = 0; s < ns && s < 64; s++)
+				segUse[s] = rg.Find(s < am->nJoint ? am->joint[s] : m_avaSeg[s]);
+			RetargetBorrowedSkin(sk, nc.jig.empty() ? NULL : nc.jig.data(), nc.jig.size(), md, am, segUse, ns < 64 ? ns : 64, nvA);
+		}
 		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ, m_avaSeg, ns, md, (nc.jig.empty() || maleAva) ? NULL : nc.jig.data(), clothN, clothV, clothP, expose, softN, softV, m_avaCos[ci].name, sewn);
 		FlashAvaLocal(90);
 		// 袖は腕のメッシュに載せる。骨の軸へは拡げない。1 系は軸が肉の芯から外れる。
@@ -12135,6 +12228,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		const CreatureSkin* hs;
 		const AvaCache* backAc;
 		BOOL hostSkull;
+		BOOL borrowed;
 	};
 	static HairHostKeep s_hkeep[192][4];
 	static unsigned char s_hturn[192];
@@ -12143,16 +12237,18 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	const AvaCache* backCached = NULL;
 	int headSegCached = -1;
 	BOOL hostSkull = FALSE;
+	BOOL borrowed = FALSE;
 	BOOL hhit = FALSE;
 	if (model >= 0 && model < 192) {
 		for (int i = 0; i < 4; i++) {
 			const HairHostKeep& k = s_hkeep[model][i];
-			if (k.gen == g_avaCacheGen && k.avatar == avatar) {
+			if (k.gen == g_avaCacheGen && k.avatar == avatar && k.am) {
 				hs = k.hs;
 				amCached = k.am;
 				backCached = k.backAc;
 				headSegCached = k.headSeg;
 				hostSkull = k.hostSkull;
+				borrowed = k.borrowed;
 				hhit = TRUE;
 				break;
 			}
@@ -12162,6 +12258,12 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 		for (int k = 0; k < (int)m_skins.size(); k++)
 			if (m_skins[k].model == model && m_skins[k].crownOk) { hs = &m_skins[k]; break; }
 		for (const AvaModel& x : m_avaModels) if (TacNameEq32(x.name, md.name)) { amCached = &x; break; }
+		if (!amCached) {
+			const char* ref = NULL;
+			if (!strncmp(md.name, "HumF", 4) || !strcmp(md.name, "HumWitch") || !strcmp(md.name, "HumMedieval")) ref = "HumF0";
+			else if (!strncmp(md.name, "HumM", 4) || !strcmp(md.name, "HumKing") || !strcmp(md.name, "HumAdventurer")) ref = "HumM0";
+			if (ref) for (const AvaModel& x : m_avaModels) if (TacNameEq32(x.name, ref)) { amCached = &x; borrowed = TRUE; break; }
+		}
 		for (int s = 0; s < m_avaSegN; s++) if (!strcmp(m_avaSeg[s], "Head")) { headSegCached = s; break; }
 		// 素体を描いているときは、カタログの頭蓋ではなく、その素体の頭の骨に髪の根を合わせる。
 		if (avatar > 0) {
@@ -12189,6 +12291,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			dst.hs = hs;
 			dst.backAc = backCached;
 			dst.hostSkull = hostSkull;
+			dst.borrowed = borrowed;
 		}
 	}
 	if (hairFresh) {
@@ -12220,11 +12323,21 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			const float ry = seg[4] * cx + seg[5] * cy + seg[6] * cz + seg[7];
 			const float rz = seg[8] * cx + seg[9] * cy + seg[10] * cz + seg[11];
 			float liftDy = (hs->crown[1] + 0.018f) - ry;
-			if (liftDy < 0.008f) liftDy = 0.008f;
-			else if (liftDy > 0.22f) liftDy = 0.22f;
+			float shiftX = hs->crown[0] - rx;
+			float shiftZ = (hs->skullC[2] - 0.006f) - rz;
+			// 0 系の区間を借りた頭は、2.5cm では天辺まで届かず毛が顔の横で潰れて禿げる。
+			if (borrowed) {
+				if (liftDy < -0.45f) liftDy = -0.45f;
+				else if (liftDy > 0.45f) liftDy = 0.45f;
+				shiftX = Clampf(shiftX, -0.35f, 0.35f);
+				shiftZ = Clampf(shiftZ, -0.35f, 0.35f);
+			} else {
+				if (liftDy < 0.008f) liftDy = 0.008f;
+				else if (liftDy > 0.22f) liftDy = 0.22f;
+				shiftX = Clampf(shiftX, -0.025f, 0.025f);
+				shiftZ = Clampf(shiftZ, -0.025f, 0.025f);
+			}
 			slot[13] += liftDy;
-			float shiftX = Clampf(hs->crown[0] - rx, -0.025f, 0.025f);
-			float shiftZ = Clampf((hs->skullC[2] - 0.006f) - rz, -0.025f, 0.025f);
 			slot[12] += shiftX;
 			slot[14] += shiftZ;
 		}
@@ -12645,7 +12758,7 @@ void Renderer::FinishPose(const Model& m, Pose& p, const PoseMods* mods) const
 	}
 }
 
-void Renderer::EvalPose(const Model& m, int ca, float ta, int la, int cb, float tb, int lb, float blend, const PoseMods* mods, Pose& out) const
+void Renderer::EvalPose(const Model& m, int ca, float ta, int la, int cb, float tb, int lb, float blend, const PoseMods* mods, Pose& out, const Q4* holdQ, const V3* holdP, int holdN) const
 {
 	const Rig* g = (m.rig >= 0 && m.rig < (int)rigs.size()) ? &rigs[m.rig] : NULL;
 	const Clip* A = (g && ca >= 0 && ca < (int)g->clips.size()) ? &g->clips[ca] : NULL;
@@ -12670,14 +12783,19 @@ void Renderer::EvalPose(const Model& m, int ca, float ta, int la, int cb, float 
 		Q4 q = m.restR[j];
 		V3 t = m.restT[j];
 		if (A) q = (A->nFrames <= 1) ? A->q[j] : QNlerp(A->q[(size_t)a0 * nJ + j], A->q[(size_t)a1 * nJ + j], af);
-		if (B && blend < 1.f) {
+		BOOL held = holdQ && holdP && holdN > 0 && j < holdN && blend < 1.f;
+		if (held) q = QNlerp(holdQ[j], q, blend);
+		else if (B && blend < 1.f) {
 			Q4 qb = (B->nFrames <= 1) ? B->q[j] : QNlerp(B->q[(size_t)b0 * nJ + j], B->q[(size_t)b1 * nJ + j], bf);
 			q = QNlerp(qb, q, blend);
 		}
 		if (g && j == g->hips) {
 			if (A) t = SampleH(*A, ta, la);
-			if (B && blend < 1.f) t = Lerp(SampleH(*B, tb, lb), t, blend);
-			if (la && A && !A->hips.empty()) { t.x = A->hips[0].x; t.z = A->hips[0].z; }
+			if (held) t = Lerp(holdP[j], t, blend);
+			else if (B && blend < 1.f) t = Lerp(SampleH(*B, tb, lb), t, blend);
+			if (!held && la && A && !A->hips.empty()) { t.x = A->hips[0].x; t.z = A->hips[0].z; }
+		} else if (held) {
+			t = Lerp(holdP[j], t, blend);
 		}
 		V3 s = m.restS[j];
 		if (mods && mods->any) { s.x *= mods->scale[j].x; s.y *= mods->scale[j].y; s.z *= mods->scale[j].z; }
@@ -17342,6 +17460,15 @@ void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD bo
 		HudRect(x + inset, y + inset, it, h - inset * 2.f, inner);
 		HudRect(x + w - inset - it, y + inset, it, h - inset * 2.f, inner);
 	};
+	auto filigree = [&]() {
+		if (w < 40.f || h < 36.f) return;
+		DWORD gem = MulA(RGBA8(255, 246, 220, 150), alpha);
+		float g = 7.f;
+		HudRect(x + 5.f, y + 5.f, g, 1.4f, gem); HudRect(x + 5.f, y + 5.f, 1.4f, g, gem);
+		HudRect(x + w - 5.f - g, y + 5.f, g, 1.4f, gem); HudRect(x + w - 6.4f, y + 5.f, 1.4f, g, gem);
+		HudRect(x + 5.f, y + h - 6.4f, g, 1.4f, gem); HudRect(x + 5.f, y + h - 5.f - g, 1.4f, g, gem);
+		HudRect(x + w - 5.f - g, y + h - 6.4f, g, 1.4f, gem); HudRect(x + w - 6.4f, y + h - 5.f - g, 1.4f, g, gem);
+	};
 	if (!m_psUi || !m_vbHud || w < 4.f || h < 4.f) {
 		HudRectGrad(x + 2, y + 2, w - 4, h - 4, MulA(Shade(fill, 1.12f), alpha), MulA(Shade(fill, .82f), alpha));
 		DWORD b = MulA(border, alpha);
@@ -17350,6 +17477,7 @@ void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD bo
 		HudRect(x + 1, y + 1, 2, 2, b); HudRect(x + w - 3, y + 1, 2, 2, b); HudRect(x + 1, y + h - 3, 2, 2, b); HudRect(x + w - 3, y + h - 3, 2, 2, b);
 		HudRect(x + 4, y + 4, w - 8, 1, MulA(RGBA8(255, 255, 255, 60), alpha));
 		ornament();
+		filigree();
 		return;
 	}
 	float rad = (w < h ? w : h) * 0.16f;
@@ -17371,6 +17499,7 @@ void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD bo
 	m_hud.push_back(v0); m_hud.push_back(v1); m_hud.push_back(v2);
 	m_hud.push_back(v0); m_hud.push_back(v2); m_hud.push_back(v3);
 	ornament();
+	filigree();
 }
 
 void Renderer::HudImage(ID3D11ShaderResourceView* srv, float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c)

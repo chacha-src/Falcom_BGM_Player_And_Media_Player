@@ -415,6 +415,7 @@ public:
 	void ApplySleepTimer(int minutes);       // 0=Off
 	void OpenTagEditForSelection();
 	void OpenTagBatchForSelection();
+	void OpenTagGrid();
 	void CycleRatingForDisp(int disp);
 	void ShiftLrcMs(int deltaMs);
 	void DrawBannerMeters(CDC* pDC, int bannerW, int bannerH);
