@@ -59,7 +59,7 @@ static std::wstring gWork, gArchive;
 static std::vector<Item> gItems;
 static std::vector<std::wstring> gCut;
 static OxzUpdHit* gUpdWait = NULL;
-static int gOwned = 0, gBusy = 0, gExit = 0, gCloseOnAdd = 0, gSyncDone = 0;
+static int gOwned = 0, gBusy = 0, gExit = 0, gCloseWhenDone = 0, gSyncDone = 0;
 static DWORD gBusyTick = 0;
 static std::wstring gBusyText;
 static Job* gJob = NULL;
@@ -810,7 +810,7 @@ static void StartPack(const std::vector<std::wstring>& inputs, int add, const st
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
 	Job* j = NewJob();
 	j->kind = add ? JOB_ADD : JOB_PACK;
-	j->closeAfter = (add && gCloseOnAdd) ? 1 : 0;
+	j->closeAfter = gCloseWhenDone ? 1 : 0;
 	j->inputs = inputs;
 	if (add) j->archive = archive;
 	else if (exact) j->archive = AvoidDest(archive, inputs);
@@ -824,6 +824,7 @@ static void StartExtractMany(const std::vector<std::wstring>& inputs, int toFold
 	SetBusy(1, OxzTxt(OS_EXTRACTING));
 	Job* j = NewJob();
 	j->kind = toFolder ? JOB_EXTRACTTO : JOB_EXTHERE;
+	j->closeAfter = gCloseWhenDone ? 1 : 0;
 	j->inputs = inputs;
 	StartJob(j);
 }
@@ -838,6 +839,7 @@ static void StartExtractAt(const std::vector<std::wstring>& inputs, const std::w
 	SetBusy(1, OxzTxt(OS_EXTRACTING));
 	Job* j = NewJob();
 	j->kind = JOB_EXTAT;
+	j->closeAfter = gCloseWhenDone ? 1 : 0;
 	j->inputs = inputs;
 	j->dest = folder;
 	j->sub = sub;
@@ -982,7 +984,7 @@ static void OnJobDone()
 	}
 	int closeNow = !fail && j->closeAfter;
 	delete j;
-	SyncInstalledCopy();
+	if (!closeNow) SyncInstalledCopy();
 	if (closeNow || gExit) {
 		delete gUpdWait;
 		gUpdWait = NULL;
@@ -1894,16 +1896,16 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 			if (!_wcsicmp(argv[i], L"/exit")) gExit = 1;
 			else if (!_wcsicmp(argv[i], L"/sub")) gStartSub = 1;
 			else if (!_wcsicmp(argv[i], L"/list") && i + 1 < argc) gStartB = argv[++i];
-			else if (!_wcsicmp(argv[i], L"/packlist") && i + 1 < argc) { gStartKind = 2; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/exthere") && i + 1 < argc) { gStartKind = 3; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/extractto") && i + 1 < argc) { gStartKind = 4; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/addto") && i + 1 < argc) { gStartKind = 5; gCloseOnAdd = 1; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/packone") && i + 1 < argc) { gStartKind = 6; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/packdir") && i + 1 < argc) { gStartKind = 7; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/packlist") && i + 1 < argc) { gStartKind = 2; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/exthere") && i + 1 < argc) { gStartKind = 3; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/extractto") && i + 1 < argc) { gStartKind = 4; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/addto") && i + 1 < argc) { gStartKind = 5; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/packone") && i + 1 < argc) { gStartKind = 6; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/packdir") && i + 1 < argc) { gStartKind = 7; gCloseWhenDone = 1; gStartA = argv[++i]; }
 			else if (!_wcsicmp(argv[i], L"/editlist") && i + 1 < argc) { gStartKind = 8; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/packto") && i + 1 < argc) { gStartKind = 9; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/extdest") && i + 1 < argc) { gStartKind = 10; gStartA = argv[++i]; }
-			else if (!_wcsicmp(argv[i], L"/extractdlg") && i + 1 < argc) { gStartKind = 11; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/packto") && i + 1 < argc) { gStartKind = 9; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/extdest") && i + 1 < argc) { gStartKind = 10; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/extractdlg") && i + 1 < argc) { gStartKind = 11; gCloseWhenDone = 1; gStartA = argv[++i]; }
 			else if (!_wcsicmp(argv[i], L"/test") && i + 1 < argc) { gStartKind = 12; gStartA = argv[++i]; }
 			else if (argv[i][0] != L'/' && gStartKind == 0) { gStartKind = 1; gStartA = argv[i]; }
 		}
@@ -1929,8 +1931,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 	ShowWindow(hwnd, gStartKind == 12 ? SW_HIDE : show);
 	UpdateWindow(hwnd);
 	if (gStartKind) PostMessageW(hwnd, WM_START, 0, 0);
-	if (!gExit && gStartKind != 12) PostMessageW(hwnd, WM_APP + 12, 0, 0);
-	if (!gExit && gStartKind != 12 && !gCloseOnAdd) OxzUpdateCheckAsync(hwnd);
+	if (!gExit && gStartKind != 12 && !gCloseWhenDone) PostMessageW(hwnd, WM_APP + 12, 0, 0);
+	if (!gExit && gStartKind != 12 && !gCloseWhenDone) OxzUpdateCheckAsync(hwnd);
 	ACCEL acc[9];
 	memset(acc, 0, sizeof(acc));
 	acc[0].fVirt = FCONTROL | FVIRTKEY; acc[0].key = 'A'; acc[0].cmd = ID_SELECTALL;

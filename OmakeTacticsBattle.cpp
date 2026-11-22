@@ -22,7 +22,11 @@ static float FitLo(float v, float lo, float hi)
 
 static int WeatherTx(int w);
 static int HourTx(int h);
+static const int kItemThrow = 3;
+static int VaultKind(const GoodDef* g);
+static BOOL ItemThrowFrom(const GoodDef* g, const Unit& src, int sx, int sz, const Unit& t);
 static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t);
+static BOOL ItemPays(const Battle& b, const GoodDef* g, const Unit& t);
 static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t);
 
 enum {
@@ -2053,23 +2057,63 @@ void Game::DemoDrive(float dt)
 			AiDecide(m_b, m_cur, m_ai, m_rng, 2);
 			if (m_ai.target != -2 && m_ai.target != -3 && m_ai.target != -4 && m_ai.skill != -2) {
 				float bestI = -1e9f;
-				int gi = -1, ti = -1;
+				int gi = -1, ti = -1, mx = u.x, mz = u.z, ml = u.deck;
 				int nGood = GoodCount();
+				// 今いるマス、届かなければ届く停止マス。攻撃位置へ歩くと投擲圏から外れる。
+				auto standFor = [&](const GoodDef* gd, const Unit& tgt, int& ox, int& oz, int& ol) -> BOOL {
+					if (!gd) return FALSE;
+					int vk = VaultKind(gd);
+					BOOL raise = gd->item == IT_RAISE || gd->extra == 106 || gd->extra == 116 || vk == 2;
+					if (raise && !RaisePlaceable(m_b, tgt)) return FALSE;
+					if (ItemThrowFrom(gd, u, u.x, u.z, tgt)) {
+						ox = u.x; oz = u.z; ol = u.deck;
+						return TRUE;
+					}
+					int bestC = 99999, bestN = 99999, bx = -1, bz = -1, bl = -1;
+					int sa = UnitSpan(u); if (sa < 1) sa = 1;
+					int st = UnitSpan(tgt); if (st < 1) st = 1;
+					int rad = kItemThrow + sa + st;
+					int x0 = tgt.x - rad, x1 = tgt.x + rad + st, z0 = tgt.z - rad, z1 = tgt.z + rad + st;
+					if (x0 < 0) x0 = 0;
+					if (z0 < 0) z0 = 0;
+					if (x1 >= MAPN) x1 = MAPN - 1;
+					if (z1 >= MAPN) z1 = MAPN - 1;
+					for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++) {
+						if (!ItemThrowFrom(gd, u, x, z, tgt)) continue;
+						for (int L = 0; L < LAY_N; L++) {
+							if (!ReachCanStopLayer(m_reach, x, z, L)) continue;
+							int c = ReachCostAt(m_reach, L, x, z);
+							if (c < 0) continue;
+							int hop = max(abs(x - tgt.x), abs(z - tgt.z));
+							if (c < bestC || (c == bestC && hop < bestN)) {
+								bestC = c; bestN = hop; bx = x; bz = z; bl = L;
+							}
+						}
+					}
+					if (bx < 0) return FALSE;
+					ox = bx; oz = bz; ol = bl;
+					return TRUE;
+				};
 				for (int g = 0; g < nGood; g++) {
 					if (GoodHave(m_save, g) <= 0) continue;
 					const GoodDef* gd = GoodAt(g);
 					for (int i = 0; i < m_b.nUnits; i++) {
-						if (!ItemHelps(m_b, gd, u, m_b.u[i])) continue;
+						if (!ItemPays(m_b, gd, m_b.u[i])) continue;
+						int sx, sz, sl;
+						if (!standFor(gd, m_b.u[i], sx, sz, sl)) continue;
 						float sc = 92.f;
 						if (m_b.u[i].hp * 2 <= max(1, m_b.u[i].ch.stat[S_HP])) sc += 88.f;
-						if (gd->item == IT_RAISE || gd->extra == 106 || gd->extra == 116) sc += 140.f;
-						if (sc > bestI) { bestI = sc; gi = g; ti = i; }
+						if (gd->item == IT_RAISE || gd->extra == 106 || gd->extra == 116 || VaultKind(gd) == 2) sc += 140.f;
+						if (sc > bestI) { bestI = sc; gi = g; ti = i; mx = sx; mz = sz; ml = sl; }
 					}
 				}
 				if (gi >= 0 && bestI >= 170.f) {
 					m_ai.skill = -3;
 					m_ai.target = ti;
 					m_ai.castX = gi;
+					m_ai.moveX = mx;
+					m_ai.moveZ = mz;
+					m_ai.moveL = ml;
 				}
 			}
 			m_demoAct = 1;
@@ -2305,15 +2349,29 @@ void Game::DemoDrive(float dt)
 		m_demoStep = 0;
 		int good = m_ai.castX;
 		int tg = m_ai.target;
+		const GoodDef* gd = (good >= 0) ? GoodAt(good) : NULL;
+		auto legal = [&](int i) -> BOOL {
+			if (!gd || i < 0 || i >= m_b.nUnits) return FALSE;
+			if (!ItemHelps(m_b, gd, u, m_b.u[i])) return FALSE;
+			if ((gd->item == IT_RAISE || gd->extra == 106 || gd->extra == 116 || VaultKind(gd) == 2) && !RaisePlaceable(m_b, m_b.u[i])) return FALSE;
+			return TRUE;
+		};
+		if (!legal(tg)) {
+			tg = -1;
+			for (int i = 0; i < m_b.nUnits; i++) if (legal(i)) { tg = i; break; }
+			m_ai.target = tg;
+		}
 		if (m_itemAim < 0) {
-			if (good < 0 || GoodHave(m_save, good) <= 0) { FinishUnitTurn(1); return; }
+			if (!gd || GoodHave(m_save, good) <= 0 || tg < 0) { FinishUnitTurn(1); return; }
 			m_itemAim = good;
 			m_navMode = TRUE;
 			m_focusId = ID_BT_ITT0;
 			return;
 		}
-		if (tg < 0 || tg >= m_b.nUnits) { FinishUnitTurn(1); return; }
+		if (tg < 0) { FinishUnitTurn(1); return; }
+		int ph = (int)m_phase;
 		UseConsumable(m_itemAim, tg);
+		if ((int)m_phase == ph) FinishUnitTurn(1);
 		return;
 	}
 	if (m_phase == PH_P_SUMMON) {
@@ -9850,8 +9908,6 @@ void Game::DrawForecast(float* ox, float* oy, float* ow, float* oh)
 	if (opt > 0) drawExp(x, y + h - expBlock, w);
 }
 
-static const int kItemThrow = 3;
-
 static int VaultKind(const GoodDef* g)
 {
 	if (!g || g->extra < 200) return -1;
@@ -9862,25 +9918,40 @@ static BOOL ItemHarms(const GoodDef* g)
 	return g && (g->item == IT_DELAY || g->extra == IX_SLOW || g->extra == IX_VENOM || g->extra == 107 || g->extra == 108 || g->extra == 117 || VaultKind(g) == 3);
 }
 
-static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
+static int ItemCheb(const Unit& src, int sx, int sz, const Unit& t)
 {
-	if (!g) return FALSE;
 	int dist = 9999;
 	int sa = UnitSpan(src), st = UnitSpan(t);
+	if (sa < 1) sa = 1;
+	if (st < 1) st = 1;
 	for (int az = 0; az < sa; az++) for (int ax = 0; ax < sa; ax++)
-		for (int dz = 0; dz < st; dz++) for (int dx = 0; dx < st; dx++)
-			dist = min(dist, max(abs((src.x + ax) - (t.x + dx)), abs((src.z + az) - (t.z + dz))));
+		for (int dz = 0; dz < st; dz++) for (int dx = 0; dx < st; dx++) {
+			int d = max(abs((sx + ax) - (t.x + dx)), abs((sz + az) - (t.z + dz)));
+			if (d < dist) dist = d;
+		}
+	return dist;
+}
+
+static BOOL ItemThrowFrom(const GoodDef* g, const Unit& src, int sx, int sz, const Unit& t)
+{
+	if (!g || !Map::In(sx, sz)) return FALSE;
+	int dist = ItemCheb(src, sx, sz, t);
 	if (dist > kItemThrow) return FALSE;
 	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2)
-		return t.team == src.team && !t.alive && t.hp <= 0 && dist >= 0;
+		return t.team == src.team && !t.alive && t.hp <= 0;
 	if (ItemHarms(g))
 		return t.team != src.team && t.alive && dist >= 1;
 	return t.team == src.team && t.alive;
 }
 
-static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t)
+static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 {
-	if (!ItemThrowOk(g, src, t)) return FALSE;
+	return ItemThrowFrom(g, src, src.x, src.z, t);
+}
+
+static BOOL ItemPays(const Battle& b, const GoodDef* g, const Unit& t)
+{
+	if (!g) return FALSE;
 	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) return TRUE;
 	BOOL hurt = t.alive && t.hp < t.ch.stat[S_HP];
 	BOOL mana = t.alive && t.mp < t.ch.stat[S_MP];
@@ -9923,6 +9994,12 @@ static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const 
 	if (vk == 6) return hurt || mana;
 	if (vk == 7) return ail;
 	return FALSE;
+}
+
+static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t)
+{
+	if (!ItemThrowOk(g, src, t)) return FALSE;
+	return ItemPays(b, g, t);
 }
 
 static const wchar_t* RaiseNoRoomWord()
@@ -11625,14 +11702,33 @@ void Game::DrawCutInUi()
 			const Unit& u = m_b.u[ui];
 			float w = U(280);
 			float bx = align ? x - w : x;
-			wchar_t nm[64];
+			wchar_t nm[64], sub[96], lv[32];
 			UnitTitle(u, nm, 64);
+			unsigned __int64 tlv = CharTrueLv(u.ch);
+			swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNumU64(tlv));
+			const wchar_t* job = (u.team == TEAM_PLAYER || UnitIsHumanFoe(u) || u.monster < 0) ? ClassName(u.ch.cls) : MonsterLabel(u.monster);
+			if (!job) job = L"";
+			swprintf_s(sub, L"%s  %s", job, lv);
 			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
-			float fs = row >= U(20) ? U(14) : max(U(9.f), row * .42f);
-			float bh = max(U(3.f), min(U(8.f), row - fs - U(2)));
-			m_r.HudText(nm, align ? bx + w : bx, y, fs, fc, align ? 2 : 0, 1);
+			float nameFs = U(14);
+			float subFs = U(11);
+			float bh = U(6);
+			float gap = U(1);
+			float need = nameFs + subFs + bh + gap * 2.f;
+			if (row + 0.5f < need && need > 1.f) {
+				float s = row / need;
+				nameFs *= s;
+				subFs *= s;
+				bh *= s;
+				gap *= s;
+			}
+			if (bh < 1.f) bh = 1.f;
+			float tx = align ? bx + w : bx;
+			int al = align ? 2 : 0;
+			m_r.HudText(nm, tx, y, FitTextPx(nm, w, nameFs, 1), fc, al, 1);
+			m_r.HudText(sub, tx, y + nameFs + gap, FitTextPx(sub, w, subFs, 0), RGBA8(255, 228, 170), al, 0);
 			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-			Bar(bx, y + fs, w, bh, frac, HpFillCol(u, frac), HpBackCol(u));
+			Bar(bx, y + nameFs + gap + subFs + gap, w, bh, frac, HpFillCol(u, frac), HpBackCol(u));
 		};
 		auto col = [&](const int* id, int n, int align) {
 			if (n < 1) return;
@@ -11640,7 +11736,7 @@ void Game::DrawCutInUi()
 			float bot = (float)m_h - bar - U(4);
 			float avail = max(U(12.f), bot - top);
 			float row = avail / (float)n;
-			if (row > U(22)) row = U(22);
+			if (row > U(38)) row = U(38);
 			float y0 = top + (avail - n * row) * .5f;
 			for (int i = 0; i < n; i++)
 				hpBox(id[i], align ? (float)m_w - U(16) : U(16), align, y0 + i * row, row);
