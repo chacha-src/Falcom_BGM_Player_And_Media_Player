@@ -1319,6 +1319,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="OmakeTacticsModels.cpp" />
     <ClCompile Include="OmakeTacticsGame.cpp" />
     <ClCompile Include="OmakeTacticsBattle.cpp" />
+    <ClCompile Include="OmakeTacticsCutShot.cpp" />
     <ClCompile Include="OmakeTacticsText.cpp" />
     <ClCompile Include="OmakeTacticsAudio.cpp" />
     <ClCompile Include="OmakeTacticsDlg.cpp" />
@@ -1680,6 +1681,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_dst.cso" />
     <None Include="res\cso\tac_gsp.cso" />
     <None Include="res\cso\tac_cswx.cso" />
+    <None Include="res\cso\tac_pscut.cso" />
     <None Include="res\cso\tac_psg10.cso" />
     <None Include="res\cso\tac_psg11.cso" />
     <None Include="res\cso\tac_psg12.cso" />

@@ -9806,7 +9806,7 @@ static int PickReady(const Unit* u, int n, int lastTeam, const int* ct, const BY
 	int bestP = -1, bestE = -1;
 	for (int i = 0; i < n; i++) {
 		// alert 0 は未発見。行動順に入れない。also は「次の手番から入る」予告だけ。
-		if (!u[i].alive || (u[i].alert != 1 && !(also && also[i]))) continue;
+		if (!UnitInFight(u[i]) || (u[i].alert != 1 && !(also && also[i]))) continue;
 		int c = ReadyCt(u, ct, i);
 		if (c < 1000) continue;
 		int& best = (u[i].team == TEAM_PLAYER) ? bestP : bestE;
@@ -9825,13 +9825,19 @@ static int PickReady(const Unit* u, int n, int lastTeam, const int* ct, const BY
 
 int Battle::NextActor()
 {
+	for (int i = 0; i < nUnits; i++) {
+		Unit& v = u[i];
+		if (!UnitInFight(v)) {
+			if (v.alive || v.hp != 0 || !v.killed) UnitSealDead(v);
+		}
+	}
 	for (int guard = 0; guard < 100000; guard++) {
 		int best = PickReady(u, nUnits, lastActTeam, NULL, NULL);
 		if (best >= 0) {
 			lastActTeam = u[best].team;
 			return best;
 		}
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) u[i].ct += Speed(*this, u[i]);
+		for (int i = 0; i < nUnits; i++) if (UnitInFight(u[i]) && u[i].alert == 1) u[i].ct += Speed(*this, u[i]);
 	}
 	return -1;
 }
@@ -9868,7 +9874,7 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 			continue;
 		}
 		bool any = false;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && (u[i].alert == 1 || also[i])) { ct[i] += Speed(*this, u[i]); any = true; }
+		for (int i = 0; i < nUnits; i++) if (UnitInFight(u[i]) && (u[i].alert == 1 || also[i])) { ct[i] += Speed(*this, u[i]); any = true; }
 		if (!any) break;
 	}
 	return got;
@@ -11876,6 +11882,8 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut, int* burnO
 	*healOut = 0; *poisonOut = 0;
 	if (burnOut) *burnOut = 0;
 	if (bleedOut) *bleedOut = 0;
+	// 戦闘不能の体に再生や自然回復を乗せない。HP 0 のまま alive だと、ここで 6 などへ戻り手番が止まる。
+	if (!UnitInFight(u)) return 0;
 	int regenPct = PasScale(u, PAS_REGEN2, 15, 13);
 	if (regenPct < 0) regenPct = 0;
 	if (!regenPct) {

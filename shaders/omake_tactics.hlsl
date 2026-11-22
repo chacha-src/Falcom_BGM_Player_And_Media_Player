@@ -16,7 +16,7 @@ cbuffer Frame : register(b0)
 	float4 Sight;    // x=明瞭な半径 y=ステージ番号 z=人数 w=有効
 	float4 Ally[16]; // xy=味方のワールドxz z=有効
 	float4 CamNear;  // x=視線方向で消す深さ y=ここから残す。0 なら無効 w=不透明帯の上端
-	float4 CamFwd;   // xyz=今のカメラ前方
+	float4 CamFwd;   // xyz=今のカメラ前方 w=着弾の画面衝撃 (0..1)
 	float4 Wx;       // x=天候 y=時刻。地面の反射に使う。z=画質の連続段(rank)
 	row_major float4x4 ReflectVP;
 	float4 ReflectInfo; // x=映す y=床の高さ z=反射パス(1=上面を捨てる 2=上面も残す) w=ぼかし幅
@@ -72,7 +72,7 @@ float TacGate(float s, float th)
 cbuffer AirNow : register(b4)
 {
 	float4 AirB; // xy=そよ風 zw=強風+暴風
-	float4 AirL; // x=上下 y=GustAmt
+	float4 AirL; // x=上下 y=GustAmt z=風速m/s w=気温℃
 	float4 AirHide0; // 折れて飛んだ木などの xz。x>=900 は空き
 	float4 AirHide1;
 };
@@ -252,16 +252,23 @@ float WaveAmp(float th)
 
 void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 {
-	float2 d1 = normalize(float2(1.0, 0.25));
-	float2 d2 = normalize(float2(-0.35, 1.0));
-	float2 d3 = normalize(float2(0.2, -1.0));
+	float2 wd = AirMain() + AirBreeze();
+	float wdl = length(wd);
+	wd = wdl > 1e-3 ? wd / wdl : float2(0.97, 0.24);
+	float2 d1 = wd;
+	float2 d2 = normalize(float2(-wd.y, wd.x) + wd * 0.42);
+	float2 d3 = normalize(float2(wd.y, -wd.x) * 0.7 + wd * 0.5);
 	float k1 = 1.35, k2 = 2.4, k3 = 4.1;
-	float f1 = k1 * dot(d1, xz) - t * 1.15;
-	float f2 = k2 * dot(d2, xz) - t * 1.7;
-	float f3 = k3 * dot(d3, xz) - t * 2.3;
+	float spd = 1.0 + saturate(max(AirL.z, 0.0) / 24.0) * 0.4;
+	float f1 = k1 * dot(d1, xz) - t * 1.15 * spd;
+	float f2 = k2 * dot(d2, xz) - t * 1.7 * spd;
+	float f3 = k3 * dot(d3, xz) - t * 2.3 * spd;
 	h = amp * (sin(f1) + 0.55 * sin(f2) + 0.28 * sin(f3));
 	dh = amp * (d1 * k1 * cos(f1) + d2 * k2 * 0.55 * cos(f2) + d3 * k3 * 0.28 * cos(f3));
 	dh += float2(sin(t * 0.65 + xz.x * 0.85), cos(t * 0.5 + xz.y * 0.75)) * amp * 1.4;
+	float sea = 1.0 + saturate(max(AirL.z, 0.0) / 18.0);
+	h *= sea;
+	dh *= sea;
 	float gust = GustAmt();
 	h *= 1.0 + gust * 1.15;
 	dh *= 1.0 + gust * 1.15;
@@ -1134,7 +1141,7 @@ float3 RainSlide(float3 col, float3 albedo, float3 n, float3 v, float3 w, float 
 	if (snow > 0.5) {
 		float cling = sky * (0.4 + 0.6 * fbm2(w.xz * 5.5));
 		col = lerp(col, float3(0.93, 0.96, 1.0), cling * 0.5);
-		float meltSpd = 0.42;
+		float meltSpd = 0.42 * (1.0 + saturate(AirL.w / 12.0) * 0.65);
 		float mf = along * 12.0 - Eye.w * meltSpd;
 		float melt = pow(saturate(sin(mf) * 0.5 + 0.5), 6.0) * path * wall;
 		col += float3(0.92, 0.96, 1.0) * (melt * 0.7 + tip * cling * 0.45);
@@ -3442,7 +3449,8 @@ void AirCraft(inout float3 col, float2 uv, float z, float th, float t)
 	else if (th < 14.5) tint = float3(0.82, 0.9, 1.0);
 	else if (th < 15.5) tint = float3(1.0, 0.94, 0.7);
 	else tint = float3(1.0, 0.72, 0.84);
-	col += tint * (m1 * 0.5 + m2 * 0.9) * veil * (0.28 + gust * 0.45);
+	float blow = 0.65 + saturate(max(AirL.z, 0.0) / 14.0) * 0.9;
+	col += tint * (m1 * 0.5 + m2 * 0.9) * veil * (0.28 + gust * 0.45) * blow;
 	float2 dir = wind;
 	float dl = length(dir);
 	dir = dl > 1e-4 ? dir / dl : float2(1.0, 0.15);
@@ -3695,6 +3703,56 @@ float4 PSBlur(QOut i) : SV_Target
 	return float4(c, 1);
 }
 
+// カット／着弾の画面演出。full=1 はカット専用パス（筋・強い空気遠近）。
+float3 CutCine(float3 col, float2 uv, float2 asp, float2 px, float zpix, float3 bloom, float gt, int full)
+{
+	float cut = saturate(FxMore.z);
+	float crit = saturate(FxNow.x);
+	float fairy = saturate(FxNow.y);
+	float hit = saturate(CamFwd.w);
+	float2 da = (uv - 0.5) * asp;
+	float r = length(da);
+	float waveR = (1.0 - hit) * 0.90;
+	float ring = exp(-pow(r - waveR, 2.0) * 88.0) * hit;
+	float punch = hit * hit * (0.50 + 0.50 * (1.0 - saturate(r)));
+	col += float3(1.00, 0.82, 0.56) * ring * (0.55 + 0.35 * cut);
+	col += col * punch * 0.26;
+	col += bloom * punch * 0.40;
+	[branch] if (hit > 0.02) {
+		float2 ca = (uv - 0.5) * px * (18.0 * hit);
+		float cr = Tex.SampleLevel(SL, uv + ca, 0).r;
+		float cb = Tex.SampleLevel(SL, uv - ca, 0).b;
+		col.r = lerp(col.r, cr, hit * 0.52);
+		col.b = lerp(col.b, cb, hit * 0.52);
+	}
+	float cBoost = 0.55 + 0.90 * cut;
+	float cRing = exp(-pow(r - 0.16 * (1.25 - crit), 2.0) * 36.0);
+	col += float3(1.00, 0.92, 0.40) * crit * (0.22 + 0.50 * cRing) * cBoost;
+	col += bloom * crit * 0.55 * cBoost;
+	col = lerp(col, col * float3(1.16, 1.06, 0.82), crit * 0.38 * cBoost);
+	float air = smoothstep(0.16, 0.90, zpix);
+	float3 haze = FogColor.rgb * 1.10 + bloom * 0.32;
+	col = lerp(col, lerp(col, haze, 0.70), air * (0.22 + 0.40 * cut));
+	[branch] if (full != 0) {
+		float streak = 0;
+		[unroll] for (int k = -4; k <= 4; k++) {
+			if (k == 0) continue;
+			float3 s = Tex.SampleLevel(SL, uv + float2(px.x * 10.0 * k, 0), 0).rgb;
+			streak += max(0, dot(s, float3(0.30, 0.59, 0.11)) - 0.62);
+		}
+		streak *= 0.11;
+		col += float3(1.00, 0.94, 0.78) * streak * (0.16 + 0.42 * cut + 0.50 * crit);
+		float vig = saturate(1.0 - pow(r * (1.04 + 0.22 * cut), 2.05));
+		col *= lerp(0.52, 1.0, vig);
+		float g = hash21(uv * Screen.xy + float2(gt * 37.1, gt * 19.7)) - 0.5;
+		col += g * (0.016 + 0.024 * cut);
+		float3 mapped = col * col * (3.0 - 2.0 * saturate(col));
+		col = lerp(col, mapped, 0.14 + 0.12 * cut);
+	}
+	col += float3(0.55, 0.82, 1.00) * fairy * 0.10 * cut;
+	return col;
+}
+
 float4 PSGrade(QOut i) : SV_Target
 {
 	float3 scene = Tex.Sample(SL, i.uv).rgb;
@@ -3825,11 +3883,37 @@ float4 PSGrade(QOut i) : SV_Target
 		}
 	}
 	{
+		int inCut = FxMore.z > 0.4;
+		[branch] if (CamFwd.w > 0.012 || inCut)
+			col = CutCine(col, i.uv, asp, px, zpix, bloom, gt, inCut);
+	}
+	{
 		float3 x = max(col, 0.0) * 1.32;
 		float3 aces = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
 		col = lerp(saturate(col), saturate(aces), 0.62);
 	}
 	return float4(saturate(col), 1);
+}
+
+float4 PSCut(QOut i) : SV_Target
+{
+	float4 o = PSGrade(i);
+	float2 asp = float2(Screen.x * Screen.w, 1);
+	float2 da = (i.uv - 0.5) * asp;
+	float zpix = DepthMap.SampleLevel(SL, i.uv, 0).r;
+	float3 acc = o.rgb;
+	[unroll] for (int s = 1; s <= 3; s++) {
+		float f = s * 0.007 * (0.28 + 0.72 * zpix);
+		acc += Tex.SampleLevel(SL, i.uv + da * f, 0).rgb;
+		acc += Tex.SampleLevel(SL, i.uv - da * f, 0).rgb;
+	}
+	acc *= (1.0 / 7.0);
+	float farW = smoothstep(0.20, 0.78, zpix) * 0.28;
+	o.rgb = lerp(o.rgb, lerp(o.rgb, acc, 0.55), farW);
+	float2 q = da;
+	float vig = saturate(1.0 - pow(length(q) * 1.18, 2.2));
+	o.rgb *= lerp(0.78, 1.0, vig);
+	return float4(saturate(o.rgb), 1);
 }
 
 float4 PSGradeTiny(QOut i) : SV_Target
@@ -3935,6 +4019,21 @@ float WxHeight(float x, float z)
 	return WxH[iz * 64 + ix];
 }
 
+float WxCouple(float kind)
+{
+	if (kind > 0.5 && kind < 1.5) return 0.72;
+	if (kind > 1.5 && kind < 2.5) return 0.86;
+	if (kind > 2.5 && kind < 3.5) return 0.50;
+	if (kind > 3.5 && kind < 4.5) return 0.55;
+	if (kind > 4.5 && kind < 5.5) return 0.22;
+	if (kind > 5.5 && kind < 6.5) return 0.92;
+	if (kind > 6.5 && kind < 7.5) return 0.65;
+	if (kind > 7.5 && kind < 8.5) return 0.38;
+	if (kind > 9.5 && kind < 10.5) return 0.70;
+	if (kind > 10.5 && kind < 11.5) return 0.40;
+	return 0.20;
+}
+
 void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, float3 side, float3 wind, float gust)
 {
 	float along = 3.4 + WxRnd(seed) * 12.6;
@@ -3943,53 +4042,52 @@ void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, floa
 	o.p.xyz = eye + fwd * along + side * lat + float3(0, up, 0);
 	o.p.w = 1;
 	o.extra.z = wx;
+	float jig = 1.0 + gust * 0.16;
 	if (wx > 0.5 && wx < 1.5) {
 		float sp = 10.0 + WxRnd(seed) * 5.0;
-		float w = 1.6 * (1.0 + gust * 1.2);
-		o.vel = float4(wind * w + float3(WxRnd(seed) * 0.8 - 0.4, -sp, WxRnd(seed) * 0.8 - 0.4), 0.04);
+		o.vel = float4(wind.x * 0.72 * jig + WxRnd(seed) * 0.8 - 0.4, -sp, wind.z * 0.72 * jig + WxRnd(seed) * 0.8 - 0.4, 0.04);
 		o.sz = float4(0.028, 0, 1.6, 1.6);
 		o.c = float4(0.72, 0.84, 1, 0.9);
 		o.extra.xyw = float3(16.0, 0.15, 0.018);
 	} else if (wx > 4.5 && wx < 5.5) {
 		float sp = 14.0 + WxRnd(seed) * 6.0;
-		float w = 5.2 * (1.0 + gust * 1.2);
-		o.vel = float4(wind * w + float3(WxRnd(seed) * 0.8 - 0.4, -sp, WxRnd(seed) * 0.8 - 0.4), 0.05);
+		o.vel = float4(wind.x * 0.86 * jig + WxRnd(seed) * 0.8 - 0.4, -sp, wind.z * 0.86 * jig + WxRnd(seed) * 0.8 - 0.4, 0.05);
 		o.sz = float4(0.024, 0, 1.5, 1.5);
 		o.c = float4(0.72, 0.84, 1, 0.92);
 		o.extra.xyw = float3(16.0, 0.15, 0.016);
 		o.extra.z = 2;
 	} else if (wx > 1.5 && wx < 2.5) {
-		o.vel = float4(wind * 0.7 + float3(WxRnd(seed) * 0.6 - 0.3, -1.8 + WxRnd(seed) * 1.0, WxRnd(seed) * 0.6 - 0.3), 0);
+		o.vel = float4(wind.x * 0.50 * jig + WxRnd(seed) * 0.6 - 0.3, -1.8 + WxRnd(seed) * 1.0 + wind.y * 0.12, wind.z * 0.50 * jig + WxRnd(seed) * 0.6 - 0.3, 0);
 		o.sz = float4(0.055, 2, 4.0, 4.0);
 		o.c = float4(0.96, 0.98, 1, 1);
 		o.extra.xyw = float3(0.8, 0.35, 0.04);
 		o.extra.z = 3;
 	} else if (wx > 2.5 && wx < 3.5) {
-		o.vel = float4(wind * 0.5 + float3(WxRnd(seed) * 0.5 - 0.25, -2.6 + WxRnd(seed) * 1.4, WxRnd(seed) * 0.5 - 0.25), 0.02);
+		o.vel = float4(wind.x * 0.55 * jig + WxRnd(seed) * 0.5 - 0.25, -2.6 + WxRnd(seed) * 1.4 + wind.y * 0.2, wind.z * 0.55 * jig + WxRnd(seed) * 0.5 - 0.25, 0.02);
 		o.sz = float4(0.04, 0, 3.2, 3.2);
 		o.c = float4(0.85, 0.4, 0.18, 1);
 		o.extra.xyw = float3(1.6, 0.25, 0.025);
 		o.extra.z = 4;
 	} else if (wx > 6.5 && wx < 7.5) {
-		o.vel = float4(wind * 0.8 + float3(WxRnd(seed) * 0.4 - 0.2, -18.0 + WxRnd(seed) * 5.0, WxRnd(seed) * 0.4 - 0.2), 0.02);
+		o.vel = float4(wind.x * 0.22 * jig + WxRnd(seed) * 0.4 - 0.2, -18.0 + WxRnd(seed) * 5.0, wind.z * 0.22 * jig + WxRnd(seed) * 0.4 - 0.2, 0.02);
 		o.sz = float4(0.048, 7, 1.4, 1.4);
 		o.c = float4(0.9, 0.95, 1, 1);
 		o.extra.xyw = float3(22.0, 0.05, 0.04);
 		o.extra.z = 5;
 	} else if (wx > 5.5 && wx < 6.5) {
-		o.vel = float4(wind * (5.0 + WxRnd(seed) * 3.0) + float3(0, -2.2 + WxRnd(seed) * 1.6, 0), 0.04);
+		o.vel = float4(wind.x * 0.92 * jig, -2.2 + WxRnd(seed) * 1.6 + wind.y * 0.1, wind.z * 0.92 * jig, 0.04);
 		o.sz = float4(0.032, 0, 1.8, 1.8);
 		o.c = float4(0.92, 0.74, 0.38, 1);
 		o.extra.xyw = float3(3.0, 0.2, 0.02);
 		o.extra.z = 6;
 	} else if (wx > 7.5 && wx < 8.5) {
-		o.vel = float4(wind * 0.9 + float3(WxRnd(seed) * 0.6 - 0.3, -1.1 + WxRnd(seed) * 0.7, WxRnd(seed) * 0.6 - 0.3), 0.01);
+		o.vel = float4(wind.x * 0.65 * jig + WxRnd(seed) * 0.6 - 0.3, -1.1 + WxRnd(seed) * 0.7 + wind.y * 0.18, wind.z * 0.65 * jig + WxRnd(seed) * 0.6 - 0.3, 0.01);
 		o.sz = float4(0.06, 2, 4.5, 4.5);
 		o.c = float4(1, 0.72, 0.8, 1);
 		o.extra.xyw = float3(0.45, 0.3, 0.04);
 		o.extra.z = 7;
 	} else if (wx > 3.5 && wx < 4.5) {
-		o.vel = float4(wind * 0.35 + float3(WxRnd(seed) * 0.4 - 0.2, WxRnd(seed) * 0.35 - 0.15, WxRnd(seed) * 0.4 - 0.2), 0);
+		o.vel = float4(wind.x * 0.38 * jig + WxRnd(seed) * 0.4 - 0.2, WxRnd(seed) * 0.35 - 0.15 + wind.y * 0.08, wind.z * 0.38 * jig + WxRnd(seed) * 0.4 - 0.2, 0);
 		o.sz = float4(0.14, 0, 3.5, 3.5);
 		o.c = float4(0.78, 0.82, 0.86, 0.22);
 		o.extra.xyw = float3(0, 0.15, 0.22);
@@ -3997,7 +4095,7 @@ void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, floa
 	} else {
 		float gy = WxHeight(o.p.x, o.p.z);
 		if (gy > -90.0) o.p.y = gy + 0.1 + WxRnd(seed) * 0.5;
-		o.vel = float4(WxRnd(seed) * 0.4 - 0.2, 0.8 + WxRnd(seed) * 1.0, WxRnd(seed) * 0.4 - 0.2, 0.02);
+		o.vel = float4(wind.x * 0.2 * jig + WxRnd(seed) * 0.4 - 0.2, 0.8 + WxRnd(seed) * 1.0 + wind.y * 0.35, wind.z * 0.2 * jig + WxRnd(seed) * 0.4 - 0.2, 0.02);
 		o.sz = float4(0.05, 0, 1.6, 1.6);
 		o.c = float4(1, 0.7, 0.35, 0.45);
 		o.extra.xyw = float3(-0.4, 0.2, 0.08);
@@ -4046,7 +4144,7 @@ void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm,
 	float shed = kind;
 	o.p = float4(pos, 1);
 	float down = fall + WxRnd(seed) * 0.7;
-	o.vel = float4(side * 0.18 + wind * (0.15 + gust * 0.25) + float3(0.0, -down, 0.0), 0.045);
+	o.vel = float4(side * 0.18 + float3(wind.x, 0.0, wind.z) * (0.18 + gust * 0.12) + float3(0.0, -down, 0.0), 0.045);
 	float life = 0.9 + WxRnd(seed) * 0.6;
 	o.sz = float4(0.014, 0, life, life);
 	o.c = float4(0.78, 0.90, 1.0, 0.9);
@@ -4108,9 +4206,15 @@ void CSWx(uint3 dtid : SV_DispatchThreadID)
 		return;
 	}
 	float3 prev = o.p.xyz;
-	float2 air = AirMain() + AirBreeze();
-	o.vel.xz += air * dt * 4.2;
-	o.vel.y += AirLift() * dt * 3.2;
+	float couple = WxCouple(o.extra.z);
+	float follow = min(dt * 1.55, 0.35);
+	o.vel.x += (wind.x * couple - o.vel.x) * follow;
+	o.vel.z += (wind.z * couple - o.vel.z) * follow;
+	o.vel.x += sin(o.p.z * 0.7 + Eye.w * 1.3) * dt * gust * 0.8;
+	o.vel.z += cos(o.p.x * 0.7 + Eye.w * 1.1) * dt * gust * 0.8;
+	if ((o.extra.z > 2.5 && o.extra.z < 4.5) || (o.extra.z > 6.5 && o.extra.z < 9.5))
+		o.vel.y += wind.y * dt * 0.35;
+	o.vel.y += AirLift() * dt * 0.6;
 	o.vel.y -= o.extra.x * dt;
 	o.vel.xyz *= exp(-o.extra.y * dt);
 	o.p.xyz += o.vel.xyz * dt;

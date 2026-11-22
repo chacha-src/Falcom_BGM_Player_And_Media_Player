@@ -4,6 +4,7 @@
 #include "resource.h"
 
 #include <wincodec.h>
+#include <d3d11.h>
 #include <d3dcompiler.h>
 #include <string.h>
 #include <stdlib.h>
@@ -88,35 +89,95 @@ static BOOL BonusImagePath(int id, wchar_t* path, int cch)
 }
 
 // TACX: magic, ver u32, count u32, rec[count] { name[56], off u64, size u32, flags u32 } = 72 bytes, blobs
-static const BYTE* s_texView = NULL;
-static DWORD s_texBytes = 0;
-static int s_texN = 0;
+struct MapSlot { int id; const BYTE* p; DWORD n; HANDLE hMap; HANDLE hFile; };
+static MapSlot s_slot[32];
+static int s_nslot = 0;
 
-static BOOL TacTexEnsure()
+struct S3BinMap { const BYTE* view; DWORD bytes; int n; int tried; HANDLE file; HANDLE map; };
+static S3BinMap s_bins[3];
+
+void Soft3DReleaseBonusBins()
 {
-	if (s_texView) return s_texN > 0;
+	for (int i = 0; i < s_nslot; ) {
+		const BYTE* p = s_slot[i].p;
+		bool inside = false;
+		if (p && !s_slot[i].hFile) {
+			for (int b = 0; b < 3; b++) {
+				const BYTE* v = s_bins[b].view;
+				if (!v || v == (const BYTE*)1) continue;
+				if (p >= v && p < v + s_bins[b].bytes) { inside = true; break; }
+			}
+		}
+		if (!inside) { i++; continue; }
+		s_slot[i] = s_slot[s_nslot - 1];
+		s_slot[s_nslot - 1] = MapSlot();
+		s_nslot--;
+	}
+	for (int i = 0; i < 3; i++) {
+		if (s_bins[i].view && s_bins[i].view != (const BYTE*)1)
+			UnmapViewOfFile(s_bins[i].view);
+		if (s_bins[i].map) CloseHandle(s_bins[i].map);
+		if (s_bins[i].file) CloseHandle(s_bins[i].file);
+		s_bins[i].view = NULL;
+		s_bins[i].map = NULL;
+		s_bins[i].file = NULL;
+		s_bins[i].n = 0;
+		s_bins[i].bytes = 0;
+		s_bins[i].tried = 0;
+	}
+}
+
+static BOOL S3OpenBin(S3BinMap* b, const wchar_t* rel)
+{
+	if (!b || !rel) return FALSE;
+	if (b->tried) return b->view && b->view != (const BYTE*)1 && b->n > 0;
+	b->tried = 1;
+	b->view = (const BYTE*)1;
+	b->n = 0;
+	b->bytes = 0;
 	wchar_t exe[MAX_PATH], path[MAX_PATH];
 	BonusExeDir(exe, MAX_PATH);
-	swprintf_s(path, L"%s\\tacticsbgm\\resource\\tactics\\tac_tex.bin", exe);
-	HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-	if (hFile == INVALID_HANDLE_VALUE) { s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	swprintf_s(path, L"%s\\tacticsbgm\\resource\\%s", exe, rel);
+	HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return FALSE;
 	DWORD sz = GetFileSize(hFile, NULL);
-	if (sz < 12 || sz > 512u * 1024u * 1024u) { CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	if (sz < 12 || sz > 1024u * 1024u * 1024u) { CloseHandle(hFile); return FALSE; }
 	HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
-	if (!hMap) { CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	if (!hMap) { CloseHandle(hFile); return FALSE; }
 	const BYTE* view = (const BYTE*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-	if (!view) { CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
-	if (memcmp(view, "TACX", 4) != 0) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
+	if (!view) { CloseHandle(hMap); CloseHandle(hFile); return FALSE; }
+	if (memcmp(view, "TACX", 4) != 0) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); return FALSE; }
 	unsigned ver = 0, n = 0;
 	memcpy(&ver, view + 4, 4);
 	memcpy(&n, view + 8, 4);
-	if (ver != 1 || n == 0 || n > 4096) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
 	unsigned long long hdr = 12ull + 72ull * (unsigned long long)n;
-	if (hdr > sz) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); s_texView = (const BYTE*)1; s_texN = 0; return FALSE; }
-	s_texView = view;
-	s_texBytes = sz;
-	s_texN = (int)n;
+	if (ver != 1 || n == 0 || n > 4096 || hdr > sz) { UnmapViewOfFile(view); CloseHandle(hMap); CloseHandle(hFile); return FALSE; }
+	b->view = view;
+	b->bytes = sz;
+	b->n = (int)n;
+	b->file = hFile;
+	b->map = hMap;
 	return TRUE;
+}
+
+static BOOL S3BinFind(const S3BinMap* b, const char* want, const BYTE** data, DWORD* len)
+{
+	if (!b || !b->view || b->view == (const BYTE*)1 || b->n <= 0) return FALSE;
+	const BYTE* rec = b->view + 12;
+	for (int k = 0; k < b->n; k++) {
+		if (_stricmp((const char*)rec, want) == 0) {
+			unsigned long long off = 0;
+			unsigned size = 0;
+			memcpy(&off, rec + 56, 8);
+			memcpy(&size, rec + 64, 4);
+			if (off >= b->bytes || size < 8 || off + (unsigned long long)size > b->bytes) return FALSE;
+			*data = b->view + (size_t)off;
+			*len = size;
+			return TRUE;
+		}
+		rec += 72;
+	}
+	return FALSE;
 }
 
 BOOL BonusTexNamed(const char* rel, const BYTE** data, DWORD* len)
@@ -124,23 +185,17 @@ BOOL BonusTexNamed(const char* rel, const BYTE** data, DWORD* len)
 	if (data) *data = NULL;
 	if (len) *len = 0;
 	if (!rel || !rel[0] || !data || !len) return FALSE;
-	if (!TacTexEnsure() || s_texN <= 0 || s_texView == (const BYTE*)1) return FALSE;
 	char want[56] = {};
 	int i = 0;
 	for (; rel[i] && i < 55; i++) want[i] = (rel[i] == '\\') ? '/' : rel[i];
-	const BYTE* rec = s_texView + 12;
-	for (int k = 0; k < s_texN; k++) {
-		if (_stricmp((const char*)rec, want) == 0) {
-			unsigned long long off = 0;
-			unsigned size = 0;
-			memcpy(&off, rec + 56, 8);
-			memcpy(&size, rec + 64, 4);
-			if (off >= s_texBytes || size < 8 || off + size > s_texBytes) return FALSE;
-			*data = s_texView + (size_t)off;
-			*len = size;
-			return TRUE;
-		}
-		rec += 72;
+	static const wchar_t* kRel[3] = {
+		L"tactics\\tac_tex.bin",
+		L"meiro\\m_pbr.bin",
+		L"race\\r_pbr.bin",
+	};
+	for (int b = 0; b < 3; b++) {
+		if (!S3OpenBin(&s_bins[b], kRel[b])) continue;
+		if (S3BinFind(&s_bins[b], want, data, len)) return TRUE;
 	}
 	return FALSE;
 }
@@ -163,9 +218,6 @@ BOOL BonusImageMap(int id, const BYTE** data, DWORD* len)
 	if (data) *data = NULL;
 	if (len) *len = 0;
 	if (!data || !len || id <= 0) return FALSE;
-	struct MapSlot { int id; const BYTE* p; DWORD n; HANDLE hMap; HANDLE hFile; };
-	static MapSlot s_slot[32];
-	static int s_nslot = 0;
 	for (int i = 0; i < s_nslot; i++) {
 		if (s_slot[i].id == id) {
 			*data = s_slot[i].p;
@@ -303,6 +355,94 @@ done:
 	S3TEX_RELEASE(fac);
 	free(owned);
 	return ok;
+}
+
+BOOL Soft3DTexLoadNamed(const char* rel, DWORD* dst, int dstW, int dstH)
+{
+	if (!rel || !dst || dstW <= 0 || dstH <= 0) return FALSE;
+	const BYTE* mem = NULL;
+	DWORD n = 0;
+	if (!BonusTexNamed(rel, &mem, &n) || !mem || n < 24) return FALSE;
+	IWICImagingFactory* fac = NULL;
+	IWICStream* stream = NULL;
+	IWICBitmapDecoder* dec = NULL;
+	IWICBitmapFrameDecode* frame = NULL;
+	IWICFormatConverter* conv = NULL;
+	IWICBitmapScaler* scaler = NULL;
+	IWICBitmapSource* src = NULL;
+	BOOL ok = FALSE;
+	UINT w = 0, h = 0;
+	HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac));
+	if (FAILED(hr) || !fac) {
+		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+		hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac));
+	}
+	if (FAILED(hr) || !fac) goto done;
+	if (FAILED(fac->CreateStream(&stream)) || !stream) goto done;
+	if (FAILED(stream->InitializeFromMemory((BYTE*)mem, n))) goto done;
+	if (FAILED(fac->CreateDecoderFromStream(stream, NULL, WICDecodeMetadataCacheOnLoad, &dec)) || !dec) goto done;
+	if (FAILED(dec->GetFrame(0, &frame)) || !frame) goto done;
+	if (FAILED(fac->CreateFormatConverter(&conv)) || !conv) goto done;
+	if (FAILED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, NULL, 0.0, WICBitmapPaletteTypeCustom))) goto done;
+	conv->GetSize(&w, &h);
+	src = conv;
+	if ((int)w != dstW || (int)h != dstH) {
+		if (FAILED(fac->CreateBitmapScaler(&scaler)) || !scaler) goto done;
+		if (FAILED(scaler->Initialize(conv, (UINT)dstW, (UINT)dstH, WICBitmapInterpolationModeFant))) goto done;
+		src = scaler;
+	}
+	if (FAILED(src->CopyPixels(NULL, (UINT)(dstW * 4), (UINT)(dstW * dstH * 4), (BYTE*)dst))) goto done;
+	ok = TRUE;
+done:
+	S3TEX_RELEASE(scaler); S3TEX_RELEASE(conv); S3TEX_RELEASE(frame); S3TEX_RELEASE(dec); S3TEX_RELEASE(stream); S3TEX_RELEASE(fac);
+	return ok;
+}
+
+BOOL Soft3DCreateTex2DMips(ID3D11Device* dev, const DWORD* src, int w, int h, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)
+{
+	if (!dev || !src || w < 1 || h < 1 || !tex || !srv) return FALSE;
+	*tex = NULL; *srv = NULL;
+	int levels = 1, mw = w, mh = h;
+	while ((mw > 1 || mh > 1) && levels < 16) { mw = mw > 1 ? mw >> 1 : 1; mh = mh > 1 ? mh >> 1 : 1; levels++; }
+	const DWORD* levelPtr[16];
+	DWORD* owned[16];
+	int lw[16], lh[16];
+	for (int i = 0; i < 16; i++) { levelPtr[i] = NULL; owned[i] = NULL; lw[i] = lh[i] = 0; }
+	levelPtr[0] = src; lw[0] = w; lh[0] = h;
+	for (int i = 1; i < levels; i++) {
+		int sw = lw[i - 1], sh = lh[i - 1];
+		int dw = sw > 1 ? sw >> 1 : 1, dh = sh > 1 ? sh >> 1 : 1;
+		DWORD* d = (DWORD*)malloc((size_t)dw * (size_t)dh * 4u);
+		if (!d) { for (int k = 1; k < i; k++) free(owned[k]); return FALSE; }
+		for (int y = 0; y < dh; y++) {
+			int y0 = y * 2, y1 = (y0 + 1 < sh) ? y0 + 1 : y0;
+			for (int x = 0; x < dw; x++) {
+				int x0 = x * 2, x1 = (x0 + 1 < sw) ? x0 + 1 : x0;
+				DWORD c00 = levelPtr[i - 1][y0 * sw + x0];
+				DWORD c10 = levelPtr[i - 1][y0 * sw + x1];
+				DWORD c01 = levelPtr[i - 1][y1 * sw + x0];
+				DWORD c11 = levelPtr[i - 1][y1 * sw + x1];
+				DWORD o = 0;
+				for (int ch = 0; ch < 4; ch++) {
+					unsigned s = ((c00 >> (ch * 8)) & 255u) + ((c10 >> (ch * 8)) & 255u) + ((c01 >> (ch * 8)) & 255u) + ((c11 >> (ch * 8)) & 255u);
+					o |= ((s >> 2) & 255u) << (ch * 8);
+				}
+				d[y * dw + x] = o;
+			}
+		}
+		owned[i] = d; levelPtr[i] = d; lw[i] = dw; lh[i] = dh;
+	}
+	D3D11_TEXTURE2D_DESC desc = {};
+	desc.Width = (UINT)w; desc.Height = (UINT)h; desc.MipLevels = (UINT)levels; desc.ArraySize = 1;
+	desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; desc.SampleDesc.Count = 1;
+	desc.Usage = D3D11_USAGE_IMMUTABLE; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA sd[16] = {};
+	for (int i = 0; i < levels; i++) { sd[i].pSysMem = levelPtr[i]; sd[i].SysMemPitch = (UINT)lw[i] * 4u; }
+	HRESULT hr = dev->CreateTexture2D(&desc, sd, tex);
+	if (SUCCEEDED(hr)) hr = dev->CreateShaderResourceView(*tex, NULL, srv);
+	if (FAILED(hr) && *tex) { (*tex)->Release(); *tex = NULL; *srv = NULL; }
+	for (int i = 1; i < levels; i++) free(owned[i]);
+	return SUCCEEDED(hr) && *srv != NULL;
 }
 
 #ifndef S3CSO_RELEASE

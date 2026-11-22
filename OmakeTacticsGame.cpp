@@ -153,6 +153,12 @@ Game::Game()
 	m_loadA = m_loadB = 0;
 	m_loadLive = FALSE;
 	m_loadUnits = m_avaLoadUnits = m_loadHave = m_sliceBase = m_sliceUnits = 0;
+	m_stageGate = 0;
+	m_stageGateT = 0;
+	m_stageLoadKind = m_stageLoadStage = 0;
+	m_stageLoadStep = m_stageLoadI = 0;
+	m_stageLoadHave = m_stageLoadNeed = 0;
+	m_stageBodyN = m_stageMeshN = m_stageAvaN = m_stageAvaPass = 0;
 	m_renderDt = 1.f / 60.f;
 	m_lastRenderTime = 0;
 	m_qApply = -1;
@@ -333,6 +339,7 @@ Game::Game()
 	memset(m_gustHz, 0, sizeof(m_gustHz));
 	m_gustHN = 0;
 	m_gustCool = 2.5f;
+	m_aeolAcc = 0;
 	m_wxFlash = 0;
 	m_wxFlashCol[0] = 0.82f; m_wxFlashCol[1] = 0.88f; m_wxFlashCol[2] = 1.f;
 	m_wetGlobal = 0;
@@ -435,6 +442,7 @@ Game::Game()
 	m_demoStage = 1;
 	m_demoPh = -1;
 	m_flashWhite = 0;
+	m_hitScreenT = m_hitScreenMax = 0;
 	m_critScreenT = m_critScreenMax = 0;
 	m_fairyScreenT = m_fairyScreenMax = 0;
 	m_fairyGhost = 0;
@@ -455,6 +463,9 @@ Game::Game()
 	m_cutAllyN = m_cutFoeN = 0;
 	m_cutKind = 0;
 	m_cutPat = 0;
+	m_cutShotMark = 0;
+	m_cutRainEnd = 0;
+	m_cutFxN = 0;
 	m_seqCaster = m_seqPrimary = -1;
 	m_seqSkill = -1;
 	m_battleStage = 1;
@@ -1448,6 +1459,7 @@ void Game::Tick(float dt)
 		} else m_idleT = 0;
 	}
 	if (m_demo) TickDemo(dt);
+	if (m_stageGate) TickStageLoad(dt);
 	if (m_qCoolT > 0) m_qCoolT -= dt;
 	if (m_syncLock > 0) m_syncLock -= dt;
 	BOOL holdGame = FALSE;
@@ -1496,14 +1508,20 @@ void Game::Tick(float dt)
 		if (!Recover()) { m_screen = SC_FAIL; return; }
 	}
 	float gdt = dt * ((m_fastFwd && !m_demo) ? 3.f : 1.f);
-	switch (m_screen) {
+	if (m_stageGate == 1 || m_stageGate == 2) {
+		// 包みと読込のあいだは進行しない。描画は止めない。
+	} else switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_CREATE: UpdateBase(dt); break;
 	case SC_BATTLE: UpdateBattle(m_showHelp ? 0 : gdt); break;
 	case SC_RESULT: UpdateBase(dt); break;
 	default: break;
 	}
-	UpdateParticles(m_screen == SC_BATTLE ? gdt : dt);
-	UpdateDebris(m_screen == SC_BATTLE ? gdt : dt);
+	float wdt = (m_screen == SC_BATTLE) ? gdt : dt;
+	TickClimate(wdt);
+	UpdateParticles(wdt);
+	TickAeolian(wdt);
+	UpdateDebris(wdt);
+	if (m_hitScreenT > 0.f) m_hitScreenT = max(0.f, m_hitScreenT - dt);
 	if (m_critScreenT > 0.f) m_critScreenT = max(0.f, m_critScreenT - dt);
 	if (m_fairyScreenT > 0.f) m_fairyScreenT = max(0.f, m_fairyScreenT - dt);
 	if (m_fairyFxT > 0.f) m_fairyFxT = max(0.f, m_fairyFxT - (m_screen == SC_BATTLE ? gdt : dt));
@@ -1797,19 +1815,20 @@ void Game::RenderFrame()
 		m_wetGlobal = Clampf(m_wetGlobal + (wetNow ? 0.14f : -0.05f) * m_renderDt, 0.f, 1.f);
 		float crit01 = (m_critScreenT > 0.f && m_critScreenMax > 0.01f) ? Clampf(m_critScreenT / m_critScreenMax, 0.f, 1.f) : 0.f;
 		float fairy01 = (m_fairyScreenT > 0.f && m_fairyScreenMax > 0.01f) ? Clampf(m_fairyScreenT / m_fairyScreenMax, 0.f, 1.f) : 0.f;
+		float hit01 = (m_hitScreenT > 0.f && m_hitScreenMax > 0.01f) ? Clampf(m_hitScreenT / m_hitScreenMax, 0.f, 1.f) : 0.f;
 		float quake01 = (m_quakeT > 0.f) ? Clampf(m_quakeMag, 0.f, 1.f) : 0.f;
 		BOOL inCut = (m_screen == SC_BATTLE && m_seqCut && m_cutStage >= 1 && m_cutStage <= 3);
 		BOOL hasMarks = (m_screen == SC_BATTLE) || ((m_screen == SC_BASE || m_screen == SC_PARTY || m_screen == SC_EVOLVE || m_screen == SC_RESULT) && m_showBuilt);
 		if (hasMarks) SyncGroundMarks(m_screen != SC_BATTLE, m_renderDt);
-		m_r.SetScreenFx(crit01, fairy01, Clampf(m_wxFlash, 0.f, 1.f), quake01, m_wetGlobal, inCut, hasMarks);
+		m_r.SetScreenFx(crit01, fairy01, Clampf(m_wxFlash, 0.f, 1.f), quake01, m_wetGlobal, inCut, hasMarks, hit01);
 	}
 	m_r.SetAvaLoadFull(m_screen != SC_CREATE && m_screen != SC_BATTLE);
 	m_r.BeginFrame();
 	if (m_screen != SC_BATTLE && m_screen != SC_BASE) m_r.SetSight(0, 0, 0.f);
-	if (m_screen == SC_BATTLE) {
+	if (m_screen == SC_BATTLE && m_stageGate != 2) {
 		AssignBattlePortraits();
 		BindImportedActors();
-	} else if (m_loaded) PrepareMenuPortraits();
+	} else if (m_loaded && m_stageGate != 2) PrepareMenuPortraits();
 	switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_RESULT:
 		DrawShowcase3D();
@@ -1818,7 +1837,11 @@ void Game::RenderFrame()
 		DrawCreate3D();
 		break;
 	case SC_BATTLE:
-		if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) DrawCutIn3D();
+		if (m_stageGate == 2) {
+			SetupCamera(v3(0, 0, 0), 0, .3f, 10, .8f);
+			m_r.BeginMainPass();
+			m_r.DrawSky(RGBA8(12, 16, 36), RGBA8(28, 22, 48), 0, 0);
+		} else if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) DrawCutIn3D();
 		else DrawBattle3D();
 		break;
 	default: {
@@ -1828,7 +1851,7 @@ void Game::RenderFrame()
 	} break;
 	}
 	StepPortraitFeathers();
-	if (m_loaded) RenderPortraits();
+	if (m_loaded && m_stageGate != 2) RenderPortraits();
 	const BOOL avaWait = m_r.AvatarLoading() && m_screen != SC_BATTLE && m_screen != SC_LOADING && m_screen != SC_FAIL;
 	const BOOL avaFull = avaWait && !m_loaded && m_screen != SC_CREATE;
 	if (avaFull) {
@@ -1836,7 +1859,17 @@ void Game::RenderFrame()
 		m_r.BeginMainPass();
 		m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
 	}
+	{
+		float crit01 = (m_critScreenT > 0.f && m_critScreenMax > 0.01f) ? Clampf(m_critScreenT / m_critScreenMax, 0.f, 1.f) : 0.f;
+		float fairy01 = (m_fairyScreenT > 0.f && m_fairyScreenMax > 0.01f) ? Clampf(m_fairyScreenT / m_fairyScreenMax, 0.f, 1.f) : 0.f;
+		float hit01 = (m_hitScreenT > 0.f && m_hitScreenMax > 0.01f) ? Clampf(m_hitScreenT / m_hitScreenMax, 0.f, 1.f) : 0.f;
+		float quake01 = (m_quakeT > 0.f) ? Clampf(m_quakeMag, 0.f, 1.f) : 0.f;
+		BOOL inCut = (m_screen == SC_BATTLE && m_seqCut && m_cutStage >= 1 && m_cutStage <= 3);
+		BOOL hasMarks = (m_screen == SC_BATTLE) || ((m_screen == SC_BASE || m_screen == SC_PARTY || m_screen == SC_EVOLVE || m_screen == SC_RESULT) && m_showBuilt);
+		m_r.SetScreenFx(crit01, fairy01, Clampf(m_wxFlash, 0.f, 1.f), quake01, m_wetGlobal, inCut, hasMarks, hit01);
+	}
 	m_r.BeginHud();
+	if (m_stageGate) { m_click = FALSE; m_rclick = FALSE; m_activateId = -1; }
 	if (m_screen == SC_CREATE && avaWait) m_r.GrabAvaPlate();
 	m_btns.clear();
 	if (m_uiHoverScreen != m_screen || m_uiHoverShop != (m_shop != 0)) {
@@ -1866,7 +1899,7 @@ void Game::RenderFrame()
 	case SC_CREATE: DrawCreateUi(); break;
 	case SC_PARTY: DrawPartyUi(); break;
 	case SC_EVOLVE: DrawEvolveUi(); break;
-	case SC_BATTLE: DrawBattleUi(); break;
+	case SC_BATTLE: if (m_stageGate != 2) DrawBattleUi(); break;
 	case SC_RESULT: DrawResultUi(); break;
 	}
 	if (avaWait && !avaFull) {
@@ -1892,7 +1925,7 @@ void Game::RenderFrame()
 	else if (!avaFull && m_skillTip >= 0) DrawSkillTip();
 	if (!avaFull) DrawPerfHud();
 	if (!avaFull && m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
-	if (m_demo) m_click = FALSE;
+	if (m_demo || m_stageGate) m_click = FALSE;
 	else if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
 		m_click = FALSE;
 		BattleClick(m_clickX, m_clickY);
@@ -1903,6 +1936,7 @@ void Game::RenderFrame()
 			RGBA8((int)(m_wxFlashCol[0] * 255), (int)(m_wxFlashCol[1] * 255), (int)(m_wxFlashCol[2] * 255), fa));
 	}
 	if (m_demo) DrawDemoCurtain();
+	if (m_stageGate) DrawStageGate();
 	m_r.EndHud();
 	m_btnsPrev = m_btns;
 	if (m_uiHoverHit) {
@@ -4086,7 +4120,24 @@ void Game::UpdateDebris(float dt)
 		d.life -= dt;
 		if (d.life <= 0.f) { d.on = 0; continue; }
 		float px0 = d.x, pz0 = d.z, py0 = d.y;
-		d.vy -= 14.5f * dt;
+		{
+			const TacClimate& clim = TacClimateRead();
+			float couple = 0.1f;
+			if (d.kind == 1) couple = 0.5f;
+			else if (d.kind == 2) couple = 0.25f;
+			else if (d.kind == 3) couple = 0.15f;
+			if (d.wind) couple = (d.kind == 0) ? 0.9f : 1.3f;
+			float rel = couple * dt;
+			if (rel > 0.42f) rel = 0.42f;
+			d.vx += (clim.windX - d.vx) * rel;
+			d.vz += (clim.windZ - d.vz) * rel;
+			float grav = 14.5f;
+			if (d.wind) {
+				grav = (d.kind == 2) ? 1.5f : 3.2f;
+				d.vy += clim.lift * 0.22f * dt;
+			}
+			d.vy -= grav * dt;
+		}
 		float drag = expf(-0.45f * dt);
 		d.vx *= drag; d.vz *= drag;
 		d.x += d.vx * dt;
@@ -4212,32 +4263,130 @@ void Game::WeatherTread(const Unit& u, int x, int z)
 	}
 }
 
-// 髪や服と同じ突風。地形に沿った渦を足して、粒がまっすぐ飛ばないようにする。
+void Game::TickClimate(float dt)
+{
+	int wx = WX_CLEAR, hour = HR_NOON, theme = TH_PLAINS;
+	DWORD seed = 1;
+	if (m_screen == SC_BATTLE) {
+		wx = TacWx(m_b.weather);
+		hour = TacHour(m_b.weather);
+		theme = m_b.map.theme;
+		seed = m_b.map.seed ? m_b.map.seed : 1;
+	} else if ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt) {
+		HomeSky(wx, hour);
+		theme = m_showMap.theme;
+		seed = m_showMap.seed ? m_showMap.seed : (m_mapSeed ? m_mapSeed : 1);
+	} else if (m_screen == SC_CREATE) {
+		if (m_previewRain) wx = WX_RAIN;
+		seed = 17;
+	}
+	TacClimateTick(dt, m_time, wx, hour, theme, seed);
+}
+
+void Game::TickAeolian(float dt)
+{
+	if (dt <= 0.f) return;
+	const BOOL mapOn = (m_screen == SC_BATTLE) || ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt);
+	if (!mapOn) return;
+	if (m_screen == SC_BATTLE && m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) return;
+	const TacClimate& c = TacClimateRead();
+	if (!c.live) return;
+	const Map& map = (m_screen == SC_BATTLE) ? m_b.map : m_showMap;
+	int q = QualityNow();
+	float rate = 0.3f + c.speed * 0.52f + c.gust * 1.35f;
+	if (c.wx == WX_STORM || c.wx == WX_SAND) rate *= 1.35f;
+	else if (c.wx == WX_FOG) rate *= 0.4f;
+	else if (c.wx == WX_CLEAR && c.speed < 2.2f) rate *= 0.5f;
+	if (q <= 0 || q == 4) rate *= 0.55f;
+	int cap = 6 + (int)(c.speed * 2.35f + c.gust * 6.f);
+	if (c.wx == WX_STORM || c.wx == WX_SAND) cap += 8;
+	if (q <= 0 || q == 4) cap = cap * 2 / 3;
+	if (cap < 4) cap = 4;
+	if (cap > 64) cap = 64;
+	m_aeolAcc += dt * rate;
+	int guard = 0;
+	while (m_aeolAcc >= 1.f && guard < 5) {
+		m_aeolAcc -= 1.f;
+		guard++;
+		int windN = 0, empty = -1, oldW = -1;
+		float oldLife = 1e9f;
+		for (int i = 0; i < DEBRIS_N; i++) {
+			DebrisBit& bit = m_debris[i];
+			if (!bit.on) { if (empty < 0) empty = i; continue; }
+			if (!bit.wind) continue;
+			windN++;
+			if (bit.life < oldLife) { oldLife = bit.life; oldW = i; }
+		}
+		int slot = -1;
+		if (windN >= cap) slot = oldW;
+		else if (empty >= 0) slot = empty;
+		else slot = oldW;
+		if (slot < 0) { m_aeolAcc = 0.f; return; }
+		float dx = 0.f, dz = -1.f;
+		float hsp = sqrtf(c.windX * c.windX + c.windZ * c.windZ);
+		if (hsp > 0.08f) { dx = -c.windX / hsp; dz = -c.windZ / hsp; }
+		float px = -dz, pz = dx;
+		int found = 0;
+		float x = 0.f, y = 0.f, z = 0.f;
+		for (int t = 0; t < 6 && !found; t++) {
+			float side = m_rng.F(-7.5f, 7.5f);
+			float back = m_rng.F(9.f, 15.f);
+			x = m_camTarget.x + dx * back + px * side;
+			z = m_camTarget.z + dz * back + pz * side;
+			int ix = (int)floorf(x), iz = (int)floorf(z);
+			if (!Map::In(ix, iz)) continue;
+			const Cell& cell = map.At(ix, iz);
+			if (cell.t == T_VOID || cell.t == T_CHASM) continue;
+			y = map.TopY(ix, iz) + m_rng.F(0.35f, 1.6f + c.speed * 0.12f);
+			found = 1;
+		}
+		if (!found) continue;
+		int kind = 1;
+		DWORD tint = RGBA8(168, 156, 96);
+		float sc = 0.038f;
+		int theme = c.theme;
+		int wx = c.wx;
+		if (wx == WX_SNOW || theme == TH_SNOW) { kind = 2; tint = RGBA8(236, 244, 255); sc = 0.04f; }
+		else if (wx == WX_HAIL) { kind = 2; tint = RGBA8(214, 230, 255); sc = 0.026f; }
+		else if (wx == WX_ASH || theme == TH_VOLCANO) { kind = 0; tint = RGBA8(68, 60, 56); sc = 0.034f; }
+		else if (wx == WX_SAND || theme == TH_DESERT || theme == TH_CANYON) { kind = 0; tint = RGBA8(198, 164, 98); sc = 0.028f; }
+		else if (wx == WX_PETAL || theme == TH_MARCHEN || theme == TH_HEAVEN) { kind = 1; tint = RGBA8(255, 168, 188); sc = 0.05f; }
+		else if (theme == TH_FOREST || theme == TH_SWAMP) { kind = 1; tint = RGBA8(86, 128, 46); sc = 0.046f; }
+		else if (wx == WX_STORM || wx == WX_RAIN) { kind = 1; tint = RGBA8(112, 96, 72); sc = 0.04f; }
+		DebrisBit& d = m_debris[slot];
+		memset(&d, 0, sizeof(d));
+		d.on = 1;
+		d.wind = 1;
+		d.kind = kind;
+		d.x = x; d.y = y; d.z = z;
+		float jig = m_rng.F(0.82f, 1.08f);
+		d.vx = c.windX * jig;
+		d.vz = c.windZ * jig;
+		d.vy = c.lift * 0.3f + m_rng.F(-0.25f, 0.7f);
+		d.rx = m_rng.F(0.f, 6.283f);
+		d.ry = m_rng.F(0.f, 6.283f);
+		d.rz = m_rng.F(0.f, 6.283f);
+		float spin = 2.5f + c.speed * 0.35f;
+		d.srx = m_rng.F(-spin, spin);
+		d.sry = m_rng.F(-spin, spin);
+		d.srz = m_rng.F(-spin, spin);
+		d.sc = sc * m_rng.F(0.7f, 1.25f);
+		d.life = d.maxLife = m_rng.F(2.4f, 4.2f);
+		d.tint = tint;
+	}
+	if (m_aeolAcc > 3.f) m_aeolAcc = 3.f;
+}
+
+// 気候の平均風に、地形の渦だけ足す。木・服と同じ向きへ流す。
 static void WindField(float time, float x, float z, float& ox, float& oz, float& lift, int theme)
 {
-	TacAir air = TacAirHeld(time);
-	float mag = 1.f;
-	if (theme == TH_DESERT || theme == TH_CANYON) mag = 1.48f;
-	else if (theme == TH_PLAINS) mag = 1.12f;
-	else if (theme == TH_SNOW) mag = 0.68f;
-	else if (theme == TH_FOREST) mag = 0.52f;
-	else if (theme == TH_SEABED) mag = 0.32f;
-	else if (theme == TH_ORBIT) mag = 0.18f;
-	else if (theme == TH_VOLCANO) mag = 1.22f;
-	else if (theme == TH_FALLS) mag = 0.82f;
-	else if (theme == TH_STATION) mag = 0.4f;
-	else if (theme == TH_CITADEL) mag = 0.7f;
-	else if (theme == TH_LANTERN) mag = 0.55f;
-	else if (theme == TH_MIRROR) mag = 0.28f;
-	else if (theme == TH_HEAVEN) mag = 0.95f;
-	else if (theme == TH_MARCHEN) mag = 0.6f;
-	ox = (air.bx + air.mx) * mag * 3.4f;
-	oz = (air.bz + air.mz) * mag * 3.4f;
+	const TacClimate& c = TacClimateRead();
 	float s = sinf(x * 0.41f + time * 0.55f) * cosf(z * 0.33f - time * 0.37f);
-	float c = cosf(x * 0.27f - time * 0.48f) * sinf(z * 0.36f + time * 0.29f);
-	ox += -c * (0.7f + mag * 0.35f);
-	oz += s * (0.7f + mag * 0.35f);
-	lift = air.y * mag * 2.8f + s * 0.35f;
+	float cr = cosf(x * 0.27f - time * 0.48f) * sinf(z * 0.36f + time * 0.29f);
+	float eddy = 0.55f + c.gust * 0.9f;
+	ox = c.windX - cr * eddy;
+	oz = c.windZ + s * eddy;
+	lift = c.lift + s * 0.28f;
 	if (theme == TH_VOLCANO) lift += 1.15f;
 	else if (theme == TH_SEABED) lift -= 0.35f;
 	else if (theme == TH_SWAMP) lift += 0.25f;
@@ -4643,8 +4792,9 @@ void Game::UpdateParticles(float dt)
 		V3 side = Cross(v3(0, 1, 0), fwd);
 		if (Len(side) < 0.2f) side = v3(1, 0, 0);
 		else side = Norm(side);
-		float windAng = 0.6f + sinf(m_time * 0.13f) * 0.4f;
-		V3 wind = v3(cosf(windAng), 0, sinf(windAng));
+		const TacClimate& clim = TacClimateRead();
+		V3 wind = v3(clim.windX, 0.f, clim.windZ);
+		float jig = 1.f + clim.gust * 0.16f;
 		int guard = 0;
 		while (m_wxAcc >= 1.f && guard < 8 && m_parts.size() < 3000) {
 			m_wxAcc -= 1.f;
@@ -4661,50 +4811,50 @@ void Game::UpdateParticles(float dt)
 			q.p = p; q.a = 1; q.add = 1; q.nHit = 0;
 			if (wx == WX_RAIN || wx == WX_STORM) {
 				float sp = (wx == WX_STORM) ? m_rng.F(14.f, 20.f) : m_rng.F(10.f, 15.f);
-				float w = ((wx == WX_STORM) ? 5.2f : 1.6f) * (1.f + wetGust * 1.2f);
-				q.v = wind * w + v3(m_rng.F(-0.4f, 0.4f), -sp, m_rng.F(-0.4f, 0.4f));
+				float couple = ((wx == WX_STORM) ? 0.86f : 0.72f) * jig;
+				q.v = v3(wind.x * couple + m_rng.F(-0.4f, 0.4f), -sp, wind.z * couple + m_rng.F(-0.4f, 0.4f));
 				q.life = q.max = 1.6f;
 				q.size = 0.055f; q.size1 = 0.04f;
 				q.r = 0.72f; q.g = 0.84f; q.b = 1.f;
 				q.shape = 0; q.grav = 16.f; q.drag = 0.15f; q.stretch = 0.055f;
 				q.wxHit = (wx == WX_STORM) ? 2 : 1;
 			} else if (wx == WX_SNOW) {
-				q.v = wind * 0.7f + v3(m_rng.F(-0.3f, 0.3f), m_rng.F(-1.8f, -0.8f), m_rng.F(-0.3f, 0.3f));
+				q.v = v3(wind.x * 0.50f * jig + m_rng.F(-0.3f, 0.3f), m_rng.F(-1.8f, -0.8f) + clim.lift * 0.12f, wind.z * 0.50f * jig + m_rng.F(-0.3f, 0.3f));
 				q.life = q.max = 4.f;
 				q.size = 0.07f; q.size1 = 0.05f;
 				q.r = 0.96f; q.g = 0.98f; q.b = 1.f;
 				q.shape = 2; q.grav = 0.8f; q.drag = 0.35f; q.stretch = 0;
 				q.wxHit = 3;
 			} else if (wx == WX_ASH) {
-				q.v = wind * 0.5f + v3(m_rng.F(-0.25f, 0.25f), m_rng.F(-2.6f, -1.2f), m_rng.F(-0.25f, 0.25f));
+				q.v = v3(wind.x * 0.55f * jig + m_rng.F(-0.25f, 0.25f), m_rng.F(-2.6f, -1.2f) + clim.lift * 0.2f, wind.z * 0.55f * jig + m_rng.F(-0.25f, 0.25f));
 				q.life = q.max = 3.2f;
 				q.size = 0.05f; q.size1 = 0.03f;
 				q.r = 0.85f; q.g = 0.4f; q.b = 0.18f;
 				q.shape = 0; q.grav = 1.6f; q.drag = 0.25f; q.stretch = 0.02f;
 				q.wxHit = 4;
 			} else if (wx == WX_HAIL) {
-				q.v = wind * 0.8f + v3(m_rng.F(-0.2f, 0.2f), m_rng.F(-18.f, -13.f), m_rng.F(-0.2f, 0.2f));
+				q.v = v3(wind.x * 0.22f * jig + m_rng.F(-0.2f, 0.2f), m_rng.F(-18.f, -13.f), wind.z * 0.22f * jig + m_rng.F(-0.2f, 0.2f));
 				q.life = q.max = 1.4f;
 				q.size = 0.06f; q.size1 = 0.05f;
 				q.r = 0.9f; q.g = 0.95f; q.b = 1.f;
 				q.shape = 7; q.grav = 22.f; q.drag = 0.05f; q.stretch = 0.02f;
 				q.wxHit = 5;
 			} else if (wx == WX_SAND) {
-				q.v = wind * m_rng.F(5.f, 8.f) + v3(0, m_rng.F(-2.2f, -0.6f), 0);
+				q.v = v3(wind.x * 0.92f * jig, m_rng.F(-2.2f, -0.6f) + clim.lift * 0.1f, wind.z * 0.92f * jig);
 				q.life = q.max = 1.8f;
 				q.size = 0.04f; q.size1 = 0.025f;
 				q.r = 0.92f; q.g = 0.74f; q.b = 0.38f;
 				q.shape = 0; q.grav = 3.f; q.drag = 0.2f; q.stretch = 0.04f;
 				q.wxHit = 6;
 			} else if (wx == WX_PETAL) {
-				q.v = wind * 0.9f + v3(m_rng.F(-0.3f, 0.3f), m_rng.F(-1.1f, -0.4f), m_rng.F(-0.3f, 0.3f));
+				q.v = v3(wind.x * 0.65f * jig + m_rng.F(-0.3f, 0.3f), m_rng.F(-1.1f, -0.4f) + clim.lift * 0.18f, wind.z * 0.65f * jig + m_rng.F(-0.3f, 0.3f));
 				q.life = q.max = 4.5f;
 				q.size = 0.08f; q.size1 = 0.05f;
 				q.r = 1.f; q.g = 0.72f; q.b = 0.8f;
 				q.shape = 2; q.grav = 0.45f; q.drag = 0.3f; q.stretch = 0.01f;
 				q.wxHit = 7;
 			} else if (wx == WX_FOG) {
-				q.v = wind * 0.35f + v3(m_rng.F(-0.2f, 0.2f), m_rng.F(-0.15f, 0.2f), m_rng.F(-0.2f, 0.2f));
+				q.v = v3(wind.x * 0.38f * jig + m_rng.F(-0.2f, 0.2f), m_rng.F(-0.15f, 0.2f) + clim.lift * 0.08f, wind.z * 0.38f * jig + m_rng.F(-0.2f, 0.2f));
 				q.life = q.max = 3.5f;
 				q.size = 0.16f; q.size1 = 0.24f;
 				q.r = 0.78f; q.g = 0.82f; q.b = 0.86f; q.a = 0.22f;
@@ -4738,10 +4888,10 @@ void Game::UpdateParticles(float dt)
 					if (!m_r.InView(ap + v3(0, ht * 0.6f, 0), 1.8f)) continue;
 					int fromHair = m_rng.F() < 0.45f ? 1 : 0;
 					V3 sp = ap + v3(m_rng.F(-0.12f, 0.12f), ht * (fromHair ? m_rng.F(0.78f, 1.02f) : m_rng.F(0.38f, 0.72f)), m_rng.F(-0.12f, 0.12f));
-					float w = ((wx == WX_STORM) ? 6.5f : 2.4f) * (0.7f + wetGust * 1.4f);
+					float shed = ((wx == WX_STORM) ? 0.42f : 0.28f) * (0.85f + wetGust * 0.3f);
 					Particle q = {};
 					q.p = sp;
-					q.v = wind * w + v3(m_rng.F(-0.8f, 0.8f), m_rng.F(0.4f, 2.2f), m_rng.F(-0.8f, 0.8f));
+					q.v = v3(wind.x * shed + m_rng.F(-0.8f, 0.8f), m_rng.F(0.4f, 2.2f), wind.z * shed + m_rng.F(-0.8f, 0.8f));
 					q.life = q.max = m_rng.F(0.28f, 0.55f);
 					q.size = 0.028f; q.size1 = 0.01f;
 					q.r = 0.78f; q.g = 0.88f; q.b = 1.f; q.a = 0.85f;
@@ -4825,11 +4975,25 @@ void Game::UpdateParticles(float dt)
 		Particle& p = m_parts[i];
 		p.life -= dt;
 		if (p.life <= 0) { m_parts[i] = m_parts.back(); m_parts.pop_back(); continue; }
-		if (p.wxHit == 7) {
-			p.v.x += cosf(m_time * 1.4f + p.p.z) * dt * 1.1f;
-			p.v.z += sinf(m_time * 1.1f + p.p.x) * dt * 0.8f;
-		}
-		if (p.wxHit == 8) {
+		if (p.wxHit == 7 || (p.wxHit >= 1 && p.wxHit <= 6)) {
+			const TacClimate& clim = TacClimateRead();
+			float couple = 0.7f;
+			if (p.wxHit == 2) couple = 0.86f;
+			else if (p.wxHit == 3) couple = 0.5f;
+			else if (p.wxHit == 4) couple = 0.55f;
+			else if (p.wxHit == 5) couple = 0.22f;
+			else if (p.wxHit == 6) couple = 0.92f;
+			else if (p.wxHit == 7) couple = 0.65f;
+			float rel = dt * 1.45f;
+			if (rel > 0.4f) rel = 0.4f;
+			p.v.x += (clim.windX * couple - p.v.x) * rel;
+			p.v.z += (clim.windZ * couple - p.v.z) * rel;
+			if (p.wxHit == 3 || p.wxHit == 4 || p.wxHit == 7) p.v.y += clim.lift * 0.2f * dt;
+			if (p.wxHit == 7) {
+				p.v.x += cosf(m_time * 1.4f + p.p.z) * dt * 1.1f;
+				p.v.z += sinf(m_time * 1.1f + p.p.x) * dt * 0.8f;
+			}
+		} else if (p.wxHit == 8) {
 			float wx = 0.f, wz = 0.f, lift = 0.f;
 			WindField(m_time, p.p.x, p.p.z, wx, wz, lift, airTh);
 			float follow = dt * 1.8f;
@@ -5160,9 +5324,9 @@ void Game::UpdateParticles(float dt)
 		V3 side = Cross(v3(0, 1, 0), fwd);
 		if (Len(side) < 0.2f) side = v3(1, 0, 0);
 		else side = Norm(side);
-		float windAng = 0.6f + sinf(m_time * 0.13f) * 0.4f;
-		V3 wind = v3(cosf(windAng), 0, sinf(windAng));
-		float gust = (wxG == WX_RAIN || wxG == WX_STORM) ? TacBurst(m_time) : 0.f;
+		const TacClimate& clim = TacClimateRead();
+		V3 wind = v3(clim.windX, clim.lift, clim.windZ);
+		float gust = clim.gust;
 		float heat = 0.f;
 		{
 			int theme = -1, hour = HR_NOON, wHeat = wxG;
@@ -5183,6 +5347,12 @@ void Game::UpdateParticles(float dt)
 			if (wHeat == WX_HEAT && heat < 0.9f) heat = 0.9f;
 			if (wHeat == WX_RAIN) heat *= 0.12f;
 			if (wHeat == WX_STORM || wHeat == WX_SNOW || wHeat == WX_HAIL) heat = 0.f;
+			if (wHeat != WX_STORM && wHeat != WX_SNOW && wHeat != WX_HAIL && wHeat != WX_FOG) {
+				float therm = (clim.tempC - 26.f) / 18.f;
+				if (therm < 0.f) therm = 0.f;
+				if (therm > 1.f) therm = 1.f;
+				if (therm > heat) heat = therm;
+			}
 		}
 		m_r.TickWxGpu(dt, wxG, fwd, side, wind, gust, nAct, act, hgt, heat);
 	}
@@ -5408,30 +5578,40 @@ void Game::TickGust(float dt)
 	BOOL storm = (wx == WX_STORM);
 	float burst = TacBurst(m_time);
 	BOOL strong = burst > 0.35f;
+	const TacClimate& clim = TacClimateRead();
 	m_gustCool -= dt;
 	if (m_gustCool <= 0.f) {
-		if (storm) m_gustCool = m_rng.F(4.f, 8.f);
-		else if (wet) m_gustCool = m_rng.F(6.f, 11.f);
-		else if (strong) m_gustCool = m_rng.F(7.f, 13.f);
-		else m_gustCool = m_rng.F(11.f, 18.f);
+		float spd = clim.speed;
+		float cool = 17.5f / (0.5f + spd * 0.105f);
+		if (storm) cool *= 0.6f;
+		else if (wet) cool *= 0.82f;
+		else if (clim.gust > 0.55f || strong) cool *= 0.88f;
+		cool *= m_rng.F(0.88f, 1.12f);
+		if (cool < 2.2f) cool = 2.2f;
+		m_gustCool = cool;
 		SpawnGust();
 	}
-	if (wet) {
+	if (wet || clim.precip > 0.35f) {
 		static float ripAcc = 0.f;
 		ripAcc += dt;
-		if (ripAcc > 0.28f) {
+		float every = 0.55f / (0.45f + clim.precip + clim.speed * 0.035f);
+		if (every < 0.12f) every = 0.12f;
+		if (ripAcc > every) {
 			ripAcc = 0.f;
-			for (int n = 0; n < 2; n++) {
+			int nRip = (clim.speed > 10.f) ? 3 : 2;
+			for (int n = 0; n < nRip; n++) {
 				int x = (int)floorf(m_camTarget.x) + m_rng.Range(-10, 10);
 				int z = (int)floorf(m_camTarget.z) + m_rng.Range(-10, 10);
 				if (!Map::In(x, z)) continue;
 				int t = map.At(x, z).t;
 				if (t != T_WATER && t != T_LAVA) continue;
 				int s = m_ripHead % TAC_RIPN;
+				float amp = (0.42f + clim.precip * 0.5f) * (0.75f + clim.speed * 0.04f);
+				if (amp > 1.45f) amp = 1.45f;
 				m_rip[s][0] = x + m_rng.F(0.15f, 0.85f);
 				m_rip[s][1] = m_time;
 				m_rip[s][2] = z + m_rng.F(0.15f, 0.85f);
-				m_rip[s][3] = storm ? 1.15f : 0.72f;
+				m_rip[s][3] = amp;
 				m_ripHead++;
 			}
 		}
@@ -5906,6 +6086,10 @@ void Game::StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, B
 		ElementFx(EL_THUNDER, SK_MAGIC, from, to, big); return;
 	}
 	if (skill == SKL_METEOR || skill == SKL_APOC || skill == SKL_STORM || skill == SKL_GRAVITY) {
+		if (m_seqCut && m_cutStage == 2 && m_cutKind == 0) {
+			Burst(to, 6, 2.2f * k, .1f, .35f, 1.f, .5f, .15f, 1, 1, 1.5f, 0, .3f);
+			return;
+		}
 		int rocks = (skill == SKL_STORM || skill == SKL_APOC) ? 4 : 2;
 		for (int i = 0; i < rocks; i++) {
 			Particle q = {};
@@ -6160,6 +6344,7 @@ void Game::DemoBegin()
 	m_demoStep = 0;
 	m_demoPh = -1;
 	m_click = FALSE;
+	BeginStageLoad(m_demoStage, 0);
 }
 
 void Game::DemoLeave()
@@ -6172,25 +6357,18 @@ void Game::DemoLeave()
 void Game::TickDemo(float dt)
 {
 	if (m_demo == 1) {
-		m_demoT += dt;
-		// 幕が閉じ切ってから戦闘を出す。BGM は画面が戦闘になった時点で地形曲へ替わる。
-		if (m_screen != SC_BATTLE && m_demoT >= 0.62f) {
-			StartBattle(m_demoStage);
-			if (m_screen != SC_BATTLE) {
-				m_save = m_demoSave;
-				m_demo = 0;
-				m_idleT = 0;
-				return;
-			}
-			m_navMode = TRUE;
+		if (m_stageGate) return;
+		if (m_screen != SC_BATTLE) {
+			m_save = m_demoSave;
+			m_demo = 0;
+			m_idleT = 0;
+			return;
 		}
-		if (m_screen == SC_BATTLE && m_demoT >= 1.25f) {
-			m_demo = 2;
-			m_demoT = 0;
-			m_demoAct = 0;
-			m_demoPh = -1;
-			m_navMode = TRUE;
-		}
+		m_demo = 2;
+		m_demoT = 0;
+		m_demoAct = 0;
+		m_demoPh = -1;
+		m_navMode = TRUE;
 	} else if (m_demo == 2) {
 		m_demoT += dt;
 	} else if (m_demo == 3) {
@@ -6209,8 +6387,83 @@ void Game::TickDemo(float dt)
 	}
 }
 
+void Game::DrawStageGate()
+{
+	if (!m_stageGate) return;
+	float W = (float)m_w, H = (float)m_h;
+	float wrapU = 1.f, burst = 0.f;
+	if (m_stageGate == 1) wrapU = Smooth01(m_stageGateT / 0.52f);
+	else if (m_stageGate == 3) burst = Smooth01(m_stageGateT / 0.62f);
+	const int colN = 14, rowN = 8;
+	float tw = W / (float)colN, th = H / (float)rowN;
+	float cx = W * 0.5f, cy = H * 0.5f;
+	float diag = sqrtf(cx * cx + cy * cy);
+	if (diag < 1.f) diag = 1.f;
+	for (int y = 0; y < rowN; y++) {
+		for (int x = 0; x < colN; x++) {
+			float ex = (x + 0.5f) * tw;
+			float ey = (y + 0.5f) * th;
+			float dx = ex - cx, dy = ey - cy;
+			float dist = sqrtf(dx * dx + dy * dy);
+			float delay = (dist / diag) * 0.42f;
+			float k = Smooth01((wrapU - delay) / max(0.08f, 1.f - delay));
+			if (k <= 0.01f) continue;
+			unsigned h = (unsigned)(x * 197 + y * 913 + 17);
+			h ^= h << 13; h *= 1274126177u;
+			float jitter = ((h >> 8) & 255) / 255.f;
+			float fromS = 2.15f + jitter * 0.35f;
+			float px = cx + dx * fromS, py = cy + dy * fromS;
+			px = px + (ex - px) * k;
+			py = py + (ey - py) * k;
+			float ang = atan2f(dy, dx);
+			float fly = burst * (1.05f + jitter * 0.55f);
+			px += cosf(ang) * fly * (220.f + jitter * 280.f);
+			py += sinf(ang) * fly * (180.f + jitter * 240.f);
+			float sc = (0.92f + 0.08f * k) * (1.f + fly * 0.45f);
+			if (m_stageGate == 2) sc += 0.025f * sinf(m_time * 7.f + x * 0.7f + y * 0.5f);
+			float bw = tw * sc + 1.2f, bh = th * sc + 1.2f;
+			float x0 = px - bw * 0.5f, y0 = py - bh * 0.5f;
+			int a = (int)(255.f * (1.f - Smooth01((burst - 0.12f) / 0.88f)));
+			if (a < 8) continue;
+			int shade = 10 + (int)(18.f * jitter);
+			DWORD c0 = RGBA8(shade + 4, shade + 8, shade + 22, a);
+			DWORD c1 = RGBA8(shade + 18, 12 + shade / 2, 40 + shade, a);
+			m_r.HudRectGrad(x0, y0, bw, bh, c0, c1);
+			int ea = (int)(a * (0.55f + 0.45f * k));
+			m_r.HudRect(x0, y0, bw, 2.f, RGBA8(232, 196, 110, ea));
+			m_r.HudRect(x0, y0 + bh - 2.f, bw, 2.f, RGBA8(186, 140, 72, ea * 3 / 4));
+		}
+	}
+	if (m_stageGate == 2 || (m_stageGate == 1 && wrapU > 0.72f)) {
+		int pct = 0;
+		if (m_stageLoadNeed > 0) pct = m_stageLoadHave * 100 / m_stageLoadNeed;
+		if (pct < 0) pct = 0;
+		if (pct > 100) pct = 100;
+		if (m_stageGate == 1) pct = 0;
+		float fade = m_stageGate == 1 ? Smooth01((wrapU - 0.72f) / 0.28f) : (1.f - Smooth01(burst * 1.6f));
+		int ta = (int)(255.f * fade);
+		if (ta > 8) {
+			wchar_t cap[64];
+			StageCaption(m_stageLoadStage > 0 ? m_stageLoadStage : m_save.stageSel, cap, 64);
+			m_r.HudText(cap, W * 0.5f, H * 0.40f, U(28), RGBA8(255, 230, 160, ta), 1, 1);
+			wchar_t line[80];
+			swprintf_s(line, L"%s  %d%%/100%%", TT(TX_MISC_LOADING), pct);
+			m_r.HudText(line, W * 0.5f, H * 0.50f, U(18), RGBA8(230, 230, 240, ta), 1, 0);
+			float bw = min(U(480.f), W * 0.56f);
+			float bh = U(18);
+			float bx = (W - bw) * 0.5f;
+			float by = H * 0.56f;
+			m_r.HudRect(bx, by, bw, bh, RGBA8(40, 28, 18, ta * 2 / 3));
+			float fw = bw * (pct / 100.f);
+			if (fw > 1.f) m_r.HudRect(bx, by, fw, bh, RGBA8(255, 214, 120, ta));
+			m_r.HudRect(bx, by, bw, 2.f, RGBA8(232, 196, 110, ta * 3 / 4));
+		}
+	}
+}
+
 void Game::DrawDemoCurtain()
 {
+	if (m_stageGate) return;
 	if (m_demo != 1 && m_demo != 3) return;
 	float cover;
 	BOOL out = m_demo == 3;

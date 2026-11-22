@@ -557,20 +557,20 @@ void CS3mHelpDlg::OnPaint()
 		L"PCM-SFX: items, sleutels, deuren, trappen, portalen, stoten, sloten, vallen, doel. Weergave-menu.",
 		L"SFX PCM: przedmioty, klucze, drzwi, schody, portale, uderzenia, zamki, pułapki, cel. Menu Widok.",
 		L"PCM SFX: öğe, anahtar, kapı, merdiven, portal, çarpma, kilit, tuzak, hedef. Görünüm menüsü."));
-	line(LL14(L"壁・床・鏡・アイテム・ギミックはライセンスフリーの写真テクスチャ（56枚・512）をexeに埋め込んでいます（別ファイル不要）。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、雲カードもあり、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。風で壁・雲・小物が揺れ、階段以外では上下階は透けません。壁は通路より細めです。",
-		L"Walls, floors, mirrors, items and gizmos use 56 license-free photo textures (512px) embedded in the exe (no extra files): albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), cloud billboards, a brighter indoor cube in the basement, and reflection plus wrap lighting. Wind sways walls/clouds/props; other floors show only through stairs. Wall bands are thinner than corridors.",
-		L"Murs, sols, miroirs, objets : 56 textures photo 512 dans l'exe (albédo+détail, nuages, cube intérieur plus clair en sous-sol, réflexion).",
-		L"Muri, pavimenti, specchi, oggetti: 56 texture foto 512 nell'exe (albedo+dettaglio, nubi, cubo interno più chiaro in cantina, riflessione).",
-		L"Paredes, suelos, espejos, objetos: 56 texturas foto 512 en el exe (albedo+detalle, nubes, cubo interior más claro en sótano, reflexión).",
-		L"벽·바닥·거울·아이템·기믹은 라이선스 프리 사진 텍스처 56장(512)을 exe에 내장. 층 테마에 세부·구름 카드, 지하는 실내 큐브로 밝게, 반사·난반사.",
-		L"墙、地板、镜子、道具、机关：56张许可证自由照片纹理（512）嵌入exe。各层主题叠加细节与云卡，地下用室内立方体提亮，含反射与漫反射。",
-		L"Walls/floors/mirrors/items: 56 photo textures 512 in the exe (albedo+detail, cloud cards, brighter indoor cube below, reflection).",
-		L"Стены, полы, зеркала, предметы: 56 фототекстур 512 в exe (альбедо+деталь, облака, более светлый внутренний куб в подвале, отражение).",
-		L"Wände, Böden, Spiegel, Items: 56 Fototexturen 512 in der exe (Albedo+Detail, Wolken, hellerer Innenwürfel im Keller, Reflexion).",
-		L"Paredes, chãos, espelhos, itens: 56 texturas foto 512 no exe (albedo+detalhe, nuvens, cubo interno mais claro no subsolo, reflexão).",
-		L"Muren, vloeren, spiegels, items: 56 fototexturen 512 in de exe (albedo+detail, wolken, helderdere binnenkubus in de kelder, reflectie).",
-		L"Ściany, podłogi, lustra, przedmioty: 56 tekstur zdjęciowych 512 w exe (albedo+szczegół, chmury, jaśniejszy sześcian wewnątrz w piwnicy, odbicie).",
-		L"Duvar, zemin, ayna, öğe: 56 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, bulut, bodrumda daha aydınlık iç küp, yansıma)."));
+	line(LL14(L"壁・床は CC0 の実写PBR（2048、法線・粗さ・高さ）を resource の bin から読み、テッセレーションで高さ変位します。階テーマ（レンガ／湿った石／錆び鉄／火山岩）に細部を重ね、雲カードもあり、地下は室内キューブで壁が見える明るさにし、反射と乱反射があります。風で壁・雲・小物が揺れ、階段以外では上下階は透けません。壁は通路より細めです。",
+		L"Walls and floors use CC0 photo PBR at 2048 (albedo, normal, roughness, height) from the resource bin, with tessellated height: albedo plus detail per floor theme (brick, wet stone, rusted metal, volcanic), cloud billboards, a brighter indoor cube in the basement, and reflection plus wrap lighting. Wind sways walls/clouds/props; other floors show only through stairs. Wall bands are thinner than corridors.",
+		L"Murs, sols, miroirs, objets : PBR CC0 2048 depuis le bin (albédo+détail, nuages, cube intérieur plus clair en sous-sol, réflexion).",
+		L"Muri, pavimenti, specchi, oggetti: PBR CC0 2048 dal bin (albedo+dettaglio, nubi, cubo interno più chiaro in cantina, riflessione).",
+		L"Paredes, suelos, espejos, objetos: PBR CC0 2048 desde el bin (albedo+detalle, nubes, cubo interior más claro en sótano, reflexión).",
+		L"벽·바닥·거울·아이템·기믹은 CC0 실사 PBR 2048을 resource bin에서 읽고 테셀레이션으로 높이를 변위합니다. 층 테마에 세부·구름 카드, 지하는 실내 큐브로 밝게, 반사·난반사.",
+		L"墙、地板、镜子、道具、机关：CC0 实拍 PBR 2048 从 resource 的 bin 读取，并用曲面细分做高度位移。各层主题叠加细节与云卡，地下用室内立方体提亮，含反射与漫反射。",
+		L"Walls/floors/mirrors/items: CC0 PBR 2048 from the resource bin (albedo+detail, cloud cards, brighter indoor cube below, reflection).",
+		L"Стены, полы, зеркала, предметы: CC0 PBR 2048 из bin (альбедо+деталь, облака, более светлый внутренний куб в подвале, отражение).",
+		L"Wände, Böden, Spiegel, Items: CC0-PBR 2048 aus dem Bin (Albedo+Detail, Wolken, hellerer Innenwürfel im Keller, Reflexion).",
+		L"Paredes, chãos, espelhos, itens: PBR CC0 2048 do bin (albedo+detalhe, nuvens, cubo interno mais claro no subsolo, reflexão).",
+		L"Muren, vloeren, spiegels, items: CC0 PBR 2048 uit de bin (albedo+detail, wolken, helderdere binnenkubus in de kelder, reflectie).",
+		L"Ściany, podłogi, lustra, przedmioty: CC0 PBR 2048 z bin (albedo+szczegół, chmury, jaśniejszy sześcian wewnątrz w piwnicy, odbicie).",
+		L"Duvar, zemin, ayna, öğe: CC0 PBR 2048 resource bininden (albedo+ayrıntı, bulut, bodrumda daha aydınlık iç küp, yansıma)."));
 	line(LL14(L"半透明のトラップ（粘液・棘・氷・闇）や窓・鏡にも、上に小さなラベルが出ます。",
 		L"Translucent traps (slime, spikes, ice, dark), windows and mirrors also carry a small label above them.",
 		L"Pièges translucides, fenêtres et miroirs : petite étiquette au-dessus.",
@@ -1222,7 +1222,7 @@ BOOL CS3mView::DispatchSubmesh(const void* jobs, UINT nJobs, UINT nVerts)
 BOOL CS3mView::CreateProcTextures()
 {
 	// 階テーマごと 512² アトラス（4×4=16種）＋床テクスチャ
-	const int AW=512,AH=512,TW=128,TH=128;
+	const int AW=2048,AH=2048,TW=512,TH=512;
 	auto hash=[&](int x,int y,int s)->int{return ((x*73856093)^(y*19349663)^(s*83492791))&255;};
 	auto noise = [&](float x, float y, int s) -> float {
 		int ix = (int)floorf(x); float fx = x - ix;
@@ -1343,12 +1343,9 @@ BOOL CS3mView::CreateProcTextures()
 	D3D11_TEXTURE2D_DESC d={}; d.Width=AW;d.Height=AH;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
 	auto failHr=[&](HRESULT hr)->BOOL{ m_dxFailHr=hr; return FALSE; };
 	auto make2d=[&](D3D11_TEXTURE2D_DESC* desc, const void* bits, UINT pitch, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->HRESULT{
-		D3D11_SUBRESOURCE_DATA sd={bits,pitch,0};
-		HRESULT hr=m_dev->CreateTexture2D(desc,&sd,tex);
-		if(FAILED(hr)) return hr;
-		hr=m_dev->CreateShaderResourceView(*tex,NULL,srv);
-		if(FAILED(hr)){ S3M_RELEASE(*tex); }
-		return hr;
+		(void)pitch;
+		if(!desc || !Soft3DCreateTex2DMips(m_dev,(const DWORD*)bits,(int)desc->Width,(int)desc->Height,tex,srv)) return E_FAIL;
+		return S_OK;
 	};
 	auto makeCube=[&](DWORD* src, int face, ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->HRESULT{
 		D3D11_TEXTURE2D_DESC cd=d;
@@ -1369,7 +1366,7 @@ BOOL CS3mView::CreateProcTextures()
 	DWORD* atlas=new (std::nothrow) DWORD[AW*AH];
 	if(!atlas) return failHr(E_OUTOFMEMORY);
 	static const int kWallRes[S3M_THEME_N]={IDR_S3TEX_M_WALL0,IDR_S3TEX_M_WALL1,IDR_S3TEX_M_WALL2,IDR_S3TEX_M_WALL3};
-	const int W=512,H=512;
+	const int W=2048,H=2048;
 	DWORD* p=new (std::nothrow) DWORD[W*H];
 	if(!p){delete[] atlas; return failHr(E_OUTOFMEMORY);}
 	for(int th=0;th<S3M_THEME_N;th++){
@@ -7040,7 +7037,7 @@ void CSoft3DMazeDlg::RenderScene()
 	for(int z=iz0;z<=iz1;z++)for(int x=ix0;x<=ix1;x++){
 		BYTE c=CellAtF(fxFloor,x,z);if(S3mIsSolidWall(c)||c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP||c==CELL_MIRROR_FLOOR||!vis(x,z))continue;
 		float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
-		if(VisitAtF(fxFloor,x,z))quad(x0,passH+.01f,z0,x0,passH+.01f,z1,x1,passH+.01f,z1,x1,passH+.01f,z0,0,1,0,.25f,.55f,1.f,.35f);
+		if(VisitAtF(fxFloor,x,z))quad(x0,passH+.01f,z0,x0,passH+.01f,z1,x1,passH+.01f,z1,x1,passH+.01f,z0,0,1,0,.25f,.55f,1.f,.18f);
 	}
 	UINT nPlate=(nFloor+nWall+nTrans)-plateBeg;
 	// ナビ導線（3D）：現在階の経路を1本の細長い金矢印メッシュとして一括生成
@@ -7487,7 +7484,11 @@ void CSoft3DMazeDlg::RenderScene()
 			dc->IASetInputLayout(m_view.m_ilPatch);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
 			dc->VSSetShader(m_view.m_vsTess,NULL,0);dc->HSSetShader(m_view.m_hsTess,NULL,0);dc->DSSetShader(m_view.m_dsTess,NULL,0);dc->GSSetShader(NULL,NULL,0);dc->PSSetShader(colorPass?m_view.m_psWall:NULL,NULL,0);
 			dc->DSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);dc->PSSetShaderResources(0,1,&m_view.m_srvBrick[L.th]);
-			if(colorPass){ID3D11ShaderResourceView* bd=m_view.m_srvBrickD[L.th]?m_view.m_srvBrickD[L.th]:m_view.m_srvBrick[L.th];if(L.th==0&&m_view.m_srvBrick2)bd=m_view.m_srvBrick2;dc->PSSetShaderResources(1,1,&bd);}
+			{
+				ID3D11ShaderResourceView* bd=m_view.m_srvBrickD[L.th]?m_view.m_srvBrickD[L.th]:m_view.m_srvBrick[L.th];
+				dc->DSSetShaderResources(1,1,&bd);
+				if(colorPass) dc->PSSetShaderResources(1,1,&bd);
+			}
 			if(L.nW)dc->Draw(L.nW,L.wBeg);
 			if(skipSlot!=0 && L.nMW&&m_view.m_srvMirrorWall){
 				dc->DSSetShaderResources(0,1,&m_view.m_srvMirrorWall);dc->PSSetShaderResources(0,1,&m_view.m_srvMirrorWall);
@@ -7699,7 +7700,8 @@ void CSoft3DMazeDlg::RenderScene()
 		}
 	}
 	// ナビをシーンRTへ先に焼いておく（ポスト後パスが落ちても見える）
-	if(nNav){
+	auto drawNav=[&](){
+		if(!nNav)return;
 		dc->RSSetState(m_view.m_rsNoCull);
 		dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();
 		dc->IASetInputLayout(m_view.m_ilSolid);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -7711,7 +7713,8 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->Draw(nNav,navBeg);
 		dc->RSSetState(m_view.m_rsSolid);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);
 		dc->PSSetShaderResources(0,7,ns);
-	}
+	};
+	drawNav();
 	dc->PSSetShaderResources(5,2,ns+5);
 	dc->OMSetDepthStencilState(m_view.m_dssOff,0);dc->OMSetBlendState(m_view.m_bsOpaque,NULL,~0u);dc->IASetInputLayout(NULL);dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);dc->HSSetShader(NULL,NULL,0);dc->DSSetShader(NULL,NULL,0);dc->GSSetShader(NULL,NULL,0);dc->VSSetShader(m_view.m_vsPost,NULL,0);dc->PSSetSamplers(1,1,&m_view.m_sampPoint);
 	ID3D11ShaderResourceView* finSrc = m_view.m_sceneSrv;
@@ -7760,6 +7763,7 @@ void CSoft3DMazeDlg::RenderScene()
 		if(m_view.m_mirrorSrv[0]) dc->PSSetShaderResources(5,1,&m_view.m_mirrorSrv[0]);
 		if(m_view.m_mirrorSrv[1]) dc->PSSetShaderResources(6,1,&m_view.m_mirrorSrv[1]);
 		drawTransRange(plateBeg,nPlate,TRUE,4);
+		drawNav();
 		if(nVfxAlpha){
 			const int thV=ThemeOfFloor(fxFloor);
 			dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);bindCB();

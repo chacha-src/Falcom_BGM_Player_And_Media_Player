@@ -62,6 +62,7 @@ float2 AirBreezeT() { return AirB.xy; }
 float2 AirMainT() { return AirB.zw; }
 float AirLiftT() { return AirL.x; }
 float GustAmtT() { return AirL.y; }
+float WindMsT() { return max(AirL.z, 0.0); }
 
 float3 FallLeanT(float3 w, float3 n, float amount)
 {
@@ -115,13 +116,20 @@ TC VST(VSIn v)
 			else if (th > 7.5 && th < 8.5) amp = 0.016;
 			else if (th > 6.5) amp = 0.012;
 			amp *= 1.0 + GustAmtT() * 3.0;
+			amp *= 1.0 + saturate(WindMsT() / 18.0);
 			float2 flow = v.c.rg * 2.0 - 1.0;
 			float rush = saturate(v.c.b * 1.35);
 			float spd = lerp(0.45, 2.6, rush);
 			float2 xz = w.xz - flow * t * spd;
-			w.y += sin(xz.x * 1.35 + xz.y * 0.34 - t * 1.15) * amp;
-			w.y += sin(xz.x * -0.84 + xz.y * 2.4 - t * 1.7) * amp * 0.55;
-			w.y += sin(xz.x * 0.82 - xz.y * 4.1 - t * 2.3) * amp * 0.28 * (1.0 + rush);
+			float2 wd = AirMainT() + AirBreezeT();
+			float wdl = length(wd);
+			wd = wdl > 1e-3 ? wd / wdl : float2(0.97, 0.24);
+			float along = xz.x * wd.x + xz.y * wd.y;
+			float cross = xz.x * -wd.y + xz.y * wd.x;
+			float wsp = 1.0 + saturate(WindMsT() / 24.0) * 0.4;
+			w.y += sin(along * 1.35 - t * 1.15 * wsp) * amp;
+			w.y += sin(along * -0.55 + cross * 2.2 - t * 1.7 * wsp) * amp * 0.55;
+			w.y += sin(along * 0.4 - cross * 3.6 - t * 2.3) * amp * 0.28 * (1.0 + rush);
 		} else {
 			w = FallLeanT(w, n, 0.74);
 			w.x += sin(w.y * 2.6 - Eye.w * 4.2) * (0.04 + GustAmtT() * 0.08);
@@ -129,7 +137,8 @@ TC VST(VSIn v)
 	} else if (OutlineColor.a < 1.5 && Params.y > 1.5 && Params.y < 2.5) {
 		if (n.y > 0.45) {
 			float t = Eye.w;
-			w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * (0.018 + GustAmtT() * 0.016);
+			float lava = (0.018 + GustAmtT() * 0.016) * (1.0 + saturate(WindMsT() / 18.0));
+			w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * lava;
 		} else {
 			w = FallLeanT(w, n, 0.16);
 			w.x += sin(w.y * 0.45 - Eye.w * 0.32 + w.z * 0.2) * 0.11;

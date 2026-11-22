@@ -193,6 +193,14 @@ private:
 
 	// 拠点
 	void EnterBase();
+	void BeginStageLoad(int stage, int kind);
+	void TickStageLoad(float dt);
+	void PumpStageLoad();
+	void DrawStageGate();
+	void ApplyStageStart(int stage);
+	void ApplyStageResume();
+	void CollectStageCast();
+	BOOL StageGating() const { return m_stageGate != 0; }
 	void WarmHomeAvatars();
 	void ProbeSuspend();
 	void QueueSuspend(int kind);
@@ -346,7 +354,9 @@ private:
 	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
-	void DrawCutArenaDress(DWORD ec, V3 eye, V3 look);
+	BOOL CutSkillCam(float t, V3& look, V3& eye);
+	void CutSkillWorld();
+	float CutShotHold() const;
 	void BindSummonCut();
 	void SummonImpactFx();
 	void SummonApply(int phase, float u);
@@ -392,6 +402,8 @@ private:
 	void StampGroundRing(float cx, float cz, float rad, float strength, int kind, BOOL home = FALSE);
 	void SyncGroundMarks(BOOL home, float dt);
 	void UpdateParticles(float dt);
+	void TickClimate(float dt);
+	void TickAeolian(float dt);
 	void UpdateWeatherEvents(float dt);
 	void TickGust(float dt);
 	void SpawnGust();
@@ -449,6 +461,21 @@ private:
 	int m_loadHave;
 	int m_sliceBase;
 	int m_sliceUnits;
+	int m_stageGate;
+	float m_stageGateT;
+	int m_stageLoadKind;
+	int m_stageLoadStage;
+	int m_stageLoadStep;
+	int m_stageLoadI;
+	int m_stageLoadHave;
+	int m_stageLoadNeed;
+	int m_stageBodyN;
+	char m_stageBody[24][16];
+	int m_stageMeshN;
+	int m_stageMesh[256];
+	int m_stageAvaN;
+	int m_stageAvaUnit[MAX_UNITS];
+	int m_stageAvaPass;
 	float m_renderDt, m_lastRenderTime;
 	int m_recoverTries;
 	Rng m_rng;
@@ -547,7 +574,7 @@ private:
 		float rest, sc, x, y, z, vx, vy, vz, yaw, spin, t, prevY, chip;
 	};
 	struct DebrisBit {
-		int on, kind, bounces;
+		int on, kind, bounces, wind;
 		float x, y, z, vx, vy, vz, rx, ry, rz, srx, sry, srz, sc, life, maxLife;
 		DWORD tint;
 	};
@@ -556,6 +583,7 @@ private:
 	DebrisBit m_debris[DEBRIS_N];
 	int m_gustHx[GUST_HIDE], m_gustHz[GUST_HIDE], m_gustHN;
 	float m_gustCool;
+	float m_aeolAcc;
 	float m_wxFlash;       // 稲妻フラッシュの強さ 0..1
 	float m_wxFlashCol[3]; // フラッシュの色（寒色の白）
 	float m_wetGlobal;
@@ -781,6 +809,11 @@ private:
 	int m_cutAllyN, m_cutFoeN;
 	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
 	int m_cutPat;        // 0斬 1重 2旋 3突 4射 5火 6氷 7雷 8闇 9風 10回復 11範囲回復 12支援 13敵
+	unsigned m_cutShotMark;
+	float m_cutRainEnd;
+	enum { CUT_FX_MAX = 160 };
+	CutFxPt m_cutFx[CUT_FX_MAX];
+	int m_cutFxN;
 	int m_sumOn, m_sumFx, m_sumRank, m_sumHit, m_sumHide;
 	float m_sumU, m_sumYaw, m_sumFade;
 	V3 m_sumPos, m_sumFrom, m_sumTo;
@@ -793,6 +826,7 @@ private:
 	V3 m_cutAnchor;
 	float m_cutYaw;
 	float m_flashWhite;
+	float m_hitScreenT, m_hitScreenMax;
 	float m_critScreenT, m_critScreenMax;
 	float m_fairyScreenT, m_fairyScreenMax;
 	float m_fairyFxT;

@@ -57,6 +57,7 @@
     <ClCompile Include="OxzLang.cpp" />
     <ClCompile Include="OxzWork.cpp" />
     <ClCompile Include="OxzInst.cpp" />
+    <ClCompile Include="OxzUpdate.cpp" />
     <ClCompile Include="..\OxzFilt.cpp" />
   </ItemGroup>
   <ItemGroup>

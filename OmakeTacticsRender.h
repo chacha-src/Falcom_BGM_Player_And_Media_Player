@@ -13,6 +13,20 @@ struct VtxK { float p[3], n[3], uv[2]; BYTE j[4]; BYTE w[4]; };
 struct VtxH { float x, y, u, v; DWORD c; float p0[4]; DWORD b; };
 struct VtxP { float p[3]; float u, v, shape; float c[4]; };
 
+// カット専用。sz.y の番号は shaders/omake_tactics_cut.hlsl の kind と一致させる。
+enum CutFxKind {
+	CFX_ROCK = 0, CFX_CRACK = 1, CFX_BOLT = 2, CFX_ICE = 3,
+	CFX_PILLAR = 4, CFX_RING = 5, CFX_GALE = 6, CFX_DARK = 7,
+	CFX_HEAL = 8, CFX_BEAM = 9, CFX_BREATH = 10, CFX_ARROW = 11,
+	CFX_SLASH = 12, CFX_SIGIL = 13, CFX_WARP = 14, CFX_DUST = 15
+};
+struct CutFxPt {
+	float p[3];
+	float vel[4];
+	float sz[4];
+	float c[4];
+};
+
 inline DWORD RGBA8(int r, int g, int b, int a = 255)
 {
 	return (DWORD)(Clampi(r, 0, 255) | (Clampi(g, 0, 255) << 8) | (Clampi(b, 0, 255) << 16) | (Clampi(a, 0, 255) << 24));
@@ -39,6 +53,207 @@ struct TacAir {
 	float sway;   // 木や草を曲げる量
 };
 
+// 戦闘・拠点で一つだけ進む気候。風・気温・湿度・降水・太陽高度はここから読む。
+// 天候の種類そのものはマップのまま（空の色を飛ばさない）。強さは連続で寄せる。
+struct TacClimate {
+	float tempC, humid, dewC;
+	float windX, windZ, lift;
+	float gust, speed, precip, cloud, solar;
+	float clockH;
+	int wx, hour, theme;
+	int live;
+	DWORD seed;
+};
+
+inline TacClimate& TacClimateMut()
+{
+	static TacClimate c;
+	return c;
+}
+inline const TacClimate& TacClimateRead() { return TacClimateMut(); }
+
+inline float TacHourSolar(int hour)
+{
+	switch (hour) {
+	case HR_DAWN: return 0.34f;
+	case HR_MORNING: return 0.72f;
+	case HR_DUSK: return 0.30f;
+	case HR_NIGHT: return 0.08f;
+	case HR_DEEP: return 0.f;
+	case HR_ECLIPSE: return 0.12f;
+	case HR_DREAM: return 0.42f;
+	case HR_STAR: return 0.05f;
+	case HR_MOON: return 0.14f;
+	default: return 1.f;
+	}
+}
+inline float TacHourClock(int hour)
+{
+	switch (hour) {
+	case HR_DAWN: return 6.2f;
+	case HR_MORNING: return 9.0f;
+	case HR_DUSK: return 17.4f;
+	case HR_NIGHT: return 21.0f;
+	case HR_DEEP: return 1.5f;
+	case HR_ECLIPSE: return 13.0f;
+	case HR_DREAM: return 15.0f;
+	case HR_STAR: return 23.2f;
+	case HR_MOON: return 22.0f;
+	default: return 13.0f;
+	}
+}
+
+inline void TacClimateTick(float dt, float time, int wx, int hour, int theme, DWORD seed)
+{
+	if (dt < 0.f) dt = 0.f;
+	if (dt > 0.2f) dt = 0.2f;
+	if (theme < 0) theme = 0;
+	if (theme >= TH_COUNT) theme = TH_COUNT - 1;
+	if (wx < 0) wx = WX_CLEAR;
+	if (wx > WX_HEAT) wx = WX_CLEAR;
+	if (hour < 0) hour = HR_NOON;
+	if (hour > HR_MOON) hour = HR_NOON;
+	if (!seed) seed = 1;
+	// 昼の気温、夜の気温、開けた土地の風の通り。海底と軌道は空気が薄い。
+	static const float kDay[TH_COUNT] = { 22.f, 34.f, 18.f, -2.f, 38.f, 46.f, 24.f, 20.f, 8.f, 16.f, -40.f, 18.f, 17.f, 21.f, 14.f, 19.f, 20.f };
+	static const float kNight[TH_COUNT] = { 10.f, 16.f, 9.f, -14.f, 18.f, 32.f, 16.f, 11.f, 6.f, 10.f, -60.f, 16.f, 8.f, 14.f, 8.f, 12.f, 11.f };
+	static const float kOpen[TH_COUNT] = { 1.12f, 1.48f, 0.52f, 0.68f, 1.48f, 1.22f, 0.78f, 0.85f, 0.32f, 0.82f, 0.18f, 0.40f, 0.70f, 0.55f, 0.28f, 0.95f, 0.60f };
+	static const float kHum[TH_COUNT] = { 0.48f, 0.22f, 0.72f, 0.62f, 0.12f, 0.18f, 0.88f, 0.40f, 0.95f, 0.80f, 0.02f, 0.35f, 0.42f, 0.50f, 0.30f, 0.40f, 0.55f };
+	// dT, 湿度, 風 m/s, 突風, 降水, 雲, 上昇
+	static const float kWx[10][7] = {
+		{ 0.f, 0.45f, 3.6f, 0.18f, 0.00f, 0.22f, 0.12f },
+		{ -3.f, 0.92f, 7.4f, 0.40f, 0.72f, 0.86f, -0.04f },
+		{ -8.f, 0.78f, 4.6f, 0.26f, 0.58f, 0.82f, 0.06f },
+		{ 6.f, 0.30f, 6.8f, 0.46f, 0.42f, 0.55f, 0.85f },
+		{ -1.f, 0.98f, 1.5f, 0.08f, 0.06f, 0.96f, 0.00f },
+		{ -5.f, 0.97f, 15.2f, 0.84f, 1.00f, 0.98f, 0.40f },
+		{ 4.f, 0.15f, 13.4f, 0.72f, 0.48f, 0.42f, 0.22f },
+		{ -4.f, 0.70f, 9.6f, 0.52f, 0.64f, 0.90f, 0.08f },
+		{ 1.f, 0.55f, 3.8f, 0.22f, 0.26f, 0.32f, 0.10f },
+		{ 11.f, 0.12f, 2.6f, 0.24f, 0.00f, 0.06f, 1.15f },
+	};
+	TacClimate& c = TacClimateMut();
+	const BOOL snap = !c.live || c.seed != seed || c.theme != theme;
+	if (snap) c.clockH = TacHourClock(hour);
+	c.clockH += dt * (1.f / 90.f);
+	if (c.clockH >= 24.f) c.clockH -= 24.f;
+	if (c.clockH < 0.f) c.clockH += 24.f;
+	float solar = TacHourSolar(hour);
+	float drift = c.clockH - TacHourClock(hour);
+	if (drift > 12.f) drift -= 24.f;
+	if (drift < -12.f) drift += 24.f;
+	solar += drift * 0.035f;
+	if (solar < 0.f) solar = 0.f;
+	if (solar > 1.f) solar = 1.f;
+	const float* w = kWx[wx];
+	float dayT = kDay[theme] + w[0];
+	float nightT = kNight[theme] + w[0] * 0.45f;
+	float tempT = nightT + (dayT - nightT) * solar;
+	float humidT = kHum[theme] * 0.35f + w[1] * 0.65f;
+	if (humidT < 0.02f) humidT = 0.02f;
+	if (humidT > 0.99f) humidT = 0.99f;
+	float burst = TacGate(sinf(time * 0.083f + 2.4f), 0.78f);
+	float strong = TacGate(sinf(time * 0.17f + 0.6f), 0.55f);
+	float gustT = w[3] * (0.42f + 0.58f * burst) + strong * 0.22f;
+	float hot = tempT - 26.f;
+	if (hot < 0.f) hot = 0.f;
+	if (hot > 16.f) hot = 16.f;
+	float therm = (hot / 16.f) * solar;
+	gustT += therm * 0.12f;
+	float dewGap = (1.f - humidT) * 18.f;
+	float cloudT = w[5];
+	if (dewGap < 3.f) {
+		float sat = 1.f - dewGap / 3.f;
+		gustT *= 1.f - sat * 0.28f;
+		cloudT += (1.f - cloudT) * sat * 0.35f;
+	}
+	if (gustT < 0.f) gustT = 0.f;
+	if (gustT > 1.f) gustT = 1.f;
+	if (cloudT > 1.f) cloudT = 1.f;
+	float diurnal = 0.76f + 0.30f * solar;
+	float spdT = w[2] * kOpen[theme] * diurnal;
+	spdT *= 0.88f + 0.12f * sinf(time * 0.11f + (float)(seed & 255) * 0.01f);
+	spdT *= 1.f + gustT * 0.22f;
+	if (spdT < 0.15f) spdT = 0.15f;
+	float ang = (float)(seed % 10007u) * (6.2831853f / 10007.f);
+	ang += sinf(time * 0.05f + TacHourClock(hour)) * 0.22f;
+	ang += sinf(c.clockH * 0.261799f) * 0.38f;
+	ang += w[3] * sinf(time * 0.02f) * 0.40f;
+	float windXT = cosf(ang) * spdT;
+	float windZT = sinf(ang) * spdT;
+	float liftT = w[6] * (0.65f + 0.35f * solar) + therm * 1.35f;
+	if (theme == TH_VOLCANO) liftT += 0.55f;
+	else if (theme == TH_SEABED) liftT -= 0.25f;
+	else if (theme == TH_SWAMP) liftT += 0.12f;
+	else if (theme == TH_FALLS) liftT += 0.2f;
+	else if (theme == TH_HEAVEN) liftT += 0.28f;
+	else if (theme == TH_ORBIT) liftT *= 0.2f;
+	float precipT = w[4] * (0.86f + 0.14f * gustT);
+	if (precipT < 0.f) precipT = 0.f;
+	if (precipT > 1.f) precipT = 1.f;
+	if (snap || dt <= 0.f) {
+		c.tempC = tempT;
+		c.humid = humidT;
+		c.windX = windXT;
+		c.windZ = windZT;
+		c.lift = liftT;
+		c.gust = gustT;
+		c.precip = precipT;
+		c.cloud = cloudT;
+	} else {
+		float kw = 1.f - expf(-dt / 7.5f);
+		float kt = 1.f - expf(-dt / 22.f);
+		float kg = 1.f - expf(-dt / 1.35f);
+		c.tempC += (tempT - c.tempC) * kt;
+		c.humid += (humidT - c.humid) * kt;
+		c.windX += (windXT - c.windX) * kw;
+		c.windZ += (windZT - c.windZ) * kw;
+		c.lift += (liftT - c.lift) * kw;
+		c.gust += (gustT - c.gust) * kg;
+		c.precip += (precipT - c.precip) * kg;
+		c.cloud += (cloudT - c.cloud) * kt;
+	}
+	c.dewC = c.tempC - (1.f - c.humid) * 18.f;
+	float sp = sqrtf(c.windX * c.windX + c.windZ * c.windZ);
+	c.speed = sp * (1.f + c.gust * 0.28f);
+	c.solar = solar;
+	c.wx = wx;
+	c.hour = hour;
+	c.theme = theme;
+	c.seed = seed;
+	c.live = 1;
+}
+
+// そよ風・突風の式は残し、気候の平均風を足す。木・服・水面が同じ向きになる。
+inline void TacClimateMod(float& bx, float& bz, float& mx, float& mz, float& y)
+{
+	const TacClimate& c = TacClimateRead();
+	if (!c.live) return;
+	float turb = 0.28f + c.gust * 0.55f;
+	if (turb < 0.2f) turb = 0.2f;
+	bx *= turb;
+	bz *= turb;
+	mx *= turb * 0.65f;
+	mz *= turb * 0.65f;
+	y *= 0.45f + c.gust * 0.25f;
+	float mean = c.speed / 9.f;
+	if (mean > 2.15f) mean = 2.15f;
+	float dirx = 1.f, dirz = 0.f;
+	float sp = sqrtf(c.windX * c.windX + c.windZ * c.windZ);
+	if (sp > 0.05f) { dirx = c.windX / sp; dirz = c.windZ / sp; }
+	mx += dirx * mean;
+	mz += dirz * mean;
+	y += c.lift * 0.08f;
+	float h = sqrtf(mx * mx + mz * mz);
+	if (h > 2.35f) {
+		float s = 2.35f / h;
+		mx *= s;
+		mz *= s;
+	}
+	if (y > 1.2f) y = 1.2f;
+	if (y < -1.2f) y = -1.2f;
+}
+
 inline TacAir TacAirAt(float time)
 {
 	const float breeze = 0.62f + 0.38f * sinf(time * 0.31f);
@@ -55,6 +270,7 @@ inline TacAir TacAirAt(float time)
 	a.mx = cosf(aS) * strong * 1.30f + cosf(aG) * gale * 2.70f;
 	a.mz = sinf(aS) * strong * 1.30f + sinf(aG) * gale * 2.70f;
 	a.y = up * 0.95f - down * 1.15f;
+	TacClimateMod(a.bx, a.bz, a.mx, a.mz, a.y);
 	const float h = sqrtf(a.mx * a.mx + a.mz * a.mz);
 	const float hb = sqrtf(a.bx * a.bx + a.bz * a.bz);
 	a.sway = h * 0.22f + hb * 0.35f + fabsf(a.y) * 0.18f;
@@ -521,7 +737,7 @@ public:
 	void SetSight(const float* xz, int n, float radius);
 	void SetTheme(int theme) { m_theme = theme; }
 	void SetSky(int wx, int hour) { m_wx = wx; m_hour = hour; }
-	void SetScreenFx(float crit, float fairy, float lightning, float quake, float wet, BOOL cutScene, BOOL hasMarks)
+	void SetScreenFx(float crit, float fairy, float lightning, float quake, float wet, BOOL cutScene, BOOL hasMarks, float hit = 0.f)
 	{
 		m_fcb.fxNow[0] = crit;
 		m_fcb.fxNow[1] = fairy;
@@ -531,6 +747,7 @@ public:
 		m_fcb.fxMore[1] = quake;
 		m_fcb.fxMore[2] = cutScene ? 1.f : 0.f;
 		m_fcb.fxMore[3] = m_inPortrait ? 1.f : 0.f;
+		m_fcb.camFwd[3] = hit;
 	}
 	void UploadGroundMarks(const BYTE* rgba256);
 	void SetAmbient(DWORD sky, DWORD ground, float strength, float hard);
@@ -579,7 +796,7 @@ public:
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
 	void SetSceneShift(const M4& m) { m_sceneShift = m; }
 	void SetCamNear(float hide, float solid, float ghost = 0.f) { m_fcb.camNear[0] = hide; m_fcb.camNear[1] = solid; m_fcb.camNear[2] = ghost; }
-	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; m_fcb.camFwd[3] = 1.f; }
+	void SetCamFwd(float x, float y, float z) { m_fcb.camFwd[0] = x; m_fcb.camFwd[1] = y; m_fcb.camFwd[2] = z; }
 	void SetCoverGhost(float ax, float ay, float az, float cx, float cy, float cz, int haveCursor, float radius, float focusY, int layerFade, float yLo = -1e8f, float yHi = -1e8f);
 	void ClearCoverGhost();
 	void DrawTerrain();
@@ -596,6 +813,7 @@ public:
 	void SetStageId(int stage);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n, const M4* mapXform = NULL);
+	void DrawCutFx(const CutFxPt* fx, int n);
 	void PortraitFeatherReset();
 	void PortraitFeatherAdd(int slot, const Particle* ps, int n);
 	void PortraitFeatherUpload();
@@ -857,6 +1075,10 @@ private:
 	ID3D11VertexShader* m_vsPT;
 	ID3D11GeometryShader* m_gsP;
 	ID3D11PixelShader* m_psP;
+	ID3D11VertexShader* m_vsCutFx;
+	ID3D11GeometryShader* m_gsCutFx;
+	ID3D11PixelShader* m_psCutFx;
+	ID3D11InputLayout* m_ilCutFx;
 	ID3D11VertexShader* m_vsQ;
 	ID3D11PixelShader* m_psSky;
 	ID3D11PixelShader* m_psSkyT[TH_COUNT];
@@ -864,6 +1086,7 @@ private:
 	ID3D11PixelShader* m_psBlur;
 	ID3D11PixelShader* m_psGrade;
 	ID3D11PixelShader* m_psGradeTiny;
+	ID3D11PixelShader* m_psCut;
 	ID3D11PixelShader* m_psDofH;
 	ID3D11PixelShader* m_psDofU;
 	ID3D11VertexShader* m_vsT;

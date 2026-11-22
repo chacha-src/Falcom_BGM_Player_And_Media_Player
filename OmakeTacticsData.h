@@ -781,6 +781,19 @@ inline int UnitIsHumanFoe(const Unit& u)
 {
 	return u.lucky >= 2 && u.team == TEAM_ENEMY;
 }
+// 手番に乗せてよい生存者。HP 0 や撃破済みを alive のまま残すと、再生で HP が戻り倒れたまま行動不能になる。
+inline int UnitInFight(const Unit& u)
+{
+	return u.alive && u.hp > 0 && !u.killed;
+}
+inline void UnitSealDead(Unit& u)
+{
+	u.hp = 0;
+	u.alive = 0;
+	u.killed = 1;
+	u.poison = u.burn = u.bleed = u.freeze = u.sleep = u.stun = u.confuse = 0;
+	u.slow = u.defDown = u.blind = u.silence = 0;
+}
 inline const wchar_t* UnitFoeMark(const Unit& u)
 {
 	if (u.boss) return L"★";

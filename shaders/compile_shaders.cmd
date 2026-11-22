@@ -126,6 +126,7 @@ call :job vs_5_0 VST shaders\omake_tactics_tess.hlsl tac_VST tac_vst
 call :job hs_5_0 HST shaders\omake_tactics_tess.hlsl tac_HST tac_hst
 call :job ds_5_0 DST shaders\omake_tactics_tess.hlsl tac_DST tac_dst
 call :job ps_5_0 PSGradeTiny shaders\omake_tactics.hlsl tac_PSGradeTiny tac_psgrtiny
+call :job ps_5_0 PSCut shaders\omake_tactics.hlsl tac_PSCut tac_pscut
 call :job ps_5_0 PSDofH shaders\omake_tactics_dof.hlsl tac_PSDofH tac_psdofh
 call :job ps_5_0 PSDofU shaders\omake_tactics_dof.hlsl tac_PSDofU tac_psdofu
 call :job cs_5_0 CSSoft shaders\omake_tactics_soft.hlsl tac_CSSoft tac_cssoft

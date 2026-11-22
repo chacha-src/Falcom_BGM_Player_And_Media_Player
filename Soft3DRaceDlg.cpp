@@ -124,6 +124,7 @@ static void S3rFillSkinCB(S3RSkinCB& cb, float t, float windX, float windY, floa
 	cb.bones[1] = S3rMatHinge(0.28f, 0.02f, 0.06f, 0.f, 0.f, 1.f, 0.18f * flap + 0.04f * sinf(t * 7.2f));
 	cb.bones[2] = S3rMatHinge(-0.28f, 0.02f, 0.06f, 0.f, 0.f, 1.f, -0.18f * flap - 0.04f * sinf(t * 7.2f));
 	cb.bones[3] = S3rMatHinge(0.f, 0.04f, -0.72f, 1.f, 0.f, 0.f, 0.10f * sinf(t * 5.4f) + 0.08f * flap);
+	cb.bones[12] = S3rMatHinge(0.f, 0.02f, 1.02f, 0.f, 0.f, 1.f, t * 52.f);
 	const float gx = windX * (0.55f + 0.45f * gust);
 	const float gz = windZ * (0.55f + 0.45f * gust);
 	const float gy = windY * 0.35f;
@@ -990,20 +991,20 @@ void CS3rHelpDlg::OnPaint()
 		L"Nalopende camera; bij helling van onder. Bij tunnels daalt het zicht, maar MMB-achteruit wint. Achteruitkijkspiegel bovenaan; vlakke waterreflectie. Heuvels/dalen/rivieren; tunnels door bergen. Bomen mogen in de band steken; vlieg door gaten.",
 		L"Opóźniona kamera; na stromiźnie od dołu. Przy tunelach widok opada, ale MMB wstecz ma pierwszeństwo. Lusterko u góry; odbicie wody. Wzgórza/doliny/rzeki; tunele w górach. Drzewa mogą wchodzić w pas; leć prześwitami.",
 		L"Gecikmeli kamera; dik yokuşta alttan. Tünel önünde bakış iner ama MMB geri bak öncelikli. Üstte dikiz aynası; suda düzlemsel yansıma. Tepe/vadi/ırmak; dağ tünelleri. Ağaçlar banta gömülebilir; boşluktan geçin."));
-	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。ライセンスフリーの写真テクスチャ56枚（512）をexeに埋め込んでいます（別ファイル不要）。地面はテーマ写真に細部を重ね、水面・機体・空の雲カード（複数種）とキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
-		L"Themes from forest to cloud garden. Terrain and props change per theme. Fifty-six license-free photo textures (512px) are embedded in the exe (no extra files): theme albedo plus detail, water, craft, several cloud cards and a sky cube. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
-		L"Thèmes forêt→jardin de nuages. 56 textures photo 512 dans l'exe (albédo+détail, eau, nuages, ciel). Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
-		L"Temi foresta→giardino di nubi. 56 texture foto 512 nell'exe (albedo+dettaglio, acqua, nubi, cielo). Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
-		L"Temas bosque→jardín de nubes. 56 texturas foto 512 en el exe (albedo+detalle, agua, nubes, cielo). Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
-		L"테마: 숲~구름 정원. 라이선스 프리 사진 텍스처 56장(512)을 exe에 내장. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
-		L"主题从森林到云之庭。许可证自由照片纹理56张、512、嵌入exe。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
-		L"Themes forest→cloud garden. 56 photo textures 512 in the exe (albedo+detail, water, cloud cards, sky cube). Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
-		L"Темы лес→облачный сад. 56 фототекстур 512 в exe (альбедо+деталь, вода, облака, небо). Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
-		L"Themen Wald→Wolkengarten. 56 Fototexturen 512 in der exe (Albedo+Detail, Wasser, Wolken, Himmel). Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
-		L"Temas floresta→jardim de nuvens. 56 texturas foto 512 no exe (albedo+detalhe, água, nuvens, céu). Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
-		L"Thema's bos→wolken tuin. 56 fototexturen 512 in de exe (albedo+detail, water, wolken, lucht). Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
-		L"Tematy las→ogród chmur. 56 tekstur zdjęciowych 512 w exe (albedo+szczegół, woda, chmury, niebo). Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
-		L"Temalar orman→bulut bahçesi. 56 adet 512 fotoğraf dokusu exe içinde (albedo+ayrıntı, su, bulut, gök). Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
+	line(LL14(L"テーマで森〜雲の庭まで変化。地形もオブジェクトもテーマごと。CC0の実写PBR（2048、法線・粗さ・高さ）を resource の bin から読みます。戦闘機は実メッシュで、翼が撓みプロペラが回ります。地面はテーマ写真に細部を重ね、水面・機体・空の雲カード（複数種）とキューブも写真。反射と乱反射があり、アイテムは結晶球です。生成のたびに輪郭も抽選（楕円／高低差のある八の字／角の丸い凸型／くびれた凹型）。八の字の交差は段差なので横切ってショートカットできない。枝下／土管の間／山のトンネル／急坂／開けた区間が混在。",
+		L"Themes from forest to cloud garden. Terrain and props change per theme. CC0 photo PBR at 2048 (albedo, normal, roughness, height) loads from the resource bin. Fighters are real meshes with flexing wings and spinning propellers. Water, cloud cards and the sky cube stay photographic. Wrap lighting and reflection; items are crystal orbs. Each Generate also picks a plan: oval, figure-8 with a height split (no flat shortcut through the crossing), rounded convex, or a concave pinch. Mix of canopy gaps, pipe gaps, mountain tunnels, steep climbs and open stretches.",
+		L"Thèmes forêt→jardin de nuages. PBR CC0 2048 (albédo, normale, rugosité) depuis le bin. Avions réels, ailes souples, hélice. Réflexion ; objets en orbes. Générer tire aussi le tracé: ovale, 8 avec dénivelé (pas de coupe à plat), convexe arrondi ou concave. Branches, tuyaux, tunnels, pentes, ouvert.",
+		L"Temi foresta→giardino di nubi. PBR CC0 2048 (albedo, normale, roughness) dal bin. Aerei reali, ali flessibili, elica. Riflessione; oggetti a sfera. Genera estrae anche il tracciato: ovale, 8 con dislivello, convesso o concavo. Rami, tubi, tunnel, salite, aperti.",
+		L"Temas bosque→jardín de nubes. PBR CC0 2048 (albedo, normal, rugosidad) desde el bin. Aviones reales, alas flexibles, hélice. Reflexión; objetos en orbe. Generar también elige el trazado: óvalo, 8 con desnivel, convexo o cóncavo. Ramas, tuberías, túneles, pendientes.",
+		L"테마: 숲~구름 정원. CC0 실사 PBR 2048(법선·거칠기·높이)을 resource bin에서 읽습니다. 전투기는 실제 메시, 날개 휨, 프로펠러 회전. 지면은 테마+세부, 수면·기체·구름 카드·하늘도 사진. 반사·난반사, 아이템은 결정 구. 생성마다 윤곽도 추첨(타원/고저 8자/볼록/오목). 8자 교차는 단차라 가로질러 숏컷 불가. 가지/파이프/터널/급경사/개방 혼합.",
+		L"主题从森林到云之庭。CC0 实拍 PBR 2048（法线、粗糙度、高度）从 resource 的 bin 读取。战斗机为真实网格，机翼弯曲，螺旋桨旋转。地面为主题加细节，水面/机体/云卡/天空亦为照片。反射与漫反射，道具为结晶球。每次生成也抽轮廓：椭圆／带高低差的8字（交叉处不能平切）／圆角凸形／收腰凹形。枝下/管隙/山洞/急坡/开阔混在。",
+		L"Themes forest→cloud garden. CC0 PBR 2048 from the resource bin. Real fighter meshes, flexing wings, spinning props. Reflection; crystal item orbs. Generate also picks oval, a height-split figure-8 (no flat shortcut), rounded convex or a concave pinch. Branches/pipes/tunnels/climbs/open.",
+		L"Темы лес→облачный сад. CC0 PBR 2048 из bin. Реальные истребители, гибкие крылья, винт. Отражение; предметы-сферы. Создать также выбирает овал, восьмёрку с перепадом, выпуклый или вогнутый контур.",
+		L"Themen Wald→Wolkengarten. CC0-PBR 2048 aus dem Bin. Echte Jäger, biegsame Flügel, Propeller. Reflexion; Item-Kugeln. Erzeugen wählt auch Oval, Achter mit Höhensprung, konvex oder konkav.",
+		L"Temas floresta→jardim de nuvens. PBR CC0 2048 do bin. Caças reais, asas flexíveis, hélice. Reflexão; orbes de item. Gerar também escolhe oval, 8 com desnível, convexo ou côncavo.",
+		L"Thema's bos→wolken tuin. CC0 PBR 2048 uit de bin. Echte jagers, buigende vleugels, propeller. Reflectie; item-bollen. Genereren kiest ook ovaal, 8-vorm met hoogteverschil, convex of concaaf.",
+		L"Tematy las→ogród chmur. CC0 PBR 2048 z bin. Prawdziwe myśliwce, giętkie skrzydła, śmigło. Odbicie; kule przedmiotów. Generuj losuje też owal, ósemkę z przewyższeniem, wypukły lub wklęsły.",
+		L"Temalar orman→bulut bahçesi. CC0 PBR 2048 resource bininden. Gerçek uçak örgüsü, esneyen kanat, pervane. Yansıma; öğe küreleri. Üret oval, yükseklik farklı 8, dışbükey veya içbükey de seçer."));
 	line(LL14(L"アイテム球の上に、機体と同じ系統の小さなラベルが出ます（種類が分かります）。",
 		L"A small craft-style label sits above each item orb so you can tell the type.",
 		L"Petite étiquette (comme les appareils) au-dessus de chaque orbe.",
@@ -1113,7 +1114,7 @@ CS3rView::CS3rView()
 	, m_texObs(NULL), m_srvObs(NULL), m_texObsD(NULL), m_srvObsD(NULL)
 	, m_texEnv(NULL), m_srvEnv(NULL), m_texEnv2(NULL), m_srvEnv2(NULL)
 	, m_texSky(NULL), m_srvSky(NULL), m_texSky2(NULL), m_srvSky2(NULL), m_texSky3(NULL), m_srvSky3(NULL), m_texSky4(NULL), m_srvSky4(NULL)
-	, m_texItem(NULL), m_srvItem(NULL), m_texWood(NULL), m_srvWood(NULL)
+	, m_texItem(NULL), m_srvItem(NULL), m_texWood(NULL), m_srvWood(NULL), m_texWoodN(NULL), m_srvWoodN(NULL)
 	, m_texCraft(NULL), m_srvCraft(NULL), m_texCraftD(NULL), m_srvCraftD(NULL)
 	, m_texNoise(NULL), m_srvNoise(NULL), m_uavNoise(NULL)
 	, m_texClear(NULL), m_srvClear(NULL), m_clearTexW(0), m_clearTexH(0)
@@ -1273,8 +1274,8 @@ BOOL CS3rView::CreateProcTextures()
 	auto softN=[&](int x,int y,int s)->int{
 		return (int)(fbm((float)x * 0.1f, (float)y * 0.1f, s, 3) * 255.f) - 128;
 	};
-	const int W=512,H=512;
-	DWORD* pix=new (std::nothrow) DWORD[W*H];
+	const int W=512,H=512,SW=2048,SH=2048;
+	DWORD* pix=new (std::nothrow) DWORD[SW*(size_t)SH];
 	if(!pix) return FALSE;
 	D3D11_TEXTURE2D_DESC d={}; d.Width=W;d.Height=H;d.MipLevels=1;d.ArraySize=1;d.Format=DXGI_FORMAT_B8G8R8A8_UNORM;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_IMMUTABLE;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
 	static const int kThemeRes[S3R_THEME_N]={
@@ -1282,7 +1283,9 @@ BOOL CS3rView::CreateProcTextures()
 		IDR_S3TEX_R_UNDER,IDR_S3TEX_R_GRASS,IDR_S3TEX_R_MESA,IDR_S3TEX_R_CLOUD
 	};
 	for(int th=0;th<S3R_THEME_N;th++){
-		if(!Soft3DTexLoadPngRes(kThemeRes[th],pix,W,H)){
+		int tw=W,thh=H;
+		if(Soft3DTexLoadPngRes(kThemeRes[th],pix,SW,SH)){tw=SW;thh=SH;}
+		else{
 		for(int y=0;y<H;y++)for(int x=0;x<W;x++){
 			int n=softN(x,y,th+3); BYTE r,g,b,a=255;
 			if(th==0){ // forest
@@ -1321,11 +1324,12 @@ BOOL CS3rView::CreateProcTextures()
 			pix[y*W+x]=((DWORD)a<<24)|((DWORD)r<<16)|((DWORD)g<<8)|b;
 		}
 		}
-		D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0};
-		if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texTheme[th]))||FAILED(m_dev->CreateShaderResourceView(m_texTheme[th],NULL,&m_srvTheme[th]))){delete[] pix;return FALSE;}
+		if(!Soft3DCreateTex2DMips(m_dev,pix,tw,thh,&m_texTheme[th],&m_srvTheme[th])){delete[] pix;return FALSE;}
 	}
 	// 機体専用スキン（メッシュ UV 用）— パネル／ストライプ／キャノピ用グラデ
-	if(!Soft3DTexLoadPngRes(IDR_S3TEX_R_CRAFT,pix,W,H)){
+	int craftW=W,craftH=H;
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_CRAFT,pix,SW,SH)){craftW=SW;craftH=SH;}
+	else{
 	for(int y=0;y<H;y++)for(int x=0;x<W;x++){
 		float u=(float)x/(W-1), v=(float)y/(H-1);
 		float panel = 0.88f + 0.08f*sinf(u*18.f) + 0.06f*sinf(v*10.f);
@@ -1346,7 +1350,7 @@ BOOL CS3rView::CreateProcTextures()
 		pix[y*W+x]=0xff000000|((DWORD)r<<16)|((DWORD)g<<8)|b;
 	}
 	}
-	{D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texCraft))||FAILED(m_dev->CreateShaderResourceView(m_texCraft,NULL,&m_srvCraft))){delete[] pix;return FALSE;}}
+	if(!Soft3DCreateTex2DMips(m_dev,pix,craftW,craftH,&m_texCraft,&m_srvCraft)){delete[] pix;return FALSE;}
 	// power band ribbon texture (glowing pastel)
 	if(!Soft3DTexLoadPngRes(IDR_S3TEX_R_BAND,pix,W,H)){
 	for(int y=0;y<H;y++)for(int x=0;x<W;x++){
@@ -1361,33 +1365,32 @@ BOOL CS3rView::CreateProcTextures()
 	}
 	}
 	{D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0}; if(FAILED(m_dev->CreateTexture2D(&d,&sd,&m_texBand))||FAILED(m_dev->CreateShaderResourceView(m_texBand,NULL,&m_srvBand))){delete[] pix;return FALSE;}}
-	auto upload2d=[&](ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv)->BOOL{
-		D3D11_SUBRESOURCE_DATA sd={pix,(UINT)(W*4),0};
-		return SUCCEEDED(m_dev->CreateTexture2D(&d,&sd,tex)) && SUCCEEDED(m_dev->CreateShaderResourceView(*tex,NULL,srv));
+	auto upload2d=[&](ID3D11Texture2D** tex, ID3D11ShaderResourceView** srv, int tw, int thh)->BOOL{
+		return Soft3DCreateTex2DMips(m_dev, pix, tw, thh, tex, srv) ? TRUE : FALSE;
 	};
 	static const int kThemeDetRes[S3R_THEME_N]={
 		IDR_S3TEX_R_FOREST_D,IDR_S3TEX_R_RUINS_D,IDR_S3TEX_R_OIL_D,IDR_S3TEX_R_NIGHT_D,
 		IDR_S3TEX_R_UNDER_D,IDR_S3TEX_R_GRASS_D,IDR_S3TEX_R_MESA_D,IDR_S3TEX_R_CLOUD_D
 	};
 	for(int th=0;th<S3R_THEME_N;th++){
-		if(Soft3DTexLoadPngRes(kThemeDetRes[th],pix,W,H)){
-			if(!upload2d(&m_texThemeD[th],&m_srvThemeD[th])){delete[] pix;return FALSE;}
+		if(Soft3DTexLoadPngRes(kThemeDetRes[th],pix,SW,SH)){
+			if(!upload2d(&m_texThemeD[th],&m_srvThemeD[th],SW,SH)){delete[] pix;return FALSE;}
 		}
 	}
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_CRAFT_D,pix,W,H)){
-		if(!upload2d(&m_texCraftD,&m_srvCraftD)){delete[] pix;return FALSE;}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_CRAFT_D,pix,SW,SH)){
+		if(!upload2d(&m_texCraftD,&m_srvCraftD,SW,SH)){delete[] pix;return FALSE;}
 	}
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER,pix,W,H)){
-		if(!upload2d(&m_texWater,&m_srvWater)){delete[] pix;return FALSE;}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER,pix,SW,SH)){
+		if(!upload2d(&m_texWater,&m_srvWater,SW,SH)){delete[] pix;return FALSE;}
 	}
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER_D,pix,W,H)){
-		if(!upload2d(&m_texWaterD,&m_srvWaterD)){delete[] pix;return FALSE;}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WATER_D,pix,SW,SH)){
+		if(!upload2d(&m_texWaterD,&m_srvWaterD,SW,SH)){delete[] pix;return FALSE;}
 	}
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS,pix,W,H)){
-		if(!upload2d(&m_texObs,&m_srvObs)){delete[] pix;return FALSE;}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS,pix,SW,SH)){
+		if(!upload2d(&m_texObs,&m_srvObs,SW,SH)){delete[] pix;return FALSE;}
 	}
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS_D,pix,W,H)){
-		if(!upload2d(&m_texObsD,&m_srvObsD)){delete[] pix;return FALSE;}
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_OBS_D,pix,SW,SH)){
+		if(!upload2d(&m_texObsD,&m_srvObsD,SW,SH)){delete[] pix;return FALSE;}
 	}
 	// env cube: stacked +X -X +Y -Y +Z -Z photo strip, else procedural sky
 	d.ArraySize=6; d.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
@@ -1419,12 +1422,13 @@ BOOL CS3rView::CreateProcTextures()
 	}
 	delete[] cube;
 	d.ArraySize=1; d.MiscFlags=0;
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY,pix,W,H)){ if(!upload2d(&m_texSky,&m_srvSky)){delete[] pix;return FALSE;} }
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY2,pix,W,H)){ if(!upload2d(&m_texSky2,&m_srvSky2)){delete[] pix;return FALSE;} }
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY3,pix,W,H)){ if(!upload2d(&m_texSky3,&m_srvSky3)){delete[] pix;return FALSE;} }
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY4,pix,W,H)){ if(!upload2d(&m_texSky4,&m_srvSky4)){delete[] pix;return FALSE;} }
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_ITEM,pix,W,H)){ if(!upload2d(&m_texItem,&m_srvItem)){delete[] pix;return FALSE;} }
-	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WOOD,pix,W,H)){ if(!upload2d(&m_texWood,&m_srvWood)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY,pix,W,H)){ if(!upload2d(&m_texSky,&m_srvSky,W,H)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY2,pix,W,H)){ if(!upload2d(&m_texSky2,&m_srvSky2,W,H)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY3,pix,W,H)){ if(!upload2d(&m_texSky3,&m_srvSky3,W,H)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_SKY4,pix,W,H)){ if(!upload2d(&m_texSky4,&m_srvSky4,W,H)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_ITEM,pix,W,H)){ if(!upload2d(&m_texItem,&m_srvItem,W,H)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadPngRes(IDR_S3TEX_R_WOOD,pix,SW,SH)){ if(!upload2d(&m_texWood,&m_srvWood,SW,SH)){delete[] pix;return FALSE;} }
+	if(Soft3DTexLoadNamed("race/r_wood_n.png",pix,SW,SH)){ if(!upload2d(&m_texWoodN,&m_srvWoodN,SW,SH)){delete[] pix;return FALSE;} }
 	delete[] pix;
 	// noise UAV target 256x64 相当の天気マップ（毎フレ CS）
 	{
@@ -2038,7 +2042,7 @@ void CS3rView::ReleaseDx()
 	S3R_RELEASE(m_hmBuf[0]); S3R_RELEASE(m_hmBuf[1]); S3R_RELEASE(m_hmBuf[2]);
 	S3R_RELEASE(m_csGridWrite); S3R_RELEASE(m_csGridCount);
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
-	S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
+	S3R_RELEASE(m_srvWoodN);S3R_RELEASE(m_texWoodN);S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
 	S3R_RELEASE(m_srvSky4);S3R_RELEASE(m_texSky4);S3R_RELEASE(m_srvSky3);S3R_RELEASE(m_texSky3);
 	S3R_RELEASE(m_srvSky2);S3R_RELEASE(m_texSky2);S3R_RELEASE(m_srvSky);S3R_RELEASE(m_texSky);
 	S3R_RELEASE(m_srvEnv2);S3R_RELEASE(m_texEnv2);S3R_RELEASE(m_srvEnv);S3R_RELEASE(m_texEnv);S3R_RELEASE(m_srvCraftD);S3R_RELEASE(m_texCraftD);S3R_RELEASE(m_srvCraft);S3R_RELEASE(m_texCraft);
@@ -3363,9 +3367,53 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 	if (!nestedTick) m_inTick = 0;
 }
 
+static BOOL S3rLoadCraftBin(CSoft3DRaceDlg* dlg)
+{
+	if (!dlg) return FALSE;
+	wchar_t exe[MAX_PATH], path[MAX_PATH];
+	GetModuleFileNameW(NULL, exe, MAX_PATH);
+	wchar_t* sl = wcsrchr(exe, L'\\');
+	if (sl) *sl = 0;
+	swprintf_s(path, L"%s\\tacticsbgm\\resource\\race\\r_craft.bin", exe);
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return FALSE;
+	DWORD got = 0;
+	char mag[4] = {};
+	unsigned ver = 0, nmesh = 0;
+	if (!ReadFile(h, mag, 4, &got, NULL) || got != 4 || memcmp(mag, "S3MS", 4) != 0) { CloseHandle(h); return FALSE; }
+	if (!ReadFile(h, &ver, 4, &got, NULL) || got != 4 || ver != 1) { CloseHandle(h); return FALSE; }
+	if (!ReadFile(h, &nmesh, 4, &got, NULL) || got != 4 || nmesh != (unsigned)CSoft3DRaceDlg::S3R_MAX_CRAFT) { CloseHandle(h); return FALSE; }
+	dlg->m_craftNv = 0;
+	dlg->m_craftNi = 0;
+	BOOL ok = TRUE;
+	for (unsigned s = 0; s < nmesh && ok; s++) {
+		unsigned nv = 0, ni = 0;
+		if (!ReadFile(h, &nv, 4, &got, NULL) || got != 4 || !ReadFile(h, &ni, 4, &got, NULL) || got != 4) { ok = FALSE; break; }
+		if (nv < 3 || ni < 3 || dlg->m_craftNv + (int)nv > CSoft3DRaceDlg::S3R_CRAFT_VMAX || dlg->m_craftNi + (int)ni > CSoft3DRaceDlg::S3R_CRAFT_IMAX) { ok = FALSE; break; }
+		const UINT base = (UINT)dlg->m_craftNv;
+		const DWORD vb = nv * 16u * 4u;
+		if (!ReadFile(h, dlg->m_craftVert + (size_t)dlg->m_craftNv * 16, vb, &got, NULL) || got != vb) { ok = FALSE; break; }
+		dlg->m_craftNv += (int)nv;
+		const DWORD ib = ni * 4u;
+		dlg->m_craftMeshI0[s] = dlg->m_craftNi;
+		UINT* dst = dlg->m_craftIdx + dlg->m_craftNi;
+		if (!ReadFile(h, dst, ib, &got, NULL) || got != ib) { ok = FALSE; break; }
+		for (unsigned i = 0; i < ni; i++) {
+			if (dst[i] >= nv) { ok = FALSE; break; }
+			dst[i] += base;
+		}
+		dlg->m_craftNi += (int)ni;
+		dlg->m_craftMeshNi[s] = (int)ni;
+	}
+	CloseHandle(h);
+	if (!ok) { dlg->m_craftNv = 0; dlg->m_craftNi = 0; return FALSE; }
+	return TRUE;
+}
+
 void CSoft3DRaceDlg::BuildCraftMeshes()
 {
-	// 12 機種の戦闘機（+Z 機首、+Y 上、ボーン1/2=主翼、3=尾翼）
+	if (S3rLoadCraftBin(this)) return;
+	// 12 機種の戦闘機（+Z 機首、+Y 上、ボーン1/2=主翼、3=尾翼、12=プロペラ）
 	m_craftNv = 0; m_craftNi = 0;
 	memset(m_craftMeshI0, 0, sizeof(m_craftMeshI0));
 	memset(m_craftMeshNi, 0, sizeof(m_craftMeshNi));
@@ -7672,8 +7720,9 @@ void CSoft3DRaceDlg::RenderScene()
 		}
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
 		{
-			ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsR;
-			ID3D11ShaderResourceView* srvs[]={themeR,scenT1,NULL,envR,shR,noiseR};
+			ID3D11ShaderResourceView* scenT0=m_view.m_srvWood?m_view.m_srvWood:themeR;
+			ID3D11ShaderResourceView* scenT1=m_view.m_srvWoodN?m_view.m_srvWoodN:scenT0;
+			ID3D11ShaderResourceView* srvs[]={scenT0,scenT1,NULL,envR,shR,noiseR};
 			dc->PSSetShaderResources(0,6,srvs);
 			if (m_view.m_vbSceneryParts > 0)
 				drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
@@ -7771,8 +7820,9 @@ void CSoft3DRaceDlg::RenderScene()
 		}
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
 		{
-			ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsM;
-			ID3D11ShaderResourceView* srvs[]={themeM,scenT1,NULL,envM,shM,noiseM};
+			ID3D11ShaderResourceView* scenT0=m_view.m_srvWood?m_view.m_srvWood:themeM;
+			ID3D11ShaderResourceView* scenT1=m_view.m_srvWoodN?m_view.m_srvWoodN:scenT0;
+			ID3D11ShaderResourceView* srvs[]={scenT0,scenT1,NULL,envM,shM,noiseM};
 			dc->PSSetShaderResources(0,6,srvs);
 			if (m_view.m_vbSceneryParts > 0)
 				drawParts(m_view.m_vbScenery, m_view.m_vbSceneryN, m_view.m_vbSceneryParts, 3);
@@ -7889,8 +7939,9 @@ void CSoft3DRaceDlg::RenderScene()
 	}
 	{
 		dc->PSSetShader(m_view.m_psSolid,NULL,0);
-		ID3D11ShaderResourceView* scenT1=m_view.m_srvWood?m_view.m_srvWood:obsSrv;
-		ID3D11ShaderResourceView* srvs[]={themeSrv,scenT1,NULL,envSrv,shSrv,noiseSrv};
+		ID3D11ShaderResourceView* scenT0=m_view.m_srvWood?m_view.m_srvWood:themeSrv;
+		ID3D11ShaderResourceView* scenT1=m_view.m_srvWoodN?m_view.m_srvWoodN:scenT0;
+		ID3D11ShaderResourceView* srvs[]={scenT0,scenT1,NULL,envSrv,shSrv,noiseSrv};
 		dc->PSSetShaderResources(0,6,srvs);
 		if (m_view.m_vbSceneryParts > 0) {
 			dc->GSSetShader(m_view.m_gsWind,NULL,0);

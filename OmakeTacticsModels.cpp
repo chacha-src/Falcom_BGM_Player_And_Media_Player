@@ -2826,6 +2826,7 @@ void PortraitVisFill(const Renderer& r, const Actor& a, float time, DrawParams& 
 
 BOOL ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
+	if (a.model < 0) return FALSE;
 	if (a.proc == 3) {
 		if (!a.poseValid) ActorPose(a, lib, r);
 		if (!a.poseValid) return TRUE;

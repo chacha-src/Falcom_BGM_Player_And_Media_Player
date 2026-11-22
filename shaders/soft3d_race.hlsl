@@ -25,7 +25,13 @@ float3 Fres(float3 F0,float vh){return F0+(1.-F0)*pow(1.-saturate(vh),5.);}
 float Gsch(float nv,float nl,float a){float k=pow(a+1.,2.)/8.;return (nv/(nv*(1.-k)+k))*(nl/(nl*(1.-k)+k));}
 float3 SpecB(float3 n,float3 l,float3 v,float rough,float3 F0){float3 h=normalize(l+v);float nh=saturate(dot(n,h)),nv=saturate(dot(n,v)),nl=saturate(dot(n,l)),vh=saturate(dot(v,h));float a=max(rough*rough,.002);return Dggx(nh,a)*Gsch(nv,nl,a)*Fres(F0,vh)/max(4.*nv*nl,1e-4);}
 float3 EnvR(float3 n,float3 v,float rough){return Env.SampleLevel(SL,reflect(-v,n),clamp(rough*5.5,0.,7.)).rgb;}
-float2 POM(float2 uv,float3 vw,float3 n,float s){float3 t=normalize(cross(n,abs(n.y)>.9?float3(1,0,0):float3(0,1,0)));float2 du=float2(dot(vw,t),-vw.y)*s;[unroll]for(int i=0;i<6;i++)uv-=du*(T1.Sample(SL,uv).r-.48);return uv;}
+float PbrA(float a){return step(0.08,a)*step(a,0.92);}
+float3 NMap(float3 n,float3 w,float2 uv){float4 pk=T1.Sample(SL,uv);if(PbrA(pk.a)<0.5)return normalize(n);
+float2 xy=pk.xy*2.-1.;xy.y=-xy.y;float3 N=normalize(n);float3 dp1=ddx(w),dp2=ddy(w);float2 du1=ddx(uv),du2=ddy(uv);
+float3 T=dp1*du2.y-dp2*du1.y;float3 B=dp2*du1.x-dp1*du2.x;float tl=length(T),bl=length(B);if(tl<1e-4||bl<1e-4)return N;
+T/=tl;B/=bl;float nz=sqrt(saturate(1.-dot(xy,xy)));return normalize(T*xy.x+B*xy.y+N*nz);}
+float RoughP(float2 uv,float fb){float4 pk=T1.Sample(SL,uv);return lerp(fb,saturate(pk.b),PbrA(pk.a));}
+float2 POM(float2 uv,float3 vw,float3 n,float s){float4 pk=T1.Sample(SL,uv);if(PbrA(pk.a)<0.5)return uv;float3 t=normalize(cross(n,abs(n.y)>.9?float3(1,0,0):float3(0,1,0)));float2 du=float2(dot(vw,t),-vw.y)*s;[unroll]for(int i=0;i<6;i++)uv-=du*(T1.Sample(SL,uv).a-.5);return uv;}
 float ContAO(float3 n){float g=length(float2(ddx(n.y),ddy(n.y)));return saturate(1.-g*3.2);}
 float PeelAmt(float3 w){float rad=abs(Peel.w);if(rad<.05)return 0;float3 e=Eye.xyz;float3 pl=Peel.xyz-e;float lp=length(pl);if(lp<1.1)return 0;
 float3 dir=pl/lp;float3 tw=w-e;float along=dot(tw,dir);float dl=length(tw-dir*along);
@@ -93,12 +99,13 @@ float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate
 float nd=lerp(.30,max(ndl,.22),sh);nd=saturate(nd*.62+wrap*wrap*.48);
 float uvk=saturate((0.96-i.c.a)*18.);
 float2 suv=lerp(i.w.xz*0.0048+i.w.y*0.002,i.uv,uvk);suv=lerp(suv,POM(suv,v,n,.018),1.-uvk);
+float pbrS=PbrA(T1.Sample(SL,suv).a);if(pbrS>0.5)n=NMap(n,i.w,suv);
 float4 tex4=T0.Sample(SL,suv);float3 tex=tex4.rgb;
 float3 det=T1.Sample(SL,lerp(i.w.xz*0.021+i.w.y*0.014,i.uv*2.,uvk)).rgb;
-float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.38,0.52*(1.-uvk)));
+float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.38,0.52*(1.-uvk)*(1.-pbrS)));
 float3 base=lerp(i.c.rgb,photo,lerp(0.62,0.94,uvk));
 float3 env=EnvR(n,v,lerp(.45,.18,uvk));float fr=pow(1.-saturate(dot(n,v)),2.2);float ndc=lerp(nd,saturate(.70+wrap*.32),uvk);
-float3 c=base*ndc*ContAO(n)+env*(.14+fr*.30)*(1.-uvk*.55)+SpecB(n,l,v,lerp(.55,.28,uvk),lerp(float3(.04,.04,.04),float3(.08,.08,.08),uvk))*sh*1.8;
+float3 c=base*ndc*ContAO(n)+env*(.14+fr*.30)*(1.-uvk*.55)+SpecB(n,l,v,RoughP(suv,lerp(.55,.28,uvk)),lerp(float3(.04,.04,.04),float3(.08,.08,.08),uvk))*sh*1.8;
 float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);
 float al=saturate(lerp(i.c.a,max(tex4.a,0.90),uvk));if(al<0.08&&uvk>0.5)discard;
 float nw=saturate((Fog.z+1.4-i.w.y)/2.6)*(1.-uvk);c=lerp(c,c*float3(.78,.88,.92)+float3(.08,.14,.16)*pow(saturate(dot(reflect(-l,n),v)),28)*sh,nw*.5);
@@ -125,9 +132,12 @@ return float4(ReflectMap.Sample(SL,saturate(muv)).rgb,mb);}
 float4 PSW(D i):SV_Target{float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);
 float2 wp=i.w.xz*0.065+Misc.w*float2(.025,-.02);float w1=fbm(wp),w2=fbm(wp.yx*1.5+float2(Misc.w*.045,0));
 n=normalize(n+float3((w1-.5)*1.2,0,(w2-.5)*1.15)*.5);
+float2 wuv=i.w.xz*0.07+Misc.w*float2(.04,-.025);
+n=normalize(lerp(n,NMap(n,i.w,wuv),0.78));
 float sh=ShadowAt(i.w,n);float3 v=normalize(Eye.xyz-i.w);float ndv=saturate(dot(n,v));float F=0.02+0.98*pow(1.-ndv,5.);
 float depth=saturate(i.c.a);float3 shallow=saturate(i.c.rgb*float3(1.15,1.28,1.2));float3 deepC=float3(.02,.09,.14);
 float3 waterAlb=lerp(shallow,deepC,smoothstep(.05,.8,depth));
+waterAlb=lerp(waterAlb,waterAlb*T0.Sample(SL,wuv).rgb*1.35,PbrA(T1.Sample(SL,wuv).a)*0.62);
 float2 suv=i.p.xy*Screen.zw;float2 ruv=saturate(suv+n.xz*lerp(.008,.035,depth)*(1.05-ndv));
 float3 refr=Depth.Sample(SL,ruv).rgb;float hasR=saturate(dot(refr,1)*2.2);
 float3 beer=exp(-float3(.18,.08,.05)*lerp(.8,3.2,depth));float3 under=lerp(waterAlb,refr*beer*1.4,hasR);
@@ -145,24 +155,27 @@ return float4(lerp(c,float3(.42,.60,.80),fg*.26),saturate(al));}
 float4 PST(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normalize(i.n);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);
 float slope=saturate(1.-n.y);float h=i.w.y;float th=Eye.w;
 float nLo=fbm(i.w.xz*0.028), nHi=fbm(i.w.xz*0.11);
-n=normalize(n+float3(nHi-.45,0,nLo-.45)*slope*0.62);
-float3 v=normalize(Eye.xyz-i.w);float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);
+float3 v=normalize(Eye.xyz-i.w);
+float2 tuv=POM(i.w.xz*0.0038,v,n,.028);
+float pbr=PbrA(T1.Sample(SL,tuv).a);
+n=pbr>0.5?NMap(n,i.w,tuv):normalize(n+float3(nHi-.45,0,nLo-.45)*slope*0.35);
+float ndl=saturate(dot(n,l));float wrap=saturate(dot(n,l)*.5+.5);
 float nd=lerp(.24,max(ndl,.16),sh);nd=saturate(nd*.58+wrap*wrap*.52);
-float2 tuv=POM(i.w.xz*0.0038,v,n,.022);
 float3 tex=T0.Sample(SL,tuv).rgb;
 float3 det=T1.Sample(SL,i.w.xz*0.018).rgb;
-float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.32,0.55));
-float3 dirt=lerp(i.c.rgb,photo,0.72);
-float3 rock=dirt*lerp(float3(.62,.58,.52),float3(.48,.42,.36),saturate(slope*1.4));
-float3 wet=lerp(dirt,float3(.16,.26,.34),0.72);
-if(th<0.5){rock=float3(.36,.30,.20);wet=float3(.10,.22,.16);}
-else if(th<1.5){rock=float3(.50,.46,.40);wet=float3(.28,.26,.24);}
-else if(th<2.5){rock=float3(.30,.32,.34);wet=float3(.14,.16,.18);}
-else if(th<3.5){rock=float3(.22,.24,.34);wet=float3(.08,.10,.18);}
-else if(th<4.5){rock=float3(.20,.38,.48);wet=float3(.08,.22,.36);}
-else if(th<5.5){rock=float3(.42,.36,.22);wet=float3(.12,.28,.18);}
-else if(th<6.5){rock=float3(.62,.38,.24);wet=float3(.28,.18,.12);}
-else {rock=float3(.78,.80,.88);wet=float3(.55,.62,.78);}
+float3 photo=saturate(tex*lerp(float3(1,1,1),det*1.32,0.55*(1.-pbr)));
+float3 dirt=lerp(i.c.rgb,photo,lerp(0.72,0.97,pbr));
+float3 rockT=lerp(float3(.78,.72,.64),float3(.62,.56,.50),saturate(slope*1.4));
+float3 wetT=float3(.62,.70,.76);
+if(th<0.5){rockT=float3(.82,.74,.58);wetT=float3(.48,.68,.42);}
+else if(th<1.5){rockT=float3(.86,.82,.76);wetT=float3(.66,.64,.62);}
+else if(th<2.5){rockT=float3(.72,.74,.76);wetT=float3(.55,.58,.60);}
+else if(th<3.5){rockT=float3(.64,.66,.80);wetT=float3(.42,.50,.64);}
+else if(th<4.5){rockT=float3(.58,.74,.84);wetT=float3(.38,.64,.80);}
+else if(th<5.5){rockT=float3(.80,.70,.54);wetT=float3(.46,.70,.50);}
+else if(th<6.5){rockT=float3(.94,.64,.44);wetT=float3(.74,.50,.38);}
+else {rockT=float3(.94,.96,.99);wetT=float3(.74,.82,.94);}
+float3 rock=dirt*rockT;float3 wet=dirt*wetT;
 float3 base=lerp(dirt,rock,saturate(slope*2.5+nHi*0.18));
 float waterL=Fog.z;float low=saturate((waterL+1.6-h)/2.2);float submerged=saturate((waterL-h)/3.5);
 base=lerp(base,wet,low*(1.-slope)*0.72);
@@ -172,7 +185,7 @@ if(th>2.5&&th<3.6) base=lerp(base,float3(.88,.92,1),saturate(n.y+.15)*.42);
 if(th>5.5&&th<6.6) base=lerp(base,float3(.95,.72,.48),saturate((h-28.)/22.)*0.35);
 float3 env=EnvR(n,v,lerp(.62,.28,slope));float fr=pow(1.-saturate(dot(n,v)),2.4);
 float hemi=saturate(n.y*.5+.5);float3 hemiC=lerp(float3(.55,.48,.42),float3(.72,.82,.98),hemi);
-float3 c=base*nd*lerp(float3(1,1,1),hemiC,0.24)*ContAO(n)+env*(.12+fr*.28)+SpecB(n,l,v,lerp(.7,.32,slope),float3(.04,.04,.04))*sh*1.6;
+float3 c=base*nd*lerp(float3(1,1,1),hemiC,0.24)*ContAO(n)+env*(.12+fr*.28)+SpecB(n,l,v,RoughP(tuv,lerp(.55,.22,slope)),float3(.04,.04,.05))*sh*1.6;
 float specW=saturate(low*(1.-slope)*0.65);c+=float3(.25,.4,.5)*SpecB(n,l,v,.18,float3(.02,.04,.05))*specW*sh;
 float grass=saturate(n.y-slope)*saturate(1.-th)*smoothstep(.35,.8,nHi);
 c+=base*float3(.12,.28,.06)*pow(saturate(dot(n,l)*.4+.6),1.4)*grass*.35;
@@ -185,14 +198,15 @@ float4 PSC(D i):SV_Target{if(Fog.w>0.5&&i.w.y<Fog.z+0.08)discard;float3 n=normal
 float3 v=normalize(Eye.xyz-i.w);
 float ply=saturate((i.c.a-1.45)*4.);float va=i.c.a-ply*2.;
 float3 albedo=T0.Sample(SL,i.uv).rgb;
+float pbrC=PbrA(T1.Sample(SL,i.uv).a);
 float3 det=T1.Sample(SL,i.uv*4.6).rgb;
-albedo=saturate(albedo*lerp(float3(1,1,1),det*1.22,0.34));
+albedo=saturate(albedo*lerp(float3(1,1,1),det*1.22,0.34*(1.-pbrC)));
 float nz=(albedo.r-0.5)*0.14 + fbm(i.w.xz*12.+i.w.y*10.+Misc.w*.02)*0.08;
-n=normalize(n+float3(nz,nz,nz));
+n=pbrC>0.5?NMap(n,i.w,i.uv):normalize(n+float3(nz,nz,nz));
 float nd=lerp(.42,max(saturate(dot(n,l)),.28),sh);nd=saturate(nd*.70+saturate(dot(n,l)*.5+.5)*saturate(dot(n,l)*.5+.5)*.32);
 float3 base=saturate(i.c.rgb*albedo*1.05);
 float glass=saturate((va-0.74)*10.)*saturate((0.90-va)*16.);
-float rough=lerp(.40,.08,glass);float3 F0=lerp(float3(.045,.048,.052),float3(.16,.20,.26),glass);
+float rough=lerp(RoughP(i.uv,.38),.05,glass);float3 F0=lerp(float3(.04,.045,.05),float3(.18,.22,.28),glass);
 float3 env=EnvR(n,v,rough);float fr=pow(1.-saturate(dot(n,v)),3.1);
 float3 c=base*(0.40+0.60*nd)*ContAO(n)+env*(.07+fr*(.12+.28*glass))+SpecB(n,l,v,rough,F0)*sh*lerp(1.05,2.05,glass);
 c=lerp(c,c*float3(.16,.17,.22),ply*fr*0.62);

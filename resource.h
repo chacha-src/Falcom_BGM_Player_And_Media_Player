@@ -2422,6 +2422,7 @@
 #define IDR_CSO_TAC_PSSKY14             5013
 #define IDR_CSO_TAC_PSSKY15             5014
 #define IDR_CSO_TAC_PSSKY16             5015
+#define IDR_CSO_TAC_PSCUT               5016
 #define IDR_GS_WOPN                     399
 
 #define IDC_MP_BOT_SHORTCFG             5100

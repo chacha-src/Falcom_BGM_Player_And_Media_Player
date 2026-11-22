@@ -198,6 +198,8 @@ public:
 	ID3D11ShaderResourceView* m_srvItem;
 	ID3D11Texture2D* m_texWood;
 	ID3D11ShaderResourceView* m_srvWood;
+	ID3D11Texture2D* m_texWoodN;
+	ID3D11ShaderResourceView* m_srvWoodN;
 	ID3D11Texture2D* m_texNoise;
 	ID3D11ShaderResourceView* m_srvNoise;
 	ID3D11UnorderedAccessView* m_uavNoise;
@@ -315,8 +317,8 @@ public:
 		S3R_MAX_ITEMS = 64,
 		S3R_SPLINE_MAX = 96,
 		S3R_PATH_SAMPLES = 1024,
-		S3R_CRAFT_VMAX = 20480,
-		S3R_CRAFT_IMAX = 61440,
+		S3R_CRAFT_VMAX = 262144,
+		S3R_CRAFT_IMAX = 1048576,
 		S3R_OBS_VMAX = 32768,
 		S3R_OBS_IMAX = 98304,
 		S3R_HM_N = 161,

@@ -19,6 +19,7 @@
 #endif
 #include "SevenZipDec.h"
 #include "ZpaqRun.h"
+#include "Soft3DTexRes.h"
 
 // 09a があれば優先。なければ 08g。各版は .oxz → .7z → .zip。展開は exe 内。
 static const TCHAR* UPDATE_URL_PRIMARY_ZST = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.oxz");
@@ -3082,7 +3083,13 @@ static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, cons
 		int sl = out.ReverseFind(_T('\\'));
 		if (sl > 0) BonusMkDir(out.Left(sl));
 		CFile f;
-		if (!f.Open(out, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) { SevenZipClose(&a); return false; }
+		if (!f.Open(out, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+			const DWORD e = GetLastError();
+			if (e == ERROR_SHARING_VIOLATION || e == ERROR_LOCK_VIOLATION || e == ERROR_USER_MAPPED_FILE)
+				continue;
+			SevenZipClose(&a);
+			return false;
+		}
 		bool ok = true;
 		try { if (sz) f.Write(data, (UINT)sz); }
 		catch (CFileException* e) { e->Delete(); ok = false; }
@@ -3204,6 +3211,7 @@ bool EnsureBonusImages(int kind)
 		return true;
 	}
 	CString tmp = root + fetchName;
+	Soft3DReleaseBonusBins();
 	CString start;
 	start.Format(LL14(
 		L"%sを受け取っています…\n0%%",
@@ -3226,6 +3234,11 @@ bool EnsureBonusImages(int kind)
 	DeleteFile(tmp);
 	UpdateBusyClose();
 	if (!ok || GetFileAttributes(key) == INVALID_FILE_ATTRIBUTES) {
+		if (have) {
+			s_bonusChecked[kind] = true;
+			if (kind == 2) EnsureTacticsOggAvailable(true);
+			return true;
+		}
 		CString msg;
 		msg.Format(LL14(
 			L"%sを受け取れませんでした。",

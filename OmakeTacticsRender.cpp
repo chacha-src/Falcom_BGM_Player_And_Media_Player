@@ -383,7 +383,7 @@ Renderer::Renderer()
 	m_instOn = FALSE;
 	m_psM = m_psO = m_psOV = m_psH = m_psP = m_psSky = NULL;
 	for (int si = 0; si < TH_COUNT; si++) m_psSkyT[si] = NULL;
-	m_psBloom = m_psBlur = m_psGrade = m_psGradeTiny = m_psDofH = m_psDofU = m_psUi = NULL;
+	m_psBloom = m_psBlur = m_psGrade = m_psGradeTiny = m_psCut = m_psDofH = m_psDofU = m_psUi = NULL;
 	m_vsT = NULL; m_hsT = NULL; m_dsT = NULL;
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
 	for (int gi = 0; gi < TH_COUNT; gi++) m_psGround[gi] = NULL;
@@ -420,7 +420,8 @@ Renderer::Renderer()
 	m_scalpModel = -1;
 	m_capC = RGBA8(70, 70, 70);
 	for (int s = 0; s < TAC_SCALP_CACHE; s++) m_scalps[s].model = -1;
-	m_ilS = m_ilB = m_ilK = m_ilH = m_ilP = m_ilPT = NULL;
+	m_ilS = m_ilB = m_ilK = m_ilH = m_ilP = m_ilPT = m_ilCutFx = NULL;
+	m_vsCutFx = NULL; m_gsCutFx = NULL; m_psCutFx = NULL;
 	m_cbFrame = m_cbAir = m_cbRipple = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = m_vbInst = m_ibQuad = NULL; m_vbDynBytes = 0; m_vbInstBytes = 0; m_dynPos = 0xFFFFFFF0u; m_dynOff = 0; m_hudPos = 0xFFFFFFF0u; m_instPos = 0xFFFFFFF0u;
 	m_sLin = m_sCmp = m_sClamp = NULL;
 	m_rsBack = m_rsFront = m_rsNone = m_rsShadow = m_rsHud = NULL;
@@ -552,11 +553,12 @@ void Renderer::Release()
 	}
 	g_ptRingI = -1;
 	TAC_REL(m_srvPortrait); TAC_REL(m_ptRtv); TAC_REL(m_ptTex); TAC_REL(m_ptDsv); TAC_REL(m_ptDs);
-	TAC_REL(m_vsS); TAC_REL(m_vsSh); TAC_REL(m_vsB); TAC_REL(m_vsBSh); TAC_REL(m_vsK); TAC_REL(m_vsKSh); TAC_REL(m_vsH); TAC_REL(m_vsP); TAC_REL(m_vsPT); TAC_REL(m_vsQ);
+	TAC_REL(m_vsS); TAC_REL(m_vsSh); TAC_REL(m_vsB); TAC_REL(m_vsBSh); TAC_REL(m_vsK); TAC_REL(m_vsKSh); TAC_REL(m_vsH); TAC_REL(m_vsP); 	TAC_REL(m_vsPT); TAC_REL(m_vsQ);
 	TAC_REL(m_gsP);
+	TAC_REL(m_vsCutFx); TAC_REL(m_gsCutFx); TAC_REL(m_psCutFx); TAC_REL(m_ilCutFx);
 	TAC_REL(m_psM); TAC_REL(m_psO); TAC_REL(m_psOV); TAC_REL(m_psH); TAC_REL(m_psP); TAC_REL(m_psSky);
 	for (int si = 0; si < TH_COUNT; si++) TAC_REL(m_psSkyT[si]);
-	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psGradeTiny);
+	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psGradeTiny); TAC_REL(m_psCut);
 	TAC_REL(m_psDofH); TAC_REL(m_psDofU); TAC_REL(m_vsT); TAC_REL(m_hsT); TAC_REL(m_dsT); TAC_REL(m_psUi);
 	TAC_REL(m_psProp); TAC_REL(m_psWater); TAC_REL(m_psLava);
 	for (int gi = 0; gi < TH_COUNT; gi++) TAC_REL(m_psGround[gi]);
@@ -636,6 +638,27 @@ void Renderer::Release()
 	m_lost = FALSE;
 	TacAvaReset();
 	TacMonRestart();
+}
+
+static HRESULT LoadCutBlob(const char* entry, const char* profile, ID3DBlob** out)
+{
+	if (!out) return E_INVALIDARG;
+	*out = NULL;
+	if (SUCCEEDED(Soft3DLoadCso(L"tac", entry, profile, 0, L"omake_tactics_cut.hlsl", (void**)out)) && *out)
+		return S_OK;
+	const wchar_t* paths[] = {
+		L"c:\\projects\\APPLICATION3\\ogg_all2022\\shaders\\omake_tactics_cut.hlsl",
+		L"C:\\PROJECTS\\APPLICATION3\\ogg_all2022\\shaders\\omake_tactics_cut.hlsl",
+	};
+	for (int i = 0; i < 2; i++) {
+		if (GetFileAttributesW(paths[i]) == INVALID_FILE_ATTRIBUTES) continue;
+		ID3DBlob* err = NULL;
+		HRESULT hr = D3DCompileFromFile(paths[i], NULL, NULL, entry, profile, D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, out, &err);
+		if (err) err->Release();
+		if (SUCCEEDED(hr) && *out) return S_OK;
+		if (*out) { (*out)->Release(); *out = NULL; }
+	}
+	return E_FAIL;
 }
 
 BOOL Renderer::Init(HWND hwnd, int quality)
@@ -1240,6 +1263,31 @@ BOOL Renderer::CreateShaders()
 		} else { TAC_REL(m_vsPT); TAC_REL(m_gsP); }
 		TAC_REL(bVS); TAC_REL(bGS);
 	}
+	{
+		ID3DBlob* bv = NULL;
+		ID3DBlob* bg = NULL;
+		ID3DBlob* bp = NULL;
+		m_vsCutFx = NULL; m_gsCutFx = NULL; m_psCutFx = NULL; m_ilCutFx = NULL;
+		if (SUCCEEDED(LoadCutBlob("VSCut", "vs_5_0", &bv)) && bv
+			&& SUCCEEDED(LoadCutBlob("GSCut", "gs_5_0", &bg)) && bg
+			&& SUCCEEDED(LoadCutBlob("PSCut", "ps_5_0", &bp)) && bp
+			&& SUCCEEDED(m_dev->CreateVertexShader(bv->GetBufferPointer(), bv->GetBufferSize(), NULL, &m_vsCutFx))
+			&& SUCCEEDED(m_dev->CreateGeometryShader(bg->GetBufferPointer(), bg->GetBufferSize(), NULL, &m_gsCutFx))
+			&& SUCCEEDED(m_dev->CreatePixelShader(bp->GetBufferPointer(), bp->GetBufferSize(), NULL, &m_psCutFx))) {
+			D3D11_INPUT_ELEMENT_DESC lpt[] = {
+				{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				{ "TEXCOORD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 44, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			};
+			if (FAILED(m_dev->CreateInputLayout(lpt, 4, bv->GetBufferPointer(), bv->GetBufferSize(), &m_ilCutFx))) {
+				TAC_REL(m_vsCutFx); TAC_REL(m_gsCutFx); TAC_REL(m_psCutFx); m_ilCutFx = NULL;
+			}
+		} else {
+			TAC_REL(m_vsCutFx); TAC_REL(m_gsCutFx); TAC_REL(m_psCutFx); m_ilCutFx = NULL;
+		}
+		TAC_REL(bv); TAC_REL(bg); TAC_REL(bp);
+	}
 	TAC_REL(bS); TAC_REL(bK); TAC_REL(bH); TAC_REL(bP); TAC_REL(bQ);
 	{
 		ID3DBlob* bB = NULL;
@@ -1323,6 +1371,11 @@ BOOL Renderer::CreateShaders()
 		if (FAILED(Soft3DLoadCso(L"tac", "PSDofU", "ps_5_0", IDR_CSO_TAC_PSDOFU, L"omake_tactics_dof.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
 		hr = m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psDofU); TAC_REL(b);
 		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		m_psCut = NULL;
+		if (SUCCEEDED(Soft3DLoadCso(L"tac", "PSCut", "ps_5_0", IDR_CSO_TAC_PSCUT, L"omake_tactics.hlsl", (void**)&b)) && b) {
+			if (FAILED(m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psCut))) m_psCut = NULL;
+			TAC_REL(b);
+		}
 	}
 	{
 		static const int skyRid[TH_COUNT] = {
@@ -10574,14 +10627,19 @@ static void TacAirSplit(float time, const M4& inv, float amp, float breeze[3], f
 	const float aB = time * 0.11f;
 	const float aS = time * 0.047f + 1.9f;
 	const float aG = time * 0.031f + 4.4f;
-	const V3 b = MXformDir(inv, v3(cosf(aB) * (0.40f * br), 0.f, sinf(aB) * (0.40f * br)));
-	const V3 s = MXformDir(inv, v3(cosf(aS) * st * 1.30f, 0.f, sinf(aS) * st * 1.30f));
-	const V3 g = MXformDir(inv, v3(cosf(aG) * ga * 2.70f, 0.f, sinf(aG) * ga * 2.70f));
+	float bx = cosf(aB) * (0.40f * br);
+	float bz = sinf(aB) * (0.40f * br);
+	float mx = cosf(aS) * st * 1.30f + cosf(aG) * ga * 2.70f;
+	float mz = sinf(aS) * st * 1.30f + sinf(aG) * ga * 2.70f;
+	float yy = upg * 0.95f - dn * 1.15f;
+	TacClimateMod(bx, bz, mx, mz, yy);
+	const V3 b = MXformDir(inv, v3(bx, 0.f, bz));
+	const V3 s = MXformDir(inv, v3(mx, 0.f, mz));
 	breeze[0] = b.x * amp; breeze[1] = b.y * amp; breeze[2] = b.z * amp;
-	strong[0] = s.x * amp; strong[1] = s.y * amp; strong[2] = s.z * amp;
-	gale[0] = g.x * amp; gale[1] = g.y * amp; gale[2] = g.z * amp;
-	up = upg * 0.95f * amp;
-	down = dn * 1.15f * amp;
+	strong[0] = strong[1] = strong[2] = 0.f;
+	gale[0] = s.x * amp; gale[1] = s.y * amp; gale[2] = s.z * amp;
+	up = fmaxf(yy, 0.f) * amp;
+	down = fmaxf(-yy, 0.f) * amp;
 }
 
 // ゲートが立っているあいだ方向を覚え、落ちたあとも hold フレーム残し、attack で上げ release で下ろす。
@@ -12676,10 +12734,14 @@ static void TacUploadShaderAir(ID3D11DeviceContext* ctx, ID3D11Buffer* fallback,
 	}
 	const float inv = 0.125f;
 	bx *= inv; bz *= inv; mx *= inv; mz *= inv; y *= inv;
+	TacClimateMod(bx, bz, mx, mz, y);
 	float gust = sqrtf(mx * mx + mz * mz) / 2.70f + sqrtf(bx * bx + bz * bz) * 0.45f + fabsf(y) * 0.28f;
 	if (gust < 0.f) gust = 0.f;
 	if (gust > 1.f) gust = 1.f;
-	float o[16] = { bx, bz, mx, mz, y, gust, 0.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f };
+	const TacClimate& clim = TacClimateRead();
+	float spd = clim.live ? clim.speed : 0.f;
+	float tempC = clim.live ? clim.tempC : 20.f;
+	float o[16] = { bx, bz, mx, mz, y, gust, spd, tempC, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f, 99999.f, 0.f };
 	memcpy(o + 8, g_gustHide, sizeof(g_gustHide));
 	D3D11_MAPPED_SUBRESOURCE ms;
 	ID3D11Buffer* b = TacCbAcquire(g_airR, ctx, fallback, ms);
@@ -14276,7 +14338,7 @@ void Renderer::DrawTerrain()
 						if (fabsf(cy - m_fadeY) > 2.6f) continue;
 					} else if (layer != m_cutDeck) continue;
 				}
-				V3 cMid = v3(cx * 16.f + 8.f, cy, cz * 16.f + 8.f);
+				V3 cMid = MXformPt(m_sceneShift, v3(cx * 16.f + 8.f, cy, cz * 16.f + 8.f));
 				if (m_pass == PASS_SHADOW ? !InLight(cMid, rad) : !InView(cMid, rad)) continue;
 				// チャンク単位の透かしは、重なっていない上階まで消すので使わない。
 				if (m_pass == PASS_SHADOW) {
@@ -15006,7 +15068,7 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 			if (drip > n / 5) drip = n / 5;
 			if (drip < 8) drip = 8;
 		}
-		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = heat; cb[19] = 0;
+		cb[16] = (float)drip; cb[17] = (float)wx; cb[18] = heat; cb[19] = TacClimateRead().precip;
 		memcpy(wxMs.pData, cb, sizeof(cb));
 		m_ctx->Unmap(wxCb, 0);
 	}
@@ -15038,6 +15100,74 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	m_ctx->CSSetConstantBuffers(0, 1, &noneB);
 	m_ctx->CSSetConstantBuffers(5, 1, &noneB);
 	m_wxGpuFlip = write;
+}
+
+static int CutFxAdditive(float kind)
+{
+	int k = (int)(kind + 0.5f);
+	if (k == CFX_ROCK || k == CFX_CRACK || k == CFX_ICE || k == CFX_ARROW || k == CFX_DUST) return 0;
+	return 1;
+}
+
+void Renderer::DrawCutFx(const CutFxPt* fx, int n)
+{
+	if (!fx || n <= 0 || !m_ctx || m_pass == PASS_SHADOW || m_inPortrait) return;
+	if (!m_vsCutFx || !m_gsCutFx || !m_psCutFx || !m_ilCutFx) return;
+	if (n > 160) n = 160;
+	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
+	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
+	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
+	M4 basis = MIdent();
+	basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z;
+	basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z;
+	basis.m[8] = fwd.x; basis.m[9] = fwd.y; basis.m[10] = fwd.z;
+	DrawParams bdp;
+	SetObj(basis, bdp, 0);
+	BOOL mrt = TacQFx(m_quality) && m_zRtv && m_msRtv && !m_inPortrait;
+	if (mrt) {
+		ID3D11RenderTargetView* one = m_msRtv;
+		m_ctx->OMSetRenderTargets(1, &one, m_dsv);
+	}
+	m_ctx->IASetInputLayout(m_ilCutFx);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+	m_ctx->VSSetShader(m_vsCutFx, NULL, 0);
+	TacGsOn(m_ctx, m_gsCutFx);
+	ID3D11Buffer* objb = g_cbBound ? g_cbBound : m_cbObj;
+	ID3D11Buffer* gcb[2] = { TacCbCur(g_frameR, m_cbFrame), objb };
+	m_ctx->GSSetConstantBuffers(0, 2, gcb);
+	m_ctx->PSSetShader(m_psCutFx, NULL, 0);
+	m_ctx->RSSetState(m_rsNone);
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+	m_bindKey = -1;
+	for (int pass = 0; pass < 2; pass++) {
+		CutFxPt batch[160];
+		int nb = 0;
+		for (int i = 0; i < n; i++) {
+			if (CutFxAdditive(fx[i].sz[1]) != pass) continue;
+			if (nb >= 160) break;
+			batch[nb++] = fx[i];
+		}
+		if (nb <= 0) continue;
+		UINT bytes = (UINT)nb * (UINT)sizeof(CutFxPt);
+		UINT st = sizeof(CutFxPt), off = 0;
+		void* dst = TacPtPartMap(m_dev, m_ctx, bytes, off);
+		if (!dst || !g_ptPart) continue;
+		memcpy(dst, batch, bytes);
+		m_ctx->Unmap(g_ptPart, 0);
+		m_ctx->IASetVertexBuffers(0, 1, &g_ptPart, &st, &off);
+		m_ctx->OMSetBlendState(pass ? m_bsAdd : m_bsPremul, NULL, 0xFFFFFFFF);
+		m_ctx->Draw((UINT)nb, 0);
+	}
+	TacGsOff(m_ctx);
+	ID3D11Buffer* gnone[2] = { NULL, NULL };
+	m_ctx->GSSetConstantBuffers(0, 2, gnone);
+	if (mrt) {
+		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
+		m_ctx->OMSetRenderTargets(2, rt, m_dsv);
+	}
+	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+	m_dsWant = m_dsWrite;
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
 void Renderer::DrawWxGpu()
@@ -16914,18 +17044,22 @@ BOOL Renderer::ApplyPost()
 	ID3D11ShaderResourceView* src = m_sceneSrv;
 	// 作成プレビューは Q.w を負にする。シェーダは場面そのものを返すだけなので、全面の書き写しをしない。
 	float qRank = TacQRank(m_quality, m_qPlus);
-	if (m_fcb.q[3] >= 0.f && m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && qRank >= 5.f && m_psDofH) {
+	const BOOL inCut = m_fcb.fxMore[2] > 0.5f;
+	UpdateFrameCB();
+	if (m_fcb.q[3] >= 0.f && m_theme >= 0 && TacQFx(m_quality) && m_dofSrv && m_zSrv && (qRank >= 5.f || inCut) && m_psDofH) {
 		if (m_msaa > 1 && m_zTex && m_zRes)
 			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
 		DrawParams df;
 		df.emissive = TacQLerp(qRank, 0.f, 0.f, 4.f, 6.f, 8.f, 10.f, 12.f, 12.f);
 		df.hue = 0.16f;
-		fs(m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
+		ID3D11PixelShader* dofPs = (inCut && m_psDofU) ? m_psDofU : m_psDofH;
+		fs(dofPs, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
 		src = m_dofSrv;
 	}
 	int nblur = (int)(TacQLerp(qRank, 0.f, 2.f, 2.f, 2.f, 3.f, 3.f, 3.f, 3.f) + 0.5f);
 	if (nblur > 2) nblur = 2;
-	if (m_gpu == 3 && m_quality < 5) nblur = min(nblur, 2);
+	if (inCut) nblur = max(nblur, 2);
+	if (m_gpu == 3 && m_quality < 5 && !inCut) nblur = min(nblur, 2);
 	if (nblur > 0) {
 		DrawParams ex;
 		ex.mode = 0.92f;
@@ -16948,6 +17082,8 @@ BOOL Renderer::ApplyPost()
 	gr.dissolve = (float)m_wx;
 	gr.flash = (float)m_hour;
 	ID3D11PixelShader* grade = (m_quality == 4 && m_psGradeTiny) ? m_psGradeTiny : m_psGrade;
+	if (inCut && m_psCut) grade = m_psCut;
+	else if (inCut && m_psGrade) grade = m_psGrade;
 	ID3D11ShaderResourceView* zBind = (TacQFx(m_quality) && m_zSrv) ? m_zSrv : NULL;
 	m_ctx->PSSetShaderResources(2, 1, &zBind);
 	fs(grade, src, m_blASrv, m_bbRtv, m_w, m_h, gr, 0);
