@@ -109,6 +109,13 @@ static const wchar_t* kTxt[OS_COUNT][14] = {
 	{ L"圧縮率", L"Compression", L"Compression", L"Compressione", L"Compresión", L"압축률", L"压缩率", L"الضغط", L"Сжатие", L"Kompression", L"Compressão", L"Compressie", L"Kompresja", L"Sıkıştırma" },
 	{ L"1 は速く、10 は小さくなります。", L"1 is fast, 10 is smaller.", L"1 est rapide, 10 est plus petit.", L"1 è veloce, 10 è più piccolo.", L"1 es rápido, 10 es más pequeño.", L"1은 빠르고 10은 더 작습니다.", L"1 更快，10 更小。", L"1 أسرع، و10 أصغر.", L"1 быстрее, 10 меньше.", L"1 ist schnell, 10 ist kleiner.", L"1 é rápido, 10 é menor.", L"1 is snel, 10 is kleiner.", L"1 jest szybkie, 10 jest mniejsze.", L"1 hızlıdır, 10 daha küçüktür." },
 	{ L"PPMd を使う", L"Use PPMd", L"Utiliser PPMd", L"Usa PPMd", L"Usar PPMd", L"PPMd 사용", L"使用 PPMd", L"استخدام PPMd", L"Использовать PPMd", L"PPMd verwenden", L"Usar PPMd", L"PPMd gebruiken", L"Użyj PPMd", L"PPMd kullan" },
+	{ L"関連図", L"Map", L"Carte", L"Mappa", L"Mapa", L"관계도", L"关系图", L"مخطط", L"Схема", L"Karte", L"Mapa", L"Kaart", L"Schemat", L"Şema" },
+	{ L"zip 書庫 (*.zip)", L"ZIP archive (*.zip)", L"Archive zip (*.zip)", L"Archivio zip (*.zip)", L"Archivo zip (*.zip)", L"zip 보관함 (*.zip)", L"zip 压缩包 (*.zip)", L"أرشيف zip ‏(*.zip)", L"Архив zip (*.zip)", L"zip-Archiv (*.zip)", L"Arquivo zip (*.zip)", L"zip-archief (*.zip)", L"Archiwum zip (*.zip)", L"zip arşivi (*.zip)" },
+	{ L"tar 書庫 (*.tar)", L"TAR archive (*.tar)", L"Archive tar (*.tar)", L"Archivio tar (*.tar)", L"Archivo tar (*.tar)", L"tar 보관함 (*.tar)", L"tar 归档 (*.tar)", L"أرشيف tar ‏(*.tar)", L"Архив tar (*.tar)", L"tar-Archiv (*.tar)", L"Arquivo tar (*.tar)", L"tar-archief (*.tar)", L"Archiwum tar (*.tar)", L"tar arşivi (*.tar)" },
+	{ L"パスワードが必要です。", L"A password is required.", L"Un mot de passe est requis.", L"Serve una password.", L"Se necesita una contraseña.", L"비밀번호가 필요합니다.", L"需要密码。", L"كلمة المرور مطلوبة.", L"Нужен пароль.", L"Ein Passwort ist nötig.", L"É necessária uma senha.", L"Een wachtwoord is nodig.", L"Hasło jest wymagane.", L"Parola gerekli." },
+	{ L"混在", L"Mixed", L"Mixte", L"Misto", L"Mixto", L"혼합", L"混合", L"مختلط", L"Смешанный", L"Gemischt", L"Misto", L"Gemengd", L"Mieszany", L"Karışık" },
+	{ L"このファイル", L"This file", L"Ce fichier", L"Questo file", L"Este archivo", L"이 파일", L"此文件", L"هذا الملف", L"Этот файл", L"Diese Datei", L"Este ficheiro", L"Dit bestand", L"Ten plik", L"Bu dosya" },
+	{ L"全体", L"Overall", L"Ensemble", L"Totale", L"Total", L"전체", L"整体", L"الإجمالي", L"Всего", L"Gesamt", L"Total", L"Totaal", L"Razem", L"Toplam" },
 };
 
 static const wchar_t* kName[14] = {

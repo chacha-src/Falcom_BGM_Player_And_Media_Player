@@ -31,6 +31,18 @@
 #include "OxzFilt.h"
 #include "OxzFast.h"
 
+struct FilePulse;
+static thread_local FilePulse* tFilePulse = NULL;
+static thread_local int tPulseEmit = 0;
+static thread_local int tEmitLo = 0;
+static void PulseEncode(FilePulse* fp, unsigned long long done, unsigned long long total);
+
+struct EncHook {
+	void (*fn)(void* user, unsigned long long done, unsigned long long total);
+	void* user;
+};
+static EncHook gEncHook = { 0, 0 };
+
 enum {
 	M_STORE = 0,
 	M_ZSTD = 1,
@@ -399,6 +411,72 @@ static int LooksPe(const uint8_t* p, size_t n)
 	return p[off] == 'P' && p[off + 1] == 'E' && p[off + 2] == 0 && p[off + 3] == 0;
 }
 
+static int TryZstdStream(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int pass)
+{
+	size_t ln = LevelN(n);
+	int hi = 19;
+	int level;
+	int wlog = 23;
+	size_t bound, off = 0;
+	std::vector<uint8_t> buf;
+	ZSTD_CCtx* c;
+	ZSTD_outBuffer output;
+	if (ln <= 256u * 1024u) hi = 22;
+	else if (ln <= 64ull * 1024ull * 1024ull) hi = 19;
+	else if (ln <= 256ull * 1024ull * 1024ull) hi = 16;
+	else if (ln <= 1024ull * 1024ull * 1024ull) hi = 12;
+	else hi = 9;
+	level = Scale(1, hi);
+	if (ln >= 32ull * 1024ull * 1024ull) wlog = 25;
+	else if (ln >= 8ull * 1024ull * 1024ull) wlog = 24;
+	else if (ln < 1u * 1024u * 1024u) wlog = 21;
+	if (pass == 1 && wlog < 24) wlog = 24;
+	if (pass == 1 && ln > 256ull * 1024ull * 1024ull) return 0;
+	bound = ZSTD_compressBound(n);
+	if (ZSTD_isError(bound) || bound == 0) return 0;
+	try { buf.resize(bound); } catch (...) { return 0; }
+	c = ZSTD_createCCtx();
+	if (!c) return 0;
+	ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, level);
+	ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
+	ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, wlog);
+	if (pass == 1) ZSTD_CCtx_setParameter(c, ZSTD_c_enableLongDistanceMatching, 1);
+	output.dst = buf.data();
+	output.size = buf.size();
+	output.pos = 0;
+	while (off <= n) {
+		size_t chunk = 0;
+		ZSTD_inBuffer input;
+		int last, stepDone = 0;
+		if (off < n) {
+			chunk = n - off;
+			if (chunk > (1u << 20)) chunk = 1u << 20;
+		}
+		input.src = in + off;
+		input.size = chunk;
+		input.pos = 0;
+		off += chunk;
+		last = off >= n;
+		while (!stepDone) {
+			size_t inBefore = input.pos;
+			size_t outBefore = output.pos;
+			size_t rem = ZSTD_compressStream2(c, &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
+			if (ZSTD_isError(rem)) { ZSTD_freeCCtx(c); return 0; }
+			if (last) stepDone = rem == 0;
+			else stepDone = input.pos == input.size;
+			if (!stepDone && input.pos == inBefore && output.pos == outBefore) { ZSTD_freeCCtx(c); return 0; }
+		}
+		PulseEncode(tFilePulse, off > n ? n : off, n);
+		if (last) break;
+	}
+	ZSTD_freeCCtx(c);
+	if (output.pos == 0 || output.pos >= n) return 0;
+	buf.resize(output.pos);
+	out.swap(buf);
+	tZstdLdm = pass == 1;
+	return 1;
+}
+
 static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int mode)
 {
 	size_t ln = LevelN(n);
@@ -410,6 +488,9 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 	size_t best = n;
 	std::vector<uint8_t> buf;
 	if (n == 0) return 0;
+	if (tPulseEmit && n >= 256u * 1024u && (mode == 0 || mode == 1)) {
+		if (TryZstdStream(in, n, out, mode)) return 1;
+	}
 	if (ln <= 256u * 1024u) hi = 22;
 	else if (ln <= 64ull * 1024ull * 1024ull) hi = 19;
 	else if (ln <= 256ull * 1024ull * 1024ull) hi = 16;
@@ -522,10 +603,12 @@ static int BrotliParallel(const uint8_t* in, size_t n, int q, int win, std::vect
 		std::vector<int> ok(parts, 0);
 		std::vector<std::thread> pool;
 		std::atomic<size_t> cursor(0);
+		std::atomic<unsigned long long> doneBytes(0);
+		EncHook hook = gEncHook;
 		workers = threads;
 		if (workers > parts) workers = (unsigned)parts;
 		for (t = 0; t < workers; ++t) {
-			pool.push_back(std::thread([&, n, chunk, q, win, parts]() {
+			pool.push_back(std::thread([&, n, chunk, q, win, parts, hook]() {
 				for (;;) {
 					size_t i = cursor.fetch_add(1);
 					size_t off, len, cap, got;
@@ -542,6 +625,7 @@ static int BrotliParallel(const uint8_t* in, size_t n, int q, int win, std::vect
 					if (!BrotliEncoderCompress(q, win, BROTLI_MODE_GENERIC, len, in + off, &got, piece[i].data()) || got == 0) continue;
 					piece[i].resize(got);
 					ok[i] = 1;
+					if (hook.fn && n) hook.fn(hook.user, doneBytes.fetch_add(len) + len, n);
 				}
 			}));
 			BoostThread(pool.back());
@@ -615,11 +699,13 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 			std::vector<Part> parts(th);
 			std::vector<std::thread> pool;
 			std::atomic<unsigned> cursor(0);
+			std::atomic<unsigned long long> doneBytes(0);
+			EncHook hook = gEncHook;
 			unsigned t;
 			int propsOk = 1;
 			size_t total = 0;
 			for (t = 0; t < th; ++t) {
-				pool.push_back(std::thread([&, n, th]() {
+				pool.push_back(std::thread([&, n, th, hook]() {
 					for (;;) {
 						unsigned c = cursor.fetch_add(1);
 						size_t off, len, capc, gotc = 0;
@@ -637,6 +723,7 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 						parts[c].data.resize(gotc);
 						parts[c].prop = prc;
 						parts[c].ok = 1;
+						if (hook.fn && n) hook.fn(hook.user, doneBytes.fetch_add(len) + len, n);
 					}
 				}));
 				BoostThread(pool.back());
@@ -711,7 +798,7 @@ static int TryLzfse(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 static int TryBzip2(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	if (n == 0 || n > 0xFFFFFFFFull) return 0;
-	return OxzBzipCompress(in, n, out, Scale(1, 9), InnerThreads(n));
+	return OxzBzipCompress(in, n, out, Scale(1, 9), InnerThreads(n), gEncHook.fn, gEncHook.user);
 }
 
 static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
@@ -888,7 +975,7 @@ static void WarmCodecs()
 struct FilePulse {
 	const wchar_t* name;
 	uint64_t size;
-	int pct;
+	int tenth;
 	int seen;
 };
 
@@ -906,7 +993,6 @@ struct SavePulse {
 };
 
 static SavePulse* gPulse = NULL;
-static thread_local FilePulse* tFilePulse = NULL;
 static const unsigned kPulseMagic = 0x50585A4Fu;
 
 struct PulseWeight {
@@ -916,35 +1002,39 @@ struct PulseWeight {
 	int usedBase;
 	unsigned long long numer;
 	unsigned long long denom;
+	int fileTen;
 };
 
-static void Publish(FilePulse* fp, int pct, int finish)
+static void Publish(FilePulse* fp, int tenth, int finish)
 {
 	SavePulse* p;
 	unsigned display;
 	uint64_t numer;
 	size_t i;
 	DWORD now;
+	int pct;
 	if (!fp || !fp->name) return;
 	p = gPulse;
 	if (!p || !p->fn) return;
+	if (tenth < 0) tenth = 0;
+	if (tenth > 1000) tenth = 1000;
 	std::lock_guard<std::mutex> lock(p->mu);
 	if (!fp->seen) {
 		fp->seen = 1;
 		p->active.push_back(fp);
 	}
 	now = GetTickCount();
-	if (!finish && pct > 0 && p->lastTick && (DWORD)(now - p->lastTick) < 80) {
-		if (pct > fp->pct && pct < 100) fp->pct = pct;
+	if (!finish && tenth > 0 && tenth < 1000 && p->lastTick && (DWORD)(now - p->lastTick) < 80) {
+		if (tenth > fp->tenth) fp->tenth = tenth;
 		return;
 	}
-	if (!finish) p->lastTick = now;
+	if (!finish) p->lastTick = now ? now : 1;
 	if (finish) {
-		if (fp->pct < 100) {
+		if (fp->tenth < 1000) {
 			p->bytesDone += fp->size;
 			p->filesDone++;
 		}
-		fp->pct = 100;
+		fp->tenth = 1000;
 		for (i = 0; i < p->active.size(); ++i) {
 			if (p->active[i] == fp) {
 				p->active.erase(p->active.begin() + (ptrdiff_t)i);
@@ -952,14 +1042,14 @@ static void Publish(FilePulse* fp, int pct, int finish)
 			}
 		}
 	} else {
-		if (pct < fp->pct) pct = fp->pct;
-		if (pct > 99) pct = 99;
-		fp->pct = pct;
+		if (tenth < fp->tenth) tenth = fp->tenth;
+		if (tenth > 990) tenth = 990;
+		fp->tenth = tenth;
 	}
 	numer = p->bytesDone;
 	for (i = 0; i < p->active.size(); ++i) {
 		FilePulse* o = p->active[i];
-		if (o->pct > 0 && o->pct < 100) numer += o->size * (uint64_t)o->pct / 100ull;
+		if (o->tenth > 0 && o->tenth < 1000) numer += o->size * (uint64_t)o->tenth / 1000ull;
 	}
 	if (p->bytesAll && numer > p->bytesAll) numer = p->bytesAll;
 	if (p->user) {
@@ -967,13 +1057,49 @@ static void Publish(FilePulse* fp, int pct, int finish)
 		if (w->magic == kPulseMagic) {
 			w->numer = numer;
 			w->denom = p->bytesAll ? p->bytesAll : 1;
+			w->fileTen = fp->tenth;
 		}
 	}
 	display = p->filesDone;
 	if (!finish && p->total && display < p->total) display++;
 	if (p->total && display > p->total) display = p->total;
 	if (!display) display = 1;
-	p->fn(fp->name, display, p->total ? p->total : 1, finish ? 100 : fp->pct, p->user);
+	pct = finish ? 100 : fp->tenth / 10;
+	p->fn(fp->name, display, p->total ? p->total : 1, pct, p->user);
+}
+
+static int EmitTenth(unsigned long long done, unsigned long long total)
+{
+	int lo = tEmitLo;
+	if (lo < 0) lo = 0;
+	if (lo > 990) lo = 990;
+	if (!total || done == 0) return lo;
+	if (done > total) done = total;
+	return lo + (int)(done * (unsigned long long)(990 - lo) / total);
+}
+
+static void PulseEncode(FilePulse* fp, unsigned long long done, unsigned long long total)
+{
+	if (!fp || !tPulseEmit) return;
+	Publish(fp, EmitTenth(done, total), 0);
+}
+
+struct EncPulseUser {
+	FilePulse* fp;
+	int lo;
+};
+
+static void OnEncodePulse(void* user, unsigned long long done, unsigned long long total)
+{
+	EncPulseUser* w = (EncPulseUser*)user;
+	int lo, ten;
+	if (!w || !w->fp || !total) return;
+	lo = w->lo;
+	if (lo < 0) lo = 0;
+	if (lo > 990) lo = 990;
+	if (done > total) done = total;
+	ten = lo + (int)(done * (unsigned long long)(990 - lo) / total);
+	Publish(w->fp, ten, 0);
 }
 
 struct PulseGuard {
@@ -988,7 +1114,7 @@ struct PulseGuard {
 	}
 	~PulseGuard()
 	{
-		Publish(&fp, 100, 1);
+		Publish(&fp, 1000, 1);
 		if (tFilePulse == &fp) tFilePulse = NULL;
 	}
 };
@@ -1087,8 +1213,11 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe)
 					} catch (...) {
 					}
 					if (pulseFile) {
+						int ten;
 						step = pulseStep.fetch_add(1) + 1;
-						Publish(pulseFile, (int)((unsigned long long)step * pulseCap / pulseJobs), 0);
+						ten = (int)((unsigned long long)step * (unsigned)pulseCap * 10ull / pulseJobs);
+						if (ten > pulseCap * 10) ten = pulseCap * 10;
+						Publish(pulseFile, ten, 0);
 					}
 				}
 				tInSurvey = 0;
@@ -1134,11 +1263,21 @@ static int EmitMethod(const uint8_t* raw, size_t n, int method, int flags, int z
 	std::vector<uint8_t> b, tmp;
 	uint8_t prop = 0;
 	int ok = 0;
+	EncPulseUser watch;
 	try { b.assign(raw, raw + n); } catch (...) { return 0; }
 	if (flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
 	if (flags & F_DELTA4) Delta4Enc(b.data(), b.size());
 	else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+	watch.fp = tFilePulse;
+	watch.lo = tEmitLo;
+	gEncHook.fn = OnEncodePulse;
+	gEncHook.user = &watch;
+	struct EmitHold {
+		EmitHold() { tPulseEmit = 1; }
+		~EmitHold() { tPulseEmit = 0; gEncHook.fn = NULL; gEncHook.user = NULL; }
+	} hold;
 	ok = OneCodec(b.data(), b.size(), method, method == M_ZSTD ? (zstdLdm ? 1 : 0) : 0, tmp, &prop);
+	(void)hold;
 	if (!ok || tmp.size() >= n) return 0;
 	out->method = method;
 	out->flags = flags;
@@ -1155,15 +1294,19 @@ static Choice Pick(const uint8_t* raw, size_t n, int isPe)
 	if (n <= kProbeBytes) return Search(raw, n, isPe);
 	{
 		Choice probe = Search(raw, kProbeBytes, isPe);
+		int got = 0;
 		best.method = M_STORE;
 		best.flags = 0;
 		best.prop = 0;
 		best.zstdLdm = 0;
 		best.data.assign(raw, raw + n);
+		tEmitLo = 250;
 		if (probe.method != M_STORE && EmitMethod(raw, n, probe.method, probe.flags, probe.zstdLdm, &best))
-			return best;
-		if (probe.method != M_ZSTD && EmitMethod(raw, n, M_ZSTD, probe.flags, 1, &best))
-			return best;
+			got = 1;
+		else if (probe.method != M_ZSTD && EmitMethod(raw, n, M_ZSTD, probe.flags, 1, &best))
+			got = 1;
+		tEmitLo = 0;
+		if (got) return best;
 	}
 	return best;
 }
@@ -2056,6 +2199,40 @@ static int WriteMember(const std::wstring& path, const uint8_t* p, size_t n, uin
 	return 1;
 }
 
+struct ExWatch {
+	OxzCoreProgFn fn;
+	void* user;
+	const wchar_t* name;
+	unsigned index;
+	unsigned total;
+	uint64_t unpacked;
+	DWORD tick;
+};
+
+static thread_local ExWatch tExWatch = { NULL, NULL, NULL, 0, 0, 0, 0 };
+static thread_local int tExOn = 0;
+
+static void PulseExtract(uint64_t produced)
+{
+	int ten;
+	DWORD now;
+	if (!tExOn || !tExWatch.fn) return;
+	ten = 0;
+	if (tExWatch.unpacked) {
+		if (produced > tExWatch.unpacked) produced = tExWatch.unpacked;
+		ten = (int)(produced * 1000ull / tExWatch.unpacked);
+	}
+	if (ten > 999) ten = 999;
+	now = GetTickCount();
+	if (ten > 0 && tExWatch.tick && (DWORD)(now - tExWatch.tick) < 80) return;
+	tExWatch.tick = now ? now : 1;
+	if (tExWatch.user) {
+		PulseWeight* w = (PulseWeight*)tExWatch.user;
+		if (w->magic == kPulseMagic) w->fileTen = ten;
+	}
+	tExWatch.fn(tExWatch.name, tExWatch.index, tExWatch.total, ten / 10, tExWatch.user);
+}
+
 static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 {
 	HANDLE out;
@@ -2079,6 +2256,7 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 			if (!WriteAll(out, ibuf.data(), rd)) { CloseHandle(out); return 0; }
 			left -= rd;
 			produced += rd;
+			PulseExtract(produced);
 		}
 	} else if (e.method == M_ZSTD) {
 		ZSTD_DCtx* d = ZSTD_createDCtx();
@@ -2109,6 +2287,7 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 					crc = CrcBlock(obuf.data(), output.pos, crc);
 					if (!WriteAll(out, obuf.data(), output.pos)) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
 					produced += output.pos;
+					PulseExtract(produced);
 				}
 				if (rem == 0 && input.pos == input.size) break;
 				if (input.pos == input.size && output.pos == 0) {
@@ -2208,6 +2387,24 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			const DirEnt& ent = ents[job.ei];
 			if (failed.load()) return 0;
 			if (prog) prog(ent.name.c_str(), done.load(), total, 0, progUser);
+			if (ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD) && ent.unpacked >= 1024ull * 1024ull) {
+				int sok;
+				if (rh != h) return 2;
+				tExWatch.fn = prog;
+				tExWatch.user = progUser;
+				tExWatch.name = ent.name.c_str();
+				tExWatch.index = done.load();
+				tExWatch.total = total;
+				tExWatch.unpacked = ent.unpacked;
+				tExWatch.tick = 0;
+				tExOn = 1;
+				sok = StreamDecode(h, ent, job.full);
+				tExOn = 0;
+				if (!sok) return 0;
+				done.fetch_add(1);
+				if (prog) prog(ent.name.c_str(), done.load(), total, 100, progUser);
+				return 1;
+			}
 			if (ent.packed != (uint64_t)(size_t)ent.packed) dr = -1;
 			else {
 				try { packed.resize((size_t)ent.packed); dr = 1; }
@@ -2220,8 +2417,19 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			if (dr == 1) {
 				if (!WriteMember(job.full, plain.data(), plain.size(), ent.mtime, ent.attr)) return 0;
 			} else if (dr < 0 && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD)) {
+				int sok;
 				if (rh != h) return 2;
-				if (!StreamDecode(h, ent, job.full)) return 0;
+				tExWatch.fn = prog;
+				tExWatch.user = progUser;
+				tExWatch.name = ent.name.c_str();
+				tExWatch.index = done.load();
+				tExWatch.total = total;
+				tExWatch.unpacked = ent.unpacked;
+				tExWatch.tick = 0;
+				tExOn = 1;
+				sok = StreamDecode(h, ent, job.full);
+				tExOn = 0;
+				if (!sok) return 0;
 			} else {
 				return 0;
 			}

@@ -28,12 +28,18 @@ struct OxzSnap {
 	unsigned index;
 	unsigned total;
 	DWORD startTick;
+	int fileTen;
+	int overallTen;
 };
 
 void OxzProgBegin(const wchar_t* archive);
 void OxzProgArchive(const wchar_t* archive);
 void OxzProgFile(const wchar_t* file, unsigned index, unsigned total, int filePct, int overall);
+void OxzProgDetail(const wchar_t* file, unsigned index, unsigned total, int fileTen, int overallTen);
 void OxzProgRead(OxzSnap* out);
+void OxzFormatGrouped(unsigned long long n, wchar_t* out, size_t cch);
+void OxzFormatRatio(unsigned long long packed, unsigned long long size, wchar_t* out, size_t cch);
+void OxzFormatTenth(int ten, wchar_t* out, size_t cch);
 
 int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base = 0, int span = 100);
 /* zip など、RIP を戻さない展開。 */

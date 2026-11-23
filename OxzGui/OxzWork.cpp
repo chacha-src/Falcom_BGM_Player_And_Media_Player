@@ -1,4 +1,5 @@
 #include "OxzWork.h"
+#include "OxzIn.h"
 #include "OxzArc.h"
 #include "OxzLang.h"
 #include "OxzFilt.h"
@@ -71,33 +72,39 @@ struct OxzSpanProg {
 	int usedBase;
 	unsigned long long weightNumer;
 	unsigned long long weightDenom;
+	int fileTen;
 	std::wstring err;
-	OxzSpanProg() : magic(0x50585A4Fu), base(0), span(0), usedBase(0), weightNumer(0), weightDenom(0) {}
+	OxzSpanProg() : magic(0x50585A4Fu), base(0), span(0), usedBase(0), weightNumer(0), weightDenom(0), fileTen(0) {}
 };
 
 extern "C" static void OxzSaveProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
 {
 	OxzSpanProg* p = (OxzSpanProg*)user;
-	int overall = p->base;
+	int cap = (p->base + p->span) * 10;
+	int overallTen = p->base * 10;
 	unsigned shown = index;
+	int fileTen = pct >= 100 ? 1000 : pct * 10;
+	if (p->fileTen > fileTen) fileTen = p->fileTen;
+	p->fileTen = 0;
+	if (fileTen < 0) fileTen = 0;
+	if (fileTen > 1000) fileTen = 1000;
 	if (p->magic == 0x50585A4Fu && p->weightDenom) {
 		unsigned long long n = p->weightNumer;
 		if (n > p->weightDenom) n = p->weightDenom;
-		overall += (int)((p->span * n) / p->weightDenom);
+		overallTen += (int)(((unsigned long long)p->span * 10ull * n) / p->weightDenom);
 		if (shown < 1) shown = 1;
-	} else {
-		if (total) {
-			unsigned long long done = index;
-			if (pct >= 100 && done < total) done++;
-			overall += (int)(((unsigned long long)p->span * done) / total);
-			shown = (unsigned)done;
-			if (pct < 100 && shown < total) shown++;
-			if (!shown) shown = 1;
-		}
+	} else if (total) {
+		unsigned long long done = index;
+		if (pct >= 100 && done < total) done++;
+		overallTen += (int)(((unsigned long long)p->span * 10ull * done) / total);
+		shown = (unsigned)done;
+		if (pct < 100 && shown < total) shown++;
+		if (!shown) shown = 1;
 	}
-	if (overall > p->base + p->span) overall = p->base + p->span;
-	if (pct >= 100 && p->weightDenom && p->weightNumer >= p->weightDenom) overall = p->base + p->span;
-	OxzProgFile(name, shown, total, pct, overall);
+	if (overallTen > cap) overallTen = cap;
+	if (pct >= 100 && p->weightDenom && p->weightNumer >= p->weightDenom) overallTen = cap;
+	if (overallTen > 1000) overallTen = 1000;
+	OxzProgDetail(name, shown, total, fileTen, overallTen);
 }
 
 extern "C" static void OxzPkgProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
@@ -113,11 +120,30 @@ extern "C" static void OxzPkgProg(const wchar_t* name, unsigned index, unsigned 
 		span = p->span - used;
 		if (span < 1) span = 1;
 	}
-	int overall = base;
-	if (total) overall += (int)(((unsigned long long)span * index) / total);
-	if (pct >= 100 && total && index + 1 >= total) overall = p->base + p->span;
-	if (overall > p->base + p->span) overall = p->base + p->span;
-	OxzProgFile(name, index + 1, total ? total : 1, pct, overall);
+	int cap = (p->base + p->span) * 10;
+	int fileTen = pct >= 100 ? 1000 : pct * 10;
+	unsigned shown;
+	int overallTen = base * 10;
+	if (p->fileTen > fileTen && pct < 100) fileTen = p->fileTen;
+	p->fileTen = 0;
+	if (fileTen < 0) fileTen = 0;
+	if (fileTen > 1000) fileTen = 1000;
+	if (pct >= 100) {
+		if (total) overallTen += (int)(((unsigned long long)span * 10ull * index) / total);
+		shown = index ? index : 1;
+	} else if (total) {
+		unsigned long long num = (unsigned long long)index * 1000ull + (unsigned)fileTen;
+		overallTen += (int)(((unsigned long long)span * 10ull * num) / ((unsigned long long)total * 1000ull));
+		shown = index + 1;
+	} else {
+		shown = 1;
+	}
+	if (total && shown > total) shown = total;
+	if (!shown) shown = 1;
+	if (pct >= 100 && total && index >= total) overallTen = cap;
+	if (overallTen > cap) overallTen = cap;
+	if (overallTen > 1000) overallTen = 1000;
+	OxzProgDetail(name, shown, total ? total : 1, fileTen, overallTen);
 }
 
 extern "C" static int OxzPkgBase(const wchar_t* sevenPath, const wchar_t* destDir, void* user)
@@ -211,6 +237,7 @@ void OxzProgBegin(const wchar_t* archive)
 	if (!gProg.startTick) gProg.startTick = 1;
 	OxzCopySnap(gProg.archive, 520, archive);
 	OxzProgUnlock();
+	OxzPulseReset();
 }
 
 void OxzProgArchive(const wchar_t* archive)
@@ -220,21 +247,35 @@ void OxzProgArchive(const wchar_t* archive)
 	OxzProgUnlock();
 }
 
+void OxzProgDetail(const wchar_t* file, unsigned index, unsigned total, int fileTen, int overallTen)
+{
+	int same;
+	OxzProgLock();
+	if (fileTen < 0) fileTen = 0;
+	if (fileTen > 1000) fileTen = 1000;
+	if (overallTen < 0) overallTen = 0;
+	if (overallTen > 1000) overallTen = 1000;
+	if (total && index > total) index = total;
+	if (overallTen < gProg.overallTen) overallTen = gProg.overallTen;
+	same = file && file[0] && gProg.file[0] && _wcsicmp(file, gProg.file) == 0;
+	if (same && fileTen < gProg.fileTen) fileTen = gProg.fileTen;
+	if (file && file[0]) OxzCopySnap(gProg.file, 1024, file);
+	if (index) gProg.index = index;
+	if (total) gProg.total = total;
+	gProg.fileTen = fileTen;
+	gProg.overallTen = overallTen;
+	gProg.filePct = fileTen / 10;
+	gProg.overall = overallTen / 10;
+	OxzProgUnlock();
+}
+
 void OxzProgFile(const wchar_t* file, unsigned index, unsigned total, int filePct, int overall)
 {
-	OxzProgLock();
 	if (filePct < 0) filePct = 0;
 	if (filePct > 100) filePct = 100;
 	if (overall < 0) overall = 0;
 	if (overall > 100) overall = 100;
-	if (total && index > total) index = total;
-	if (overall < gProg.overall) overall = gProg.overall;
-	if (file && file[0]) OxzCopySnap(gProg.file, 1024, file);
-	if (index) gProg.index = index;
-	if (total) gProg.total = total;
-	gProg.filePct = filePct;
-	gProg.overall = overall;
-	OxzProgUnlock();
+	OxzProgDetail(file, index, total, filePct * 10, overall * 10);
 }
 
 void OxzProgRead(OxzSnap* out)
@@ -243,6 +284,40 @@ void OxzProgRead(OxzSnap* out)
 	OxzProgLock();
 	*out = gProg;
 	OxzProgUnlock();
+}
+
+void OxzFormatGrouped(unsigned long long n, wchar_t* out, size_t cch)
+{
+	wchar_t tmp[32];
+	wchar_t buf[48];
+	int i, len, dst;
+	if (!out || !cch) return;
+	_snwprintf_s(tmp, _TRUNCATE, L"%llu", n);
+	len = (int)wcslen(tmp);
+	dst = 0;
+	for (i = 0; i < len && dst + 2 < (int)sizeof(buf) / (int)sizeof(buf[0]); ++i) {
+		if (i > 0 && (len - i) % 3 == 0) buf[dst++] = L',';
+		buf[dst++] = tmp[i];
+	}
+	buf[dst] = 0;
+	wcsncpy_s(out, cch, buf, _TRUNCATE);
+}
+
+void OxzFormatRatio(unsigned long long packed, unsigned long long size, wchar_t* out, size_t cch)
+{
+	unsigned long long t;
+	if (!out || !cch) return;
+	if (!size) { out[0] = 0; return; }
+	t = (packed * 1000ull + size / 2ull) / size;
+	_snwprintf_s(out, cch, _TRUNCATE, L"%llu.%llu%%", t / 10ull, t % 10ull);
+}
+
+void OxzFormatTenth(int ten, wchar_t* out, size_t cch)
+{
+	if (!out || !cch) return;
+	if (ten < 0) ten = 0;
+	if (ten > 1000) ten = 1000;
+	_snwprintf_s(out, cch, _TRUNCATE, L"%d.%d%%", ten / 10, ten % 10);
 }
 
 struct OxzScope {
@@ -273,40 +348,42 @@ struct OxzScopeHold {
 	~OxzScopeHold() { gScope = sc.prev; }
 };
 
-static int OxzOverallNow()
+static int OxzOverallTen()
 {
 	if (!gScope) return 0;
 	int add = 0;
 	unsigned long long num = gScope->done + gScope->partial;
 	if (gScope->bytes) {
 		if (num > gScope->bytes) num = gScope->bytes;
-		add = (int)((num * (unsigned long long)gScope->span) / gScope->bytes);
+		add = (int)((num * (unsigned long long)gScope->span * 10ull) / gScope->bytes);
 	} else if (gScope->total) {
 		unsigned idx = gScope->index;
 		if (idx > gScope->total) idx = gScope->total;
-		add = (int)((idx * (unsigned)gScope->span) / gScope->total);
+		add = (int)((idx * (unsigned)gScope->span * 10u) / gScope->total);
 	}
-	int v = gScope->base + add;
-	int cap = gScope->base + gScope->span;
+	int v = gScope->base * 10 + add;
+	int cap = (gScope->base + gScope->span) * 10;
 	if (v > cap) v = cap;
-	if (v > 100) v = 100;
+	if (v > 1000) v = 1000;
 	if (v < 0) v = 0;
 	return v;
 }
 
-static void OxzNote(const wchar_t* name, unsigned long long finishedBytes, int filePct)
+static void OxzNote(const wchar_t* name, unsigned long long finishedBytes, int fileTen)
 {
 	if (!gScope) return;
-	if (filePct >= 100) {
+	if (fileTen >= 1000) {
 		if (gScope->bytes) gScope->done += finishedBytes;
 		gScope->partial = 0;
 		gScope->index++;
+		fileTen = 1000;
 	}
 	unsigned show = gScope->index;
-	if (filePct < 100 && show < gScope->total) show++;
+	if (fileTen < 1000 && show < gScope->total) show++;
 	if (!show) show = 1;
-	int fp = filePct < 0 ? 0 : (filePct > 100 ? 100 : filePct);
-	OxzProgFile(name, show, gScope->total, fp, OxzOverallNow());
+	if (fileTen < 0) fileTen = 0;
+	if (fileTen > 1000) fileTen = 1000;
+	OxzProgDetail(name, show, gScope->total, fileTen, OxzOverallTen());
 }
 
 static void OxzRipTree(const std::wstring& dir, int encoding)
@@ -324,7 +401,7 @@ static void OxzRipTree(const std::wstring& dir, int encoding)
 		else {
 			OxzNote(fd.cFileName, 0, 0);
 			OxzRipFile(child, encoding);
-			OxzNote(fd.cFileName, 0, 100);
+			OxzNote(fd.cFileName, 0, 1000);
 		}
 	} while (FindNextFileW(h, &fd));
 	FindClose(h);
@@ -481,7 +558,7 @@ static int OxzCopyFileP(const std::wstring& from, const std::wstring& to, const 
 	}
 	if (!gScope || total < 1024ull * 1024ull) {
 		if (!CopyFileW(from.c_str(), to.c_str(), FALSE)) return 0;
-		OxzNote(name, total, 100);
+		OxzNote(name, total, 1000);
 		return 1;
 	}
 	HANDLE in = CreateFileW(from.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -509,13 +586,14 @@ static int OxzCopyFileP(const std::wstring& from, const std::wstring& to, const 
 		}
 		got += n;
 		gScope->partial = got;
-		int fp = total ? (int)(got * 100ull / total) : 100;
-		OxzNote(name, 0, fp);
+		int fileTen = total ? (int)(got * 1000ull / total) : 1000;
+		if (fileTen > 999) fileTen = 999;
+		OxzNote(name, 0, fileTen);
 	}
 	CloseHandle(in);
 	CloseHandle(out);
 	gScope->partial = 0;
-	OxzNote(name, total ? total : got, 100);
+	OxzNote(name, total ? total : got, 1000);
 	return 1;
 }
 
@@ -765,36 +843,24 @@ int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int
 		}
 		return 0;
 	}
-	int kind = OxzArchiveKind(arc);
-	int rip = OxzIsOxz(arc) ? 1 : 0;
-	if (kind >= 1 && kind <= 4) {
-		std::wstring nativeErr;
-		int rc = OxzExtractNative(arc, dest, kind, rip, nativeErr, base, span);
-		if (rc == 0) return 0;
-		if (OxzHas7za()) return OxzExtract7za(arc, dest, err, base, span, rip);
-		err = nativeErr.empty() ? OxzTxt(OS_OPEN_FAIL) : nativeErr;
-		return rc;
-	}
-	return OxzExtract7za(arc, dest, err, base, span, rip);
+	int rc = OxzExtractInProc(arc, dest, err, base, span);
+	if (rc == 3) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
+	return rc;
 }
 
 int OxzExtractPlain(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span)
 {
-	if (!OxzHas7za()) { err = OxzTxt(OS_NO7ZA); return 2; }
 	if (span < 1) span = 1;
 	OxzProgArchive(arc);
 	CreateDirectoryW(dest, NULL);
-	std::wstring args = L"x -y -sccUTF-8 -bb1 -bsp1 -bso1 " + OxzQuote(std::wstring(L"-o") + dest) + L" " + OxzQuote(arc);
-	int rc = OxzRun7za(args, NULL, base, span);
-	if (rc != 0) { err = OxzTxt(OS_OPEN_FAIL); return rc; }
-	return 0;
+	if (OxzCoreIsPkg(arc)) return OxzExtractTo(arc, dest, err, base, span);
+	return OxzExtractInProc(arc, dest, err, base, span);
 }
 
 int OxzTest(const wchar_t* arc, std::wstring& err, int base, int span)
 {
-	std::wstring tmp = OxzNewWork();
-	int rc = OxzExtractTo(arc, tmp.c_str(), err, base, span);
-	OxzRmTree(tmp);
+	std::vector<OxzTestRow> rows;
+	int rc = OxzTestArchive(arc, rows, err, base, span);
 	if (rc != 0 && err.empty()) err = OxzTxt(OS_TEST_FAIL);
 	return rc;
 }

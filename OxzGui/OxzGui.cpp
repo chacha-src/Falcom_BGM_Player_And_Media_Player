@@ -33,7 +33,8 @@
 
 enum {
 	ID_OPEN = 1001, ID_NEW, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME, ID_EXTRACT, ID_SAVE, ID_SETTINGS,
-	ID_LIST, ID_STATUS, ID_PROG,
+	ID_LIST, ID_STATUS, ID_PROG, ID_TESTVIEW, ID_MAP,
+	ID_PROG_FILE, ID_LBL_ALL, ID_LBL_FILE, ID_PCT_ALL, ID_PCT_FILE,
 	ID_COPY = 1301, ID_CUT, ID_PASTE, ID_SELECTALL, ID_REFRESH, ID_UP, ID_OPENSEL,
 	ID_SET_LANG = 1101, ID_SET_INSTALL, ID_SET_REMOVE, ID_SET_CLOSE, ID_SET_HELP, ID_SET_STAT,
 	ID_SET_LEVEL = 1107, ID_SET_LEVEL_LBL, ID_SET_LEVEL_VAL, ID_SET_LEVEL_HINT, ID_SET_PPMD
@@ -50,6 +51,7 @@ struct Item {
 	int packedKnown;
 	int method;
 	int flags;
+	std::wstring codec;
 	FILETIME ft;
 	FILETIME created;
 	DWORD attr;
@@ -66,6 +68,8 @@ struct Job {
 	int merged;
 	int sub;
 	int closeAfter;
+	std::vector<OxzEnt> keep;
+	std::vector<OxzTestRow> report;
 };
 struct OpenWatch {
 	std::wstring path;
@@ -77,7 +81,7 @@ struct OpenWatch {
 };
 struct BtnSt { WNDPROC old; int hover; int down; };
 
-static HWND gHwnd, gList, gStatus, gProg, gSet;
+static HWND gHwnd, gList, gStatus, gProg, gProgFile, gLblAll, gLblFile, gPctAll, gPctFile, gSet;
 static HACCEL gAccel = NULL;
 static HFONT gFont;
 static HBRUSH gPink, gMint;
@@ -87,6 +91,7 @@ static int gHasFile = 0, gSortCol = 0, gSortAsc = 1, gDropHi = -1;
 static std::vector<std::wstring> gCut;
 static OxzUpdHit* gUpdWait = NULL;
 static int gOwned = 0, gBusy = 0, gExit = 0, gCloseWhenDone = 0, gSyncDone = 0, gRefreshing = 0, gVirtual = 0;
+static std::vector<OxzEnt> gForeign;
 static HIMAGELIST gIcons = NULL;
 static DWORD gBusyTick = 0;
 static std::wstring gBusyText;
@@ -102,8 +107,8 @@ static int LaunchWorkFile(const std::wstring& path);
 static void WatchAfterSave(int fail);
 static void SetBusy(int on, const wchar_t* text);
 
-static const int kBtnId[] = { ID_OPEN, ID_NEW, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME, ID_EXTRACT, ID_SAVE, ID_SETTINGS };
-static const int kBtnStr[] = { OS_OPEN, OS_NEW, OS_ADDFILE, OS_ADDFOLDER, OS_DEL, OS_RENAME, OS_EXTRACT, OS_SAVE, OS_SETTINGS };
+static const int kBtnId[] = { ID_OPEN, ID_NEW, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME, ID_EXTRACT, ID_SAVE, ID_TESTVIEW, ID_MAP, ID_SETTINGS };
+static const int kBtnStr[] = { OS_OPEN, OS_NEW, OS_ADDFILE, OS_ADDFOLDER, OS_DEL, OS_RENAME, OS_EXTRACT, OS_SAVE, OS_TEST, OS_MAP, OS_SETTINGS };
 
 static void Tell(HWND owner, const wchar_t* text, UINT icon)
 {
@@ -248,7 +253,7 @@ static void Relayout()
 	GetClientRect(gHwnd, &rc);
 	int x = 8, y = 8, rowH = 32, maxX = rc.right - 8;
 	if (maxX < 200) maxX = 200;
-	for (int i = 0; i < 9; ++i) {
+	for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i) {
 		HWND b = GetDlgItem(gHwnd, kBtnId[i]);
 		wchar_t text[256];
 		GetWindowTextW(b, text, 256);
@@ -258,25 +263,43 @@ static void Relayout()
 		x += w + 6;
 	}
 	int top = y + rowH + 8;
-	int foot = gBusy ? 116 : 56;
+	int foot = gBusy ? 176 : 56;
 	int listH = rc.bottom - top - foot;
 	if (listH < 40) listH = 40;
 	MoveWindow(gList, 8, top, rc.right - 16, listH, TRUE);
 	if (gProg) {
+		HWND bars[] = { gProg, gProgFile, gLblAll, gLblFile, gPctAll, gPctFile };
 		if (gBusy) {
-			MoveWindow(gProg, 8, rc.bottom - 108, rc.right - 16, 16, TRUE);
-			ShowWindow(gProg, SW_SHOW);
+			int lab = MeasureText(gHwnd, OxzTxt(OS_PROG_FILE));
+			int lab2 = MeasureText(gHwnd, OxzTxt(OS_PROG_ALL));
+			int pctW = 78;
+			int yAll = rc.bottom - 168;
+			int yFile = rc.bottom - 140;
+			int barX, barW;
+			if (lab2 > lab) lab = lab2;
+			if (lab < 72) lab = 72;
+			if (lab > 168) lab = 168;
+			barX = 12 + lab;
+			barW = rc.right - barX - pctW - 16;
+			if (barW < 48) barW = 48;
+			MoveWindow(gLblAll, 8, yAll, lab, 22, TRUE);
+			MoveWindow(gProg, barX, yAll + 3, barW, 16, TRUE);
+			MoveWindow(gPctAll, barX + barW + 6, yAll, pctW, 22, TRUE);
+			MoveWindow(gLblFile, 8, yFile, lab, 22, TRUE);
+			MoveWindow(gProgFile, barX, yFile + 3, barW, 16, TRUE);
+			MoveWindow(gPctFile, barX + barW + 6, yFile, pctW, 22, TRUE);
+			for (int i = 0; i < 6; ++i) if (bars[i]) ShowWindow(bars[i], SW_SHOW);
 		} else {
-			ShowWindow(gProg, SW_HIDE);
+			for (int i = 0; i < 6; ++i) if (bars[i]) ShowWindow(bars[i], SW_HIDE);
 		}
 	}
-	MoveWindow(gStatus, 8, gBusy ? rc.bottom - 88 : rc.bottom - 48, rc.right - 16, gBusy ? 80 : 40, TRUE);
+	MoveWindow(gStatus, 8, gBusy ? rc.bottom - 112 : rc.bottom - 48, rc.right - 16, gBusy ? 104 : 40, TRUE);
 }
 
 static void Relabel()
 {
 	if (!gHwnd) return;
-	for (int i = 0; i < 9; ++i)
+	for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i)
 		SetWindowTextW(GetDlgItem(gHwnd, kBtnId[i]), OxzTxt(kBtnStr[i]));
 	if (gList) {
 		LVCOLUMNW col;
@@ -288,6 +311,8 @@ static void Relabel()
 			ListView_SetColumn(gList, i, &col);
 		}
 	}
+	if (gLblAll) SetWindowTextW(gLblAll, OxzTxt(OS_PROG_ALL));
+	if (gLblFile) SetWindowTextW(gLblFile, OxzTxt(OS_PROG_FILE));
 	SetTitle();
 	ApplyRtl(gHwnd);
 	ApplyCaption(gHwnd);
@@ -310,6 +335,7 @@ static void DropWork()
 	gWork.clear();
 	gOwned = 0;
 	gVirtual = 0;
+	gForeign.clear();
 	gBrowse.clear();
 	gHasFile = 0;
 	gItems.clear();
@@ -326,7 +352,12 @@ static void CodecLabel(const Item& it, wchar_t* out, size_t n)
 	const wchar_t* s = L"";
 	if (!out || n == 0) return;
 	out[0] = 0;
-	if (it.up || it.dir || it.method < 0) return;
+	if (it.up) return;
+	if (!it.codec.empty()) {
+		wcsncpy_s(out, n, it.codec.c_str(), _TRUNCATE);
+		return;
+	}
+	if (it.dir || it.method < 0) return;
 	switch (it.method) {
 	case 0: s = L"Store"; break;
 	case 1: s = L"Zstd"; break;
@@ -546,6 +577,32 @@ static void UpdateStatus()
 		s += L"    ";
 		s += b;
 	}
+	{
+		unsigned long long sz = 0, pk = 0;
+		int files = 0, known = 1;
+		for (size_t k = 0; k < gItems.size(); ++k) {
+			if (gItems[k].up || gItems[k].dir) continue;
+			files++;
+			sz += gItems[k].size;
+			if (!gItems[k].packedKnown) known = 0;
+			else pk += gItems[k].packed;
+		}
+		if (!files) {
+			known = 1;
+			for (size_t k = 0; k < gItems.size(); ++k) {
+				if (gItems[k].up || !gItems[k].dir) continue;
+				sz += gItems[k].size;
+				if (!gItems[k].packedKnown) known = 0;
+				else pk += gItems[k].packed;
+			}
+		}
+		if (known && sz) {
+			wchar_t b[64];
+			OxzFormatRatio(pk, sz, b, 64);
+			s += L"    ";
+			s += b;
+		}
+	}
 	SetStatus(s.c_str());
 }
 
@@ -622,6 +679,25 @@ static void SumFolders(std::vector<Item>& all)
 			all[i].packedKnown = 1;
 		}
 	}
+	for (size_t i = 0; i < all.size(); ++i) {
+		std::wstring prefix, mark;
+		int any = 0, mixed = 0;
+		if (!all[i].dir) continue;
+		prefix = all[i].rel + L"\\";
+		for (size_t k = 0; k < all.size(); ++k) {
+			wchar_t label[64];
+			std::wstring c;
+			if (all[k].dir) continue;
+			if (!(all[k].rel.size() > prefix.size() && _wcsnicmp(all[k].rel.c_str(), prefix.c_str(), prefix.size()) == 0)) continue;
+			CodecLabel(all[k], label, 64);
+			c = label;
+			if (c.empty()) continue;
+			any = 1;
+			if (mark.empty()) mark = c;
+			else if (_wcsicmp(mark.c_str(), c.c_str()) != 0) mixed = 1;
+		}
+		if (any) all[i].codec = mixed ? OxzTxt(OS_MIXED) : mark;
+	}
 }
 
 static FILETIME FtU(uint64_t v)
@@ -675,6 +751,7 @@ static void FillVirtual(std::vector<Item>& all)
 				all[hit].packedKnown = 0;
 				all[hit].method = -1;
 				all[hit].flags = 0;
+				all[hit].codec.clear();
 			}
 			all[hit].size = disk[k].size;
 			all[hit].ft = disk[k].ft;
@@ -688,18 +765,78 @@ static void FillVirtual(std::vector<Item>& all)
 	SumFolders(all);
 }
 
+static void MergeDisk(std::vector<Item>& all, const std::vector<Item>& disk)
+{
+	for (size_t k = 0; k < disk.size(); ++k) {
+		size_t hit = all.size();
+		for (size_t n = 0; n < all.size(); ++n) {
+			if (SameRel(all[n].rel, disk[k].rel)) { hit = n; break; }
+		}
+		if (hit < all.size()) {
+			if (!disk[k].dir && (disk[k].size != all[hit].size || CompareFileTime(&disk[k].ft, &all[hit].ft) != 0)) {
+				all[hit].packedKnown = 0;
+				all[hit].method = -1;
+				all[hit].flags = 0;
+				all[hit].codec.clear();
+			}
+			all[hit].size = disk[k].size;
+			all[hit].ft = disk[k].ft;
+			all[hit].created = disk[k].created;
+			all[hit].attr = disk[k].attr;
+		} else {
+			if (!disk[k].dir) gHasFile = 1;
+			all.push_back(disk[k]);
+		}
+	}
+}
+
+static void FillForeign(std::vector<Item>& all)
+{
+	std::vector<Item> disk;
+	for (size_t i = 0; i < gForeign.size(); ++i) {
+		Item it;
+		const OxzEnt& e = gForeign[i];
+		memset(&it.ft, 0, sizeof(it.ft));
+		memset(&it.created, 0, sizeof(it.created));
+		it.rel = e.rel;
+		it.name = LeafOf(it.rel);
+		it.dir = e.dir;
+		it.up = 0;
+		it.size = e.size;
+		it.packed = e.packed;
+		it.packedKnown = e.packedKnown;
+		it.method = -1;
+		it.flags = 0;
+		it.codec = e.codec;
+		it.ft = FtU(e.mtime);
+		it.created = it.ft;
+		it.attr = e.dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_ARCHIVE;
+		if (!it.dir) gHasFile = 1;
+		all.push_back(it);
+	}
+	if (!gWork.empty()) Walk(disk, gWork, L"");
+	MergeDisk(all, disk);
+	SumFolders(all);
+}
+
+static void LoadRows(std::vector<Item>& all)
+{
+	gHasFile = 0;
+	if (!gForeign.empty()) FillForeign(all);
+	else if (gVirtual && !gArchive.empty()) FillVirtual(all);
+	else {
+		if (!gWork.empty()) Walk(all, gWork, L"");
+		ApplyPack(all);
+	}
+}
+
 static void Refresh()
 {
 	std::vector<Item> all;
 	gRefreshing = 1;
 	ListView_DeleteAllItems(gList);
 	gItems.clear();
-	gHasFile = 0;
-	if (gVirtual && !gArchive.empty()) FillVirtual(all);
-	else {
-		if (!gWork.empty()) Walk(all, gWork, L"");
-		ApplyPack(all);
-	}
+	LoadRows(all);
 	EnsureBrowse();
 	for (size_t i = 0; i < all.size(); ++i)
 		if (InBrowse(all[i].rel)) gItems.push_back(all[i]);
@@ -738,19 +875,17 @@ static void Refresh()
 		ListView_InsertItem(gList, &it);
 		sz[0] = human[0] = pk[0] = ph[0] = ratio[0] = codec[0] = kind[0] = attr[0] = when[0] = made[0] = 0;
 		if (!row.up) {
-			_snwprintf_s(sz, _TRUNCATE, L"%llu", row.size);
+			OxzFormatGrouped(row.size, sz, 64);
 			FormatUnit(row.size, human, 64);
 			if (!row.packedKnown) { wcscpy_s(pk, L"-"); wcscpy_s(ph, L"-"); wcscpy_s(ratio, L"-"); }
 			else {
-				_snwprintf_s(pk, _TRUNCATE, L"%llu", row.packed);
+				OxzFormatGrouped(row.packed, pk, 64);
 				FormatUnit(row.packed, ph, 64);
-				if (row.size) _snwprintf_s(ratio, _TRUNCATE, L"%llu%%", (row.packed * 100 + row.size / 2) / row.size);
+				if (row.size) OxzFormatRatio(row.packed, row.size, ratio, 32);
 				else wcscpy_s(ratio, L"-");
 			}
-			if (!row.dir) {
-				if (row.method < 0) wcscpy_s(codec, L"-");
-				else CodecLabel(row, codec, 64);
-			}
+			if (!row.codec.empty() || (!row.dir && row.method >= 0)) CodecLabel(row, codec, 64);
+			else if (!row.dir) wcscpy_s(codec, L"-");
 			if (row.dir) wcscpy_s(kind, OxzTxt(OS_FOLDER));
 			else {
 				size_t dot = row.name.find_last_of(L'.');
@@ -829,15 +964,32 @@ static void GoUp()
 	SelectByName(child);
 }
 
+static void EnsureDiskRoot()
+{
+	if (!gWork.empty()) return;
+	gWork = OxzNewWork();
+	gOwned = 1;
+}
+
 static int EnsureOnDisk(const std::wstring& rel)
 {
-	std::wstring path;
+	std::wstring path, err;
 	DWORD a;
-	if (gWork.empty() || rel.empty()) return 0;
+	std::vector<OxzEnt> one;
+	if (rel.empty()) return 0;
+	EnsureDiskRoot();
 	path = gWork + L"\\" + rel;
 	a = GetFileAttributesW(path.c_str());
 	if (a != INVALID_FILE_ATTRIBUTES) return 1;
-	if (!gVirtual) return 0;
+	for (size_t i = 0; i < gForeign.size(); ++i) {
+		if (gForeign[i].dir) continue;
+		if (_wcsicmp(gForeign[i].rel.c_str(), rel.c_str()) == 0) { one.push_back(gForeign[i]); break; }
+	}
+	if (!one.empty()) {
+		if (OxzMaterialize(gArchive.c_str(), gWork.c_str(), one, err, 0, 100) != 0) return 0;
+		return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+	}
+	if (!gVirtual || gArchive.empty()) return 0;
 	return OxzCoreMaterialize(rel.c_str(), path.c_str()) == OXZ_CORE_OK;
 }
 
@@ -849,7 +1001,21 @@ static void EnsureTree(const std::wstring& rel, int dir)
 		EnsureOnDisk(rel);
 		return;
 	}
+	EnsureDiskRoot();
 	CreateDirectoryW((gWork + L"\\" + rel).c_str(), NULL);
+	if (!gForeign.empty()) {
+		std::vector<OxzEnt> need;
+		std::wstring prefix = rel + L"\\";
+		std::wstring err;
+		for (size_t n = 0; n < gForeign.size(); ++n) {
+			const OxzEnt& e = gForeign[n];
+			if (e.dir) continue;
+			if (_wcsicmp(e.rel.c_str(), rel.c_str()) == 0 || (e.rel.size() > prefix.size() && _wcsnicmp(e.rel.c_str(), prefix.c_str(), prefix.size()) == 0))
+				need.push_back(e);
+		}
+		if (!need.empty()) OxzMaterialize(gArchive.c_str(), gWork.c_str(), need, err, 0, 100);
+		return;
+	}
 	if (OxzCoreList(&items, &count) != OXZ_CORE_OK) return;
 	for (i = 0; i < count; ++i) {
 		std::wstring name;
@@ -867,17 +1033,15 @@ static void EnterRow(int row)
 	if (gItems[row].up) { GoUp(); return; }
 	if (!gItems[row].dir) {
 		std::wstring path;
-		int ok;
-		if (gWork.empty()) return;
-		path = gWork + L"\\" + gItems[row].rel;
-		ok = GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+		int ok = GetFileAttributesW((gWork.empty() ? L"" : (gWork + L"\\" + gItems[row].rel)).c_str()) != INVALID_FILE_ATTRIBUTES;
 		if (!ok) {
 			SetBusy(1, OxzTxt(OS_EXTRACTING));
 			ok = EnsureOnDisk(gItems[row].rel);
 			SetBusy(0, NULL);
 			SetStatus(OxzTxt(OS_HINT));
 		}
-		if (!ok || !LaunchWorkFile(path)) Tell(gHwnd, OxzTxt(OS_OPEN_FAIL), MB_ICONWARNING);
+		path = gWork.empty() ? L"" : (gWork + L"\\" + gItems[row].rel);
+		if (!ok || path.empty() || !LaunchWorkFile(path)) Tell(gHwnd, OxzTxt(OS_OPEN_FAIL), MB_ICONWARNING);
 		return;
 	}
 	gBrowse = gItems[row].rel;
@@ -901,12 +1065,15 @@ static void SetBusy(int on, const wchar_t* text)
 	gBusy = on;
 	gBusyText = text ? text : L"";
 	gBusyTick = GetTickCount();
-	for (int i = 0; i < 9; ++i)
+	for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i)
 		EnableWindow(GetDlgItem(gHwnd, kBtnId[i]), on ? FALSE : TRUE);
 	if (gProg) SendMessageW(gProg, PBM_SETPOS, 0, 0);
+	if (gProgFile) SendMessageW(gProgFile, PBM_SETPOS, 0, 0);
+	if (gPctAll) SetWindowTextW(gPctAll, L"0.0%");
+	if (gPctFile) SetWindowTextW(gPctFile, L"0.0%");
 	if (on) {
 		SetStatus(gBusyText.c_str());
-		SetTimer(gHwnd, 1, 200, NULL);
+		SetTimer(gHwnd, 1, 100, NULL);
 	} else {
 		KillTimer(gHwnd, 1);
 	}
@@ -1016,12 +1183,30 @@ static DWORD WINAPI JobThread(LPVOID p)
 	Job* j = (Job*)p;
 	j->rc = 2;
 	j->bytes = 0;
-	if (j->kind == JOB_OPEN || j->kind == JOB_EXTRACT) {
+	if (j->kind == JOB_OPEN && j->sub == 1) {
+		OxzProgBegin(j->archive.c_str());
+		j->rc = OxzListArchive(j->archive.c_str(), j->keep, j->err);
+	} else if (j->kind == JOB_OPEN || j->kind == JOB_EXTRACT) {
 		OxzProgBegin(j->archive.c_str());
 		j->rc = OxzExtractTo(j->archive.c_str(), j->dest.c_str(), j->err);
 	} else if (j->kind == JOB_SAVE) {
 		OxzProgBegin(j->archive.c_str());
-		j->rc = OxzPackWork(j->work, j->archive, j->bytes, j->err);
+		if (!j->keep.empty()) {
+			if (j->work.empty()) {
+				j->work = OxzNewWork();
+				j->sub = 4;
+			}
+			j->rc = OxzMaterialize(j->dest.c_str(), j->work.c_str(), j->keep, j->err, 0, 35);
+		} else j->rc = 0;
+		if (j->rc == 0) {
+			const wchar_t* name = j->archive.c_str();
+			size_t ln = wcslen(name);
+			int zip = ln >= 4 && _wcsicmp(name + ln - 4, L".zip") == 0;
+			int tar = ln >= 4 && _wcsicmp(name + ln - 4, L".tar") == 0;
+			if (zip) j->rc = OxzWriteZip(j->work, j->archive, j->bytes, j->err, 35, 65);
+			else if (tar) j->rc = OxzWriteTar(j->work, j->archive, j->bytes, j->err, 35, 65);
+			else j->rc = OxzPackWork(j->work, j->archive, j->bytes, j->err, 35, 65);
+		}
 	} else if (j->kind == JOB_PACK || j->kind == JOB_ADD) {
 		std::wstring existing;
 		OxzProgBegin(j->archive.c_str());
@@ -1030,10 +1215,13 @@ static DWORD WINAPI JobThread(LPVOID p)
 		j->merged = existing.empty() ? 0 : 1;
 		j->rc = OxzMergePack(existing, j->inputs, j->archive, j->bytes, j->err);
 		if (j->rc == 0 && !j->closeAfter) {
-			std::wstring view = OxzNewWork();
-			std::wstring ignore;
-			if (OxzExtractTo(j->archive.c_str(), view.c_str(), ignore) == 0) j->dest = view;
-			else OxzRmTree(view);
+			if (OxzCoreIsPkg(j->archive.c_str())) j->sub = 2;
+			else {
+				std::wstring view = OxzNewWork();
+				std::wstring ignore;
+				if (OxzExtractTo(j->archive.c_str(), view.c_str(), ignore) == 0) j->dest = view;
+				else OxzRmTree(view);
+			}
 		}
 	} else if (j->kind == JOB_EXTHERE || j->kind == JOB_EXTRACTTO) {
 		j->rc = 0;
@@ -1075,6 +1263,9 @@ static DWORD WINAPI JobThread(LPVOID p)
 			if (rc) { j->rc = rc; j->err = e; }
 		}
 		if (!any) { j->rc = 2; j->err = OxzTxt(OS_OPEN_FAIL); }
+	} else if (j->kind == JOB_TEST && j->sub == 1) {
+		OxzProgBegin(j->archive.c_str());
+		j->rc = OxzTestArchive(j->archive.c_str(), j->report, j->err, 0, 100);
 	} else if (j->kind == JOB_TEST) {
 		j->rc = 0;
 		int any = 0, total = 0;
@@ -1173,18 +1364,14 @@ static void OnOpenPath(const std::wstring& arc)
 			}
 		}
 	}
-	std::wstring work = OxzNewWork();
-	SetBusy(1, OxzTxt(OS_EXTRACTING));
+	SetBusy(1, OxzTxt(OS_OPEN));
 	Job* j = NewJob();
 	j->kind = JOB_OPEN;
+	j->sub = 1;
 	j->archive = arc;
-	j->dest = work;
 	DropWork();
 	ListView_DeleteAllItems(gList);
-	gWork = work;
-	gOwned = 1;
 	gArchive = arc;
-	gVirtual = 0;
 	StartJob(j);
 }
 
@@ -1225,7 +1412,7 @@ static std::vector<wchar_t> MakeOpenFilter()
 	std::vector<wchar_t> v;
 	auto add = [&](const wchar_t* s) { while (*s) v.push_back(*s++); v.push_back(0); };
 	add(OxzTxt(OS_OPEN_ARCH));
-	add(L"*.oxz;*.7z;*.zip;*.rar;*.gz;*.tgz;*.tar;*.bz2;*.xz;*.cab;*.iso;*.wim");
+	add(L"*.oxz;*.7z;*.zip;*.rar;*.gz;*.tgz;*.tar;*.tar.gz;*.bz2;*.tbz;*.tbz2;*.tar.bz2;*.xz;*.txz;*.tar.xz;*.zst;*.tzst;*.tar.zst;*.cab;*.iso;*.wim;*.lzh;*.lha;*.arj");
 	add(OxzTxt(OS_OXZFILTER));
 	add(L"*.oxz");
 	add(OxzTxt(OS_ALLFILES));
@@ -1243,18 +1430,34 @@ static int PickArchive(std::wstring& path, int save)
 		std::wstring sug = OxzIsOxz(gArchive) ? gArchive : OxzSaveName(gArchive);
 		wcsncpy_s(buf, sug.c_str(), _TRUNCATE);
 	}
-	std::vector<wchar_t> filt = save ? MakeFilter(OxzTxt(OS_OXZFILTER), L"*.oxz", OxzTxt(OS_ALLFILES), L"*.*") : MakeOpenFilter();
+	std::vector<wchar_t> filt;
+	if (save) {
+		auto add = [&](const wchar_t* s) { while (*s) filt.push_back(*s++); filt.push_back(0); };
+		add(OxzTxt(OS_OXZFILTER)); add(L"*.oxz");
+		add(OxzTxt(OS_ZIPFILTER)); add(L"*.zip");
+		add(OxzTxt(OS_TARFILTER)); add(L"*.tar");
+		add(OxzTxt(OS_ALLFILES)); add(L"*.*");
+		filt.push_back(0);
+	} else filt = MakeOpenFilter();
 	memset(&ofn, 0, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = gHwnd;
 	ofn.lpstrFilter = &filt[0];
 	ofn.lpstrFile = buf;
 	ofn.nMaxFile = MAX_PATH;
-	ofn.lpstrDefExt = L"oxz";
+	ofn.lpstrDefExt = NULL;
 	ofn.Flags = OFN_EXPLORER | OFN_HIDEREADONLY | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
 	BOOL ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
 	if (!ok) return 0;
 	path = buf;
+	if (save) {
+		std::wstring leaf = OxzBaseName(path);
+		if (leaf.find(L'.') == std::wstring::npos) {
+			if (ofn.nFilterIndex == 2) path += L".zip";
+			else if (ofn.nFilterIndex == 3) path += L".tar";
+			else path += L".oxz";
+		}
+	}
 	return 1;
 }
 
@@ -1296,7 +1499,12 @@ static void OnNew()
 
 static void EnsureWork()
 {
-	if (gWork.empty()) OnNew();
+	if (!gWork.empty()) return;
+	if (!gForeign.empty() || (gVirtual && !gArchive.empty())) {
+		EnsureDiskRoot();
+		return;
+	}
+	OnNew();
 }
 
 static void OnAddFiles()
@@ -1332,11 +1540,24 @@ static void OnDelete()
 	if (rels.empty()) return;
 	if (MessageBoxW(gHwnd, OxzTxt(OS_DEL_ASK), OxzTxt(OS_DEL), MB_OKCANCEL | MB_ICONWARNING) != IDOK) return;
 	for (size_t k = 0; k < rels.size(); ++k) {
-		std::wstring path = gWork + L"\\" + rels[k];
-		DWORD a = GetFileAttributesW(path.c_str());
-		OxzCoreDrop(rels[k].c_str());
+		std::wstring path;
+		DWORD a = INVALID_FILE_ATTRIBUTES;
+		if (!gForeign.empty()) {
+			std::vector<OxzEnt> kept;
+			std::wstring prefix = rels[k] + L"\\";
+			for (size_t n = 0; n < gForeign.size(); ++n) {
+				const OxzEnt& e = gForeign[n];
+				if (_wcsicmp(e.rel.c_str(), rels[k].c_str()) == 0) continue;
+				if (e.rel.size() > prefix.size() && _wcsnicmp(e.rel.c_str(), prefix.c_str(), prefix.size()) == 0) continue;
+				kept.push_back(e);
+			}
+			gForeign.swap(kept);
+		} else if (gVirtual) OxzCoreDrop(rels[k].c_str());
 		if (!gBrowse.empty() && (_wcsicmp(gBrowse.c_str(), rels[k].c_str()) == 0 || (gBrowse.size() > rels[k].size() && _wcsnicmp(gBrowse.c_str(), rels[k].c_str(), rels[k].size()) == 0 && gBrowse[rels[k].size()] == L'\\')))
 			gBrowse.clear();
+		if (gWork.empty()) continue;
+		path = gWork + L"\\" + rels[k];
+		a = GetFileAttributesW(path.c_str());
 		if (a == INVALID_FILE_ATTRIBUTES) continue;
 		if (a & FILE_ATTRIBUTE_DIRECTORY) OxzRmTree(path);
 		else DeleteFileW(path.c_str());
@@ -1349,6 +1570,75 @@ static void OnRename()
 	int sel = ListView_GetNextItem(gList, -1, LVNI_FOCUSED);
 	if (sel < 0) sel = ListView_GetNextItem(gList, -1, LVNI_SELECTED);
 	if (sel >= 0 && sel < (int)gItems.size() && !gItems[sel].up) ListView_EditLabel(gList, sel);
+}
+
+static void OnTestView()
+{
+	std::wstring arc = gArchive;
+	if (arc.empty() && !PickArchive(arc, 0)) return;
+	SetBusy(1, OxzTxt(OS_TEST));
+	Job* j = NewJob();
+	j->kind = JOB_TEST;
+	j->sub = 1;
+	j->archive = arc;
+	StartJob(j);
+}
+
+static void OnMap()
+{
+	std::vector<Item> all;
+	std::vector<OxzMapNode> folders, codecs;
+	std::vector<OxzMapLink> links;
+	unsigned long long size = 0, packed = 0;
+	int known = 1, any = 0;
+	struct Bucket { std::wstring name; unsigned long long size; unsigned long long packed; };
+	std::vector<Bucket> fb, cb;
+	if (gArchive.empty() && gWork.empty() && gForeign.empty()) {
+		Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION);
+		return;
+	}
+	LoadRows(all);
+	for (size_t i = 0; i < all.size(); ++i) {
+		std::wstring parent, codec;
+		wchar_t label[64];
+		int fi = -1, ci = -1;
+		OxzMapLink link;
+		if (all[i].dir) continue;
+		any = 1;
+		size += all[i].size;
+		if (!all[i].packedKnown) known = 0;
+		else packed += all[i].packed;
+		parent = all[i].rel;
+		{
+			size_t s = parent.find_last_of(L'\\');
+			if (s == std::wstring::npos) parent = L"\\";
+			else parent.resize(s);
+		}
+		CodecLabel(all[i], label, 64);
+		codec = label[0] ? label : L"-";
+		for (size_t k = 0; k < fb.size(); ++k) if (_wcsicmp(fb[k].name.c_str(), parent.c_str()) == 0) { fi = (int)k; break; }
+		if (fi < 0) { Bucket b; b.name = parent; b.size = 0; b.packed = 0; fb.push_back(b); fi = (int)fb.size() - 1; }
+		for (size_t k = 0; k < cb.size(); ++k) if (_wcsicmp(cb[k].name.c_str(), codec.c_str()) == 0) { ci = (int)k; break; }
+		if (ci < 0) { Bucket b; b.name = codec; b.size = 0; b.packed = 0; cb.push_back(b); ci = (int)cb.size() - 1; }
+		fb[fi].size += all[i].size;
+		cb[ci].size += all[i].size;
+		if (all[i].packedKnown) { fb[fi].packed += all[i].packed; cb[ci].packed += all[i].packed; }
+		link.from = fi;
+		link.to = ci;
+		link.packed = all[i].packedKnown ? all[i].packed : all[i].size;
+		{
+			int merged = 0;
+			for (size_t k = 0; k < links.size(); ++k) if (links[k].from == fi && links[k].to == ci) { links[k].packed += link.packed; merged = 1; break; }
+			if (!merged) links.push_back(link);
+		}
+	}
+	if (!any) {
+		Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION);
+		return;
+	}
+	for (size_t i = 0; i < fb.size(); ++i) { OxzMapNode n; n.name = fb[i].name; n.size = fb[i].size; n.packed = fb[i].packed; folders.push_back(n); }
+	for (size_t i = 0; i < cb.size(); ++i) { OxzMapNode n; n.name = cb[i].name; n.size = cb[i].size; n.packed = cb[i].packed; codecs.push_back(n); }
+	OxzShowMap(gHwnd, gFont, OxzTxt(OS_MAP), size, packed, known, folders, codecs, links);
 }
 
 static void OnExtract()
@@ -1372,7 +1662,8 @@ static int HasFiles()
 
 static void OnSave()
 {
-	if (gWork.empty() || (!HasFiles() && gArchive.empty())) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
+	if (gWork.empty() && gForeign.empty() && !gVirtual) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
+	if (!HasFiles() && gArchive.empty() && gForeign.empty()) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
 	std::wstring arc;
 	if (!PickArchive(arc, 1)) return;
 	if (UnderWork(arc)) { Tell(gHwnd, OxzTxt(OS_SAVE_INSIDE), MB_ICONWARNING); return; }
@@ -1381,12 +1672,14 @@ static void OnSave()
 	j->kind = JOB_SAVE;
 	j->archive = arc;
 	j->work = gWork;
+	j->dest = gArchive;
+	j->keep = gForeign;
 	StartJob(j);
 }
 
 static void SaveCurrent()
 {
-	if (gBusy || gWork.empty() || (!HasFiles() && gArchive.empty())) return;
+	if (gBusy || (gWork.empty() && gForeign.empty()) || (!HasFiles() && gArchive.empty() && gForeign.empty())) return;
 	if (!OxzIsOxz(gArchive)) { OnSave(); return; }
 	if (UnderWork(gArchive)) return;
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
@@ -1394,6 +1687,8 @@ static void SaveCurrent()
 	j->kind = JOB_SAVE;
 	j->archive = gArchive;
 	j->work = gWork;
+	j->dest = gArchive;
+	j->keep = gForeign;
 	StartJob(j);
 }
 
@@ -1452,7 +1747,7 @@ static void FreezeWatchBase()
 
 static void StartWatchSave()
 {
-	if (gBusy || gWatchPause || gWork.empty() || (!HasFiles() && gArchive.empty())) return;
+	if (gBusy || gWatchPause || (gWork.empty() && gForeign.empty()) || (!HasFiles() && gArchive.empty() && gForeign.empty())) return;
 	if (gArchive.empty()) {
 		gWatchPause = 1;
 		FreezeWatchBase();
@@ -1467,6 +1762,8 @@ static void StartWatchSave()
 	j->kind = JOB_SAVE;
 	j->archive = arc;
 	j->work = gWork;
+	j->dest = gArchive;
+	j->keep = gForeign;
 	StartJob(j);
 }
 
@@ -1711,6 +2008,19 @@ static void OnJobDone()
 	SetBusy(0, NULL);
 	if (!j) return;
 	if (j->kind == JOB_TEST) {
+		if (j->sub == 1) {
+			if (j->rc) gResult = j->rc;
+			if (j->report.empty()) {
+				OxzTestRow row;
+				row.name = j->archive;
+				row.ok = j->rc == 0;
+				row.detail = j->rc ? (j->err.empty() ? OxzTxt(OS_TEST_FAIL) : j->err) : L"OK";
+				j->report.push_back(row);
+			}
+			if (!gExit) OxzShowTest(gHwnd, gFont, OxzTxt(OS_TEST), j->report);
+			delete j;
+			return;
+		}
 		if (j->rc) gResult = j->rc;
 		if (!gExit) {
 			const wchar_t* msg = j->rc ? (j->err.empty() ? OxzTxt(OS_TEST_FAIL) : j->err.c_str()) : OxzTxt(OS_TEST_OK);
@@ -1722,32 +2032,70 @@ static void OnJobDone()
 	}
 	int fail = j->rc != 0;
 	if (j->kind == JOB_SAVE) WatchAfterSave(fail);
-	if (!fail && (j->kind == JOB_PACK || j->kind == JOB_ADD) && !j->dest.empty() && !j->closeAfter) {
+	if (j->kind == JOB_OPEN && j->sub == 1) {
+		if (!fail) {
+			gForeign.swap(j->keep);
+			gVirtual = 1;
+			gWork.clear();
+			gOwned = 0;
+			Refresh();
+			SetStatus(OxzTxt(OS_HINT));
+		}
+	} else if (!fail && (j->kind == JOB_PACK || j->kind == JOB_ADD) && j->sub == 2 && !j->closeAfter) {
+		DropWork();
+		gWork = OxzNewWork();
+		gOwned = 1;
+		gArchive = j->archive;
+		gVirtual = 1;
+		if (OxzCoreRemember(gWork.c_str(), gArchive.c_str()) == OXZ_CORE_OK) Refresh();
+	} else if (!fail && (j->kind == JOB_PACK || j->kind == JOB_ADD) && !j->dest.empty() && !j->closeAfter) {
 		DropWork();
 		gWork = j->dest;
 		gOwned = 1;
 		gArchive = j->archive;
 		Refresh();
 		OxzCoreRemember(gWork.c_str(), gArchive.c_str());
-	} else if (j->kind == JOB_OPEN || j->kind == JOB_DROPSAVE || (j->kind == JOB_SAVE && !fail)) {
-		if ((j->kind == JOB_SAVE || j->kind == JOB_DROPSAVE) && !j->archive.empty()) gArchive = j->archive;
+	} else if (j->kind == JOB_SAVE && !fail) {
+		gWork = j->work;
+		gOwned = 1;
+		gArchive = j->archive;
+		gForeign.clear();
+		gVirtual = 0;
+		OxzCoreForget();
+		if (OxzCoreIsPkg(gArchive.c_str())) {
+			gVirtual = 1;
+			OxzCoreRemember(gWork.c_str(), gArchive.c_str());
+		} else {
+			std::wstring listErr;
+			OxzListArchive(gArchive.c_str(), gForeign, listErr);
+			if (!gForeign.empty()) gVirtual = 1;
+		}
+		Refresh();
+	} else if (j->kind == JOB_OPEN || j->kind == JOB_DROPSAVE) {
+		if (j->kind == JOB_DROPSAVE && !j->archive.empty()) gArchive = j->archive;
 		Refresh();
 		if (!fail) OxzCoreRemember(gWork.c_str(), gArchive.c_str());
 	}
+	if (fail && j->kind == JOB_SAVE && j->sub == 4 && !j->work.empty() && (gWork.empty() || !OxzSamePath(gWork, j->work)))
+		OxzRmTree(j->work);
 	if (fail) {
 		if (!gExit) Tell(gHwnd, j->err.empty() ? OxzTxt(OS_SAVE_FAIL) : j->err.c_str(), MB_ICONWARNING);
 	} else if (j->kind == JOB_SAVE || j->kind == JOB_PACK || j->kind == JOB_ADD || j->kind == JOB_DROPSAVE) {
 		gArchive = j->archive;
 		wchar_t msg[400];
 		const wchar_t* head = (j->kind == JOB_ADD || j->kind == JOB_DROPSAVE || j->merged) ? OxzTxt(OS_ADDED) : (j->kind == JOB_PACK ? OxzTxt(OS_CREATED) : OxzTxt(OS_SAVED));
-		_snwprintf_s(msg, _TRUNCATE, L"%s  %llu %s   %s", head, j->bytes, OxzTxt(OS_BYTES), j->archive.c_str());
+		wchar_t bytes[48];
+		OxzFormatGrouped(j->bytes, bytes, 48);
+		_snwprintf_s(msg, _TRUNCATE, L"%s  %s %s   %s", head, bytes, OxzTxt(OS_BYTES), j->archive.c_str());
 		SetStatus(msg);
 		SetTitle();
 	} else if (j->kind == JOB_EXTRACT || j->kind == JOB_EXTHERE || j->kind == JOB_EXTRACTTO || j->kind == JOB_EXTAT) {
 		SetStatus(OxzTxt(OS_EXTRACTED));
 	} else if (j->kind == JOB_PACKEACH) {
 		wchar_t msg[200];
-		_snwprintf_s(msg, _TRUNCATE, L"%s  %llu %s", OxzTxt(OS_CREATED), j->bytes, OxzTxt(OS_BYTES));
+		wchar_t bytes[48];
+		OxzFormatGrouped(j->bytes, bytes, 48);
+		_snwprintf_s(msg, _TRUNCATE, L"%s  %s %s", OxzTxt(OS_CREATED), bytes, OxzTxt(OS_BYTES));
 		SetStatus(msg);
 	}
 	int closeNow = !fail && j->closeAfter;
@@ -1776,10 +2124,10 @@ static void ApplyRename(NMLVDISPINFOW* di)
 	size_t slash = rel.find_last_of(L'\\');
 	std::wstring parent = slash == std::wstring::npos ? L"" : rel.substr(0, slash);
 	std::wstring destRel = parent.empty() ? neu : (parent + L"\\" + neu);
-	std::wstring src = gWork + L"\\" + rel;
+	std::wstring src = gWork.empty() ? L"" : (gWork + L"\\" + rel);
 	int onDisk, moved = 0, rn;
 	if (_wcsicmp(destRel.c_str(), rel.c_str()) == 0) return;
-	onDisk = GetFileAttributesW(src.c_str()) != INVALID_FILE_ATTRIBUTES;
+	onDisk = !src.empty() && GetFileAttributesW(src.c_str()) != INVALID_FILE_ATTRIBUTES;
 	if (onDisk) {
 		if (!MoveFileW(src.c_str(), (gWork + L"\\" + destRel).c_str())) {
 			Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
@@ -1787,7 +2135,18 @@ static void ApplyRename(NMLVDISPINFOW* di)
 		}
 		moved = 1;
 	}
-	rn = OxzCoreRename(rel.c_str(), destRel.c_str());
+	rn = 0;
+	if (!gForeign.empty()) {
+		int hit = 0;
+		std::wstring prefix = rel + L"\\";
+		for (size_t n = 0; n < gForeign.size(); ++n) {
+			OxzEnt& e = gForeign[n];
+			if (_wcsicmp(e.rel.c_str(), rel.c_str()) == 0) { e.rel = destRel; hit = 1; }
+			else if (e.rel.size() > prefix.size() && _wcsnicmp(e.rel.c_str(), prefix.c_str(), prefix.size()) == 0)
+				e.rel = destRel + e.rel.substr(rel.size());
+		}
+		rn = hit ? OXZ_CORE_OK : OXZ_CORE_ERR;
+	} else rn = OxzCoreRename(rel.c_str(), destRel.c_str());
 	if (!moved && rn != OXZ_CORE_OK) {
 		Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
 		return;
@@ -1923,7 +2282,7 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			if (sel >= 0 && sel <= 13) {
 				OxzLangSet(sel);
 				MakeFont(gHwnd);
-				for (int i = 0; i < 9; ++i) SendMessageW(GetDlgItem(gHwnd, kBtnId[i]), WM_SETFONT, (WPARAM)gFont, TRUE);
+				for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i) SendMessageW(GetDlgItem(gHwnd, kBtnId[i]), WM_SETFONT, (WPARAM)gFont, TRUE);
 				SendMessageW(gList, WM_SETFONT, (WPARAM)gFont, TRUE);
 				SendMessageW(gStatus, WM_SETFONT, (WPARAM)gFont, TRUE);
 				Relabel();
@@ -2381,14 +2740,15 @@ static int DragInside(const std::wstring& dir, const std::wstring& path)
 static void CollectSelected(std::vector<std::wstring>& paths)
 {
 	paths.clear();
-	if (gWork.empty()) return;
+	if (gWork.empty() && gForeign.empty() && !gVirtual) return;
 	std::vector<std::wstring> all;
 	std::vector<int> folders;
 	int row = -1;
 	while ((row = ListView_GetNextItem(gList, row, LVNI_SELECTED)) >= 0) {
 		if (row >= (int)gItems.size() || gItems[row].up) continue;
-		if (GetFileAttributesW((gWork + L"\\" + gItems[row].rel).c_str()) == INVALID_FILE_ATTRIBUTES)
+		if (gWork.empty() || GetFileAttributesW((gWork + L"\\" + gItems[row].rel).c_str()) == INVALID_FILE_ATTRIBUTES)
 			EnsureTree(gItems[row].rel, gItems[row].dir);
+		if (gWork.empty()) continue;
 		all.push_back(gWork + L"\\" + gItems[row].rel);
 		if (gItems[row].dir) folders.push_back((int)all.size() - 1);
 	}
@@ -2531,7 +2891,7 @@ static void WatchCut()
 
 static void BeginListDrag()
 {
-	if (gBusy || gWork.empty()) return;
+	if (gBusy || (gWork.empty() && gForeign.empty() && !gVirtual)) return;
 	std::vector<std::wstring> paths;
 	CollectSelected(paths);
 	if (paths.empty()) return;
@@ -2553,7 +2913,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		MakeFont(hwnd);
 		ApplyCaption(hwnd);
 		ApplyRtl(hwnd);
-		for (int i = 0; i < 9; ++i) {
+		for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i) {
 			HWND b = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
 				0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)kBtnId[i], NULL, NULL);
 			SendMessageW(b, WM_SETFONT, (WPARAM)gFont, TRUE);
@@ -2568,7 +2928,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		ListView_SetBkColor(gList, RGB(255, 224, 236));
 		LVCOLUMNW col;
 		memset(&col, 0, sizeof(col));
-		const int widths[] = { 268, 100, 90, 110, 100, 64, 120, 72, 56, 140, 140 };
+		const int widths[] = { 248, 128, 88, 128, 96, 72, 112, 72, 56, 136, 136 };
 		col.mask = LVCF_TEXT | LVCF_WIDTH;
 		col.pszText = (LPWSTR)L"";
 		for (int c = 0; c < 11; ++c) {
@@ -2577,11 +2937,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		}
 		gStatus = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 10, 10, hwnd, (HMENU)ID_STATUS, NULL, NULL);
 		SendMessageW(gStatus, WM_SETFONT, (WPARAM)gFont, TRUE);
-		gProg = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD, 0, 0, 10, 10, hwnd, (HMENU)ID_PROG, NULL, NULL);
+		gProg = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_PROG, NULL, NULL);
+		gProgFile = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_PROG_FILE, NULL, NULL);
+		gLblAll = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_LEFTNOWORDWRAP | SS_CENTERIMAGE, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_LBL_ALL, NULL, NULL);
+		gLblFile = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_LEFTNOWORDWRAP | SS_CENTERIMAGE, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_LBL_FILE, NULL, NULL);
+		gPctAll = CreateWindowExW(0, L"STATIC", L"0.0%", WS_CHILD | SS_RIGHT | SS_CENTERIMAGE, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_PCT_ALL, NULL, NULL);
+		gPctFile = CreateWindowExW(0, L"STATIC", L"0.0%", WS_CHILD | SS_RIGHT | SS_CENTERIMAGE, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)ID_PCT_FILE, NULL, NULL);
 		SetWindowTheme(gProg, L"", L"");
-		SendMessageW(gProg, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+		SetWindowTheme(gProgFile, L"", L"");
+		SendMessageW(gProg, PBM_SETRANGE32, 0, 1000);
+		SendMessageW(gProgFile, PBM_SETRANGE32, 0, 1000);
 		SendMessageW(gProg, PBM_SETBARCOLOR, 0, (LPARAM)RGB(60, 160, 60));
+		SendMessageW(gProgFile, PBM_SETBARCOLOR, 0, (LPARAM)RGB(70, 130, 180));
 		SendMessageW(gProg, PBM_SETBKCOLOR, 0, (LPARAM)RGB(255, 234, 238));
+		SendMessageW(gProgFile, PBM_SETBKCOLOR, 0, (LPARAM)RGB(255, 234, 238));
+		SendMessageW(gLblAll, WM_SETFONT, (WPARAM)gFont, TRUE);
+		SendMessageW(gLblFile, WM_SETFONT, (WPARAM)gFont, TRUE);
+		SendMessageW(gPctAll, WM_SETFONT, (WPARAM)gFont, TRUE);
+		SendMessageW(gPctFile, WM_SETFONT, (WPARAM)gFont, TRUE);
 		Relabel();
 		gDrop = new GuiDrop();
 		RegisterDragDrop(hwnd, gDrop);
@@ -2594,7 +2967,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		RECT* r = (RECT*)lp;
 		SetWindowPos(hwnd, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
 		MakeFont(hwnd);
-		for (int i = 0; i < 9; ++i) SendMessageW(GetDlgItem(hwnd, kBtnId[i]), WM_SETFONT, (WPARAM)gFont, TRUE);
+		for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i) SendMessageW(GetDlgItem(hwnd, kBtnId[i]), WM_SETFONT, (WPARAM)gFont, TRUE);
 		SendMessageW(gList, WM_SETFONT, (WPARAM)gFont, TRUE);
 		SendMessageW(gStatus, WM_SETFONT, (WPARAM)gFont, TRUE);
 		Relayout();
@@ -2612,6 +2985,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		case ID_RENAME: OnRename(); break;
 		case ID_EXTRACT: OnExtract(); break;
 		case ID_SAVE: OnSave(); break;
+		case ID_TESTVIEW: OnTestView(); break;
+		case ID_MAP: OnMap(); break;
 		case ID_SETTINGS: ShowSettings(); break;
 		case ID_COPY: OnCopyFiles(0); break;
 		case ID_CUT: OnCopyFiles(1); break;
@@ -2628,6 +3003,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			else {
 				int bad = 0;
 				for (size_t k = 0; k < rows.size(); ++k) {
+					if (gItems[rows[k]].dir) EnsureTree(gItems[rows[k]].rel, 1);
+					else if (!EnsureOnDisk(gItems[rows[k]].rel)) { bad = 1; continue; }
+					if (gWork.empty()) { bad = 1; continue; }
 					if (gItems[rows[k]].dir) {
 						std::wstring path = gWork + L"\\" + gItems[rows[k]].rel;
 						HINSTANCE opened = ShellExecuteW(gHwnd, L"open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
@@ -2701,10 +3079,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		if (wp == 3) { PollWatch(); return 0; }
 		if (wp == 1 && gBusy) {
 			OxzSnap snap;
-			wchar_t elapsed[16], left[16], arc[700], ratio[64], count[80], clock[96], body[2100];
+			wchar_t elapsed[16], left[16], arc[700], filePct[32], allPct[32], count[80], clock[96], body[2100];
+			int ten;
 			memset(&snap, 0, sizeof(snap));
 			OxzProgRead(&snap);
-			if (gProg) SendMessageW(gProg, PBM_SETPOS, snap.overall, 0);
+			ten = snap.overallTen;
+			if (gProg) SendMessageW(gProg, PBM_SETPOS, ten, 0);
+			if (gProgFile) SendMessageW(gProgFile, PBM_SETPOS, snap.fileTen, 0);
+			OxzFormatTenth(snap.fileTen, filePct, 32);
+			OxzFormatTenth(ten, allPct, 32);
+			if (gPctFile) SetWindowTextW(gPctFile, filePct);
+			if (gPctAll) SetWindowTextW(gPctAll, allPct);
 			DWORD now = GetTickCount();
 			DWORD ms = snap.startTick ? now - snap.startTick : 0;
 			unsigned sec = ms / 1000;
@@ -2712,13 +3097,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			if (hour > 99) hour = 99;
 			sec %= 3600;
 			_snwprintf_s(elapsed, _TRUNCATE, L"%02u:%02u:%02u", hour, sec / 60, sec % 60);
-			if (snap.overall > 0 && snap.overall < 100 && snap.startTick) {
-				DWORD rem = (DWORD)((unsigned long long)ms * (unsigned)(100 - snap.overall) / (unsigned)snap.overall);
+			if (ten > 0 && ten < 1000 && snap.startTick) {
+				DWORD rem = (DWORD)((unsigned long long)ms * (unsigned)(1000 - ten) / (unsigned)ten);
 				unsigned rs = rem / 1000, rh = rs / 3600;
 				if (rh > 99) rh = 99;
 				rs %= 3600;
 				_snwprintf_s(left, _TRUNCATE, L"%02u:%02u:%02u", rh, rs / 60, rs % 60);
-			} else if (snap.overall >= 100) {
+			} else if (ten >= 1000) {
 				wcscpy_s(left, L"00:00:00");
 			} else {
 				wcscpy_s(left, L"--:--:--");
@@ -2727,10 +3112,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			const wchar_t* slash = wcsrchr(snap.archive, L'\\');
 			if (slash && slash[1]) leaf = slash + 1;
 			_snwprintf_s(arc, _TRUNCATE, OxzTxt(OS_PROG_ARC), leaf[0] ? leaf : gBusyText.c_str());
-			_snwprintf_s(ratio, _TRUNCATE, OxzTxt(OS_PROG_RATIO), snap.filePct, snap.overall);
 			_snwprintf_s(count, _TRUNCATE, OxzTxt(OS_PROG_COUNT), snap.index, snap.total);
 			_snwprintf_s(clock, _TRUNCATE, OxzTxt(OS_PROG_TIME), elapsed, left);
-			_snwprintf_s(body, _TRUNCATE, L"%s\r\n%s\r\n%s    %s    %s", arc, snap.file, ratio, count, clock);
+			_snwprintf_s(body, _TRUNCATE, L"%s\r\n%s\r\n%s    %s", arc, snap.file, count, clock);
 			SetStatus(body);
 		}
 		return 0;
