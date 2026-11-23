@@ -2474,6 +2474,7 @@
 #define IDR_CSO_TAC_PSSKY16             5015
 #define IDR_CSO_TAC_PSCUT               5016
 #define IDR_GS_WOPN                     399
+#define IDR_XG_WOPN                     402
 
 #define IDC_MP_BOT_SHORTCFG             5100
 #define IDC_MP_BOT_RAIRAX               5101
@@ -2496,7 +2497,7 @@
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        402
+#define _APS_NEXT_RESOURCE_VALUE        403
 #define _APS_NEXT_COMMAND_VALUE         33350
 #define _APS_NEXT_CONTROL_VALUE         5155
 #define _APS_NEXT_SYMED_VALUE           104

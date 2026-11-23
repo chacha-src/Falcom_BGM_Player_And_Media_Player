@@ -15,6 +15,8 @@ public:
 	/* Modal. Writes bind prog/bank on OK (GS/XG). VST3 pick also returns IDOK
 	   after loading dedicated plugin into the part. */
 	static int PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int isDrum = -1);
+	/* FM音色画面。VSTは開かず、選んだバンクとPCだけ返す。 */
+	static int PickForFmVoice(CWnd* owner, int* msb, int* lsb, int* prog, int* isXg, int* isDrum);
 
 	int m_part;
 	int m_prog;
@@ -23,6 +25,7 @@ public:
 	int m_mapSel;
 	int m_pickedVst3; /* 1 if user left via VST3 pick */
 	int m_isDrum;     /* 1 = kit / rhythm part (any MIDI ch, not only 10) */
+	int m_fmPick;     /* 1 = FM音色画面からの試聴。出力コンボに依らず FM で鳴らす */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

@@ -186,11 +186,11 @@ float3 Part(float3 p, float pick)
 	float t = saturate(-dy / 0.50);
 	// 体型で胴は太る。ふくよかな体ほど断面を広げ、毛が胴の中を通らないようにする。
 	float gz = Grav.w > 0.1 ? Grav.w : 1.0;
-	// HumF0。胸の関節から、最大の胸が前 19cm、ドレスの前が 21cm。
-	float front = lerp(0.200, 0.175, t) * lerp(1.0, gz, 0.7);
+	// HumF0。胸の関節から、最大の胸が前 19cm、ドレスの前が 21cm。余白を残さないと裾が胴へ入る。
+	float front = lerp(0.230, 0.200, t) * lerp(1.0, gz, 0.7);
 	// 背中の 16〜18cm はマントの布。マントが無いときは胴の後ろだけにする。
 	float rear = lerp(lerp(0.100, 0.118, t) * gz, lerp(0.160, 0.185, t) * lerp(1.0, gz, 0.5), step(0.5, Wind.w));
-	float halfS = lerp(0.185, 0.200, t) * gz;
+	float halfS = lerp(0.200, 0.220, t) * gz;
 	float rf = f >= 0.0 ? front : rear;
 	float e = (s * s) / (halfS * halfS) + (f * f) / (rf * rf);
 	if (e < 1.0 && e > 1e-6) {
@@ -243,7 +243,9 @@ float SkullRad(float3 d)
 	float ry = u.y < 0.0 ? 0.125 : 0.100;
 	float rx = 0.086;
 	float e2 = (u.x * u.x) / (rx * rx) + (u.y * u.y) / (ry * ry) + (u.z * u.z) / (rz * rz);
-	float faceR = rsqrt(max(e2, 1e-4)) * smoothstep(-0.15, -0.09, d.y);
+	// 楕円体は額から下の正面だけ。頭頂と側頭まで下限にすると、殻が頭より大きいドームになって耳との間が空く。
+	float faceBand = smoothstep(0.06, -0.01, u.y) * smoothstep(0.02, -0.10, u.z) * smoothstep(0.55, 0.25, abs(u.x));
+	float faceR = rsqrt(max(e2, 1e-4)) * faceBand;
 	R = max(R, faceR);
 	if (R < 0.03 && el > -0.55) R = 0.095;
 	return R;
@@ -294,21 +296,32 @@ float3 SkullPush(float3 p, float3 keep)
 	// 0.24 まで見る。上からの風で静止位置より沈んでも、ここで押し戻せる。
 	if (rP > 0.50)
 		return mul(float4(b, 1), Pal).xyz;
-	if (rP > 0.24 && !(rK > 1e-4 && dot(dK, dP) < 0.0))
+	if (rP > 0.24 && !(rK > 1e-4 && dot(dK, dP) < 0.0) && !(dP.y > -0.05 && rP < 0.34))
 		return mul(float4(b, 1), Pal).xyz;
 	if (rP > 0.16 && rK > 1e-4 && dot(dK, dP) < 0.0) {
 		float Rs = max(SkullRad(dK), 0.095);
-		float mkFar = (dP.z < -0.01 || dK.z < -0.01) ? 0.010 : 0.008;
+		float mkFar = (dP.z < -0.01 || dK.z < -0.01) ? 0.014 : 0.010;
 		b = C + dirK * (Rs + mkFar);
 		return mul(float4(b, 1), Pal).xyz;
 	}
 	float Rp = SkullRad(dP);
 	float Rk = SkullRad(dK);
-	float mk = (dP.z < -0.01 || dK.z < -0.01) ? 0.010 : 0.008;
+	float mk = (dP.z < -0.02 && dP.y < 0.02) ? 0.005 : 0.003;
 	// 今いる方位の面まで出す。静止位置の半径で戻すと、頭が太い方位では面の内側に残る。
 	if (Rp > 0.02 && rP < Rp + mk - 0.001) {
 		b = C + dirP * (Rp + mk);
 		return mul(float4(b, 1), Pal).xyz;
+	}
+	// 地肌の殻が頭蓋の外に浮いている。頭頂・側頭・耳の高さは面まで戻す。下へ落ちた毛先は残す。
+	if (dP.y > -0.05 && Rp > 0.03 && rP < 0.34) {
+		float surf = Rp + mk;
+		float gap = rP - surf;
+		if (gap > 0.0 && gap < 0.12) {
+			float t = 1.0 - smoothstep(0.070, 0.12, gap);
+			if (dP.z < -0.03 && dP.y < 0.0) t *= 0.25;
+			b = C + dirP * lerp(rP, surf, t);
+			return mul(float4(b, 1), Pal).xyz;
+		}
 	}
 	if (rK > 1e-4 && dot(dK, dP) < 0.0 && rP < 0.50) {
 		float Rs = max(Rk, 0.095);

@@ -3,6 +3,7 @@
   oxz 独自書庫 (OXZPKG)。7z とは別の印。
   ファイルごとに複数の公開コーデックを試し、1 バイトでも小さい方を残す。
   512KB を超えるファイルは先頭 512KB を各コーデック同時に試し、その方式で全体を圧縮する。
+  大きなファイルの圧縮と展開は、コーデックの内側でもスレッドに分ける。形式と既存書庫の中身は変えない。
   PPMd は展開が重いので 8MB を超えるファイルには使わない。それ以下でも他方式より 5% 以上小さいときだけ使う。
   同点なら展開の軽い方。拡張子では除外しない。サイズは 64 ビット。
   既存の 7z 形式 oxz は base としてそのまま持ち、変わったファイルだけ足す。
@@ -34,8 +35,19 @@ typedef int (*OxzCoreBaseFn)(const wchar_t* sevenPath, const wchar_t* destDir, v
 
 int OxzCoreIsPkg(const wchar_t* path);
 void OxzCoreForget(void);
+/* 1 は速く、10 は小さい。未設定時は 10。 */
+int OxzCoreSetLevel(int level);
+int OxzCoreGetLevel(void);
+void OxzCoreSetPpmd(int on);
+int OxzCoreGetPpmd(void);
 /* 展開直後の作業フォルダを覚える。archive は 7z 形式 oxz、OXZPKG、または無い。 */
 int OxzCoreRemember(const wchar_t* workDir, const wchar_t* archiveOrNull);
+/* 覚えている一覧から rel を外す。フォルダなら中も外す。 */
+int OxzCoreDrop(const wchar_t* rel);
+/* 覚えている名前を付け替える。圧縮データはそのまま。 */
+int OxzCoreRename(const wchar_t* oldRel, const wchar_t* newRel);
+/* 覚えている圧縮ブロックを 1 ファイルだけ展開する。 */
+int OxzCoreMaterialize(const wchar_t* rel, const wchar_t* destPath);
 /* 作業フォルダを書庫にする。変わっていない圧縮済みデータはコピーする。 */
 int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsigned long long* outBytes,
     OxzCoreProgFn prog, void* progUser);
@@ -52,10 +64,13 @@ typedef struct OxzCoreItem {
 	uint16_t method;
 	uint16_t flags;
 	uint64_t packed;
+	uint32_t attr;
 } OxzCoreItem;
 
 int OxzCoreReadDir(const wchar_t* archive, OxzCoreItem** items, int* count,
     uint64_t* baseOff, uint64_t* baseSize);
+/* 開いている書庫の、削除していない項目。 */
+int OxzCoreList(OxzCoreItem** items, int* count);
 void OxzCoreFreeItems(OxzCoreItem* items, int count);
 /* overlay を展開し、RIP も戻したバイトを malloc する。 */
 int OxzCoreReadOverlay(const wchar_t* archive, int overlay, void** data, size_t* size);

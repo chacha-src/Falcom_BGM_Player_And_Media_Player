@@ -65,24 +65,39 @@ static bool OxzReadAll(HANDLE h, unsigned char* buf, size_t n)
 }
 
 struct OxzSpanProg {
+	unsigned magic;
 	int base;
 	int span;
 	int usedBase;
+	unsigned long long weightNumer;
+	unsigned long long weightDenom;
 	std::wstring err;
+	OxzSpanProg() : magic(0x50585A4Fu), base(0), span(0), usedBase(0), weightNumer(0), weightDenom(0) {}
 };
 
 extern "C" static void OxzSaveProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
 {
 	OxzSpanProg* p = (OxzSpanProg*)user;
 	int overall = p->base;
-	if (total) {
-		overall += (int)(((unsigned long long)p->span * index) / total);
-		if (pct > 0 && pct < 100)
-			overall += (int)(((unsigned long long)p->span * (unsigned)pct) / (100ull * total));
+	unsigned shown = index;
+	if (p->magic == 0x50585A4Fu && p->weightDenom) {
+		unsigned long long n = p->weightNumer;
+		if (n > p->weightDenom) n = p->weightDenom;
+		overall += (int)((p->span * n) / p->weightDenom);
+		if (shown < 1) shown = 1;
+	} else {
+		if (total) {
+			unsigned long long done = index;
+			if (pct >= 100 && done < total) done++;
+			overall += (int)(((unsigned long long)p->span * done) / total);
+			shown = (unsigned)done;
+			if (pct < 100 && shown < total) shown++;
+			if (!shown) shown = 1;
+		}
 	}
 	if (overall > p->base + p->span) overall = p->base + p->span;
-	if (pct >= 100 && total && index + 1 >= total) overall = p->base + p->span;
-	OxzProgFile(name, index + 1, total, pct, overall);
+	if (pct >= 100 && p->weightDenom && p->weightNumer >= p->weightDenom) overall = p->base + p->span;
+	OxzProgFile(name, shown, total, pct, overall);
 }
 
 extern "C" static void OxzPkgProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
@@ -208,13 +223,15 @@ void OxzProgArchive(const wchar_t* archive)
 void OxzProgFile(const wchar_t* file, unsigned index, unsigned total, int filePct, int overall)
 {
 	OxzProgLock();
-	if (file && file[0]) OxzCopySnap(gProg.file, 1024, file);
-	if (index) gProg.index = index;
-	if (total) gProg.total = total;
 	if (filePct < 0) filePct = 0;
 	if (filePct > 100) filePct = 100;
 	if (overall < 0) overall = 0;
 	if (overall > 100) overall = 100;
+	if (total && index > total) index = total;
+	if (overall < gProg.overall) overall = gProg.overall;
+	if (file && file[0]) OxzCopySnap(gProg.file, 1024, file);
+	if (index) gProg.index = index;
+	if (total) gProg.total = total;
 	gProg.filePct = filePct;
 	gProg.overall = overall;
 	OxzProgUnlock();

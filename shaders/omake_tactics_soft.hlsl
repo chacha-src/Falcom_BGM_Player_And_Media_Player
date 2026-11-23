@@ -72,7 +72,8 @@ float3 BustPush(float3 p, float air)
 			float side = p.x >= Body.x ? 1 : -1;
 			n = normalize(float3(n.x + side * 0.28, min(n.y, -0.12), -0.88));
 		}
-		p += n * 0.002;
+		// 余白は拡大後の座標。固定の 2mm だと、体を大きくしたとき胸の布が中へ残る。
+		p += n * (0.006 * max(Sim.w, 1.0));
 	}
 	return p;
 }
@@ -92,7 +93,7 @@ float3 ArmPush(float3 p)
 		float dist = length(d);
 		if (dist >= R) continue;
 		float3 n = dist > 1e-4 ? d / dist : float3(0, -1, 0);
-		p += n * (R - dist + 0.006);
+		p += n * (R - dist + 0.008 * max(Sim.w, 1.0));
 	}
 	return p;
 }

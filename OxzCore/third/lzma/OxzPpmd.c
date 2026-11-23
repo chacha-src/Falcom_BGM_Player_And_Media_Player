@@ -33,7 +33,7 @@ static void PpmdFree(ISzAllocPtr p, void* address)
 	free(address);
 }
 
-int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile)
+int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile, int userLevel)
 {
 	static const ISzAlloc al = { PpmdAlloc, PpmdFree };
 	CPpmd7* ppmd;
@@ -45,7 +45,15 @@ int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, siz
 	if (!in || !out || !outSize || inSize == 0 || outCap < 8)
 		return 1;
 	scale = profile ? profile : inSize;
-	if (scale > 8ull * 1024ull * 1024ull) {
+	if (userLevel < 1) userLevel = 1;
+	if (userLevel > 10) userLevel = 10;
+	if (userLevel <= 3) {
+		order = 4;
+		mem = 256u << 10;
+	} else if (userLevel <= 6) {
+		order = 5;
+		mem = 1u << 20;
+	} else if (scale > 8ull * 1024ull * 1024ull) {
 		order = 4;
 		mem = 1u << 20;
 	} else if (scale > 256u * 1024u) {

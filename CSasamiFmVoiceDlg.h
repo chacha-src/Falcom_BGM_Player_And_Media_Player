@@ -32,6 +32,8 @@ protected:
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
 	afx_msg void OnBnClickedApplyHex();
+	afx_msg void OnBnClickedTone();
+	afx_msg void OnBnClickedMml();
 
 	void LayoutChrome();
 	void ApplyLang();
@@ -42,6 +44,8 @@ protected:
 	CCustomStandardButton m_btnOk;
 	CCustomStandardButton m_btnCancel;
 	CCustomStandardButton m_btnApplyHex;
+	CCustomStandardButton m_btnTone;
+	CCustomStandardButton m_btnMml;
 	CCustomComboBox m_cmbPreset;
 	CCustomEdit m_edHex;
 	uint8_t m_voice[25];

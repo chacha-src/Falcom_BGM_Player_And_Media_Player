@@ -165,8 +165,10 @@ int Ppmd7a_DecodeSymbol(CPpmd7 *p);
 /* Ppmd7z_* : modified PPMdH with 7z Range Coder */
 BoolInt Ppmd7z_RangeDec_Init(CPpmd7_RangeDec *p);
 #define Ppmd7z_RangeDec_IsFinishedOK(p) ((p)->Code == 0)
+void Ppmd7z_RangeDec_Bind(const Byte *p, const Byte *end);
+int Ppmd7z_RangeDec_Over(void);
 int Ppmd7z_DecodeSymbol(CPpmd7 *p);
-// Byte *Ppmd7z_DecodeSymbols(CPpmd7 *p, Byte *buf, const Byte *lim);
+Byte *Ppmd7z_DecodeSymbols(CPpmd7 *p, Byte *buf, const Byte *lim);
 
 
 /* ---------- Encode ---------- */

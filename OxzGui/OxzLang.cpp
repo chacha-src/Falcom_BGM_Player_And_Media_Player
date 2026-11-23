@@ -106,6 +106,9 @@ static const wchar_t* kTxt[OS_COUNT][14] = {
 	{ L"それぞれフォルダを作って展開", L"Extract each into its own folder", L"Extraire chacun dans son dossier", L"Estrai ciascuno nella propria cartella", L"Extraer cada uno en su carpeta", L"각각 폴더를 만들어 풀기", L"分别建文件夹并解压", L"استخراج كل واحد في مجلده", L"Распаковать каждый в свою папку", L"Jedes in einen eigenen Ordner entpacken", L"Extrair cada um para a sua pasta", L"Elk uitpakken in een eigen map", L"Rozpakuj każdy do własnego folderu", L"Her birini kendi klasörüne aç" },
 	{ L"選択 %u", L"%u selected", L"%u sélectionné(s)", L"%u selezionati", L"%u seleccionados", L"선택 %u", L"已选 %u", L"المحدد %u", L"Выбрано %u", L"%u ausgewählt", L"%u selecionados", L"%u geselecteerd", L"Zaznaczono %u", L"%u seçili" },
 	{ L"コーデック", L"Codec", L"Codec", L"Codec", L"Códec", L"코덱", L"编码", L"الترميز", L"Кодек", L"Codec", L"Codec", L"Codec", L"Kodek", L"Kodek" },
+	{ L"圧縮率", L"Compression", L"Compression", L"Compressione", L"Compresión", L"압축률", L"压缩率", L"الضغط", L"Сжатие", L"Kompression", L"Compressão", L"Compressie", L"Kompresja", L"Sıkıştırma" },
+	{ L"1 は速く、10 は小さくなります。", L"1 is fast, 10 is smaller.", L"1 est rapide, 10 est plus petit.", L"1 è veloce, 10 è più piccolo.", L"1 es rápido, 10 es más pequeño.", L"1은 빠르고 10은 더 작습니다.", L"1 更快，10 更小。", L"1 أسرع، و10 أصغر.", L"1 быстрее, 10 меньше.", L"1 ist schnell, 10 ist kleiner.", L"1 é rápido, 10 é menor.", L"1 is snel, 10 is kleiner.", L"1 jest szybkie, 10 jest mniejsze.", L"1 hızlıdır, 10 daha küçüktür." },
+	{ L"PPMd を使う", L"Use PPMd", L"Utiliser PPMd", L"Usa PPMd", L"Usar PPMd", L"PPMd 사용", L"使用 PPMd", L"استخدام PPMd", L"Использовать PPMd", L"PPMd verwenden", L"Usar PPMd", L"PPMd gebruiken", L"Użyj PPMd", L"PPMd kullan" },
 };
 
 static const wchar_t* kName[14] = {

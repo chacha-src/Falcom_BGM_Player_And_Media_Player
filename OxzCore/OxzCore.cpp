@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <vector>
 #include <string>
 #include <map>
@@ -12,6 +13,8 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <immintrin.h>
 
 #include "zstd.h"
 #include "lz4.h"
@@ -26,6 +29,7 @@
 #include "Lzma2Dec.h"
 #include "Ppmd7.h"
 #include "OxzFilt.h"
+#include "OxzFast.h"
 
 enum {
 	M_STORE = 0,
@@ -51,16 +55,51 @@ static const uint8_t kMagic[8] = { 'O', 'X', 'Z', 'P', 'K', 'G', 0, 0 };
 static const size_t kLzBlockMax = 0x7E000000u;
 static const size_t kProbeBytes = 512u * 1024u;
 static const size_t kPpmdMax = 8ull * 1024ull * 1024ull;
-static size_t gLevelBytes = 0;
+static thread_local size_t gLevelBytes = 0;
+static int gUserLevel = 10;
+static int gUsePpmd = 1;
 static thread_local int tZstdLdm = 0;
+static thread_local int tInSurvey = 0;
+static thread_local int tInFilePool = 0;
+
+static int Scale(int lo, int hi)
+{
+	if (hi < lo) return lo;
+	if (gUserLevel <= 1) return lo;
+	if (gUserLevel >= 10) return hi;
+	return lo + (hi - lo) * (gUserLevel - 1) / 9;
+}
 
 static size_t LevelN(size_t n)
 {
 	return gLevelBytes ? gLevelBytes : n;
 }
 
-extern "C" int OxzLzma2Compress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile);
-extern "C" int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile);
+static unsigned HwCap(void)
+{
+	unsigned n = std::thread::hardware_concurrency();
+	if (n < 1) n = 4;
+	if (n > 12) n = 12;
+	return n;
+}
+
+static unsigned InnerThreads(size_t n)
+{
+	unsigned threads;
+	if (tInSurvey || n < 2ull * 1024ull * 1024ull) return 1;
+	threads = HwCap();
+	if (tInFilePool && threads > 2) threads = 2;
+	return threads;
+}
+
+static void BoostThread(std::thread& th)
+{
+	SetThreadPriority((HANDLE)th.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
+}
+
+extern "C" int OxzLzma2Compress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel);
+extern "C" int OxzLzma2EncodeChunk(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel);
+extern "C" int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile, int userLevel);
 extern "C" void* OxzLzmaAlloc(const ISzAlloc* p, size_t n)
 {
 	(void)p;
@@ -93,6 +132,7 @@ struct SnapFile {
 	uint64_t unpacked;
 	uint64_t packed;
 	uint64_t dataOff;
+	int dropped;
 };
 
 struct Snap {
@@ -147,26 +187,41 @@ struct OutItem {
 	std::vector<uint8_t> payload;
 };
 
-static uint32_t gCrcTab[256];
+static uint32_t gCrcTab[8][256];
 static int gCrcReady;
 
 static void CrcInit(void)
 {
-	int i, b;
+	int i, b, k;
 	if (gCrcReady) return;
 	for (i = 0; i < 256; ++i) {
 		uint32_t r = (uint32_t)i;
 		for (b = 0; b < 8; ++b) r = (r >> 1) ^ (0xEDB88320u & (0u - (r & 1u)));
-		gCrcTab[i] = r;
+		gCrcTab[0][i] = r;
+	}
+	for (k = 1; k < 8; ++k) {
+		for (i = 0; i < 256; ++i) {
+			uint32_t r = gCrcTab[k - 1][i];
+			gCrcTab[k][i] = gCrcTab[0][r & 255] ^ (r >> 8);
+		}
 	}
 	gCrcReady = 1;
 }
 
 static uint32_t CrcBlock(const uint8_t* p, size_t n, uint32_t c)
 {
-	size_t i;
 	CrcInit();
-	for (i = 0; i < n; ++i) c = gCrcTab[(c ^ p[i]) & 255] ^ (c >> 8);
+	while (n >= 8) {
+		uint32_t one, two;
+		memcpy(&one, p, 4);
+		memcpy(&two, p + 4, 4);
+		one ^= c;
+		c = gCrcTab[7][one & 255] ^ gCrcTab[6][(one >> 8) & 255] ^ gCrcTab[5][(one >> 16) & 255] ^ gCrcTab[4][(one >> 24) & 255]
+			^ gCrcTab[3][two & 255] ^ gCrcTab[2][(two >> 8) & 255] ^ gCrcTab[1][(two >> 16) & 255] ^ gCrcTab[0][(two >> 24) & 255];
+		p += 8;
+		n -= 8;
+	}
+	while (n--) c = gCrcTab[0][(c ^ *p++) & 255] ^ (c >> 8);
 	return c;
 }
 
@@ -347,18 +402,20 @@ static int LooksPe(const uint8_t* p, size_t n)
 static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int mode)
 {
 	size_t ln = LevelN(n);
-	int level = 19;
+	int hi = 19;
+	int level;
 	int wlog = 23;
 	int pass;
 	int bestLdm = 0;
 	size_t best = n;
 	std::vector<uint8_t> buf;
 	if (n == 0) return 0;
-	if (ln <= 256u * 1024u) level = 22;
-	else if (ln <= 64ull * 1024ull * 1024ull) level = 19;
-	else if (ln <= 256ull * 1024ull * 1024ull) level = 16;
-	else if (ln <= 1024ull * 1024ull * 1024ull) level = 12;
-	else level = 9;
+	if (ln <= 256u * 1024u) hi = 22;
+	else if (ln <= 64ull * 1024ull * 1024ull) hi = 19;
+	else if (ln <= 256ull * 1024ull * 1024ull) hi = 16;
+	else if (ln <= 1024ull * 1024ull * 1024ull) hi = 12;
+	else hi = 9;
+	level = Scale(1, hi);
 	if (ln >= 32ull * 1024ull * 1024ull) wlog = 25;
 	else if (ln >= 8ull * 1024ull * 1024ull) wlog = 24;
 	else if (ln < 1u * 1024u * 1024u) wlog = 21;
@@ -380,7 +437,16 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 		ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
 		ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, useLog);
 		if (pass == 1) ZSTD_CCtx_setParameter(c, ZSTD_c_enableLongDistanceMatching, 1);
-		got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
+		{
+			unsigned zt = InnerThreads(n);
+			if (level >= 19 && zt > 2) zt = 2;
+			if (zt > 1 && ZSTD_isError(ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, (int)zt))) zt = 1;
+			got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
+			if (ZSTD_isError(got) && zt > 1) {
+				ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, 0);
+				got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
+			}
+		}
 		ZSTD_freeCCtx(c);
 		if (ZSTD_isError(got) || got == 0 || got >= best) continue;
 		best = got;
@@ -399,7 +465,10 @@ static int TryLz4(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	cap = LZ4_compressBound((int)n);
 	if (cap <= 0) return 0;
 	try { out.resize((size_t)cap); } catch (...) { return 0; }
-	got = LZ4_compress_HC((const char*)in, (char*)out.data(), (int)n, cap, LZ4HC_CLEVEL_MAX);
+	if (gUserLevel <= 2)
+		got = LZ4_compress_default((const char*)in, (char*)out.data(), (int)n, cap);
+	else
+		got = LZ4_compress_HC((const char*)in, (char*)out.data(), (int)n, cap, Scale(4, LZ4HC_CLEVEL_MAX));
 	if (got <= 0 || (size_t)got >= n) return 0;
 	out.resize((size_t)got);
 	return 1;
@@ -408,13 +477,15 @@ static int TryLz4(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 static int DeflateOnce(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int raw)
 {
 	size_t ln = LevelN(n);
-	int level = 9;
+	int hi = 9;
+	int level;
 	struct libdeflate_compressor* c;
 	size_t bound, got;
 	if (n == 0) return 0;
-	if (ln <= 64ull * 1024ull * 1024ull) level = 12;
-	else if (ln <= 512ull * 1024ull * 1024ull) level = 9;
-	else level = 6;
+	if (ln <= 64ull * 1024ull * 1024ull) hi = 12;
+	else if (ln <= 512ull * 1024ull * 1024ull) hi = 9;
+	else hi = 6;
+	level = Scale(1, hi);
 	c = libdeflate_alloc_compressor(level);
 	if (!c) return 0;
 	bound = raw ? libdeflate_deflate_compress_bound(c, n) : libdeflate_zlib_compress_bound(c, n);
@@ -437,10 +508,66 @@ static int TryRawDeflate(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	return DeflateOnce(in, n, out, 1);
 }
 
+static int BrotliParallel(const uint8_t* in, size_t n, int q, int win, std::vector<uint8_t>& out, unsigned threads)
+{
+	size_t chunk = 4ull * 1024ull * 1024ull;
+	size_t parts, total = 0, pi;
+	unsigned workers, t;
+	if (chunk > n / 2) chunk = n / 2;
+	if (chunk < 256u * 1024u) return 0;
+	parts = (n + chunk - 1) / chunk;
+	if (parts < 2) return 0;
+	{
+		std::vector<std::vector<uint8_t>> piece(parts);
+		std::vector<int> ok(parts, 0);
+		std::vector<std::thread> pool;
+		std::atomic<size_t> cursor(0);
+		workers = threads;
+		if (workers > parts) workers = (unsigned)parts;
+		for (t = 0; t < workers; ++t) {
+			pool.push_back(std::thread([&, n, chunk, q, win, parts]() {
+				for (;;) {
+					size_t i = cursor.fetch_add(1);
+					size_t off, len, cap, got;
+					if (i >= parts) break;
+					off = chunk * i;
+					if (off >= n) break;
+					len = chunk;
+					if (len > n - off) len = n - off;
+					cap = BrotliEncoderMaxCompressedSize(len);
+					if (cap == 0) continue;
+					try { piece[i].resize(cap); }
+					catch (...) { continue; }
+					got = cap;
+					if (!BrotliEncoderCompress(q, win, BROTLI_MODE_GENERIC, len, in + off, &got, piece[i].data()) || got == 0) continue;
+					piece[i].resize(got);
+					ok[i] = 1;
+				}
+			}));
+			BoostThread(pool.back());
+		}
+		for (t = 0; t < pool.size(); ++t) pool[t].join();
+		for (pi = 0; pi < parts; ++pi) {
+			if (!ok[pi]) return 0;
+			total += piece[pi].size();
+		}
+		if (total == 0 || total >= n) return 0;
+		try { out.resize(total); }
+		catch (...) { return 0; }
+		total = 0;
+		for (pi = 0; pi < parts; ++pi) {
+			memcpy(out.data() + total, piece[pi].data(), piece[pi].size());
+			total += piece[pi].size();
+		}
+	}
+	return 1;
+}
+
 static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	int q, win, mode, modes;
 	size_t cap, best, ln;
+	unsigned threads;
 	if (n == 0) return 0;
 	cap = BrotliEncoderMaxCompressedSize(n);
 	if (cap == 0) return 0;
@@ -449,9 +576,12 @@ static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	else if (ln <= 64ull * 1024ull * 1024ull) q = 9;
 	else if (ln <= 256ull * 1024ull * 1024ull) q = 6;
 	else q = 4;
+	q = Scale(1, q);
 	win = n < (1u << 16) ? 18 : BROTLI_MAX_WINDOW_BITS;
 	best = n;
 	modes = (n <= 8u * 1024u * 1024u && ln <= 8u * 1024u * 1024u) ? 2 : 1;
+	threads = InnerThreads(n);
+	if (threads > 1 && n > 8ull * 1024ull * 1024ull && BrotliParallel(in, n, q, win, out, threads)) return 1;
 	for (mode = 0; mode < modes; ++mode) {
 		std::vector<uint8_t> buf;
 		size_t got = cap;
@@ -470,10 +600,73 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 {
 	size_t cap, got = 0;
 	unsigned char pr = 0;
+	unsigned th;
 	if (n == 0) return 0;
+	th = InnerThreads(n);
+	if (th >= 2 && n >= 8ull * 1024ull * 1024ull) {
+		size_t unit = n / th;
+		if (unit < 4ull * 1024ull * 1024ull) {
+			th = (unsigned)(n / (4ull * 1024ull * 1024ull));
+			if (th < 2) th = 2;
+			unit = n / th;
+		}
+		if (th >= 2 && unit > 0) {
+			struct Part { std::vector<uint8_t> data; unsigned char prop; int ok; };
+			std::vector<Part> parts(th);
+			std::vector<std::thread> pool;
+			std::atomic<unsigned> cursor(0);
+			unsigned t;
+			int propsOk = 1;
+			size_t total = 0;
+			for (t = 0; t < th; ++t) {
+				pool.push_back(std::thread([&, n, th]() {
+					for (;;) {
+						unsigned c = cursor.fetch_add(1);
+						size_t off, len, capc, gotc = 0;
+						unsigned char prc = 0;
+						if (c >= th) break;
+						off = (n / th) * c;
+						len = (c + 1 == th) ? (n - off) : (n / th);
+						capc = len + (len / 4) + 65536;
+						try { parts[c].data.resize(capc); }
+						catch (...) { parts[c].ok = 0; continue; }
+						if (OxzLzma2EncodeChunk(in + off, len, parts[c].data.data(), capc, &gotc, &prc, LevelN(n), gUserLevel) != 0 || gotc == 0 || parts[c].data[gotc - 1] != 0) {
+							parts[c].ok = 0;
+							continue;
+						}
+						parts[c].data.resize(gotc);
+						parts[c].prop = prc;
+						parts[c].ok = 1;
+					}
+				}));
+				BoostThread(pool.back());
+			}
+			for (t = 0; t < pool.size(); ++t) pool[t].join();
+			for (t = 0; t < th; ++t) {
+				if (!parts[t].ok) { propsOk = 0; break; }
+				if (t > 0 && parts[t].prop != parts[0].prop) { propsOk = 0; break; }
+				total += parts[t].data.size() - (t + 1 == th ? 0 : 1);
+			}
+			if (propsOk && total > 0 && total < n) {
+				size_t at = 0;
+				try { out.resize(total); }
+				catch (...) { propsOk = 0; }
+				if (propsOk) {
+					for (t = 0; t < th; ++t) {
+						size_t take = parts[t].data.size();
+						if (t + 1 != th) take--;
+						memcpy(out.data() + at, parts[t].data.data(), take);
+						at += take;
+					}
+					*prop = parts[0].prop;
+					return 1;
+				}
+			}
+		}
+	}
 	cap = n + (n / 4) + 65536;
 	try { out.resize(cap); } catch (...) { return 0; }
-	if (OxzLzma2Compress(in, n, out.data(), cap, &got, &pr, LevelN(n)) != 0) return 0;
+	if (OxzLzma2Compress(in, n, out.data(), cap, &got, &pr, LevelN(n), gUserLevel) != 0) return 0;
 	if (got == 0 || got >= n) return 0;
 	out.resize(got);
 	*prop = pr;
@@ -489,6 +682,7 @@ static int TryLizard(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	if (ln <= 4u * 1024u * 1024u) level = LIZARD_MAX_CLEVEL;
 	else if (ln <= 64ull * 1024ull * 1024ull) level = 22;
 	else level = LIZARD_DEFAULT_CLEVEL;
+	level = Scale(LIZARD_MIN_CLEVEL, level);
 	cap = Lizard_compressBound((int)n);
 	if (cap <= 0) return 0;
 	try { out.resize((size_t)cap); } catch (...) { return 0; }
@@ -516,18 +710,8 @@ static int TryLzfse(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 
 static int TryBzip2(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
-	unsigned int destLen;
-	unsigned long long bound;
-	int rc;
 	if (n == 0 || n > 0xFFFFFFFFull) return 0;
-	bound = (unsigned long long)n + (unsigned long long)n / 100ull + 600ull;
-	if (bound > 0xFFFFFFFFull) return 0;
-	destLen = (unsigned int)bound;
-	try { out.resize(destLen); } catch (...) { return 0; }
-	rc = BZ2_bzBuffToBuffCompress((char*)out.data(), &destLen, (char*)in, (unsigned int)n, 9, 0, 30);
-	if (rc != BZ_OK || destLen == 0 || (size_t)destLen >= n) return 0;
-	out.resize(destLen);
-	return 1;
+	return OxzBzipCompress(in, n, out, Scale(1, 9), InnerThreads(n));
 }
 
 static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
@@ -535,7 +719,7 @@ static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	size_t got = 0;
 	if (n == 0) return 0;
 	try { out.resize(n); } catch (...) { return 0; }
-	if (OxzPpmdCompress(in, n, out.data(), out.size(), &got, LevelN(n)) != 0) return 0;
+	if (OxzPpmdCompress(in, n, out.data(), out.size(), &got, LevelN(n), gUserLevel) != 0) return 0;
 	if (got == 0 || got >= n) return 0;
 	out.resize(got);
 	return 1;
@@ -563,29 +747,76 @@ static void Delta1Enc(uint8_t* p, size_t n)
 {
 	size_t i;
 	if (n < 2) return;
-	for (i = n - 1; i > 0; --i) p[i] = (uint8_t)(p[i] - p[i - 1]);
+	i = n;
+	while (i > 32) {
+		size_t at = i - 32;
+		__m256i cur, prev;
+		if (at < 1) break;
+		cur = _mm256_loadu_si256((const __m256i*)(p + at));
+		prev = _mm256_loadu_si256((const __m256i*)(p + at - 1));
+		_mm256_storeu_si256((__m256i*)(p + at), _mm256_sub_epi8(cur, prev));
+		i = at;
+	}
+	while (i > 1) {
+		--i;
+		p[i] = (uint8_t)(p[i] - p[i - 1]);
+	}
 }
 
 static void Delta1Dec(uint8_t* p, size_t n)
 {
-	size_t i;
-	for (i = 1; i < n; ++i) p[i] = (uint8_t)(p[i] + p[i - 1]);
+	size_t i = 1;
+	if (n < 2) return;
+	while (i + 16 <= n) {
+		__m128i v = _mm_loadu_si128((const __m128i*)(p + i));
+		__m128i carry;
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 1));
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 2));
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 4));
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 8));
+		carry = _mm_set1_epi8((char)p[i - 1]);
+		v = _mm_add_epi8(v, carry);
+		_mm_storeu_si128((__m128i*)(p + i), v);
+		i += 16;
+	}
+	for (; i < n; ++i) p[i] = (uint8_t)(p[i] + p[i - 1]);
 }
 
 static void Delta4Enc(uint8_t* p, size_t n)
 {
 	size_t i;
 	if (n < 8) return;
-	for (i = n - 1; i >= 4; --i) {
+	i = n;
+	while (i > 32) {
+		size_t at = i - 32;
+		__m256i cur, prev;
+		if (at < 4) break;
+		cur = _mm256_loadu_si256((const __m256i*)(p + at));
+		prev = _mm256_loadu_si256((const __m256i*)(p + at - 4));
+		_mm256_storeu_si256((__m256i*)(p + at), _mm256_sub_epi8(cur, prev));
+		i = at;
+	}
+	while (i > 4) {
+		--i;
 		p[i] = (uint8_t)(p[i] - p[i - 4]);
-		if (i == 4) break;
 	}
 }
 
 static void Delta4Dec(uint8_t* p, size_t n)
 {
-	size_t i;
-	for (i = 4; i < n; ++i) p[i] = (uint8_t)(p[i] + p[i - 4]);
+	size_t i = 4;
+	while (i + 4 <= n) {
+		int k, s, d;
+		memcpy(&s, p + i - 4, 4);
+		memcpy(&d, p + i, 4);
+		{
+			__m128i a = _mm_add_epi8(_mm_cvtsi32_si128(s), _mm_cvtsi32_si128(d));
+			k = _mm_cvtsi128_si32(a);
+		}
+		memcpy(p + i, &k, 4);
+		i += 4;
+	}
+	for (; i < n; ++i) p[i] = (uint8_t)(p[i] + p[i - 4]);
 }
 
 static void RunCodecs(Choice* best, const uint8_t* p, size_t n, int flags)
@@ -634,25 +865,133 @@ static int OneCodec(const uint8_t* in, size_t n, int method, int zstdPass, std::
 
 static void WarmCodecs()
 {
-	static int ready = 0;
-	uint8_t sample[64];
-	std::vector<uint8_t> tmp;
-	uint8_t prop = 0;
-	int i;
-	if (ready) return;
-	for (i = 0; i < 64; ++i) sample[i] = (uint8_t)(i * 17 + 3);
-	OneCodec(sample, 64, M_ZSTD, 0, tmp, &prop);
-	OneCodec(sample, 64, M_LZ4, 0, tmp, &prop);
-	OneCodec(sample, 64, M_LIZARD, 0, tmp, &prop);
-	OneCodec(sample, 64, M_LZFSE, 0, tmp, &prop);
-	OneCodec(sample, 64, M_DEFLATE, 0, tmp, &prop);
-	OneCodec(sample, 64, M_RAWDEFLATE, 0, tmp, &prop);
-	OneCodec(sample, 64, M_BZIP2, 0, tmp, &prop);
-	OneCodec(sample, 64, M_BROTLI, 0, tmp, &prop);
-	OneCodec(sample, 64, M_PPMD, 0, tmp, &prop);
-	OneCodec(sample, 64, M_LZMA2, 0, tmp, &prop);
-	ready = 1;
+	static std::once_flag once;
+	std::call_once(once, []() {
+		uint8_t sample[64];
+		std::vector<uint8_t> tmp;
+		uint8_t prop = 0;
+		int i;
+		for (i = 0; i < 64; ++i) sample[i] = (uint8_t)(i * 17 + 3);
+		OneCodec(sample, 64, M_ZSTD, 0, tmp, &prop);
+		OneCodec(sample, 64, M_LZ4, 0, tmp, &prop);
+		OneCodec(sample, 64, M_LIZARD, 0, tmp, &prop);
+		OneCodec(sample, 64, M_LZFSE, 0, tmp, &prop);
+		OneCodec(sample, 64, M_DEFLATE, 0, tmp, &prop);
+		OneCodec(sample, 64, M_RAWDEFLATE, 0, tmp, &prop);
+		OneCodec(sample, 64, M_BZIP2, 0, tmp, &prop);
+		OneCodec(sample, 64, M_BROTLI, 0, tmp, &prop);
+		OneCodec(sample, 64, M_PPMD, 0, tmp, &prop);
+		OneCodec(sample, 64, M_LZMA2, 0, tmp, &prop);
+	});
 }
+
+struct FilePulse {
+	const wchar_t* name;
+	uint64_t size;
+	int pct;
+	int seen;
+};
+
+struct SavePulse {
+	OxzCoreProgFn fn;
+	void* user;
+	unsigned total;
+	unsigned filesDone;
+	uint64_t bytesAll;
+	uint64_t bytesDone;
+	DWORD lastTick;
+	std::mutex mu;
+	std::vector<FilePulse*> active;
+	SavePulse() : fn(NULL), user(NULL), total(0), filesDone(0), bytesAll(0), bytesDone(0), lastTick(0) {}
+};
+
+static SavePulse* gPulse = NULL;
+static thread_local FilePulse* tFilePulse = NULL;
+static const unsigned kPulseMagic = 0x50585A4Fu;
+
+struct PulseWeight {
+	unsigned magic;
+	int base;
+	int span;
+	int usedBase;
+	unsigned long long numer;
+	unsigned long long denom;
+};
+
+static void Publish(FilePulse* fp, int pct, int finish)
+{
+	SavePulse* p;
+	unsigned display;
+	uint64_t numer;
+	size_t i;
+	DWORD now;
+	if (!fp || !fp->name) return;
+	p = gPulse;
+	if (!p || !p->fn) return;
+	std::lock_guard<std::mutex> lock(p->mu);
+	if (!fp->seen) {
+		fp->seen = 1;
+		p->active.push_back(fp);
+	}
+	now = GetTickCount();
+	if (!finish && pct > 0 && p->lastTick && (DWORD)(now - p->lastTick) < 80) {
+		if (pct > fp->pct && pct < 100) fp->pct = pct;
+		return;
+	}
+	if (!finish) p->lastTick = now;
+	if (finish) {
+		if (fp->pct < 100) {
+			p->bytesDone += fp->size;
+			p->filesDone++;
+		}
+		fp->pct = 100;
+		for (i = 0; i < p->active.size(); ++i) {
+			if (p->active[i] == fp) {
+				p->active.erase(p->active.begin() + (ptrdiff_t)i);
+				break;
+			}
+		}
+	} else {
+		if (pct < fp->pct) pct = fp->pct;
+		if (pct > 99) pct = 99;
+		fp->pct = pct;
+	}
+	numer = p->bytesDone;
+	for (i = 0; i < p->active.size(); ++i) {
+		FilePulse* o = p->active[i];
+		if (o->pct > 0 && o->pct < 100) numer += o->size * (uint64_t)o->pct / 100ull;
+	}
+	if (p->bytesAll && numer > p->bytesAll) numer = p->bytesAll;
+	if (p->user) {
+		PulseWeight* w = (PulseWeight*)p->user;
+		if (w->magic == kPulseMagic) {
+			w->numer = numer;
+			w->denom = p->bytesAll ? p->bytesAll : 1;
+		}
+	}
+	display = p->filesDone;
+	if (!finish && p->total && display < p->total) display++;
+	if (p->total && display > p->total) display = p->total;
+	if (!display) display = 1;
+	p->fn(fp->name, display, p->total ? p->total : 1, finish ? 100 : fp->pct, p->user);
+}
+
+struct PulseGuard {
+	FilePulse fp;
+	explicit PulseGuard(const std::wstring& rel, uint64_t size)
+	{
+		memset(&fp, 0, sizeof(fp));
+		fp.name = rel.c_str();
+		fp.size = size ? size : 1;
+		tFilePulse = &fp;
+		Publish(&fp, 0, 0);
+	}
+	~PulseGuard()
+	{
+		Publish(&fp, 100, 1);
+		if (tFilePulse == &fp) tFilePulse = NULL;
+	}
+};
 
 struct Survey {
 	int method;
@@ -698,7 +1037,7 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe)
 	for (f = 0; f < nflags; ++f) {
 		for (m = 0; m < (int)(sizeof(kMethod) / sizeof(kMethod[0])); ++m) {
 			Survey s;
-			if (kMethod[m] == M_PPMD && LevelN(n) > kPpmdMax) continue;
+			if (kMethod[m] == M_PPMD && (!gUsePpmd || LevelN(n) > kPpmdMax)) continue;
 			s.method = kMethod[m];
 			s.flags = flags[f];
 			s.zstdPass = kPass[m];
@@ -708,30 +1047,54 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe)
 			jobs.push_back(std::move(s));
 		}
 	}
-	threads = std::thread::hardware_concurrency();
-	if (threads < 1) threads = 4;
-	if (threads > 12) threads = 12;
+	threads = HwCap();
+	if (tInFilePool) {
+		unsigned capThreads = HwCap() / 3;
+		if (capThreads < 1) capThreads = 1;
+		if (capThreads > 4) capThreads = 4;
+		threads = capThreads;
+	}
 	if (threads > jobs.size()) threads = (unsigned)jobs.size();
-	for (t = 0; t < threads; ++t) {
-		pool.push_back(std::thread([&, n]() {
-			for (;;) {
-				size_t i = cursor.fetch_add(1);
-				std::vector<uint8_t> b, tmp;
-				uint8_t prop = 0;
-				Survey* job;
-				if (i >= jobs.size()) break;
-				job = &jobs[i];
-				try { b.assign(raw, raw + n); } catch (...) { continue; }
-				if (job->flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
-				if (job->flags & F_DELTA4) Delta4Enc(b.data(), b.size());
-				else if (job->flags & F_DELTA1) Delta1Enc(b.data(), b.size());
-				if (!OneCodec(b.data(), b.size(), job->method, job->zstdPass, tmp, &prop)) continue;
-				job->ok = 1;
-				job->prop = prop;
-				job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
-				job->data.swap(tmp);
-			}
-		}));
+	{
+		size_t levelSnap = gLevelBytes;
+		FilePulse* pulseFile = tFilePulse;
+		unsigned pulseCap = (levelSnap > n && levelSnap - n > 4096) ? 25u : 95u;
+		std::atomic<unsigned> pulseStep(0);
+		size_t pulseJobs = jobs.size() ? jobs.size() : 1;
+		for (t = 0; t < threads; ++t) {
+			pool.push_back(std::thread([&, n, levelSnap, pulseFile, pulseCap, pulseJobs]() {
+				gLevelBytes = levelSnap;
+				tInSurvey = 1;
+				for (;;) {
+					size_t i = cursor.fetch_add(1);
+					std::vector<uint8_t> b, tmp;
+					uint8_t prop = 0;
+					Survey* job;
+					unsigned step;
+					if (i >= jobs.size()) break;
+					job = &jobs[i];
+					try {
+						b.assign(raw, raw + n);
+						if (job->flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
+						if (job->flags & F_DELTA4) Delta4Enc(b.data(), b.size());
+						else if (job->flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+						if (OneCodec(b.data(), b.size(), job->method, job->zstdPass, tmp, &prop)) {
+							job->ok = 1;
+							job->prop = prop;
+							job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
+							job->data.swap(tmp);
+						}
+					} catch (...) {
+					}
+					if (pulseFile) {
+						step = pulseStep.fetch_add(1) + 1;
+						Publish(pulseFile, (int)((unsigned long long)step * pulseCap / pulseJobs), 0);
+					}
+				}
+				tInSurvey = 0;
+			}));
+			BoostThread(pool.back());
+		}
 	}
 	for (t = 0; t < pool.size(); ++t) pool[t].join();
 	{
@@ -820,27 +1183,37 @@ static int DecLzma(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLe
 	return r == SZ_OK && dest == dstLen;
 }
 
-struct PpmdIn {
-	IByteIn vt;
-	const uint8_t* p;
-	const uint8_t* end;
-	int extra;
-};
-
-static Byte PpmdRead(IByteInPtr p)
+static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen)
 {
-	PpmdIn* s = (PpmdIn*)p;
-	if (s->p >= s->end) { s->extra = 1; return 0; }
-	return *s->p++;
+	size_t ip = 0, op = 0;
+	while (op < dstLen && ip < srcLen) {
+		BrotliDecoderState* s = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+		size_t availIn, availOut, produced, consumed, total = 0;
+		const uint8_t* nextIn;
+		uint8_t* nextOut;
+		BrotliDecoderResult r;
+		if (!s) return 0;
+		availIn = srcLen - ip;
+		nextIn = src + ip;
+		availOut = dstLen - op;
+		nextOut = dst + op;
+		r = BrotliDecoderDecompressStream(s, &availIn, &nextIn, &availOut, &nextOut, &total);
+		produced = (dstLen - op) - availOut;
+		consumed = (srcLen - ip) - availIn;
+		BrotliDecoderDestroyInstance(s);
+		if (r != BROTLI_DECODER_RESULT_SUCCESS || (produced == 0 && consumed == 0)) return 0;
+		op += produced;
+		ip += consumed;
+		if (op == dstLen) return 1;
+	}
+	return op == dstLen;
 }
 
 static int DecPpmd(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen)
 {
 	ISzAlloc alloc = { OxzLzmaAlloc, OxzLzmaFree };
 	CPpmd7* ppmd;
-	PpmdIn in;
 	unsigned order, mem;
-	size_t i;
 	int ok = 0;
 	if (srcLen < 5) return 0;
 	order = src[0];
@@ -852,20 +1225,12 @@ static int DecPpmd(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLe
 	Ppmd7_Construct(ppmd);
 	if (!Ppmd7_Alloc(ppmd, mem, &alloc)) { free(ppmd); return 0; }
 	Ppmd7_Init(ppmd, order);
-	in.vt.Read = PpmdRead;
-	in.p = src + 5;
-	in.end = src + srcLen;
-	in.extra = 0;
-	ppmd->rc.dec.Stream = &in.vt;
-	if (Ppmd7z_RangeDec_Init(&ppmd->rc.dec) && !in.extra) {
-		ok = 1;
-		for (i = 0; i < dstLen; ++i) {
-			int sym = Ppmd7z_DecodeSymbol(ppmd);
-			if (in.extra || sym < 0 || sym > 255) { ok = 0; break; }
-			dst[i] = (uint8_t)sym;
-		}
-		if (ok && !Ppmd7z_RangeDec_IsFinishedOK(&ppmd->rc.dec)) ok = 0;
+	Ppmd7z_RangeDec_Bind(src + 5, src + srcLen);
+	if (Ppmd7z_RangeDec_Init(&ppmd->rc.dec) && !Ppmd7z_RangeDec_Over()) {
+		Byte* got = Ppmd7z_DecodeSymbols(ppmd, dst, dst + dstLen);
+		if (got == dst + dstLen && !Ppmd7z_RangeDec_Over() && Ppmd7z_RangeDec_IsFinishedOK(&ppmd->rc.dec)) ok = 1;
 	}
+	Ppmd7z_RangeDec_Bind(0, 0);
 	Ppmd7_Free(ppmd, &alloc);
 	free(ppmd);
 	return ok;
@@ -912,18 +1277,12 @@ static int DecodeRaw(const DirEnt& e, const uint8_t* src, std::vector<uint8_t>& 
 		libdeflate_free_decompressor(d);
 		if (rr != LIBDEFLATE_SUCCESS || got != n) return 0;
 	} else if (e.method == M_BZIP2) {
-		unsigned int destLen;
-		int rc;
 		if (n > 0xFFFFFFFFull || e.packed > 0xFFFFFFFFull) return 0;
-		destLen = (unsigned int)n;
-		rc = BZ2_bzBuffToBuffDecompress((char*)plain.data(), &destLen, (char*)src, (unsigned int)e.packed, 0, 0);
-		if (rc != BZ_OK || destLen != (unsigned int)n) return 0;
+		if (!OxzBzipDecompress(src, (size_t)e.packed, plain.data(), n, InnerThreads(n))) return 0;
 	} else if (e.method == M_LZMA2) {
 		if (!DecLzma(src, (size_t)e.packed, plain.data(), n, e.prop)) return 0;
 	} else if (e.method == M_BROTLI) {
-		got = n;
-		if (BrotliDecoderDecompress((size_t)e.packed, src, &got, plain.data()) != BROTLI_DECODER_RESULT_SUCCESS || got != n)
-			return 0;
+		if (!DecBrotli(src, (size_t)e.packed, plain.data(), n)) return 0;
 	} else if (e.method == M_PPMD) {
 		if (!DecPpmd(src, (size_t)e.packed, plain.data(), n)) return 0;
 	} else {
@@ -932,8 +1291,16 @@ static int DecodeRaw(const DirEnt& e, const uint8_t* src, std::vector<uint8_t>& 
 	if (e.flags & F_DELTA4) Delta4Dec(plain.data(), plain.size());
 	else if (e.flags & F_DELTA1) Delta1Dec(plain.data(), plain.size());
 	if (e.flags & F_RIP) OxzRipConvert(plain.data(), plain.size(), 0);
-	if (e.crc != CrcFinish(plain.data(), plain.size())) return 0;
-	return 1;
+	if (e.crc == CrcFinish(plain.data(), plain.size())) return 1;
+	if (e.method == M_BZIP2 && n <= 0xFFFFFFFFull && e.packed <= 0xFFFFFFFFull) {
+		try { plain.assign(n, 0); } catch (...) { return 0; }
+		if (!OxzBzipDecompress(src, (size_t)e.packed, plain.data(), n, 0)) return 0;
+		if (e.flags & F_DELTA4) Delta4Dec(plain.data(), plain.size());
+		else if (e.flags & F_DELTA1) Delta1Dec(plain.data(), plain.size());
+		if (e.flags & F_RIP) OxzRipConvert(plain.data(), plain.size(), 0);
+		if (e.crc == CrcFinish(plain.data(), plain.size())) return 1;
+	}
+	return 0;
 }
 
 static int MethodHasPayload(uint16_t m)
@@ -1336,7 +1703,7 @@ extern "C" int OxzCoreRemember(const wchar_t* workDir, const wchar_t* archiveOrN
 		SnapFile sf;
 		sf.rel = ents[i].name;
 		sf.size = ents[i].unpacked;
-		sf.mtime = 0;
+		sf.mtime = ents[i].mtime;
 		sf.attr = ents[i].attr;
 		sf.isDir = ents[i].method == M_DIR;
 		sf.origin = ents[i].method == M_TOMB ? ORIGIN_TOMB : ORIGIN_OVERLAY;
@@ -1347,6 +1714,7 @@ extern "C" int OxzCoreRemember(const wchar_t* workDir, const wchar_t* archiveOrN
 		sf.unpacked = ents[i].unpacked;
 		sf.packed = ents[i].packed;
 		sf.dataOff = ents[i].dataOff;
+		sf.dropped = 0;
 		if (sf.origin == ORIGIN_TOMB) {
 			if (next.files.find(sf.rel) == next.files.end()) next.files[sf.rel] = sf;
 		} else {
@@ -1370,6 +1738,7 @@ extern "C" int OxzCoreRemember(const wchar_t* workDir, const wchar_t* archiveOrN
 		sf.unpacked = items[i].size;
 		sf.packed = 0;
 		sf.dataOff = 0;
+		sf.dropped = 0;
 		if (prev && prev->origin == ORIGIN_OVERLAY && !sf.isDir && !prev->isDir && prev->unpacked == sf.size && MethodHasPayload(prev->method)) {
 			sf.origin = ORIGIN_OVERLAY;
 			sf.method = prev->method;
@@ -1459,6 +1828,87 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 	}
 	if (baseFile != INVALID_HANDLE_VALUE) { CloseHandle(baseFile); baseFile = INVALID_HANDLE_VALUE; }
 	for (i = 0; i < items.size(); ++i) if (!items[i].isDir) nfiles++;
+	{
+		std::map<std::wstring, int, ILess> live;
+		unsigned total;
+		for (i = 0; i < items.size(); ++i) live[items[i].rel] = 1;
+		total = (unsigned)items.size();
+		if (snapOk) {
+			for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
+				if (it->second.origin != ORIGIN_OVERLAY || it->second.dropped) continue;
+				if (live.find(it->second.rel) == live.end()) total++;
+			}
+		}
+		if (!total) total = 1;
+		{
+			struct Prepared { int ready; OutItem it; Prepared() : ready(0) {} };
+			std::vector<Prepared> prepared;
+			std::vector<size_t> smallPick, largePick;
+			int pulsed = 0;
+			auto must = [&](size_t ix) -> int {
+				WorkItem& w = items[ix];
+				SnapFile* sf = snapOk ? FindSnap(&gSnap, w.rel) : NULL;
+				if (w.isDir) return 0;
+				if (sf && !sf->dropped && sf->origin == ORIGIN_OVERLAY && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime && MethodHasPayload(sf->method)) return 0;
+				if (baseKept && sf && sf->origin == ORIGIN_BASE && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime) return 0;
+				return 1;
+			};
+			auto runPick = [&](size_t ix) {
+				Prepared& pr = prepared[ix];
+				PulseGuard guard(items[ix].rel, items[ix].size);
+				pr.it.rel = items[ix].rel;
+				pr.it.attr = items[ix].attr;
+				pr.it.mtime = items[ix].mtime;
+				try {
+					if (FillPicked(items[ix].disk, items[ix].size, &pr.it)) pr.ready = 1;
+					else pr.ready = -1;
+				} catch (...) { pr.ready = -1; }
+			};
+			try { prepared.resize(items.size()); }
+			catch (...) { goto fail; }
+			for (i = 0; i < items.size(); ++i) {
+				if (!must(i)) continue;
+				if (items[i].size >= 8ull * 1024ull * 1024ull) largePick.push_back(i);
+				else smallPick.push_back(i);
+			}
+			{
+				SavePulse pulse;
+				struct PulseArm {
+					int on;
+					PulseArm() : on(0) {}
+					void arm(SavePulse* p) { gPulse = p; on = 1; }
+					~PulseArm() { if (on) gPulse = NULL; }
+				} arm;
+				pulse.fn = prog;
+				pulse.user = progUser;
+				pulse.total = (unsigned)(largePick.size() + smallPick.size());
+				for (i = 0; i < largePick.size(); ++i) pulse.bytesAll += items[largePick[i]].size ? items[largePick[i]].size : 1;
+				for (i = 0; i < smallPick.size(); ++i) pulse.bytesAll += items[smallPick[i]].size ? items[smallPick[i]].size : 1;
+				if (prog && pulse.total) { arm.arm(&pulse); pulsed = 1; }
+			for (i = 0; i < largePick.size(); ++i) runPick(largePick[i]);
+			if (smallPick.size() == 1) runPick(smallPick[0]);
+			else if (!smallPick.empty()) {
+				unsigned ft = HwCap() / 3;
+				unsigned t;
+				std::atomic<size_t> cursor(0);
+				std::vector<std::thread> pool;
+				if (ft < 1) ft = 1;
+				if (ft > smallPick.size()) ft = (unsigned)smallPick.size();
+				for (t = 0; t < ft; ++t) {
+					pool.push_back(std::thread([&]() {
+						tInFilePool = 1;
+						for (;;) {
+							size_t c = cursor.fetch_add(1);
+							if (c >= smallPick.size()) break;
+							runPick(smallPick[c]);
+						}
+						tInFilePool = 0;
+					}));
+					BoostThread(pool.back());
+				}
+				for (t = 0; t < pool.size(); ++t) pool[t].join();
+			}
+			}
 	for (i = 0; i < items.size(); ++i) {
 		WorkItem& w = items[i];
 		SnapFile* sf = snapOk ? FindSnap(&gSnap, w.rel) : NULL;
@@ -1466,11 +1916,11 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 		int pct0 = 0;
 		utf = RelUtf8(w.rel);
 		if (utf.empty() || utf.size() > 4096) goto fail;
-		if (prog) prog(w.rel.c_str(), index, (unsigned)items.size(), pct0, progUser);
+		if (prog && !pulsed) prog(w.rel.c_str(), index, total, pct0, progUser);
 		if (w.isDir) {
 			PutEntry(dir, M_DIR, 0, 0, 0, w.attr, w.mtime, 0, 0, 0, w.rel);
 			count++;
-		} else if (sf && sf->origin == ORIGIN_OVERLAY && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime && MethodHasPayload(sf->method)) {
+		} else if (sf && !sf->dropped && sf->origin == ORIGIN_OVERLAY && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime && MethodHasPayload(sf->method)) {
 			HANDLE src = OpenRead(gSnap.archive.c_str());
 			uint64_t len;
 			int copied = 0;
@@ -1499,6 +1949,12 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 			count++;
 		} else if (baseKept && sf && sf->origin == ORIGIN_BASE && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime) {
 			/* 変わっていない base の中身。書庫へは足さない。 */
+		} else if (i < prepared.size() && prepared[i].ready == 1) {
+			OutItem& it = prepared[i].it;
+			if (!Seek(out, pos) || (it.packed && !WriteAll(out, it.payload.data(), it.payload.size()))) goto fail;
+			PutEntry(dir, it.method, it.flags, it.prop, it.crc, w.attr, w.mtime, it.unpacked, it.packed, pos, w.rel);
+			pos += it.packed;
+			count++;
 		} else {
 			OutItem it;
 			it.rel = w.rel;
@@ -1513,16 +1969,48 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 			pos += it.packed;
 			count++;
 		}
-		if (prog) prog(w.rel.c_str(), index, (unsigned)items.size(), 100, progUser);
+		if (prog && !pulsed) prog(w.rel.c_str(), index, total, 100, progUser);
 		index++;
+	}
+		}
+	if (snapOk) {
+		for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
+			SnapFile& sf = it->second;
+			HANDLE src;
+			uint64_t len;
+			int copied = 0;
+			if (sf.origin != ORIGIN_OVERLAY || sf.dropped) continue;
+			if (live.find(sf.rel) != live.end()) continue;
+			if (prog) prog(sf.rel.c_str(), index, total, 0, progUser);
+			if (sf.isDir) {
+				PutEntry(dir, M_DIR, 0, 0, 0, sf.attr, sf.mtime, 0, 0, 0, sf.rel);
+				count++;
+			} else if (MethodHasPayload(sf.method)) {
+				src = OpenRead(gSnap.archive.c_str());
+				if (src != INVALID_HANDLE_VALUE) {
+					len = FileLen(src);
+					if (sf.dataOff <= len && sf.packed <= len - sf.dataOff && Seek(out, pos))
+						copied = CopyRange(src, sf.dataOff, sf.packed, out);
+					CloseHandle(src);
+				}
+				if (!copied) goto fail;
+				PutEntry(dir, sf.method, sf.flags, sf.prop, sf.crc, sf.attr, sf.mtime, sf.unpacked, sf.packed, pos, sf.rel);
+				pos += sf.packed;
+				count++;
+			}
+			if (prog) prog(sf.rel.c_str(), index, total, 100, progUser);
+			index++;
+		}
+	}
 	}
 	if (baseKept) {
 		for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
 			size_t k;
-			int live = 0;
+			int onDisk = 0;
 			if (it->second.origin == ORIGIN_NEW) continue;
-			for (k = 0; k < items.size(); ++k) if (SamePath(items[k].rel, it->second.rel)) { live = 1; break; }
-			if (!live) tombs.push_back(it->second.rel);
+			if (it->second.origin == ORIGIN_OVERLAY && !it->second.dropped) continue;
+			for (k = 0; k < items.size(); ++k) if (SamePath(items[k].rel, it->second.rel)) { onDisk = 1; break; }
+			if (!onDisk) tombs.push_back(it->second.rel);
 		}
 		std::sort(tombs.begin(), tombs.end(), [](const std::wstring& a, const std::wstring& b) { return a.size() > b.size(); });
 		for (i = 0; i < tombs.size(); ++i) {
@@ -1708,36 +2196,239 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 		EnsureParents(full);
 		CreateDirectoryW(full.c_str(), NULL);
 	}
-	for (i = 0; i < ents.size(); ++i) {
-		std::wstring full;
-		std::vector<uint8_t> packed, plain;
-		int dr;
-		if (!MethodHasPayload(ents[i].method)) continue;
-		full = FullPath(JoinPath(root, ents[i].name).c_str());
-		if (!UnderRoot(root, full)) { CloseHandle(h); return OXZ_CORE_ERR; }
-		if (prog) prog(ents[i].name.c_str(), seen, overlays ? overlays : 1, 0, progUser);
-		if (ents[i].packed != (uint64_t)(size_t)ents[i].packed) dr = -1;
-		else {
-			try { packed.resize((size_t)ents[i].packed); dr = 1; }
-			catch (...) { dr = -1; }
-			if (dr == 1) {
-				if (ents[i].packed && !ReadAt(h, ents[i].dataOff, packed.data(), packed.size())) { CloseHandle(h); return OXZ_CORE_ERR; }
-				dr = DecodeRaw(ents[i], packed.data(), plain);
+	{
+		struct ExJob { size_t ei; std::wstring full; int large; };
+		std::vector<ExJob> small, big;
+		unsigned total = overlays ? overlays : 1;
+		std::atomic<unsigned> done(0);
+		std::atomic<int> failed(0);
+		auto runOne = [&](const ExJob& job, HANDLE rh) -> int {
+			std::vector<uint8_t> packed, plain;
+			int dr;
+			const DirEnt& ent = ents[job.ei];
+			if (failed.load()) return 0;
+			if (prog) prog(ent.name.c_str(), done.load(), total, 0, progUser);
+			if (ent.packed != (uint64_t)(size_t)ent.packed) dr = -1;
+			else {
+				try { packed.resize((size_t)ent.packed); dr = 1; }
+				catch (...) { dr = -1; }
+				if (dr == 1) {
+					if (ent.packed && !ReadAt(rh, ent.dataOff, packed.data(), packed.size())) return 0;
+					dr = DecodeRaw(ent, packed.data(), plain);
+				}
 			}
+			if (dr == 1) {
+				if (!WriteMember(job.full, plain.data(), plain.size(), ent.mtime, ent.attr)) return 0;
+			} else if (dr < 0 && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD)) {
+				if (rh != h) return 2;
+				if (!StreamDecode(h, ent, job.full)) return 0;
+			} else {
+				return 0;
+			}
+			done.fetch_add(1);
+			if (prog) prog(ent.name.c_str(), done.load(), total, 100, progUser);
+			return 1;
+		};
+		for (i = 0; i < ents.size(); ++i) {
+			ExJob job;
+			if (!MethodHasPayload(ents[i].method)) continue;
+			job.ei = i;
+			job.full = FullPath(JoinPath(root, ents[i].name).c_str());
+			job.large = (ents[i].unpacked >= 8ull * 1024ull * 1024ull || ents[i].packed >= 8ull * 1024ull * 1024ull) ? 1 : 0;
+			if (!UnderRoot(root, job.full)) { CloseHandle(h); return OXZ_CORE_ERR; }
+			if (job.large || ents[i].packed != (uint64_t)(size_t)ents[i].packed) big.push_back(job);
+			else small.push_back(job);
 		}
-		if (dr == 1) {
-			if (!WriteMember(full, plain.data(), plain.size(), ents[i].mtime, ents[i].attr)) { CloseHandle(h); return OXZ_CORE_ERR; }
-		} else if (dr < 0 && ents[i].flags == 0 && (ents[i].method == M_STORE || ents[i].method == M_ZSTD)) {
-			if (!StreamDecode(h, ents[i], full)) { CloseHandle(h); return OXZ_CORE_ERR; }
+		for (i = 0; i < big.size(); ++i) {
+			int rc = runOne(big[i], h);
+			if (rc == 2) {
+				if (!StreamDecode(h, ents[big[i].ei], big[i].full)) rc = 0;
+				else {
+					done.fetch_add(1);
+					if (prog) prog(ents[big[i].ei].name.c_str(), done.load(), total, 100, progUser);
+					rc = 1;
+				}
+			}
+			if (rc != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
+		}
+		if (small.size() <= 1) {
+			for (i = 0; i < small.size(); ++i) {
+				if (runOne(small[i], h) != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
+			}
 		} else {
-			CloseHandle(h);
-			return OXZ_CORE_ERR;
+			unsigned ft = HwCap();
+			unsigned t;
+			std::atomic<size_t> cursor(0);
+			std::vector<std::thread> pool;
+			if (ft > small.size()) ft = (unsigned)small.size();
+			for (t = 0; t < ft; ++t) {
+				pool.push_back(std::thread([&]() {
+					HANDLE rh = OpenRead(arc.c_str());
+					tInFilePool = 1;
+					if (rh == INVALID_HANDLE_VALUE) { failed.store(1); return; }
+					for (;;) {
+						size_t c = cursor.fetch_add(1);
+						int rc;
+						if (c >= small.size() || failed.load()) break;
+						rc = runOne(small[c], rh);
+						if (rc != 1) failed.store(1);
+					}
+					CloseHandle(rh);
+					tInFilePool = 0;
+				}));
+				BoostThread(pool.back());
+			}
+			for (t = 0; t < pool.size(); ++t) pool[t].join();
+			if (failed.load()) { CloseHandle(h); return OXZ_CORE_ERR; }
 		}
-		if (prog) prog(ents[i].name.c_str(), seen, overlays ? overlays : 1, 100, progUser);
-		seen++;
+		seen = done.load();
 	}
 	CloseHandle(h);
 	if (prog && overlays == 0) prog(L"", 0, 1, 100, progUser);
+	return OXZ_CORE_OK;
+}
+
+static int RelUnder(const std::wstring& rel, const std::wstring& root)
+{
+	if (_wcsicmp(rel.c_str(), root.c_str()) == 0) return 1;
+	return rel.size() > root.size() && _wcsnicmp(rel.c_str(), root.c_str(), root.size()) == 0 && rel[root.size()] == L'\\';
+}
+
+extern "C" int OxzCoreSetLevel(int level)
+{
+	if (level < 1) level = 1;
+	if (level > 10) level = 10;
+	gUserLevel = level;
+	return gUserLevel;
+}
+
+extern "C" int OxzCoreGetLevel(void)
+{
+	return gUserLevel;
+}
+
+extern "C" void OxzCoreSetPpmd(int on)
+{
+	gUsePpmd = on ? 1 : 0;
+}
+
+extern "C" int OxzCoreGetPpmd(void)
+{
+	return gUsePpmd;
+}
+
+extern "C" int OxzCoreDrop(const wchar_t* rel)
+{
+	std::wstring key;
+	int n = 0;
+	if (!rel || !rel[0]) return OXZ_CORE_ERR;
+	key = SlashToBack(rel);
+	for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
+		if (!RelUnder(it->second.rel, key)) continue;
+		it->second.dropped = 1;
+		n++;
+	}
+	return n ? OXZ_CORE_OK : OXZ_CORE_ERR;
+}
+
+extern "C" int OxzCoreRename(const wchar_t* oldRel, const wchar_t* newRel)
+{
+	std::wstring oldKey, newKey;
+	std::vector<std::pair<std::wstring, SnapFile>> add;
+	std::vector<std::wstring> del;
+	size_t i;
+	if (!oldRel || !oldRel[0] || !newRel || !newRel[0]) return OXZ_CORE_ERR;
+	oldKey = SlashToBack(oldRel);
+	newKey = SlashToBack(newRel);
+	if (SamePath(oldKey, newKey)) return OXZ_CORE_OK;
+	for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
+		SnapFile sf;
+		std::wstring rest;
+		if (!RelUnder(it->second.rel, oldKey)) continue;
+		sf = it->second;
+		rest = sf.rel.size() > oldKey.size() ? sf.rel.substr(oldKey.size()) : L"";
+		sf.rel = newKey + rest;
+		sf.dropped = 0;
+		add.push_back(std::make_pair(sf.rel, sf));
+		del.push_back(it->first);
+	}
+	if (add.empty()) return OXZ_CORE_ERR;
+	for (i = 0; i < del.size(); ++i) gSnap.files.erase(del[i]);
+	for (i = 0; i < add.size(); ++i) gSnap.files[add[i].first] = add[i].second;
+	return OXZ_CORE_OK;
+}
+
+extern "C" int OxzCoreMaterialize(const wchar_t* rel, const wchar_t* destPath)
+{
+	SnapFile* sf;
+	HANDLE h;
+	std::vector<uint8_t> packed, plain;
+	DirEnt e;
+	uint64_t len;
+	std::wstring key;
+	if (!rel || !destPath) return OXZ_CORE_ERR;
+	key = SlashToBack(rel);
+	sf = FindSnap(&gSnap, key);
+	if (!sf || sf->dropped || sf->isDir || !MethodHasPayload(sf->method)) return OXZ_CORE_ERR;
+	if (sf->unpacked != (uint64_t)(size_t)sf->unpacked) return OXZ_CORE_ERR;
+	h = OpenRead(gSnap.archive.c_str());
+	if (h == INVALID_HANDLE_VALUE) return OXZ_CORE_ERR;
+	len = FileLen(h);
+	if (sf->dataOff > len || sf->packed > len - sf->dataOff) { CloseHandle(h); return OXZ_CORE_ERR; }
+	try { packed.resize((size_t)sf->packed); }
+	catch (...) { CloseHandle(h); return OXZ_CORE_ERR; }
+	if (sf->packed && !ReadAt(h, sf->dataOff, packed.data(), packed.size())) { CloseHandle(h); return OXZ_CORE_ERR; }
+	CloseHandle(h);
+	e.method = sf->method;
+	e.flags = sf->flags;
+	e.prop = sf->prop;
+	e.crc = sf->crc;
+	e.attr = sf->attr;
+	e.mtime = sf->mtime;
+	e.unpacked = sf->unpacked;
+	e.packed = sf->packed;
+	e.dataOff = sf->dataOff;
+	e.name = sf->rel;
+	if (DecodeRaw(e, packed.data(), plain) != 1) return OXZ_CORE_ERR;
+	if (!WriteMember(destPath, plain.empty() ? NULL : plain.data(), plain.size(), sf->mtime, sf->attr)) return OXZ_CORE_ERR;
+	return OXZ_CORE_OK;
+}
+
+static void FillItem(OxzCoreItem* dst, const std::wstring& name, int isDir, int tomb, int overlay, uint64_t unpacked, uint64_t mtime, uint16_t method, uint16_t flags, uint64_t packed, uint32_t attr)
+{
+	dst->name = _wcsdup(name.c_str());
+	dst->isDir = isDir;
+	dst->tomb = tomb;
+	dst->overlay = overlay;
+	dst->unpacked = unpacked;
+	dst->mtime = mtime;
+	dst->method = method;
+	dst->flags = flags;
+	dst->packed = packed;
+	dst->attr = attr;
+}
+
+extern "C" int OxzCoreList(OxzCoreItem** items, int* count)
+{
+	std::vector<SnapFile*> keep;
+	OxzCoreItem* arr;
+	size_t i;
+	if (!items || !count) return OXZ_CORE_ERR;
+	*items = NULL;
+	*count = 0;
+	for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
+		if (it->second.dropped || it->second.origin == ORIGIN_TOMB || it->second.method == M_TOMB) continue;
+		keep.push_back(&it->second);
+	}
+	arr = (OxzCoreItem*)calloc(keep.size() ? keep.size() : 1, sizeof(OxzCoreItem));
+	if (!arr) return OXZ_CORE_ERR;
+	for (i = 0; i < keep.size(); ++i) {
+		SnapFile* sf = keep[i];
+		FillItem(&arr[i], sf->rel, sf->isDir, 0, MethodHasPayload(sf->method) ? 0 : -1, sf->unpacked, sf->mtime, sf->method, sf->flags, sf->packed, sf->attr);
+		if (!arr[i].name) { OxzCoreFreeItems(arr, (int)i); return OXZ_CORE_ERR; }
+	}
+	*items = arr;
+	*count = (int)keep.size();
 	return OXZ_CORE_OK;
 }
 
@@ -1762,16 +2453,10 @@ extern "C" int OxzCoreReadDir(const wchar_t* archive, OxzCoreItem** items, int* 
 	arr = (OxzCoreItem*)calloc(ents.size() ? ents.size() : 1, sizeof(OxzCoreItem));
 	if (!arr) return OXZ_CORE_ERR;
 	for (i = 0; i < ents.size(); ++i) {
-		arr[i].name = _wcsdup(ents[i].name.c_str());
+		FillItem(&arr[i], ents[i].name, ents[i].method == M_DIR, ents[i].method == M_TOMB,
+			MethodHasPayload(ents[i].method) ? (int)i : -1, ents[i].unpacked, ents[i].mtime,
+			ents[i].method, ents[i].flags, ents[i].packed, ents[i].attr);
 		if (!arr[i].name) { OxzCoreFreeItems(arr, (int)i); return OXZ_CORE_ERR; }
-		arr[i].isDir = ents[i].method == M_DIR;
-		arr[i].tomb = ents[i].method == M_TOMB;
-		arr[i].overlay = MethodHasPayload(ents[i].method) ? (int)i : -1;
-		arr[i].unpacked = ents[i].unpacked;
-		arr[i].mtime = ents[i].mtime;
-		arr[i].method = ents[i].method;
-		arr[i].flags = ents[i].flags;
-		arr[i].packed = ents[i].packed;
 	}
 	*items = arr;
 	*count = (int)ents.size();
@@ -1819,4 +2504,137 @@ extern "C" int OxzCoreReadOverlay(const wchar_t* archive, int overlay, void** da
 extern "C" void OxzCoreFree(void* p)
 {
 	free(p);
+}
+
+extern "C" int OxzBzipLastParallel(void);
+
+extern "C" int OxzSpeedSelfTest(void)
+{
+	int saved = gUserLevel;
+	int code = 0;
+	std::vector<uint8_t> raw, a, b, packed;
+	size_t i;
+	gUserLevel = 1;
+	gLevelBytes = 0;
+	raw.resize(4096);
+	for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)(i * 17 + 3);
+	{
+		uint32_t tab[256];
+		uint32_t c = 0xFFFFFFFFu;
+		int n, bit;
+		for (n = 0; n < 256; ++n) {
+			uint32_t r = (uint32_t)n;
+			for (bit = 0; bit < 8; ++bit) r = (r >> 1) ^ (0xEDB88320u & (0u - (r & 1u)));
+			tab[n] = r;
+		}
+		for (i = 0; i < raw.size(); ++i) c = tab[(c ^ raw[i]) & 255] ^ (c >> 8);
+		if ((c ^ 0xFFFFFFFFu) != CrcFinish(raw.data(), raw.size())) code = 1;
+	}
+	if (!code) {
+		a = raw;
+		b = raw;
+		for (i = a.size() - 1; i > 0; --i) a[i] = (uint8_t)(a[i] - a[i - 1]);
+		Delta1Enc(b.data(), b.size());
+		if (a != b) code = 2;
+		else {
+			Delta1Dec(b.data(), b.size());
+			if (b != raw) code = 2;
+		}
+	}
+	if (!code) {
+		a = raw;
+		b = raw;
+		for (i = a.size() - 1; i >= 4; --i) {
+			a[i] = (uint8_t)(a[i] - a[i - 4]);
+			if (i == 4) break;
+		}
+		Delta4Enc(b.data(), b.size());
+		if (a != b) code = 3;
+		else {
+			Delta4Dec(b.data(), b.size());
+			if (b != raw) code = 3;
+		}
+	}
+	if (!code) {
+		raw.resize(3u * 1024u * 1024u);
+		for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)((i * 17) ^ (i >> 4) ^ ((i / 4096) * 13));
+		{
+			unsigned int dest = (unsigned int)(raw.size() + raw.size() / 50 + 600);
+			std::vector<uint8_t> stock(dest), plain(raw.size());
+			int rc = BZ2_bzBuffToBuffCompress((char*)stock.data(), &dest, (char*)raw.data(), (unsigned int)raw.size(), 1, 0, 30);
+			int dec = 0;
+			if (rc != BZ_OK) code = 41;
+			else {
+				dec = OxzBzipDecompress(stock.data(), dest, plain.data(), plain.size(), 4);
+				if (!dec) code = 42;
+				else if (plain != raw) code = 43;
+				else if (!OxzBzipLastParallel()) code = 44;
+			}
+			if (code) fprintf(stderr, "bz rc=%d dec=%d dest=%u par=%d\n", rc, dec, dest, OxzBzipLastParallel());
+		}
+	}
+	if (!code) {
+		const char* phrase = "the quick brown fox jumps over the lazy dog. ";
+		size_t plen = strlen(phrase);
+		std::vector<uint8_t> plain;
+		raw.resize(4u * 1024u * 1024u);
+		for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)phrase[i % plen];
+		plain.resize(raw.size());
+		if (!OxzBzipCompress(raw.data(), raw.size(), packed, 9, 4)) code = 5;
+		else if (!OxzBzipDecompress(packed.data(), packed.size(), plain.data(), plain.size(), 4) || plain != raw || !OxzBzipLastParallel()) code = 5;
+		else if (!OxzBzipDecompress(packed.data(), packed.size(), plain.data(), plain.size(), 0) || plain != raw) code = 5;
+	}
+	if (!code) {
+		uint8_t prop = 0;
+		std::vector<uint8_t> plain;
+		raw.resize(9ull * 1024ull * 1024ull);
+		for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)((i * 3) ^ (i >> 4));
+		gLevelBytes = raw.size();
+		if (!TryLzma(raw.data(), raw.size(), packed, &prop)) code = 6;
+		else {
+			plain.resize(raw.size());
+			if (!DecLzma(packed.data(), packed.size(), plain.data(), plain.size(), prop) || plain != raw) code = 6;
+		}
+		gLevelBytes = 0;
+	}
+	if (!code) {
+		std::vector<uint8_t> plain;
+		raw.resize(4ull * 1024ull * 1024ull);
+		for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)(i & 255);
+		gLevelBytes = raw.size();
+		if (!TryZstd(raw.data(), raw.size(), packed, 0)) code = 7;
+		else {
+			plain.resize(raw.size());
+			size_t got = ZSTD_decompress(plain.data(), plain.size(), packed.data(), packed.size());
+			if (ZSTD_isError(got) || got != plain.size() || plain != raw) code = 7;
+		}
+		gLevelBytes = 0;
+	}
+	if (!code) {
+		std::vector<uint8_t> plain;
+		raw.assign(9ull * 1024ull * 1024ull, 7);
+		for (i = 0; i < raw.size(); i += 64) raw[i] = (uint8_t)(i / 64);
+		gLevelBytes = raw.size();
+		if (!TryBrotli(raw.data(), raw.size(), packed)) code = 8;
+		else {
+			plain.resize(raw.size());
+			if (!DecBrotli(packed.data(), packed.size(), plain.data(), plain.size()) || plain != raw) code = 8;
+		}
+		gLevelBytes = 0;
+	}
+	if (!code) {
+		size_t got = 0;
+		std::vector<uint8_t> plain;
+		raw.resize(32 * 1024);
+		for (i = 0; i < raw.size(); ++i) raw[i] = (uint8_t)("oxz ppmd speed test "[i % 20]);
+		packed.resize(raw.size());
+		if (OxzPpmdCompress(raw.data(), raw.size(), packed.data(), packed.size(), &got, raw.size(), 1) != 0 || got == 0) code = 9;
+		else {
+			plain.resize(raw.size());
+			if (!DecPpmd(packed.data(), got, plain.data(), plain.size()) || plain != raw) code = 9;
+		}
+	}
+	gUserLevel = saved;
+	gLevelBytes = 0;
+	return code;
 }

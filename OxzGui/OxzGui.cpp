@@ -35,7 +35,8 @@ enum {
 	ID_OPEN = 1001, ID_NEW, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME, ID_EXTRACT, ID_SAVE, ID_SETTINGS,
 	ID_LIST, ID_STATUS, ID_PROG,
 	ID_COPY = 1301, ID_CUT, ID_PASTE, ID_SELECTALL, ID_REFRESH, ID_UP, ID_OPENSEL,
-	ID_SET_LANG = 1101, ID_SET_INSTALL, ID_SET_REMOVE, ID_SET_CLOSE, ID_SET_HELP, ID_SET_STAT
+	ID_SET_LANG = 1101, ID_SET_INSTALL, ID_SET_REMOVE, ID_SET_CLOSE, ID_SET_HELP, ID_SET_STAT,
+	ID_SET_LEVEL = 1107, ID_SET_LEVEL_LBL, ID_SET_LEVEL_VAL, ID_SET_LEVEL_HINT, ID_SET_PPMD
 };
 enum { JOB_OPEN = 1, JOB_SAVE, JOB_EXTRACT, JOB_PACK, JOB_ADD, JOB_EXTHERE, JOB_EXTRACTTO, JOB_EXTAT, JOB_TEST, JOB_DROPSAVE, JOB_PACKEACH, WM_JOB = WM_APP + 1, WM_START = WM_APP + 5 };
 
@@ -85,7 +86,7 @@ static std::vector<Item> gItems;
 static int gHasFile = 0, gSortCol = 0, gSortAsc = 1, gDropHi = -1;
 static std::vector<std::wstring> gCut;
 static OxzUpdHit* gUpdWait = NULL;
-static int gOwned = 0, gBusy = 0, gExit = 0, gCloseWhenDone = 0, gSyncDone = 0, gRefreshing = 0;
+static int gOwned = 0, gBusy = 0, gExit = 0, gCloseWhenDone = 0, gSyncDone = 0, gRefreshing = 0, gVirtual = 0;
 static HIMAGELIST gIcons = NULL;
 static DWORD gBusyTick = 0;
 static std::wstring gBusyText;
@@ -99,6 +100,7 @@ static int gWatchPause = 0;
 static void ClearWatch();
 static int LaunchWorkFile(const std::wstring& path);
 static void WatchAfterSave(int fail);
+static void SetBusy(int on, const wchar_t* text);
 
 static const int kBtnId[] = { ID_OPEN, ID_NEW, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME, ID_EXTRACT, ID_SAVE, ID_SETTINGS };
 static const int kBtnStr[] = { OS_OPEN, OS_NEW, OS_ADDFILE, OS_ADDFOLDER, OS_DEL, OS_RENAME, OS_EXTRACT, OS_SAVE, OS_SETTINGS };
@@ -307,6 +309,7 @@ static void DropWork()
 	if (gOwned && !gWork.empty()) OxzRmTree(gWork);
 	gWork.clear();
 	gOwned = 0;
+	gVirtual = 0;
 	gBrowse.clear();
 	gHasFile = 0;
 	gItems.clear();
@@ -434,6 +437,7 @@ static int InBrowse(const std::wstring& rel)
 
 static void EnsureBrowse()
 {
+	if (gVirtual) return;
 	while (!gBrowse.empty() && !gWork.empty()) {
 		DWORD a = GetFileAttributesW((gWork + L"\\" + gBrowse).c_str());
 		if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return;
@@ -545,6 +549,8 @@ static void UpdateStatus()
 	SetStatus(s.c_str());
 }
 
+static void SumFolders(std::vector<Item>& all);
+
 static void ApplyPack(std::vector<Item>& all)
 {
 	struct Less {
@@ -590,6 +596,11 @@ static void ApplyPack(std::vector<Item>& all)
 			all[i].method = 100;
 		}
 	}
+	SumFolders(all);
+}
+
+static void SumFolders(std::vector<Item>& all)
+{
 	for (size_t i = 0; i < all.size(); ++i) {
 		unsigned long long sum = 0, sumSz = 0;
 		int any = 0, allKnown = 1;
@@ -613,6 +624,70 @@ static void ApplyPack(std::vector<Item>& all)
 	}
 }
 
+static FILETIME FtU(uint64_t v)
+{
+	FILETIME ft;
+	ft.dwLowDateTime = (DWORD)v;
+	ft.dwHighDateTime = (DWORD)(v >> 32);
+	return ft;
+}
+
+static int SameRel(const std::wstring& a, const std::wstring& b)
+{
+	return _wcsicmp(a.c_str(), b.c_str()) == 0;
+}
+
+static void FillVirtual(std::vector<Item>& all)
+{
+	OxzCoreItem* items = NULL;
+	int count = 0, i;
+	std::vector<Item> disk;
+	if (OxzCoreList(&items, &count) != OXZ_CORE_OK) return;
+	for (i = 0; i < count; ++i) {
+		Item it;
+		if (!items[i].name || items[i].tomb) continue;
+		memset(&it.ft, 0, sizeof(it.ft));
+		memset(&it.created, 0, sizeof(it.created));
+		it.rel = items[i].name;
+		it.name = LeafOf(it.rel);
+		it.dir = items[i].isDir;
+		it.up = 0;
+		it.size = items[i].unpacked;
+		it.packed = items[i].packed;
+		it.packedKnown = items[i].isDir ? 0 : 1;
+		it.method = items[i].method;
+		it.flags = items[i].flags;
+		it.ft = FtU(items[i].mtime);
+		it.created = it.ft;
+		it.attr = items[i].attr;
+		if (!it.dir) gHasFile = 1;
+		all.push_back(it);
+	}
+	OxzCoreFreeItems(items, count);
+	if (!gWork.empty()) Walk(disk, gWork, L"");
+	for (size_t k = 0; k < disk.size(); ++k) {
+		size_t hit = all.size();
+		for (size_t n = 0; n < all.size(); ++n) {
+			if (SameRel(all[n].rel, disk[k].rel)) { hit = n; break; }
+		}
+		if (hit < all.size()) {
+			if (!disk[k].dir && (disk[k].size != all[hit].size || CompareFileTime(&disk[k].ft, &all[hit].ft) != 0)) {
+				all[hit].packedKnown = 0;
+				all[hit].method = -1;
+				all[hit].flags = 0;
+			}
+			all[hit].size = disk[k].size;
+			all[hit].ft = disk[k].ft;
+			all[hit].created = disk[k].created;
+			all[hit].attr = disk[k].attr;
+		} else {
+			if (!disk[k].dir) gHasFile = 1;
+			all.push_back(disk[k]);
+		}
+	}
+	SumFolders(all);
+}
+
 static void Refresh()
 {
 	std::vector<Item> all;
@@ -620,8 +695,11 @@ static void Refresh()
 	ListView_DeleteAllItems(gList);
 	gItems.clear();
 	gHasFile = 0;
-	if (!gWork.empty()) Walk(all, gWork, L"");
-	ApplyPack(all);
+	if (gVirtual && !gArchive.empty()) FillVirtual(all);
+	else {
+		if (!gWork.empty()) Walk(all, gWork, L"");
+		ApplyPack(all);
+	}
 	EnsureBrowse();
 	for (size_t i = 0; i < all.size(); ++i)
 		if (InBrowse(all[i].rel)) gItems.push_back(all[i]);
@@ -751,13 +829,55 @@ static void GoUp()
 	SelectByName(child);
 }
 
+static int EnsureOnDisk(const std::wstring& rel)
+{
+	std::wstring path;
+	DWORD a;
+	if (gWork.empty() || rel.empty()) return 0;
+	path = gWork + L"\\" + rel;
+	a = GetFileAttributesW(path.c_str());
+	if (a != INVALID_FILE_ATTRIBUTES) return 1;
+	if (!gVirtual) return 0;
+	return OxzCoreMaterialize(rel.c_str(), path.c_str()) == OXZ_CORE_OK;
+}
+
+static void EnsureTree(const std::wstring& rel, int dir)
+{
+	OxzCoreItem* items = NULL;
+	int count = 0, i;
+	if (!dir) {
+		EnsureOnDisk(rel);
+		return;
+	}
+	CreateDirectoryW((gWork + L"\\" + rel).c_str(), NULL);
+	if (OxzCoreList(&items, &count) != OXZ_CORE_OK) return;
+	for (i = 0; i < count; ++i) {
+		std::wstring name;
+		if (!items[i].name || items[i].isDir || items[i].tomb) continue;
+		name = items[i].name;
+		if (_wcsicmp(name.c_str(), rel.c_str()) == 0 || (name.size() > rel.size() && _wcsnicmp(name.c_str(), rel.c_str(), rel.size()) == 0 && name[rel.size()] == L'\\'))
+			EnsureOnDisk(name);
+	}
+	OxzCoreFreeItems(items, count);
+}
+
 static void EnterRow(int row)
 {
 	if (gBusy || row < 0 || row >= (int)gItems.size()) return;
 	if (gItems[row].up) { GoUp(); return; }
 	if (!gItems[row].dir) {
+		std::wstring path;
+		int ok;
 		if (gWork.empty()) return;
-		if (!LaunchWorkFile(gWork + L"\\" + gItems[row].rel)) Tell(gHwnd, OxzTxt(OS_OPEN_FAIL), MB_ICONWARNING);
+		path = gWork + L"\\" + gItems[row].rel;
+		ok = GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+		if (!ok) {
+			SetBusy(1, OxzTxt(OS_EXTRACTING));
+			ok = EnsureOnDisk(gItems[row].rel);
+			SetBusy(0, NULL);
+			SetStatus(OxzTxt(OS_HINT));
+		}
+		if (!ok || !LaunchWorkFile(path)) Tell(gHwnd, OxzTxt(OS_OPEN_FAIL), MB_ICONWARNING);
 		return;
 	}
 	gBrowse = gItems[row].rel;
@@ -1029,6 +1149,30 @@ static void StartJob(Job* j)
 
 static void OnOpenPath(const std::wstring& arc)
 {
+	if (OxzCoreIsPkg(arc.c_str())) {
+		OxzCoreItem* items = NULL;
+		int count = 0, files = 0, i;
+		uint64_t baseOff = 0, baseSize = 0;
+		if (OxzCoreReadDir(arc.c_str(), &items, &count, &baseOff, &baseSize) == OXZ_CORE_OK) {
+			for (i = 0; i < count; ++i)
+				if (items[i].name && !items[i].isDir && !items[i].tomb) files++;
+			OxzCoreFreeItems(items, count);
+			if (files > 0 || baseSize == 0) {
+				std::wstring work = OxzNewWork();
+				DropWork();
+				ListView_DeleteAllItems(gList);
+				gWork = work;
+				gOwned = 1;
+				gArchive = arc;
+				gVirtual = 1;
+				if (OxzCoreRemember(gWork.c_str(), gArchive.c_str()) == OXZ_CORE_OK) {
+					Refresh();
+					SetStatus(OxzTxt(OS_HINT));
+					return;
+				}
+			}
+		}
+	}
 	std::wstring work = OxzNewWork();
 	SetBusy(1, OxzTxt(OS_EXTRACTING));
 	Job* j = NewJob();
@@ -1040,6 +1184,7 @@ static void OnOpenPath(const std::wstring& arc)
 	gWork = work;
 	gOwned = 1;
 	gArchive = arc;
+	gVirtual = 0;
 	StartJob(j);
 }
 
@@ -1189,6 +1334,9 @@ static void OnDelete()
 	for (size_t k = 0; k < rels.size(); ++k) {
 		std::wstring path = gWork + L"\\" + rels[k];
 		DWORD a = GetFileAttributesW(path.c_str());
+		OxzCoreDrop(rels[k].c_str());
+		if (!gBrowse.empty() && (_wcsicmp(gBrowse.c_str(), rels[k].c_str()) == 0 || (gBrowse.size() > rels[k].size() && _wcsnicmp(gBrowse.c_str(), rels[k].c_str(), rels[k].size()) == 0 && gBrowse[rels[k].size()] == L'\\')))
+			gBrowse.clear();
 		if (a == INVALID_FILE_ATTRIBUTES) continue;
 		if (a & FILE_ATTRIBUTE_DIRECTORY) OxzRmTree(path);
 		else DeleteFileW(path.c_str());
@@ -1628,9 +1776,22 @@ static void ApplyRename(NMLVDISPINFOW* di)
 	size_t slash = rel.find_last_of(L'\\');
 	std::wstring parent = slash == std::wstring::npos ? L"" : rel.substr(0, slash);
 	std::wstring destRel = parent.empty() ? neu : (parent + L"\\" + neu);
+	std::wstring src = gWork + L"\\" + rel;
+	int onDisk, moved = 0, rn;
 	if (_wcsicmp(destRel.c_str(), rel.c_str()) == 0) return;
-	if (!MoveFileW((gWork + L"\\" + rel).c_str(), (gWork + L"\\" + destRel).c_str()))
+	onDisk = GetFileAttributesW(src.c_str()) != INVALID_FILE_ATTRIBUTES;
+	if (onDisk) {
+		if (!MoveFileW(src.c_str(), (gWork + L"\\" + destRel).c_str())) {
+			Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
+			return;
+		}
+		moved = 1;
+	}
+	rn = OxzCoreRename(rel.c_str(), destRel.c_str());
+	if (!moved && rn != OXZ_CORE_OK) {
 		Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
+		return;
+	}
 	PostMessageW(gHwnd, WM_APP + 2, 0, 0);
 }
 
@@ -1702,6 +1863,9 @@ static void RelabelSet()
 	SetWindowTextW(GetDlgItem(gSet, ID_SET_CLOSE), OxzTxt(OS_CLOSE));
 	SetWindowTextW(GetDlgItem(gSet, ID_SET_HELP), OxzTxt(OS_HELP));
 	SetWindowTextW(GetDlgItem(gSet, OS_LANG), OxzTxt(OS_LANG));
+	SetWindowTextW(GetDlgItem(gSet, ID_SET_LEVEL_LBL), OxzTxt(OS_LEVEL));
+	SetWindowTextW(GetDlgItem(gSet, ID_SET_LEVEL_HINT), OxzTxt(OS_LEVEL_HINT));
+	SetWindowTextW(GetDlgItem(gSet, ID_SET_PPMD), OxzTxt(OS_PPMD));
 	RefreshSetStatus();
 	ApplyRtl(gSet);
 	ApplyCaption(gSet);
@@ -1727,13 +1891,26 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		gSet = hwnd;
 		HWND lang = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, 16, 200, 24, hwnd, (HMENU)OS_LANG, NULL, NULL);
 		HWND list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY, 16, 44, 220, 280, hwnd, (HMENU)ID_SET_LANG, NULL, NULL);
-		HWND help = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL, 252, 44, 430, 220, hwnd, (HMENU)ID_SET_HELP, NULL, NULL);
-		HWND st = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 252, 274, 430, 24, hwnd, (HMENU)ID_SET_STAT, NULL, NULL);
-		HWND inst = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 252, 312, 200, 34, hwnd, (HMENU)ID_SET_INSTALL, NULL, NULL);
-		HWND rem = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 462, 312, 200, 34, hwnd, (HMENU)ID_SET_REMOVE, NULL, NULL);
-		HWND closeb = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 462, 360, 200, 34, hwnd, (HMENU)ID_SET_CLOSE, NULL, NULL);
-		HWND hs[] = { lang, list, help, st, inst, rem, closeb };
-		for (int i = 0; i < 7; ++i) SendMessageW(hs[i], WM_SETFONT, (WPARAM)gFont, TRUE);
+		HWND help = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL, 252, 44, 430, 150, hwnd, (HMENU)ID_SET_HELP, NULL, NULL);
+		HWND lvl = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 252, 204, 120, 22, hwnd, (HMENU)ID_SET_LEVEL_LBL, NULL, NULL);
+		HWND bar = CreateWindowExW(0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS, 372, 200, 220, 32, hwnd, (HMENU)ID_SET_LEVEL, NULL, NULL);
+		HWND val = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 600, 204, 36, 22, hwnd, (HMENU)ID_SET_LEVEL_VAL, NULL, NULL);
+		HWND hint = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 252, 234, 380, 22, hwnd, (HMENU)ID_SET_LEVEL_HINT, NULL, NULL);
+		HWND ppmd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 252, 260, 380, 24, hwnd, (HMENU)ID_SET_PPMD, NULL, NULL);
+		HWND st = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 252, 294, 430, 24, hwnd, (HMENU)ID_SET_STAT, NULL, NULL);
+		HWND inst = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 252, 328, 200, 34, hwnd, (HMENU)ID_SET_INSTALL, NULL, NULL);
+		HWND rem = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 462, 328, 200, 34, hwnd, (HMENU)ID_SET_REMOVE, NULL, NULL);
+		HWND closeb = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 462, 372, 200, 34, hwnd, (HMENU)ID_SET_CLOSE, NULL, NULL);
+		HWND hs[] = { lang, list, help, lvl, bar, val, hint, ppmd, st, inst, rem, closeb };
+		SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELONG(1, 10));
+		SendMessageW(bar, TBM_SETPOS, TRUE, OxzCoreGetLevel());
+		SendMessageW(ppmd, BM_SETCHECK, OxzCoreGetPpmd() ? BST_CHECKED : BST_UNCHECKED, 0);
+		{
+			wchar_t num[8];
+			_snwprintf_s(num, _TRUNCATE, L"%d", OxzCoreGetLevel());
+			SetWindowTextW(val, num);
+		}
+		for (int i = 0; i < 12; ++i) SendMessageW(hs[i], WM_SETFONT, (WPARAM)gFont, TRUE);
 		SubBtn(inst); SubBtn(rem); SubBtn(closeb);
 		for (int i = 0; i < 14; ++i) SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)OxzLangName(i));
 		SendMessageW(list, LB_SETCURSEL, OxzLang(), 0);
@@ -1750,8 +1927,8 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				SendMessageW(gList, WM_SETFONT, (WPARAM)gFont, TRUE);
 				SendMessageW(gStatus, WM_SETFONT, (WPARAM)gFont, TRUE);
 				Relabel();
-				HWND hs[] = { GetDlgItem(hwnd, OS_LANG), GetDlgItem(hwnd, ID_SET_LANG), GetDlgItem(hwnd, ID_SET_HELP), GetDlgItem(hwnd, ID_SET_STAT), GetDlgItem(hwnd, ID_SET_INSTALL), GetDlgItem(hwnd, ID_SET_REMOVE), GetDlgItem(hwnd, ID_SET_CLOSE) };
-				for (int i = 0; i < 7; ++i) SendMessageW(hs[i], WM_SETFONT, (WPARAM)gFont, TRUE);
+				HWND hs[] = { GetDlgItem(hwnd, OS_LANG), GetDlgItem(hwnd, ID_SET_LANG), GetDlgItem(hwnd, ID_SET_HELP), GetDlgItem(hwnd, ID_SET_LEVEL_LBL), GetDlgItem(hwnd, ID_SET_LEVEL_HINT), GetDlgItem(hwnd, ID_SET_PPMD), GetDlgItem(hwnd, ID_SET_STAT), GetDlgItem(hwnd, ID_SET_INSTALL), GetDlgItem(hwnd, ID_SET_REMOVE), GetDlgItem(hwnd, ID_SET_CLOSE) };
+				for (int i = 0; i < 10; ++i) SendMessageW(hs[i], WM_SETFONT, (WPARAM)gFont, TRUE);
 				RelabelSet();
 				OxzRefreshMenuText();
 				InvalidateRect(gHwnd, NULL, TRUE);
@@ -1759,11 +1936,34 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			}
 			return 0;
 		}
+		if (LOWORD(wp) == ID_SET_PPMD) {
+			int on = SendMessageW(GetDlgItem(hwnd, ID_SET_PPMD), BM_GETCHECK, 0, 0) == BST_CHECKED;
+			DWORD v = on ? 1 : 0;
+			OxzCoreSetPpmd(on);
+			RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"ppmd", REG_DWORD, &v, sizeof(v));
+			return 0;
+		}
 		if (gBusy) return 0;
 		if (LOWORD(wp) == ID_SET_INSTALL) OnInstallClick(0);
 		else if (LOWORD(wp) == ID_SET_REMOVE) OnInstallClick(1);
 		else if (LOWORD(wp) == ID_SET_CLOSE) DestroyWindow(hwnd);
 		return 0;
+	case WM_HSCROLL: {
+		HWND bar = GetDlgItem(hwnd, ID_SET_LEVEL);
+		if ((HWND)lp == bar) {
+			int v = (int)SendMessageW(bar, TBM_GETPOS, 0, 0);
+			DWORD dv;
+			wchar_t num[8];
+			if (v < 1) v = 1;
+			if (v > 10) v = 10;
+			OxzCoreSetLevel(v);
+			dv = (DWORD)v;
+			RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"level", REG_DWORD, &dv, sizeof(dv));
+			_snwprintf_s(num, _TRUNCATE, L"%d", v);
+			SetWindowTextW(GetDlgItem(hwnd, ID_SET_LEVEL_VAL), num);
+		}
+		return 0;
+	}
 	case WM_DRAWITEM:
 		DrawBtn((DRAWITEMSTRUCT*)lp);
 		return TRUE;
@@ -1794,7 +1994,7 @@ static void ShowSettings()
 	RECT r;
 	GetWindowRect(gHwnd, &r);
 	HWND d = CreateWindowExW(WS_EX_DLGMODALFRAME, L"OxzSet", L"", WS_POPUP | WS_CAPTION | WS_SYSMENU,
-		r.left + 40, r.top + 40, 720, 460, gHwnd, NULL, GetModuleHandleW(NULL), NULL);
+		r.left + 40, r.top + 40, 720, 520, gHwnd, NULL, GetModuleHandleW(NULL), NULL);
 	if (!d) return;
 	ShowWindow(d, SW_SHOW);
 	UpdateWindow(d);
@@ -2187,6 +2387,8 @@ static void CollectSelected(std::vector<std::wstring>& paths)
 	int row = -1;
 	while ((row = ListView_GetNextItem(gList, row, LVNI_SELECTED)) >= 0) {
 		if (row >= (int)gItems.size() || gItems[row].up) continue;
+		if (GetFileAttributesW((gWork + L"\\" + gItems[row].rel).c_str()) == INVALID_FILE_ATTRIBUTES)
+			EnsureTree(gItems[row].rel, gItems[row].dir);
 		all.push_back(gWork + L"\\" + gItems[row].rel);
 		if (gItems[row].dir) folders.push_back((int)all.size() - 1);
 	}
@@ -2315,6 +2517,12 @@ static void WatchCut()
 		if (GetFileAttributesW(gCut[i].c_str()) == INVALID_FILE_ATTRIBUTES) gone = 1;
 	}
 	if (!gone) return;
+	for (size_t i = 0; i < gCut.size(); ++i) {
+		if (GetFileAttributesW(gCut[i].c_str()) != INVALID_FILE_ATTRIBUTES) continue;
+		if (gWork.empty() || gCut[i].size() <= gWork.size()) continue;
+		if (_wcsnicmp(gCut[i].c_str(), gWork.c_str(), gWork.size()) != 0 || gCut[i][gWork.size()] != L'\\') continue;
+		OxzCoreDrop(gCut[i].c_str() + gWork.size() + 1);
+	}
 	gCut.clear();
 	KillTimer(gHwnd, 2);
 	Refresh();
@@ -2667,6 +2875,16 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 {
 	OxzEscapeJob();
 	OxzLangInit();
+	{
+		DWORD level = 10, ppmd = 1, cb = sizeof(DWORD);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"level", RRF_RT_REG_DWORD, NULL, &level, &cb) != ERROR_SUCCESS || level < 1 || level > 10)
+			level = 10;
+		cb = sizeof(DWORD);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"ppmd", RRF_RT_REG_DWORD, NULL, &ppmd, &cb) != ERROR_SUCCESS)
+			ppmd = 1;
+		OxzCoreSetLevel((int)level);
+		OxzCoreSetPpmd(ppmd ? 1 : 0);
+	}
 	OleInitialize(NULL);
 	int argc = 0;
 	wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -2720,7 +2938,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 		}
 		LocalFree(argv);
 	}
-	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS };
+	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS | ICC_BAR_CLASSES };
 	InitCommonControlsEx(&icc);
 	if (!gPink) gPink = CreateSolidBrush(RGB(255, 224, 236));
 	if (!gMint) gMint = CreateSolidBrush(RGB(255, 234, 238));

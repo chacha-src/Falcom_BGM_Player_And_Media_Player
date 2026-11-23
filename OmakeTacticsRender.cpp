@@ -6528,11 +6528,11 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 			const float t = Clampf(Dot(q, ax) / L, 0.f, 1.f);
 			if (t < t0 || t > t1) continue;
 			const float dist = Len(q - ax * (t * L));
-			if (dist > 0.12f) continue;
+			if (dist > 0.16f) continue;
 			if (dist > r) r = dist;
 			got++;
 		}
-		return got >= 4 ? Clampf(r + 0.008f, 0.030f, 0.080f) : 0.042f;
+		return got >= 4 ? Clampf(r + 0.010f, 0.030f, 0.115f) : 0.042f;
 	};
 	for (int side = 0; side < 2; side++) {
 		float A[3], B[3], H[3];
@@ -6587,7 +6587,7 @@ static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V
 			for (int s = 0; s < 2; s++) {
 				const float jl = sqrtf(apexJ[s][0] * apexJ[s][0] + apexJ[s][1] * apexJ[s][1] + apexJ[s][2] * apexJ[s][2]);
 				nc.bustA[s][0] = apex[s][0]; nc.bustA[s][1] = apex[s][1]; nc.bustA[s][2] = apex[s][2];
-				nc.bustA[s][3] = Clampf(0.038f + jl * 0.45f, 0.04f, 0.085f);
+				nc.bustA[s][3] = Clampf(0.038f + jl * 0.45f, 0.04f, 0.130f);
 			}
 		}
 		// 1/2 系は格子に載せると面が折れるので、胸下は CPU の垂らしだけ。当たりはあとで頂点 CS。
@@ -11629,7 +11629,7 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	const int jLaR = rm ? validJ(rm->laR) : -1;
 	// 頭側を 8cm にすると、球が髪型全体を頭蓋へ押し潰して兜になる。首の太さだけにする。
 	cap(jNeck, headJ, 0.048f * gL, 0.032f);
-	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.090f * gT, 0.125f * gT);
+	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.110f * gT, 0.135f * gT);
 	cap(jShL, jUaL, 0.060f * gL, 0.054f * gL);
 	cap(jShR, jUaR, 0.060f * gL, 0.054f * gL);
 	cap(jUaL, jLaL, 0.056f * gL, 0.048f * gL);
@@ -12032,10 +12032,10 @@ void Renderer::EnsureScalp(int model, int headJ)
 					cy += sk->bind[ix[c]].p[1];
 					cz += sk->bind[ix[c]].p[2];
 				}
-				// 渦と分け目と、突風で髪が離れる側頭・後頭を髪色で塞ぐ。額と顔（前側）は出す。
+				// 渦と、突風で髪が離れる側頭・後頭を髪色で塞ぐ。額（天辺から 2cm より下の前側）は出さない。
 				const float dy = cy * (1.f / 3.f) - yTop, dz = cz * (1.f / 3.f) - capCz;
 				if (dy < -0.22f) continue;
-				if (dy < -0.055f && dz < -0.02f) continue;
+				if (dz < -0.012f && dy < -0.020f) continue;
 				for (int c = 0; c < 3; c++) {
 					int v = ix[c];
 					if (map[v] < 0) {
@@ -12310,8 +12310,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	slot[4] = seg[1]; slot[5] = seg[5]; slot[6] = seg[9]; slot[7] = 0.f;
 	slot[8] = seg[2]; slot[9] = seg[6]; slot[10] = seg[10]; slot[11] = 0.f;
 	slot[12] = seg[3]; slot[13] = seg[7]; slot[14] = seg[11]; slot[15] = 1.f;
-	// 頭頂の型は輪で、天辺を頭蓋の天辺に揃えると渦の穴から頭が出る。1.8cm 上に置き、
-	// 内側に入った分はシェーダが頭蓋の外へ出す。左右前後は頭蓋の外形の中心へ揃え、顔や片耳へずれて禿げないようにする。
+	// 頭頂の型は輪で、天辺に揃えると渦の穴から頭が出る。4mm だけ上げ、穴は小さい笠で塞ぐ。
+	// 1.8cm 上げると分け目が開いて地肌が白く抜ける。左右前後は頭蓋の中心へ揃え、片耳へずれて禿げないようにする。
 	if (hs && hs->crownOk && hs->crown[1] > 0.4f) {
 		int ref = (style >= 1 && style <= 15 && m_hairCapN[style] >= 8) ? style : ((m_hairCapN[1] >= 8) ? 1 : -1);
 		if (ref < 0) {
@@ -12322,7 +12322,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			const float rx = seg[0] * cx + seg[1] * cy + seg[2] * cz + seg[3];
 			const float ry = seg[4] * cx + seg[5] * cy + seg[6] * cz + seg[7];
 			const float rz = seg[8] * cx + seg[9] * cy + seg[10] * cz + seg[11];
-			float liftDy = (hs->crown[1] + 0.018f) - ry;
+			// 天辺より 1.8cm 上げると分け目が開いて地肌が筋になる。4mm だけ浮かせ、穴は後の小さい笠で塞ぐ。
+			float liftDy = (hs->crown[1] + 0.004f) - ry;
 			float shiftX = hs->crown[0] - rx;
 			float shiftZ = (hs->skullC[2] - 0.006f) - rz;
 			// 0 系の区間を借りた頭は、2.5cm では天辺まで届かず毛が顔の横で潰れて禿げる。
@@ -12332,7 +12333,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 				shiftX = Clampf(shiftX, -0.35f, 0.35f);
 				shiftZ = Clampf(shiftZ, -0.35f, 0.35f);
 			} else {
-				if (liftDy < 0.008f) liftDy = 0.008f;
+				if (liftDy < 0.001f) liftDy = 0.001f;
 				else if (liftDy > 0.22f) liftDy = 0.22f;
 				shiftX = Clampf(shiftX, -0.025f, 0.025f);
 				shiftZ = Clampf(shiftZ, -0.025f, 0.025f);
@@ -12496,8 +12497,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 				DrawStaticVerts(m_capDraw, got->v.data(), (UINT)got->n, world, dc);
 			}
 		}
-		// ポニーテールの渦はカードが地肌と同じ深さで、頭頂だけ地肌が残る。頭蓋の外 8mm の笠でその穴を塞ぐ。
-		// 顔枠はカメラが近く、笠が髪の横に円盤になって出る。頭を回すと風の倒れが骨と逆へ滑る。顔では描かない。
+		// 渦の穴だけを天辺の小さい笠で塞ぐ。頭蓋全体の半球は、近いカメラで分け目が白く光り、額を横に切る。
+		// 顔枠はカメラが近く、頭を回すと風の倒れが骨と逆へ滑る。顔では描かない。
 		if (!m_inPortrait && hs && hs->crownOk && hs->skullC[1] > 0.4f) {
 			const int N = 12;
 			static GpuMesh domeM;
@@ -12546,12 +12547,15 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 					if (sl < 0.2f) { side[0] = 0.f; side[1] = up[2]; side[2] = -up[1]; sl = sqrtf(side[1] * side[1] + side[2] * side[2]); }
 					side[0] /= sl; side[1] /= sl; side[2] /= sl;
 					float fwd[3] = { side[1] * up[2] - side[2] * up[1], side[2] * up[0] - side[0] * up[2], side[0] * up[1] - side[1] * up[0] };
-					const float R = rl + 0.008f;
+					// 半球（半径 約10cm）は額まで届く。渦を覆う 3.6cm の笠を、天辺の 2mm 上に置く。
+					const float Rxz = 0.036f;
+					const float Ry = 0.008f;
+					const float lift = rl + 0.002f - Ry;
 					M4 domeL = MIdent();
-					domeL.m[0] = side[0] * R; domeL.m[1] = side[1] * R; domeL.m[2] = side[2] * R;
-					domeL.m[4] = up[0] * R;   domeL.m[5] = up[1] * R;   domeL.m[6] = up[2] * R;
-					domeL.m[8] = fwd[0] * R;  domeL.m[9] = fwd[1] * R;  domeL.m[10] = fwd[2] * R;
-					domeL.m[12] = c[0];       domeL.m[13] = c[1];       domeL.m[14] = c[2];
+					domeL.m[0] = side[0] * Rxz; domeL.m[1] = side[1] * Rxz; domeL.m[2] = side[2] * Rxz;
+					domeL.m[4] = up[0] * Ry;    domeL.m[5] = up[1] * Ry;    domeL.m[6] = up[2] * Ry;
+					domeL.m[8] = fwd[0] * Rxz;  domeL.m[9] = fwd[1] * Rxz;  domeL.m[10] = fwd[2] * Rxz;
+					domeL.m[12] = c[0] + up[0] * lift; domeL.m[13] = c[1] + up[1] * lift; domeL.m[14] = c[2] + up[2] * lift;
 					DrawParams dc = dp;
 					dc.outline = 0.f;
 					dc.twoSided = 1;

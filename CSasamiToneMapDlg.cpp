@@ -5,6 +5,7 @@
 #include "SasamiToneNames.h"
 #include "VstMidiEngine.h"
 #include "CSasamiStaffCore.h"
+#include "FmMidiLive.h"
 
 IMPLEMENT_DYNAMIC(CSasamiToneMapDlg, CCustomBlurDialogExBase)
 
@@ -32,7 +33,7 @@ static const int kMapCount = (int)(sizeof(kMaps) / sizeof(kMaps[0]));
 CSasamiToneMapDlg::CSasamiToneMapDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_TONE_MAP, pParent)
 	, m_part(1), m_prog(0), m_bankMsb(0), m_bankLsb(0), m_mapSel(0)
-	, m_pickedVst3(0), m_isDrum(0), m_bind(NULL), m_scroll(0), m_cellH(18), m_auditionHold(0)
+	, m_pickedVst3(0), m_isDrum(0), m_fmPick(0), m_bind(NULL), m_scroll(0), m_cellH(18), m_auditionHold(0)
 {
 	memset(m_names, 0, sizeof(m_names));
 }
@@ -63,6 +64,28 @@ int CSasamiToneMapDlg::PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bi
 		bind->vstBankLsb[part1to32 - 1] = dlg.m_bankLsb;
 	}
 	return IDOK;
+}
+
+int CSasamiToneMapDlg::PickForFmVoice(CWnd* owner, int* msb, int* lsb, int* prog, int* isXg, int* isDrum)
+{
+	CSasamiToneMapDlg dlg(owner);
+	dlg.m_part = 1;
+	dlg.m_fmPick = 1;
+	dlg.m_bind = NULL;
+	if (dlg.DoModal() != IDOK) return 0;
+	if (msb) *msb = dlg.m_bankMsb & 127;
+	if (lsb) *lsb = dlg.m_bankLsb & 127;
+	if (prog) *prog = dlg.m_prog & 127;
+	const int xg = (dlg.m_mapSel >= 0 && dlg.m_mapSel < kMapCount && kMaps[dlg.m_mapSel].isXg) ? 1 : 0;
+	if (isXg) *isXg = xg;
+	if (isDrum) *isDrum = dlg.m_isDrum ? 1 : 0;
+	return 1;
+}
+
+static void CutToneLive()
+{
+	FmMidiLiveNoteOff();
+	VstLiveAuditionStop();
 }
 
 void CSasamiToneMapDlg::DoDataExchange(CDataExchange* pDX)
@@ -114,6 +137,10 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 		if (b.GetSafeHwnd()) { b.SetAeroMode(FALSE); b.SetFlat(TRUE); }
 	};
 	flat(m_ok); flat(m_cancel); flat(m_editor); flat(m_vst3);
+	if (m_fmPick) {
+		if (m_editor.GetSafeHwnd()) m_editor.ShowWindow(SW_HIDE);
+		if (m_vst3.GetSafeHwnd()) m_vst3.ShowWindow(SW_HIDE);
+	}
 	if (m_map.GetSafeHwnd()) m_map.SetAeroMode(FALSE);
 	if (m_bankM.GetSafeHwnd()) m_bankM.SetAeroMode(FALSE);
 	if (m_bankL.GetSafeHwnd()) m_bankL.SetAeroMode(FALSE);
@@ -457,7 +484,15 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	const int pc = HitTone(point);
 	if (pc >= 0) {
 		ApplyTone(pc, 0);
-		if (TonePortLive(m_part)) {
+		const int fm = m_fmPick || ScStaffScorePreviewOut() == SC_OUT_FMMIDI;
+		if (fm && !ToneIsEmpty(pc)) {
+			const int ch = m_isDrum ? 9 : ((m_part - 1) & 15);
+			const int note = m_isDrum ? 36 : 60;
+			const int xg = (m_mapSel >= 0 && m_mapSel < kMapCount && kMaps[m_mapSel].isXg) ? 1 : 0;
+			FmMidiLiveAudition(ch, m_bankMsb, m_bankLsb, m_prog, note, 100, xg);
+			m_auditionHold = 1;
+			SetCapture();
+		} else if (TonePortLive(m_part)) {
 			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
 			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 2000);
 			m_auditionHold = 1;
@@ -469,8 +504,9 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 void CSasamiToneMapDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	if (m_auditionHold) {
-		VstLiveAuditionStop();
+		CutToneLive();
 		m_auditionHold = 0;
+		if (GetCapture() == this) ReleaseCapture();
 	}
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
@@ -481,7 +517,7 @@ void CSasamiToneMapDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 	if (pc >= 0 && !ToneIsEmpty(pc)) {
 		/* Select only — no live PC send (same freeze as 入力 ApplyTone). */
 		m_prog = pc;
-		VstLiveAuditionStop();
+		CutToneLive();
 		ScSaveWndGeom(this, &savedata.sasamiToneMapX, &savedata.sasamiToneMapY,
 			&savedata.sasamiToneMapW, &savedata.sasamiToneMapH);
 		EndDialog(IDOK);
@@ -544,7 +580,7 @@ void CSasamiToneMapDlg::OnBnClickedOk()
 		&savedata.sasamiToneMapW, &savedata.sasamiToneMapH);
 	/* Cut audition only — do NOT SendBankProgram here (Host32/SHM race freezes
 	   on 入力). PickForPart writes bind; score/MML update happens after DoModal. */
-	VstLiveAuditionStop();
+	CutToneLive();
 	if (ToneIsEmpty(m_prog)) {
 		for (int pc = 0; pc < 128; ++pc) {
 			if (!ToneIsEmpty(pc)) { m_prog = pc; break; }
@@ -555,13 +591,13 @@ void CSasamiToneMapDlg::OnBnClickedOk()
 void CSasamiToneMapDlg::OnBnClickedCancel() {
 	ScSaveWndGeom(this, &savedata.sasamiToneMapX, &savedata.sasamiToneMapY,
 		&savedata.sasamiToneMapW, &savedata.sasamiToneMapH);
-	VstLiveAuditionStop();
+	CutToneLive();
 	EndDialog(IDCANCEL);
 }
 void CSasamiToneMapDlg::OnBnClickedEditor()
 {
 	/* Do not call ProgramCount here — Host32 PROGRAMS IPC freezes after preview. */
-	VstLiveAuditionStop();
+	CutToneLive();
 	VstLiveEditorOpenAsync(m_part);
 	if (m_hint.GetSafeHwnd())
 		m_hint.SetWindowText(LL14(
@@ -584,7 +620,7 @@ void CSasamiToneMapDlg::OnBnClickedEditor()
 void CSasamiToneMapDlg::OnBnClickedVst3()
 {
 	/* Switch this part from GS/XG multi → dedicated VST3 (HALion / Groove Agent…). */
-	VstLiveAuditionStop();
+	CutToneLive();
 	if (!ScVstPickLoadForPart(this, m_part, m_bind))
 		return;
 	m_pickedVst3 = 1;
@@ -601,7 +637,7 @@ void CSasamiToneMapDlg::OnBnClickedVst3()
 
 void CSasamiToneMapDlg::OnCancel()
 {
-	VstLiveAuditionStop();
+	CutToneLive();
 	ScSaveWndGeom(this, &savedata.sasamiToneMapX, &savedata.sasamiToneMapY,
 		&savedata.sasamiToneMapW, &savedata.sasamiToneMapH);
 	CCustomBlurDialogExBase::OnCancel();
@@ -609,6 +645,6 @@ void CSasamiToneMapDlg::OnCancel()
 
 void CSasamiToneMapDlg::OnDestroy()
 {
-	VstLiveAuditionStop();
+	CutToneLive();
 	CCustomBlurDialogExBase::OnDestroy();
 }

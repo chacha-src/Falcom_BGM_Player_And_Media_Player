@@ -108,10 +108,19 @@ void CSSkin(uint dtid : SV_DispatchThreadID)
 					float ry = u.y < 0.0 ? 0.125 : 0.100;
 					float rx = 0.086;
 					float e2 = (u.x * u.x) / (rx * rx) + (u.y * u.y) / (ry * ry) + (u.z * u.z) / (rz * rz);
-					float faceR = rsqrt(max(e2, 1e-4)) * smoothstep(-0.15, -0.09, d.y);
+					float faceBand = smoothstep(0.06, -0.01, u.y) * smoothstep(0.02, -0.10, u.z) * smoothstep(0.55, 0.25, abs(u.x));
+					float faceR = rsqrt(max(e2, 1e-4)) * faceBand;
 					R = max(R, faceR);
-					float pad = d.z < -0.02 ? 0.010 : 0.008;
-					if (R > 0.03 && r < R + pad) p = SkullC.xyz + u * (R + pad);
+					float pad = (u.z < -0.02 && u.y < 0.02) ? 0.005 : 0.003;
+					if (R > 0.03 && d.y > -0.05 && r < 0.34) {
+						float surf = R + pad;
+						float gap = r - surf;
+						float t = 0.0;
+						if (gap <= 0.0) t = 1.0;
+						else if (gap < 0.12) t = 1.0 - smoothstep(0.070, 0.12, gap);
+						if (u.z < -0.2 && u.y < 0.0) t *= 0.25;
+						if (t > 0.0) p = SkullC.xyz + u * lerp(r, surf, t);
+					} else if (R > 0.03 && r < R + pad) p = SkullC.xyz + u * (R + pad);
 				}
 			}
 			if (hj < 64u) {

@@ -11,7 +11,35 @@ This code is based on:
 #define kTopValue ((UInt32)1 << 24)
 
 
-#define READ_BYTE(p) IByteIn_Read((p)->Stream)
+static __declspec(thread) const Byte *g_oxzRd;
+static __declspec(thread) const Byte *g_oxzRdEnd;
+static __declspec(thread) int g_oxzRdOver;
+
+void Ppmd7z_RangeDec_Bind(const Byte *p, const Byte *end)
+{
+  g_oxzRd = p;
+  g_oxzRdEnd = end;
+  g_oxzRdOver = 0;
+}
+
+int Ppmd7z_RangeDec_Over(void)
+{
+  return g_oxzRdOver;
+}
+
+static Byte OxzReadByte(const CPpmd7_RangeDec *p)
+{
+  if (g_oxzRd) {
+    if (g_oxzRd >= g_oxzRdEnd) {
+      g_oxzRdOver = 1;
+      return 0;
+    }
+    return *g_oxzRd++;
+  }
+  return IByteIn_Read(p->Stream);
+}
+
+#define READ_BYTE(p) OxzReadByte(p)
 
 BoolInt Ppmd7z_RangeDec_Init(CPpmd7_RangeDec *p)
 {
@@ -59,9 +87,7 @@ static void Ppmd7z_RD_Decode(CPpmd7 *p, UInt32 start, UInt32 size)
 void Ppmd7_UpdateModel(CPpmd7 *p);
 
 #define MASK(sym)  ((Byte *)charMask)[sym]
-// Z7_FORCE_INLINE
-// static
-int Ppmd7z_DecodeSymbol(CPpmd7 *p)
+static int PpmdDecodeOne(CPpmd7 *p)
 {
   size_t charMask[256 / sizeof(size_t)];
 
@@ -278,23 +304,21 @@ int Ppmd7z_DecodeSymbol(CPpmd7 *p)
   }
 }
 
-/*
+int Ppmd7z_DecodeSymbol(CPpmd7 *p)
+{
+  return PpmdDecodeOne(p);
+}
+
 Byte *Ppmd7z_DecodeSymbols(CPpmd7 *p, Byte *buf, const Byte *lim)
 {
-  int sym = 0;
-  if (buf != lim)
-  do
-  {
-    sym = Ppmd7z_DecodeSymbol(p);
+  while (buf != lim) {
+    int sym = PpmdDecodeOne(p);
     if (sym < 0)
       break;
-    *buf = (Byte)sym;
+    *buf++ = (Byte)sym;
   }
-  while (++buf < lim);
-  p->LastSymbol = sym;
   return buf;
 }
-*/
 
 #undef kTopValue
 #undef READ_BYTE

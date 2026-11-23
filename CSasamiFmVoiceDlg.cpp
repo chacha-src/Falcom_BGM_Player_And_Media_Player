@@ -2,6 +2,8 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CSasamiFmVoiceDlg.h"
+#include "CSasamiToneMapDlg.h"
+#include "FmMidiLive.h"
 #include "CSasamiStaffCore.h"
 #include "PlayList.h"
 #include "kb_sasami/source/sasami_write.h"
@@ -11,6 +13,8 @@
 
 #define IDC_SASAMI_FV_HEX   4486
 #define IDC_SASAMI_FV_APPLY 4487
+#define IDC_SASAMI_FV_TONE  4488
+#define IDC_SASAMI_FV_MML   4489
 
 extern CPlayList* pl;
 
@@ -70,6 +74,8 @@ BEGIN_MESSAGE_MAP(CSasamiFmVoiceDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_FV_CANCEL, OnBnClickedCancel)
 	ON_CBN_SELCHANGE(IDC_SASAMI_FV_PRESET, OnCbnPreset)
 	ON_BN_CLICKED(IDC_SASAMI_FV_APPLY, OnBnClickedApplyHex)
+	ON_BN_CLICKED(IDC_SASAMI_FV_TONE, OnBnClickedTone)
+	ON_BN_CLICKED(IDC_SASAMI_FV_MML, OnBnClickedMml)
 END_MESSAGE_MAP()
 
 static int VoiceApplyFromText(const wchar_t* txt, uint8_t out[25])
@@ -249,6 +255,10 @@ void CSasamiFmVoiceDlg::ApplyLang()
 		L"FM 음색 (25바이트)", L"FM音色(25字节)", L"صوت FM (25 بايت)", L"FM-тембр (25 байт)", L"FM-Klang (25 Bytes)",
 		L"Voz FM (25 bytes)", L"FM-klank (25 bytes)", L"Głos FM (25 bajtów)", L"FM ses (25 bayt)"));
 	m_btnPreview.SetWindowText(LL14(L"プレビュー", L"Preview", L"Aperçu", L"Anteprima", L"Vista previa", L"미리듣기", L"试听", L"معاينة", L"Просмотр", L"Vorschau", L"Prévia", L"Voorbeeld", L"Podgląd", L"Önizle"));
+	if (m_btnTone.GetSafeHwnd())
+		m_btnTone.SetWindowText(LL14(L"トーンマップ", L"Tone map", L"Table de sons", L"Mappa timbri", L"Mapa de tonos", L"톤 맵", L"音色表", L"خريطة النغمات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Toonkaart", L"Mapa brzmień", L"Ton haritası"));
+	if (m_btnMml.GetSafeHwnd())
+		m_btnMml.SetWindowText(LL14(L"MML化", L"To MML", L"En MML", L"In MML", L"A MML", L"MML로", L"转成MML", L"إلى MML", L"В MML", L"Als MML", L"Para MML", L"Naar MML", L"Do MML", L"MML'e"));
 	m_btnOk.SetWindowText(L"OK");
 	m_btnCancel.SetWindowText(LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
 }
@@ -261,12 +271,16 @@ void CSasamiFmVoiceDlg::LayoutChrome()
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int pad = 8;
 	int y = cap + pad;
-	m_btnPreview.MoveWindow(pad, y, 96, 28);
-	m_btnOk.MoveWindow(pad + 104, y, 72, 28);
-	m_btnCancel.MoveWindow(pad + 184, y, 96, 28);
+	m_btnPreview.MoveWindow(pad, y, 88, 28);
+	m_btnOk.MoveWindow(pad + 96, y, 56, 28);
+	m_btnCancel.MoveWindow(pad + 160, y, 88, 28);
+	if (m_btnTone.GetSafeHwnd())
+		m_btnTone.MoveWindow(pad + 256, y, 120, 28);
+	if (m_btnMml.GetSafeHwnd())
+		m_btnMml.MoveWindow(pad + 384, y, 72, 28);
 	/* Closed combo height must stay ~line height; large H overlaps the knob body. */
 	if (m_cmbPreset.GetSafeHwnd())
-		m_cmbPreset.MoveWindow(pad + 292, y, 180, 28);
+		m_cmbPreset.MoveWindow(pad + 464, y, max(120, rc.Width() - pad - 464 - pad), 28);
 	y += 36;
 	const int applyW = 72;
 	if (m_edHex.GetSafeHwnd())
@@ -297,6 +311,16 @@ BOOL CSasamiFmVoiceDlg::OnInitDialog()
 	m_btnPreview.SetFlat(TRUE);
 	m_btnOk.SetFlat(TRUE);
 	m_btnCancel.SetFlat(TRUE);
+	if (!m_btnTone.GetSafeHwnd()) {
+		m_btnTone.Create(L"Tone", WS_CHILD | WS_VISIBLE | WS_TABSTOP, CRect(0, 0, 120, 28), this, IDC_SASAMI_FV_TONE);
+		m_btnTone.SetAeroMode(FALSE);
+		m_btnTone.SetFlat(TRUE);
+	}
+	if (!m_btnMml.GetSafeHwnd()) {
+		m_btnMml.Create(L"MML", WS_CHILD | WS_VISIBLE | WS_TABSTOP, CRect(0, 0, 72, 28), this, IDC_SASAMI_FV_MML);
+		m_btnMml.SetAeroMode(FALSE);
+		m_btnMml.SetFlat(TRUE);
+	}
 	if (m_cmbPreset.GetSafeHwnd()) m_cmbPreset.SetAeroMode(FALSE);
 	if (!m_edHex.GetSafeHwnd()) {
 		m_edHex.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
@@ -545,6 +569,77 @@ int CSasamiFmVoiceDlg::PreviewBeep()
 }
 
 void CSasamiFmVoiceDlg::OnBnClickedPreview() { PreviewBeep(); }
+
+void CSasamiFmVoiceDlg::OnBnClickedTone()
+{
+	int msb = 0, lsb = 0, prog = 0, xg = 0, drum = 0;
+	if (!CSasamiToneMapDlg::PickForFmVoice(this, &msb, &lsb, &prog, &xg, &drum))
+		return;
+	uint8_t v[25];
+	if (!FmMidiVoiceFromBank(msb, lsb, prog, xg, drum, v)
+		&& !FmMidiVoiceFromBank(msb, lsb, prog, xg, drum ? 0 : 1, v)) {
+		MessageBeep(MB_ICONHAND);
+		return;
+	}
+	memcpy(m_voice, v, 25);
+	SyncHexToEdit();
+	InvalidateRect(m_bodyRc, FALSE);
+	SetWindowText(LL14(
+		L"FM音色 — トーンマップの音色を載せました",
+		L"FM voice — tone map sound loaded",
+		L"Timbre FM — son de la table chargé",
+		L"Voce FM — suono della mappa caricato",
+		L"Voz FM — tono del mapa cargado",
+		L"FM 음색 — 톤 맵 음색을 올렸습니다",
+		L"FM音色 — 已载入音色表",
+		L"صوت FM — حُمّلت نغمة الخريطة",
+		L"FM-тембр — звук карты загружен",
+		L"FM-Klang — Klangkarte geladen",
+		L"Voz FM — timbre do mapa carregado",
+		L"FM-klank — toonkaart geladen",
+		L"Głos FM — brzmienie z mapy",
+		L"FM ses — ton haritası yüklendi"));
+}
+
+void CSasamiFmVoiceDlg::OnBnClickedMml()
+{
+	wchar_t hex[160];
+	VoiceFormatHex(m_voice, hex, 160);
+	CString line;
+	line.Format(L"@VOICEHEX 0 %s\r\n@CV0\r\n", hex);
+	if (!OpenClipboard()) {
+		MessageBeep(MB_ICONHAND);
+		return;
+	}
+	EmptyClipboard();
+	const SIZE_T bytes = (SIZE_T)(line.GetLength() + 1) * sizeof(wchar_t);
+	HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
+	if (!h) {
+		CloseClipboard();
+		MessageBeep(MB_ICONHAND);
+		return;
+	}
+	void* p = GlobalLock(h);
+	memcpy(p, (LPCWSTR)line, bytes);
+	GlobalUnlock(h);
+	SetClipboardData(CF_UNICODETEXT, h);
+	CloseClipboard();
+	SetWindowText(LL14(
+		L"FM音色 — @VOICEHEX をコピーしました",
+		L"FM voice — @VOICEHEX copied",
+		L"Timbre FM — @VOICEHEX copié",
+		L"Voce FM — @VOICEHEX copiato",
+		L"Voz FM — @VOICEHEX copiado",
+		L"FM 음색 — @VOICEHEX 를 복사했습니다",
+		L"FM音色 — 已复制 @VOICEHEX",
+		L"صوت FM — نُسخ @VOICEHEX",
+		L"FM-тембр — @VOICEHEX скопирован",
+		L"FM-Klang — @VOICEHEX kopiert",
+		L"Voz FM — @VOICEHEX copiado",
+		L"FM-klank — @VOICEHEX gekopieerd",
+		L"Głos FM — skopiowano @VOICEHEX",
+		L"FM ses — @VOICEHEX kopyalandı"));
+}
 
 void CSasamiFmVoiceDlg::OnBnClickedOk()
 {
