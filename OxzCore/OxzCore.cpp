@@ -2389,7 +2389,6 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			if (prog) prog(ent.name.c_str(), done.load(), total, 0, progUser);
 			if (ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD) && ent.unpacked >= 1024ull * 1024ull) {
 				int sok;
-				if (rh != h) return 2;
 				tExWatch.fn = prog;
 				tExWatch.user = progUser;
 				tExWatch.name = ent.name.c_str();
@@ -2398,7 +2397,7 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 				tExWatch.unpacked = ent.unpacked;
 				tExWatch.tick = 0;
 				tExOn = 1;
-				sok = StreamDecode(h, ent, job.full);
+				sok = StreamDecode(rh, ent, job.full);
 				tExOn = 0;
 				if (!sok) return 0;
 				done.fetch_add(1);
