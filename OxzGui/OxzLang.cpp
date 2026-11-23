@@ -105,6 +105,7 @@ static const wchar_t* kTxt[OS_COUNT][14] = {
 	{ L"それぞれ oxz をここに作成", L"Create an oxz here for each", L"Créer un oxz ici pour chacun", L"Crea qui un oxz per ciascuno", L"Crear aquí un oxz para cada uno", L"여기에 각각 oxz 만들기", L"在此处分别创建 oxz", L"إنشاء oxz هنا لكل واحد", L"Создать здесь oxz для каждого", L"Hier für jedes ein oxz erstellen", L"Criar aqui um oxz para cada um", L"Maak hier voor elk een oxz", L"Utwórz tutaj oxz dla każdego", L"Her biri için burada oxz oluştur" },
 	{ L"それぞれフォルダを作って展開", L"Extract each into its own folder", L"Extraire chacun dans son dossier", L"Estrai ciascuno nella propria cartella", L"Extraer cada uno en su carpeta", L"각각 폴더를 만들어 풀기", L"分别建文件夹并解压", L"استخراج كل واحد في مجلده", L"Распаковать каждый в свою папку", L"Jedes in einen eigenen Ordner entpacken", L"Extrair cada um para a sua pasta", L"Elk uitpakken in een eigen map", L"Rozpakuj każdy do własnego folderu", L"Her birini kendi klasörüne aç" },
 	{ L"選択 %u", L"%u selected", L"%u sélectionné(s)", L"%u selezionati", L"%u seleccionados", L"선택 %u", L"已选 %u", L"المحدد %u", L"Выбрано %u", L"%u ausgewählt", L"%u selecionados", L"%u geselecteerd", L"Zaznaczono %u", L"%u seçili" },
+	{ L"コーデック", L"Codec", L"Codec", L"Codec", L"Códec", L"코덱", L"编码", L"الترميز", L"Кодек", L"Codec", L"Codec", L"Codec", L"Kodek", L"Kodek" },
 };
 
 static const wchar_t* kName[14] = {

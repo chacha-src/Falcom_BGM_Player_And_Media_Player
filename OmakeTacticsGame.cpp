@@ -1666,7 +1666,8 @@ BOOL Game::TakePaceDue(LARGE_INTEGER& due)
 // または、全敵（ボスを含む）の今のHP合計が、全敵の最大HP合計の30%以下。倒した敵の最大HPは分母に残す。
 // 着弾の見た目HPで切り、ダメージを与えた瞬間に組み直す。敗北寸前は与えた時と受けた時。
 // 敗北寸前は味方の残りHPが最大の33%未満、または死者が人数の半数以上。条件を外れた着弾で戻す。
-// ボスを倒した瞬間、またはボスのいないマップで最後の敵を倒した着弾で、カットシーンの途中から勝利曲。
+// 解決済みの実HPでは切り替えない。カットシーンに入る前や、多段の次の段の前には曲を変えない。
+// 段ごとに着弾した見た目HPで、勝利目前と勝利をその都度判定する。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -1708,29 +1709,28 @@ void Game::SyncBgm()
 			else deadN++;
 		}
 		int bosses = 0, bossesUp = 0;
+		int visFoe = 0, visBoss = 0, visAny = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team != TEAM_ENEMY || !u.boss) continue;
 			bosses++;
 			if (u.alive && u.hp > 0) bossesUp++;
 		}
-		if (bosses > 0 && bossesUp == 0 && players > 0) m_bossDown = 1;
-		int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
-		int killCut = 0;
 		if (m_phase == PH_ACTION) {
-			int anyBoss = 0, bossUp = 0, foeUp = 0, anyFoe = 0;
 			for (int i = 0; i < m_b.nUnits; i++) {
 				const Unit& u = m_b.u[i];
 				if (u.team != TEAM_ENEMY) continue;
-				anyFoe = 1;
-				if (u.boss) anyBoss = 1;
-				int shown = (u.alive && u.hp > 0 && m_dispHp[i] > 0.5f) ? 1 : 0;
-				if (!shown) continue;
-				foeUp = 1;
-				if (u.boss) bossUp = 1;
+				visAny = 1;
+				if (m_dispHp[i] <= 0.5f) continue;
+				visFoe = 1;
+				if (u.boss) visBoss = 1;
 			}
-			if (anyFoe && ((anyBoss && !bossUp) || (!anyBoss && !foeUp))) killCut = 1;
 		}
+		// 攻撃の再生中は、まだ画面に残っているHPだけで勝敗を見る。実HPは段の最初に全部減っている。
+		if (m_phase != PH_ACTION && bosses > 0 && bossesUp == 0 && players > 0) m_bossDown = 1;
+		int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_phase != PH_ACTION && m_bossDown && players > 0) || (m_phase != PH_ACTION && alive == 0 && all > 0 && players > 0);
+		int killCut = 0;
+		if (m_phase == PH_ACTION && visAny && ((bosses > 0 && !visBoss) || (bosses == 0 && !visFoe))) killCut = 1;
 		int nearWin = 0;
 		if (m_screen == SC_BATTLE && !fightWon) {
 			int bossLow = 0;

@@ -4,6 +4,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OxzGui", "OxzGui.vcxproj", 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OxzShell", "OxzShell.vcxproj", "{B1C2D3E4-2222-4A21-9F02-0A1B2C3D4E5F}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OxzCore", "..\OxzCore\OxzCore.vcxproj", "{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Release|x64 = Release|x64
@@ -13,5 +15,7 @@ Global
 		{B1C2D3E4-1111-4A21-9F02-0A1B2C3D4E5F}.Release|x64.Build.0 = Release|x64
 		{B1C2D3E4-2222-4A21-9F02-0A1B2C3D4E5F}.Release|x64.ActiveCfg = Release|x64
 		{B1C2D3E4-2222-4A21-9F02-0A1B2C3D4E5F}.Release|x64.Build.0 = Release|x64
+		{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}.Release|x64.ActiveCfg = Release|x64
+		{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 EndGlobal

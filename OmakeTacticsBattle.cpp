@@ -1851,6 +1851,12 @@ void Game::EndBattle(int victory)
 	if (victory) {
 		m_save.stageCleared = max(m_save.stageCleared, m_battleStage);
 		m_save.stageSel = Clampi(m_battleStage + 1, 1, StagePlayMax(m_save.stageCleared));
+		// 選んだ地図での開始はその戦闘だけ。クリアしたら地形・天候・時刻の固定を外し、次はランダムに戻す。
+		m_themeSel = -1;
+		m_homeWx = -1;
+		m_homeHr = -1;
+		m_mapSeed = 0;
+		m_mapSeedStage = -1;
 		DropSuspend(0);
 	}
 	Persist();

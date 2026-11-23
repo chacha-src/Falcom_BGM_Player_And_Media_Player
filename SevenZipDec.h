@@ -18,6 +18,7 @@ struct SevenZipArc {
 	int ripPe;
 	Byte* ripCopy;
 	size_t ripCopyCap;
+	void* oxzPkg;
 };
 
 int SevenZipPathIs7zW(const wchar_t* path);

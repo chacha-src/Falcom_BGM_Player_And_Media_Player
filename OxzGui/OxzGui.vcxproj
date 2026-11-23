@@ -38,6 +38,7 @@
       <ConformanceMode>false</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <ExceptionHandling>Sync</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -139,6 +140,11 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="OxzGui.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OxzCore\OxzCore.vcxproj">
+      <Project>{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

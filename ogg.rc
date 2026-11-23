@@ -2578,16 +2578,16 @@ BEGIN
 END
 
 IDD_TAGGRID DIALOGEX 0, 0, 640, 420
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
+STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "タグ一覧"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "",IDC_TG_HINT,7,4,470,28
     EDITTEXT        IDC_TG_PAT,7,34,400,14,ES_AUTOHSCROLL
-    CONTROL         "ファイル",IDC_TG_ADD,"Button",BS_PUSHBUTTON | WS_TABSTOP,0,0,8,8
-    CONTROL         "フォルダ",IDC_TG_DIR,"Button",BS_PUSHBUTTON | WS_TABSTOP,0,0,8,8
-    CONTROL         "名前へ",IDC_TG_NAME,"Button",BS_PUSHBUTTON | WS_TABSTOP,0,0,8,8
-    CONTROL         "連番",IDC_TG_NUM,"Button",BS_PUSHBUTTON | WS_TABSTOP,0,0,8,8
+    PUSHBUTTON      "ファイル",IDC_TG_ADD,0,0,8,8
+    PUSHBUTTON      "フォルダ",IDC_TG_DIR,0,0,8,8
+    PUSHBUTTON      "名前へ",IDC_TG_NAME,0,0,8,8
+    PUSHBUTTON      "連番",IDC_TG_NUM,0,0,8,8
     PUSHBUTTON      "保存",IDC_TG_SAVE,500,6,52,16
     PUSHBUTTON      "閉じる",IDC_TG_CLOSE,556,6,52,16
     CONTROL         "",IDC_TG_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,52,470,336
@@ -2611,7 +2611,7 @@ BEGIN
     EDITTEXT        IDC_TP_NAME,46,74,150,14,ES_AUTOHSCROLL
     LTEXT           "型",IDC_TP_PAT_L,202,76,20,10
     EDITTEXT        IDC_TP_PAT,224,74,208,14,ES_AUTOHSCROLL
-    LISTBOX         IDC_TP_LIST,8,94,424,162,LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LISTBOX         IDC_TP_LIST,8,94,424,162,LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
     DEFPUSHBUTTON   "追加",IDC_TP_ADD,8,266,72,16
     PUSHBUTTON      "更新",IDC_TP_UPD,86,266,72,16
     PUSHBUTTON      "削除",IDC_TP_DEL,164,266,72,16
@@ -3212,7 +3212,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1694
+ FILEVERSION 0,9,1,1695
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -3230,10 +3230,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.22 v1694"
-            VALUE "FileVersion", "0.9.1.1694"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.11.23 v1695"
+            VALUE "FileVersion", "0.9.1.1695"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.11.22"
+            VALUE "LegalCopyright", "Copyright (C) 2026.11.23"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player raira"

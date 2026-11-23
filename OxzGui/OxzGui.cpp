@@ -19,6 +19,7 @@
 #include "OxzInst.h"
 #include "OxzUpdate.h"
 #include "OxzAudio.h"
+#include "../OxzCore/OxzCore.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -46,6 +47,8 @@ struct Item {
 	unsigned long long size;
 	unsigned long long packed;
 	int packedKnown;
+	int method;
+	int flags;
 	FILETIME ft;
 	FILETIME created;
 	DWORD attr;
@@ -277,8 +280,8 @@ static void Relabel()
 		LVCOLUMNW col;
 		memset(&col, 0, sizeof(col));
 		col.mask = LVCF_TEXT;
-		const int ids[] = { OS_COL_NAME, OS_COL_SIZE, OS_COL_HUMAN, OS_COL_PACKED, OS_COL_PACKHUMAN, OS_COL_RATIO, OS_COL_TYPE, OS_COL_ATTR, OS_COL_DATE, OS_COL_CREATED };
-		for (int i = 0; i < 10; ++i) {
+		const int ids[] = { OS_COL_NAME, OS_COL_SIZE, OS_COL_HUMAN, OS_COL_PACKED, OS_COL_PACKHUMAN, OS_COL_RATIO, OS_COL_CODEC, OS_COL_TYPE, OS_COL_ATTR, OS_COL_DATE, OS_COL_CREATED };
+		for (int i = 0; i < 11; ++i) {
 			col.pszText = (LPWSTR)OxzTxt(ids[i]);
 			ListView_SetColumn(gList, i, &col);
 		}
@@ -299,6 +302,7 @@ static void ClearWatch()
 
 static void DropWork()
 {
+	OxzCoreForget();
 	ClearWatch();
 	if (gOwned && !gWork.empty()) OxzRmTree(gWork);
 	gWork.clear();
@@ -314,17 +318,58 @@ static std::wstring LeafOf(const std::wstring& rel)
 	return s == std::wstring::npos ? rel : rel.substr(s + 1);
 }
 
+static void CodecLabel(const Item& it, wchar_t* out, size_t n)
+{
+	const wchar_t* s = L"";
+	if (!out || n == 0) return;
+	out[0] = 0;
+	if (it.up || it.dir || it.method < 0) return;
+	switch (it.method) {
+	case 0: s = L"Store"; break;
+	case 1: s = L"Zstd"; break;
+	case 2: s = L"LZ4"; break;
+	case 3: s = L"Deflate"; break;
+	case 4: s = L"LZMA2"; break;
+	case 5: s = L"Brotli"; break;
+	case 8: s = L"DeflateRaw"; break;
+	case 9: s = L"Lizard"; break;
+	case 10: s = L"LZFSE"; break;
+	case 11: s = L"bzip2"; break;
+	case 12: s = L"PPMd"; break;
+	case 100: s = L"7z"; break;
+	default: s = L"?"; break;
+	}
+	wcsncpy_s(out, n, s, _TRUNCATE);
+	if (it.flags & 1) wcscat_s(out, n, L"+RIP");
+	if (it.flags & 2) wcscat_s(out, n, L"+d1");
+	if (it.flags & 4) wcscat_s(out, n, L"+d4");
+}
+
 static int CmpItem(const Item& a, const Item& b)
 {
 	int c = 0;
 	if (gSortCol == 0 && a.dir != b.dir) return a.dir > b.dir ? -1 : 1;
-	if (gSortCol == 1 || gSortCol == 2 || gSortCol == 3 || gSortCol == 4) {
-		unsigned long long av = (gSortCol == 1 || gSortCol == 2) ? a.size : a.packed;
-		unsigned long long bv = (gSortCol == 1 || gSortCol == 2) ? b.size : b.packed;
+	if (gSortCol == 1 || gSortCol == 2 || gSortCol == 3 || gSortCol == 4 || gSortCol == 5) {
+		unsigned long long av, bv;
+		if (gSortCol == 5) {
+			av = (a.packedKnown && a.size) ? (a.packed * 10000ull) / a.size : 0;
+			bv = (b.packedKnown && b.size) ? (b.packed * 10000ull) / b.size : 0;
+		} else if (gSortCol == 1 || gSortCol == 2) {
+			av = a.size;
+			bv = b.size;
+		} else {
+			av = a.packedKnown ? a.packed : 0;
+			bv = b.packedKnown ? b.packed : 0;
+		}
 		c = av < bv ? -1 : av > bv ? 1 : 0;
-	} else if (gSortCol == 8 || gSortCol == 9) {
-		const FILETIME& af = gSortCol == 9 ? a.created : a.ft;
-		const FILETIME& bf = gSortCol == 9 ? b.created : b.ft;
+	} else if (gSortCol == 6) {
+		wchar_t as[64], bs[64];
+		CodecLabel(a, as, 64);
+		CodecLabel(b, bs, 64);
+		c = _wcsicmp(as, bs);
+	} else if (gSortCol == 9 || gSortCol == 10) {
+		const FILETIME& af = gSortCol == 10 ? a.created : a.ft;
+		const FILETIME& bf = gSortCol == 10 ? b.created : b.ft;
 		c = CompareFileTime(&af, &bf);
 	} else {
 		c = _wcsicmp(a.name.c_str(), b.name.c_str());
@@ -359,6 +404,8 @@ static void Walk(std::vector<Item>& all, const std::wstring& dir, const std::wst
 		it.up = 0;
 		it.packed = 0;
 		it.packedKnown = 0;
+		it.method = -1;
+		it.flags = 0;
 		std::wstring child = dir + L"\\" + fd.cFileName;
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 			it.dir = 1;
@@ -498,6 +545,74 @@ static void UpdateStatus()
 	SetStatus(s.c_str());
 }
 
+static void ApplyPack(std::vector<Item>& all)
+{
+	struct Less {
+		bool operator()(const std::wstring& a, const std::wstring& b) const { return _wcsicmp(a.c_str(), b.c_str()) < 0; }
+	};
+	struct Info { unsigned long long packed, unpacked; int method, flags; };
+	std::map<std::wstring, Info, Less> got;
+	int base = 0;
+	OxzCoreItem* items = NULL;
+	int count = 0;
+	uint64_t baseOff = 0, baseSize = 0;
+	for (size_t i = 0; i < all.size(); ++i) {
+		if (!all[i].dir) gHasFile = 1;
+		all[i].packed = 0;
+		all[i].packedKnown = 0;
+		all[i].method = -1;
+		all[i].flags = 0;
+	}
+	if (!gArchive.empty() && OxzCoreIsPkg(gArchive.c_str())
+		&& OxzCoreReadDir(gArchive.c_str(), &items, &count, &baseOff, &baseSize) == OXZ_CORE_OK) {
+		base = baseSize > 0;
+		for (int i = 0; i < count; ++i) {
+			Info inf;
+			if (!items[i].name || items[i].isDir || items[i].tomb || items[i].overlay < 0) continue;
+			inf.packed = items[i].packed;
+			inf.unpacked = items[i].unpacked;
+			inf.method = items[i].method;
+			inf.flags = items[i].flags;
+			got[items[i].name] = inf;
+		}
+		OxzCoreFreeItems(items, count);
+	}
+	for (size_t i = 0; i < all.size(); ++i) {
+		std::map<std::wstring, Info, Less>::iterator it;
+		if (all[i].dir) continue;
+		it = got.find(all[i].rel);
+		if (it != got.end() && it->second.unpacked == all[i].size) {
+			all[i].packed = it->second.packed;
+			all[i].packedKnown = 1;
+			all[i].method = it->second.method;
+			all[i].flags = it->second.flags;
+		} else if (it == got.end() && base) {
+			all[i].method = 100;
+		}
+	}
+	for (size_t i = 0; i < all.size(); ++i) {
+		unsigned long long sum = 0, sumSz = 0;
+		int any = 0, allKnown = 1;
+		std::wstring prefix;
+		if (!all[i].dir) continue;
+		prefix = all[i].rel + L"\\";
+		for (size_t k = 0; k < all.size(); ++k) {
+			if (all[k].dir) continue;
+			if (all[k].rel.size() > prefix.size() && _wcsnicmp(all[k].rel.c_str(), prefix.c_str(), prefix.size()) == 0) {
+				any = 1;
+				sumSz += all[k].size;
+				if (!all[k].packedKnown) allKnown = 0;
+				else sum += all[k].packed;
+			}
+		}
+		all[i].size = sumSz;
+		if (any && allKnown) {
+			all[i].packed = sum;
+			all[i].packedKnown = 1;
+		}
+	}
+}
+
 static void Refresh()
 {
 	std::vector<Item> all;
@@ -506,43 +621,7 @@ static void Refresh()
 	gItems.clear();
 	gHasFile = 0;
 	if (!gWork.empty()) Walk(all, gWork, L"");
-	unsigned long long raw = 0, arcSz = 0;
-	int known = 0;
-	for (size_t i = 0; i < all.size(); ++i) {
-		if (all[i].dir) continue;
-		raw += all[i].size;
-		gHasFile = 1;
-	}
-	if (!gArchive.empty() && raw) {
-		WIN32_FILE_ATTRIBUTE_DATA fa;
-		if (GetFileAttributesExW(gArchive.c_str(), GetFileExInfoStandard, &fa)) {
-			ULARGE_INTEGER u;
-			u.LowPart = fa.nFileSizeLow;
-			u.HighPart = fa.nFileSizeHigh;
-			arcSz = u.QuadPart;
-			known = 1;
-		}
-	}
-	for (size_t i = 0; i < all.size(); ++i) {
-		if (all[i].dir || !known) continue;
-		all[i].packed = (all[i].size * arcSz + raw / 2) / raw;
-		all[i].packedKnown = 1;
-	}
-	for (size_t i = 0; i < all.size(); ++i) {
-		if (!all[i].dir) continue;
-		unsigned long long sum = 0, sumSz = 0;
-		std::wstring prefix = all[i].rel + L"\\";
-		for (size_t k = 0; k < all.size(); ++k) {
-			if (all[k].dir) continue;
-			if (all[k].rel.size() > prefix.size() && _wcsnicmp(all[k].rel.c_str(), prefix.c_str(), prefix.size()) == 0) {
-				sumSz += all[k].size;
-				if (all[k].packedKnown) sum += all[k].packed;
-			}
-		}
-		all[i].size = sumSz;
-		all[i].packed = sum;
-		all[i].packedKnown = known;
-	}
+	ApplyPack(all);
 	EnsureBrowse();
 	for (size_t i = 0; i < all.size(); ++i)
 		if (InBrowse(all[i].rel)) gItems.push_back(all[i]);
@@ -558,6 +637,8 @@ static void Refresh()
 		up.size = 0;
 		up.packed = 0;
 		up.packedKnown = 0;
+		up.method = -1;
+		up.flags = 0;
 		up.attr = 0;
 		gItems.insert(gItems.begin(), up);
 	}
@@ -569,7 +650,7 @@ static void Refresh()
 	std::map<std::wstring, int> icons;
 	for (size_t i = 0; i < gItems.size(); ++i) {
 		LVITEMW it;
-		wchar_t sz[64], human[64], pk[64], ph[64], ratio[32], kind[64], attr[8], when[64], made[64];
+		wchar_t sz[64], human[64], pk[64], ph[64], ratio[32], codec[64], kind[64], attr[8], when[64], made[64];
 		const Item& row = gItems[i];
 		memset(&it, 0, sizeof(it));
 		it.mask = LVIF_TEXT | LVIF_IMAGE;
@@ -577,20 +658,20 @@ static void Refresh()
 		it.iImage = IconForRow(row, neu, icons);
 		it.pszText = (LPWSTR)row.name.c_str();
 		ListView_InsertItem(gList, &it);
-		sz[0] = human[0] = pk[0] = ph[0] = ratio[0] = kind[0] = attr[0] = when[0] = made[0] = 0;
+		sz[0] = human[0] = pk[0] = ph[0] = ratio[0] = codec[0] = kind[0] = attr[0] = when[0] = made[0] = 0;
 		if (!row.up) {
 			_snwprintf_s(sz, _TRUNCATE, L"%llu", row.size);
 			FormatUnit(row.size, human, 64);
 			if (!row.packedKnown) { wcscpy_s(pk, L"-"); wcscpy_s(ph, L"-"); wcscpy_s(ratio, L"-"); }
 			else {
-				_snwprintf_s(pk, _TRUNCATE, L"~%llu", row.packed);
+				_snwprintf_s(pk, _TRUNCATE, L"%llu", row.packed);
 				FormatUnit(row.packed, ph, 64);
-				if (ph[0]) {
-					size_t n = wcslen(ph);
-					if (n + 2 < 64) { memmove(ph + 1, ph, (n + 1) * sizeof(wchar_t)); ph[0] = L'~'; }
-				}
 				if (row.size) _snwprintf_s(ratio, _TRUNCATE, L"%llu%%", (row.packed * 100 + row.size / 2) / row.size);
 				else wcscpy_s(ratio, L"-");
+			}
+			if (!row.dir) {
+				if (row.method < 0) wcscpy_s(codec, L"-");
+				else CodecLabel(row, codec, 64);
 			}
 			if (row.dir) wcscpy_s(kind, OxzTxt(OS_FOLDER));
 			else {
@@ -609,10 +690,11 @@ static void Refresh()
 		ListView_SetItemText(gList, (int)i, 3, pk);
 		ListView_SetItemText(gList, (int)i, 4, ph);
 		ListView_SetItemText(gList, (int)i, 5, ratio);
-		ListView_SetItemText(gList, (int)i, 6, kind);
-		ListView_SetItemText(gList, (int)i, 7, attr);
-		ListView_SetItemText(gList, (int)i, 8, when);
-		ListView_SetItemText(gList, (int)i, 9, made);
+		ListView_SetItemText(gList, (int)i, 6, codec);
+		ListView_SetItemText(gList, (int)i, 7, kind);
+		ListView_SetItemText(gList, (int)i, 8, attr);
+		ListView_SetItemText(gList, (int)i, 9, when);
+		ListView_SetItemText(gList, (int)i, 10, made);
 	}
 	HIMAGELIST old = ListView_SetImageList(gList, neu, LVSIL_SMALL);
 	if (old) ImageList_Destroy(old);
@@ -814,11 +896,6 @@ static DWORD WINAPI JobThread(LPVOID p)
 	Job* j = (Job*)p;
 	j->rc = 2;
 	j->bytes = 0;
-	if ((j->kind == JOB_SAVE || j->kind == JOB_PACK || j->kind == JOB_ADD || j->kind == JOB_DROPSAVE || j->kind == JOB_PACKEACH) && !OxzHas7za()) {
-		j->err = OxzTxt(OS_NO7ZA);
-		PostMessageW(gHwnd, WM_JOB, 0, 0);
-		return 0;
-	}
 	if (j->kind == JOB_OPEN || j->kind == JOB_EXTRACT) {
 		OxzProgBegin(j->archive.c_str());
 		j->rc = OxzExtractTo(j->archive.c_str(), j->dest.c_str(), j->err);
@@ -1147,7 +1224,7 @@ static int HasFiles()
 
 static void OnSave()
 {
-	if (gWork.empty() || !HasFiles()) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
+	if (gWork.empty() || (!HasFiles() && gArchive.empty())) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
 	std::wstring arc;
 	if (!PickArchive(arc, 1)) return;
 	if (UnderWork(arc)) { Tell(gHwnd, OxzTxt(OS_SAVE_INSIDE), MB_ICONWARNING); return; }
@@ -1161,7 +1238,7 @@ static void OnSave()
 
 static void SaveCurrent()
 {
-	if (gBusy || gWork.empty() || !HasFiles()) return;
+	if (gBusy || gWork.empty() || (!HasFiles() && gArchive.empty())) return;
 	if (!OxzIsOxz(gArchive)) { OnSave(); return; }
 	if (UnderWork(gArchive)) return;
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
@@ -1227,7 +1304,7 @@ static void FreezeWatchBase()
 
 static void StartWatchSave()
 {
-	if (gBusy || gWatchPause || gWork.empty() || !HasFiles()) return;
+	if (gBusy || gWatchPause || gWork.empty() || (!HasFiles() && gArchive.empty())) return;
 	if (gArchive.empty()) {
 		gWatchPause = 1;
 		FreezeWatchBase();
@@ -1503,9 +1580,11 @@ static void OnJobDone()
 		gOwned = 1;
 		gArchive = j->archive;
 		Refresh();
+		OxzCoreRemember(gWork.c_str(), gArchive.c_str());
 	} else if (j->kind == JOB_OPEN || j->kind == JOB_DROPSAVE || (j->kind == JOB_SAVE && !fail)) {
 		if ((j->kind == JOB_SAVE || j->kind == JOB_DROPSAVE) && !j->archive.empty()) gArchive = j->archive;
 		Refresh();
+		if (!fail) OxzCoreRemember(gWork.c_str(), gArchive.c_str());
 	}
 	if (fail) {
 		if (!gExit) Tell(gHwnd, j->err.empty() ? OxzTxt(OS_SAVE_FAIL) : j->err.c_str(), MB_ICONWARNING);
@@ -1782,9 +1861,7 @@ static void BeginStartup()
 static void AcceptPaths(const std::vector<std::wstring>& paths, const std::wstring& into)
 {
 	if (paths.empty() || gBusy) return;
-	if (paths.size() == 1 && CanOpen(paths[0])) {
-		if ((gHasFile || !gItems.empty()) && MessageBoxW(gHwnd, OxzTxt(OS_REPLACE_ASK), OxzTxt(OS_APP), MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
-			return;
+	if (paths.size() == 1 && CanOpen(paths[0]) && gWork.empty() && gArchive.empty()) {
 		OnOpenPath(paths[0]);
 		return;
 	}
@@ -2283,10 +2360,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		ListView_SetBkColor(gList, RGB(255, 224, 236));
 		LVCOLUMNW col;
 		memset(&col, 0, sizeof(col));
-		const int widths[] = { 268, 100, 90, 110, 100, 64, 72, 56, 140, 140 };
+		const int widths[] = { 268, 100, 90, 110, 100, 64, 120, 72, 56, 140, 140 };
 		col.mask = LVCF_TEXT | LVCF_WIDTH;
 		col.pszText = (LPWSTR)L"";
-		for (int c = 0; c < 10; ++c) {
+		for (int c = 0; c < 11; ++c) {
 			col.cx = widths[c];
 			ListView_InsertColumn(gList, c, &col);
 		}

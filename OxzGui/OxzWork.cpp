@@ -2,6 +2,7 @@
 #include "OxzArc.h"
 #include "OxzLang.h"
 #include "OxzFilt.h"
+#include "../OxzCore/OxzCore.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,60 @@ static bool OxzReadAll(HANDLE h, unsigned char* buf, size_t n)
 	return true;
 }
 
+struct OxzSpanProg {
+	int base;
+	int span;
+	int usedBase;
+	std::wstring err;
+};
+
+extern "C" static void OxzSaveProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
+{
+	OxzSpanProg* p = (OxzSpanProg*)user;
+	int overall = p->base;
+	if (total) {
+		overall += (int)(((unsigned long long)p->span * index) / total);
+		if (pct > 0 && pct < 100)
+			overall += (int)(((unsigned long long)p->span * (unsigned)pct) / (100ull * total));
+	}
+	if (overall > p->base + p->span) overall = p->base + p->span;
+	if (pct >= 100 && total && index + 1 >= total) overall = p->base + p->span;
+	OxzProgFile(name, index + 1, total, pct, overall);
+}
+
+extern "C" static void OxzPkgProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
+{
+	OxzSpanProg* p = (OxzSpanProg*)user;
+	int base = p->base;
+	int span = p->span;
+	if (p->usedBase) {
+		int used = p->span * 4 / 5;
+		if (used < 1) used = 1;
+		if (used >= p->span) used = p->span > 1 ? p->span - 1 : 0;
+		base += used;
+		span = p->span - used;
+		if (span < 1) span = 1;
+	}
+	int overall = base;
+	if (total) overall += (int)(((unsigned long long)span * index) / total);
+	if (pct >= 100 && total && index + 1 >= total) overall = p->base + p->span;
+	if (overall > p->base + p->span) overall = p->base + p->span;
+	OxzProgFile(name, index + 1, total ? total : 1, pct, overall);
+}
+
+extern "C" static int OxzPkgBase(const wchar_t* sevenPath, const wchar_t* destDir, void* user)
+{
+	OxzSpanProg* p = (OxzSpanProg*)user;
+	int sub = p->span * 4 / 5;
+	std::wstring e;
+	int rc;
+	p->usedBase = 1;
+	if (sub < 1) sub = 1;
+	rc = OxzExtractNative(sevenPath, destDir, 1, 1, e, p->base, sub);
+	if (rc) p->err = e.empty() ? OxzTxt(OS_OPEN_FAIL) : e;
+	return rc == 0 ? 0 : 1;
+}
+
 static bool OxzWriteAll(HANDLE h, const unsigned char* buf, size_t n)
 {
 	size_t off = 0;
@@ -83,7 +138,7 @@ static void OxzRipFile(const std::wstring& path, int encoding)
 	DWORD rd = 0;
 	unsigned char* buf;
 	if (h == INVALID_HANDLE_VALUE) return;
-	if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 2 || sz.QuadPart > 2ll * 1024 * 1024 * 1024) {
+	if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 2) {
 		CloseHandle(h);
 		return;
 	}
@@ -680,6 +735,19 @@ int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int
 	if (span < 1) span = 1;
 	OxzProgArchive(arc);
 	CreateDirectoryW(dest, NULL);
+	if (OxzCoreIsPkg(arc)) {
+		OxzSpanProg prog;
+		int rc;
+		prog.base = base;
+		prog.span = span;
+		prog.usedBase = 0;
+		rc = OxzCoreExtract(arc, dest, OxzPkgBase, &prog, OxzPkgProg, &prog);
+		if (rc != OXZ_CORE_OK) {
+			err = prog.err.empty() ? OxzTxt(OS_OPEN_FAIL) : prog.err;
+			return 2;
+		}
+		return 0;
+	}
 	int kind = OxzArchiveKind(arc);
 	int rip = OxzIsOxz(arc) ? 1 : 0;
 	if (kind >= 1 && kind <= 4) {
@@ -716,67 +784,20 @@ int OxzTest(const wchar_t* arc, std::wstring& err, int base, int span)
 
 int OxzPackWork(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span)
 {
+	OxzSpanProg prog;
+	unsigned long long n = 0;
+	int rc;
 	bytes = 0;
-	if (!OxzHas7za()) { err = OxzTxt(OS_NO7ZA); return 2; }
 	if (span < 1) span = 1;
 	OxzProgArchive(archive.c_str());
-	std::wstring stage = OxzNewWork();
-	std::wstring tmp = archive + L".building";
-	std::wstring args = L"a -sccUTF-8 -bb1 -bsp1 -bso1 -mx9 -md=64m " + OxzQuote(tmp);
-	int files = 0;
-	WIN32_FIND_DATAW fd;
-	HANDLE h;
-	unsigned counted = 0;
-	unsigned long long countedBytes = 0;
-	int copySpan = span * 12 / 100;
-	int ripSpan = span * 8 / 100;
-	int zSpan = span - copySpan - ripSpan;
-	if (zSpan < 1) {
-		zSpan = span;
-		copySpan = 0;
-		ripSpan = 0;
-	}
-	DeleteFileW(tmp.c_str());
-	OxzCountDir(work, counted, countedBytes);
-	{
-		OxzScopeHold hold(base, copySpan, counted, countedBytes);
-		OxzCopyTree(work, stage);
-	}
-	{
-		OxzScopeHold hold(base + copySpan, ripSpan, counted, 0);
-		OxzRipTree(stage, 1);
-	}
-	h = FindFirstFileW((stage + L"\\*").c_str(), &fd);
-	if (h != INVALID_HANDLE_VALUE) {
-		do {
-			if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0 || (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0)))
-				continue;
-			args += L" ";
-			args += OxzQuote(fd.cFileName);
-			files++;
-		} while (FindNextFileW(h, &fd));
-		FindClose(h);
-	}
-	int rc = 2;
-	if (files <= 0) err = OxzTxt(OS_EMPTY);
-	else rc = OxzRun7za(args, stage.c_str(), base + copySpan + ripSpan, zSpan);
-	OxzRmTree(stage);
-	WIN32_FILE_ATTRIBUTE_DATA fad;
-	if (err.empty() && rc <= 1 && GetFileAttributesExW(tmp.c_str(), GetFileExInfoStandard, &fad)) {
-		ULARGE_INTEGER u;
-		u.LowPart = fad.nFileSizeLow;
-		u.HighPart = fad.nFileSizeHigh;
-		bytes = u.QuadPart;
-		if (!MoveFileExW(tmp.c_str(), archive.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-			DeleteFileW(tmp.c_str());
-			err = OxzTxt(OS_MOVE_FAIL);
-			return 2;
-		}
-		return 0;
-	}
-	DeleteFileW(tmp.c_str());
-	if (err.empty()) err = OxzTxt(OS_SAVE_FAIL);
-	return 2;
+	prog.base = base;
+	prog.span = span;
+	prog.usedBase = 0;
+	rc = OxzCoreSave(work.c_str(), archive.c_str(), &n, OxzSaveProg, &prog);
+	bytes = n;
+	if (rc == OXZ_CORE_EMPTY) { err = OxzTxt(OS_EMPTY); return 2; }
+	if (rc != OXZ_CORE_OK) { err = OxzTxt(OS_SAVE_FAIL); return 2; }
+	return 0;
 }
 
 static int OxzTakeInput(const std::wstring& path, const std::wstring& dest)
@@ -805,6 +826,7 @@ int OxzMergePack(const std::wstring& existing, const std::vector<std::wstring>& 
 			OxzRmTree(work);
 			return rc;
 		}
+		OxzCoreRemember(work.c_str(), existing.c_str());
 	}
 	unsigned files = 0;
 	unsigned long long nbytes = 0;

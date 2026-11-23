@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>OxzCore</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>OxzCore</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(ProjectDir)</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>OxzCored</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level1</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CRT_SECURE_NO_WARNINGS;_WIN32_WINNT=0x0A00;WINVER=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>false</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 /wd4244 /wd4267 /wd4018 /wd4996 %(AdditionalOptions)</AdditionalOptions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)third\lz4\lib;$(ProjectDir)third\libdeflate;$(ProjectDir)third\libdeflate\lib;$(ProjectDir)third\brotli\c\include;$(ProjectDir)third\lizard\lib;$(ProjectDir)third\lizard\lib\entropy;$(ProjectDir)third\lzfse\src;$(ProjectDir)third\bzip2;$(ProjectDir)..\zstd;$(ProjectDir)..\lzma_sdk;$(ProjectDir)..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level1</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_WIN32_WINNT=0x0A00;WINVER=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>false</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 /wd4244 /wd4267 /wd4018 /wd4996 %(AdditionalOptions)</AdditionalOptions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)third\lz4\lib;$(ProjectDir)third\libdeflate;$(ProjectDir)third\libdeflate\lib;$(ProjectDir)third\brotli\c\include;$(ProjectDir)third\lizard\lib;$(ProjectDir)third\lizard\lib\entropy;$(ProjectDir)third\lzfse\src;$(ProjectDir)third\bzip2;$(ProjectDir)..\zstd;$(ProjectDir)..\lzma_sdk;$(ProjectDir)..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="OxzCore.cpp" />
+    <ClCompile Include="third\lz4\lib\lz4.c" />
+    <ClCompile Include="third\lz4\lib\lz4hc.c" />
+    <ClCompile Include="third\libdeflate\lib\utils.c" />
+    <ClCompile Include="third\libdeflate\lib\deflate_compress.c" />
+    <ClCompile Include="third\libdeflate\lib\deflate_decompress.c" />
+    <ClCompile Include="third\libdeflate\lib\adler32.c" />
+    <ClCompile Include="third\libdeflate\lib\zlib_compress.c" />
+    <ClCompile Include="third\libdeflate\lib\zlib_decompress.c" />
+    <ClCompile Include="third\libdeflate\lib\x86\cpu_features.c" />
+    <ClCompile Include="third\brotli\c\common\constants.c" />
+    <ClCompile Include="third\brotli\c\common\context.c" />
+    <ClCompile Include="third\brotli\c\common\dictionary.c" />
+    <ClCompile Include="third\brotli\c\common\platform.c" />
+    <ClCompile Include="third\brotli\c\common\shared_dictionary.c" />
+    <ClCompile Include="third\brotli\c\common\transform.c" />
+    <ClCompile Include="third\brotli\c\dec\bit_reader.c" />
+    <ClCompile Include="third\brotli\c\dec\decode.c" />
+    <ClCompile Include="third\brotli\c\dec\huffman.c">
+      <ObjectFileName>$(IntDir)brotli_huffman.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third\brotli\c\dec\state.c" />
+    <ClCompile Include="third\brotli\c\enc\backward_references.c" />
+    <ClCompile Include="third\brotli\c\enc\backward_references_hq.c" />
+    <ClCompile Include="third\brotli\c\enc\bit_cost.c" />
+    <ClCompile Include="third\brotli\c\enc\block_splitter.c" />
+    <ClCompile Include="third\brotli\c\enc\brotli_bit_stream.c" />
+    <ClCompile Include="third\brotli\c\enc\cluster.c" />
+    <ClCompile Include="third\brotli\c\enc\command.c" />
+    <ClCompile Include="third\brotli\c\enc\compound_dictionary.c" />
+    <ClCompile Include="third\brotli\c\enc\compress_fragment.c" />
+    <ClCompile Include="third\brotli\c\enc\compress_fragment_two_pass.c" />
+    <ClCompile Include="third\brotli\c\enc\dictionary_hash.c" />
+    <ClCompile Include="third\brotli\c\enc\encode.c" />
+    <ClCompile Include="third\brotli\c\enc\encoder_dict.c" />
+    <ClCompile Include="third\brotli\c\enc\entropy_encode.c" />
+    <ClCompile Include="third\brotli\c\enc\fast_log.c" />
+    <ClCompile Include="third\brotli\c\enc\histogram.c" />
+    <ClCompile Include="third\brotli\c\enc\literal_cost.c" />
+    <ClCompile Include="third\brotli\c\enc\memory.c" />
+    <ClCompile Include="third\brotli\c\enc\metablock.c" />
+    <ClCompile Include="third\brotli\c\enc\static_dict.c" />
+    <ClCompile Include="third\brotli\c\enc\utf8_util.c" />
+    <ClCompile Include="third\lizard\lib\lizard_compress.c" />
+    <ClCompile Include="third\lizard\lib\lizard_decompress.c" />
+    <ClCompile Include="third\lizard\lib\entropy\entropy_common.c" />
+    <ClCompile Include="third\lizard\lib\entropy\fse_compress.c" />
+    <ClCompile Include="third\lizard\lib\entropy\fse_decompress.c" />
+    <ClCompile Include="third\lizard\lib\entropy\hist.c" />
+    <ClCompile Include="third\lizard\lib\entropy\huf_compress.c" />
+    <ClCompile Include="third\lizard\lib\entropy\huf_decompress.c" />
+    <ClCompile Include="third\lzfse\src\lzfse_decode.c" />
+    <ClCompile Include="third\lzfse\src\lzfse_decode_base.c" />
+    <ClCompile Include="third\lzfse\src\lzfse_encode.c" />
+    <ClCompile Include="third\lzfse\src\lzfse_encode_base.c" />
+    <ClCompile Include="third\lzfse\src\lzfse_fse.c" />
+    <ClCompile Include="third\lzfse\src\lzvn_decode_base.c" />
+    <ClCompile Include="third\lzfse\src\lzvn_encode_base.c" />
+    <ClCompile Include="third\bzip2\blocksort.c" />
+    <ClCompile Include="third\bzip2\huffman.c">
+      <ObjectFileName>$(IntDir)bzip2_huffman.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third\bzip2\crctable.c" />
+    <ClCompile Include="third\bzip2\randtable.c" />
+    <ClCompile Include="third\bzip2\compress.c" />
+    <ClCompile Include="third\bzip2\decompress.c" />
+    <ClCompile Include="third\bzip2\bzlib.c" />
+    <ClCompile Include="third\lzma\LzFind.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third\lzma\LzmaEnc.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third\lzma\Lzma2Enc.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third\lzma\OxzLzma2.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third\lzma\Ppmd7Enc.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third\lzma\OxzPpmd.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)third\lzma;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
