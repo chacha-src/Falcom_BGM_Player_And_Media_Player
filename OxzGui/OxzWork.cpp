@@ -84,15 +84,17 @@ extern "C" static void OxzSaveProg(const wchar_t* name, unsigned index, unsigned
 	int overallTen = p->base * 10;
 	unsigned shown = index;
 	int fileTen = pct >= 100 ? 1000 : pct * 10;
-	if (p->fileTen > fileTen) fileTen = p->fileTen;
+	if (pct < 100 && p->fileTen > fileTen && p->fileTen < 1000) fileTen = p->fileTen;
 	p->fileTen = 0;
 	if (fileTen < 0) fileTen = 0;
 	if (fileTen > 1000) fileTen = 1000;
+	int holdPlace = 0;
 	if (p->magic == 0x50585A4Fu && p->weightDenom) {
 		unsigned long long n = p->weightNumer;
 		if (n > p->weightDenom) n = p->weightDenom;
 		overallTen += (int)(((unsigned long long)p->span * 10ull * n) / p->weightDenom);
-		if (shown < 1) shown = 1;
+		if (!index) holdPlace = 1;
+		else if (shown < 1) shown = 1;
 	} else if (total) {
 		unsigned long long done = index;
 		if (pct >= 100 && done < total) done++;
@@ -104,7 +106,8 @@ extern "C" static void OxzSaveProg(const wchar_t* name, unsigned index, unsigned
 	if (overallTen > cap) overallTen = cap;
 	if (pct >= 100 && p->weightDenom && p->weightNumer >= p->weightDenom) overallTen = cap;
 	if (overallTen > 1000) overallTen = 1000;
-	OxzProgDetail(name, shown, total, fileTen, overallTen);
+	if (holdPlace) OxzProgDetail(name, 0, 0, fileTen, overallTen);
+	else OxzProgDetail(name, shown, total, fileTen, overallTen);
 }
 
 extern "C" static void OxzPkgProg(const wchar_t* name, unsigned index, unsigned total, int pct, void* user)
@@ -249,7 +252,6 @@ void OxzProgArchive(const wchar_t* archive)
 
 void OxzProgDetail(const wchar_t* file, unsigned index, unsigned total, int fileTen, int overallTen)
 {
-	int same;
 	OxzProgLock();
 	if (fileTen < 0) fileTen = 0;
 	if (fileTen > 1000) fileTen = 1000;
@@ -257,10 +259,8 @@ void OxzProgDetail(const wchar_t* file, unsigned index, unsigned total, int file
 	if (overallTen > 1000) overallTen = 1000;
 	if (total && index > total) index = total;
 	if (overallTen < gProg.overallTen) overallTen = gProg.overallTen;
-	same = file && file[0] && gProg.file[0] && _wcsicmp(file, gProg.file) == 0;
-	if (same && fileTen < gProg.fileTen) fileTen = gProg.fileTen;
 	if (file && file[0]) OxzCopySnap(gProg.file, 1024, file);
-	if (index) gProg.index = index;
+	if (index > gProg.index) gProg.index = index;
 	if (total) gProg.total = total;
 	gProg.fileTen = fileTen;
 	gProg.overallTen = overallTen;

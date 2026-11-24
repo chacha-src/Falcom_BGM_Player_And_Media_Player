@@ -19,6 +19,7 @@
 #include "OxzInst.h"
 #include "OxzUpdate.h"
 #include "OxzAudio.h"
+#include "OxzLook.h"
 #include "../OxzCore/OxzCore.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -36,10 +37,11 @@ enum {
 	ID_LIST, ID_STATUS, ID_PROG, ID_TESTVIEW, ID_MAP,
 	ID_PROG_FILE, ID_LBL_ALL, ID_LBL_FILE, ID_PCT_ALL, ID_PCT_FILE,
 	ID_COPY = 1301, ID_CUT, ID_PASTE, ID_SELECTALL, ID_REFRESH, ID_UP, ID_OPENSEL,
+	ID_CONV_OXZ = 1310, ID_CONV_ZIP, ID_CONV_TAR,
 	ID_SET_LANG = 1101, ID_SET_INSTALL, ID_SET_REMOVE, ID_SET_CLOSE, ID_SET_HELP, ID_SET_STAT,
 	ID_SET_LEVEL = 1107, ID_SET_LEVEL_LBL, ID_SET_LEVEL_VAL, ID_SET_LEVEL_HINT, ID_SET_PPMD
 };
-enum { JOB_OPEN = 1, JOB_SAVE, JOB_EXTRACT, JOB_PACK, JOB_ADD, JOB_EXTHERE, JOB_EXTRACTTO, JOB_EXTAT, JOB_TEST, JOB_DROPSAVE, JOB_PACKEACH, WM_JOB = WM_APP + 1, WM_START = WM_APP + 5 };
+enum { JOB_OPEN = 1, JOB_SAVE, JOB_EXTRACT, JOB_PACK, JOB_ADD, JOB_EXTHERE, JOB_EXTRACTTO, JOB_EXTAT, JOB_TEST, JOB_DROPSAVE, JOB_PACKEACH, JOB_CONVERT, WM_JOB = WM_APP + 1, WM_START = WM_APP + 5 };
 
 struct Item {
 	std::wstring rel;
@@ -99,10 +101,30 @@ static Job* gJob = NULL;
 static int gStartKind = 0;
 static int gStartSub = 0;
 static int gResult = 0;
-static std::wstring gStartA, gStartB;
+static std::wstring gStartA, gStartB, gPendingBrowse;
 static std::vector<OpenWatch> gWatch;
 static int gWatchPause = 0;
 static void ClearWatch();
+static void ShowLookMenu(HWND owner, int x, int y);
+static int gInMenu = 0;
+static int gCtxX, gCtxY, gCtxList, gCtxQueued;
+static HWND gCtxFrom;
+static void QueueMenu(HWND owner, HWND from, int x, int y, int onList)
+{
+	if (!owner || gCtxQueued || gInMenu) return;
+	if (x == -1 && y == -1) {
+		POINT pt;
+		GetCursorPos(&pt);
+		x = pt.x;
+		y = pt.y;
+	}
+	gCtxX = x;
+	gCtxY = y;
+	gCtxList = onList;
+	gCtxFrom = from ? from : owner;
+	gCtxQueued = 1;
+	PostMessageW(owner, WM_APP + 30, 0, 0);
+}
 static int LaunchWorkFile(const std::wstring& path);
 static void WatchAfterSave(int fail);
 static void SetBusy(int on, const wchar_t* text);
@@ -140,27 +162,58 @@ static void ApplyRtl(HWND hwnd)
 
 static void ApplyCaption(HWND hwnd)
 {
-	COLORREF cap = RGB(255, 182, 210);
-	COLORREF text = RGB(80, 20, 50);
-	COLORREF border = RGB(216, 132, 176);
-	DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &cap, sizeof(cap));
-	DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text, sizeof(text));
-	DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+	OxzApplyChrome(hwnd);
 }
 
-static UINT DpiOf(HWND hwnd)
+static BOOL CALLBACK ApplyFontCb(HWND child, LPARAM lp)
 {
-	typedef UINT(WINAPI* Fn)(HWND);
-	Fn fn = (Fn)GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow");
-	UINT dpi = fn && hwnd ? fn(hwnd) : 96;
-	return dpi ? dpi : 96;
+	SendMessageW(child, WM_SETFONT, (WPARAM)lp, TRUE);
+	return TRUE;
+}
+
+static void RefreshLook()
+{
+	const OxzPal& p = OxzLook();
+	HFONT nf = OxzCreateUiFont(gHwnd ? gHwnd : gSet);
+	HFONT old = gFont;
+	gFont = nf;
+	if (gPink) DeleteObject(gPink);
+	if (gMint) DeleteObject(gMint);
+	gPink = CreateSolidBrush(p.bg0);
+	gMint = CreateSolidBrush(p.face);
+	if (gHwnd) {
+		OxzRefreshChrome(gHwnd);
+		EnumChildWindows(gHwnd, ApplyFontCb, (LPARAM)gFont);
+		if (gList) {
+			ListView_SetBkColor(gList, p.face);
+			ListView_SetTextBkColor(gList, p.face);
+		}
+		if (gProg) {
+			SendMessageW(gProg, PBM_SETBARCOLOR, 0, (LPARAM)p.accent);
+			SendMessageW(gProg, PBM_SETBKCOLOR, 0, (LPARAM)p.face);
+			OxzSetBarInk(gProg, p.accent);
+		}
+		if (gProgFile) {
+			SendMessageW(gProgFile, PBM_SETBARCOLOR, 0, (LPARAM)p.accent2);
+			SendMessageW(gProgFile, PBM_SETBKCOLOR, 0, (LPARAM)p.face);
+			OxzSetBarInk(gProgFile, p.accent2);
+		}
+		RedrawWindow(gHwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	}
+	if (gSet) {
+		OxzRefreshChrome(gSet);
+		EnumChildWindows(gSet, ApplyFontCb, (LPARAM)gFont);
+		RedrawWindow(gSet, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	}
+	if (old) DeleteObject(old);
 }
 
 static void MakeFont(HWND hwnd)
 {
-	if (gFont) DeleteObject(gFont);
-	int h = -MulDiv(11, (int)DpiOf(hwnd), 72);
-	gFont = CreateFontW(h, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+	HFONT nf = OxzCreateUiFont(hwnd);
+	HFONT old = gFont;
+	gFont = nf;
+	if (old) DeleteObject(old);
 }
 
 static LRESULT CALLBACK BtnProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -202,36 +255,7 @@ static void SubBtn(HWND b)
 
 static void DrawBtn(const DRAWITEMSTRUCT* di)
 {
-	BtnSt* st = (BtnSt*)GetWindowLongPtrW(di->hwndItem, GWLP_USERDATA);
-	int dis = (di->itemState & ODS_DISABLED) != 0;
-	int hot = st && st->hover && !dis;
-	int down = ((di->itemState & ODS_SELECTED) != 0) || (st && st->down);
-	COLORREF bg = dis ? RGB(214, 220, 214) : down ? RGB(60, 160, 60) : hot ? RGB(100, 200, 100) : RGB(200, 232, 190);
-	COLORREF fg = down && !dis ? RGB(255, 255, 255) : RGB(20, 50, 20);
-	HBRUSH br = CreateSolidBrush(bg);
-	FillRect(di->hDC, &di->rcItem, br);
-	DeleteObject(br);
-	HPEN pen = CreatePen(PS_SOLID, 1, RGB(80, 140, 80));
-	HGDIOBJ old = SelectObject(di->hDC, pen);
-	HGDIOBJ oldB = SelectObject(di->hDC, GetStockObject(NULL_BRUSH));
-	Rectangle(di->hDC, di->rcItem.left, di->rcItem.top, di->rcItem.right, di->rcItem.bottom);
-	if (!down && !dis) {
-		HPEN gloss = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-		SelectObject(di->hDC, gloss);
-		MoveToEx(di->hDC, di->rcItem.left + 2, di->rcItem.top + 2, NULL);
-		LineTo(di->hDC, di->rcItem.right - 2, di->rcItem.top + 2);
-		SelectObject(di->hDC, pen);
-		DeleteObject(gloss);
-	}
-	SelectObject(di->hDC, oldB);
-	SelectObject(di->hDC, old);
-	DeleteObject(pen);
-	wchar_t text[256];
-	GetWindowTextW(di->hwndItem, text, 256);
-	SetBkMode(di->hDC, TRANSPARENT);
-	SetTextColor(di->hDC, fg);
-	SelectObject(di->hDC, gFont);
-	DrawTextW(di->hDC, text, -1, (RECT*)&di->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+	OxzPaintButton(di, gFont);
 }
 
 static int MeasureText(HWND hwnd, const wchar_t* s)
@@ -296,6 +320,44 @@ static void Relayout()
 	MoveWindow(gStatus, 8, gBusy ? rc.bottom - 112 : rc.bottom - 48, rc.right - 16, gBusy ? 104 : 40, TRUE);
 }
 
+static void ApplySortArrow()
+{
+	if (!gList) return;
+	HWND hdr = ListView_GetHeader(gList);
+	if (!hdr) return;
+	int n = Header_GetItemCount(hdr);
+	for (int i = 0; i < n; ++i) {
+		HDITEMW it;
+		memset(&it, 0, sizeof(it));
+		it.mask = HDI_FORMAT;
+		if (!Header_GetItem(hdr, i, &it)) continue;
+		it.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+		if (i == gSortCol) it.fmt |= gSortAsc ? HDF_SORTUP : HDF_SORTDOWN;
+		Header_SetItem(hdr, i, &it);
+	}
+}
+
+static void SaveSort()
+{
+	DWORD col = (DWORD)gSortCol;
+	DWORD asc = gSortAsc ? 1u : 0u;
+	if (col > 10) col = 0;
+	RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"sortCol", REG_DWORD, &col, sizeof(col));
+	RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"sortAsc", REG_DWORD, &asc, sizeof(asc));
+}
+
+static void LoadSort()
+{
+	DWORD col = 0, asc = 1, cb = sizeof(DWORD);
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"sortCol", RRF_RT_REG_DWORD, NULL, &col, &cb) != ERROR_SUCCESS || col > 10)
+		col = 0;
+	cb = sizeof(DWORD);
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"sortAsc", RRF_RT_REG_DWORD, NULL, &asc, &cb) != ERROR_SUCCESS)
+		asc = 1;
+	gSortCol = (int)col;
+	gSortAsc = asc ? 1 : 0;
+}
+
 static void Relabel()
 {
 	if (!gHwnd) return;
@@ -317,6 +379,7 @@ static void Relabel()
 	ApplyRtl(gHwnd);
 	ApplyCaption(gHwnd);
 	Relayout();
+	ApplySortArrow();
 	if (!gBusy) SetStatus(OxzTxt(OS_HINT));
 }
 
@@ -379,6 +442,9 @@ static void CodecLabel(const Item& it, wchar_t* out, size_t n)
 	if (it.flags & 4) wcscat_s(out, n, L"+d4");
 }
 
+static void FormatAttr(DWORD attr, wchar_t* out);
+static void KindText(const Item& it, wchar_t* out, size_t n);
+
 static int CmpItem(const Item& a, const Item& b)
 {
 	int c = 0;
@@ -400,6 +466,16 @@ static int CmpItem(const Item& a, const Item& b)
 		wchar_t as[64], bs[64];
 		CodecLabel(a, as, 64);
 		CodecLabel(b, bs, 64);
+		c = _wcsicmp(as, bs);
+	} else if (gSortCol == 7) {
+		wchar_t as[64], bs[64];
+		KindText(a, as, 64);
+		KindText(b, bs, 64);
+		c = _wcsicmp(as, bs);
+	} else if (gSortCol == 8) {
+		wchar_t as[16], bs[16];
+		FormatAttr(a.attr, as);
+		FormatAttr(b.attr, bs);
 		c = _wcsicmp(as, bs);
 	} else if (gSortCol == 9 || gSortCol == 10) {
 		const FILETIME& af = gSortCol == 10 ? a.created : a.ft;
@@ -508,6 +584,22 @@ static void FormatAttr(DWORD attr, wchar_t* out)
 	if (attr & FILE_ATTRIBUTE_HIDDEN) out[n++] = L'H';
 	if (attr & FILE_ATTRIBUTE_SYSTEM) out[n++] = L'S';
 	out[n] = 0;
+}
+
+static void KindText(const Item& it, wchar_t* out, size_t n)
+{
+	if (!out || n == 0) return;
+	out[0] = 0;
+	if (it.up) return;
+	if (it.dir) {
+		wcsncpy_s(out, n, OxzTxt(OS_FOLDER), _TRUNCATE);
+		return;
+	}
+	size_t dot = it.name.find_last_of(L'.');
+	if (dot != std::wstring::npos && dot + 1 < it.name.size()) {
+		wcsncpy_s(out, n, it.name.c_str() + dot + 1, _TRUNCATE);
+		_wcsupr_s(out, n);
+	}
 }
 
 static int EndsName(const std::wstring& name, const wchar_t* ext)
@@ -913,6 +1005,7 @@ static void Refresh()
 	if (old) ImageList_Destroy(old);
 	gIcons = neu;
 	gRefreshing = 0;
+	ApplySortArrow();
 	if (!gBusy) UpdateStatus();
 	SetTitle();
 }
@@ -1060,6 +1153,29 @@ static int UnderWork(const std::wstring& path)
 	return path.size() == gWork.size() || path[gWork.size()] == L'\\';
 }
 
+static void SetBarPos(HWND bar, int pos)
+{
+	int hi, cur;
+	if (!bar) return;
+	if (pos < 0) pos = 0;
+	if (pos > 1000) pos = 1000;
+	hi = (int)SendMessageW(bar, PBM_GETRANGE, FALSE, 0);
+	cur = (int)SendMessageW(bar, PBM_GETPOS, 0, 0);
+	if (hi != 1000) SendMessageW(bar, PBM_SETRANGE32, 0, 1000);
+	if (pos < cur) {
+		SendMessageW(bar, PBM_SETRANGE32, 0, 1001);
+		SendMessageW(bar, PBM_SETPOS, pos + 1, 0);
+		SendMessageW(bar, PBM_SETRANGE32, 0, 1000);
+	} else if (pos >= 1000 && cur < 1000) {
+		SendMessageW(bar, PBM_SETRANGE32, 0, 1001);
+		SendMessageW(bar, PBM_SETPOS, 1001, 0);
+		SendMessageW(bar, PBM_SETRANGE32, 0, 1000);
+	}
+	if (pos == cur && hi == 1000) return;
+	SendMessageW(bar, PBM_SETPOS, pos, 0);
+	InvalidateRect(bar, NULL, FALSE);
+}
+
 static void SetBusy(int on, const wchar_t* text)
 {
 	gBusy = on;
@@ -1067,8 +1183,8 @@ static void SetBusy(int on, const wchar_t* text)
 	gBusyTick = GetTickCount();
 	for (int i = 0; i < (int)(sizeof(kBtnId) / sizeof(kBtnId[0])); ++i)
 		EnableWindow(GetDlgItem(gHwnd, kBtnId[i]), on ? FALSE : TRUE);
-	if (gProg) SendMessageW(gProg, PBM_SETPOS, 0, 0);
-	if (gProgFile) SendMessageW(gProgFile, PBM_SETPOS, 0, 0);
+	if (gProg) SetBarPos(gProg, 0);
+	if (gProgFile) SetBarPos(gProgFile, 0);
 	if (gPctAll) SetWindowTextW(gPctAll, L"0.0%");
 	if (gPctFile) SetWindowTextW(gPctFile, L"0.0%");
 	if (on) {
@@ -1308,6 +1424,43 @@ static DWORD WINAPI JobThread(LPVOID p)
 			if (rc) { j->rc = rc; j->err = e; break; }
 		}
 		if (!any) { j->rc = 2; j->err = OxzTxt(OS_NOTHING); }
+	} else if (j->kind == JOB_CONVERT) {
+		j->rc = 0;
+		int any = 0, total = 0;
+		for (size_t i = 0; i < j->inputs.size(); ++i)
+			if (CanOpen(j->inputs[i])) total++;
+		std::vector<std::wstring> used;
+		const wchar_t* ext = j->dest.c_str();
+		OxzProgBegin(total ? j->inputs[0].c_str() : L"");
+		for (size_t i = 0; i < j->inputs.size(); ++i) {
+			if (!CanOpen(j->inputs[i])) continue;
+			std::wstring work = OxzNewWork();
+			std::wstring e;
+			int base = 0, span = 100;
+			OxzSlice(any, total ? total : 1, base, span);
+			int half = span / 2;
+			if (half < 1) half = span;
+			int rc = OxzExtractTo(j->inputs[i].c_str(), work.c_str(), e, base, half);
+			if (rc == 0) {
+				std::wstring pick = JoinPath(OxzParent(j->inputs[i]), StemOf(j->inputs[i]) + ext);
+				if (OxzSamePath(pick, j->inputs[i]) || GetFileAttributesW(pick.c_str()) != INVALID_FILE_ATTRIBUTES)
+					used.push_back(pick);
+				pick = UniqueAmong(pick, used, ext);
+				used.push_back(pick);
+				unsigned long long bytes = 0;
+				int rest = span - half;
+				if (rest < 1) rest = 1;
+				if (_wcsicmp(ext, L".zip") == 0) rc = OxzWriteZip(work, pick, bytes, e, base + half, rest);
+				else if (_wcsicmp(ext, L".tar") == 0) rc = OxzWriteTar(work, pick, bytes, e, base + half, rest);
+				else rc = OxzPackWork(work, pick, bytes, e, base + half, rest);
+				j->bytes += bytes;
+				if (rc == 0) j->archive = pick;
+			}
+			OxzRmTree(work);
+			any++;
+			if (rc) { j->rc = rc; j->err = e; break; }
+		}
+		if (!any) { j->rc = 2; j->err = OxzTxt(OS_NOTHING); }
 	}
 	PostMessageW(gHwnd, WM_JOB, 0, 0);
 	return 0;
@@ -1340,6 +1493,8 @@ static void StartJob(Job* j)
 
 static void OnOpenPath(const std::wstring& arc)
 {
+	std::wstring back = gPendingBrowse;
+	gPendingBrowse.clear();
 	if (OxzCoreIsPkg(arc.c_str())) {
 		OxzCoreItem* items = NULL;
 		int count = 0, files = 0, i;
@@ -1356,6 +1511,7 @@ static void OnOpenPath(const std::wstring& arc)
 				gOwned = 1;
 				gArchive = arc;
 				gVirtual = 1;
+				if (!back.empty()) gBrowse = back;
 				if (OxzCoreRemember(gWork.c_str(), gArchive.c_str()) == OXZ_CORE_OK) {
 					Refresh();
 					SetStatus(OxzTxt(OS_HINT));
@@ -1370,6 +1526,7 @@ static void OnOpenPath(const std::wstring& arc)
 	j->sub = 1;
 	j->archive = arc;
 	DropWork();
+	if (!back.empty()) gBrowse = back;
 	ListView_DeleteAllItems(gList);
 	gArchive = arc;
 	StartJob(j);
@@ -1821,7 +1978,7 @@ static void OfferPendingUpdate()
 		return;
 	}
 	SetBusy(1, OxzTxt(OS_UPDATING));
-	OxzUpdateBegin(gHwnd, hit);
+	OxzUpdateBegin(gHwnd, hit, gArchive.c_str(), gBrowse.c_str());
 	delete hit;
 }
 
@@ -1860,6 +2017,35 @@ static void StartPack(const std::vector<std::wstring>& inputs, int add, const st
 	else if (exact) j->archive = AvoidDest(archive, inputs);
 	else j->archive = AvoidDest(OxzDestFor(inputs), inputs);
 	if (j->archive.empty()) { delete j; SetBusy(0, NULL); Tell(gHwnd, OxzTxt(OS_SAVE_FAIL), MB_ICONWARNING); return; }
+	StartJob(j);
+}
+
+static const wchar_t* ConvExt(const std::wstring& fmt)
+{
+	if (_wcsicmp(fmt.c_str(), L"oxz") == 0 || _wcsicmp(fmt.c_str(), L".oxz") == 0) return L".oxz";
+	if (_wcsicmp(fmt.c_str(), L"zip") == 0 || _wcsicmp(fmt.c_str(), L".zip") == 0) return L".zip";
+	if (_wcsicmp(fmt.c_str(), L"tar") == 0 || _wcsicmp(fmt.c_str(), L".tar") == 0) return L".tar";
+	return NULL;
+}
+
+static void StartConvert(const std::vector<std::wstring>& inputs, const std::wstring& fmt)
+{
+	const wchar_t* ext = ConvExt(fmt);
+	std::vector<std::wstring> arcs;
+	for (size_t i = 0; i < inputs.size(); ++i)
+		if (CanOpen(inputs[i])) arcs.push_back(inputs[i]);
+	if (!ext || arcs.empty()) {
+		if (!gExit) Tell(gHwnd, OxzTxt(arcs.empty() ? OS_NOTHING : OS_SAVE_FAIL), MB_ICONINFORMATION);
+		if (gExit || gCloseWhenDone) PostMessageW(gHwnd, WM_CLOSE, 0, 0);
+		return;
+	}
+	SetBusy(1, OxzTxt(OS_CONVERTING));
+	Job* j = NewJob();
+	j->kind = JOB_CONVERT;
+	j->closeAfter = gCloseWhenDone ? 1 : 0;
+	j->inputs = arcs;
+	j->dest = ext;
+	j->archive = arcs[0];
 	StartJob(j);
 }
 
@@ -2097,6 +2283,12 @@ static void OnJobDone()
 		OxzFormatGrouped(j->bytes, bytes, 48);
 		_snwprintf_s(msg, _TRUNCATE, L"%s  %s %s", OxzTxt(OS_CREATED), bytes, OxzTxt(OS_BYTES));
 		SetStatus(msg);
+	} else if (j->kind == JOB_CONVERT) {
+		wchar_t msg[500];
+		wchar_t bytes[48];
+		OxzFormatGrouped(j->bytes, bytes, 48);
+		_snwprintf_s(msg, _TRUNCATE, L"%s  %s %s   %s", OxzTxt(OS_CONVERTED), bytes, OxzTxt(OS_BYTES), j->archive.c_str());
+		SetStatus(msg);
 	}
 	int closeNow = !fail && j->closeAfter;
 	delete j;
@@ -2157,7 +2349,6 @@ static void ApplyRename(NMLVDISPINFOW* di)
 static void PaintList(NMLVCUSTOMDRAW* cd)
 {
 	int row = (int)cd->nmcd.dwItemSpec;
-	int col = cd->iSubItem;
 	int sel = (ListView_GetItemState(gList, row, LVIS_SELECTED) & LVIS_SELECTED) ? 1 : 0;
 	int cut = 0;
 	if (row >= 0 && row < (int)gItems.size() && !gItems[row].up && !gWork.empty()) {
@@ -2168,43 +2359,58 @@ static void PaintList(NMLVCUSTOMDRAW* cd)
 			if (full.size() > c.size() && _wcsnicmp(full.c_str(), c.c_str(), c.size()) == 0 && full[c.size()] == L'\\') { cut = 1; break; }
 		}
 	}
-	COLORREF bg = sel ? RGB(176, 158, 228) : (row % 2 ? RGB(230, 244, 238) : RGB(252, 236, 244));
-	COLORREF fg = sel ? RGB(40, 28, 88) : (cut ? RGB(150, 140, 150) : RGB(0, 0, 0));
-	RECT rc;
-	ListView_GetSubItemRect(gList, row, col, LVIR_BOUNDS, &rc);
-	if (col == 0) {
-		RECT next;
-		ListView_GetSubItemRect(gList, row, 1, LVIR_BOUNDS, &next);
-		rc.right = next.left;
-		rc.left = 0;
-	}
-	HBRUSH br = CreateSolidBrush(bg);
-	FillRect(cd->nmcd.hdc, &rc, br);
-	DeleteObject(br);
-	int iconPad = 0;
-	if (col == 0 && gIcons) {
-		LVITEMW it;
-		memset(&it, 0, sizeof(it));
-		it.mask = LVIF_IMAGE;
-		it.iItem = row;
-		if (ListView_GetItem(gList, &it) && it.iImage >= 0) {
-			int icx = 0, icy = 0;
-			ImageList_GetIconSize(gIcons, &icx, &icy);
-			int y = rc.top + ((rc.bottom - rc.top) - icy) / 2;
-			ImageList_Draw(gIcons, it.iImage, cd->nmcd.hdc, rc.left + 4, y, ILD_TRANSPARENT);
-			iconPad = icx + 6;
+	COLORREF bg, fg;
+	OxzRowColors(row, sel, &bg, &fg);
+	if (cut && !sel) fg = OxzLook().textDim;
+	RECT rowrc;
+	if (!ListView_GetItemRect(gList, row, &rowrc, LVIR_BOUNDS)) return;
+	if (rowrc.right <= rowrc.left || rowrc.bottom <= rowrc.top) return;
+	HWND head = ListView_GetHeader(gList);
+	int cols = head ? Header_GetItemCount(head) : 1;
+	if (cols < 1) cols = 1;
+	int saved = SaveDC(cd->nmcd.hdc);
+	int x = rowrc.left;
+	for (int col = 0; col < cols; ++col) {
+		int w = ListView_GetColumnWidth(gList, col);
+		if (w < 1) continue;
+		RECT rc;
+		rc.left = x;
+		rc.top = rowrc.top;
+		rc.right = x + w;
+		rc.bottom = rowrc.bottom;
+		x += w;
+		int clip = SaveDC(cd->nmcd.hdc);
+		IntersectClipRect(cd->nmcd.hdc, rc.left, rc.top, rc.right, rc.bottom);
+		HBRUSH br = CreateSolidBrush(bg);
+		FillRect(cd->nmcd.hdc, &rc, br);
+		DeleteObject(br);
+		int iconPad = 0;
+		if (col == 0 && gIcons) {
+			LVITEMW it;
+			memset(&it, 0, sizeof(it));
+			it.mask = LVIF_IMAGE;
+			it.iItem = row;
+			if (ListView_GetItem(gList, &it) && it.iImage >= 0) {
+				int icx = 0, icy = 0;
+				ImageList_GetIconSize(gIcons, &icx, &icy);
+				int y = rc.top + ((rc.bottom - rc.top) - icy) / 2;
+				ImageList_Draw(gIcons, it.iImage, cd->nmcd.hdc, rc.left + 4, y, ILD_TRANSPARENT);
+				iconPad = icx + 6;
+			}
 		}
+		wchar_t text[1024];
+		text[0] = 0;
+		ListView_GetItemText(gList, row, col, text, 1024);
+		SetBkMode(cd->nmcd.hdc, TRANSPARENT);
+		SetTextColor(cd->nmcd.hdc, fg);
+		SelectObject(cd->nmcd.hdc, gFont);
+		RECT tr = rc;
+		tr.left += 8 + iconPad;
+		if (tr.left < rc.right)
+			DrawTextW(cd->nmcd.hdc, text, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+		RestoreDC(cd->nmcd.hdc, clip);
 	}
-	wchar_t text[1024];
-	text[0] = 0;
-	ListView_GetItemText(gList, row, col, text, 1024);
-	SetBkMode(cd->nmcd.hdc, TRANSPARENT);
-	SetTextColor(cd->nmcd.hdc, fg);
-	SelectObject(cd->nmcd.hdc, gFont);
-	RECT tr = rc;
-	tr.left += 8;
-	tr.left += iconPad;
-	DrawTextW(cd->nmcd.hdc, text, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+	RestoreDC(cd->nmcd.hdc, saved);
 }
 
 static void RefreshSetStatus()
@@ -2246,6 +2452,9 @@ static void OnInstallClick(int remove)
 static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
 	switch (msg) {
+	case WM_PARENTNOTIFY:
+		if (LOWORD(wp) == WM_CREATE) OxzBindAcrylic(hwnd);
+		return 0;
 	case WM_CREATE: {
 		gSet = hwnd;
 		HWND lang = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, 16, 200, 24, hwnd, (HMENU)OS_LANG, NULL, NULL);
@@ -2276,7 +2485,22 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		RelabelSet();
 		return 0;
 	}
+	case WM_ERASEBKGND:
+		return OxzHostErase(hwnd, (HDC)wp, gPink);
+	case WM_PAINT:
+		if (!OxzPerPixelAcrylic()) return DefWindowProcW(hwnd, msg, wp, lp);
+		OxzHostPaint(hwnd);
+		return 0;
+	case WM_CONTEXTMENU:
+		QueueMenu(hwnd, hwnd, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), 0);
+		return TRUE;
+	case WM_APP + 30:
+		gCtxQueued = 0;
+		ReleaseCapture();
+		ShowLookMenu(hwnd, gCtxX, gCtxY);
+		return 0;
 	case WM_COMMAND:
+		if (OxzLookCommand(LOWORD(wp))) { RefreshLook(); return 0; }
 		if (HIWORD(wp) == LBN_SELCHANGE && LOWORD(wp) == ID_SET_LANG) {
 			int sel = (int)SendMessageW(GetDlgItem(hwnd, ID_SET_LANG), LB_GETCURSEL, 0, 0);
 			if (sel >= 0 && sel <= 13) {
@@ -2328,12 +2552,8 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		return TRUE;
 	case WM_CTLCOLORSTATIC:
 	case WM_CTLCOLOREDIT:
-	case WM_CTLCOLORLISTBOX: {
-		HDC dc = (HDC)wp;
-		SetBkColor(dc, RGB(255, 234, 238));
-		SetTextColor(dc, RGB(40, 20, 40));
-		return (LRESULT)gMint;
-	}
+	case WM_CTLCOLORLISTBOX:
+		return (LRESULT)OxzHostCtlColor((HDC)wp, msg, msg == WM_CTLCOLORSTATIC ? gPink : gMint);
 	case WM_ACTIVATE:
 		if (LOWORD(wp) != WA_INACTIVE) RefreshSetStatus();
 		return 0;
@@ -2415,6 +2635,7 @@ static void BeginStartup()
 	else if (gStartKind == 14) { TakePaths(gStartA, paths, 0); OxzShowConvert(NULL, paths); PostMessageW(gHwnd, WM_CLOSE, 0, 0); }
 	else if (gStartKind == 15) { TakePaths(gStartA, paths, 0); StartPackEach(paths, L""); }
 	else if (gStartKind == 16) { TakePaths(gStartB, paths, 0); StartPackEach(paths, gStartA); }
+	else if (gStartKind == 17) { TakePaths(gStartA, paths, 1); StartConvert(paths, gStartB); }
 }
 
 static void AcceptPaths(const std::vector<std::wstring>& paths, const std::wstring& into)
@@ -2544,6 +2765,22 @@ private:
 
 static GuiDrop* gDrop = NULL;
 
+static void ShowLookMenu(HWND owner, int x, int y)
+{
+	if (gInMenu) return;
+	POINT pt;
+	if (x == -1 && y == -1) {
+		GetCursorPos(&pt);
+		x = pt.x;
+		y = pt.y;
+	}
+	if (!owner) owner = gHwnd;
+	gInMenu = 1;
+	UINT id = OxzOpenLookMenu(owner, x, y, NULL, 0);
+	gInMenu = 0;
+	if (id) SendMessageW(owner, WM_COMMAND, id, 0);
+}
+
 static void ShowListMenu(int x, int y)
 {
 	POINT c = { x, y };
@@ -2556,21 +2793,42 @@ static void ShowListMenu(int x, int y)
 		ListView_SetItemState(gList, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
 		ListView_SetItemState(gList, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 	}
-	HMENU m = CreatePopupMenu();
+	OxzPopAdd add[20];
+	int n = 0;
 	int sel = ListView_GetNextItem(gList, -1, LVNI_SELECTED);
-	if (sel >= 0 && sel < (int)gItems.size() && !gItems[sel].up)
-		AppendMenuW(m, MF_STRING, ID_OPENSEL, OxzTxt(OS_OPEN));
-	AppendMenuW(m, MF_STRING, ID_COPY, OxzTxt(OS_COPY));
-	AppendMenuW(m, MF_STRING, ID_CUT, OxzTxt(OS_CUT));
-	AppendMenuW(m, MF_STRING, ID_PASTE, OxzTxt(OS_PASTE));
-	AppendMenuW(m, MF_STRING, ID_SELECTALL, OxzTxt(OS_SELECTALL));
-	AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-	AppendMenuW(m, MF_STRING, ID_ADDFILE, OxzTxt(OS_ADDFILE));
-	AppendMenuW(m, MF_STRING, ID_ADDFOLDER, OxzTxt(OS_ADDFOLDER));
-	AppendMenuW(m, MF_STRING, ID_DEL, OxzTxt(OS_DEL));
-	AppendMenuW(m, MF_STRING, ID_RENAME, OxzTxt(OS_RENAME));
-	TrackPopupMenu(m, TPM_RIGHTBUTTON, x, y, 0, gHwnd, NULL);
-	DestroyMenu(m);
+	if (sel >= 0 && sel < (int)gItems.size() && !gItems[sel].up) {
+		add[n].id = ID_OPENSEL;
+		add[n].text = OxzTxt(OS_OPEN);
+		add[n].sep = 0;
+		n++;
+	}
+	UINT ids[] = { ID_COPY, ID_CUT, ID_PASTE, ID_SELECTALL, ID_ADDFILE, ID_ADDFOLDER, ID_DEL, ID_RENAME };
+	int strs[] = { OS_COPY, OS_CUT, OS_PASTE, OS_SELECTALL, OS_ADDFILE, OS_ADDFOLDER, OS_DEL, OS_RENAME };
+	for (int i = 0; i < 8 && n < 16; ++i) {
+		add[n].id = ids[i];
+		add[n].text = OxzTxt(strs[i]);
+		add[n].sep = (ids[i] == ID_ADDFILE) ? 1 : 0;
+		n++;
+	}
+	if (!gArchive.empty() && CanOpen(gArchive) && n + 3 <= 20) {
+		add[n].id = ID_CONV_OXZ;
+		add[n].text = OxzTxt(OS_TO_OXZ);
+		add[n].sep = 1;
+		n++;
+		add[n].id = ID_CONV_ZIP;
+		add[n].text = OxzTxt(OS_TO_ZIP);
+		add[n].sep = 0;
+		n++;
+		add[n].id = ID_CONV_TAR;
+		add[n].text = OxzTxt(OS_TO_TAR);
+		add[n].sep = 0;
+		n++;
+	}
+	if (gInMenu) return;
+	gInMenu = 1;
+	UINT id = OxzOpenLookMenu(gHwnd, x, y, add, n);
+	gInMenu = 0;
+	if (id) SendMessageW(gHwnd, WM_COMMAND, id, 0);
 }
 
 class ListFmt : public IEnumFORMATETC
@@ -2910,6 +3168,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	switch (msg) {
 	case WM_CREATE: {
 		gHwnd = hwnd;
+		OxzSetLookRefresh(RefreshLook);
 		MakeFont(hwnd);
 		ApplyCaption(hwnd);
 		ApplyRtl(hwnd);
@@ -2920,12 +3179,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			SubBtn(b);
 		}
 		gList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
-			WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS | LVS_SHOWSELALWAYS,
+			WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | LVS_REPORT | LVS_EDITLABELS | LVS_SHOWSELALWAYS,
 			0, 0, 10, 10, hwnd, (HMENU)ID_LIST, NULL, NULL);
 		ListView_SetExtendedListViewStyle(gList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
 		SetWindowTheme(gList, L"", L"");
 		SendMessageW(gList, WM_SETFONT, (WPARAM)gFont, TRUE);
-		ListView_SetBkColor(gList, RGB(255, 224, 236));
+		ListView_SetBkColor(gList, OxzLook().face);
+		ListView_SetTextBkColor(gList, OxzLook().face);
 		LVCOLUMNW col;
 		memset(&col, 0, sizeof(col));
 		const int widths[] = { 248, 128, 88, 128, 96, 72, 112, 72, 56, 136, 136 };
@@ -2947,10 +3207,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		SetWindowTheme(gProgFile, L"", L"");
 		SendMessageW(gProg, PBM_SETRANGE32, 0, 1000);
 		SendMessageW(gProgFile, PBM_SETRANGE32, 0, 1000);
-		SendMessageW(gProg, PBM_SETBARCOLOR, 0, (LPARAM)RGB(60, 160, 60));
-		SendMessageW(gProgFile, PBM_SETBARCOLOR, 0, (LPARAM)RGB(70, 130, 180));
-		SendMessageW(gProg, PBM_SETBKCOLOR, 0, (LPARAM)RGB(255, 234, 238));
-		SendMessageW(gProgFile, PBM_SETBKCOLOR, 0, (LPARAM)RGB(255, 234, 238));
+		SendMessageW(gProg, PBM_SETBARCOLOR, 0, (LPARAM)OxzLook().accent);
+		SendMessageW(gProgFile, PBM_SETBARCOLOR, 0, (LPARAM)OxzLook().accent2);
+		OxzSetBarInk(gProg, OxzLook().accent);
+		OxzSetBarInk(gProgFile, OxzLook().accent2);
+		SendMessageW(gProg, PBM_SETBKCOLOR, 0, (LPARAM)OxzLook().face);
+		SendMessageW(gProgFile, PBM_SETBKCOLOR, 0, (LPARAM)OxzLook().face);
 		SendMessageW(gLblAll, WM_SETFONT, (WPARAM)gFont, TRUE);
 		SendMessageW(gLblFile, WM_SETFONT, (WPARAM)gFont, TRUE);
 		SendMessageW(gPctAll, WM_SETFONT, (WPARAM)gFont, TRUE);
@@ -2974,7 +3236,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		Refresh();
 		return 0;
 	}
+	case WM_ERASEBKGND:
+		return OxzHostErase(hwnd, (HDC)wp, gPink);
+	case WM_PAINT:
+		if (!OxzPerPixelAcrylic()) return DefWindowProcW(hwnd, msg, wp, lp);
+		OxzHostPaint(hwnd);
+		return 0;
+	case WM_PARENTNOTIFY:
+		if (LOWORD(wp) == WM_CREATE) OxzBindAcrylic(hwnd);
+		return 0;
 	case WM_COMMAND:
+		if (OxzLookCommand(LOWORD(wp))) { RefreshLook(); return 0; }
 		if (gBusy) return 0;
 		switch (LOWORD(wp)) {
 		case ID_OPEN: OnOpen(); break;
@@ -2985,6 +3257,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		case ID_RENAME: OnRename(); break;
 		case ID_EXTRACT: OnExtract(); break;
 		case ID_SAVE: OnSave(); break;
+		case ID_CONV_OXZ: { std::vector<std::wstring> one(1, gArchive); StartConvert(one, L"oxz"); break; }
+		case ID_CONV_ZIP: { std::vector<std::wstring> one(1, gArchive); StartConvert(one, L"zip"); break; }
+		case ID_CONV_TAR: { std::vector<std::wstring> one(1, gArchive); StartConvert(one, L"tar"); break; }
 		case ID_TESTVIEW: OnTestView(); break;
 		case ID_MAP: OnMap(); break;
 		case ID_SETTINGS: ShowSettings(); break;
@@ -3022,18 +3297,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		DrawBtn((DRAWITEMSTRUCT*)lp);
 		return TRUE;
 	case WM_CTLCOLORSTATIC:
-	case WM_CTLCOLOREDIT: {
-		SetBkColor((HDC)wp, RGB(255, 224, 236));
-		SetTextColor((HDC)wp, RGB(80, 30, 60));
-		return (LRESULT)gPink;
-	}
+	case WM_CTLCOLOREDIT:
+		return (LRESULT)OxzHostCtlColor((HDC)wp, msg, gPink);
 	case WM_NOTIFY: {
 		NMHDR* nm = (NMHDR*)lp;
 		if (nm->hwndFrom == gList && nm->code == NM_CUSTOMDRAW) {
 			NMLVCUSTOMDRAW* cd = (NMLVCUSTOMDRAW*)lp;
 			if (cd->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
-			if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) return CDRF_NOTIFYSUBITEMDRAW;
-			if (cd->nmcd.dwDrawStage == (CDDS_ITEMPREPAINT | CDDS_SUBITEM)) {
+			if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
 				PaintList(cd);
 				return CDRF_SKIPDEFAULT;
 			}
@@ -3045,8 +3316,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		if (nm->idFrom == ID_LIST && nm->code == LVN_ENDLABELEDIT) ApplyRename((NMLVDISPINFOW*)lp);
 		if (nm->idFrom == ID_LIST && nm->code == LVN_COLUMNCLICK && !gBusy) {
 			int col = ((NMLISTVIEW*)lp)->iSubItem;
+			if (col < 0 || col > 10) return 0;
 			if (gSortCol == col) gSortAsc = !gSortAsc;
 			else { gSortCol = col; gSortAsc = 1; }
+			SaveSort();
 			Refresh();
 		}
 		if (nm->idFrom == ID_LIST && nm->code == LVN_ITEMCHANGED && !gRefreshing && !gBusy) UpdateStatus();
@@ -3064,16 +3337,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				ListView_SetItemState(gList, lv->iItem, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 			BeginListDrag();
 		}
-		if (nm->idFrom == ID_LIST && nm->code == NM_RCLICK && !gBusy) {
+		if (nm->idFrom == ID_LIST && nm->code == NM_RCLICK) {
 			POINT pt;
 			GetCursorPos(&pt);
-			ShowListMenu(pt.x, pt.y);
+			QueueMenu(hwnd, hwnd, pt.x, pt.y, 1);
 		}
 		return 0;
 	}
-	case WM_CONTEXTMENU:
-		if ((HWND)wp == gList && !gBusy) { ShowListMenu(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)); return 0; }
-		break;
+	case WM_CONTEXTMENU: {
+		HWND from = (HWND)wp;
+		int onList = (from == gList || (from && GetParent(from) == gList)) ? 1 : 0;
+		QueueMenu(hwnd, from ? from : hwnd, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), onList);
+		return TRUE;
+	}
+	case WM_APP + 30:
+		gCtxQueued = 0;
+		ReleaseCapture();
+		if (gCtxList) {
+			if (gBusy) ShowLookMenu(hwnd, gCtxX, gCtxY);
+			else ShowListMenu(gCtxX, gCtxY);
+		} else ShowLookMenu(gCtxFrom ? gCtxFrom : hwnd, gCtxX, gCtxY);
+		return 0;
 	case WM_TIMER:
 		if (wp == 2) { WatchCut(); return 0; }
 		if (wp == 3) { PollWatch(); return 0; }
@@ -3084,8 +3368,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			memset(&snap, 0, sizeof(snap));
 			OxzProgRead(&snap);
 			ten = snap.overallTen;
-			if (gProg) SendMessageW(gProg, PBM_SETPOS, ten, 0);
-			if (gProgFile) SendMessageW(gProgFile, PBM_SETPOS, snap.fileTen, 0);
+			if (gProg) SetBarPos(gProg, ten);
+			if (gProgFile) SetBarPos(gProgFile, snap.fileTen);
 			OxzFormatTenth(snap.fileTen, filePct, 32);
 			OxzFormatTenth(ten, allPct, 32);
 			if (gPctFile) SetWindowTextW(gPctFile, filePct);
@@ -3255,10 +3539,43 @@ static void OxzForceShow(HWND hwnd)
 	SetForegroundWindow(hwnd);
 }
 
+static int ResumeBrowseOk(const wchar_t* s)
+{
+	if (!s || !s[0]) return 0;
+	if (wcsstr(s, L"..")) return 0;
+	if (wcschr(s, L':') || wcschr(s, L'/')) return 0;
+	if (s[0] == L'\\') return 0;
+	return 1;
+}
+
+static void TakeResume()
+{
+	wchar_t path[32768], br[2048];
+	DWORD cb = sizeof(path);
+	path[0] = 0;
+	br[0] = 0;
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"reopen", RRF_RT_REG_SZ, NULL, path, &cb) != ERROR_SUCCESS)
+		path[0] = 0;
+	cb = sizeof(br);
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"reopenBrowse", RRF_RT_REG_SZ, NULL, br, &cb) != ERROR_SUCCESS)
+		br[0] = 0;
+	RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"reopen");
+	RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"reopenBrowse");
+	int pathOk = path[0] && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+	if (gStartKind == 0 && pathOk) {
+		gStartKind = 1;
+		gStartA = path;
+	}
+	if (pathOk && ResumeBrowseOk(br) && _wcsicmp(gStartA.c_str(), path) == 0)
+		gPendingBrowse = br;
+}
+
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 {
 	OxzEscapeJob();
 	OxzLangInit();
+	OxzLookLoad();
+	LoadSort();
 	{
 		DWORD level = 10, ppmd = 1, cb = sizeof(DWORD);
 		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\OxzGui", L"level", RRF_RT_REG_DWORD, NULL, &level, &cb) != ERROR_SUCCESS || level < 1 || level > 10)
@@ -3318,20 +3635,22 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 			else if (!_wcsicmp(argv[i], L"/convert") && i + 1 < argc) { gStartKind = 14; gCloseWhenDone = 1; gStartA = argv[++i]; }
 			else if (!_wcsicmp(argv[i], L"/packeach") && i + 1 < argc) { gStartKind = 15; gCloseWhenDone = 1; gStartA = argv[++i]; }
 			else if (!_wcsicmp(argv[i], L"/packeachto") && i + 1 < argc) { gStartKind = 16; gCloseWhenDone = 1; gStartA = argv[++i]; }
+			else if (!_wcsicmp(argv[i], L"/convto") && i + 2 < argc) { gStartKind = 17; gCloseWhenDone = 1; gStartB = argv[++i]; gStartA = argv[++i]; }
 			else if (argv[i][0] != L'/' && gStartKind == 0) { gStartKind = 1; gStartA = argv[i]; }
 		}
 		LocalFree(argv);
 	}
+	TakeResume();
 	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS | ICC_BAR_CLASSES };
 	InitCommonControlsEx(&icc);
-	if (!gPink) gPink = CreateSolidBrush(RGB(255, 224, 236));
-	if (!gMint) gMint = CreateSolidBrush(RGB(255, 234, 238));
+	if (!gPink) gPink = CreateSolidBrush(OxzLook().bg0);
+	if (!gMint) gMint = CreateSolidBrush(OxzLook().face);
 	WNDCLASSW wc;
 	memset(&wc, 0, sizeof(wc));
 	wc.lpfnWndProc = WndProc;
 	wc.hInstance = hi;
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = gPink;
+	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 	wc.lpszClassName = L"OxzGui";
 	RegisterClassW(&wc);
 	wc.lpfnWndProc = SetProc;

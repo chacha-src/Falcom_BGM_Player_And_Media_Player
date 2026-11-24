@@ -114,6 +114,10 @@ static void OxzWriteVerbs(const std::wstring& exe)
 	OxzStore(L"OxzGui.Here", OxzTxt(OS_SHELL_HERE), q + L" /exthere \"%1\"", icon, 0, 1);
 	OxzStore(L"OxzGui.To", OxzTxt(OS_SHELL_TO), q + L" /extractto \"%1\"", icon, 0, 1);
 	OxzStore(L"OxzGui.Test", OxzTxt(OS_TEST), q + L" /test \"%1\"", icon, 0);
+	OxzStore(L"OxzGui.SepConv", L"", L"", icon, 1);
+	OxzStore(L"OxzGui.ToOxz", OxzTxt(OS_TO_OXZ), q + L" /convto oxz \"%1\"", icon, 0, 1);
+	OxzStore(L"OxzGui.ToZip", OxzTxt(OS_TO_ZIP), q + L" /convto zip \"%1\"", icon, 0, 1);
+	OxzStore(L"OxzGui.ToTar", OxzTxt(OS_TO_TAR), q + L" /convto tar \"%1\"", icon, 0, 1);
 	OxzStore(L"OxzGui.Sep", L"", L"", icon, 1);
 	OxzStore(L"OxzGui.CompressDlg", OxzTxt(OS_COMPRESS_DLG), q + L" /editlist \"%1\"", icon, 0);
 	OxzStore(L"OxzGui.Compress", OxzTxt(OS_SHELL_PACK), q + L" /packone \"%1\"", icon, 0);
@@ -128,10 +132,10 @@ static void OxzWriteVerbs(const std::wstring& exe)
 		skip += L"\"";
 		if (_wcsicmp(kOxzExtractExts[i], L".oxz") == 0) continue;
 		std::wstring assoc = std::wstring(L"Software\\Classes\\SystemFileAssociations\\") + kOxzExtractExts[i] + L"\\shell\\Oxz";
-		OxzCascade(assoc.c_str(), OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
+		OxzCascade(assoc.c_str(), OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.SepConv;OxzGui.ToOxz;OxzGui.ToZip;OxzGui.ToTar;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
 	}
 	OxzCascade(L"Software\\Classes\\AllFilesystemObjects\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", skip.c_str());
-	OxzCascade(L"Software\\Classes\\OxzArchive\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
+	OxzCascade(L"Software\\Classes\\OxzArchive\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.Open;OxzGui.ExtractDlg;OxzGui.Here;OxzGui.To;OxzGui.Test;OxzGui.SepConv;OxzGui.ToOxz;OxzGui.ToZip;OxzGui.ToTar;OxzGui.Sep;OxzGui.CompressDlg;OxzGui.Compress;OxzGui.PackEach", NULL);
 	OxzCascade(L"Software\\Classes\\Directory\\Background\\shell\\Oxz", OxzTxt(OS_MENU), icon, L"OxzGui.CompressDlgDir;OxzGui.CompressDir", NULL);
 	OxzSetSz(HKEY_LOCAL_MACHINE, L"Software\\Classes\\AllFilesystemObjects\\shellex\\ContextMenuHandlers\\Oxz", NULL, menu);
 	OxzSetSz(HKEY_LOCAL_MACHINE, L"Software\\Classes\\Directory\\Background\\shellex\\ContextMenuHandlers\\Oxz", NULL, menu);

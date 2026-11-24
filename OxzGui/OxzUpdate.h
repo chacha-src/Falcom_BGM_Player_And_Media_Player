@@ -12,4 +12,4 @@ struct OxzUpdHit {
 };
 
 void OxzUpdateCheckAsync(HWND hwnd);
-void OxzUpdateBegin(HWND hwnd, const OxzUpdHit* hit);
+void OxzUpdateBegin(HWND hwnd, const OxzUpdHit* hit, const wchar_t* reopen, const wchar_t* browse);

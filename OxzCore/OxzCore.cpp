@@ -1019,17 +1019,33 @@ static void Publish(FilePulse* fp, int tenth, int finish)
 	if (tenth < 0) tenth = 0;
 	if (tenth > 1000) tenth = 1000;
 	std::lock_guard<std::mutex> lock(p->mu);
+	if (finish == 2) {
+		if (fp->seen) {
+			for (i = 0; i < p->active.size(); ++i) {
+				if (p->active[i] == fp) {
+					p->active.erase(p->active.begin() + (ptrdiff_t)i);
+					break;
+				}
+			}
+		}
+		fp->tenth = 0;
+		fp->seen = 0;
+		return;
+	}
 	if (!fp->seen) {
 		fp->seen = 1;
 		p->active.push_back(fp);
 	}
 	now = GetTickCount();
-	if (!finish && tenth > 0 && tenth < 1000 && p->lastTick && (DWORD)(now - p->lastTick) < 80) {
+	if (finish == 3) {
+		if (tenth > 990) tenth = 990;
+		fp->tenth = tenth;
+	} else if (!finish && tenth > 0 && tenth < 1000 && p->lastTick && (DWORD)(now - p->lastTick) < 80) {
 		if (tenth > fp->tenth) fp->tenth = tenth;
 		return;
 	}
 	if (!finish) p->lastTick = now ? now : 1;
-	if (finish) {
+	if (finish == 1) {
 		if (fp->tenth < 1000) {
 			p->bytesDone += fp->size;
 			p->filesDone++;
@@ -1041,7 +1057,7 @@ static void Publish(FilePulse* fp, int tenth, int finish)
 				break;
 			}
 		}
-	} else {
+	} else if (finish != 3) {
 		if (tenth < fp->tenth) tenth = fp->tenth;
 		if (tenth > 990) tenth = 990;
 		fp->tenth = tenth;
@@ -1061,10 +1077,10 @@ static void Publish(FilePulse* fp, int tenth, int finish)
 		}
 	}
 	display = p->filesDone;
-	if (!finish && p->total && display < p->total) display++;
+	if (finish != 1 && p->total && display < p->total) display++;
 	if (p->total && display > p->total) display = p->total;
 	if (!display) display = 1;
-	pct = finish ? 100 : fp->tenth / 10;
+	pct = finish == 1 ? 100 : fp->tenth / 10;
 	p->fn(fp->name, display, p->total ? p->total : 1, pct, p->user);
 }
 
@@ -1104,7 +1120,8 @@ static void OnEncodePulse(void* user, unsigned long long done, unsigned long lon
 
 struct PulseGuard {
 	FilePulse fp;
-	explicit PulseGuard(const std::wstring& rel, uint64_t size)
+	int commit;
+	explicit PulseGuard(const std::wstring& rel, uint64_t size) : commit(1)
 	{
 		memset(&fp, 0, sizeof(fp));
 		fp.name = rel.c_str();
@@ -1112,9 +1129,11 @@ struct PulseGuard {
 		tFilePulse = &fp;
 		Publish(&fp, 0, 0);
 	}
+	void cancel() { commit = 0; }
 	~PulseGuard()
 	{
-		Publish(&fp, 1000, 1);
+		if (commit) Publish(&fp, 1000, 1);
+		else Publish(&fp, 0, 2);
 		if (tFilePulse == &fp) tFilePulse = NULL;
 	}
 };
@@ -1270,6 +1289,7 @@ static int EmitMethod(const uint8_t* raw, size_t n, int method, int flags, int z
 	else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
 	watch.fp = tFilePulse;
 	watch.lo = tEmitLo;
+	if (tFilePulse && tEmitLo > 0) Publish(tFilePulse, tEmitLo, 3);
 	gEncHook.fn = OnEncodePulse;
 	gEncHook.user = &watch;
 	struct EmitHold {
@@ -1639,11 +1659,61 @@ static int FillPicked(const std::wstring& path, uint64_t size, OutItem* it)
 	return 1;
 }
 
-static int StreamStore(HANDLE in, HANDLE out, uint64_t size, uint32_t* crc)
+struct StreamProg {
+	OxzCoreProgFn fn;
+	void* user;
+	const wchar_t* name;
+	uint64_t size;
+	unsigned long long baseNumer;
+	int useWeight;
+	DWORD tick;
+};
+
+static void StreamNote(StreamProg* sp, uint64_t done, int finish)
+{
+	int ten;
+	DWORD now;
+	PulseWeight* w;
+	if (!sp || !sp->fn || !sp->size) return;
+	if (done > sp->size) done = sp->size;
+	ten = finish ? 1000 : (int)(done * 1000ull / sp->size);
+	if (!finish && ten > 999) ten = 999;
+	if (ten < 0) ten = 0;
+	now = GetTickCount();
+	if (!finish && ten > 0 && ten < 999 && sp->tick && (DWORD)(now - sp->tick) < 80) return;
+	sp->tick = now ? now : 1;
+	w = (PulseWeight*)sp->user;
+	if (sp->useWeight && w && w->magic == kPulseMagic) {
+		unsigned long long n = sp->baseNumer + (finish ? sp->size : done);
+		if (w->denom && n > w->denom) n = w->denom;
+		w->numer = n;
+		w->fileTen = ten;
+	}
+	sp->fn(sp->name, 0, 0, finish ? 100 : ten / 10, sp->user);
+}
+
+static void ArmStream(StreamProg* sp, OxzCoreProgFn prog, void* user, const wchar_t* name, uint64_t size)
+{
+	PulseWeight* w;
+	memset(sp, 0, sizeof(*sp));
+	if (!prog) return;
+	sp->fn = prog;
+	sp->user = user;
+	sp->name = name;
+	sp->size = size ? size : 1;
+	w = (PulseWeight*)user;
+	if (w && w->magic == kPulseMagic && w->denom) {
+		sp->useWeight = 1;
+		sp->baseNumer = w->numer;
+	}
+}
+
+static int StreamStore(HANDLE in, HANDLE out, uint64_t size, uint32_t* crc, StreamProg* sp)
 {
 	std::vector<uint8_t> buf;
 	uint32_t c = 0xFFFFFFFFu;
 	uint64_t left = size;
+	uint64_t got = 0;
 	try { buf.resize(1u << 20); } catch (...) { return 0; }
 	if (!Seek(in, 0)) return 0;
 	while (left) {
@@ -1653,12 +1723,14 @@ static int StreamStore(HANDLE in, HANDLE out, uint64_t size, uint32_t* crc)
 		c = CrcBlock(buf.data(), rd, c);
 		if (!WriteAll(out, buf.data(), rd)) return 0;
 		left -= rd;
+		got += rd;
+		StreamNote(sp, got, 0);
 	}
 	*crc = c ^ 0xFFFFFFFFu;
 	return 1;
 }
 
-static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out, uint64_t dataOff, OutItem* it)
+static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out, uint64_t dataOff, OutItem* it, StreamProg* sp)
 {
 	HANDLE in = OpenRead(path.c_str());
 	ZSTD_CCtx* c;
@@ -1690,6 +1762,7 @@ static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out
 			crc = CrcBlock(ibuf.data(), rd, crc);
 			left -= rd;
 			chunk = rd;
+			StreamNote(sp, size - left, 0);
 		}
 		input.src = ibuf.data();
 		input.size = chunk;
@@ -1723,10 +1796,11 @@ static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out
 		it->unpacked = size;
 		it->packed = produced;
 		it->op = OP_STREAM;
+		StreamNote(sp, size, 1);
 		CloseHandle(in);
 		return 1;
 	}
-	if (!Seek(out, dataOff) || !StreamStore(in, out, size, &crc)) { CloseHandle(in); return 0; }
+	if (!Seek(out, dataOff) || !StreamStore(in, out, size, &crc, sp)) { CloseHandle(in); return 0; }
 	if (!SetEndOfFile(out)) { CloseHandle(in); return 0; }
 	it->method = M_STORE;
 	it->flags = 0;
@@ -1735,6 +1809,7 @@ static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out
 	it->unpacked = size;
 	it->packed = size;
 	it->op = OP_STREAM;
+	StreamNote(sp, size, 1);
 	ok = 1;
 	CloseHandle(in);
 	return ok;
@@ -2004,8 +2079,8 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 				pr.it.mtime = items[ix].mtime;
 				try {
 					if (FillPicked(items[ix].disk, items[ix].size, &pr.it)) pr.ready = 1;
-					else pr.ready = -1;
-				} catch (...) { pr.ready = -1; }
+					else { pr.ready = -1; guard.cancel(); }
+				} catch (...) { pr.ready = -1; guard.cancel(); }
 			};
 			try { prepared.resize(items.size()); }
 			catch (...) { goto fail; }
@@ -2079,7 +2154,9 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 				it.attr = w.attr;
 				it.mtime = w.mtime;
 				if (!FillPicked(w.disk, w.size, &it)) {
-					if (!StreamZstdOrStore(w.disk, w.size, out, pos, &it)) goto fail;
+					StreamProg sp;
+					ArmStream(&sp, prog, progUser, w.rel.c_str(), w.size);
+					if (!StreamZstdOrStore(w.disk, w.size, out, pos, &it, prog ? &sp : NULL)) goto fail;
 				} else {
 					if (!Seek(out, pos) || !WriteAll(out, it.payload.data(), it.payload.size())) goto fail;
 				}
@@ -2104,7 +2181,9 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 			it.attr = w.attr;
 			it.mtime = w.mtime;
 			if (!FillPicked(w.disk, w.size, &it)) {
-				if (!StreamZstdOrStore(w.disk, w.size, out, pos, &it)) goto fail;
+				StreamProg sp;
+				ArmStream(&sp, prog, progUser, w.rel.c_str(), w.size);
+				if (!StreamZstdOrStore(w.disk, w.size, out, pos, &it, prog ? &sp : NULL)) goto fail;
 			} else {
 				if (!Seek(out, pos) || (it.packed && !WriteAll(out, it.payload.data(), it.payload.size()))) goto fail;
 			}

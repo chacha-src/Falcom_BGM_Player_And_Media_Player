@@ -19,7 +19,7 @@
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
-    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -43,12 +43,17 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>..\..\zlib-develop;..\..\zlib-develop\contrib\infback9;..\minizip;..\lzma_sdk;..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\un7z\lzma\C;..;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>cabinet.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;$(ProjectDir)..\x64lib\libogg_static_avx2_2026.lib;$(ProjectDir)..\x64lib\libFLAC_static_avx2_2026.lib;$(ProjectDir)..\x64lib\libz-static.lib;$(ProjectDir)..\x64lib\libzstd_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
       <Command>if exist "C:\projects\APPLICATION3\ogg_binary\ZpaqGui\7za.exe" copy /Y "C:\projects\APPLICATION3\ogg_binary\ZpaqGui\7za.exe" "$(ProjectDir)7za.exe"</Command>
@@ -140,6 +145,8 @@
     <ClCompile Include="OxzOpen.cpp" />
     <ClCompile Include="OxzFmt.cpp" />
     <ClCompile Include="OxzView.cpp" />
+    <ClCompile Include="OxzLook.cpp" />
+    <ClCompile Include="OxzMenu.cpp" />
     <ClCompile Include="OxzWim.cpp" />
     <ClCompile Include="..\minizip\zip.c">
       <PreprocessorDefinitions>NOCRYPT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -171,52 +178,191 @@
       <ObjectFileName>$(IntDir)xz_alloc.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unlha\unlzh.cpp" />
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\archive.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\arcread.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\blake2s.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\cmddata.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\consio.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\crc.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\crypt.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\dll.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\encname.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\errhnd.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\extinfo.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\extract.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filcreat.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\file.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filefn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filestr.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\find.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\getbits.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\global.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\hash.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\headers.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\isnt.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\match.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\options.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\pathfn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\qopen.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rarvm.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rawread.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rdwrfn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rijndael.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rs.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rs16.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\scantree.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\secpassword.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\sha1.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\sha256.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings><ObjectFileName>$(IntDir)unrar_sha256.obj</ObjectFileName></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\smallfn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\strfn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\strlist.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\system.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\threadpool.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\timefn.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\ui.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\unicode.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\unpack.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
-    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\volume.cpp"><PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions><DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings></ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\archive.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\arcread.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\blake2s.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\cmddata.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\consio.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\crc.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\crypt.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\dll.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\encname.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\errhnd.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\extinfo.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\extract.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filcreat.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\file.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filefn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\filestr.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\find.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\getbits.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\global.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\hash.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\headers.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\isnt.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\match.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\options.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\pathfn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\qopen.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rarvm.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rawread.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rdwrfn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rijndael.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rs.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\rs16.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\scantree.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\secpassword.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\sha1.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\sha256.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <ObjectFileName>$(IntDir)unrar_sha256.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\smallfn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\strfn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\strlist.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\system.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\threadpool.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\timefn.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\ui.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\unicode.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\unpack.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\unrar\unrarsrc\volume.cpp">
+      <PreprocessorDefinitions>RARDLL;UNRAR;SILENT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4267;4244;4100;4189;4456;4458;4706;4127;4311;4312;4018;4005;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="OxzGui.rc" />
@@ -225,6 +371,12 @@
     <ProjectReference Include="..\OxzCore\OxzCore.vcxproj">
       <Project>{C3A1F00D-4B21-4C0E-9A11-0A1B2C3D4E60}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="OxzGui.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

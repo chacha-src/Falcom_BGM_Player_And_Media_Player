@@ -253,7 +253,8 @@ private:
 enum {
 	ACT_OPEN = 1, ACT_EXTRACT_DLG, ACT_EXTRACT_HERE, ACT_EXTRACT_TO, ACT_TEST,
 	ACT_COMPRESS_DLG, ACT_COMPRESS, ACT_DRAG_HERE, ACT_DRAG_FOLDER, ACT_DRAG_CREATE,
-	ACT_TAG = 20, ACT_CONV = 21, ACT_PACK_EACH = 22
+	ACT_TAG = 20, ACT_CONV = 21, ACT_PACK_EACH = 22,
+	ACT_TO_OXZ = 30, ACT_TO_ZIP = 31, ACT_TO_TAR = 32
 };
 
 struct OxzCmd { int act; std::wstring extra; };
@@ -400,6 +401,9 @@ static const wchar_t* VerbOf(int act)
 	case ACT_TAG: return L"oxz.tagedit";
 	case ACT_CONV: return L"oxz.convert";
 	case ACT_PACK_EACH: return L"oxz.packeach";
+	case ACT_TO_OXZ: return L"oxz.tooxz";
+	case ACT_TO_ZIP: return L"oxz.tozip";
+	case ACT_TO_TAR: return L"oxz.totar";
 	default: return L"oxz.create";
 	}
 }
@@ -626,6 +630,10 @@ private:
 			else AddItem(sub, OxzTxt(OS_EXTRACT_EACH), ACT_EXTRACT_TO, L"");
 			AddItem(sub, OxzTxt(OS_TEST), ACT_TEST, L"");
 			AddSep(sub);
+			AddItem(sub, OxzTxt(OS_TO_OXZ), ACT_TO_OXZ, L"oxz");
+			AddItem(sub, OxzTxt(OS_TO_ZIP), ACT_TO_ZIP, L"zip");
+			AddItem(sub, OxzTxt(OS_TO_TAR), ACT_TO_TAR, L"tar");
+			AddSep(sub);
 		}
 		AddItem(sub, OxzTxt(OS_COMPRESS_DLG), ACT_COMPRESS_DLG, L"");
 		AddItem(sub, Format1(OS_COMPRESS_TO, BaseOf(dest)), ACT_COMPRESS, dest);
@@ -653,6 +661,12 @@ private:
 				if (IsExtractable(m_files[i])) use.push_back(m_files[i]);
 			if (use.empty()) return false;
 		}
+		if (c.act == ACT_TO_OXZ || c.act == ACT_TO_ZIP || c.act == ACT_TO_TAR) {
+			use.clear();
+			for (size_t i = 0; i < m_files.size(); ++i)
+				if (IsExtractable(m_files[i])) use.push_back(m_files[i]);
+			if (use.empty()) return false;
+		}
 		if (c.act == ACT_TAG || c.act == ACT_CONV) {
 			use.clear();
 			for (size_t i = 0; i < m_files.size(); ++i)
@@ -669,6 +683,9 @@ private:
 		case ACT_TEST: args = L"/test " + OxzQ(list); break;
 		case ACT_TAG: args = L"/tagedit " + OxzQ(list); break;
 		case ACT_CONV: args = L"/convert " + OxzQ(list); break;
+		case ACT_TO_OXZ:
+		case ACT_TO_ZIP:
+		case ACT_TO_TAR: args = L"/convto " + c.extra + L" " + OxzQ(list); break;
 		case ACT_COMPRESS_DLG: args = L"/editlist " + OxzQ(list); break;
 		case ACT_COMPRESS:
 		case ACT_DRAG_CREATE: args = L"/packto " + OxzQ(c.extra) + L" /list " + OxzQ(list); break;

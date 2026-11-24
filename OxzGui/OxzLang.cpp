@@ -116,6 +116,19 @@ static const wchar_t* kTxt[OS_COUNT][14] = {
 	{ L"混在", L"Mixed", L"Mixte", L"Misto", L"Mixto", L"혼합", L"混合", L"مختلط", L"Смешанный", L"Gemischt", L"Misto", L"Gemengd", L"Mieszany", L"Karışık" },
 	{ L"このファイル", L"This file", L"Ce fichier", L"Questo file", L"Este archivo", L"이 파일", L"此文件", L"هذا الملف", L"Этот файл", L"Diese Datei", L"Este ficheiro", L"Dit bestand", L"Ten plik", L"Bu dosya" },
 	{ L"全体", L"Overall", L"Ensemble", L"Totale", L"Total", L"전체", L"整体", L"الإجمالي", L"Всего", L"Gesamt", L"Total", L"Totaal", L"Razem", L"Toplam" },
+	{ L"フォント", L"Font", L"Police", L"Carattere", L"Fuente", L"글꼴", L"字体", L"خط", L"Шрифт", L"Schrift", L"Fonte", L"Lettertype", L"Czcionka", L"Yazi tipi" },
+	{ L"サイズ", L"Size", L"Taille", L"Dimensione", L"Tamano", L"크기", L"大小", L"حجم", L"Размер", L"Größe", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut" },
+	{ L"太字", L"Bold", L"Gras", L"Grassetto", L"Negrita", L"굵게", L"粗体", L"عريض", L"Жирный", L"Fett", L"Negrito", L"Vet", L"Pogrubienie", L"Kalin" },
+	{ L"斜体", L"Italic", L"Italique", L"Corsivo", L"Cursiva", L"기울임", L"斜体", L"مائل", L"Курсив", L"Kursiv", L"Italico", L"Cursief", L"Kursywa", L"Italik" },
+	{ L"アクリルモード", L"Acrylic mode", L"Mode acrylique", L"Modalita acrilica", L"Modo acrilico", L"아크릴 모드", L"亚克力模式", L"وضع الأكريليك", L"Акриловый режим", L"Acrylmodus", L"Modo acrilico", L"Acrylmodus", L"Tryb akrylowy", L"Akrilik mod" },
+	{ L"立体アクセント強め", L"Stronger 3D accent", L"Accent 3D fort", L"Accento 3D forte", L"Acento 3D fuerte", L"입체 액센트 강하게", L"加强立体强调", L"لمسة ثلاثية أقوى", L"Сильнее 3D-акцент", L"Stärkerer 3D-Akzent", L"Acento 3D forte", L"Sterkere 3D-accent", L"Silniejszy akcent 3D", L"Daha guclu 3B vurgu" },
+	{ L"テーマ", L"Theme", L"Theme", L"Tema", L"Tema", L"테마", L"主题", L"سمة", L"Тема", L"Thema", L"Tema", L"Thema", L"Motyw", L"Tema" },
+	{ L"メニュー描画方法", L"Menu animation", L"Animation du menu", L"Animazione menu", L"Animacion del menu", L"메뉴 표시 방식", L"菜单显示方式", L"طريقة عرض القائمة", L"Отображение меню", L"Menü-Darstellung", L"Exibicao do menu", L"Menuweergave", L"Wyswietlanie menu", L"Menu gosterimi" },
+	{ L"oxz に変換", L"Convert to oxz", L"Convertir en oxz", L"Converti in oxz", L"Convertir a oxz", L"oxz로 변환", L"转换为 oxz", L"تحويل إلى oxz", L"Преобразовать в oxz", L"In oxz umwandeln", L"Converter para oxz", L"Omzetten naar oxz", L"Konwertuj do oxz", L"oxz olarak dönüştür" },
+	{ L"zip に変換", L"Convert to zip", L"Convertir en zip", L"Converti in zip", L"Convertir a zip", L"zip으로 변환", L"转换为 zip", L"تحويل إلى zip", L"Преобразовать в zip", L"In zip umwandeln", L"Converter para zip", L"Omzetten naar zip", L"Konwertuj do zip", L"zip olarak dönüştür" },
+	{ L"tar に変換", L"Convert to tar", L"Convertir en tar", L"Converti in tar", L"Convertir a tar", L"tar로 변환", L"转换为 tar", L"تحويل إلى tar", L"Преобразовать в tar", L"In tar umwandeln", L"Converter para tar", L"Omzetten naar tar", L"Konwertuj do tar", L"tar olarak dönüştür" },
+	{ L"変換しています。", L"Converting.", L"Conversion.", L"Conversione.", L"Convirtiendo.", L"변환 중입니다.", L"正在转换。", L"جارٍ التحويل.", L"Преобразование.", L"Wird umgewandelt.", L"A converter.", L"Bezig met omzetten.", L"Konwertowanie.", L"Dönüştürülüyor." },
+	{ L"変換しました。", L"Converted.", L"Converti.", L"Convertito.", L"Convertido.", L"변환했습니다.", L"已转换。", L"تم التحويل.", L"Преобразовано.", L"Umgewandelt.", L"Convertido.", L"Omgezet.", L"Przekonwertowano.", L"Dönüştürüldü." },
 };
 
 static const wchar_t* kName[14] = {
