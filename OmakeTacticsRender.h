@@ -736,6 +736,7 @@ public:
 	void SetLight(V3 dirToLight, V3 focus, float radius);
 	void SetFog(float start, float end, float heightFog, DWORD color);
 	void SetSight(const float* xz, int n, float radius);
+	void SetVeilMask(int on);
 	void SetTheme(int theme) { m_theme = theme; }
 	void SetSky(int wx, int hour) { m_wx = wx; m_hour = hour; }
 	void SetScreenFx(float crit, float fairy, float lightning, float quake, float wet, BOOL cutScene, BOOL hasMarks, float hit = 0.f)

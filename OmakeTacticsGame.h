@@ -296,6 +296,10 @@ private:
 	V3 CellCenter(int x, int z) const;
 	V3 UnitGroundPos(const Unit& u) const;
 	void BeginTurn();
+	void TickField(float dt);
+	void CommitCollapse();
+	BOOL FieldHides(int ui) const;
+	BOOL VeilShows(int x, int z) const;
 	void PlayerSelectMove(int x, int z);
 	void StartMove(int ui, int tx, int tz, int nextPhase);
 	void UpdateMove(float dt);
@@ -396,6 +400,8 @@ private:
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
 	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void SpawnDebris(V3 p, V3 vel, int kind, int n, float sc, DWORD tint);
+	void SpawnSlab(float x, float y, float z, float sink);
+	void FillHideGreen();
 	void UpdateDebris(float dt);
 	void DrawDebris(const M4* mapXform = NULL);
 	void DrawCc0Props(const Particle* ps, int nPart, const CutFxPt* fx, int nfx);
@@ -579,6 +585,7 @@ private:
 	struct DebrisBit {
 		int on, kind, bounces, wind;
 		float x, y, z, vx, vy, vz, rx, ry, rz, srx, sry, srz, sc, life, maxLife;
+		float sink, ox, oz;
 		DWORD tint;
 	};
 	enum { GUST_N = 6, GUST_HIDE = 4, DEBRIS_N = 96 };
@@ -727,6 +734,10 @@ private:
 	// 戦闘
 	Battle m_b;
 	Reach m_reach;
+	unsigned char m_seen[MAPN][MAPN];
+	float m_fieldClock;
+	float m_wave;
+	int m_waveStr, m_waveH, m_waveHit;
 	Actor m_act[MAX_UNITS];
 	Phase m_phase, m_phaseBeforeMenu;
 	float m_phaseT;

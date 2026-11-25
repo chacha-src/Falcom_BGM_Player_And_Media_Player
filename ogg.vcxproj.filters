@@ -1431,6 +1431,18 @@
     <ClCompile Include="OxzFilt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kb_sasami\source\fmmidi\midisynth.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\fmmidi\ym2612_pool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FmMidiLive.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TagGridDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -2506,6 +2518,9 @@
     <ClInclude Include="CSasamiInsertFxDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TagGridDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="res\ico00001.ico">
@@ -2965,6 +2980,7 @@
     <None Include="res\cso\tac_psg12.cso" />
     <None Include="res\cso\tac_psg13.cso" />
     <None Include="res\cso\tac_pscut.cso" />
+    <None Include="kb_sasami\data\xg.wopn" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

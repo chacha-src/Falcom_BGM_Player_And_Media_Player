@@ -6831,21 +6831,60 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 			if (gAgi > 100) gAgi = 100;
 			v += gAgi * (u.ch.lv - 1) / 100;
 			v += 2;
-		} else if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
-		else v += g * (u.ch.lv - 1) / 100;
-		// 味方は成長率×2で体力が伸びる。敵の体力だけ同じ方向に合わせ、攻撃は別の曲線で足す。
-		// 序盤（〜Lv35）は従来どおり。会心が2倍なので、ステージ60〜70帯で雑魚が1発で落ちない厚みを足す。
+		} else if (s == S_MP) v += g * (u.ch.lv - 1) / 10;
+		else if (s != S_HP) v += g * (u.ch.lv - 1) / 100;
+		// 味方は成長率×2で体力が伸びる。敵も序盤（Lv48、ステージ30前後）までは同じ式。
+		// その先を同じ傾きにすると万を超えて届かない。止めすぎると1撃で溶け、行動ごとの経験も入らない。
+		// 成長率45前後の雑魚の目安: ステージ120で約3300、800で約3万、3000で約5.5万、
+		// 6000で約11万、EX1で約20万。味方の攻撃はレベルの二乗で伸びるので、中盤で一度厚くし、その後は緩める。
 		if (s == S_HP) {
-			v *= 2;
+			int lv = u.ch.lv;
+			int pivot = 48;
+			int use = lv > pivot ? pivot : lv;
+			int steps = use > 1 ? use - 1 : 0;
+			int vv = md.base[s] + (steps > 0 ? g * steps / 10 : 0);
+			vv *= 2;
 			int bulk = 0;
-			if (u.ch.lv >= 12) {
-				bulk = 12 + (u.ch.lv - 12);
-				if (u.ch.lv >= 36) bulk += (u.ch.lv - 36);
-				if (u.ch.lv >= 72) bulk += (u.ch.lv - 72);
-				if (u.ch.lv >= 120) bulk += (u.ch.lv - 120) / 2;
+			if (use >= 12) {
+				bulk = 12 + (use - 12);
+				if (use >= 36) bulk += (use - 36);
 				if (bulk > 280) bulk = 280;
 			}
-			v = v * (100 + bulk) / 100;
+			vv = vv * (100 + bulk) / 100;
+			if (lv > pivot && g > 0) {
+				int n = lv - pivot;
+				int tail = 0;
+				int a = n > 144 ? 144 : n;
+				tail += g * a * 2 / 5;
+				n -= a;
+				if (n > 0) {
+					int b = n > 1096 ? 1096 : n;
+					tail += g * b / 2;
+					n -= b;
+				}
+				if (n > 0) {
+					int c = n > 3544 ? 3544 : n;
+					tail += g * c / 6;
+					n -= c;
+				}
+				if (n > 0) {
+					int d = n > 4834 ? 4834 : n;
+					tail += g * d / 4;
+					n -= d;
+				}
+				if (n > 0) {
+					int e = n > 6446 ? 6446 : n;
+					tail += g * e / 3;
+					n -= e;
+				}
+				if (n > 0) {
+					if (n > 84000) n = 84000;
+					tail += g * n / 4;
+				}
+				vv += tail;
+			}
+			if (vv < 1) vv = 1;
+			v = vv;
 		}
 		if (s == S_DEF || s == S_RES) {
 			int db = 0;
@@ -8004,6 +8043,10 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 	if (mv > 250) mv = 250;
 	int startL = u.deck;
 	if (startL < 0 || startL >= LAY_N || !LayerOn(b.map.At(u.x, u.z), startL)) startL = 0;
+	if (TacFloodWet(b, u.x, u.z, startL)) {
+		mv = mv * 7 / 10;
+		if (mv < 2) mv = 2;
+	}
 	out.cost[startL][u.z][u.x] = 0;
 	out.from[startL][u.z][u.x] = -1;
 	int bHead[256];
@@ -8504,6 +8547,30 @@ static float PlayerHitGross(const Unit& a, int skill, int magic)
 	return gross * SkillPowerBand(sd, magic);
 }
 
+// 雑魚が残っているほどボスへの攻撃は抜ける割合が落ちる。全滅で1。雑魚のいない戦は1。
+static float BossTrashKeep(const Battle& b)
+{
+	long long mx = 0, left = 0;
+	int n = 0;
+	for (int i = 0; i < b.nUnits; i++) {
+		const Unit& u = b.u[i];
+		if (u.team != TEAM_ENEMY || u.boss) continue;
+		int cap = u.ch.stat[S_HP];
+		if (cap < 1) cap = 1;
+		int hp = u.hp;
+		if (!u.alive || hp < 0) hp = 0;
+		if (hp > cap) hp = cap;
+		mx += cap;
+		left += hp;
+		n++;
+	}
+	if (n <= 0 || mx <= 0) return 1.f;
+	float gone = 1.f - (float)left / (float)mx;
+	if (gone < 0.f) gone = 0.f;
+	if (gone > 1.f) gone = 1.f;
+	return 0.34f + 0.66f * gone;
+}
+
 static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill, int& dmg, int& hit, int& crit)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
@@ -8682,6 +8749,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 	if (a.team == TEAM_PLAYER && d.team == TEAM_ENEMY) {
 		int pct = FoeMasteryPct(FoeKills(d.monster));
 		if (pct > 0) dm *= (100 + pct) / 100.f;
+		if (d.boss) dm *= BossTrashKeep(b);
 	}
 	{
 		int el = AttackElem(a, skill);
@@ -8888,11 +8956,16 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	}
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	f.hits = sd ? max(1, sd->hits) : ((UnitStat(a, S_AGI) - UnitStat(d, S_AGI) >= 5) ? 2 : 1);
+	if (b.sweep == TAC_VAR_RING && a.team == TEAM_ENEMY && a.boss) {
+		int heal = sd && (sd->kind == SK_HEAL || sd->kind == SK_BUFF || sd->kind == SK_PASSIVE);
+		if (!heal) f.hits += 1;
+	}
 	bool single = !sd || sd->area == 0;
 	f.canCounter = single && a.team != d.team && CanCounter(b, d, a);
 	if (f.canCounter) {
 		StrikeCalc(b, d, a, -1, f.cdmg, f.chit, f.ccrit);
 		f.chits = (UnitStat(d, S_AGI) - UnitStat(a, S_AGI) >= 5) ? 2 : 1;
+		if (b.sweep == TAC_VAR_RING && d.team == TEAM_ENEMY && d.boss) f.chits += 1;
 	}
 }
 
@@ -9467,11 +9540,33 @@ int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 		frac = (double)dmg / (double)hp;
 		if (frac > 1.0) frac = 1.0;
 	}
-	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
-	double e = (8.0 + (double)stage * 0.48) * (0.38 + 0.32 * frac) * lvK;
-	if (d.boss) e *= 1.25;
+	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。
+	   序盤は従来の傾き。体力を厚くした中盤以降は行動数が減るので、ステージに合わせて底を上げる。
+	   ☆×3と人型×5は付与側。ボスは雑魚より厚く、人型の5倍までは行かない。 */
+	double slope = 0.48;
+	if (stage > 30) {
+		double extra = (double)(stage - 30) * 0.0065;
+		if (extra > 1.85) extra = 1.85;
+		slope += extra;
+	}
+	double e = (8.0 + (double)stage * slope) * (0.40 + 0.36 * frac) * lvK;
+	if (d.boss) e *= 2.4;
 	if (stage < 16) e *= 1.0 + (16 - stage) * 0.15;
 	// ラッキー☆の×3は AwardExp / Preview 側で明示適用（ここだと見積と実付与の差が分かりにくい）。
+	if (e < 1.0) return 1;
+	if (e > 2000000000.0) return 2000000000;
+	return (int)(e + 0.5);
+}
+
+int ExpForSupport(int stage)
+{
+	if (stage < 1) stage = 1;
+	double e = 16.0 + (double)stage * 0.5;
+	if (stage > 30) {
+		double m = 1.0 + (double)(stage - 30) * 0.0045;
+		if (m > 3.2) m = 3.2;
+		e *= m;
+	}
 	if (e < 1.0) return 1;
 	if (e > 2000000000.0) return 2000000000;
 	return (int)(e + 0.5);
@@ -11688,6 +11783,123 @@ static void EnsureFootRoutes(Battle& b)
 	}
 }
 
+static void ApplySpecialRoster(Battle& b, Rng& r, int stage)
+{
+	if (b.sweep == TAC_VAR_RAGE) {
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || u.team != TEAM_ENEMY) continue;
+			u.ch.stat[S_HP] *= 2;
+			if (u.ch.stat[S_HP] < 1) u.ch.stat[S_HP] = 1;
+			u.hp = u.ch.stat[S_HP];
+			u.ch.stat[S_STR] = u.ch.stat[S_STR] * 3 / 2;
+			u.ch.stat[S_MAG] = u.ch.stat[S_MAG] * 3 / 2;
+			u.ch.stat[S_DEF] = max(1, u.ch.stat[S_DEF] / 2);
+			u.ch.stat[S_RES] = max(1, u.ch.stat[S_RES] / 2);
+		}
+	} else if (b.sweep == TAC_VAR_RING) {
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (u.team != TEAM_ENEMY) continue;
+			u.alive = 0;
+			u.hp = 0;
+		}
+		b.RebuildOcc();
+		int cx = MAPN / 2, cz = MAPN / 2, found = 0;
+		for (int rad = 0; rad < MAPN && !found; rad++) {
+			for (int dz = -rad; dz <= rad && !found; dz++) for (int dx = -rad; dx <= rad && !found; dx++) {
+				if (max(abs(dx), abs(dz)) != rad) continue;
+				int x = MAPN / 2 + dx, z = MAPN / 2 + dz;
+				if (!Map::In(x, z)) continue;
+				const Cell& c = b.map.At(x, z);
+				if (c.t == T_VOID || c.t == T_CHASM || TerrainInfo(c.t).costFoot >= 99) continue;
+				cx = x; cz = z; found = 1;
+			}
+		}
+		int placed = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			Unit& u = b.u[i];
+			if (!u.alive || u.team != TEAM_PLAYER) continue;
+			int px = cx, pz = cz, ok = 0;
+			for (int rad = 0; rad < 8 && !ok; rad++) {
+				for (int dz = -rad; dz <= rad && !ok; dz++) for (int dx = -rad; dx <= rad && !ok; dx++) {
+					if (max(abs(dx), abs(dz)) != rad) continue;
+					int x = cx + dx, z = cz + dz;
+					if (!Map::In(x, z)) continue;
+					int busy = 0;
+					for (int p = 0; p < b.nUnits; p++) if (b.u[p].alive && b.u[p].team == TEAM_PLAYER && b.u[p].x == x && b.u[p].z == z) busy = 1;
+					if (busy && !(x == u.x && z == u.z)) continue;
+					const Cell& c = b.map.At(x, z);
+					if (c.t == T_VOID || c.t == T_CHASM || TerrainInfo(c.t).costFoot >= 99) continue;
+					px = x; pz = z; ok = 1;
+				}
+			}
+			u.x = px; u.z = pz;
+			u.deck = 0;
+			if (Map::In(px, pz)) {
+				const Cell& c = b.map.At(px, pz);
+				int best = 0, bestH = 99999;
+				int nL = CellLayN(c);
+				for (int L = 0; L < nL; L++) {
+					if (TerrainInfo(LayerTr(c, L)).costFoot >= 99) continue;
+					int h = LayerHt(c, L);
+					if (h < bestH) { bestH = h; best = L; }
+				}
+				u.deck = best;
+			}
+			placed++;
+		}
+		(void)placed;
+		b.RebuildOcc();
+		int made = 0;
+		for (int k = 0; k < 6 && b.nUnits < MAX_UNITS; k++) {
+			float ang = (float)k * 6.2831853f / 6.f;
+			int gx = cx + (int)floorf(cosf(ang) * 6.f + 0.5f);
+			int gz = cz + (int)floorf(sinf(ang) * 6.f + 0.5f);
+			if (!Map::In(gx, gz)) continue;
+			int id = -1;
+			for (int t = 0; t < 16 && id < 0; t++) {
+				int sp = (t & 1) ? 1 : 2;
+				int cand = PickMonsterOfSpan(stage, sp, 1, r);
+				if (cand < 0) continue;
+				if (MonsterSpan(MonsterInfo(cand), 1) > 2) continue;
+				id = cand;
+			}
+			if (id < 0) continue;
+			int refH = LayerHt(b.map.At(gx, gz), 0);
+			int px = gx, pz = gz;
+			int span = MonsterSpan(MonsterInfo(id), 1);
+			if (span < 1) span = 1;
+			if (span > 2) span = 1;
+			if (!FitSpanAt(b, gx, gz, refH, span, &px, &pz)) {
+				if (!FitSpanAt(b, gx, gz, refH, 1, &px, &pz)) continue;
+			}
+			Unit& u = b.u[b.nUnits];
+			MakeEnemy(u, id, max(1, StageEnemyLevel(stage) + 3), 1, r);
+			if (u.span > 2) continue;
+			u.ch.stat[S_HP] *= 2;
+			u.hp = u.ch.stat[S_HP];
+			u.hpShow = (float)u.hp;
+			u.alert = 1;
+			u.x = px;
+			u.z = pz;
+			u.deck = MatchDeckAt(b.map.At(px, pz), refH, 0);
+			u.face = atan2f((float)(cx - px), (float)(cz - pz));
+			u.ct = r.Range(200, 700);
+			b.nUnits++;
+			b.RebuildOcc();
+			made++;
+		}
+		(void)made;
+	} else if (b.sweep == TAC_VAR_FLOOD) {
+		b.stampedeLine = MapIsSpiral(b.map) ? 1 : 99;
+	} else if (b.sweep == TAC_VAR_WAVE) {
+		b.stampedeLeft = 2;
+		b.stampedeLine = 0;
+		b.stampedeShow = 0;
+	}
+}
+
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
@@ -11791,6 +12003,9 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		if (stage < 21) kind = TAC_VAR_NONE;
 	}
 	if (b.map.nGrp <= 0) kind = TAC_VAR_NONE;
+	// スタンピードは seed%16==3。こちらは ==1 を7種で分ける。掃討・既存の特殊戦とは重ならない。
+	if (kind == TAC_VAR_NONE && stage >= 18 && (seed % 16u) == 1u)
+		kind = TAC_VAR_RAGE + (int)((seed / 16u) % 7u);
 	if (kind == TAC_VAR_BOSS) {
 		int has = 0;
 		for (int g = 0; g < b.map.nGrp; g++) if (b.map.grp[g].boss && b.map.grp[g].n > 0) has = 1;
@@ -12194,6 +12409,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			b.stampedeLine = line;
 		}
 	}
+	ApplySpecialRoster(b, r, stage);
 }
 
 static int StampedeSpot(Battle& b, int ui, int ax, int az, int ally, int radMax, int needRange)
@@ -13483,6 +13699,39 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level, int showcas
 		p.moveX = u.x; p.moveZ = u.z; p.moveL = u.deck;
 	} else {
 		p.moveX = bestX; p.moveZ = bestZ; p.moveL = bestL;
+	}
+}
+
+void FieldNudgeAi(const Battle& b, int ui, AiPlan& p, Rng& r)
+{
+	if (ui < 0 || ui >= b.nUnits) return;
+	const Unit& u = b.u[ui];
+	if (!u.alive || u.team != TEAM_ENEMY) return;
+	if (b.sweep != TAC_VAR_VEIL && b.sweep != TAC_VAR_DUST) return;
+	if (b.sweep == TAC_VAR_DUST && p.target >= 0 && p.target < b.nUnits) {
+		const Unit& t = b.u[p.target];
+		int out = 1;
+		if (t.alive && t.team == TEAM_PLAYER) {
+			int s = UnitSpan(u); if (s < 1) s = 1;
+			int sp = UnitSpan(t); if (sp < 1) sp = 1;
+			for (int dz = 0; dz < s && out; dz++) for (int dx = 0; dx < s && out; dx++)
+				for (int pz = 0; pz < sp && out; pz++) for (int px = 0; px < sp && out; px++)
+					if (max(abs((u.x + dx) - (t.x + px)), abs((u.z + dz) - (t.z + pz))) <= 4) out = 0;
+		}
+		if (out) p.target = -1;
+	}
+	if (p.moveX != u.x || p.moveZ != u.z) return;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	int order[4] = { 0, 1, 2, 3 };
+	for (int i = 0; i < 4; i++) {
+		int j = r.Range(0, 3);
+		int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+	}
+	for (int k = 0; k < 4; k++) {
+		int nx = u.x + dx[order[k]], nz = u.z + dz[order[k]];
+		if (!FootFits(b, ui, nx, nz)) continue;
+		p.moveX = nx; p.moveZ = nz; p.moveL = u.deck;
+		return;
 	}
 }
 

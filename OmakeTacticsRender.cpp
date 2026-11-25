@@ -1517,12 +1517,12 @@ BOOL Renderer::CreateShaders()
 					if (FAILED(m_dev->CreateShaderResourceView(m_wxGpuSB[wi], &sd, &m_wxGpuSRV[wi]))) m_wxGpuSRV[wi] = NULL;
 				}
 				D3D11_BUFFER_DESC ad = {};
-				ad.ByteWidth = WX_GPU_ACT * 16;
+				ad.ByteWidth = WX_GPU_ACT * 32;
 				ad.Usage = D3D11_USAGE_DYNAMIC;
 				ad.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 				ad.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 				ad.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-				ad.StructureByteStride = 16;
+				ad.StructureByteStride = 32;
 				g_wxActSlot = 0;
 				for (int wi = 0; wi < TAC_WXA_RING; wi++) {
 					g_wxActRing[wi] = NULL;
@@ -13056,6 +13056,11 @@ void Renderer::ClearCoverGhost()
 	m_coverGhost = 0;
 }
 
+void Renderer::SetVeilMask(int on)
+{
+	if (on) m_fcb.sight[1] = -1.f;
+}
+
 void Renderer::SetSight(const float* xz, int n, float radius)
 {
 	if (n < 0) n = 0;
@@ -15147,8 +15152,8 @@ void Renderer::TickWxGpu(float dt, int wx, const V3& fwd, const V3& side, const 
 	}
 	void* actp = mapWx(m_wxActSB, m_wxGpuN <= 0);
 	if (!actp) return;
-	memset(actp, 0, WX_GPU_ACT * 16);
-	if (act4 && nAct > 0) memcpy(actp, act4, (size_t)nAct * 16);
+	memset(actp, 0, WX_GPU_ACT * 32);
+	if (act4 && nAct > 0) memcpy(actp, act4, (size_t)nAct * 32);
 	m_ctx->Unmap(m_wxActSB, 0);
 	static int s_hgtOk = 0;
 	static ID3D11Buffer* s_hgtBuf = NULL;

@@ -969,6 +969,7 @@ int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
 int  ExpForHeal(const Unit& a, const Unit& d, int healed, int stage);
+int  ExpForSupport(int stage);
 long long ExpShareAoe(long long e, int nHit);
 int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
 int  SkillMpCost(int maxMp, int skill);
@@ -1016,8 +1017,24 @@ enum {
 	TAC_VAR_AMBUSH = 7,
 	TAC_VAR_TWIN = 8,
 	TAC_VAR_VAULT = 9,
-	TAC_VAR_BLESS = 10
+	TAC_VAR_BLESS = 10,
+	TAC_VAR_RAGE = 11,
+	TAC_VAR_RING = 12,
+	TAC_VAR_FALL = 13,
+	TAC_VAR_FLOOD = 14,
+	TAC_VAR_WAVE = 15,
+	TAC_VAR_VEIL = 16,
+	TAC_VAR_DUST = 17
 };
+inline int TacFloodWet(const Battle& b, int x, int z, int layer)
+{
+	if (b.sweep != TAC_VAR_FLOOD || b.stampedeLine <= 0) return 0;
+	if (!MapIsSpiral(b.map)) return 1;
+	if (!Map::In(x, z)) return 0;
+	const Cell& c = b.map.At(x, z);
+	if (!LayerOn(c, layer)) layer = 0;
+	return LayerHt(c, layer) <= b.stampedeLine;
+}
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
 int TacSpiralAuditRun(const wchar_t* path);
 int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
@@ -1054,6 +1071,7 @@ struct AiPlan {
 	int wild;         // 0=通常 1=混乱（敵味方問わず） 2=自分を攻撃
 };
 void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r, int level = 2, int showcase = 0);
+void FieldNudgeAi(const Battle& b, int ui, AiPlan& p, Rng& r);
 void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------

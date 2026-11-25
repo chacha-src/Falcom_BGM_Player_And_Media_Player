@@ -1198,6 +1198,10 @@ void Game::ApplyStageResume()
 	TacSnap* s = &g_snapLoad;
 	m_b = s->b;
 	m_b.RebuildOcc();
+	memset(m_seen, 0, sizeof(m_seen));
+	m_fieldClock = 0.f;
+	m_wave = 0.f;
+	m_waveStr = m_waveH = m_waveHit = 0;
 	m_rng.s = s->rng ? s->rng : 1;
 	m_battleStage = s->stage;
 	for (int i = 0; i < 8; i++) m_save.itemN[i] = s->itemN[i];
@@ -1611,6 +1615,10 @@ void Game::ApplyStageStart(int stage)
 	RollMapSeed(stage, FALSE);
 	DWORD seed = m_mapSeed;
 	SetupBattle(m_b, stage, seed, chars, idx, n, m_themeSel);
+	memset(m_seen, 0, sizeof(m_seen));
+	m_fieldClock = 0.f;
+	m_wave = 0.f;
+	m_waveStr = m_waveH = m_waveHit = 0;
 	if (m_b.sweep != TAC_VAR_MIST && m_b.sweep != TAC_VAR_RAID && (m_homeWx >= 0 || m_homeHr >= 0)) {
 		int wx = m_homeWx >= 0 ? m_homeWx : TacWx(m_b.weather);
 		int hr = m_homeHr >= 0 ? m_homeHr : TacHour(m_b.weather);
@@ -1742,6 +1750,13 @@ void Game::ApplyStageStart(int stage)
 	else if (m_b.sweep == TAC_VAR_TWIN) { title = TX_BT_TWIN; titleCol = RGBA8(230, 120, 160); }
 	else if (m_b.sweep == TAC_VAR_VAULT) { title = TX_BT_VAULT; titleCol = RGBA8(230, 200, 90); }
 	else if (m_b.sweep == TAC_VAR_BLESS) { title = TX_BT_BLESS; titleCol = RGBA8(160, 220, 190); }
+	else if (m_b.sweep == TAC_VAR_RAGE) { title = TX_BT_RAGE; titleCol = RGBA8(255, 90, 50); }
+	else if (m_b.sweep == TAC_VAR_RING) { title = TX_BT_RING; titleCol = RGBA8(255, 170, 70); }
+	else if (m_b.sweep == TAC_VAR_FALL) { title = TX_BT_FALL; titleCol = RGBA8(180, 140, 110); }
+	else if (m_b.sweep == TAC_VAR_FLOOD) { title = TX_BT_FLOOD; titleCol = RGBA8(80, 160, 230); }
+	else if (m_b.sweep == TAC_VAR_WAVE) { title = TX_BT_WAVE; titleCol = RGBA8(60, 140, 220); }
+	else if (m_b.sweep == TAC_VAR_VEIL) { title = TX_BT_VEIL; titleCol = RGBA8(210, 180, 130); }
+	else if (m_b.sweep == TAC_VAR_DUST) { title = TX_BT_DUST; titleCol = RGBA8(190, 160, 100); }
 	else if (m_b.stampede) { title = TX_BT_STAMPEDE; titleCol = RGBA8(255, 150, 70); }
 	else if (MapIsSpiral(m_b.map)) { title = TX_BT_SPIRAL; titleCol = RGBA8(140, 210, 230); }
 	if (title) {
@@ -1877,6 +1892,335 @@ void Game::EndBattle(int victory)
 	m_camPitch = .5f;
 }
 
+BOOL Game::VeilShows(int x, int z) const
+{
+	if (m_b.sweep != TAC_VAR_VEIL) return TRUE;
+	if (!Map::In(x, z)) return FALSE;
+	if (m_seen[z][x]) return TRUE;
+	if (m_ovMove[z][x] || m_ovAtk[z][x]) return TRUE;
+	static const int dd[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+	for (int k = 0; k < 4; k++) {
+		int nx = x + dd[k][0], nz = z + dd[k][1];
+		if (!Map::In(nx, nz)) continue;
+		if (m_ovMove[nz][nx] || m_ovAtk[nz][nx]) return TRUE;
+	}
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& p = m_b.u[i];
+		if (!p.alive || p.team != TEAM_PLAYER) continue;
+		int s = UnitSpan(p);
+		if (s < 1) s = 1;
+		if (x >= p.x && z >= p.z && x < p.x + s && z < p.z + s) return TRUE;
+	}
+	float front = (m_fieldClock - 3.f) * 1.7f;
+	if (front <= 0.f) return TRUE;
+	int rim = min(min(x, MAPN - 1 - x), min(z, MAPN - 1 - z));
+	return (float)rim > front;
+}
+
+BOOL Game::FieldHides(int ui) const
+{
+	if (ui < 0 || ui >= m_b.nUnits) return FALSE;
+	const Unit& u = m_b.u[ui];
+	if (!u.alive || u.hp <= 0 || u.team != TEAM_ENEMY) return FALSE;
+	if (m_b.sweep == TAC_VAR_VEIL) return !VeilShows(u.x, u.z);
+	if (m_b.sweep != TAC_VAR_DUST) return FALSE;
+	int best = 99;
+	int s = UnitSpan(u);
+	if (s < 1) s = 1;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& p = m_b.u[i];
+		if (!p.alive || p.team != TEAM_PLAYER) continue;
+		int sp = UnitSpan(p);
+		if (sp < 1) sp = 1;
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+			for (int pz = 0; pz < sp; pz++) for (int px = 0; px < sp; px++) {
+				int d = max(abs((u.x + dx) - (p.x + px)), abs((u.z + dz) - (p.z + pz)));
+				if (d < best) best = d;
+			}
+	}
+	return best > 4;
+}
+
+void Game::CommitCollapse()
+{
+	if (m_b.sweep != TAC_VAR_FALL) return;
+	if (m_phase == PH_MOVING || m_phase == PH_E_MOVE) return;
+	static unsigned char keep[MAPN][MAPN];
+	memset(keep, 0, sizeof(keep));
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& u = m_b.u[i];
+		if (!u.alive) continue;
+		int s = UnitSpan(u);
+		if (s < 1) s = 1;
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+			int x = u.x + dx, z = u.z + dz;
+			if (Map::In(x, z)) keep[z][x] = 1;
+		}
+	}
+	auto stepOk = [&](int x, int z) -> int {
+		if (!Map::In(x, z)) return 0;
+		const Cell& c = m_b.map.At(x, z);
+		int n = CellLayN(c);
+		for (int L = 0; L < n; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM || tr == T_WATER || tr == T_LAVA) continue;
+			if (TerrainInfo(tr).costFoot >= 99) continue;
+			return 1;
+		}
+		return 0;
+	};
+	int boss = -1, bossD = 9999;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& u = m_b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY || !u.boss) continue;
+		int d = 0;
+		for (int p = 0; p < m_b.nUnits; p++) if (m_b.u[p].alive && m_b.u[p].team == TEAM_PLAYER)
+			d += abs(m_b.u[p].x - u.x) + abs(m_b.u[p].z - u.z);
+		if (d < bossD) { bossD = d; boss = i; }
+	}
+	if (boss >= 0) {
+		static int q[MAPN * MAPN], par[MAPN * MAPN];
+		memset(par, 0xFF, sizeof(par));
+		int qh = 0, qt = 0;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.team != TEAM_PLAYER) continue;
+			if (!stepOk(u.x, u.z)) continue;
+			int id = u.z * MAPN + u.x;
+			if (par[id] != -2 && par[id] < 0) {
+				par[id] = -2;
+				if (qt < MAPN * MAPN) q[qt++] = id;
+			}
+		}
+		int hit = -1;
+		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+		while (qh < qt) {
+			int id = q[qh++];
+			int x = id % MAPN, z = id / MAPN;
+			if (x >= m_b.u[boss].x && z >= m_b.u[boss].z && x < m_b.u[boss].x + UnitSpan(m_b.u[boss]) && z < m_b.u[boss].z + UnitSpan(m_b.u[boss])) {
+				hit = id;
+				break;
+			}
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (!stepOk(nx, nz)) continue;
+				int nid = nz * MAPN + nx;
+				if (par[nid] != -1) continue;
+				par[nid] = id;
+				if (qt < MAPN * MAPN) q[qt++] = nid;
+			}
+		}
+		while (hit >= 0) {
+			keep[hit / MAPN][hit % MAPN] = 1;
+			if (par[hit] < 0) break;
+			hit = par[hit];
+		}
+	}
+	int cx[160], cz[160], nc = 0, seen = 0;
+	for (int z = 1; z < MAPN - 1; z++) for (int x = 1; x < MAPN - 1; x++) {
+		if (keep[z][x] || !stepOk(x, z)) continue;
+		const Cell& c = m_b.map.At(x, z);
+		if (c.gimm || c.t == T_DOOR) continue;
+		seen++;
+		if (nc < 160) { cx[nc] = x; cz[nc] = z; nc++; }
+		else if (m_rng.Range(0, seen) == 0) {
+			int k = m_rng.Range(0, nc - 1);
+			cx[k] = x; cz[k] = z;
+		}
+	}
+	int want = 5;
+	int fell = 0;
+	for (int n = 0; n < nc && fell < want; n++) {
+		int j = m_rng.Range(n, nc - 1);
+		int tx = cx[j], tz = cz[j];
+		cx[j] = cx[n]; cz[j] = cz[n];
+		Cell& c = m_b.map.At(tx, tz);
+		int top = CellLayN(c) - 1;
+		if (top < 0) continue;
+		float y0 = m_b.map.WalkY(tx, tz, top);
+		float sink = -40.f;
+		if (c.nLay > 1 && top > 0) {
+			int lowTr = LayerTr(c, top - 1);
+			if (lowTr != T_VOID && lowTr != T_CHASM) sink = m_b.map.WalkY(tx, tz, top - 1);
+			c.nLay = (BYTE)(c.nLay - 1);
+		} else {
+			c.t = T_VOID;
+			c.prop = 0;
+		}
+		SpawnSlab(tx + 0.5f, y0 + 0.04f, tz + 0.5f, sink);
+		Burst(v3(tx + 0.5f, y0 + 0.2f, tz + 0.5f), 8, 1.1f, 0.05f, 0.45f, 0.62f, 0.55f, 0.46f, 0, 1, 2.f, 0.2f, 0.8f);
+		fell++;
+	}
+	if (fell > 0) {
+		m_r.BuildTerrain(m_b.map);
+		m_shake = max(m_shake, 0.62f);
+		m_quakeT = max(m_quakeT, 0.45f);
+		m_quakeMag = max(m_quakeMag, 0.42f);
+	}
+}
+
+void Game::TickField(float dt)
+{
+	if (m_screen != SC_BATTLE || m_phase == PH_INTRO) {
+		m_fieldClock += dt;
+	} else m_fieldClock += dt;
+	if (m_b.sweep == TAC_VAR_VEIL) {
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.team != TEAM_PLAYER) continue;
+			int s = UnitSpan(u);
+			if (s < 1) s = 1;
+			for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+				int x = u.x + dx, z = u.z + dz;
+				if (Map::In(x, z)) m_seen[z][x] = 1;
+			}
+		}
+		BOOL mine = m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].team == TEAM_PLAYER;
+		if (mine && (m_phase == PH_MOVING || m_phase == PH_P_MOVE)) {
+			for (int i = 0; i < m_pathN; i++) {
+				int x = PackX(m_path[i]), z = PackZ(m_path[i]);
+				if (Map::In(x, z)) m_seen[z][x] = 1;
+			}
+		}
+		if (mine && m_phase == PH_ACTION) {
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) if (m_ovAtk[z][x]) m_seen[z][x] = 1;
+		}
+		FillHideGreen();
+	}
+	if (m_wave > 0.f) {
+		float prev = m_wave;
+		m_wave = max(0.f, m_wave - dt);
+		m_wxFlash = max(m_wxFlash, sinf((1.35f - m_wave) / 1.35f * 3.1415926f) * 0.85f);
+		m_wxFlashCol[0] = 0.62f; m_wxFlashCol[1] = 0.78f; m_wxFlashCol[2] = 1.f;
+		m_shake = max(m_shake, 0.35f);
+		if (m_waveHit == 0 && prev > 0.62f && m_wave <= 0.62f) {
+			m_waveHit = 1;
+			int rad = m_waveStr;
+			if (m_waveStr <= 3) rad = (m_waveStr <= 1) ? 1 : 2;
+			else if (m_waveStr >= 8) rad = 80;
+			for (int i = 0; i < m_b.nUnits; i++) {
+				Unit& u = m_b.u[i];
+				if (!u.alive) continue;
+				if (MapIsSpiral(m_b.map) && Map::In(u.x, u.z)) {
+					const Cell& c = m_b.map.At(u.x, u.z);
+					int L = u.deck;
+					if (!LayerOn(c, L)) L = 0;
+					if (LayerHt(c, L) > m_waveH) continue;
+				}
+				int ox = u.x, oz = u.z;
+				int nx = ox, nz = oz, found = 0;
+				for (int t = 0; t < 48 && !found; t++) {
+					int x = (rad >= 80) ? m_rng.Range(1, MAPN - 2) : ox + m_rng.Range(-rad, rad);
+					int z = (rad >= 80) ? m_rng.Range(1, MAPN - 2) : oz + m_rng.Range(-rad, rad);
+					if (!Map::In(x, z)) continue;
+					if (rad < 80 && max(abs(x - ox), abs(z - oz)) < 1) continue;
+					int s = UnitSpan(u);
+					if (s < 1) s = 1;
+					int ok = 1;
+					int mt = UnitMoveType(u);
+					for (int dz = 0; dz < s && ok; dz++) for (int dx = 0; dx < s && ok; dx++) {
+						int xx = x + dx, zz = z + dz;
+						if (!Map::In(xx, zz)) { ok = 0; break; }
+						for (int p = 0; p < m_b.nUnits; p++) {
+							if (p == i || !m_b.u[p].alive) continue;
+							int sp = UnitSpan(m_b.u[p]);
+							if (sp < 1) sp = 1;
+							if (xx >= m_b.u[p].x && zz >= m_b.u[p].z && xx < m_b.u[p].x + sp && zz < m_b.u[p].z + sp) ok = 0;
+						}
+						const Cell& c = m_b.map.At(xx, zz);
+						int L = u.deck;
+						if (!LayerOn(c, L)) L = 0;
+						int tr = LayerTr(c, L);
+						if (tr == T_VOID || tr == T_CHASM) ok = 0;
+						else if (mt == MV_FLY) { if (!TerrainInfo(tr).flyOk) ok = 0; }
+						else if (TerrainInfo(tr).costFoot >= 99) ok = 0;
+					}
+					if (ok) { nx = x; nz = z; found = 1; }
+				}
+				if (!found) continue;
+				u.x = nx; u.z = nz;
+				if (Map::In(nx, nz)) {
+					const Cell& c = m_b.map.At(nx, nz);
+					if (!LayerOn(c, u.deck)) u.deck = 0;
+				}
+				Burst(v3(ox + 0.5f, u.py + 0.4f, oz + 0.5f), 10, 2.2f, 0.08f, 0.6f, 0.55f, 0.75f, 1.f, 0, 1, 4.f, 0.6f, 1.4f);
+			}
+			m_b.RebuildOcc();
+			m_shake = max(m_shake, 1.1f);
+		}
+	}
+	if (m_parts.size() > 3400) return;
+	float camx = m_camTarget.x, camz = m_camTarget.z;
+	if (m_b.sweep == TAC_VAR_RAGE) {
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.team != TEAM_ENEMY) continue;
+			if (((i + (int)(m_fieldClock * 4.f)) % 3) != 0) continue;
+			float dx = u.px - camx, dz = u.pz - camz;
+			if (dx * dx + dz * dz > 26.f * 26.f) continue;
+			Burst(v3(u.px, u.py + m_act[i].height * 0.55f, u.pz), 4, 0.7f, 0.09f, 0.45f, 1.f, 0.28f, 0.08f, 0, 1, -0.4f, 0.8f, 1.1f);
+		}
+	}
+	if (m_b.sweep == TAC_VAR_FLOOD) {
+		m_wetGlobal = max(m_wetGlobal, 0.82f);
+		int drops = 0;
+		for (int z = 0; z < MAPN && drops < 18; z++) for (int x = 0; x < MAPN && drops < 18; x++) {
+			if (!TacFloodWet(m_b, x, z, 0) && !MapIsSpiral(m_b.map)) continue;
+			if (MapIsSpiral(m_b.map) && !TacFloodWet(m_b, x, z, 0)) continue;
+			int edge = 0;
+			static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (!Map::In(nx, nz) || m_b.map.At(nx, nz).t == T_VOID || m_b.map.At(nx, nz).t == T_CHASM) edge = 1;
+			}
+			if (!edge && ((x * 3 + z * 5) % 17) != ((int)m_fieldClock % 17)) continue;
+			float dxc = (x + 0.5f) - camx, dzc = (z + 0.5f) - camz;
+			if (dxc * dxc + dzc * dzc > 22.f * 22.f) continue;
+			float y = m_b.map.WalkY(x, z, 0);
+			Burst(v3(x + 0.5f, y + 2.8f, z + 0.5f), 2, 0.35f, 0.05f, 0.7f, 0.45f, 0.68f, 1.f, 0, 1, 9.f, 1.4f, -0.6f);
+			drops++;
+		}
+	}
+	if (m_b.sweep == TAC_VAR_DUST || m_b.sweep == TAC_VAR_VEIL) {
+		if (((int)(m_fieldClock * 8.f) & 1) == 0) {
+			float y = m_camTarget.y + 1.2f;
+			Burst(v3(camx + m_rng.F(-8.f, 8.f), y, camz + m_rng.F(-8.f, 8.f)), 3, 1.4f, 0.07f, 0.8f, 0.78f, 0.68f, 0.46f, 0, 1, 0.2f, 1.6f, 0.3f);
+		}
+	}
+	if ((m_fieldClock - floorf(m_fieldClock)) > 0.08f) return;
+	unsigned char wn[256];
+	unsigned char ax0[256], az0[256], ax1[256], az1[256];
+	memset(wn, 0, sizeof(wn));
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m_b.map.At(x, z);
+		if (c.gimm != GM_WARP) continue;
+		int id = c.gparam;
+		if (!wn[id]) { ax0[id] = (unsigned char)x; az0[id] = (unsigned char)z; wn[id] = 1; }
+		else if (wn[id] == 1) { ax1[id] = (unsigned char)x; az1[id] = (unsigned char)z; wn[id] = 2; }
+	}
+	int sparks = 0;
+	for (int z = 0; z < MAPN && sparks < 24; z++) for (int x = 0; x < MAPN && sparks < 24; x++) {
+		const Cell& c = m_b.map.At(x, z);
+		if (!c.gimm) continue;
+		float dx = (x + 0.5f) - camx, dz = (z + 0.5f) - camz;
+		if (dx * dx + dz * dz > 18.f * 18.f) continue;
+		float y = m_b.map.WalkY(x, z, 0) + 0.08f;
+		V3 p = v3(x + 0.5f, y, z + 0.5f);
+		if (c.gimm == GM_WARP) {
+			int id = c.gparam;
+			int src = (wn[id] < 2) || (x == ax0[id] && z == az0[id]);
+			if (src) Burst(p, 3, 0.55f, 0.035f, 0.55f, 0.75f, 0.9f, 1.f, 0, 1, -1.2f, 2.4f, 1.6f);
+			else Burst(v3(p.x, p.y + 1.1f, p.z), 3, 0.45f, 0.035f, 0.5f, 0.65f, 0.8f, 1.f, 0, 1, 2.2f, 2.2f, -0.4f);
+		} else if (c.gimm == GM_HEAL) Burst(p, 2, 0.35f, 0.04f, 0.5f, 0.35f, 1.f, 0.55f, 0, 1, -0.8f, 0.4f, 1.2f);
+		else if (c.gimm == GM_MIGHT) Burst(p, 2, 0.4f, 0.04f, 0.45f, 1.f, 0.82f, 0.25f, 0, 1, -0.3f, 0.2f, 1.f);
+		else if (c.gimm == GM_CHEST) Burst(p, 2, 0.25f, 0.03f, 0.4f, 1.f, 0.9f, 0.4f, 0, 1, -0.2f, 0.1f, 0.8f);
+		else if (c.gimm == GM_LEVER) Burst(p, 2, 0.3f, 0.03f, 0.4f, 0.3f, 0.95f, 0.95f, 0, 1, -0.4f, 0.6f, 0.6f);
+		else if (c.gimm == GM_DROP) Burst(p, 2, 0.5f, 0.04f, 0.35f, 1.f, 0.45f, 0.12f, 0, 1, 1.5f, 0.2f, 0.2f);
+		else if (c.gimm == GM_FENCE) Burst(p, 1, 0.2f, 0.03f, 0.35f, 0.72f, 0.62f, 0.4f, 0, 0, 1.2f, 0.f, 0.2f);
+		sparks++;
+	}
+}
+
 // ============================================================ 手番
 void Game::BeginTurn()
 {
@@ -1967,6 +2311,21 @@ void Game::BeginTurn()
 	m_cmdFaced = 0;
 	m_target = -1;
 	m_pathN = 0;
+	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_FLOOD && MapIsSpiral(m_b.map)) {
+		m_b.stampedeLine += 2;
+		if (m_b.stampedeLine > 240) m_b.stampedeLine = 240;
+	}
+	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_FALL) CommitCollapse();
+	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_WAVE && m_wave <= 0.f) {
+		if (m_b.stampedeLeft > 0) m_b.stampedeLeft--;
+		if (m_b.stampedeLeft <= 0) {
+			m_wave = 1.35f;
+			m_waveStr = m_rng.Range(1, 10);
+			m_waveH = m_rng.Range(1, 10);
+			m_waveHit = 0;
+			m_b.stampedeLeft = m_rng.Range(2, 4);
+		}
+	}
 	ComputeReach(m_b, ui, m_reach);
 	m_camPan = v3(0, 0, 0);
 	wchar_t nm[64];
@@ -1996,6 +2355,7 @@ void Game::BeginTurn()
 	}
 	if (u.confuse > 0) {
 		ConfusePlan(m_b, ui, m_ai, m_rng);
+		FieldNudgeAi(m_b, ui, m_ai, m_rng);
 		if (u.confuse > 0) u.confuse--;
 		AddPopup(hp, TT(TX_BT_CONFUSE), RGBA8(255, 150, 220), 1, MSG_ORBIT, 0, 0, 2);
 		TacSfx(TS_CONFUSE);
@@ -2009,6 +2369,7 @@ void Game::BeginTurn()
 		m_ai.wild = 0;
 	} else {
 		AiDecide(m_b, ui, m_ai, m_rng, TacAi(m_save));
+		FieldNudgeAi(m_b, ui, m_ai, m_rng);
 		m_phase = PH_E_SHOW;
 	}
 	m_phaseT = 0;
@@ -2076,6 +2437,7 @@ void Game::DemoDrive(float dt)
 	if (m_phase == PH_P_MOVE) {
 		if (m_demoAct == 0) {
 			AiDecide(m_b, m_cur, m_ai, m_rng, 2, 1);
+			FieldNudgeAi(m_b, m_cur, m_ai, m_rng);
 			m_demoAct = 1;
 			m_cx = u.x; m_cz = u.z; m_cLayer = u.deck; m_cursorValid = TRUE;
 		}
@@ -3863,6 +4225,7 @@ void Game::UpdateHover()
 		if (m_hoverUnit < 0 && m_cursorValid && Map::In(m_cx, m_cz))
 			m_hoverUnit = m_b.UnitAt(m_cx, m_cz);
 		if (m_hoverUnit >= 0 && !m_b.u[m_hoverUnit].alive && m_b.u[m_hoverUnit].team != TEAM_PLAYER) m_hoverUnit = -1;
+		if (m_hoverUnit >= 0 && FieldHides(m_hoverUnit)) m_hoverUnit = -1;
 		if (m_hoverUnit >= 0 && m_cursorValid && Map::In(m_cx, m_cz)) {
 			const Unit& hu = m_b.u[m_hoverUnit];
 			int s = UnitSpan(hu);
@@ -4062,6 +4425,7 @@ BOOL Game::CanTarget(int ui, int t, int skill) const
 		return dist + add >= rmin && dist + add <= rmax;
 	}
 	if (!d.alive) return FALSE;
+	if (u.team == TEAM_PLAYER && d.team == TEAM_ENEMY && FieldHides(t)) return FALSE;
 	if (skill < 0) {
 		if (d.team == u.team) return FALSE;
 		return InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), d, true);
@@ -6623,7 +6987,7 @@ void Game::AwardExp()
 		if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_HEAL) {
 			int healed = -s.dmg;
 			e = ExpForHeal(a, d, healed, m_battleStage);
-		} else if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_BUFF) e = 16 + m_battleStage / 2;
+		} else if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_BUFF) e = ExpForSupport(m_battleStage);
 		else if (!s.hit) e = 1;
 		else {
 			e = ExpForAction(a, d, s.dmg, m_battleStage);
@@ -7014,7 +7378,10 @@ void Game::UpdateUnitsVisual(float dt)
 void Game::UpdateCamera(float dt)
 {
 	V3 focus = m_camGoal;
-	if (m_cur >= 0 && m_phase != PH_INTRO) {
+	BOOL blindFollow = (m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].team == TEAM_ENEMY
+		&& (m_b.sweep == TAC_VAR_VEIL || m_b.sweep == TAC_VAR_DUST));
+	if (blindFollow) focus = m_camTarget;
+	else if (m_cur >= 0 && m_phase != PH_INTRO) {
 		const Unit& u = m_b.u[m_cur];
 		focus = v3(u.px, u.py, u.pz);
 		if (m_phase == PH_ACTION && m_seqPrimary >= 0 && m_seqPrimary != m_cur) {
@@ -7104,7 +7471,8 @@ void Game::UpdateBattle(float dt)
 	case PH_E_SHOW: {
 		float wait = 0.85f * TacPaceTime(m_save);
 		if (wait < 0.04f) wait = 0.04f;
-		if (m_cur >= 0 && m_cur < m_b.nUnits) {
+		BOOL blind = (m_b.sweep == TAC_VAR_VEIL || m_b.sweep == TAC_VAR_DUST);
+		if (m_cur >= 0 && m_cur < m_b.nUnits && !blind) {
 			const Unit& u = m_b.u[m_cur];
 			float f = Clampf(m_phaseT / max(0.05f, wait), 0.f, 1.f);
 			float e = f * f * (3.f - 2.f * f);
@@ -7160,6 +7528,7 @@ void Game::UpdateBattle(float dt)
 	default: break;
 	}
 	if (m_screen != SC_BATTLE) return;
+	TickField(dt);
 	if (m_demo == 2) DemoDrive(dt);
 	UpdateCamera(dt);
 	if (m_mouseSeen && !m_navMode && !m_demo) UpdateHover();
@@ -7357,6 +7726,7 @@ void Game::DrawBattle3D()
 			sightN++;
 		}
 		m_r.SetSight(sightXz, sightN, (float)TacSightTiles(m_b.weather));
+		if (m_b.sweep == TAC_VAR_VEIL) m_r.SetVeilMask(1);
 	}
 	m_r.SetLight(e.light, m_camTarget, min(30.f, m_camDist * 1.35f + 6.f));
 	int fadeAbove = -1, fadeX = -1, fadeZ = -1;
@@ -7392,6 +7762,7 @@ void Game::DrawBattle3D()
 		return m_r.InView(v3(u.px, u.py + .7f * (float)sp, u.pz), 2.4f * (float)sp);
 	};
 	auto foeGone = [&](int i) -> BOOL {
+		if (FieldHides(i)) return TRUE;
 		const Unit& u = m_b.u[i];
 		if (u.alive || u.team == TEAM_PLAYER) return FALSE;
 		return m_dieT[i] < 0.f || m_dieT[i] > 1.15f;
@@ -7737,6 +8108,12 @@ void Game::DrawBattle3D()
 			dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
 			dp.flash = u.flash;
 			dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
+			if (m_b.sweep == TAC_VAR_RAGE && u.team == TEAM_ENEMY && u.alive) {
+				float p = 0.5f + 0.5f * sinf(m_time * 6.f + (float)i);
+				dp.tint = RGBA8(255, (int)(70 + 50 * p), 36);
+				dp.rim = 1.15f;
+				dp.emissive = 0.85f + 0.45f * p;
+			}
 			if (!u.alive && u.team == TEAM_PLAYER) {
 				dp.tint = RGBA8(176, 196, 222);
 				dp.rim = .22f;
@@ -10399,10 +10776,20 @@ void Game::DrawMinimap(float x, float y, float s, int layer)
 			m_r.HudRect(sx - d * .5f, sy - d * .5f, d, d, RGBA8(8, 10, 18, 214));
 		}
 	}
+	if (m_b.sweep == TAC_VAR_VEIL) {
+		for (int z = z0; z <= z1; z++) for (int xx = x0; xx <= x1; xx++) {
+			if (VeilShows(xx, z)) continue;
+			float sx, sy;
+			toScreen(xx + .5f, z + .5f, sx, sy);
+			if (sx < x - cs || sy < y - cs || sx > x + s + cs || sy > y + s + cs) continue;
+			float d = max(cs * 1.05f, 2.f);
+			m_r.HudRect(sx - d * .5f, sy - d * .5f, d, d, RGBA8(40, 32, 18, 180));
+		}
+	}
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (!u.alive) continue;
-		if (u.team == TEAM_ENEMY && !u.alert && !seenCell(u.x, u.z)) continue;
+		if (u.team == TEAM_ENEMY && (FieldHides(i) || (!u.alert && !seenCell(u.x, u.z)))) continue;
 		int deck = u.deck;
 		if (deck < 0 || deck >= LAY_N || !LayerOn(m_b.map.At(u.x, u.z), deck)) deck = 0;
 		if (deck != layer) continue;
@@ -10536,7 +10923,7 @@ void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nT
 			rawPes += e;
 			counted++;
 		} else if (skill >= 0 && SkillInfo(skill).kind == SK_BUFF) {
-			long long e = 16 + m_battleStage / 2;
+			long long e = ExpForSupport(m_battleStage);
 			if (e < 1) e = 1;
 			rawOpt += e;
 			rawPes += e;
@@ -13007,6 +13394,13 @@ void Game::DrawBattleUi()
 		else if (m_b.sweep == TAC_VAR_TWIN) { varTx = TX_BT_TWIN; varCol = RGBA8(220, 110, 150); varHot = RGBA8(255, 180, 200); }
 		else if (m_b.sweep == TAC_VAR_VAULT) { varTx = TX_BT_VAULT; varCol = RGBA8(220, 190, 80); varHot = RGBA8(255, 230, 150); }
 		else if (m_b.sweep == TAC_VAR_BLESS) { varTx = TX_BT_BLESS; varCol = RGBA8(140, 210, 180); varHot = RGBA8(200, 245, 220); }
+		else if (m_b.sweep == TAC_VAR_RAGE) { varTx = TX_BT_RAGE; varCol = RGBA8(255, 90, 50); varHot = RGBA8(255, 180, 140); }
+		else if (m_b.sweep == TAC_VAR_RING) { varTx = TX_BT_RING; varCol = RGBA8(255, 160, 70); varHot = RGBA8(255, 210, 150); }
+		else if (m_b.sweep == TAC_VAR_FALL) { varTx = TX_BT_FALL; varCol = RGBA8(180, 140, 100); varHot = RGBA8(230, 200, 160); }
+		else if (m_b.sweep == TAC_VAR_FLOOD) { varTx = TX_BT_FLOOD; varCol = RGBA8(80, 150, 220); varHot = RGBA8(170, 210, 255); }
+		else if (m_b.sweep == TAC_VAR_WAVE) { varTx = TX_BT_WAVE; varCol = RGBA8(60, 130, 210); varHot = RGBA8(160, 200, 255); }
+		else if (m_b.sweep == TAC_VAR_VEIL) { varTx = TX_BT_VEIL; varCol = RGBA8(200, 170, 120); varHot = RGBA8(240, 220, 180); }
+		else if (m_b.sweep == TAC_VAR_DUST) { varTx = TX_BT_DUST; varCol = RGBA8(180, 150, 90); varHot = RGBA8(230, 200, 150); }
 		const wchar_t* swp = varTx ? TT(varTx) : NULL;
 		float fs = U(17), sfs = U(13), ifs = U(12);
 		float need = U(42) + m_r.TextWidth(l, fs, 0) + U(18) + m_r.TextWidth(th, sfs, 0);
@@ -13248,7 +13642,7 @@ void Game::DrawBattleUi()
 	}
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
-		if (u.team == TEAM_ENEMY && (!u.alive || u.dissolve >= 1.f || !u.alert)) continue;
+		if (u.team == TEAM_ENEMY && (FieldHides(i) || !u.alive || u.dissolve >= 1.f || !u.alert)) continue;
 		float dx = u.px - m_camTarget.x, dz = u.pz - m_camTarget.z;
 		float barFar = (u.team == TEAM_ENEMY && u.alert) ? 48.f : 28.f;
 		if (u.team != TEAM_PLAYER && dx * dx + dz * dz > barFar * barFar) continue;
@@ -13885,10 +14279,17 @@ void Game::DrawBattleUi()
 		else if (m_b.sweep == TAC_VAR_TWIN) { help = TX_BT_TWIN_HELP; edge = RGBA8(180, 70, 110); ink = RGBA8(255, 210, 220); }
 		else if (m_b.sweep == TAC_VAR_VAULT) { help = TX_BT_VAULT_HELP; edge = RGBA8(180, 150, 50); ink = RGBA8(255, 235, 190); }
 		else if (m_b.sweep == TAC_VAR_BLESS) { help = TX_BT_BLESS_HELP; edge = RGBA8(80, 170, 140); ink = RGBA8(210, 245, 225); }
+		else if (m_b.sweep == TAC_VAR_RAGE) { help = TX_BT_RAGE_HELP; edge = RGBA8(200, 70, 40); ink = RGBA8(255, 210, 180); }
+		else if (m_b.sweep == TAC_VAR_RING) { help = TX_BT_RING_HELP; edge = RGBA8(200, 120, 40); ink = RGBA8(255, 220, 180); }
+		else if (m_b.sweep == TAC_VAR_FALL) { help = TX_BT_FALL_HELP; edge = RGBA8(140, 100, 70); ink = RGBA8(240, 220, 190); }
+		else if (m_b.sweep == TAC_VAR_FLOOD) { help = TX_BT_FLOOD_HELP; edge = RGBA8(50, 110, 180); ink = RGBA8(200, 225, 255); }
+		else if (m_b.sweep == TAC_VAR_WAVE) { help = TX_BT_WAVE_HELP; edge = RGBA8(40, 100, 170); ink = RGBA8(190, 220, 255); }
+		else if (m_b.sweep == TAC_VAR_VEIL) { help = TX_BT_VEIL_HELP; edge = RGBA8(160, 130, 80); ink = RGBA8(245, 230, 200); }
+		else if (m_b.sweep == TAC_VAR_DUST) { help = TX_BT_DUST_HELP; edge = RGBA8(150, 120, 60); ink = RGBA8(240, 220, 180); }
 		float tw = min(U(520.f), max(U(300.f), (float)m_w * .46f));
 		float tx = varX;
 		if (tx + tw > (float)m_w - U(16)) tx = max(U(12.f), (float)m_w - U(16) - tw);
-		float ty = U(78), thb = U(150);
+		float ty = U(78), thb = (m_b.sweep >= TAC_VAR_RAGE) ? U(220) : U(150);
 		m_r.HudPanel(tx, ty, tw, thb, RGBA8(12, 16, 18, 236), edge);
 		m_r.HudTextBox(TT(help), tx + U(14), ty + U(12), tw - U(28), thb - U(22), U(14), ink);
 	}
@@ -13896,6 +14297,11 @@ void Game::DrawBattleUi()
 	else {
 		DrawCombatScreenFx(m_r, m_w, m_h, m_time, m_critScreenT, m_critScreenMax, m_fairyScreenT, m_fairyScreenMax);
 		if (m_flashWhite > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_flashWhite * 140)));
+		if (m_wave > 0.f) {
+			float a = sinf((1.35f - m_wave) / 1.35f * 3.1415926f);
+			if (a < 0.f) a = 0.f;
+			m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(150, 200, 255, (int)(a * 200.f)));
+		}
 	}
 	if (m_fastFwd && (m_phase == PH_E_SHOW || m_phase == PH_E_MOVE || m_phase == PH_ACTION)) m_r.HudText(L"▶▶", (float)m_w - U(210), U(30), U(20), RGBA8(255, 226, 150), 1, 1);
 	if (partyLook >= 0 && !m_statOpen) {

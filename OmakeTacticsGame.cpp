@@ -3986,6 +3986,12 @@ void Game::ShedFeathers(Actor& a, V3 origin, float face, BOOL hard)
 			q.v = v * m_rng.F(0.88f, 1.12f);
 			q.v.x += m_rng.F(-0.12f, 0.12f);
 			q.v.z += m_rng.F(-0.12f, 0.12f);
+			{
+				const TacClimate& clim = TacClimateRead();
+				q.v.x += clim.windX * 0.62f;
+				q.v.z += clim.windZ * 0.62f;
+				q.v.y += clim.lift * 0.16f;
+			}
 			q.max = m_rng.F(hard ? 1.8f : 1.6f, hard ? 3.1f : 2.6f);
 			q.life = q.max * 0.82f;
 			q.size = m_rng.F(hard ? 0.28f : 0.22f, hard ? 0.52f : 0.40f);
@@ -4120,6 +4126,49 @@ void Game::SpawnDebris(V3 p, V3 vel, int kind, int n, float sc, DWORD tint)
 	}
 }
 
+void Game::SpawnSlab(float x, float y, float z, float sink)
+{
+	int slot = -1;
+	float bestLife = 1e9f;
+	for (int i = 0; i < DEBRIS_N; i++) {
+		if (!m_debris[i].on) { slot = i; break; }
+		if (m_debris[i].life < bestLife) { bestLife = m_debris[i].life; slot = i; }
+	}
+	if (slot < 0) return;
+	DebrisBit& d = m_debris[slot];
+	memset(&d, 0, sizeof(d));
+	d.on = 1;
+	d.kind = 4;
+	d.x = d.ox = x;
+	d.y = d.ry = y;
+	d.z = d.oz = z;
+	d.sink = sink;
+	d.sc = 0.92f;
+	d.life = d.maxLife = 2.6f;
+	d.tint = RGBA8(150, 132, 108);
+	d.srx = m_rng.F(-1.2f, 1.2f);
+	d.sry = m_rng.F(-0.6f, 0.6f);
+}
+
+void Game::FillHideGreen()
+{
+	if (m_screen != SC_BATTLE || m_b.sweep != TAC_VAR_VEIL) return;
+	float scale = (float)MARKS_N / (float)MAPN;
+	int step = (int)scale;
+	if (step < 1) step = 1;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int v = VeilShows(x, z) ? 0 : 220;
+		int tx0 = (int)(x * scale);
+		int tz0 = (int)(z * scale);
+		for (int dz = 0; dz < step; dz++) for (int dx = 0; dx < step; dx++) {
+			int tx = tx0 + dx, tz = tz0 + dz;
+			if (tx < 0 || tz < 0 || tx >= MARKS_N || tz >= MARKS_N) continue;
+			s_battleMarks[(tz * MARKS_N + tx) * 4 + 1] = (BYTE)v;
+		}
+	}
+	s_battleMarksDirty = TRUE;
+}
+
 void Game::UpdateDebris(float dt)
 {
 	if (dt <= 0.f) return;
@@ -4133,6 +4182,17 @@ void Game::UpdateDebris(float dt)
 		if (!d.on) continue;
 		d.life -= dt;
 		if (d.life <= 0.f) { d.on = 0; continue; }
+		if (d.kind == 4) {
+			float age = d.maxLife - d.life;
+			if (age < 0.48f) {
+				d.x = d.ox + sinf(age * 34.f) * 0.08f;
+				d.z = d.oz + cosf(age * 27.f) * 0.06f;
+				d.y = d.ry + sinf(age * 46.f) * 0.045f;
+				d.vy = 0.f;
+				d.rx += d.srx * dt;
+				continue;
+			}
+		}
 		float px0 = d.x, pz0 = d.z, py0 = d.y;
 		{
 			const TacClimate& clim = TacClimateRead();
@@ -4168,6 +4228,17 @@ void Game::UpdateDebris(float dt)
 				d.srx *= 0.6f; d.sry *= 0.6f; d.srz *= 0.6f;
 				if (d.vy < 0.45f) { d.vy = 0.f; d.srx = d.sry = d.srz = 0.f; }
 			}
+			continue;
+		}
+		if (d.kind == 4) {
+			if (d.sink > -8.f && d.y <= d.sink && d.vy < 0.f) {
+				float ix = d.x, iy = d.sink, iz = d.z;
+				d.on = 0;
+				SpawnDebris(v3(ix, iy + 0.05f, iz), v3(0, 3.2f, 0), 0, 10, 0.28f, RGBA8(168, 146, 118));
+				Burst(v3(ix, iy + 0.08f, iz), 16, 2.4f, 0.08f, 0.55f, 0.72f, 0.64f, 0.52f, 0, 1, 6.f, 0.4f, 1.2f);
+				continue;
+			}
+			if (d.y < -28.f) d.on = 0;
 			continue;
 		}
 		if (haveMap) {
@@ -4207,15 +4278,17 @@ void Game::DrawDebris(const M4* mapXform)
 		if (!d.on) continue;
 		float fade = Clampf(d.life / max(0.05f, d.maxLife) * 3.5f, 0.f, 1.f);
 		float s = d.sc * (0.5f + 0.5f * fade);
+		if (d.kind == 4) s = d.sc;
 		M4 rot = MMul(MMul(MRotX(d.rx), MRotY(d.ry)), MRotZ(d.rz));
-		M4 w = MMul(MMul(MScale(s, s * (d.kind == 2 ? 1.55f : 0.85f), s * 1.15f), rot), MTrans(d.x, d.y, d.z));
+		float sy = (d.kind == 4) ? s * 0.16f : s * (d.kind == 2 ? 1.55f : 0.85f);
+		M4 w = MMul(MMul(MScale(s, sy, (d.kind == 4) ? s : s * 1.15f), rot), MTrans(d.x, d.y, d.z));
 		if (mapXform) w = MMul(w, *mapXform);
 		DrawParams dp = {};
 		dp.tint = d.tint;
 		dp.noTess = 1;
 		dp.twoSided = 1;
 		if (d.kind == 3) { dp.emissive = 0.9f; dp.flash = 0.4f; }
-		const GpuMesh& mesh = (d.kind == 2 || d.kind == 3) ? m_lib.ice : ((d.kind == 1) ? m_lib.sq : m_lib.pyr);
+		const GpuMesh& mesh = (d.kind == 4 || d.kind == 1) ? m_lib.sq : ((d.kind == 2 || d.kind == 3) ? m_lib.ice : m_lib.pyr);
 		m_r.DrawStatic(mesh, w, dp);
 	}
 }
@@ -5079,6 +5152,15 @@ void Game::UpdateParticles(float dt)
 				p.v.x += sinf(m_time * 0.55f + p.p.z * 0.28f) * dt * 0.16f;
 			}
 		} else if (p.wxHit == 9) {
+			{
+				float wx = 0.f, wz = 0.f, lift = 0.f;
+				WindField(m_time, p.p.x, p.p.z, wx, wz, lift, airTh);
+				float follow = dt * 2.4f;
+				if (follow > 0.42f) follow = 0.42f;
+				p.v.x += (wx * 0.92f - p.v.x) * follow;
+				p.v.z += (wz * 0.92f - p.v.z) * follow;
+				p.v.y += lift * 0.42f * dt;
+			}
 			if (p.nHit == 0) {
 				float seed = p.size * 47.f + p.p.x;
 				p.v.x += sinf(m_time * 6.2f + seed) * dt * 0.55f;
@@ -5263,7 +5345,7 @@ void Game::UpdateParticles(float dt)
 	if (m_r.WxGpuReady()) {
 		int wxG = WX_CLEAR;
 		if (m_screen == SC_BATTLE) wxG = TacWx(m_b.weather);
-		else if (m_screen == SC_BASE && m_showBuilt) {
+		else if ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt) {
 			int hw = 0, hh = 0;
 			HomeSky(hw, hh);
 			wxG = hw;
@@ -5294,28 +5376,87 @@ void Game::UpdateParticles(float dt)
 			memset(hgt, 0, sizeof(hgt));
 			s_hgtMode = 0;
 		}
-		float act[Renderer::WX_GPU_ACT * 4];
+		float act[Renderer::WX_GPU_ACT * 8];
 		int nAct = 0;
+		struct BodyMem { float x, y, z; unsigned char ok, phase; };
+		static BodyMem battleMem[MAX_UNITS];
+		static BodyMem homeMem[MAX_PARTY];
+		static BodyMem prevMem;
+		auto pushBody = [&](BodyMem& mem, V3 ap, float ht, int key, const Map* map) {
+			if (nAct >= Renderer::WX_GPU_ACT) return;
+			if (ht < 0.3f) ht = 0.8f;
+			if (ht > 1.6f) ht = 1.6f;
+			float vx = 0.f, vy = 0.f, vz = 0.f;
+			float dx = ap.x - mem.x, dy = ap.y - mem.y, dz = ap.z - mem.z;
+			float d2 = dx * dx + dy * dy + dz * dz;
+			if (mem.ok && d2 < 36.f && dt > 1e-4f) {
+				float idt = dt < 0.08f ? (1.f / dt) : 12.5f;
+				vx = dx * idt; vy = dy * idt; vz = dz * idt;
+				if (vx > 14.f) vx = 14.f; else if (vx < -14.f) vx = -14.f;
+				if (vy > 8.f) vy = 8.f; else if (vy < -8.f) vy = -8.f;
+				if (vz > 14.f) vz = 14.f; else if (vz < -14.f) vz = -14.f;
+			}
+			mem.x = ap.x; mem.y = ap.y; mem.z = ap.z; mem.ok = 1;
+			float sp = sqrtf(vx * vx + vz * vz);
+			float hem = 0.48f + 0.30f * sinf(m_time * 5.4f + (float)key * 1.3f);
+			if (sp > 0.4f) hem += sp * 0.08f;
+			if (hem > 1.7f) hem = 1.7f;
+			int b = nAct * 8;
+			act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
+			act[b + 4] = vx; act[b + 5] = vy; act[b + 6] = vz; act[b + 7] = hem;
+			nAct++;
+			mem.phase = (unsigned char)(mem.phase + 1);
+			if ((int)m_parts.size() >= 3300 || sp < 1.15f || (mem.phase % 10) != 0) return;
+			int ix = (int)floorf(ap.x), iz = (int)floorf(ap.z);
+			int wet = (wxG == WX_RAIN || wxG == WX_STORM || wxG == WX_HAIL) ? 1 : 0;
+			int snow = (wxG == WX_SNOW) ? 1 : 0;
+			int sand = (wxG == WX_SAND || wxG == WX_ASH) ? 1 : 0;
+			int water = 0;
+			if (map && Map::In(ix, iz)) {
+				int t = map->At(ix, iz).t;
+				if (t == T_LAVA || t == T_VOID || t == T_CHASM) return;
+				if (t == T_WATER) { wet = 1; water = 1; }
+			}
+			if (!wet && !snow && !sand && sp < 2.8f) return;
+			float inv = 1.f / sp;
+			float bx = -vx * inv, bz = -vz * inv;
+			int n = water ? 3 : 2;
+			for (int k = 0; k < n && (int)m_parts.size() < 3400; k++) {
+				Particle q = {};
+				q.p = ap + v3(m_rng.F(-0.12f, 0.12f), 0.06f, m_rng.F(-0.12f, 0.12f));
+				float kick = water ? 2.4f : 1.5f;
+				q.v = v3(bx * kick + m_rng.F(-0.4f, 0.4f), m_rng.F(0.8f, water ? 2.2f : 1.5f), bz * kick + m_rng.F(-0.4f, 0.4f));
+				q.life = q.max = m_rng.F(0.18f, 0.36f);
+				q.size = water ? 0.05f : 0.035f; q.size1 = q.size * 0.3f;
+				q.a = 1; q.shape = 0; q.add = 1; q.grav = 16.f; q.drag = 0.35f; q.stretch = 0.02f;
+				if (wet) { q.r = 0.78f; q.g = 0.88f; q.b = 1.f; }
+				else if (snow) { q.r = 0.94f; q.g = 0.96f; q.b = 1.f; q.grav = 4.f; }
+				else if (sand) { q.r = 0.86f; q.g = 0.7f; q.b = 0.38f; q.grav = 6.f; }
+				else { q.r = 0.62f; q.g = 0.52f; q.b = 0.36f; q.grav = 5.f; }
+				m_parts.push_back(q);
+			}
+		};
 		if (m_screen == SC_BATTLE) {
 			for (int i = 0; i < m_b.nUnits && nAct < Renderer::WX_GPU_ACT; i++) {
 				if (!m_b.u[i].alive || m_dispHp[i] <= 1.f) continue;
 				V3 ap = ActorPos(i);
 				float ht = m_act[i].height;
-				if (ht < 0.3f) ht = 0.8f;
-				if (ht > 1.6f) ht = 1.6f;
-				if (!m_r.InView(ap + v3(0, ht * 0.6f, 0), 2.2f)) continue;
-				int b = nAct * 4;
-				act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
-				nAct++;
+				if (!m_r.InView(ap + v3(0, (ht > 0.3f ? ht : 0.8f) * 0.6f, 0), 2.2f)) continue;
+				pushBody(battleMem[i], ap, ht, i, &m_b.map);
+			}
+		} else if ((m_screen == SC_BASE || m_screen == SC_RESULT) && m_showBuilt) {
+			int n = m_showN;
+			if (n > MAX_PARTY) n = MAX_PARTY;
+			for (int i = 0; i < n && nAct < Renderer::WX_GPU_ACT; i++) {
+				float ht = m_showAct[i].height;
+				V3 ap = m_showPos[i];
+				if (!m_r.InView(ap + v3(0, (ht > 0.3f ? ht : 0.8f) * 0.6f, 0), 2.2f)) continue;
+				pushBody(homeMem[i], ap, ht, i + 40, &m_showMap);
 			}
 		} else if (m_screen == SC_CREATE && m_previewRain && nAct < Renderer::WX_GPU_ACT) {
 			float ht = m_preview.height;
-			if (ht < 0.3f) ht = 0.8f;
-			if (ht > 1.6f) ht = 1.6f;
 			V3 ap = v3(0.f, -50.f + m_preview.hover, 0.f);
-			int b = nAct * 4;
-			act[b] = ap.x; act[b + 1] = ap.y; act[b + 2] = ap.z; act[b + 3] = ht;
-			nAct++;
+			pushBody(prevMem, ap, ht, 3, NULL);
 		}
 		V3 eye = m_eye;
 		V3 look = m_camTarget;

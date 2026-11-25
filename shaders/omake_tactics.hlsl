@@ -1454,8 +1454,18 @@ GOut PSM(PSIn i)
 	return Emit(float4(col, alpha), i.w);
 }
 
+void VeilClip(float3 w)
+{
+	if (Sight.y > -0.5) return;
+	float2 muv = saturate(w.xz * (1.0 / 64.0));
+	float g = GroundMarks.SampleLevel(CL, muv, 0).g;
+	float n = frac(sin(dot(floor(w.xz * 6.0), float2(12.9898, 78.233)) + Eye.w * 1.7) * 43758.5453);
+	clip(lerp(1.0, n - 0.15, smoothstep(0.08, 0.72, g)));
+}
+
 GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
 {
+	VeilClip(i.w);
 	alpha = FadeA(alpha);
 	float t = Eye.w;
 	float g = GustAmt();
@@ -1662,6 +1672,7 @@ void ApplyReflect(inout float3 col, float3 n, float3 v, float3 w, float rough, f
 
 GOut PSWater(PSIn i)
 {
+	VeilClip(i.w);
 	BeginLiquidGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.45) discard;
 	float3 v = normalize(Eye.xyz - i.w);
@@ -2144,6 +2155,7 @@ void ApplyGroundMarks(float2 mapxz, float3 n, inout float3 albedo, inout float3 
 
 GOut GroundPS(PSIn i, float theme)
 {
+	VeilClip(i.w);
 	BeginGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
 	// 水底のコースティクスは氷と同じ高さでも、足元以外は水面と同様に透かす。
@@ -2575,6 +2587,7 @@ GOut GroundPS(PSIn i, float theme)
 
 GOut ExtraGround(PSIn i, float kind)
 {
+	VeilClip(i.w);
 	BeginGhost(i.pos, i.w, i.n.y);
 	if (ReflectInfo.z > 0.5 && ReflectInfo.z < 1.5 && i.n.y > 0.72) discard;
 	if (i.c.a < 0.999) {
@@ -2684,6 +2697,7 @@ GOut PSGX(PSIn i) { return GroundPS(i, FogColor.a); }
 
 GOut PSProp(PSIn i)
 {
+	VeilClip(i.w);
 	// mode 9 は足元の輪。別階でも捨てず、視界の外でも色を残す。
 	if (!(Params.y > 8.5 && Params.y < 9.5)) {
 		if (GustGone(i.w) > 0.5) clip(-1);
@@ -4002,7 +4016,11 @@ struct WxGpu
 };
 StructuredBuffer<WxGpu> WxDraw : register(t11);
 RWStructuredBuffer<WxGpu> WxSim : register(u0);
-StructuredBuffer<float4> WxAct : register(t12);
+struct WxBody {
+	float4 p; // xyz 足元 w 身長
+	float4 v; // xyz 移動速度 w 裾の揺れ
+};
+StructuredBuffer<WxBody> WxAct : register(t12);
 StructuredBuffer<float> WxH : register(t13);
 cbuffer WxParm : register(b5)
 {
@@ -4124,13 +4142,13 @@ void WxBirthSky(inout WxGpu o, uint seed, float wx, float3 eye, float3 fwd, floa
 void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm, float kind)
 {
 	uint n = (uint)max(WxCnt.y, 1.0);
-	float4 a = WxAct[seed % n];
-	if (a.w < 0.05) {
+	WxBody a = WxAct[seed % n];
+	if (a.p.w < 0.05) {
 		WxBirthSky(o, seed, WxMix.y, Eye.xyz, WxFwd.xyz, WxSide.xyz, wind, gust);
 		return;
 	}
 	float pick = WxRnd(seed);
-	float ht = a.w;
+	float ht = a.p.w;
 	float ang = WxRnd(seed) * 6.2831853;
 	if (pick < 0.34) ang += 3.14159265;
 	float3 side = float3(cos(ang), 0.0, sin(ang));
@@ -4154,11 +4172,26 @@ void WxBirthDrip(inout WxGpu o, uint seed, float3 wind, float gust, float storm,
 		rad = 0.04 + WxRnd(seed) * 0.05;
 		fall = 0.55;
 	}
-	float3 pos = a.xyz + float3(0.0, ht * yk, 0.0) + side * rad;
+	float3 pos = a.p.xyz + float3(0.0, ht * yk, 0.0) + side * rad;
 	float shed = kind;
 	o.p = float4(pos, 1);
 	float down = fall + WxRnd(seed) * 0.7;
-	o.vel = float4(side * 0.18 + float3(wind.x, 0.0, wind.z) * (0.18 + gust * 0.12) + float3(0.0, -down, 0.0), 0.045);
+	float3 move = a.v.xyz;
+	float sp = length(move);
+	float3 kick = 0;
+	if (sp > 0.2) {
+		float keep = lerp(0.55, 0.92, saturate(sp / 6.0));
+		kick = move * keep;
+		kick -= move * (0.22 * saturate((sp - 1.2) / 5.0));
+	}
+	float hem = a.v.w;
+	if (yk < 0.46) {
+		float flick = hem * (0.65 + 0.35 * sin(Eye.w * 6.8 + ang * 2.4 + a.p.x));
+		kick += side * flick;
+		kick.y += abs(flick) * 0.42;
+	} else if (yk > 0.82)
+		kick *= 0.35;
+	o.vel = float4(side * 0.18 + float3(wind.x, 0.0, wind.z) * (0.18 + gust * 0.12) + kick + float3(0.0, -down, 0.0), 0.045);
 	float life = 0.9 + WxRnd(seed) * 0.6;
 	o.sz = float4(0.014, 0, life, life);
 	o.c = float4(0.78, 0.90, 1.0, 0.9);

@@ -3121,6 +3121,53 @@ static bool BonusExtract7z(const CString& arcPath, const CString& destRoot, cons
 	return any;
 }
 
+static bool BonusFileThere(const CString& path)
+{
+	return GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+static bool BonusBinsThere(int kind, const CString& root)
+{
+	static const TCHAR* kPack[3][40] = {
+		{
+			_T("meiro\\m_pbr.bin"),
+			_T("meiro\\m_wall0.png"), _T("meiro\\m_wall1.png"), _T("meiro\\m_wall2.png"), _T("meiro\\m_wall3.png"),
+			_T("meiro\\m_wall0_d.png"), _T("meiro\\m_wall1_d.png"), _T("meiro\\m_wall2_d.png"), _T("meiro\\m_wall3_d.png"),
+			_T("meiro\\m_floor0.png"), _T("meiro\\m_floor1.png"), _T("meiro\\m_floor2.png"), _T("meiro\\m_floor3.png"),
+			_T("meiro\\m_floor0_d.png"), _T("meiro\\m_floor1_d.png"), _T("meiro\\m_floor2_d.png"), _T("meiro\\m_floor3_d.png"),
+			_T("meiro\\m_mirwall.png"), _T("meiro\\m_mirfloor.png"), _T("meiro\\m_item.png"), _T("meiro\\m_gimmick.png"),
+			_T("meiro\\m_glass.png"), _T("meiro\\m_brick2.png"), _T("meiro\\m_env.png"), _T("meiro\\m_sky.png"), _T("meiro\\m_sky2.png"),
+			NULL
+		},
+		{
+			_T("race\\r_pbr.bin"), _T("race\\r_craft.bin"),
+			_T("race\\r_forest.png"), _T("race\\r_ruins.png"), _T("race\\r_oil.png"), _T("race\\r_night.png"),
+			_T("race\\r_under.png"), _T("race\\r_grass.png"), _T("race\\r_mesa.png"), _T("race\\r_cloud.png"),
+			_T("race\\r_craft.png"), _T("race\\r_band.png"),
+			_T("race\\r_forest_d.png"), _T("race\\r_ruins_d.png"), _T("race\\r_oil_d.png"), _T("race\\r_night_d.png"),
+			_T("race\\r_under_d.png"), _T("race\\r_grass_d.png"), _T("race\\r_mesa_d.png"), _T("race\\r_cloud_d.png"),
+			_T("race\\r_craft_d.png"), _T("race\\r_water.png"), _T("race\\r_water_d.png"),
+			_T("race\\r_obs.png"), _T("race\\r_obs_d.png"), _T("race\\r_env.png"), _T("race\\r_env2.png"),
+			_T("race\\r_sky.png"), _T("race\\r_sky2.png"), _T("race\\r_sky3.png"), _T("race\\r_sky4.png"),
+			_T("race\\r_item.png"), _T("race\\r_wood.png"),
+			NULL
+		},
+		{
+			_T("tactics\\tac_tex.bin"), _T("tactics\\tac_assets.bin"), _T("tactics\\tac_sfx.bin"),
+			_T("tactics\\tac_mon.bin"), _T("tactics\\tac_gear.bin"), _T("tactics\\tac_ava.bin"),
+			_T("tactics\\tac_face.bin"), _T("tactics\\tac_hair.bin"), _T("tactics\\props\\kit.bin"),
+			_T("tactics\\cut_cc0.bin"), _T("tactics\\tac_world.bin"),
+			NULL
+		},
+	};
+	if (kind < 0 || kind > 2) return false;
+	for (int i = 0; i < 40 && kPack[kind][i]; i++) {
+		if (!BonusFileThere(root + _T("\\") + kPack[kind][i]))
+			return false;
+	}
+	return true;
+}
+
 bool EnsureBonusImages(int kind)
 {
 	static const TCHAR* kStem[3] = { _T("oggmeiro"), _T("oggrace"), _T("oggtactics") };
@@ -3153,6 +3200,7 @@ bool EnsureBonusImages(int kind)
 	}
 	CString key = root + _T("\\") + kKey[kind];
 	CString utcPath = root + _T("\\") + kUtc[kind];
+	const bool bins = BonusBinsThere(kind, root);
 	CString urlZst = CString(_T("https://ppp.oohara.jp/download/")) + kStem[kind] + _T(".oxz");
 	CString url7z = CString(_T("https://ppp.oohara.jp/download/")) + kStem[kind] + _T(".7z");
 	const wchar_t* title = LL14(
@@ -3169,7 +3217,7 @@ bool EnsureBonusImages(int kind)
 			L"タクティクスのデータ", L"Tactics data", L"Images de tactique", L"Immagini di tattica", L"Imágenes de táctica",
 			L"택틱스 이미지", L"战术图片", L"صور التكتيك", L"Картинки тактики", L"Taktik-Bilder",
 			L"Imagens de tática", L"Tactiek-afbeeldingen", L"Obrazy taktyki", L"Taktik görselleri");
-	const bool have = GetFileAttributes(key) != INVALID_FILE_ATTRIBUTES;
+	const bool have = BonusFileThere(key) && bins;
 	const __int64 saved = BonusReadUtc(utcPath);
 	static bool s_bonusChecked[3] = { false, false, false };
 	if (have && saved > 0 && s_bonusChecked[kind]) {
@@ -3233,7 +3281,7 @@ bool EnsureBonusImages(int kind)
 	if (ok) ok = BonusExtract7z(tmp, root, title);
 	DeleteFile(tmp);
 	UpdateBusyClose();
-	if (!ok || GetFileAttributes(key) == INVALID_FILE_ATTRIBUTES) {
+	if (!ok || !BonusFileThere(key) || !BonusBinsThere(kind, root)) {
 		if (have) {
 			s_bonusChecked[kind] = true;
 			if (kind == 2) EnsureTacticsOggAvailable(true);

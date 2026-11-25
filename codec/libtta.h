@@ -47,8 +47,7 @@
 #define CALLBACK __stdcall
 //#define TTA_EXTERN_API __declspec(dllexport)
 #define TTA_EXTERN_API //修正 by Kobarin
-//#define TTA_ALIGNED(n) __declspec(align(n))
-#define TTA_ALIGNED(n) //修正 by Kobarin
+#define TTA_ALIGNED(n) __declspec(align(n))
 #endif
 
 // portability definitions

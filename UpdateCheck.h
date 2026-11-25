@@ -23,7 +23,7 @@ void UpdateBusyExtractProgress(int done, int total);
 void UpdateBusyCloseUi();
 void UpdateBusyPumpUi();
 
-/* 0=迷路 1=レース 2=タクティクス。画像 7z を tacticsbgm\resource へ。UTC の更新日時が新しければ取り直す。 */
+/* 0=迷路 1=レース 2=タクティクス。画像を tacticsbgm\resource へ。UTC より新しいか、bin や png が一つでも無いときに取り直す。 */
 bool EnsureBonusImages(int kind);
 
 // メイン画面表示後の定期更新チェックスレッドを開始
