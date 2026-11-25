@@ -4,6 +4,7 @@
 #include "OxzLang.h"
 #include "OxzFilt.h"
 #include "../OxzCore/OxzCore.h"
+#include "OxzVol.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,11 +22,6 @@ std::wstring OxzExeDir()
 std::wstring OxzBeside(const wchar_t* name)
 {
 	return OxzExeDir() + L"\\" + name;
-}
-
-bool OxzHas7za()
-{
-	return GetFileAttributesW(OxzBeside(L"7za.exe").c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 bool OxzIsOxz(const std::wstring& path)
@@ -672,164 +668,29 @@ std::wstring OxzDestFor(const std::vector<std::wstring>& paths)
 	return parent + (parent.size() && parent.back() != L'\\' ? L"\\" : L"") + leaf + L".oxz";
 }
 
-static int OxzPctOf(const std::string& s)
-{
-	size_t i = 0;
-	while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) i++;
-	if (i >= s.size() || s[i] < '0' || s[i] > '9') return -1;
-	int v = 0;
-	size_t start = i;
-	while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-		v = v * 10 + (s[i] - '0');
-		i++;
-		if (i - start > 3) return -1;
-	}
-	if (i >= s.size() || s[i] != '%') return -1;
-	if (v > 100) v = 100;
-	return v;
-}
-
-static std::wstring OxzFromUtf8(const std::string& s)
-{
-	if (s.empty()) return std::wstring();
-	int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), (int)s.size(), NULL, 0);
-	UINT cp = CP_UTF8;
-	if (n <= 0) {
-		cp = CP_ACP;
-		n = MultiByteToWideChar(CP_ACP, 0, s.data(), (int)s.size(), NULL, 0);
-	}
-	if (n <= 0) return std::wstring();
-	std::wstring w((size_t)n, 0);
-	MultiByteToWideChar(cp, cp == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0, s.data(), (int)s.size(), &w[0], n);
-	return w;
-}
-
-static int OxzMapped(int base, int span, int pct)
-{
-	if (span < 0) span = 0;
-	if (pct < 0) pct = 0;
-	if (pct > 100) pct = 100;
-	int v = base + (span * pct) / 100;
-	if (v > base + span) v = base + span;
-	if (v > 100) v = 100;
-	if (v < 0) v = 0;
-	return v;
-}
-
-static void OxzFeed7za(std::string& cur, int& pct, int base, int span, char c)
-{
-	if (c != '\r' && c != '\n') {
-		if (c == '\b') {
-			if (!cur.empty()) cur.pop_back();
-		} else {
-			cur.push_back(c);
-		}
-		return;
-	}
-	std::string s = cur;
-	cur.clear();
-	while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
-	size_t b = 0;
-	while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) b++;
-	if (b) s.erase(0, b);
-	if (s.empty()) return;
-	int p = OxzPctOf(s);
-	if (p >= 0) {
-		pct = p;
-		OxzProgFile(NULL, 0, 0, p, OxzMapped(base, span, p));
-		return;
-	}
-	if (s.size() >= 2 && (s[0] == '+' || s[0] == '-') && s[1] == ' ') {
-		std::string name = s.substr(2);
-		while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
-		std::wstring w = OxzFromUtf8(name);
-		OxzProgFile(w.c_str(), 0, 0, pct < 0 ? 0 : pct, OxzMapped(base, span, pct < 0 ? 0 : pct));
-	}
-}
-
-static int OxzRun7za(const std::wstring& args, const wchar_t* cwd, int base, int span)
-{
-	SECURITY_ATTRIBUTES sa;
-	HANDLE rd = NULL, wr = NULL, inR = NULL, inW = NULL;
-	memset(&sa, 0, sizeof(sa));
-	sa.nLength = sizeof(sa);
-	sa.bInheritHandle = TRUE;
-	if (!CreatePipe(&rd, &wr, &sa, 0)) return 2;
-	if (!CreatePipe(&inR, &inW, &sa, 0)) {
-		CloseHandle(rd);
-		CloseHandle(wr);
-		return 2;
-	}
-	SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
-	SetHandleInformation(inW, HANDLE_FLAG_INHERIT, 0);
-	std::wstring cmd = OxzQuote(OxzBeside(L"7za.exe")) + L" " + args;
-	std::vector<wchar_t> buf(cmd.begin(), cmd.end());
-	buf.push_back(0);
-	STARTUPINFOW si;
-	PROCESS_INFORMATION pi;
-	memset(&si, 0, sizeof(si));
-	memset(&pi, 0, sizeof(pi));
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-	si.wShowWindow = SW_HIDE;
-	si.hStdInput = inR;
-	si.hStdOutput = wr;
-	si.hStdError = wr;
-	if (!CreateProcessW(NULL, &buf[0], NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, cwd, &si, &pi)) {
-		CloseHandle(rd);
-		CloseHandle(wr);
-		CloseHandle(inR);
-		CloseHandle(inW);
-		return 2;
-	}
-	CloseHandle(wr);
-	CloseHandle(inR);
-	CloseHandle(inW);
-	std::string cur;
-	int pct = -1;
-	char tmp[4096];
-	for (;;) {
-		DWORD n = 0;
-		if (!ReadFile(rd, tmp, sizeof(tmp), &n, NULL) || n == 0) break;
-		for (DWORD i = 0; i < n; ++i) OxzFeed7za(cur, pct, base, span, tmp[i]);
-	}
-	if (!cur.empty()) OxzFeed7za(cur, pct, base, span, '\n');
-	CloseHandle(rd);
-	WaitForSingleObject(pi.hProcess, INFINITE);
-	DWORD code = 1;
-	GetExitCodeProcess(pi.hProcess, &code);
-	CloseHandle(pi.hThread);
-	CloseHandle(pi.hProcess);
-	if (code == 0) OxzProgFile(NULL, 0, 0, 100, OxzMapped(base, span, 100));
-	return code == 0 ? 0 : (int)code;
-}
-
-static int OxzExtract7za(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span, int rip)
-{
-	if (!OxzHas7za()) { err = OxzTxt(OS_NO7ZA); return 2; }
-	if (span < 1) span = 1;
-	int zSpan = rip ? span * 85 / 100 : span;
-	if (zSpan < 1) zSpan = span;
-	int ripSpan = span - zSpan;
-	std::wstring args = L"x -y -sccUTF-8 -bb1 -bsp1 -bso1 " + OxzQuote(std::wstring(L"-o") + dest) + L" " + OxzQuote(arc);
-	int rc = OxzRun7za(args, NULL, base, zSpan);
-	if (rc != 0) { err = OxzTxt(OS_OPEN_FAIL); return rc; }
-	if (rip) {
-		unsigned files = 0;
-		unsigned long long nbytes = 0;
-		OxzCountDir(dest, files, nbytes);
-		OxzScopeHold hold(base + zSpan, ripSpan, files, 0);
-		OxzRipTree(dest, 0);
-	}
-	OxzProgFile(NULL, 0, 0, 100, OxzMapped(base, span, 100));
-	return 0;
-}
-
 int OxzExtractTo(const wchar_t* arc, const wchar_t* dest, std::wstring& err, int base, int span)
 {
 	if (span < 1) span = 1;
 	OxzProgArchive(arc);
 	CreateDirectoryW(dest, NULL);
+	{
+		std::wstring use;
+		int temp = 0;
+		if (OxzMaterializeOxz(arc, use, &temp)) {
+			OxzSpanProg prog;
+			int rc;
+			prog.base = base;
+			prog.span = span;
+			prog.usedBase = 0;
+			rc = OxzCoreExtract(use.c_str(), dest, OxzPkgBase, &prog, OxzPkgProg, &prog);
+			OxzReleaseOxz(use, temp);
+			if (rc != OXZ_CORE_OK) {
+				err = prog.err.empty() ? OxzTxt(OS_OPEN_FAIL) : prog.err;
+				return 2;
+			}
+			return 0;
+		}
+	}
 	if (OxzCoreIsPkg(arc)) {
 		OxzSpanProg prog;
 		int rc;
@@ -853,7 +714,7 @@ int OxzExtractPlain(const wchar_t* arc, const wchar_t* dest, std::wstring& err, 
 	if (span < 1) span = 1;
 	OxzProgArchive(arc);
 	CreateDirectoryW(dest, NULL);
-	if (OxzCoreIsPkg(arc)) return OxzExtractTo(arc, dest, err, base, span);
+	if (OxzIsOxzFamily(arc)) return OxzExtractTo(arc, dest, err, base, span);
 	return OxzExtractInProc(arc, dest, err, base, span);
 }
 
@@ -873,6 +734,10 @@ int OxzPackWork(const std::wstring& work, const std::wstring& archive, unsigned 
 	bytes = 0;
 	if (span < 1) span = 1;
 	OxzProgArchive(archive.c_str());
+	if (OxzIsOxz(archive) && OxzOptSfx()) {
+		std::wstring stub = OxzBeside(L"OxzSfx.exe");
+		if (GetFileAttributesW(stub.c_str()) == INVALID_FILE_ATTRIBUTES) { err = OxzTxt(OS_SFX_MISSING); return 2; }
+	}
 	prog.base = base;
 	prog.span = span;
 	prog.usedBase = 0;
@@ -880,6 +745,7 @@ int OxzPackWork(const std::wstring& work, const std::wstring& archive, unsigned 
 	bytes = n;
 	if (rc == OXZ_CORE_EMPTY) { err = OxzTxt(OS_EMPTY); return 2; }
 	if (rc != OXZ_CORE_OK) { err = OxzTxt(OS_SAVE_FAIL); return 2; }
+	if (OxzIsOxz(archive) && !OxzSealOutput(archive, &bytes, err)) return 2;
 	return 0;
 }
 

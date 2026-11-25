@@ -280,9 +280,21 @@ static bool EndsI(const std::wstring& path, const wchar_t* ext)
 	return e && e <= n && _wcsicmp(path.c_str() + n - e, ext) == 0;
 }
 
+static bool IsVolumeExt(const std::wstring& path)
+{
+	size_t dot = path.find_last_of(L'.');
+	size_t i;
+	if (dot == std::wstring::npos || path.size() < dot + 4 || path.size() > dot + 6) return false;
+	if ((path[dot + 1] != L'o' && path[dot + 1] != L'O')) return false;
+	for (i = dot + 2; i < path.size(); ++i)
+		if (path[i] < L'0' || path[i] > L'9') return false;
+	return path.size() - (dot + 2) >= 2;
+}
+
 static bool IsExtractable(const std::wstring& path)
 {
 	if (IsDirPath(path)) return false;
+	if (IsVolumeExt(path)) return true;
 	for (int i = 0; kOxzExtractExts[i]; ++i)
 		if (EndsI(path, kOxzExtractExts[i])) return true;
 	return false;
@@ -512,6 +524,22 @@ public:
 					DestroyMenu(sub);
 				}
 			}
+			if (!m_drag && oxzCount) {
+				HMENU conv = CreatePopupMenu();
+				if (conv) {
+					AddItem(conv, OxzTxt(OS_TO_OXZ), ACT_TO_OXZ, one);
+					AddItem(conv, OxzTxt(OS_TO_ZIP), ACT_TO_ZIP, one);
+					AddItem(conv, OxzTxt(OS_TO_TAR), ACT_TO_TAR, one);
+					MENUITEMINFOW top;
+					memset(&top, 0, sizeof(top));
+					top.cbSize = sizeof(top);
+					top.fMask = MIIM_SUBMENU | MIIM_STRING;
+					top.hSubMenu = conv;
+					top.dwTypeData = (LPWSTR)OxzTxt(OS_ARCHIVE_CONV);
+					InsertMenuItemW(hmenu, indexMenu, TRUE, &top);
+					indexMenu++;
+				}
+			}
 			if (m_drag) {
 				int at = (int)indexMenu;
 				AddSep(hmenu, at);
@@ -524,7 +552,14 @@ public:
 				if (m_files.size() > 1 && AddItem(hmenu, OxzTxt(OS_PACK_EACH_HERE), ACT_PACK_EACH, m_folder, at)) at++;
 				HMENU formats = CreatePopupMenu();
 				if (formats) {
+					std::wstring zipDest = dest, tarDest = dest;
+					size_t dot = dest.find_last_of(L'.');
+					if (dot != std::wstring::npos) { zipDest.resize(dot); tarDest.resize(dot); }
+					zipDest += L".zip";
+					tarDest += L".tar";
 					AddItem(formats, OxzTxt(OS_MENU), ACT_DRAG_CREATE, dest);
+					AddItem(formats, OxzTxt(OS_TO_ZIP), ACT_DRAG_CREATE, zipDest);
+					AddItem(formats, OxzTxt(OS_TO_TAR), ACT_DRAG_CREATE, tarDest);
 					MENUITEMINFOW pop;
 					memset(&pop, 0, sizeof(pop));
 					pop.cbSize = sizeof(pop);

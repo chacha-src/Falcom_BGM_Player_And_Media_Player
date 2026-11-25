@@ -3,6 +3,7 @@
 #include "OxzWork.h"
 #include "OxzFilt.h"
 #include "../OxzCore/OxzCore.h"
+#include "OxzVol.h"
 #include "7z.h"
 #include "7zFile.h"
 #include "7zAlloc.h"
@@ -1476,11 +1477,16 @@ int OxzListArchive(const wchar_t* path, std::vector<OxzEnt>& out, std::wstring& 
 	int rc = 2;
 	out.clear();
 	if (!path) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
-	if (OxzCoreIsPkg(path)) {
+	{
+		std::wstring use;
+		int temp = 0;
+		if (OxzMaterializeOxz(path, use, &temp)) {
 		OxzCoreItem* items = NULL;
 		int count = 0;
 		uint64_t bo = 0, bs = 0;
-		if (OxzCoreReadDir(path, &items, &count, &bo, &bs) != OXZ_CORE_OK) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
+		int rd = OxzCoreReadDir(use.c_str(), &items, &count, &bo, &bs);
+		OxzReleaseOxz(use, temp);
+		if (rd != OXZ_CORE_OK) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
 		for (int i = 0; i < count; ++i) {
 			OxzEnt e;
 			if (!items[i].name || items[i].tomb) continue;
@@ -1500,6 +1506,7 @@ int OxzListArchive(const wchar_t* path, std::vector<OxzEnt>& out, std::wstring& 
 		OxzCoreFreeItems(items, count);
 		OxzAddDirsA(out);
 		return 0;
+		}
 	}
 	if (!Detect(path, b, sizeof(b), &n)) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
 	if (n >= 6 && b[0] == 0x37 && b[1] == 0x7A && b[2] == 0xBC && b[3] == 0xAF && b[4] == 0x27 && b[5] == 0x1C) rc = List7z(path, out, err);
@@ -1555,6 +1562,7 @@ int OxzMaterialize(const wchar_t* arc, const wchar_t* work, const std::vector<Ox
 {
 	std::vector<OxzEnt> need;
 	if (!arc || !work) return 0;
+	if (!OxzCoreIsPkg(arc) && OxzIsOxzFamily(arc)) return OxzExtractTo(arc, work, err, base, span);
 	CreateDirectoryW(work, NULL);
 	for (size_t i = 0; i < ents.size(); ++i) {
 		std::wstring full = std::wstring(work) + L"\\" + ents[i].rel;
@@ -1573,23 +1581,21 @@ int OxzTestArchive(const wchar_t* arc, std::vector<OxzTestRow>& rows, std::wstri
 	std::vector<OxzEnt> ents;
 	int rc, bad = 0;
 	rows.clear();
-	if (OxzCoreIsPkg(arc)) {
+	if (OxzIsOxzFamily(arc)) {
 		tmp = OxzNewWork();
 		rc = OxzExtractTo(arc, tmp.c_str(), err, base, span);
 		{
-			OxzCoreItem* items = NULL;
-			int count = 0;
-			uint64_t bo = 0, bs = 0;
-			if (OxzCoreReadDir(arc, &items, &count, &bo, &bs) == OXZ_CORE_OK) {
-				for (int i = 0; i < count; ++i) {
+			std::vector<OxzEnt> ents;
+			std::wstring e2;
+			if (OxzListArchive(arc, ents, e2) == 0) {
+				for (size_t i = 0; i < ents.size(); ++i) {
 					OxzTestRow row;
-					if (!items[i].name || items[i].isDir || items[i].tomb) continue;
-					row.name = items[i].name;
+					if (ents[i].dir) continue;
+					row.name = ents[i].rel;
 					row.ok = rc == 0;
 					row.detail = rc == 0 ? L"OK" : err;
 					rows.push_back(row);
 				}
-				OxzCoreFreeItems(items, count);
 			}
 		}
 		OxzRmTree(tmp);

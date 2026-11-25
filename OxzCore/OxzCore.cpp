@@ -16,6 +16,7 @@
 #include <mutex>
 #include <immintrin.h>
 
+#define ZSTD_STATIC_LINKING_ONLY
 #include "zstd.h"
 #include "lz4.h"
 #include "lz4hc.h"
@@ -30,6 +31,8 @@
 #include "Ppmd7.h"
 #include "OxzFilt.h"
 #include "OxzFast.h"
+#include "OxzMedia.h"
+#include "OxzLossless.h"
 
 struct FilePulse;
 static thread_local FilePulse* tFilePulse = NULL;
@@ -41,6 +44,31 @@ struct EncHook {
 	void (*fn)(void* user, unsigned long long done, unsigned long long total);
 	void* user;
 };
+
+struct LzWatch {
+	EncHook hook;
+	unsigned long long base;
+	unsigned long long total;
+	std::atomic<unsigned long long>* slot;
+	std::atomic<unsigned long long>* sum;
+};
+
+static void LzmaPulse(void* user, unsigned long long done, unsigned long long span)
+{
+	LzWatch* w = (LzWatch*)user;
+	unsigned long long at;
+	(void)span;
+	if (!w || !w->hook.fn || !w->total) return;
+	if (w->slot && w->sum) {
+		unsigned long long prev = w->slot->exchange(done);
+		if (done > prev) w->sum->fetch_add(done - prev);
+		at = w->sum->load();
+	} else {
+		at = w->base + done;
+	}
+	if (at > w->total) at = w->total;
+	w->hook.fn(w->hook.user, at, w->total);
+}
 static EncHook gEncHook = { 0, 0 };
 
 enum {
@@ -56,7 +84,13 @@ enum {
 	M_LIZARD = 9,
 	M_LZFSE = 10,
 	M_BZIP2 = 11,
-	M_PPMD = 12
+	M_PPMD = 12,
+	M_FLAC = 13,
+	M_ALAC = 14,
+	M_TTA = 15,
+	M_PICT = 16,
+	M_VID = 17,
+	M_LZSS = 18
 };
 
 enum { F_RIP = 1, F_DELTA1 = 2, F_DELTA4 = 4 };
@@ -65,14 +99,26 @@ enum { ORIGIN_NEW = 0, ORIGIN_BASE = 1, ORIGIN_OVERLAY = 2, ORIGIN_TOMB = 3 };
 
 static const uint8_t kMagic[8] = { 'O', 'X', 'Z', 'P', 'K', 'G', 0, 0 };
 static const size_t kLzBlockMax = 0x7E000000u;
-static const size_t kProbeBytes = 512u * 1024u;
+static const size_t kFullPick = 256u * 1024u;
+static const size_t kSampleSlice = 16u * 1024u;
+static const unsigned kSampleCount = 8;
 static const size_t kPpmdMax = 8ull * 1024ull * 1024ull;
 static thread_local size_t gLevelBytes = 0;
 static int gUserLevel = 10;
+static int gThreadCap = 0;
 static int gUsePpmd = 1;
 static thread_local int tZstdLdm = 0;
 static thread_local int tInSurvey = 0;
 static thread_local int tInFilePool = 0;
+static thread_local int tScout = 0;
+static thread_local int tZstdCeiling = 0;
+static const size_t kFastFile = 512ull * 1024ull;
+
+static int EffortCap(int level, int cap)
+{
+	if (tScout && level > cap) return cap;
+	return level;
+}
 
 static int Scale(int lo, int hi)
 {
@@ -80,6 +126,13 @@ static int Scale(int lo, int hi)
 	if (gUserLevel <= 1) return lo;
 	if (gUserLevel >= 10) return hi;
 	return lo + (hi - lo) * (gUserLevel - 1) / 9;
+}
+
+static int ZstdLevel(int hi)
+{
+	int level = EffortCap(Scale(1, hi), 3);
+	if (tZstdCeiling > 0 && level > tZstdCeiling) level = tZstdCeiling;
+	return level;
 }
 
 static size_t LevelN(size_t n)
@@ -91,7 +144,9 @@ static unsigned HwCap(void)
 {
 	unsigned n = std::thread::hardware_concurrency();
 	if (n < 1) n = 4;
+	if (gThreadCap >= 1 && n > (unsigned)gThreadCap) n = (unsigned)gThreadCap;
 	if (n > 12) n = 12;
+	if (n < 1) n = 1;
 	return n;
 }
 
@@ -104,13 +159,91 @@ static unsigned InnerThreads(size_t n)
 	return threads;
 }
 
+static int ZstdArm(ZSTD_CCtx* c, size_t n, int level, int wlog)
+{
+	unsigned zt;
+	int overlap;
+	size_t window, reload;
+	if (!c || tInSurvey || tInFilePool || tZstdCeiling == 1 || n < 2ull * 1024ull * 1024ull) return 1;
+	zt = InnerThreads(n);
+	if (zt < 2) return 1;
+	if (level >= 19 && zt > 4) zt = 4;
+	else if (zt > 8) zt = 8;
+	if (ZSTD_isError(ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, (int)zt))) return 1;
+	if (wlog < 10) wlog = 10;
+	if (wlog > 27) wlog = 27;
+	window = (size_t)1 << wlog;
+	overlap = 9;
+	reload = window;
+	while (overlap > 3) {
+		unsigned shift = (unsigned)(9 - overlap);
+		reload = shift >= 20 ? (512u << 10) : (window >> shift);
+		if (reload < (512u << 10)) reload = 512u << 10;
+		if (reload > n) reload = n;
+		if (n / reload >= zt) break;
+		overlap--;
+	}
+	if (reload < (512u << 10)) reload = 512u << 10;
+	if (reload > n) reload = n;
+	if (n / reload < 2) {
+		ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, 0);
+		return 1;
+	}
+	ZSTD_CCtx_setParameter(c, ZSTD_c_overlapLog, overlap);
+	ZSTD_CCtx_setParameter(c, ZSTD_c_jobSize, (int)reload);
+	return (int)zt;
+}
+
+static void PulseZstdDone(ZSTD_CCtx* c, unsigned long long n, int doneFrame)
+{
+	ZSTD_frameProgression pr;
+	unsigned long long done;
+	if (!n) return;
+	if (doneFrame) {
+		PulseEncode(tFilePulse, n, n);
+		return;
+	}
+	pr = ZSTD_getFrameProgression(c);
+	done = pr.consumed;
+	if (done > n) done = n;
+	PulseEncode(tFilePulse, done, n);
+}
+
+static size_t ZstdCompressWatch(ZSTD_CCtx* c, void* dst, size_t dstCap, const void* src, size_t n)
+{
+	std::atomic<int> run(1);
+	int lo = tEmitLo;
+	int emit = tPulseEmit;
+	FilePulse* fp = tFilePulse;
+	std::thread watch;
+	size_t got;
+	if (emit && fp) {
+		watch = std::thread([c, n, lo, fp, &run]() {
+			tPulseEmit = 1;
+			tEmitLo = lo;
+			while (run.load()) {
+				ZSTD_frameProgression pr = ZSTD_getFrameProgression(c);
+				unsigned long long done = pr.consumed;
+				if (done > n) done = n;
+				PulseEncode(fp, done, n);
+				Sleep(40);
+			}
+		});
+	}
+	got = ZSTD_compress2(c, dst, dstCap, src, n);
+	run.store(0);
+	if (watch.joinable()) watch.join();
+	if (emit && fp && !ZSTD_isError(got)) PulseEncode(fp, n, n);
+	return got;
+}
+
 static void BoostThread(std::thread& th)
 {
 	SetThreadPriority((HANDLE)th.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 }
 
-extern "C" int OxzLzma2Compress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel);
-extern "C" int OxzLzma2EncodeChunk(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel);
+extern "C" int OxzLzma2Compress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel, void (*pulse)(void*, unsigned long long, unsigned long long), void* pulseUser);
+extern "C" int OxzLzma2EncodeChunk(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel, void (*pulse)(void*, unsigned long long, unsigned long long), void* pulseUser);
 extern "C" int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile, int userLevel);
 extern "C" void* OxzLzmaAlloc(const ISzAlloc* p, size_t n)
 {
@@ -220,7 +353,7 @@ static void CrcInit(void)
 	gCrcReady = 1;
 }
 
-static uint32_t CrcBlock(const uint8_t* p, size_t n, uint32_t c)
+static uint32_t CrcTable(const uint8_t* p, size_t n, uint32_t c)
 {
 	CrcInit();
 	while (n >= 8) {
@@ -235,6 +368,126 @@ static uint32_t CrcBlock(const uint8_t* p, size_t n, uint32_t c)
 	}
 	while (n--) c = gCrcTab[0][(c ^ *p++) & 255] ^ (c >> 8);
 	return c;
+}
+
+static uint32_t CrcTableExt(uint32_t ext, const uint8_t* p, size_t n)
+{
+	return CrcTable(p, n, ext ^ 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
+}
+
+static __m128i CrcFold(__m128i a, __m128i b, __m128i keys)
+{
+	__m128i t1 = _mm_clmulepi64_si128(a, keys, 0x00);
+	__m128i t2 = _mm_clmulepi64_si128(a, keys, 0x11);
+	return _mm_xor_si128(_mm_xor_si128(b, t1), t2);
+}
+
+static __m128i CrcLoad16(const uint8_t*& p)
+{
+	__m128i r = _mm_loadu_si128((const __m128i*)p);
+	p += 16;
+	return r;
+}
+
+static uint32_t CrcFoldTail(__m128i x, const uint8_t* input, const uint8_t* rest, const uint8_t* end)
+{
+	const long long k3 = 0x1751997d0LL;
+	const long long k4 = 0x0ccaa009eLL;
+	__m128i k3k4 = _mm_set_epi64x(k4, k3);
+	(void)input;
+	while ((size_t)(end - rest) >= 16) x = CrcFold(x, CrcLoad16(rest), k3k4);
+	if (end != rest) {
+		size_t n = (size_t)(end - rest);
+		__m128i seq = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+		__m128i shl = _mm_add_epi8(seq, _mm_set1_epi8((char)((int)n - 16)));
+		__m128i shr = _mm_xor_si128(shl, _mm_set1_epi8((char)0x80));
+		__m128i first = _mm_shuffle_epi8(x, shl);
+		__m128i tail = _mm_loadu_si128((const __m128i*)(end - 16));
+		__m128i last = _mm_blendv_epi8(_mm_shuffle_epi8(x, shr), tail, shr);
+		x = CrcFold(first, last, k3k4);
+	}
+	x = _mm_xor_si128(_mm_clmulepi64_si128(x, k3k4, 0x10), _mm_srli_si128(x, 8));
+	{
+		__m128i barrett = _mm_set_epi64x(0x1db710641LL, (long long)0xb4e5b025f7011641ULL);
+		__m128i t = _mm_clmulepi64_si128(x, barrett, 0x00);
+		t = _mm_clmulepi64_si128(t, barrett, 0x10);
+		return ~((uint32_t)_mm_extract_epi32(_mm_xor_si128(x, t), 2));
+	}
+}
+
+static uint32_t CrcPcl(uint32_t crc, const uint8_t* data, size_t len)
+{
+	const uint8_t* end;
+	const uint8_t* input;
+	if (len < 16) return CrcTableExt(crc, data, len);
+	input = data;
+	end = data + len;
+	if (len < 128) {
+		__m128i x = CrcLoad16(data);
+		x = _mm_xor_si128(x, _mm_cvtsi32_si128((int)(~crc)));
+		return CrcFoldTail(x, input, data, end);
+	}
+	{
+		const long long k1 = 0x154442bd4LL;
+		const long long k2 = 0x1c6e41596LL;
+		__m128i k1k2 = _mm_set_epi64x(k2, k1);
+		__m128i k3k4 = _mm_set_epi64x(0x0ccaa009eLL, 0x1751997d0LL);
+		__m128i x3 = CrcLoad16(data);
+		__m128i x2 = CrcLoad16(data);
+		__m128i x1 = CrcLoad16(data);
+		__m128i x0 = CrcLoad16(data);
+		__m128i x;
+		x3 = _mm_xor_si128(x3, _mm_cvtsi32_si128((int)(~crc)));
+		while ((size_t)(end - data) >= 64) {
+			x3 = CrcFold(x3, CrcLoad16(data), k1k2);
+			x2 = CrcFold(x2, CrcLoad16(data), k1k2);
+			x1 = CrcFold(x1, CrcLoad16(data), k1k2);
+			x0 = CrcFold(x0, CrcLoad16(data), k1k2);
+		}
+		x = CrcFold(x3, x2, k3k4);
+		x = CrcFold(x, x1, k3k4);
+		x = CrcFold(x, x0, k3k4);
+		return CrcFoldTail(x, input, data, end);
+	}
+}
+
+static int gPcl = -1;
+
+static void CrcEnsure(void)
+{
+	int info[4];
+	int ok, off;
+	size_t li;
+	uint8_t b[4128];
+	static const size_t lens[] = { 0, 1, 15, 16, 17, 31, 63, 64, 65, 127, 128, 129, 200, 511, 512, 1000, 4096, 4097 };
+	CrcInit();
+	if (gPcl >= 0) return;
+	gPcl = 0;
+	__cpuid(info, 1);
+	if ((info[2] & (1 << 1)) == 0 || (info[2] & (1 << 9)) == 0 || (info[2] & (1 << 19)) == 0) return;
+	for (li = 0; li < sizeof(b); ++li) b[li] = (uint8_t)(li * 17u + 3u);
+	ok = 1;
+	for (li = 0; li < sizeof(lens) / sizeof(lens[0]); ++li) {
+		for (off = 0; off <= 7; off += 3) {
+			uint32_t table = CrcTable(b + off, lens[li], 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
+			uint32_t fast = CrcPcl(0, b + off, lens[li]);
+			if (table != fast) ok = 0;
+		}
+	}
+	{
+		uint32_t whole = CrcTable(b, 1000, 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
+		uint32_t mid = CrcPcl(0, b, 300);
+		uint32_t rest = CrcPcl(mid, b + 300, 700);
+		if (rest != whole) ok = 0;
+	}
+	if (ok) gPcl = 1;
+}
+
+static uint32_t CrcBlock(const uint8_t* p, size_t n, uint32_t c)
+{
+	CrcEnsure();
+	if (gPcl && n >= 16) return CrcPcl(c ^ 0xFFFFFFFFu, p, n) ^ 0xFFFFFFFFu;
+	return CrcTable(p, n, c);
 }
 
 static uint32_t CrcFinish(const uint8_t* p, size_t n)
@@ -264,7 +517,7 @@ static int ReadAt(HANDLE h, uint64_t off, void* dst, size_t n)
 	li.QuadPart = (LONGLONG)off;
 	if (!SetFilePointerEx(h, li, NULL, FILE_BEGIN)) return 0;
 	while (n) {
-		DWORD chunk = n > (1 << 20) ? (1 << 20) : (DWORD)n;
+		DWORD chunk = n > (4u << 20) ? (4u << 20) : (DWORD)n;
 		DWORD rd = 0;
 		if (!ReadFile(h, p, chunk, &rd, NULL) || rd != chunk) return 0;
 		p += rd;
@@ -277,7 +530,7 @@ static int WriteAll(HANDLE h, const void* src, size_t n)
 {
 	const uint8_t* p = (const uint8_t*)src;
 	while (n) {
-		DWORD chunk = n > (1 << 20) ? (1 << 20) : (DWORD)n;
+		DWORD chunk = n > (4u << 20) ? (4u << 20) : (DWORD)n;
 		DWORD wr = 0;
 		if (!WriteFile(h, p, chunk, &wr, NULL) || wr != chunk) return 0;
 		p += wr;
@@ -295,7 +548,7 @@ static uint64_t FileLen(HANDLE h)
 
 static HANDLE OpenRead(const wchar_t* path)
 {
-	return CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	return CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 }
 
 static int Is7zHead(const uint8_t* b, size_t n)
@@ -420,17 +673,17 @@ static int TryZstdStream(const uint8_t* in, size_t n, std::vector<uint8_t>& out,
 	size_t bound, off = 0;
 	std::vector<uint8_t> buf;
 	ZSTD_CCtx* c;
-	ZSTD_outBuffer output;
 	if (ln <= 256u * 1024u) hi = 22;
 	else if (ln <= 64ull * 1024ull * 1024ull) hi = 19;
 	else if (ln <= 256ull * 1024ull * 1024ull) hi = 16;
 	else if (ln <= 1024ull * 1024ull * 1024ull) hi = 12;
 	else hi = 9;
-	level = Scale(1, hi);
+	level = ZstdLevel(hi);
 	if (ln >= 32ull * 1024ull * 1024ull) wlog = 25;
 	else if (ln >= 8ull * 1024ull * 1024ull) wlog = 24;
 	else if (ln < 1u * 1024u * 1024u) wlog = 21;
 	if (pass == 1 && wlog < 24) wlog = 24;
+	if (tZstdCeiling == 1 && wlog > 19) wlog = 19;
 	if (pass == 1 && ln > 256ull * 1024ull * 1024ull) return 0;
 	bound = ZSTD_compressBound(n);
 	if (ZSTD_isError(bound) || bound == 0) return 0;
@@ -441,40 +694,67 @@ static int TryZstdStream(const uint8_t* in, size_t n, std::vector<uint8_t>& out,
 	ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
 	ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, wlog);
 	if (pass == 1) ZSTD_CCtx_setParameter(c, ZSTD_c_enableLongDistanceMatching, 1);
-	output.dst = buf.data();
-	output.size = buf.size();
-	output.pos = 0;
-	while (off <= n) {
-		size_t chunk = 0;
-		ZSTD_inBuffer input;
-		int last, stepDone = 0;
-		if (off < n) {
-			chunk = n - off;
-			if (chunk > (1u << 20)) chunk = 1u << 20;
+	{
+		int workers = ZstdArm(c, n, level, wlog);
+		size_t produced = 0;
+		const size_t slice = 4u << 20;
+		ZSTD_CCtx_setPledgedSrcSize(c, n);
+		if (workers > 1) {
+			size_t got = ZstdCompressWatch(c, buf.data(), buf.size(), in, n);
+			ZSTD_freeCCtx(c);
+			if (ZSTD_isError(got)) return 0;
+			if (got == 0 || got >= n) return -1;
+			buf.resize(got);
+			out.swap(buf);
+			tZstdLdm = pass == 1;
+			return 1;
 		}
-		input.src = in + off;
-		input.size = chunk;
-		input.pos = 0;
-		off += chunk;
-		last = off >= n;
-		while (!stepDone) {
-			size_t inBefore = input.pos;
-			size_t outBefore = output.pos;
-			size_t rem = ZSTD_compressStream2(c, &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
-			if (ZSTD_isError(rem)) { ZSTD_freeCCtx(c); return 0; }
-			if (last) stepDone = rem == 0;
-			else stepDone = input.pos == input.size;
-			if (!stepDone && input.pos == inBefore && output.pos == outBefore) { ZSTD_freeCCtx(c); return 0; }
+		while (off <= n) {
+			size_t chunk = 0;
+			ZSTD_inBuffer input;
+			int last, stepDone = 0, spins = 0;
+			if (off < n) {
+				chunk = n - off;
+				if (chunk > slice) chunk = slice;
+			}
+			input.src = in + off;
+			input.size = chunk;
+			input.pos = 0;
+			off += chunk;
+			last = off >= n;
+			while (!stepDone) {
+				ZSTD_outBuffer output;
+				size_t inBefore, rem;
+				if (produced >= buf.size()) { ZSTD_freeCCtx(c); return 0; }
+				output.dst = buf.data() + produced;
+				output.size = buf.size() - produced;
+				if (output.size > slice) output.size = slice;
+				output.pos = 0;
+				inBefore = input.pos;
+				rem = ZSTD_compressStream2(c, &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
+				if (ZSTD_isError(rem)) { ZSTD_freeCCtx(c); return 0; }
+				produced += output.pos;
+				if (output.pos) PulseZstdDone(c, n, 0);
+				if (last) stepDone = rem == 0;
+				else stepDone = input.pos == input.size;
+				if (!stepDone && input.pos == inBefore && output.pos == 0) {
+					if (workers < 2 || ++spins > 20000) { ZSTD_freeCCtx(c); return 0; }
+					PulseZstdDone(c, n, 0);
+					Sleep(1);
+					continue;
+				}
+				spins = 0;
+			}
+			PulseZstdDone(c, n, last);
+			if (last) break;
 		}
-		PulseEncode(tFilePulse, off > n ? n : off, n);
-		if (last) break;
+		ZSTD_freeCCtx(c);
+		if (produced == 0 || produced >= n) return 0;
+		buf.resize(produced);
+		out.swap(buf);
+		tZstdLdm = pass == 1;
+		return 1;
 	}
-	ZSTD_freeCCtx(c);
-	if (output.pos == 0 || output.pos >= n) return 0;
-	buf.resize(output.pos);
-	out.swap(buf);
-	tZstdLdm = pass == 1;
-	return 1;
 }
 
 static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int mode)
@@ -489,17 +769,20 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 	std::vector<uint8_t> buf;
 	if (n == 0) return 0;
 	if (tPulseEmit && n >= 256u * 1024u && (mode == 0 || mode == 1)) {
-		if (TryZstdStream(in, n, out, mode)) return 1;
+		int sr = TryZstdStream(in, n, out, mode);
+		if (sr > 0) return 1;
+		if (sr < 0) return 0;
 	}
 	if (ln <= 256u * 1024u) hi = 22;
 	else if (ln <= 64ull * 1024ull * 1024ull) hi = 19;
 	else if (ln <= 256ull * 1024ull * 1024ull) hi = 16;
 	else if (ln <= 1024ull * 1024ull * 1024ull) hi = 12;
 	else hi = 9;
-	level = Scale(1, hi);
+	level = ZstdLevel(hi);
 	if (ln >= 32ull * 1024ull * 1024ull) wlog = 25;
 	else if (ln >= 8ull * 1024ull * 1024ull) wlog = 24;
 	else if (ln < 1u * 1024u * 1024u) wlog = 21;
+	if (tZstdCeiling == 1 && wlog > 19) wlog = 19;
 	for (pass = 0; pass < 2; ++pass) {
 		size_t bound, got;
 		int useLog;
@@ -519,9 +802,7 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 		ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, useLog);
 		if (pass == 1) ZSTD_CCtx_setParameter(c, ZSTD_c_enableLongDistanceMatching, 1);
 		{
-			unsigned zt = InnerThreads(n);
-			if (level >= 19 && zt > 2) zt = 2;
-			if (zt > 1 && ZSTD_isError(ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, (int)zt))) zt = 1;
+			int zt = ZstdArm(c, n, level, useLog);
 			got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
 			if (ZSTD_isError(got) && zt > 1) {
 				ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, 0);
@@ -546,7 +827,7 @@ static int TryLz4(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	cap = LZ4_compressBound((int)n);
 	if (cap <= 0) return 0;
 	try { out.resize((size_t)cap); } catch (...) { return 0; }
-	if (gUserLevel <= 2)
+	if (tScout || gUserLevel <= 2)
 		got = LZ4_compress_default((const char*)in, (char*)out.data(), (int)n, cap);
 	else
 		got = LZ4_compress_HC((const char*)in, (char*)out.data(), (int)n, cap, Scale(4, LZ4HC_CLEVEL_MAX));
@@ -566,7 +847,7 @@ static int DeflateOnce(const uint8_t* in, size_t n, std::vector<uint8_t>& out, i
 	if (ln <= 64ull * 1024ull * 1024ull) hi = 12;
 	else if (ln <= 512ull * 1024ull * 1024ull) hi = 9;
 	else hi = 6;
-	level = Scale(1, hi);
+	level = EffortCap(Scale(1, hi), 1);
 	c = libdeflate_alloc_compressor(level);
 	if (!c) return 0;
 	bound = raw ? libdeflate_deflate_compress_bound(c, n) : libdeflate_zlib_compress_bound(c, n);
@@ -647,6 +928,20 @@ static int BrotliParallel(const uint8_t* in, size_t n, int q, int win, std::vect
 	return 1;
 }
 
+static int MostlyText(const uint8_t* p, size_t n)
+{
+	size_t step, i, good = 0, samples = 0;
+	if (n < 64) return 0;
+	step = n / 2048;
+	if (step < 1) step = 1;
+	for (i = 0; i < n; i += step) {
+		unsigned char c = p[i];
+		samples++;
+		if (c == 9 || c == 10 || c == 13 || (c >= 32 && c < 127)) good++;
+	}
+	return samples && good * 5 >= samples * 4;
+}
+
 static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	int q, win, mode, modes;
@@ -660,12 +955,12 @@ static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	else if (ln <= 64ull * 1024ull * 1024ull) q = 9;
 	else if (ln <= 256ull * 1024ull * 1024ull) q = 6;
 	else q = 4;
-	q = Scale(1, q);
+	q = EffortCap(Scale(1, q), 4);
 	win = n < (1u << 16) ? 18 : BROTLI_MAX_WINDOW_BITS;
 	best = n;
-	modes = (n <= 8u * 1024u * 1024u && ln <= 8u * 1024u * 1024u) ? 2 : 1;
+	modes = (!tScout && n <= 8u * 1024u * 1024u && ln <= 8u * 1024u * 1024u && MostlyText(in, n)) ? 2 : 1;
 	threads = InnerThreads(n);
-	if (threads > 1 && n > 8ull * 1024ull * 1024ull && BrotliParallel(in, n, q, win, out, threads)) return 1;
+	if (!tScout && threads > 1 && n >= 2ull * 1024ull * 1024ull && BrotliParallel(in, n, q, win, out, threads)) return 1;
 	for (mode = 0; mode < modes; ++mode) {
 		std::vector<uint8_t> buf;
 		size_t got = cap;
@@ -685,21 +980,25 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 	size_t cap, got = 0;
 	unsigned char pr = 0;
 	unsigned th;
+	int ul;
 	if (n == 0) return 0;
+	ul = tScout ? 1 : gUserLevel;
 	th = InnerThreads(n);
-	if (th >= 2 && n >= 8ull * 1024ull * 1024ull) {
-		size_t unit = n / th;
-		if (unit < 4ull * 1024ull * 1024ull) {
-			th = (unsigned)(n / (4ull * 1024ull * 1024ull));
-			if (th < 2) th = 2;
-			unit = n / th;
+	if (th > 4) th = 4;
+	if (ul >= 3 && th >= 2 && n >= 512ull * 1024ull) {
+		size_t unitMin = 384ull * 1024ull;
+		if (n / th < unitMin) {
+			th = (unsigned)(n / unitMin);
+			if (th < 2) th = 1;
 		}
-		if (th >= 2 && unit > 0) {
+		if (th >= 2) {
+			size_t chunkBasis = (n / th) + (n % th);
 			struct Part { std::vector<uint8_t> data; unsigned char prop; int ok; };
 			std::vector<Part> parts(th);
 			std::vector<std::thread> pool;
 			std::atomic<unsigned> cursor(0);
-			std::atomic<unsigned long long> doneBytes(0);
+			std::vector<std::atomic<unsigned long long>> slots(th);
+			std::atomic<unsigned long long> sum(0);
 			EncHook hook = gEncHook;
 			unsigned t;
 			int propsOk = 1;
@@ -710,20 +1009,25 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 						unsigned c = cursor.fetch_add(1);
 						size_t off, len, capc, gotc = 0;
 						unsigned char prc = 0;
+						LzWatch watch;
 						if (c >= th) break;
 						off = (n / th) * c;
 						len = (c + 1 == th) ? (n - off) : (n / th);
 						capc = len + (len / 4) + 65536;
 						try { parts[c].data.resize(capc); }
 						catch (...) { parts[c].ok = 0; continue; }
-						if (OxzLzma2EncodeChunk(in + off, len, parts[c].data.data(), capc, &gotc, &prc, LevelN(n), gUserLevel) != 0 || gotc == 0 || parts[c].data[gotc - 1] != 0) {
+						watch.hook = hook;
+						watch.base = off;
+						watch.total = n;
+						watch.slot = &slots[c];
+						watch.sum = &sum;
+						if (OxzLzma2EncodeChunk(in + off, len, parts[c].data.data(), capc, &gotc, &prc, chunkBasis, ul, hook.fn ? LzmaPulse : NULL, hook.fn ? &watch : NULL) != 0 || gotc == 0 || parts[c].data[gotc - 1] != 0) {
 							parts[c].ok = 0;
 							continue;
 						}
 						parts[c].data.resize(gotc);
 						parts[c].prop = prc;
 						parts[c].ok = 1;
-						if (hook.fn && n) hook.fn(hook.user, doneBytes.fetch_add(len) + len, n);
 					}
 				}));
 				BoostThread(pool.back());
@@ -753,7 +1057,15 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 	}
 	cap = n + (n / 4) + 65536;
 	try { out.resize(cap); } catch (...) { return 0; }
-	if (OxzLzma2Compress(in, n, out.data(), cap, &got, &pr, LevelN(n), gUserLevel) != 0) return 0;
+	{
+		LzWatch watch;
+		watch.hook = gEncHook;
+		watch.base = 0;
+		watch.total = n;
+		watch.slot = NULL;
+		watch.sum = NULL;
+		if (OxzLzma2Compress(in, n, out.data(), cap, &got, &pr, LevelN(n), ul, watch.hook.fn ? LzmaPulse : NULL, watch.hook.fn ? &watch : NULL) != 0) return 0;
+	}
 	if (got == 0 || got >= n) return 0;
 	out.resize(got);
 	*prop = pr;
@@ -769,7 +1081,7 @@ static int TryLizard(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	if (ln <= 4u * 1024u * 1024u) level = LIZARD_MAX_CLEVEL;
 	else if (ln <= 64ull * 1024ull * 1024ull) level = 22;
 	else level = LIZARD_DEFAULT_CLEVEL;
-	level = Scale(LIZARD_MIN_CLEVEL, level);
+	level = EffortCap(Scale(LIZARD_MIN_CLEVEL, level), 10);
 	cap = Lizard_compressBound((int)n);
 	if (cap <= 0) return 0;
 	try { out.resize((size_t)cap); } catch (...) { return 0; }
@@ -798,7 +1110,7 @@ static int TryLzfse(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 static int TryBzip2(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	if (n == 0 || n > 0xFFFFFFFFull) return 0;
-	return OxzBzipCompress(in, n, out, Scale(1, 9), InnerThreads(n), gEncHook.fn, gEncHook.user);
+	return OxzBzipCompress(in, n, out, EffortCap(Scale(1, 9), 1), InnerThreads(n), gEncHook.fn, gEncHook.user);
 }
 
 static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
@@ -806,7 +1118,7 @@ static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	size_t got = 0;
 	if (n == 0) return 0;
 	try { out.resize(n); } catch (...) { return 0; }
-	if (OxzPpmdCompress(in, n, out.data(), out.size(), &got, LevelN(n), gUserLevel) != 0) return 0;
+	if (OxzPpmdCompress(in, n, out.data(), out.size(), &got, LevelN(n), tScout ? 1 : gUserLevel) != 0) return 0;
 	if (got == 0 || got >= n) return 0;
 	out.resize(got);
 	return 1;
@@ -819,6 +1131,24 @@ struct Choice {
 	uint8_t prop;
 	std::vector<uint8_t> data;
 };
+
+struct FastAlt {
+	int method;
+	int flags;
+	int zstdLdm;
+	size_t packed;
+};
+
+static int CodecIsFast(int method)
+{
+	return method == M_ZSTD || method == M_LZ4 || method == M_LIZARD || method == M_LZFSE;
+}
+
+static int CodecIsSlow(int method)
+{
+	return method == M_LZMA2 || method == M_BROTLI || method == M_BZIP2 || method == M_PPMD
+		|| method == M_DEFLATE || method == M_RAWDEFLATE;
+}
 
 static void Consider(Choice* best, int method, int flags, uint8_t prop, std::vector<uint8_t>& packed)
 {
@@ -946,6 +1276,12 @@ static int OneCodec(const uint8_t* in, size_t n, int method, int zstdPass, std::
 	case M_BROTLI: return TryBrotli(in, n, tmp);
 	case M_PPMD: return TryPpmd(in, n, tmp);
 	case M_LZMA2: return TryLzma(in, n, tmp, prop);
+	case M_FLAC: return OxzFlacCompress(in, n, tmp);
+	case M_ALAC: return OxzAlacCompress(in, n, tmp);
+	case M_TTA: return OxzTtaCompress(in, n, tmp);
+	case M_PICT: return OxzPictCompress(in, n, tmp);
+	case M_VID: return OxzVidCompress(in, n, tmp);
+	case M_LZSS: return OxzLzssCompress(in, n, tmp);
 	default: return 0;
 	}
 }
@@ -1148,20 +1484,113 @@ struct Survey {
 	std::vector<uint8_t> data;
 };
 
-static Choice Search(const uint8_t* raw, size_t n, int isPe)
+static size_t Lz4FilterScore(const uint8_t* raw, size_t n, int flags)
+{
+	std::vector<uint8_t> b, out;
+	int cap, got;
+	if (n == 0 || n > 16u * 1024u * 1024u) return n;
+	try { b.assign(raw, raw + n); }
+	catch (...) { return n; }
+	if (flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
+	if (flags & F_DELTA4) Delta4Enc(b.data(), b.size());
+	else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+	cap = LZ4_compressBound((int)b.size());
+	if (cap <= 0) return n;
+	try { out.resize((size_t)cap); }
+	catch (...) { return n; }
+	got = LZ4_compress_fast((const char*)b.data(), (char*)out.data(), (int)b.size(), cap, 2);
+	if (got <= 0) return n;
+	return (size_t)got;
+}
+
+static void RunJobs(std::vector<Survey>& jobs, const uint8_t* raw, size_t n, int scout)
+{
+	unsigned threads, t;
+	std::vector<std::thread> pool;
+	std::atomic<size_t> cursor(0);
+	size_t levelSnap;
+	FilePulse* pulseFile;
+	unsigned pulseCap;
+	std::atomic<unsigned> pulseStep(0);
+	size_t pulseJobs;
+	if (jobs.empty()) return;
+	threads = HwCap();
+	if (tInFilePool) {
+		unsigned capThreads = HwCap() / 3;
+		if (capThreads < 1) capThreads = 1;
+		if (capThreads > 4) capThreads = 4;
+		threads = capThreads;
+	}
+	if (threads > jobs.size()) threads = (unsigned)jobs.size();
+	levelSnap = gLevelBytes;
+	pulseFile = tFilePulse;
+	pulseCap = (levelSnap > n && levelSnap - n > 4096) ? 25u : 95u;
+	pulseJobs = jobs.size() ? jobs.size() : 1;
+	for (t = 0; t < threads; ++t) {
+		pool.push_back(std::thread([&, n, levelSnap, pulseFile, pulseCap, pulseJobs, scout]() {
+			gLevelBytes = levelSnap;
+			tInSurvey = 1;
+			tScout = scout;
+			for (;;) {
+				size_t i = cursor.fetch_add(1);
+				std::vector<uint8_t> b, tmp;
+				uint8_t prop = 0;
+				Survey* job;
+				unsigned step;
+				if (i >= jobs.size()) break;
+				job = &jobs[i];
+				if (job->ok != 0) continue;
+				try {
+					b.assign(raw, raw + n);
+					if (job->flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
+					if (job->flags & F_DELTA4) Delta4Enc(b.data(), b.size());
+					else if (job->flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+					if (OneCodec(b.data(), b.size(), job->method, job->zstdPass, tmp, &prop)) {
+						job->ok = 1;
+						job->prop = prop;
+						job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
+						job->data.swap(tmp);
+					}
+				} catch (...) {
+				}
+				if (job->ok == 0) job->ok = -1;
+				if (pulseFile) {
+					int ten;
+					step = pulseStep.fetch_add(1) + 1;
+					ten = (int)((unsigned long long)step * (unsigned)pulseCap * 10ull / pulseJobs);
+					if (ten > pulseCap * 10) ten = pulseCap * 10;
+					Publish(pulseFile, ten, 0);
+				}
+			}
+			tScout = 0;
+			tInSurvey = 0;
+		}));
+		BoostThread(pool.back());
+	}
+	for (t = 0; t < pool.size(); ++t) pool[t].join();
+}
+
+static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 {
 	static const int kMethod[] = {
 		M_ZSTD, M_ZSTD, M_LZ4, M_LIZARD, M_LZFSE, M_DEFLATE, M_RAWDEFLATE, M_BZIP2, M_BROTLI, M_PPMD, M_LZMA2
 	};
 	static const int kPass[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 	int flags[6];
+	int keepFlag[6];
+	size_t score[6];
+	size_t baseScore;
 	int nflags = 0;
 	int f, m;
-	unsigned threads, t;
+	int probing;
 	std::vector<Survey> jobs;
-	std::vector<std::thread> pool;
-	std::atomic<size_t> cursor(0);
 	Choice best;
+	if (alt) {
+		alt->method = M_STORE;
+		alt->flags = 0;
+		alt->zstdLdm = 0;
+		alt->packed = n ? n : 1;
+	}
 	best.method = M_STORE;
 	best.flags = 0;
 	best.prop = 0;
@@ -1179,7 +1608,20 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe)
 			flags[nflags++] = F_RIP | F_DELTA4;
 		}
 	}
+	baseScore = 0;
 	for (f = 0; f < nflags; ++f) {
+		score[f] = Lz4FilterScore(raw, n, flags[f]);
+		keepFlag[f] = 0;
+		if (flags[f] == 0) baseScore = score[f];
+	}
+	for (f = 0; f < nflags; ++f) if (flags[f] == F_RIP && score[f] < baseScore) baseScore = score[f];
+	if (baseScore == 0) baseScore = n;
+	for (f = 0; f < nflags; ++f) {
+		if (flags[f] == 0 || flags[f] == F_RIP) keepFlag[f] = 1;
+		else if (score[f] + baseScore / 32 < baseScore) keepFlag[f] = 1;
+	}
+	for (f = 0; f < nflags; ++f) {
+		if (!keepFlag[f]) continue;
 		for (m = 0; m < (int)(sizeof(kMethod) / sizeof(kMethod[0])); ++m) {
 			Survey s;
 			if (kMethod[m] == M_PPMD && (!gUsePpmd || LevelN(n) > kPpmdMax)) continue;
@@ -1192,66 +1634,63 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe)
 			jobs.push_back(std::move(s));
 		}
 	}
-	threads = HwCap();
-	if (tInFilePool) {
-		unsigned capThreads = HwCap() / 3;
-		if (capThreads < 1) capThreads = 1;
-		if (capThreads > 4) capThreads = 4;
-		threads = capThreads;
+	probing = gLevelBytes > n + 4096;
+	if (!isPe && !probing && n <= 64u * 1024u) {
+		Survey s;
+		s.method = M_LZSS;
+		s.flags = 0;
+		s.zstdPass = 0;
+		s.ok = 0;
+		s.zstdLdm = 0;
+		s.prop = 0;
+		jobs.push_back(std::move(s));
 	}
-	if (threads > jobs.size()) threads = (unsigned)jobs.size();
-	{
-		size_t levelSnap = gLevelBytes;
-		FilePulse* pulseFile = tFilePulse;
-		unsigned pulseCap = (levelSnap > n && levelSnap - n > 4096) ? 25u : 95u;
-		std::atomic<unsigned> pulseStep(0);
-		size_t pulseJobs = jobs.size() ? jobs.size() : 1;
-		for (t = 0; t < threads; ++t) {
-			pool.push_back(std::thread([&, n, levelSnap, pulseFile, pulseCap, pulseJobs]() {
-				gLevelBytes = levelSnap;
-				tInSurvey = 1;
-				for (;;) {
-					size_t i = cursor.fetch_add(1);
-					std::vector<uint8_t> b, tmp;
-					uint8_t prop = 0;
-					Survey* job;
-					unsigned step;
-					if (i >= jobs.size()) break;
-					job = &jobs[i];
-					try {
-						b.assign(raw, raw + n);
-						if (job->flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
-						if (job->flags & F_DELTA4) Delta4Enc(b.data(), b.size());
-						else if (job->flags & F_DELTA1) Delta1Enc(b.data(), b.size());
-						if (OneCodec(b.data(), b.size(), job->method, job->zstdPass, tmp, &prop)) {
-							job->ok = 1;
-							job->prop = prop;
-							job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
-							job->data.swap(tmp);
-						}
-					} catch (...) {
-					}
-					if (pulseFile) {
-						int ten;
-						step = pulseStep.fetch_add(1) + 1;
-						ten = (int)((unsigned long long)step * (unsigned)pulseCap * 10ull / pulseJobs);
-						if (ten > pulseCap * 10) ten = pulseCap * 10;
-						Publish(pulseFile, ten, 0);
-					}
-				}
-				tInSurvey = 0;
-			}));
-			BoostThread(pool.back());
+	RunJobs(jobs, raw, n, gUserLevel >= 4 ? 1 : 0);
+	if (gUserLevel >= 4) {
+		size_t bestSz = (size_t)-1;
+		size_t secondSz = (size_t)-1;
+		int bestI = -1, secondI = -1;
+		int promo[3];
+		int np = 0, p;
+		size_t i;
+		for (i = 0; i < jobs.size(); ++i) {
+			if (jobs[i].ok != 1 || jobs[i].method == M_PPMD) continue;
+			if (jobs[i].data.size() < bestSz) {
+				bestSz = jobs[i].data.size();
+				bestI = (int)i;
+			}
+		}
+		for (i = 0; i < jobs.size(); ++i) {
+			if (jobs[i].ok != 1 || (int)i == bestI) continue;
+			if (bestSz < (size_t)-1 && jobs[i].data.size() * 100 > bestSz * 115) continue;
+			if (jobs[i].data.size() < secondSz) {
+				secondSz = jobs[i].data.size();
+				secondI = (int)i;
+			}
+		}
+		if (bestI >= 0 && !probing) {
+			promo[np++] = bestI;
+			if (secondI >= 0) promo[np++] = secondI;
+			for (p = 0; p < np; ++p) {
+				jobs[promo[p]].ok = 0;
+				jobs[promo[p]].data.clear();
+			}
+			RunJobs(jobs, raw, n, 0);
 		}
 	}
-	for (t = 0; t < pool.size(); ++t) pool[t].join();
 	{
 		Choice fast = best;
 		Choice ppmd;
 		int havePpmd = 0;
 		for (size_t i = 0; i < jobs.size(); ++i) {
 			Choice* slot;
-			if (!jobs[i].ok) continue;
+			if (jobs[i].ok != 1) continue;
+			if (alt && CodecIsFast(jobs[i].method) && jobs[i].data.size() < alt->packed) {
+				alt->method = jobs[i].method;
+				alt->flags = jobs[i].flags;
+				alt->zstdLdm = jobs[i].zstdLdm;
+				alt->packed = jobs[i].data.size();
+			}
 			if (jobs[i].method == M_PPMD) {
 				if (!havePpmd) {
 					ppmd.method = M_STORE;
@@ -1307,43 +1746,191 @@ static int EmitMethod(const uint8_t* raw, size_t n, int method, int flags, int z
 	return 1;
 }
 
+static int BuildSample(const uint8_t* raw, size_t n, std::vector<uint8_t>& out)
+{
+	size_t count = kSampleCount;
+	size_t slice = kSampleSlice;
+	size_t span;
+	size_t i;
+	if (slice > n) slice = n;
+	if (slice == 0) return 0;
+	if (count < 2) count = 2;
+	if (count * slice > n) {
+		count = n / slice;
+		if (count < 2) count = 2;
+		if (count * slice > n) slice = n / count;
+	}
+	if (slice == 0) return 0;
+	span = n - slice;
+	try {
+		out.clear();
+		out.reserve(count * slice);
+	} catch (...) { return 0; }
+	for (i = 0; i < count; ++i) {
+		size_t off = (span * i) / (count - 1);
+		out.insert(out.end(), raw + off, raw + off + slice);
+	}
+	return out.empty() ? 0 : 1;
+}
+
+static int KeepSmaller(Choice* best, int method, std::vector<uint8_t>& packed)
+{
+	if (packed.empty() || packed.size() >= best->data.size()) return 0;
+	best->method = method;
+	best->flags = 0;
+	best->prop = 0;
+	best->zstdLdm = 0;
+	best->data.swap(packed);
+	return 1;
+}
+
+static int TrySpecial(const uint8_t* raw, size_t n, Choice* best)
+{
+	int pcm, pict, vid, any = 0;
+	Choice got;
+	EncPulseUser watch;
+	std::vector<uint8_t> packed;
+	pcm = OxzPcmMaybe(raw, n);
+	pict = OxzPictMaybe(raw, n);
+	vid = OxzVidMaybe(raw, n);
+	if (!pcm && !pict && !vid) return 0;
+	got.method = M_STORE;
+	got.flags = 0;
+	got.prop = 0;
+	got.zstdLdm = 0;
+	try { got.data.assign(raw, raw + n); }
+	catch (...) { return 0; }
+	watch.fp = tFilePulse;
+	watch.lo = 250;
+	if (tFilePulse) Publish(tFilePulse, 250, 3);
+	gEncHook.fn = OnEncodePulse;
+	gEncHook.user = &watch;
+	tPulseEmit = 1;
+	if (pcm) {
+		if (OxzFlacCompress(raw, n, packed)) any |= KeepSmaller(&got, M_FLAC, packed);
+		packed.clear();
+		if (OxzAlacCompress(raw, n, packed)) any |= KeepSmaller(&got, M_ALAC, packed);
+		packed.clear();
+		if (OxzTtaCompress(raw, n, packed)) any |= KeepSmaller(&got, M_TTA, packed);
+		packed.clear();
+	}
+	if (pict) {
+		if (OxzPictCompress(raw, n, packed)) any |= KeepSmaller(&got, M_PICT, packed);
+		packed.clear();
+	}
+	if (vid) {
+		if (OxzVidCompress(raw, n, packed)) any |= KeepSmaller(&got, M_VID, packed);
+		packed.clear();
+	}
+	if (TryZstd(raw, n, packed, 0)) any |= KeepSmaller(&got, M_ZSTD, packed);
+	tPulseEmit = 0;
+	gEncHook.fn = NULL;
+	gEncHook.user = NULL;
+	if (!any || got.method == M_STORE || got.data.size() >= n) return 0;
+	*best = got;
+	return 1;
+}
+
 static Choice Pick(const uint8_t* raw, size_t n, int isPe)
 {
 	Choice best;
 	gLevelBytes = n;
-	if (n <= kProbeBytes) return Search(raw, n, isPe);
+	if (!isPe && n >= 4096 && TrySpecial(raw, n, &best)) return best;
+	if (n <= kFullPick) return Search(raw, n, isPe, 0);
 	{
-		Choice probe = Search(raw, kProbeBytes, isPe);
+		std::vector<uint8_t> sample;
+		Choice probe;
+		FastAlt alt;
 		int got = 0;
+		int method = M_STORE;
+		int flags = 0;
+		int ldm = 0;
+		int cap = 0;
+		int ranked = 0;
+		int scoutSave;
+		int ceilSave;
+		size_t bound;
+		if (!BuildSample(raw, n, sample)) return Search(raw, n, isPe, 0);
+		bound = ZSTD_compressBound(sample.size());
+		if (!isPe && n >= kFastFile && !ZSTD_isError(bound) && bound > 0) {
+			std::vector<uint8_t> quick;
+			size_t zgot = 0;
+			try { quick.resize(bound); } catch (...) { quick.clear(); }
+			if (!quick.empty())
+				zgot = ZSTD_compress(quick.data(), quick.size(), sample.data(), sample.size(), 1);
+			if (!quick.empty() && !ZSTD_isError(zgot) && zgot > 0 && zgot * 25 < sample.size()) {
+				method = M_ZSTD;
+				cap = 1;
+			}
+		}
+		if (!cap) {
+			probe = Search(sample.data(), sample.size(), isPe, &alt);
+			ranked = 1;
+			method = probe.method;
+			flags = probe.flags;
+			ldm = probe.zstdLdm;
+		}
+		if (ranked && !isPe && n >= kFastFile && !sample.empty() && probe.method != M_STORE
+			&& probe.data.size() > 0 && probe.data.size() * 25 < sample.size()) {
+			cap = 1;
+			ldm = 0;
+			if (CodecIsSlow(probe.method) && alt.method != M_STORE && alt.packed > 0 && alt.packed < sample.size()) {
+				method = alt.method;
+				flags = alt.flags;
+			}
+		}
 		best.method = M_STORE;
 		best.flags = 0;
 		best.prop = 0;
 		best.zstdLdm = 0;
-		best.data.assign(raw, raw + n);
+		try { best.data.assign(raw, raw + n); } catch (...) { return best; }
 		tEmitLo = 250;
-		if (probe.method != M_STORE && EmitMethod(raw, n, probe.method, probe.flags, probe.zstdLdm, &best))
+		scoutSave = tScout;
+		ceilSave = tZstdCeiling;
+		if (cap) {
+			tScout = 1;
+			tZstdCeiling = 1;
+		}
+		if (method != M_STORE && EmitMethod(raw, n, method, flags, ldm, &best))
 			got = 1;
-		else if (probe.method != M_ZSTD && EmitMethod(raw, n, M_ZSTD, probe.flags, 1, &best))
+		else if (method != M_ZSTD && EmitMethod(raw, n, M_ZSTD, flags, cap ? 0 : 1, &best))
 			got = 1;
+		tScout = scoutSave;
+		tZstdCeiling = ceilSave;
 		tEmitLo = 0;
 		if (got) return best;
 	}
 	return best;
 }
 
+static void PulseExtract(uint64_t produced);
+
 static int DecLzma(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen, uint8_t prop)
 {
 	ISzAlloc alloc = { OxzLzmaAlloc, OxzLzmaFree };
 	CLzma2Dec dec;
-	SizeT dest = dstLen, slen = srcLen;
+	size_t produced = 0, consumed = 0;
 	ELzmaStatus st = LZMA_STATUS_NOT_SPECIFIED;
-	SRes r;
+	SRes r = SZ_OK;
 	Lzma2Dec_Construct(&dec);
 	if (Lzma2Dec_Allocate(&dec, prop, &alloc) != SZ_OK) return 0;
 	Lzma2Dec_Init(&dec);
-	r = Lzma2Dec_DecodeToBuf(&dec, dst, &dest, src, &slen, LZMA_FINISH_END, &st);
+	while (produced < dstLen) {
+		SizeT dest = dstLen - produced;
+		SizeT slen = srcLen - consumed;
+		ELzmaFinishMode mode;
+		int last = dest <= (1u << 20);
+		if (!last) dest = 1u << 20;
+		mode = last ? LZMA_FINISH_END : LZMA_FINISH_ANY;
+		r = Lzma2Dec_DecodeToBuf(&dec, dst + produced, &dest, src + consumed, &slen, mode, &st);
+		if (r != SZ_OK) break;
+		produced += dest;
+		consumed += slen;
+		PulseExtract(produced);
+		if (dest == 0 && slen == 0) { r = SZ_ERROR_DATA; break; }
+	}
 	Lzma2Dec_Free(&dec, &alloc);
-	return r == SZ_OK && dest == dstLen;
+	return r == SZ_OK && produced == dstLen;
 }
 
 static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen)
@@ -1367,6 +1954,7 @@ static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dst
 		if (r != BROTLI_DECODER_RESULT_SUCCESS || (produced == 0 && consumed == 0)) return 0;
 		op += produced;
 		ip += consumed;
+		PulseExtract(op);
 		if (op == dstLen) return 1;
 	}
 	return op == dstLen;
@@ -1448,6 +2036,18 @@ static int DecodeRaw(const DirEnt& e, const uint8_t* src, std::vector<uint8_t>& 
 		if (!DecBrotli(src, (size_t)e.packed, plain.data(), n)) return 0;
 	} else if (e.method == M_PPMD) {
 		if (!DecPpmd(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_FLAC) {
+		if (!OxzFlacDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_ALAC) {
+		if (!OxzAlacDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_TTA) {
+		if (!OxzTtaDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_PICT) {
+		if (!OxzPictDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_VID) {
+		if (!OxzVidDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
+	} else if (e.method == M_LZSS) {
+		if (!OxzLzssDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
 	} else {
 		return 0;
 	}
@@ -1470,7 +2070,8 @@ static int MethodHasPayload(uint16_t m)
 {
 	return m == M_STORE || m == M_ZSTD || m == M_LZ4 || m == M_DEFLATE || m == M_LZMA2
 		|| m == M_BROTLI || m == M_RAWDEFLATE || m == M_LIZARD || m == M_LZFSE
-		|| m == M_BZIP2 || m == M_PPMD;
+		|| m == M_BZIP2 || m == M_PPMD || m == M_FLAC || m == M_ALAC || m == M_TTA
+		|| m == M_PICT || m == M_VID || m == M_LZSS;
 }
 
 static int LoadDir(HANDLE h, uint64_t fileSize, std::vector<DirEnt>& ents, uint64_t* baseOff, uint64_t* baseSize)
@@ -1548,7 +2149,7 @@ static int CopyRange(HANDLE in, uint64_t off, uint64_t n, HANDLE out)
 {
 	std::vector<uint8_t> buf;
 	if (!Seek(in, off)) return 0;
-	try { buf.resize(1u << 20); } catch (...) { return 0; }
+	try { buf.resize(4u << 20); } catch (...) { return 0; }
 	while (n) {
 		DWORD chunk = n > buf.size() ? (DWORD)buf.size() : (DWORD)n;
 		DWORD rd = 0;
@@ -1632,12 +2233,25 @@ static std::string RelUtf8(const std::wstring& rel)
 static int LoadFile(const std::wstring& path, uint64_t size, std::vector<uint8_t>& buf)
 {
 	HANDLE h;
+	size_t got = 0;
+	const size_t step = 8u << 20;
 	if (size != (uint64_t)(size_t)size) return 0;
 	h = OpenRead(path.c_str());
 	if (h == INVALID_HANDLE_VALUE) return 0;
 	try { buf.resize((size_t)size); }
 	catch (...) { CloseHandle(h); return 0; }
-	if (size && !ReadAt(h, 0, buf.data(), (size_t)size)) { CloseHandle(h); return 0; }
+	while (got < (size_t)size) {
+		size_t n = (size_t)size - got;
+		int ten;
+		if (n > step) n = step;
+		if (!ReadAt(h, got, buf.data() + got, n)) { CloseHandle(h); return 0; }
+		got += n;
+		if (tFilePulse && size) {
+			ten = (int)(got * 240ull / (size_t)size);
+			if (ten > 240) ten = 240;
+			Publish(tFilePulse, ten, 0);
+		}
+	}
 	CloseHandle(h);
 	return 1;
 }
@@ -1692,6 +2306,21 @@ static void StreamNote(StreamProg* sp, uint64_t done, int finish)
 	sp->fn(sp->name, 0, 0, finish ? 100 : ten / 10, sp->user);
 }
 
+static void NoteZstd(ZSTD_CCtx* c, StreamProg* sp, uint64_t size, int finish)
+{
+	ZSTD_frameProgression pr;
+	uint64_t done;
+	if (!sp || !sp->fn) return;
+	if (finish) {
+		StreamNote(sp, size, 1);
+		return;
+	}
+	pr = ZSTD_getFrameProgression(c);
+	done = pr.consumed;
+	if (done > size) done = size;
+	StreamNote(sp, done, 0);
+}
+
 static void ArmStream(StreamProg* sp, OxzCoreProgFn prog, void* user, const wchar_t* name, uint64_t size)
 {
 	PulseWeight* w;
@@ -1714,7 +2343,7 @@ static int StreamStore(HANDLE in, HANDLE out, uint64_t size, uint32_t* crc, Stre
 	uint32_t c = 0xFFFFFFFFu;
 	uint64_t left = size;
 	uint64_t got = 0;
-	try { buf.resize(1u << 20); } catch (...) { return 0; }
+	try { buf.resize(4u << 20); } catch (...) { return 0; }
 	if (!Seek(in, 0)) return 0;
 	while (left) {
 		DWORD chunk = left > buf.size() ? (DWORD)buf.size() : (DWORD)left;
@@ -1748,43 +2377,61 @@ static int StreamZstdOrStore(const std::wstring& path, uint64_t size, HANDLE out
 	if (!c) { CloseHandle(in); return 0; }
 	ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, level);
 	ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
-	try { ibuf.resize(1u << 20); obuf.resize(1u << 20); }
-	catch (...) { ZSTD_freeCCtx(c); CloseHandle(in); return 0; }
-	left = size;
-	while (!ended) {
-		size_t chunk = 0;
-		ZSTD_inBuffer input;
-		int last;
-		if (left) {
-			DWORD want = left > ibuf.size() ? (DWORD)ibuf.size() : (DWORD)left;
-			DWORD rd = 0;
-			if (!ReadFile(in, ibuf.data(), want, &rd, NULL) || rd != want) break;
-			crc = CrcBlock(ibuf.data(), rd, crc);
-			left -= rd;
-			chunk = rd;
-			StreamNote(sp, size - left, 0);
-		}
-		input.src = ibuf.data();
-		input.size = chunk;
-		input.pos = 0;
-		last = left == 0;
-		for (;;) {
-			ZSTD_outBuffer output;
-			size_t rem;
-			output.dst = obuf.data();
-			output.size = obuf.size();
-			output.pos = 0;
-			rem = ZSTD_compressStream2(c, &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
-			if (ZSTD_isError(rem)) { ended = -1; break; }
-			if (output.pos && !WriteAll(out, obuf.data(), output.pos)) { ended = -1; break; }
-			produced += output.pos;
-			if (last) {
-				if (rem == 0) { ended = 1; break; }
-			} else if (input.pos == input.size) {
-				break;
+	ZSTD_CCtx_setPledgedSrcSize(c, size);
+	{
+		int wlog = 23;
+		size_t zn = size >= 2ull * 1024ull * 1024ull ? (size_t)(2ull * 1024ull * 1024ull) : (size_t)size;
+		if (size >= 32ull * 1024ull * 1024ull) wlog = 25;
+		else if (size >= 8ull * 1024ull * 1024ull) wlog = 24;
+		else if (size < 1ull * 1024ull * 1024ull) wlog = 21;
+		if (size >= 2ull * 1024ull * 1024ull && size <= (uint64_t)~(size_t)0) zn = (size_t)size;
+		ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, wlog);
+		int workers = ZstdArm(c, zn, level, wlog);
+		try { ibuf.resize(4u << 20); obuf.resize(4u << 20); }
+		catch (...) { ZSTD_freeCCtx(c); CloseHandle(in); return 0; }
+		left = size;
+		while (!ended) {
+			size_t chunk = 0;
+			ZSTD_inBuffer input;
+			int last, spins = 0;
+			if (left) {
+				DWORD want = left > ibuf.size() ? (DWORD)ibuf.size() : (DWORD)left;
+				DWORD rd = 0;
+				if (!ReadFile(in, ibuf.data(), want, &rd, NULL) || rd != want) break;
+				crc = CrcBlock(ibuf.data(), rd, crc);
+				left -= rd;
+				chunk = rd;
 			}
+			input.src = ibuf.data();
+			input.size = chunk;
+			input.pos = 0;
+			last = left == 0;
+			for (;;) {
+				ZSTD_outBuffer output;
+				size_t rem;
+				size_t inBefore = input.pos;
+				output.dst = obuf.data();
+				output.size = obuf.size();
+				output.pos = 0;
+				rem = ZSTD_compressStream2(c, &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
+				if (ZSTD_isError(rem)) { ended = -1; break; }
+				if (output.pos && !WriteAll(out, obuf.data(), output.pos)) { ended = -1; break; }
+				produced += output.pos;
+				NoteZstd(c, sp, size, 0);
+				if (last) {
+					if (rem == 0) { ended = 1; break; }
+				} else if (input.pos == input.size) {
+					break;
+				}
+				if (input.pos == inBefore && output.pos == 0) {
+					if (workers < 2 || ++spins > 20000) { ended = -1; break; }
+					Sleep(1);
+					continue;
+				}
+				spins = 0;
+			}
+			if (ended < 0) break;
 		}
-		if (ended < 0) break;
 	}
 	ZSTD_freeCCtx(c);
 	crc ^= 0xFFFFFFFFu;
@@ -2028,7 +2675,7 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 	}
 	building = dest + L".building";
 	DeleteFileW(building.c_str());
-	out = CreateFileW(building.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	out = CreateFileW(building.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (out == INVALID_HANDLE_VALUE) {
 		if (baseFile != INVALID_HANDLE_VALUE) CloseHandle(baseFile);
 		return OXZ_CORE_ERR;
@@ -2268,7 +2915,7 @@ static int WriteMember(const std::wstring& path, const uint8_t* p, size_t n, uin
 	HANDLE h;
 	FILETIME ft;
 	EnsureParents(path);
-	h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
 	if (n && !WriteAll(h, p, n)) { CloseHandle(h); DeleteFileW(path.c_str()); return 0; }
 	ft = UToFt(mtime);
@@ -2321,9 +2968,9 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 	uint64_t produced = 0;
 	FILETIME ft;
 	EnsureParents(path);
-	out = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	out = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (out == INVALID_HANDLE_VALUE) return 0;
-	try { ibuf.resize(1u << 20); obuf.resize(1u << 20); }
+	try { ibuf.resize(4u << 20); obuf.resize(4u << 20); }
 	catch (...) { CloseHandle(out); return 0; }
 	if (!Seek(arc, e.dataOff)) { CloseHandle(out); return 0; }
 	if (e.method == M_STORE) {
@@ -2425,7 +3072,7 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 		if (!GetTempPathW(MAX_PATH, tmp)) { CloseHandle(h); return OXZ_CORE_ERR; }
 		_snwprintf_s(name, _TRUNCATE, L"%soxzb%08X.oxz", tmp, GetTickCount());
 		tempBase = name;
-		th = CreateFileW(tempBase.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		th = CreateFileW(tempBase.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 		if (th == INVALID_HANDLE_VALUE) { CloseHandle(h); return OXZ_CORE_ERR; }
 		if (!CopyRange(h, baseOff, baseSize, th)) { CloseHandle(th); DeleteFileW(tempBase.c_str()); CloseHandle(h); return OXZ_CORE_ERR; }
 		CloseHandle(th);
@@ -2489,14 +3136,24 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 				catch (...) { dr = -1; }
 				if (dr == 1) {
 					if (ent.packed && !ReadAt(rh, ent.dataOff, packed.data(), packed.size())) return 0;
+					if (prog && ent.unpacked >= 1024ull * 1024ull) {
+						tExWatch.fn = prog;
+						tExWatch.user = progUser;
+						tExWatch.name = ent.name.c_str();
+						tExWatch.index = done.load();
+						tExWatch.total = total;
+						tExWatch.unpacked = ent.unpacked;
+						tExWatch.tick = 0;
+						tExOn = 1;
+					}
 					dr = DecodeRaw(ent, packed.data(), plain);
+					tExOn = 0;
 				}
 			}
 			if (dr == 1) {
 				if (!WriteMember(job.full, plain.data(), plain.size(), ent.mtime, ent.attr)) return 0;
 			} else if (dr < 0 && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD)) {
 				int sok;
-				if (rh != h) return 2;
 				tExWatch.fn = prog;
 				tExWatch.user = progUser;
 				tExWatch.name = ent.name.c_str();
@@ -2505,7 +3162,7 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 				tExWatch.unpacked = ent.unpacked;
 				tExWatch.tick = 0;
 				tExOn = 1;
-				sok = StreamDecode(h, ent, job.full);
+				sok = StreamDecode(rh, ent, job.full);
 				tExOn = 0;
 				if (!sok) return 0;
 			} else {
@@ -2525,17 +3182,41 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			if (job.large || ents[i].packed != (uint64_t)(size_t)ents[i].packed) big.push_back(job);
 			else small.push_back(job);
 		}
-		for (i = 0; i < big.size(); ++i) {
-			int rc = runOne(big[i], h);
-			if (rc == 2) {
-				if (!StreamDecode(h, ents[big[i].ei], big[i].full)) rc = 0;
-				else {
-					done.fetch_add(1);
-					if (prog) prog(ents[big[i].ei].name.c_str(), done.load(), total, 100, progUser);
-					rc = 1;
-				}
+		if (big.size() <= 1) {
+			for (i = 0; i < big.size(); ++i) {
+				int rc = runOne(big[i], h);
+				if (rc != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
 			}
-			if (rc != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
+		} else {
+			unsigned ft = HwCap();
+			unsigned t;
+			int heavy = 0;
+			std::atomic<size_t> bcursor(0);
+			std::vector<std::thread> bpool;
+			for (i = 0; i < big.size(); ++i) {
+				const DirEnt& be = ents[big[i].ei];
+				if (!(be.flags == 0 && (be.method == M_STORE || be.method == M_ZSTD))) heavy = 1;
+			}
+			if (ft > big.size()) ft = (unsigned)big.size();
+			if (heavy && ft > 2) ft = 2;
+			else if (ft > 4) ft = 4;
+			for (t = 0; t < ft; ++t) {
+				bpool.push_back(std::thread([&]() {
+					HANDLE rh = OpenRead(arc.c_str());
+					if (rh == INVALID_HANDLE_VALUE) { failed.store(1); return; }
+					for (;;) {
+						size_t c = bcursor.fetch_add(1);
+						int rc;
+						if (c >= big.size() || failed.load()) break;
+						rc = runOne(big[c], rh);
+						if (rc != 1) failed.store(1);
+					}
+					CloseHandle(rh);
+				}));
+				BoostThread(bpool.back());
+			}
+			for (t = 0; t < bpool.size(); ++t) bpool[t].join();
+			if (failed.load()) { CloseHandle(h); return OXZ_CORE_ERR; }
 		}
 		if (small.size() <= 1) {
 			for (i = 0; i < small.size(); ++i) {
@@ -2601,6 +3282,38 @@ extern "C" void OxzCoreSetPpmd(int on)
 extern "C" int OxzCoreGetPpmd(void)
 {
 	return gUsePpmd;
+}
+
+extern "C" void OxzCoreSetThreads(int n)
+{
+	if (n < 0) n = 0;
+	if (n > 12) n = 12;
+	gThreadCap = n;
+}
+
+extern "C" int OxzCoreGetThreads(void)
+{
+	return gThreadCap;
+}
+
+extern "C" void OxzPulseEncode(unsigned long long done, unsigned long long span)
+{
+	if (gEncHook.fn && span) gEncHook.fn(gEncHook.user, done, span);
+}
+
+extern "C" void OxzPulseDecode(unsigned long long produced)
+{
+	PulseExtract((uint64_t)produced);
+}
+
+extern "C" int OxzEncodeLevel(void)
+{
+	return gUserLevel;
+}
+
+extern "C" int OxzEncodeScout(void)
+{
+	return tInSurvey || tScout;
 }
 
 extern "C" int OxzCoreDrop(const wchar_t* rel)
@@ -2919,6 +3632,66 @@ extern "C" int OxzSpeedSelfTest(void)
 			plain.resize(raw.size());
 			if (!DecPpmd(packed.data(), got, plain.data(), plain.size()) || plain != raw) code = 9;
 		}
+	}
+	if (!code) {
+		std::vector<uint8_t> pcm(8192), back(8192);
+		for (i = 0; i < 4096; ++i) {
+			int v = (int)((i % 180) * 40 - 3600);
+			pcm[i * 2] = (uint8_t)v;
+			pcm[i * 2 + 1] = (uint8_t)(v >> 8);
+		}
+		if (!OxzPcmMaybe(pcm.data(), pcm.size()) || !OxzFlacCompress(pcm.data(), pcm.size(), packed) || !OxzFlacDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != pcm) code = 50;
+		else if (!OxzAlacCompress(pcm.data(), pcm.size(), packed) || !OxzAlacDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != pcm) code = 51;
+		else if (!OxzTtaCompress(pcm.data(), pcm.size(), packed) || !OxzTtaDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != pcm) code = 52;
+	}
+	if (!code) {
+		const uint32_t stride = 192, rows = 32;
+		std::vector<uint8_t> bmp(54 + stride * rows), back;
+		memset(bmp.data(), 0, bmp.size());
+		bmp[0] = 'B'; bmp[1] = 'M';
+		bmp[2] = (uint8_t)bmp.size(); bmp[3] = (uint8_t)(bmp.size() >> 8);
+		bmp[10] = 54;
+		bmp[14] = 40;
+		bmp[18] = 64;
+		bmp[22] = (uint8_t)rows;
+		bmp[26] = 1;
+		bmp[28] = 24;
+		for (i = 0; i < stride * rows; ++i) bmp[54 + i] = 40;
+		bmp[54] = 41;
+		bmp[400] = 9;
+		bmp[4000] = 200;
+		back.resize(bmp.size());
+		if (!OxzPictMaybe(bmp.data(), bmp.size()) || !OxzPictCompress(bmp.data(), bmp.size(), packed) || !OxzPictDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != bmp) code = 53;
+	}
+	if (!code) {
+		const uint32_t frameBytes = 384;
+		const int frames = 12;
+		std::vector<uint8_t> avi, back, frame(frameBytes);
+		auto put = [&](uint32_t v) { avi.push_back((uint8_t)v); avi.push_back((uint8_t)(v >> 8)); avi.push_back((uint8_t)(v >> 16)); avi.push_back((uint8_t)(v >> 24)); };
+		auto four = [&](const char* s) { avi.insert(avi.end(), s, s + 4); };
+		four("RIFF"); put(0); four("AVI ");
+		four("LIST"); put(4 + 8 + 40); four("hdrl");
+		four("strf"); put(40);
+		put(40); put(16); put(8); avi.push_back(1); avi.push_back(0); avi.push_back(24); avi.push_back(0); put(0); put(frameBytes);
+		for (i = 0; i < 16; ++i) avi.push_back(0);
+		four("LIST"); put(4 + (uint32_t)frames * (8 + frameBytes)); four("movi");
+		for (int f = 0; f < frames; ++f) {
+			for (i = 0; i < frame.size(); ++i) frame[i] = 30;
+			frame[0] = (uint8_t)(30 + f);
+			frame[100] = (uint8_t)(80 + f);
+			four("00db"); put(frameBytes); avi.insert(avi.end(), frame.begin(), frame.end());
+		}
+		{
+			uint32_t sz = (uint32_t)(avi.size() - 8);
+			avi[4] = (uint8_t)sz; avi[5] = (uint8_t)(sz >> 8); avi[6] = (uint8_t)(sz >> 16); avi[7] = (uint8_t)(sz >> 24);
+		}
+		back.resize(avi.size());
+		if (!OxzVidMaybe(avi.data(), avi.size()) || !OxzVidCompress(avi.data(), avi.size(), packed) || !OxzVidDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != avi) code = 54;
+	}
+	if (!code) {
+		std::vector<uint8_t> raw2(4096), back(4096);
+		for (i = 0; i < raw2.size(); ++i) raw2[i] = (uint8_t)((i / 17) * 3);
+		if (!OxzLzssCompress(raw2.data(), raw2.size(), packed) || !OxzLzssDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != raw2) code = 55;
 	}
 	gUserLevel = saved;
 	gLevelBytes = 0;

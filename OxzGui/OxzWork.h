@@ -5,7 +5,6 @@
 
 std::wstring OxzExeDir();
 std::wstring OxzBeside(const wchar_t* name);
-bool OxzHas7za();
 bool OxzIsOxz(const std::wstring& path);
 std::wstring OxzBaseName(const std::wstring& path);
 std::wstring OxzParent(const std::wstring& path);

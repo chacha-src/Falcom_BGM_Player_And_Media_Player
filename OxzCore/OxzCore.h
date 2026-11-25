@@ -1,8 +1,13 @@
 #pragma once
 /*
   oxz 独自書庫 (OXZPKG)。7z とは別の印。
-  ファイルごとに複数の公開コーデックを試し、1 バイトでも小さい方を残す。
-  512KB を超えるファイルは先頭 512KB を各コーデック同時に試し、その方式で全体を圧縮する。
+  ファイルごとに複数の公開コーデックを試し、小さい方を残す。
+  フィルタは LZ4 で先にふるい、効くものだけ各コーデックへ渡す。
+  レベル 4 以上は、まず速い設定で全部試し、僅差の候補だけ本番の設定でやり直す。
+  256KB 以下はファイル全体で方式を決める。それより大きいファイルは先頭から末尾まで等間隔に 8 箇所、合計 128KB を集めて決める。
+  実行形式以外で標本が zstd でも元の 4% 未満まで小さくなるファイルは、遅い方式を試さず速い方式で全体を書く。
+  16bit PCM は FLAC / ALAC / TTA、無圧縮の BMP と TGA は行フィルタ、無圧縮 AVI はフレーム差分を使う。形が違うファイルには掛けない。
+  64KB 以下の一般データには LZSS も試す。
   大きなファイルの圧縮と展開は、コーデックの内側でもスレッドに分ける。形式と既存書庫の中身は変えない。
   PPMd は展開が重いので 8MB を超えるファイルには使わない。それ以下でも他方式より 5% 以上小さいときだけ使う。
   同点なら展開の軽い方。拡張子では除外しない。サイズは 64 ビット。
@@ -40,6 +45,9 @@ int OxzCoreSetLevel(int level);
 int OxzCoreGetLevel(void);
 void OxzCoreSetPpmd(int on);
 int OxzCoreGetPpmd(void);
+/* 0 は自動。1 から 12 まで。 */
+void OxzCoreSetThreads(int n);
+int OxzCoreGetThreads(void);
 /* 展開直後の作業フォルダを覚える。archive は 7z 形式 oxz、OXZPKG、または無い。 */
 int OxzCoreRemember(const wchar_t* workDir, const wchar_t* archiveOrNull);
 /* 覚えている一覧から rel を外す。フォルダなら中も外す。 */

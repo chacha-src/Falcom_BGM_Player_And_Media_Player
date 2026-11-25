@@ -167,15 +167,19 @@ bool OxzInstallHere(std::wstring& err)
 	std::wstring dest = OxzProgramDir();
 	std::wstring srcExe = OxzBeside(L"OxzGui.exe");
 	std::wstring srcDll = OxzBeside(L"OxzShell.dll");
-	std::wstring src7 = OxzBeside(L"7za.exe");
 	CreateDirectoryW(dest.c_str(), NULL);
-	if (GetFileAttributesW(srcDll.c_str()) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(src7.c_str()) == INVALID_FILE_ATTRIBUTES) {
+	if (GetFileAttributesW(srcDll.c_str()) == INVALID_FILE_ATTRIBUTES) {
 		err = OxzTxt(OS_MISSING);
 		return false;
 	}
-	if (!OxzCopyReplace(srcExe, dest + L"\\OxzGui.exe") || !OxzCopyReplace(srcDll, dest + L"\\OxzShell.dll") || !OxzCopyReplace(src7, dest + L"\\7za.exe")) {
+	if (!OxzCopyReplace(srcExe, dest + L"\\OxzGui.exe") || !OxzCopyReplace(srcDll, dest + L"\\OxzShell.dll")) {
 		err = OxzTxt(OS_INSTALL_FAIL);
 		return false;
+	}
+	{
+		std::wstring srcSfx = OxzBeside(L"OxzSfx.exe");
+		if (GetFileAttributesW(srcSfx.c_str()) != INVALID_FILE_ATTRIBUTES)
+			OxzCopyReplace(srcSfx, dest + L"\\OxzSfx.exe");
 	}
 	OxzWriteVerbs(dest + L"\\OxzGui.exe");
 	if (!OxzIsInstalled()) {

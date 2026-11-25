@@ -1,6 +1,7 @@
 #include "OxzArc.h"
 #include "OxzIn.h"
 #include "OxzWork.h"
+#include "OxzVol.h"
 #include "OxzLang.h"
 #include "OxzFilt.h"
 #include "lzma_sdk/7z.h"
@@ -79,6 +80,7 @@ int OxzArchiveKind(const wchar_t* path)
 	if (EndsWithI(path, L".wim")) return 11;
 	if (EndsWithI(path, L".lzh") || EndsWithI(path, L".lha")) return 12;
 	if (EndsWithI(path, L".arj")) return 13;
+	if (OxzIsOxzFamily(path)) return 1;
 	return 0;
 }
 

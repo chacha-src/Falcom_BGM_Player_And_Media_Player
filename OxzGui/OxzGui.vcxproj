@@ -55,14 +55,12 @@
       <AdditionalDependencies>cabinet.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;$(ProjectDir)..\x64lib\libogg_static_avx2_2026.lib;$(ProjectDir)..\x64lib\libFLAC_static_avx2_2026.lib;$(ProjectDir)..\x64lib\libz-static.lib;$(ProjectDir)..\x64lib\libzstd_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "C:\projects\APPLICATION3\ogg_binary\ZpaqGui\7za.exe" copy /Y "C:\projects\APPLICATION3\ogg_binary\ZpaqGui\7za.exe" "$(ProjectDir)7za.exe"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="OxzGui.cpp" />
     <ClCompile Include="OxzLang.cpp" />
     <ClCompile Include="OxzWork.cpp" />
+    <ClCompile Include="OxzVol.cpp" />
     <ClCompile Include="OxzInst.cpp" />
     <ClCompile Include="OxzUpdate.cpp" />
     <ClCompile Include="..\OxzFilt.cpp" />
