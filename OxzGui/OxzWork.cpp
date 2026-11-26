@@ -796,7 +796,12 @@ int OxzMergePack(const std::wstring& existing, const std::vector<std::wstring>& 
 		OxzRmTree(work);
 		return 2;
 	}
-	rc = OxzPackWork(work, dest, bytes, err, packBase, packSpan);
+	{
+		int wrap = OxzTarWrap(dest.c_str());
+		if (wrap >= 0) rc = OxzWriteTar(work, dest, bytes, err, packBase, packSpan);
+		else if (OxzEndsI(dest.c_str(), L".zip")) rc = OxzWriteZip(work, dest, bytes, err, packBase, packSpan);
+		else rc = OxzPackWork(work, dest, bytes, err, packBase, packSpan);
+	}
 	OxzRmTree(work);
 	return rc;
 }
@@ -823,6 +828,11 @@ int OxzSaveAdded(const std::wstring& work, const std::wstring& destDir, const st
 	{
 		OxzScopeHold hold(0, 15, files, nbytes);
 		for (size_t i = 0; i < use.size(); ++i) OxzImportOne(use[i], into);
+	}
+	{
+		int wrap = OxzTarWrap(archive.c_str());
+		if (wrap >= 0) return OxzWriteTar(work, archive, bytes, err, 15, 85);
+		if (OxzEndsI(archive.c_str(), L".zip")) return OxzWriteZip(work, archive, bytes, err, 15, 85);
 	}
 	return OxzPackWork(work, archive, bytes, err, 15, 85);
 }

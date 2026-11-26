@@ -16,6 +16,7 @@
 #include "OxzLang.h"
 #include "OxzWork.h"
 #include "OxzArc.h"
+#include "OxzIn.h"
 #include "OxzInst.h"
 #include "OxzUpdate.h"
 #include "OxzAudio.h"
@@ -44,7 +45,8 @@ enum {
 	ID_SET_SPLIT_LBL = 1112, ID_SET_SPLIT, ID_SET_ASK, ID_SET_SFX, ID_SET_THREADS_LBL, ID_SET_THREADS,
 	ID_ASK_LEVEL = 1210, ID_ASK_SPLIT, ID_ASK_SFX, ID_ASK_THREADS, ID_ASK_OK, ID_ASK_CANCEL,
 	ID_ASK_LEVEL_LBL, ID_ASK_SPLIT_LBL, ID_ASK_THREADS_LBL, ID_ASK_LEVEL_VAL,
-	ID_ASK_NAME_LBL, ID_ASK_NAME, ID_ASK_BROWSE
+	ID_ASK_NAME_LBL, ID_ASK_NAME, ID_ASK_BROWSE,
+	ID_TAR_0 = 1240, ID_TAR_1, ID_TAR_2, ID_TAR_3, ID_TAR_4, ID_TAR_5, ID_TAR_OK, ID_TAR_CANCEL
 };
 enum { JOB_OPEN = 1, JOB_SAVE, JOB_EXTRACT, JOB_PACK, JOB_ADD, JOB_EXTHERE, JOB_EXTRACTTO, JOB_EXTAT, JOB_TEST, JOB_DROPSAVE, JOB_PACKEACH, JOB_CONVERT, WM_JOB = WM_APP + 1, WM_START = WM_APP + 5 };
 
@@ -1329,9 +1331,22 @@ static DWORD WINAPI JobThread(LPVOID p)
 			const wchar_t* name = j->archive.c_str();
 			size_t ln = wcslen(name);
 			int zip = ln >= 4 && _wcsicmp(name + ln - 4, L".zip") == 0;
-			int tar = ln >= 4 && _wcsicmp(name + ln - 4, L".tar") == 0;
-			if (zip) j->rc = OxzWriteZip(j->work, j->archive, j->bytes, j->err, 35, 65);
-			else if (tar) j->rc = OxzWriteTar(j->work, j->archive, j->bytes, j->err, 35, 65);
+			int wrap = OxzTarWrap(name);
+			int loneLz4 = 0;
+			if (wrap == 5 && !OxzEndsI(name, L".tar.lz4") && !OxzEndsI(name, L".tlz4")) {
+				int files = 0, plain = 0;
+				for (size_t i = 0; i < j->keep.size(); ++i) {
+					if (j->keep[i].dir) continue;
+					files++;
+					if (j->keep[i].kind == EK_LZ4) plain++;
+				}
+				if (files == 1 && plain == 1) loneLz4 = 1;
+			}
+			if (loneLz4) {
+				j->rc = OxzWriteOneLz4(j->work, j->archive, j->bytes, j->err, 35, 65);
+				if (j->rc == 3) j->rc = OxzWriteTar(j->work, j->archive, j->bytes, j->err, 35, 65);
+			} else if (zip) j->rc = OxzWriteZip(j->work, j->archive, j->bytes, j->err, 35, 65);
+			else if (wrap >= 0) j->rc = OxzWriteTar(j->work, j->archive, j->bytes, j->err, 35, 65);
 			else j->rc = OxzPackWork(j->work, j->archive, j->bytes, j->err, 35, 65);
 		}
 	} else if (j->kind == JOB_PACK || j->kind == JOB_ADD) {
@@ -1462,7 +1477,7 @@ static DWORD WINAPI JobThread(LPVOID p)
 				int rest = span - half;
 				if (rest < 1) rest = 1;
 				if (_wcsicmp(ext, L".zip") == 0) rc = OxzWriteZip(work, pick, bytes, e, base + half, rest);
-				else if (_wcsicmp(ext, L".tar") == 0) rc = OxzWriteTar(work, pick, bytes, e, base + half, rest);
+				else if (OxzTarWrap((std::wstring(L"a") + ext).c_str()) >= 0) rc = OxzWriteTar(work, pick, bytes, e, base + half, rest);
 				else rc = OxzPackWork(work, pick, bytes, e, base + half, rest);
 				j->bytes += bytes;
 				if (rc == 0) j->archive = pick;
@@ -1580,7 +1595,7 @@ static std::vector<wchar_t> MakeOpenFilter()
 	std::vector<wchar_t> v;
 	auto add = [&](const wchar_t* s) { while (*s) v.push_back(*s++); v.push_back(0); };
 	add(OxzTxt(OS_OPEN_ARCH));
-	add(L"*.oxz;*.7z;*.zip;*.rar;*.gz;*.tgz;*.tar;*.tar.gz;*.bz2;*.tbz;*.tbz2;*.tar.bz2;*.xz;*.txz;*.tar.xz;*.zst;*.tzst;*.tar.zst;*.cab;*.iso;*.wim;*.lzh;*.lha;*.arj");
+	add(L"*.oxz;*.7z;*.zip;*.rar;*.gz;*.tgz;*.tar;*.tar.gz;*.bz2;*.tbz;*.tbz2;*.tar.bz2;*.xz;*.txz;*.tar.xz;*.zst;*.tzst;*.tar.zst;*.lz4;*.tlz4;*.tar.lz4;*.cab;*.iso;*.wim;*.lzh;*.lha;*.arj");
 	add(OxzTxt(OS_OXZFILTER));
 	add(L"*.oxz");
 	add(OxzTxt(OS_ALLFILES));
@@ -1829,15 +1844,21 @@ static int HasFiles()
 }
 
 static int AskCompress(HWND owner, const std::wstring& suggest, std::wstring& out);
+static void SaveCurrent();
+
+static int AskTar(HWND owner, int current);
+static int AdjustPlainTar(std::wstring& path);
 
 static void OnSave()
 {
 	if (gWork.empty() && gForeign.empty() && !gVirtual) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
 	if (!HasFiles() && gArchive.empty() && gForeign.empty()) { Tell(gHwnd, OxzTxt(OS_NOFILES), MB_ICONINFORMATION); return; }
+	if (!gArchive.empty() && OxzTarWrap(gArchive.c_str()) >= 0) { SaveCurrent(); return; }
 	std::wstring suggest;
 	if (!gArchive.empty()) suggest = OxzIsOxz(gArchive) ? gArchive : OxzSaveName(gArchive);
 	std::wstring arc;
 	if (!AskCompress(gHwnd, suggest, arc)) return;
+	if (!AdjustPlainTar(arc)) return;
 	if (UnderWork(arc)) { Tell(gHwnd, OxzTxt(OS_SAVE_INSIDE), MB_ICONWARNING); return; }
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
 	Job* j = NewJob();
@@ -1852,7 +1873,7 @@ static void OnSave()
 static void SaveCurrent()
 {
 	if (gBusy || (gWork.empty() && gForeign.empty()) || (!HasFiles() && gArchive.empty() && gForeign.empty())) return;
-	if (!OxzIsOxz(gArchive)) { OnSave(); return; }
+	if (!OxzIsOxz(gArchive) && OxzTarWrap(gArchive.c_str()) < 0) { OnSave(); return; }
 	if (UnderWork(gArchive)) return;
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
 	Job* j = NewJob();
@@ -1926,7 +1947,7 @@ static void StartWatchSave()
 		OnSave();
 		return;
 	}
-	std::wstring arc = OxzIsOxz(gArchive) ? gArchive : OxzSaveName(gArchive);
+	std::wstring arc = (OxzIsOxz(gArchive) || OxzTarWrap(gArchive.c_str()) >= 0) ? gArchive : OxzSaveName(gArchive);
 	if (arc.empty() || UnderWork(arc)) return;
 	FreezeWatchBase();
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
@@ -2030,6 +2051,10 @@ static void StartPack(const std::vector<std::wstring>& inputs, int add, const st
 		return;
 	}
 	if (chosen.empty()) { Tell(gHwnd, OxzTxt(OS_SAVE_FAIL), MB_ICONWARNING); return; }
+	if (!AdjustPlainTar(chosen)) {
+		if (gExit || gCloseWhenDone) PostMessageW(gHwnd, WM_CLOSE, 0, 0);
+		return;
+	}
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
 	Job* j = NewJob();
 	j->kind = add ? JOB_ADD : JOB_PACK;
@@ -2041,15 +2066,40 @@ static void StartPack(const std::vector<std::wstring>& inputs, int add, const st
 
 static const wchar_t* ConvExt(const std::wstring& fmt)
 {
-	if (_wcsicmp(fmt.c_str(), L"oxz") == 0 || _wcsicmp(fmt.c_str(), L".oxz") == 0) return L".oxz";
-	if (_wcsicmp(fmt.c_str(), L"zip") == 0 || _wcsicmp(fmt.c_str(), L".zip") == 0) return L".zip";
-	if (_wcsicmp(fmt.c_str(), L"tar") == 0 || _wcsicmp(fmt.c_str(), L".tar") == 0) return L".tar";
+	static const wchar_t* name[] = {
+		L"oxz", L".oxz", L"zip", L".zip", L"tar", L".tar",
+		L"tgz", L".tgz", L"tar.gz", L".tar.gz",
+		L"tbz2", L".tbz2", L"tbz", L".tbz", L"tar.bz2", L".tar.bz2",
+		L"txz", L".txz", L"tar.xz", L".tar.xz",
+		L"tzst", L".tzst", L"tar.zst", L".tar.zst",
+		L"lz4", L".lz4", L"tlz4", L".tlz4", L"tar.lz4", L".tar.lz4"
+	};
+	static const wchar_t* ext[] = {
+		L".oxz", L".oxz", L".zip", L".zip", L".tar", L".tar",
+		L".tgz", L".tgz", L".tgz", L".tgz",
+		L".tbz2", L".tbz2", L".tbz2", L".tbz2", L".tbz2", L".tbz2",
+		L".txz", L".txz", L".txz", L".txz",
+		L".tzst", L".tzst", L".tzst", L".tzst",
+		L".lz4", L".lz4", L".lz4", L".lz4", L".lz4", L".lz4"
+	};
+	for (int i = 0; i < (int)(sizeof(name) / sizeof(name[0])); ++i)
+		if (_wcsicmp(fmt.c_str(), name[i]) == 0) return ext[i];
 	return NULL;
 }
 
 static void StartConvert(const std::vector<std::wstring>& inputs, const std::wstring& fmt)
 {
-	const wchar_t* ext = ConvExt(fmt);
+	std::wstring use = fmt;
+	if (!gExit && (_wcsicmp(fmt.c_str(), L"tar") == 0 || _wcsicmp(fmt.c_str(), L".tar") == 0)) {
+		static const wchar_t* exts[] = { L".tar", L".tgz", L".tbz2", L".txz", L".tzst", L".lz4" };
+		int pick = AskTar(gHwnd, 0);
+		if (pick < 0) {
+			if (gCloseWhenDone) PostMessageW(gHwnd, WM_CLOSE, 0, 0);
+			return;
+		}
+		use = exts[pick];
+	}
+	const wchar_t* ext = ConvExt(use);
 	std::vector<std::wstring> arcs;
 	for (size_t i = 0; i < inputs.size(); ++i)
 		if (CanOpen(inputs[i])) arcs.push_back(inputs[i]);
@@ -2081,6 +2131,10 @@ static void StartPackEach(const std::vector<std::wstring>& inputs, const std::ws
 	else suggest = OxzParent(OxzDestFor(inputs));
 	std::wstring chosen = suggest;
 	if (OxzOptAsk() && !AskCompress(gHwnd, suggest, chosen)) {
+		if (gExit || gCloseWhenDone) PostMessageW(gHwnd, WM_CLOSE, 0, 0);
+		return;
+	}
+	if (inputs.size() == 1 && !AdjustPlainTar(chosen)) {
 		if (gExit || gCloseWhenDone) PostMessageW(gHwnd, WM_CLOSE, 0, 0);
 		return;
 	}
@@ -2638,6 +2692,8 @@ static LRESULT CALLBACK SetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 static int gAskOk;
 static std::wstring gAskPath;
+static int gTarOk;
+static int gTarPick;
 static std::wstring gAskBase;
 
 static std::wstring FinishArchivePath(const std::wstring& typed)
@@ -2704,6 +2760,31 @@ static int BrowseArchive(HWND owner, wchar_t* buf, int cap)
 	return 1;
 }
 
+static int AskNameKeepsOxz(const wchar_t* name)
+{
+	std::wstring leaf;
+	size_t dot;
+	if (!name || !name[0]) return 1;
+	leaf = OxzBaseName(name);
+	if (leaf.empty() || leaf == L"." || leaf == L"..") return 1;
+	dot = leaf.find_last_of(L'.');
+	if (dot == std::wstring::npos || dot == 0) return 1;
+	leaf = leaf.substr(dot);
+	return _wcsicmp(leaf.c_str(), L".oxz") == 0 || _wcsicmp(leaf.c_str(), L".exe") == 0;
+}
+
+static void SyncAskOxz(HWND hwnd)
+{
+	wchar_t name[2048];
+	int on;
+	name[0] = 0;
+	GetWindowTextW(GetDlgItem(hwnd, ID_ASK_NAME), name, 2048);
+	on = AskNameKeepsOxz(name);
+	EnableWindow(GetDlgItem(hwnd, ID_ASK_SPLIT), on);
+	EnableWindow(GetDlgItem(hwnd, ID_ASK_SPLIT_LBL), on);
+	EnableWindow(GetDlgItem(hwnd, ID_ASK_SFX), on);
+}
+
 static LRESULT CALLBACK AskProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
 	switch (msg) {
@@ -2748,6 +2829,7 @@ static LRESULT CALLBACK AskProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		SubBtn(browse); SubBtn(ok); SubBtn(cancel);
 		OxzApplyChrome(hwnd);
 		OxzBindAcrylic(hwnd);
+		SyncAskOxz(hwnd);
 		return 0;
 	}
 	case WM_ERASEBKGND:
@@ -2765,6 +2847,7 @@ static LRESULT CALLBACK AskProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		return 0;
 	}
 	case WM_COMMAND:
+		if (LOWORD(wp) == ID_ASK_NAME && HIWORD(wp) == EN_CHANGE) { SyncAskOxz(hwnd); return 0; }
 		if (LOWORD(wp) == ID_ASK_BROWSE) {
 			wchar_t buf[2048];
 			DWORD attr;
@@ -2867,6 +2950,119 @@ static int AskCompress(HWND owner, const std::wstring& suggest, std::wstring& ou
 	if (owner) { EnableWindow(owner, TRUE); SetForegroundWindow(owner); }
 	if (!gAskOk) return 0;
 	out = gAskPath;
+	return 1;
+}
+
+static LRESULT CALLBACK TarProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	static const wchar_t* lbl[] = {
+		L"tar", L"tar.gz (.tgz)", L"tar.bz2 (.tbz2)", L"tar.xz (.txz)", L"tar.zst (.tzst)", L"lz4 (.lz4)"
+	};
+	switch (msg) {
+	case WM_PARENTNOTIFY:
+		if (LOWORD(wp) == WM_CREATE) OxzBindAcrylic(hwnd);
+		return 0;
+	case WM_CREATE: {
+		HWND boxes[6], ok, cancel;
+		int i;
+		for (i = 0; i < 6; ++i) {
+			boxes[i] = CreateWindowExW(0, L"BUTTON", lbl[i], WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+				20, 16 + i * 28, 380, 24, hwnd, (HMENU)(UINT_PTR)(ID_TAR_0 + i), NULL, NULL);
+			SendMessageW(boxes[i], WM_SETFONT, (WPARAM)gFont, TRUE);
+			SendMessageW(boxes[i], BM_SETCHECK, i == gTarPick ? BST_CHECKED : BST_UNCHECKED, 0);
+		}
+		ok = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | BS_DEFPUSHBUTTON | WS_TABSTOP,
+			180, 196, 110, 32, hwnd, (HMENU)ID_TAR_OK, NULL, NULL);
+		cancel = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | WS_TABSTOP,
+			300, 196, 110, 32, hwnd, (HMENU)ID_TAR_CANCEL, NULL, NULL);
+		SetWindowTextW(ok, OxzTxt(OS_DO_PACK));
+		SetWindowTextW(cancel, OxzTxt(OS_CLOSE));
+		SendMessageW(ok, WM_SETFONT, (WPARAM)gFont, TRUE);
+		SendMessageW(cancel, WM_SETFONT, (WPARAM)gFont, TRUE);
+		SubBtn(ok);
+		SubBtn(cancel);
+		OxzApplyChrome(hwnd);
+		OxzBindAcrylic(hwnd);
+		return 0;
+	}
+	case WM_ERASEBKGND:
+		return OxzHostErase(hwnd, (HDC)wp, gPink);
+	case WM_PAINT:
+		if (!OxzPerPixelAcrylic()) return DefWindowProcW(hwnd, msg, wp, lp);
+		OxzHostPaint(hwnd);
+		return 0;
+	case WM_COMMAND:
+		if (HIWORD(wp) == BN_CLICKED && LOWORD(wp) >= ID_TAR_0 && LOWORD(wp) <= ID_TAR_5) {
+			int id = LOWORD(wp);
+			for (int i = 0; i < 6; ++i)
+				SendMessageW(GetDlgItem(hwnd, ID_TAR_0 + i), BM_SETCHECK, (ID_TAR_0 + i) == id ? BST_CHECKED : BST_UNCHECKED, 0);
+			return 0;
+		}
+		if (LOWORD(wp) == ID_TAR_OK) {
+			gTarPick = 0;
+			for (int i = 0; i < 6; ++i)
+				if (SendMessageW(GetDlgItem(hwnd, ID_TAR_0 + i), BM_GETCHECK, 0, 0) == BST_CHECKED) gTarPick = i;
+			gTarOk = 1;
+			DestroyWindow(hwnd);
+			return 0;
+		}
+		if (LOWORD(wp) == ID_TAR_CANCEL) { gTarOk = 0; DestroyWindow(hwnd); return 0; }
+		return 0;
+	case WM_DRAWITEM:
+		DrawBtn((DRAWITEMSTRUCT*)lp);
+		return TRUE;
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLORBTN:
+	case WM_CTLCOLOREDIT:
+		return (LRESULT)OxzHostCtlColor((HDC)wp, msg, gPink);
+	case WM_KEYDOWN:
+		if (wp == VK_ESCAPE) { gTarOk = 0; DestroyWindow(hwnd); return 0; }
+		break;
+	case WM_CLOSE:
+		gTarOk = 0;
+		DestroyWindow(hwnd);
+		return 0;
+	}
+	return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static int AskTar(HWND owner, int current)
+{
+	RECT r;
+	HWND d;
+	gTarOk = 0;
+	gTarPick = (current >= 0 && current <= 5) ? current : 0;
+	if (owner) GetWindowRect(owner, &r);
+	else { r.left = 80; r.top = 80; }
+	d = CreateWindowExW(WS_EX_DLGMODALFRAME, L"OxzTar", OxzTxt(OS_TAR_TITLE), WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN,
+		r.left + 80, r.top + 80, 440, 280, owner, NULL, GetModuleHandleW(NULL), NULL);
+	if (!d) return -1;
+	ShowWindow(d, SW_SHOW);
+	UpdateWindow(d);
+	SetFocus(GetDlgItem(d, ID_TAR_0 + gTarPick));
+	if (owner) EnableWindow(owner, FALSE);
+	{
+		MSG msg;
+		while (IsWindow(d) && GetMessageW(&msg, NULL, 0, 0)) {
+			if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); break; }
+			if (!IsDialogMessageW(d, &msg)) {
+				TranslateMessage(&msg);
+				DispatchMessageW(&msg);
+			}
+		}
+	}
+	if (owner) { EnableWindow(owner, TRUE); SetForegroundWindow(owner); }
+	if (!gTarOk) return -1;
+	return gTarPick;
+}
+
+static int AdjustPlainTar(std::wstring& path)
+{
+	int pick;
+	if (gExit || OxzTarWrap(path.c_str()) != 0) return 1;
+	pick = AskTar(gHwnd, 0);
+	if (pick < 0) return 0;
+	OxzApplyTarExt(path, pick);
 	return 1;
 }
 
@@ -3962,6 +4158,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int show)
 	RegisterClassW(&wc);
 	wc.lpfnWndProc = AskProc;
 	wc.lpszClassName = L"OxzAsk";
+	RegisterClassW(&wc);
+	wc.lpfnWndProc = TarProc;
+	wc.lpszClassName = L"OxzTar";
 	RegisterClassW(&wc);
 	HWND hwnd = CreateWindowExW(OxzLangIsRtl() ? WS_EX_LAYOUTRTL : 0, L"OxzGui", OxzTxt(OS_APP),
 		WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720, NULL, NULL, hi, NULL);

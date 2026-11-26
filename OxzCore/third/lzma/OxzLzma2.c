@@ -83,8 +83,8 @@ static int EncodeLzma2(const void* in, size_t inSize, void* out, size_t outCap, 
 			if (props.lzmaProps.level < 5) props.lzmaProps.fb = 32;
 			if (dictMax > cap) dictMax = cap;
 		}
-		if (props.lzmaProps.fb > 32) props.lzmaProps.fb = 32;
-		if (userLevel >= 7) props.lzmaProps.mc = 16;
+		if ((wideDict || userLevel < 10) && props.lzmaProps.fb > 32) props.lzmaProps.fb = 32;
+		if (userLevel >= 7 && (wideDict || userLevel < 10)) props.lzmaProps.mc = 16;
 	}
 	props.lzmaProps.numThreads = 1;
 	dict = 1u << 16;

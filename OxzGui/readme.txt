@@ -55,7 +55,10 @@ OxzGui.exe を起動します。
 　「名前.oxz」に圧縮（選んだものを一つにまとめる）
 　それぞれ oxz に圧縮（2つ以上選んだとき。一つずつ別の oxz にする）
 zip や 7z などのダブルクリック先は変えません。開く、展開、テストは oxz のメニューの中です。
-開くと oxz と同じ画面で中を見て、ドロップで追加できます。保存で作れるのは oxz、zip、tar です。7z の新規作成はこの exe には入っていません。開いた zip、7z、rar などの元ファイルは書き換えません。
+開くと oxz と同じ画面で中を見て、ドロップで追加できます。保存で作れるのは oxz、zip、tar（tar.gz、tar.bz2、tar.xz、tar.zst、lz4 を含む）です。7z の新規作成はこの exe には入っていません。開いた zip、7z、rar などの元ファイルは書き換えません。
+分割と自己解凍は oxz だけです。名前が zip や tar のときは、圧縮の画面でその二つは選べません。
+分割した oxz は、指定した大きさごとにファイルを作ります。続きは .o01 で、100 を超えるときは .o001 からです。
+自己解凍にすると先頭は exe です。exe 自身の大きさの分だけ、先頭に入る中身を減らすので、どの巻も指定した大きさを超えません。
 新しい oxz を開くときは目録だけを読むので、一覧はすぐ出ます。ファイルを開いたりコピーしたときだけ、そのファイルを展開します。
 保存と、エディタで変わったあとの更新は、変わっていない圧縮データをそのまま繋ぎ、変わったファイルだけ圧縮し直します。
 
@@ -90,7 +93,7 @@ txt や xml をエディタで保存すると、約 1 秒後に、変わった�
 一覧の列は、名前、サイズ、大きさ（B / KB / MB / GB / TB）、
 格納サイズ、格納量、比率、コーデック、種類、属性、更新日時、作成日時です。
 新しい oxz では、ファイルごとに実際の格納サイズと比率、使ったコーデックが出ます。
-512KB より大きいファイルは、先頭 512KB を各コーデック同時に試し、一番小さくなった方式で全体を圧縮します。
+256KB 以下はファイル全体で方式を決めます。それより大きいファイルは、先頭から末尾まで等間隔に 8 箇所、合計 128KB を集めて決め、その方式で全体を圧縮します。
 圧縮と展開は、別々のファイルを同時に進め、大きな bzip2、Zstd、LZMA2、Brotli はコーデックの内側でも分けて同時に処理します。書庫の形式はこれまでのままで、すでにある oxz もそのまま読めます。
 PPMd は展開が重いので、8MB を超えるファイルには使いません。それより小さいファイルでも、他の方式より 5% 以上小さいときだけ使います。
 埋め込み 7z の中だけのファイルは、一つにまとまっているので比率は出さず、コーデックは 7z です。
@@ -228,8 +231,14 @@ Open, extract, and test also appear for 7z, zip, rar, gz, bz2, xz, zst,
 tar, tgz, tar.gz, tbz2, tar.bz2, txz, tar.xz, tzst, tar.zst, cab, iso, wim,
 lzh, lha, and arj. Double-click on those types stays with the program
 that already opens them. Open shows the archive in this window, and a drop
-adds files. Save writes oxz, zip, or tar. Creating a new 7z is not in this
+adds files. Save writes oxz, zip, or tar, including tar.gz, tar.bz2, tar.xz,
+tar.zst, and lz4. Creating a new 7z is not in this
 exe. An opened zip, 7z, or rar is left unchanged.
+Split and self-extraction apply only to oxz. Those two controls are off
+when the name is a zip or a tar. A split oxz writes one file per chosen
+size, then .o01, or .o001 once the count passes 100. A self-extractor
+makes the first file an exe, and that file holds less archive data by
+the size of the exe, so no volume grows past the chosen size.
 Opening a new oxz reads only its directory, so the list appears at once.
 A file is decompressed when you open or copy that file. Save, and an
 update after an editor change, keeps unchanged compressed blocks and
@@ -267,9 +276,9 @@ Columns are name, size, a readable size (B / KB / MB / GB / TB),
 stored size, a readable packed size, ratio, codec, type, attributes,
 modified, and created.
 A new oxz shows each file's real packed size, ratio, and codec.
-A file larger than 512KB is sampled on its first 512KB. Every codec and
-filter is tried at the same time, and the smallest one is used for the
-whole file. Compression and extraction also run separate files at the
+A file of 256KB or less is tried as a whole. A larger file is judged from
+eight evenly spaced samples, 128KB in total, and that choice compresses
+the whole file. Compression and extraction also run separate files at the
 same time, and a large bzip2, Zstd, LZMA2, or Brotli member is split
 inside the codec. The archive format stays as it is, and an existing
 oxz still reads out to the same bytes. PPMd is slow to extract, so it is not used for a file over

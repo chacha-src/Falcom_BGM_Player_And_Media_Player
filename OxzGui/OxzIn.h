@@ -4,7 +4,8 @@
 enum {
 	EK_7Z = 1, EK_ZIP = 2, EK_GZ = 3, EK_TAR = 4, EK_RAR = 5, EK_ZST = 6, EK_BZ = 7, EK_XZ = 8,
 	EK_CAB = 9, EK_ISO = 10, EK_WIM = 11, EK_LZH = 12, EK_ARJ = 13,
-	EK_GZTAR = 14, EK_BZTAR = 15, EK_ZSTTAR = 16, EK_XZTAR = 17
+	EK_GZTAR = 14, EK_BZTAR = 15, EK_ZSTTAR = 16, EK_XZTAR = 17,
+	EK_LZ4 = 18, EK_LZ4TAR = 19
 };
 
 int OxzEndsI(const wchar_t* path, const wchar_t* ext);

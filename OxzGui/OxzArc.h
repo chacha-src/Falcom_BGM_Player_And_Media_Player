@@ -44,6 +44,11 @@ int OxzMaterialize(const wchar_t* arc, const wchar_t* work, const std::vector<Ox
 int OxzTestArchive(const wchar_t* arc, std::vector<OxzTestRow>& rows, std::wstring& err, int base, int span);
 int OxzWriteZip(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span);
 int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span);
+/* One uncompressed file, written as an lz4 frame. Returns 3 when the folder is not a single file. */
+int OxzWriteOneLz4(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span);
+/* 0 plain tar, 1 gz, 2 bz2, 3 xz, 4 zst, 5 lz4, -1 otherwise */
+int OxzTarWrap(const wchar_t* path);
+void OxzApplyTarExt(std::wstring& path, int wrap);
 
 struct OxzMapNode {
 	std::wstring name;

@@ -114,13 +114,13 @@
       <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\lzma_sdk\Bra.c">
-      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\lzma_sdk\Bra86.c">
-      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\lzma_sdk\BraIA64.c">
-      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\lzma_sdk\CpuArch.c">
       <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -151,6 +151,9 @@
     </ClCompile>
     <ClCompile Include="..\..\zlib-develop\contrib\infback9\infback9.c" />
     <ClCompile Include="..\..\zlib-develop\contrib\infback9\inftree9.c" />
+    <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\un7z\lzma\C\XzEnc.c">
+      <PreprocessorDefinitions>Z7_ST;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="..\..\kpi_sources_20240712\kpi_unarc\kbunarc\source\un7z\lzma\C\Xz.c">
       <PreprocessorDefinitions>Z7_ST;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>

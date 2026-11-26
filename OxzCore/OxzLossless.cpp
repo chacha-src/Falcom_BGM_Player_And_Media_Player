@@ -44,6 +44,25 @@ struct PcmView {
 	size_t suffix;
 };
 
+static int TextByte(uint8_t c)
+{
+	return c == 9 || c == 10 || c == 13 || (c >= 32 && c < 127);
+}
+
+static int LooksLikeText(const uint8_t* p, size_t n)
+{
+	size_t i, text = 0, utf = 0, samples, use;
+	use = n > 16384 ? 16384 : n;
+	if (use < 64) return 0;
+	for (i = 0; i < use; ++i) if (TextByte(p[i])) text++;
+	if (text * 5 >= use * 4) return 1;
+	samples = use / 2;
+	for (i = 0; i + 1 < use; i += 2) {
+		if ((p[i + 1] == 0 && TextByte(p[i])) || (p[i] == 0 && TextByte(p[i + 1]))) utf++;
+	}
+	return samples && utf * 4 >= samples * 3;
+}
+
 static int CalmPcm(const uint8_t* p, size_t n, int* channels)
 {
 	const int16_t* s;
@@ -119,6 +138,7 @@ static int DescribePcm(const uint8_t* p, size_t n, PcmView* v)
 	if (p[0] == 'B' && p[1] == 'M') return 0;
 	if (p[0] == 'O' && p[1] == 'X' && p[2] == 'Z') return 0;
 	if (p[0] == 0x37 && p[1] == 0x7A) return 0;
+	if (LooksLikeText(p, n)) return 0;
 	{
 		size_t pcm = n & ~1u;
 		int ch = 1;

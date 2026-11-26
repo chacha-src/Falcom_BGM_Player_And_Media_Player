@@ -47,6 +47,7 @@ int OxzArchiveKind(const wchar_t* path)
 		if (EndsWithI(path, L".tar")) return 4;
 		if (EndsWithI(path, L".rar")) return 5;
 		if (EndsWithI(path, L".zst") || EndsWithI(path, L".tzst") || EndsWithI(path, L".tar.zst")) return 6;
+	if (EndsWithI(path, L".lz4") || EndsWithI(path, L".tlz4") || EndsWithI(path, L".tar.lz4")) return 14;
 		if (EndsWithI(path, L".bz2") || EndsWithI(path, L".tbz") || EndsWithI(path, L".tbz2") || EndsWithI(path, L".tar.bz2")) return 7;
 		if (EndsWithI(path, L".xz") || EndsWithI(path, L".txz") || EndsWithI(path, L".tar.xz")) return 8;
 		if (EndsWithI(path, L".cab")) return 9;
@@ -64,6 +65,7 @@ int OxzArchiveKind(const wchar_t* path)
 	if (n >= 3 && memcmp(b, "BZh", 3) == 0) return 7;
 	if (n >= 6 && b[0] == 0xFD && memcmp(b + 1, "7zXZ", 4) == 0) return 8;
 	if (n >= 4 && b[0] == 0x28 && b[1] == 0xB5 && b[2] == 0x2F && b[3] == 0xFD) return 6;
+	if (n >= 4 && b[0] == 0x04 && b[1] == 0x22 && b[2] == 0x4D && b[3] == 0x18) return 14;
 	if (n >= 4 && memcmp(b, "MSCF", 4) == 0) return 9;
 	if (n >= 5 && memcmp(b, "MSWIM", 5) == 0) return 11;
 	if (n >= 2 && b[0] == 0x60 && b[1] == 0xEA) return 13;
@@ -73,6 +75,7 @@ int OxzArchiveKind(const wchar_t* path)
 	if (EndsWithI(path, L".tar")) return 4;
 	if (EndsWithI(path, L".rar")) return 5;
 	if (EndsWithI(path, L".zst") || EndsWithI(path, L".tzst") || EndsWithI(path, L".tar.zst")) return 6;
+	if (EndsWithI(path, L".lz4") || EndsWithI(path, L".tlz4") || EndsWithI(path, L".tar.lz4")) return 14;
 	if (EndsWithI(path, L".bz2") || EndsWithI(path, L".tbz") || EndsWithI(path, L".tbz2") || EndsWithI(path, L".tar.bz2")) return 7;
 	if (EndsWithI(path, L".xz") || EndsWithI(path, L".txz") || EndsWithI(path, L".tar.xz")) return 8;
 	if (EndsWithI(path, L".cab")) return 9;

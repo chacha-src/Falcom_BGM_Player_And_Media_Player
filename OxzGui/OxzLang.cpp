@@ -139,6 +139,8 @@ static const wchar_t* kTxt[OS_COUNT][14] = {
 	{ L"自己解凍の本体がありません。", L"The self-extractor is missing.", L"L'extracteur est absent.", L"Manca l'autoestraente.", L"Falta el autoextraible.", L"자동 풀림 본체가 없습니다.", L"缺少自解压程序。", L"برنامج الاستخراج غير موجود.", L"Нет модуля самораспаковки.", L"Der Entpacker fehlt.", L"Falta o autoextraivel.", L"Het uitpakprogramma ontbreekt.", L"Brak programu samorozpakowania.", L"Acici program yok." },
 	{ L"圧縮する", L"Compress", L"Compresser", L"Comprimi", L"Comprimir", L"압축", L"压缩", L"ضغط", L"Сжать", L"Packen", L"Comprimir", L"Inpakken", L"Kompresuj", L"Sikistir" },
 	{ L"ファイル名", L"File name", L"Nom du fichier", L"Nome file", L"Nombre", L"파일 이름", L"文件名", L"اسم الملف", L"Имя файла", L"Dateiname", L"Nome do arquivo", L"Bestandsnaam", L"Nazwa pliku", L"Dosya adi" },
+	{ L"tar の形式", L"tar format", L"Format tar", L"Formato tar", L"Formato tar", L"tar 형식", L"tar 格式", L"تنسيق tar", L"Формат tar", L"tar-Format", L"Formato tar", L"tar-formaat", L"Format tar", L"tar bicimi" },
+	{ L"分割サイズが自己解凍の exe より小さいです。", L"The split size is smaller than the self-extractor.", L"La decoupe est plus petite que l'extracteur.", L"La divisione e piu piccola dell'autoestraente.", L"La division es menor que el autoextraible.", L"분할 크기가 자동 풀림 프로그램보다 작습니다.", L"分卷大小小于自解压程序。", L"حجم التقسيم أصغر من برنامج الاستخراج.", L"Размер тома меньше модуля самораспаковки.", L"Die Teilgroesse ist kleiner als der Entpacker.", L"A divisao e menor que o autoextraivel.", L"De deelgrootte is kleiner dan het uitpakprogramma.", L"Rozmiar podzialu jest mniejszy niz program samorozpakowania.", L"Bolme boyutu acici programdan kucuk." },
 };
 
 static const wchar_t* kName[14] = {

@@ -10,7 +10,9 @@
 #include "7zCrc.h"
 #include "LzmaDec.h"
 #include "Xz.h"
+#include "XzEnc.h"
 #include "zlib.h"
+#include "../OxzCore/third/lz4/lib/lz4.h"
 #include "zip.h"
 #include "iowin32.h"
 #include "../OxzCore/third/bzip2/bzlib.h"
@@ -20,6 +22,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <algorithm>
+#include <memory>
 
 int OxzEndsI(const wchar_t* path, const wchar_t* ext)
 {
@@ -33,7 +36,38 @@ int OxzNameIsTar(const wchar_t* path)
 	return OxzEndsI(path, L".tar") || OxzEndsI(path, L".tgz") || OxzEndsI(path, L".tar.gz")
 		|| OxzEndsI(path, L".tbz") || OxzEndsI(path, L".tbz2") || OxzEndsI(path, L".tar.bz2")
 		|| OxzEndsI(path, L".txz") || OxzEndsI(path, L".tar.xz")
-		|| OxzEndsI(path, L".tzst") || OxzEndsI(path, L".tar.zst");
+		|| OxzEndsI(path, L".tzst") || OxzEndsI(path, L".tar.zst")
+		|| OxzEndsI(path, L".tar.lz4") || OxzEndsI(path, L".tlz4");
+}
+
+int OxzTarWrap(const wchar_t* path)
+{
+	if (!path) return -1;
+	if (OxzEndsI(path, L".tar.gz") || OxzEndsI(path, L".tgz")) return 1;
+	if (OxzEndsI(path, L".tar.bz2") || OxzEndsI(path, L".tbz2") || OxzEndsI(path, L".tbz")) return 2;
+	if (OxzEndsI(path, L".tar.xz") || OxzEndsI(path, L".txz")) return 3;
+	if (OxzEndsI(path, L".tar.zst") || OxzEndsI(path, L".tzst")) return 4;
+	if (OxzEndsI(path, L".tar.lz4") || OxzEndsI(path, L".tlz4") || OxzEndsI(path, L".lz4")) return 5;
+	if (OxzEndsI(path, L".tar")) return 0;
+	return -1;
+}
+
+void OxzApplyTarExt(std::wstring& path, int wrap)
+{
+	static const wchar_t* cut[] = {
+		L".tar.gz", L".tar.bz2", L".tar.xz", L".tar.zst", L".tar.lz4",
+		L".tbz2", L".tgz", L".tbz", L".txz", L".tzst", L".tlz4", L".lz4", L".tar", NULL
+	};
+	static const wchar_t* put[] = { L".tar", L".tgz", L".tbz2", L".txz", L".tzst", L".lz4" };
+	int i;
+	if (wrap < 0 || wrap > 5) wrap = 0;
+	for (i = 0; cut[i]; ++i) {
+		if (OxzEndsI(path.c_str(), cut[i])) {
+			path.resize(path.size() - wcslen(cut[i]));
+			break;
+		}
+	}
+	path += put[wrap];
 }
 
 int OxzSafeRelA(const wchar_t* name, std::wstring& rel)
@@ -508,6 +542,149 @@ struct XzSrc : Src {
 	}
 };
 
+static uint32_t Rotl32(uint32_t x, int r)
+{
+	return (x << r) | (x >> (32 - r));
+}
+
+static uint32_t Xx32(const void* data, size_t n, uint32_t seed)
+{
+	const unsigned char* p = (const unsigned char*)data;
+	const unsigned char* end = p + n;
+	uint32_t h = seed + 0x165667B1u + (uint32_t)n;
+	while (p + 4 <= end) {
+		uint32_t v;
+		memcpy(&v, p, 4);
+		h += v * 0xC2B2AE3Du;
+		h = Rotl32(h, 17) * 0x27D4EB2Fu;
+		p += 4;
+	}
+	while (p < end) {
+		h += (uint32_t)(*p++) * 0x165667B1u;
+		h = Rotl32(h, 11) * 0x9E3779B1u;
+	}
+	h ^= h >> 15;
+	h *= 0x85EBCA77u;
+	h ^= h >> 13;
+	h *= 0xC2B2AE3Du;
+	h ^= h >> 16;
+	return h;
+}
+
+struct Lz4Src : Src {
+	HANDLE h;
+	std::vector<unsigned char> pending;
+	std::vector<unsigned char> hist;
+	size_t at;
+	int bad, ended, blockChk, contentChk, linked;
+	size_t blockMax;
+	explicit Lz4Src(const wchar_t* path) : h(OxzOpenReadA(path)), at(0), bad(0), ended(0), blockChk(0), contentChk(0), linked(0), blockMax(0)
+	{
+		unsigned char mag[4], flg, bd, hc, desc[16];
+		DWORD g = 0;
+		size_t dn = 2;
+		if (h == INVALID_HANDLE_VALUE) { bad = 1; return; }
+		if (!ReadFile(h, mag, 4, &g, NULL) || g != 4 || mag[0] != 0x04 || mag[1] != 0x22 || mag[2] != 0x4D || mag[3] != 0x18) { bad = 1; return; }
+		if (!ReadFile(h, &flg, 1, &g, NULL) || g != 1 || !ReadFile(h, &bd, 1, &g, NULL) || g != 1) { bad = 1; return; }
+		if ((flg >> 6) != 1 || (flg & 0x02)) { bad = 1; return; }
+		desc[0] = flg;
+		desc[1] = bd;
+		{
+			int bsz = (bd >> 4) & 7;
+			if (bsz < 4 || bsz > 7) { bad = 1; return; }
+			blockMax = 1u << (8 + bsz * 2);
+		}
+		linked = (flg & 0x20) ? 0 : 1;
+		blockChk = (flg & 0x10) ? 1 : 0;
+		contentChk = (flg & 0x04) ? 1 : 0;
+		if (flg & 0x08) {
+			if (!ReadFile(h, desc + dn, 8, &g, NULL) || g != 8) { bad = 1; return; }
+			dn += 8;
+		}
+		if (flg & 0x01) {
+			if (!ReadFile(h, desc + dn, 4, &g, NULL) || g != 4) { bad = 1; return; }
+			dn += 4;
+		}
+		if (!ReadFile(h, &hc, 1, &g, NULL) || g != 1 || hc != (unsigned char)(Xx32(desc, dn, 0) >> 8)) { bad = 1; return; }
+	}
+	~Lz4Src() override { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
+	void Remember(const unsigned char* p, size_t n)
+	{
+		if (!linked || !n) return;
+		if (n >= 65536) {
+			hist.assign(p + n - 65536, p + n);
+			return;
+		}
+		if (hist.size() + n > 65536) hist.erase(hist.begin(), hist.begin() + (hist.size() + n - 65536));
+		hist.insert(hist.end(), p, p + n);
+	}
+	int PullBlock()
+	{
+		unsigned char szb[4];
+		DWORD g = 0;
+		uint32_t sz;
+		int raw;
+		if (ended || bad || h == INVALID_HANDLE_VALUE) return 0;
+		if (!ReadFile(h, szb, 4, &g, NULL) || g != 4) { bad = 1; return -1; }
+		sz = (uint32_t)szb[0] | ((uint32_t)szb[1] << 8) | ((uint32_t)szb[2] << 16) | ((uint32_t)szb[3] << 24);
+		if (sz == 0) {
+			if (contentChk) {
+				unsigned char c[4];
+				ReadFile(h, c, 4, &g, NULL);
+			}
+			ended = 1;
+			return 0;
+		}
+		raw = (sz & 0x80000000u) ? 1 : 0;
+		sz &= 0x7FFFFFFFu;
+		if (sz == 0 || sz > blockMax) { bad = 1; return -1; }
+		{
+			std::vector<unsigned char> comp(sz), plain(blockMax);
+			if (!ReadFile(h, comp.data(), sz, &g, NULL) || g != sz) { bad = 1; return -1; }
+			if (blockChk) {
+				unsigned char c[4];
+				if (!ReadFile(h, c, 4, &g, NULL) || g != 4) { bad = 1; return -1; }
+			}
+			if (raw) {
+				Remember(comp.data(), comp.size());
+				pending.swap(comp);
+			} else {
+				int n = hist.empty()
+					? LZ4_decompress_safe((const char*)comp.data(), (char*)plain.data(), (int)sz, (int)blockMax)
+					: LZ4_decompress_safe_usingDict((const char*)comp.data(), (char*)plain.data(), (int)sz, (int)blockMax, (const char*)hist.data(), (int)hist.size());
+				if (n < 0) { bad = 1; return -1; }
+				plain.resize((size_t)n);
+				Remember(plain.data(), plain.size());
+				pending.swap(plain);
+			}
+			at = 0;
+		}
+		return 1;
+	}
+	int Read(void* p, int n) override
+	{
+		int got = 0;
+		unsigned char* d = (unsigned char*)p;
+		if (bad || n <= 0) return bad ? -1 : 0;
+		while (got < n) {
+			if (at >= pending.size()) {
+				int pr = PullBlock();
+				if (pr < 0) return -1;
+				if (pr == 0) break;
+			}
+			{
+				size_t c = pending.size() - at;
+				if (c > (size_t)(n - got)) c = (size_t)(n - got);
+				memcpy(d + got, pending.data() + at, c);
+				at += c;
+				got += (int)c;
+			}
+		}
+		pos += (uint64_t)got;
+		return got;
+	}
+};
+
 static int ReadFull(Src& s, void* p, int n)
 {
 	int g = 0;
@@ -687,6 +864,7 @@ static int ListCompressed(const wchar_t* path, int plainKind, int tarKind, const
 		if (plainKind == EK_GZ) { GzSrc s(path); if (!s.g) { err = OxzTxt(OS_OPEN_FAIL); return 2; } tar = UseTar(s, path); }
 		else if (plainKind == EK_BZ) { BzSrc s(path); if (!s.b) { err = OxzTxt(OS_OPEN_FAIL); return 2; } tar = UseTar(s, path); }
 		else if (plainKind == EK_ZST) { ZstSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } tar = UseTar(s, path); }
+		else if (plainKind == EK_LZ4) { Lz4Src s(path); if (s.bad) { err = OxzTxt(OS_OPEN_FAIL); return 2; } tar = UseTar(s, path); }
 		else { XzSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } tar = UseTar(s, path); }
 		if (tar < 0) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
 	}
@@ -695,6 +873,7 @@ static int ListCompressed(const wchar_t* path, int plainKind, int tarKind, const
 		if (plainKind == EK_GZ) { GzSrc s(path); if (!s.g) { err = OxzTxt(OS_OPEN_FAIL); return 2; } rc = TarStream(s, tarKind, codec, NULL, NULL, &out, err, 0, 100); }
 		else if (plainKind == EK_BZ) { BzSrc s(path); if (!s.b) { err = OxzTxt(OS_OPEN_FAIL); return 2; } rc = TarStream(s, tarKind, codec, NULL, NULL, &out, err, 0, 100); }
 		else if (plainKind == EK_ZST) { ZstSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } rc = TarStream(s, tarKind, codec, NULL, NULL, &out, err, 0, 100); }
+		else if (plainKind == EK_LZ4) { Lz4Src s(path); if (s.bad) { err = OxzTxt(OS_OPEN_FAIL); return 2; } rc = TarStream(s, tarKind, codec, NULL, NULL, &out, err, 0, 100); }
 		else { XzSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } rc = TarStream(s, tarKind, codec, NULL, NULL, &out, err, 0, 100); }
 		return rc;
 	}
@@ -732,7 +911,7 @@ static int TakeCompressed(const wchar_t* path, const wchar_t* dest, const std::v
 {
 	if (ents.empty()) return 0;
 	int k = ents[0].kind;
-	if (k == EK_GZ || k == EK_BZ || k == EK_ZST || k == EK_XZ) {
+	if (k == EK_GZ || k == EK_BZ || k == EK_ZST || k == EK_XZ || k == EK_LZ4) {
 		std::wstring full = std::wstring(dest) + L"\\" + ents[0].rel;
 		HANDLE o = OxzCreateA(full);
 		unsigned char buf[1 << 16];
@@ -766,6 +945,15 @@ static int TakeCompressed(const wchar_t* path, const wchar_t* dest, const std::v
 				if (!n) break;
 				if (!OxzWriteA(o, buf, (DWORD)n, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 			}
+		} else if (k == EK_LZ4) {
+			Lz4Src s(path);
+			if (s.bad) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+			for (;;) {
+				int n = s.Read(buf, sizeof(buf));
+				if (n < 0) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+				if (!n) break;
+				if (!OxzWriteA(o, buf, (DWORD)n, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+			}
 		} else {
 			XzSrc s(path);
 			if (s.h == INVALID_HANDLE_VALUE) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
@@ -783,6 +971,7 @@ static int TakeCompressed(const wchar_t* path, const wchar_t* dest, const std::v
 	if (k == EK_BZTAR) { BzSrc s(path); if (!s.b) { err = OxzTxt(OS_OPEN_FAIL); return 2; } return TarStream(s, k, L"bzip2", dest, &ents, NULL, err, base, span); }
 	if (k == EK_ZSTTAR) { ZstSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } return TarStream(s, k, L"zstd", dest, &ents, NULL, err, base, span); }
 	if (k == EK_XZTAR) { XzSrc s(path); if (s.h == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; } return TarStream(s, k, L"xz", dest, &ents, NULL, err, base, span); }
+	if (k == EK_LZ4TAR) { Lz4Src s(path); if (s.bad) { err = OxzTxt(OS_OPEN_FAIL); return 2; } return TarStream(s, k, L"lz4", dest, &ents, NULL, err, base, span); }
 	if (k == EK_TAR) {
 		HANDLE h = OxzOpenReadA(path);
 		int rc;
@@ -1517,6 +1706,7 @@ int OxzListArchive(const wchar_t* path, std::vector<OxzEnt>& out, std::wstring& 
 	else if (n >= 3 && memcmp(b, "BZh", 3) == 0) rc = ListCompressed(path, EK_BZ, EK_BZTAR, L"bzip2", out, err);
 	else if (n >= 6 && b[0] == 0xFD && memcmp(b + 1, "7zXZ", 4) == 0) rc = ListCompressed(path, EK_XZ, EK_XZTAR, L"xz", out, err);
 	else if (n >= 4 && b[0] == 0x28 && b[1] == 0xB5 && b[2] == 0x2F && b[3] == 0xFD) rc = ListCompressed(path, EK_ZST, EK_ZSTTAR, L"zstd", out, err);
+	else if (n >= 4 && b[0] == 0x04 && b[1] == 0x22 && b[2] == 0x4D && b[3] == 0x18) rc = ListCompressed(path, EK_LZ4, EK_LZ4TAR, L"lz4", out, err);
 	else if (n >= 4 && memcmp(b, "MSCF", 4) == 0) rc = OxzListCab(path, out, err);
 	else if (n >= 8 && memcmp(b, "MSWIM", 5) == 0) rc = OxzWimList(path, out, err);
 	else if (n >= 2 && b[0] == 0x60 && b[1] == 0xEA) rc = OxzListArj(path, out, err);
@@ -1542,7 +1732,7 @@ static int TakeAll(const wchar_t* arc, const wchar_t* dest, const std::vector<Ox
 	if (k == EK_ISO) return OxzTakeIso(arc, dest, ents, err, base, span);
 	if (k == EK_WIM) return OxzWimTake(arc, dest, ents, err, base, span);
 	if (k == EK_ARJ) return OxzTakeArj(arc, dest, ents, err, base, span);
-	if (k == EK_TAR || k == EK_GZ || k == EK_BZ || k == EK_ZST || k == EK_XZ || k == EK_GZTAR || k == EK_BZTAR || k == EK_ZSTTAR || k == EK_XZTAR)
+	if (k == EK_TAR || k == EK_GZ || k == EK_BZ || k == EK_ZST || k == EK_XZ || k == EK_LZ4 || k == EK_GZTAR || k == EK_BZTAR || k == EK_ZSTTAR || k == EK_XZTAR || k == EK_LZ4TAR)
 		return TakeCompressed(arc, dest, ents, err, base, span);
 	err = OxzTxt(OS_OPEN_FAIL);
 	return 2;
@@ -1720,17 +1910,312 @@ static void TarOct(char* d, int n, uint64_t v)
 	d[n - 1] = 0;
 }
 
+struct TarOut {
+	virtual ~TarOut() {}
+	virtual int Write(const void* p, unsigned n) = 0;
+	virtual int Finish(unsigned long long& bytes) = 0;
+};
+
+struct FileOut : TarOut {
+	HANDLE h;
+	explicit FileOut(const wchar_t* path) : h(OxzCreateA(path)) {}
+	~FileOut() override { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
+	int Write(const void* p, unsigned n) override { return h != INVALID_HANDLE_VALUE && OxzWriteA(h, p, n, NULL, NULL); }
+	int Finish(unsigned long long& bytes) override
+	{
+		if (h == INVALID_HANDLE_VALUE) return 0;
+		bytes = OxzLenA(h);
+		CloseHandle(h);
+		h = INVALID_HANDLE_VALUE;
+		return 1;
+	}
+};
+
+struct GzOut : TarOut {
+	gzFile g;
+	std::wstring path;
+	explicit GzOut(const std::wstring& p) : g(gzopen_w(p.c_str(), "wb6")), path(p) {}
+	~GzOut() override { if (g) gzclose(g); }
+	int Write(const void* p, unsigned n) override
+	{
+		const unsigned char* b = (const unsigned char*)p;
+		if (!g) return 0;
+		if (n) OxzPulseAdd(n);
+		while (n) {
+			unsigned c = n > (1u << 20) ? (1u << 20) : n;
+			int w = gzwrite(g, b, c);
+			if (w <= 0) return 0;
+			b += (unsigned)w;
+			n -= (unsigned)w;
+		}
+		return 1;
+	}
+	int Finish(unsigned long long& bytes) override
+	{
+		int rc;
+		HANDLE h;
+		if (!g) return 0;
+		rc = gzclose(g);
+		g = NULL;
+		if (rc != Z_OK) return 0;
+		h = OxzOpenReadA(path.c_str());
+		if (h == INVALID_HANDLE_VALUE) return 0;
+		bytes = OxzLenA(h);
+		CloseHandle(h);
+		return 1;
+	}
+};
+
+struct BzOut : TarOut {
+	FILE* f;
+	BZFILE* b;
+	int bz;
+	std::wstring path;
+	explicit BzOut(const std::wstring& p) : f(_wfopen(p.c_str(), L"wb")), b(NULL), bz(0), path(p)
+	{
+		if (f) b = BZ2_bzWriteOpen(&bz, f, 6, 0, 0);
+	}
+	~BzOut() override
+	{
+		if (b) BZ2_bzWriteClose(&bz, b, 1, NULL, NULL);
+		if (f) fclose(f);
+	}
+	int Write(const void* p, unsigned n) override
+	{
+		if (!b) return 0;
+		if (n) OxzPulseAdd(n);
+		BZ2_bzWrite(&bz, b, (void*)p, (int)n);
+		return bz == BZ_OK;
+	}
+	int Finish(unsigned long long& bytes) override
+	{
+		unsigned int nin = 0, nout = 0;
+		HANDLE h;
+		if (!b) return 0;
+		BZ2_bzWriteClose(&bz, b, 0, &nin, &nout);
+		b = NULL;
+		if (f) { fclose(f); f = NULL; }
+		if (bz != BZ_OK) return 0;
+		h = OxzOpenReadA(path.c_str());
+		if (h == INVALID_HANDLE_VALUE) return 0;
+		bytes = OxzLenA(h);
+		CloseHandle(h);
+		return 1;
+	}
+};
+
+struct ZstOut : TarOut {
+	HANDLE h;
+	ZSTD_CCtx* c;
+	std::vector<unsigned char> out;
+	int ok;
+	explicit ZstOut(const wchar_t* path) : h(OxzCreateA(path)), c(ZSTD_createCCtx()), out(1 << 16), ok(0)
+	{
+		if (h != INVALID_HANDLE_VALUE && c && !ZSTD_isError(ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, 6))) ok = 1;
+	}
+	~ZstOut() override
+	{
+		if (c) ZSTD_freeCCtx(c);
+		if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+	}
+	int Pump(ZSTD_inBuffer* in, ZSTD_EndDirective end)
+	{
+		for (;;) {
+			ZSTD_outBuffer o;
+			size_t r;
+			if (!ok) return 0;
+			o.dst = out.data();
+			o.size = out.size();
+			o.pos = 0;
+			r = ZSTD_compressStream2(c, &o, in, end);
+			if (ZSTD_isError(r)) { ok = 0; return 0; }
+			if (o.pos && !OxzWriteA(h, out.data(), (DWORD)o.pos, NULL, NULL)) { ok = 0; return 0; }
+			if (end == ZSTD_e_end) { if (r == 0) return 1; }
+			else if (in->pos == in->size) return 1;
+		}
+	}
+	int Write(const void* p, unsigned n) override
+	{
+		ZSTD_inBuffer in;
+		if (n) OxzPulseAdd(n);
+		in.src = p;
+		in.size = n;
+		in.pos = 0;
+		return Pump(&in, ZSTD_e_continue);
+	}
+	int Finish(unsigned long long& bytes) override
+	{
+		ZSTD_inBuffer in;
+		in.src = NULL;
+		in.size = 0;
+		in.pos = 0;
+		if (!Pump(&in, ZSTD_e_end)) return 0;
+		bytes = OxzLenA(h);
+		CloseHandle(h);
+		h = INVALID_HANDLE_VALUE;
+		return 1;
+	}
+};
+
+struct Lz4Out : TarOut {
+	HANDLE h;
+	std::vector<unsigned char> buf;
+	int ok;
+	explicit Lz4Out(const wchar_t* path) : h(OxzCreateA(path)), ok(h != INVALID_HANDLE_VALUE)
+	{
+		unsigned char hdr[7], body[2];
+		body[0] = 0x60;
+		body[1] = 0x50;
+		hdr[0] = 0x04; hdr[1] = 0x22; hdr[2] = 0x4D; hdr[3] = 0x18;
+		hdr[4] = body[0]; hdr[5] = body[1];
+		hdr[6] = (unsigned char)(Xx32(body, 2, 0) >> 8);
+		if (ok && !OxzWriteA(h, hdr, 7, NULL, NULL)) ok = 0;
+	}
+	~Lz4Out() override { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
+	int FlushBlock()
+	{
+		unsigned char szb[4];
+		std::vector<unsigned char> comp;
+		const unsigned char* src;
+		uint32_t sz;
+		int n, bound;
+		if (buf.empty()) return 1;
+		bound = LZ4_compressBound((int)buf.size());
+		comp.resize((size_t)bound);
+		n = LZ4_compress_default((const char*)buf.data(), (char*)comp.data(), (int)buf.size(), bound);
+		if (n <= 0 || n >= (int)buf.size()) {
+			sz = (uint32_t)buf.size() | 0x80000000u;
+			src = buf.data();
+			n = (int)buf.size();
+		} else {
+			sz = (uint32_t)n;
+			src = comp.data();
+		}
+		szb[0] = (unsigned char)sz;
+		szb[1] = (unsigned char)(sz >> 8);
+		szb[2] = (unsigned char)(sz >> 16);
+		szb[3] = (unsigned char)(sz >> 24);
+		if (!OxzWriteA(h, szb, 4, NULL, NULL) || !OxzWriteA(h, src, (DWORD)n, NULL, NULL)) return 0;
+		buf.clear();
+		return 1;
+	}
+	int Write(const void* p, unsigned n) override
+	{
+		const unsigned char* b = (const unsigned char*)p;
+		if (!ok) return 0;
+		if (n) OxzPulseAdd(n);
+		while (n) {
+			unsigned room = (unsigned)((256 * 1024) - buf.size());
+			unsigned c = n < room ? n : room;
+			buf.insert(buf.end(), b, b + c);
+			b += c;
+			n -= c;
+			if (buf.size() == 256 * 1024 && !FlushBlock()) { ok = 0; return 0; }
+		}
+		return 1;
+	}
+	int Finish(unsigned long long& bytes) override
+	{
+		unsigned char z[4] = { 0, 0, 0, 0 };
+		if (!ok || !FlushBlock() || !OxzWriteA(h, z, 4, NULL, NULL)) return 0;
+		bytes = OxzLenA(h);
+		CloseHandle(h);
+		h = INVALID_HANDLE_VALUE;
+		return 1;
+	}
+};
+
+struct SeqIn {
+	ISeqInStream vt;
+	HANDLE h;
+};
+struct SeqOut {
+	ISeqOutStream vt;
+	HANDLE h;
+};
+static SRes SeqInRead(const ISeqInStream* pp, void* buf, size_t* size)
+{
+	SeqIn* s = (SeqIn*)pp;
+	DWORD g = 0;
+	DWORD want;
+	if (!size) return SZ_ERROR_PARAM;
+	if (*size == 0) return SZ_OK;
+	want = *size > 0x100000u ? 0x100000u : (DWORD)*size;
+	if (!ReadFile(s->h, buf, want, &g, NULL)) return SZ_ERROR_READ;
+	*size = g;
+	return SZ_OK;
+}
+static size_t SeqOutWrite(const ISeqOutStream* pp, const void* buf, size_t size)
+{
+	SeqOut* s = (SeqOut*)pp;
+	const unsigned char* b = (const unsigned char*)buf;
+	size_t left = size;
+	while (left) {
+		DWORD c = left > 0x100000u ? 0x100000u : (DWORD)left;
+		DWORD g = 0;
+		if (!WriteFile(s->h, b, c, &g, NULL) || g != c) return size - left;
+		b += c;
+		left -= c;
+	}
+	return size;
+}
+
+static int WriteXzFile(const wchar_t* src, const wchar_t* dest)
+{
+	SeqIn in;
+	SeqOut out;
+	CXzProps props;
+	SRes r;
+	in.vt.Read = SeqInRead;
+	out.vt.Write = SeqOutWrite;
+	in.h = OxzOpenReadA(src);
+	out.h = OxzCreateA(dest);
+	if (in.h == INVALID_HANDLE_VALUE || out.h == INVALID_HANDLE_VALUE) {
+		if (in.h != INVALID_HANDLE_VALUE) CloseHandle(in.h);
+		if (out.h != INVALID_HANDLE_VALUE) CloseHandle(out.h);
+		return 0;
+	}
+	XzProps_Init(&props);
+	props.lzma2Props.lzmaProps.level = 6;
+	CrcGenerateTable();
+	r = Xz_Encode(&out.vt, &in.vt, &props, NULL);
+	CloseHandle(in.h);
+	CloseHandle(out.h);
+	return r == SZ_OK;
+}
+
+static int PutOut(TarOut& o, const void* p, size_t n)
+{
+	const unsigned char* b = (const unsigned char*)p;
+	while (n) {
+		unsigned c = n > 0x100000u ? 0x100000u : (unsigned)n;
+		if (!o.Write(b, c)) return 0;
+		b += c;
+		n -= c;
+	}
+	return 1;
+}
+
 int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span)
 {
 	std::vector<DiskFile> files;
-	HANDLE o;
-	int n = 0, i = 0;
+	std::unique_ptr<TarOut> out;
+	std::wstring temp;
+	int wrap, n = 0, i = 0;
 	bytes = 0;
+	wrap = OxzTarWrap(archive.c_str());
+	if (wrap < 0) wrap = 0;
 	WalkDisk(work, L"", files);
 	for (size_t k = 0; k < files.size(); ++k) if (!files[k].dir) n++;
 	if (n < 1) n = 1;
-	o = OxzCreateA(archive);
-	if (o == INVALID_HANDLE_VALUE) { err = OxzTxt(OS_OPEN_FAIL); return 2; }
+	if (wrap == 3) {
+		temp = archive + L".plain";
+		out.reset(new FileOut(temp.c_str()));
+	} else if (wrap == 1) out.reset(new GzOut(archive));
+	else if (wrap == 2) out.reset(new BzOut(archive));
+	else if (wrap == 4) out.reset(new ZstOut(archive.c_str()));
+	else if (wrap == 5) out.reset(new Lz4Out(archive.c_str()));
+	else out.reset(new FileOut(archive.c_str()));
 	for (size_t k = 0; k < files.size(); ++k) {
 		unsigned char block[512];
 		std::string name = Utf8(files[k].rel);
@@ -1750,13 +2235,13 @@ int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned 
 			sum = 0;
 			for (int b = 0; b < 512; ++b) sum += lhdr[b];
 			_snprintf_s((char*)lhdr + 148, 8, _TRUNCATE, "%06o", sum);
-			if (!OxzWriteA(o, lhdr, 512, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+			if (!PutOut(*out, lhdr, 512)) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 			left = (raw.size() + 1 + 511) & ~511ull;
 			{
 				std::vector<unsigned char> pad((size_t)left);
 				memset(pad.data(), 0, pad.size());
 				memcpy(pad.data(), raw.c_str(), raw.size());
-				if (!OxzWriteA(o, pad.data(), (DWORD)pad.size(), NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+				if (!PutOut(*out, pad.data(), pad.size())) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 			}
 		}
 		memset(block, 0, 512);
@@ -1779,7 +2264,7 @@ int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned 
 		for (int b = 0; b < 512; ++b) sum += block[b];
 		_snprintf_s((char*)block + 148, 8, _TRUNCATE, "%06o", sum);
 		block[155] = 0;
-		if (!OxzWriteA(o, block, 512, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+		if (!PutOut(*out, block, 512)) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 		if (!files[k].dir) {
 			HANDLE in = OxzOpenReadA((work + L"\\" + files[k].rel).c_str());
 			uint64_t left = files[k].size;
@@ -1787,11 +2272,11 @@ int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned 
 			OxzNoteA(i, n, files[k].rel.c_str(), base, span);
 			OxzPulseSize(files[k].size);
 			i++;
-			if (in == INVALID_HANDLE_VALUE) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+			if (in == INVALID_HANDLE_VALUE) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 			while (left) {
 				DWORD want = left > sizeof(buf) ? (DWORD)sizeof(buf) : (DWORD)left;
 				DWORD g = 0;
-				if (!ReadFile(in, buf, want, &g, NULL) || g != want || !OxzWriteA(o, buf, g, NULL, NULL)) { CloseHandle(in); CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+				if (!ReadFile(in, buf, want, &g, NULL) || g != want || !PutOut(*out, buf, g)) { CloseHandle(in); out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 				left -= g;
 			}
 			CloseHandle(in);
@@ -1799,16 +2284,51 @@ int OxzWriteTar(const std::wstring& work, const std::wstring& archive, unsigned 
 				unsigned char pad[512];
 				DWORD pn = (DWORD)(512 - (files[k].size & 511));
 				memset(pad, 0, pn);
-				if (!OxzWriteA(o, pad, pn, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+				if (!PutOut(*out, pad, pn)) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 			}
 		}
 	}
 	{
 		unsigned char z[1024];
 		memset(z, 0, sizeof(z));
-		if (!OxzWriteA(o, z, 1024, NULL, NULL)) { CloseHandle(o); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+		if (!PutOut(*out, z, 1024) || !out->Finish(bytes)) { out.reset(); DeleteFileW(archive.c_str()); if (!temp.empty()) DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
 	}
-	bytes = OxzLenA(o);
-	CloseHandle(o);
+	out.reset();
+	if (wrap == 3) {
+		if (!WriteXzFile(temp.c_str(), archive.c_str())) { DeleteFileW(archive.c_str()); DeleteFileW(temp.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+		DeleteFileW(temp.c_str());
+		{
+			HANDLE h = OxzOpenReadA(archive.c_str());
+			if (h != INVALID_HANDLE_VALUE) { bytes = OxzLenA(h); CloseHandle(h); }
+		}
+	}
+	return 0;
+}
+
+int OxzWriteOneLz4(const std::wstring& work, const std::wstring& archive, unsigned long long& bytes, std::wstring& err, int base, int span)
+{
+	std::vector<DiskFile> files;
+	int n = 0, which = -1;
+	bytes = 0;
+	WalkDisk(work, L"", files);
+	for (size_t k = 0; k < files.size(); ++k) if (!files[k].dir) { n++; which = (int)k; }
+	if (n != 1) return 3;
+	{
+		Lz4Out out(archive.c_str());
+		HANDLE in = OxzOpenReadA((work + L"\\" + files[which].rel).c_str());
+		uint64_t left = files[which].size;
+		unsigned char buf[1 << 16];
+		OxzNoteA(0, 1, files[which].rel.c_str(), base, span);
+		OxzPulseSize(files[which].size);
+		if (in == INVALID_HANDLE_VALUE) { DeleteFileW(archive.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+		while (left) {
+			DWORD want = left > sizeof(buf) ? (DWORD)sizeof(buf) : (DWORD)left;
+			DWORD g = 0;
+			if (!ReadFile(in, buf, want, &g, NULL) || g != want || !out.Write(buf, g)) { CloseHandle(in); DeleteFileW(archive.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+			left -= g;
+		}
+		CloseHandle(in);
+		if (!out.Finish(bytes)) { DeleteFileW(archive.c_str()); err = OxzTxt(OS_OPEN_FAIL); return 2; }
+	}
 	return 0;
 }

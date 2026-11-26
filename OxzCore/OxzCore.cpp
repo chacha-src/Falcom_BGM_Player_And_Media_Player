@@ -69,7 +69,7 @@ static void LzmaPulse(void* user, unsigned long long done, unsigned long long sp
 	if (at > w->total) at = w->total;
 	w->hook.fn(w->hook.user, at, w->total);
 }
-static EncHook gEncHook = { 0, 0 };
+static thread_local EncHook gEncHook = { 0, 0 };
 
 enum {
 	M_STORE = 0,
@@ -982,10 +982,10 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 	unsigned th;
 	int ul;
 	if (n == 0) return 0;
-	ul = tScout ? 1 : gUserLevel;
+	ul = tScout ? (gUserLevel > 5 ? 5 : gUserLevel) : gUserLevel;
 	th = InnerThreads(n);
 	if (th > 4) th = 4;
-	if (ul >= 3 && th >= 2 && n >= 512ull * 1024ull) {
+	if (ul >= 3 && th >= 2 && n >= 4ull * 1024ull * 1024ull) {
 		size_t unitMin = 384ull * 1024ull;
 		if (n / th < unitMin) {
 			th = (unsigned)(n / unitMin);
@@ -1648,11 +1648,11 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 	RunJobs(jobs, raw, n, gUserLevel >= 4 ? 1 : 0);
 	if (gUserLevel >= 4) {
 		size_t bestSz = (size_t)-1;
-		size_t secondSz = (size_t)-1;
-		int bestI = -1, secondI = -1;
-		int promo[3];
+		int bestI = -1;
+		int promo[5];
 		int np = 0, p;
 		size_t i;
+		static const int kSlow[] = { M_LZMA2, M_BROTLI, M_BZIP2 };
 		for (i = 0; i < jobs.size(); ++i) {
 			if (jobs[i].ok != 1 || jobs[i].method == M_PPMD) continue;
 			if (jobs[i].data.size() < bestSz) {
@@ -1660,17 +1660,33 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 				bestI = (int)i;
 			}
 		}
-		for (i = 0; i < jobs.size(); ++i) {
-			if (jobs[i].ok != 1 || (int)i == bestI) continue;
-			if (bestSz < (size_t)-1 && jobs[i].data.size() * 100 > bestSz * 115) continue;
-			if (jobs[i].data.size() < secondSz) {
-				secondSz = jobs[i].data.size();
-				secondI = (int)i;
-			}
-		}
-		if (bestI >= 0 && !probing) {
+		if (bestI >= 0) {
+			int s;
+			size_t nearSz = (size_t)-1;
+			int nearI = -1;
 			promo[np++] = bestI;
-			if (secondI >= 0) promo[np++] = secondI;
+			for (s = 0; s < 3 && np < 4; ++s) {
+				size_t sz = (size_t)-1;
+				int idx = -1;
+				int already = 0;
+				for (p = 0; p < np; ++p) if (jobs[promo[p]].method == kSlow[s]) already = 1;
+				if (already) continue;
+				for (i = 0; i < jobs.size(); ++i) {
+					if (jobs[i].ok != 1 || jobs[i].method != kSlow[s]) continue;
+					if (jobs[i].data.size() < sz) { sz = jobs[i].data.size(); idx = (int)i; }
+				}
+				if (idx < 0 || sz > bestSz * 2) continue;
+				promo[np++] = idx;
+			}
+			for (i = 0; i < jobs.size(); ++i) {
+				int already = 0;
+				if (jobs[i].ok != 1 || jobs[i].method == M_PPMD) continue;
+				if (jobs[i].data.size() * 100 > bestSz * 115) continue;
+				for (p = 0; p < np; ++p) if (promo[p] == (int)i) already = 1;
+				if (already) continue;
+				if (jobs[i].data.size() < nearSz) { nearSz = jobs[i].data.size(); nearI = (int)i; }
+			}
+			if (nearI >= 0 && np < 5) promo[np++] = nearI;
 			for (p = 0; p < np; ++p) {
 				jobs[promo[p]].ok = 0;
 				jobs[promo[p]].data.clear();
