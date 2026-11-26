@@ -15,6 +15,7 @@
 #include <string.h>
 #include <vector>
 #include <stdlib.h>
+#include <immintrin.h>
 
 static uint32_t U32(const uint8_t* p)
 {
@@ -160,6 +161,95 @@ int OxzPcmMaybe(const uint8_t* p, size_t n)
 	return DescribePcm(p, n, &v);
 }
 
+static void ScoreFlacAlign(const uint8_t* p, size_t avail, long long* outAmp, long long* outMono, long long* outSter)
+{
+	long long amp = 0, m1 = 0, m2 = 0, s1 = 0, s2 = 0;
+	size_t totalSamples = avail / 2;
+	unsigned winCount = 4;
+	size_t winSamples = 256;
+	unsigned w;
+	if (totalSamples < 8) {
+		*outAmp = 0;
+		*outMono = 1;
+		*outSter = 1;
+		return;
+	}
+	if (totalSamples < winSamples * winCount) {
+		winCount = 1;
+		winSamples = totalSamples > 1024 ? 1024 : totalSamples;
+	}
+	for (w = 0; w < winCount; ++w) {
+		size_t start = (winCount == 1) ? 0 : ((totalSamples - winSamples) * (w + 1)) / (winCount + 1);
+		const uint8_t* sp = p + start * 2;
+		size_t i;
+		int16_t s[1024];
+		memcpy(s, sp, winSamples * 2);
+		for (i = 4; i < winSamples; ++i) {
+			int a = s[i];
+			int d1 = a - (int)s[i - 1];
+			int d2 = a - 2 * (int)s[i - 1] + (int)s[i - 2];
+			int q1 = a - (int)s[i - 2];
+			int q2 = a - 2 * (int)s[i - 2] + (int)s[i - 4];
+			amp += a < 0 ? -a : a;
+			m1 += d1 < 0 ? -d1 : d1;
+			m2 += d2 < 0 ? -d2 : d2;
+			s1 += q1 < 0 ? -q1 : q1;
+			s2 += q2 < 0 ? -q2 : q2;
+		}
+	}
+	*outAmp = amp;
+	*outMono = m1 < m2 ? m1 : m2;
+	*outSter = s1 < s2 ? s1 : s2;
+}
+
+static int DescribeFlacAny(const uint8_t* p, size_t n, int scout, PcmView* v)
+{
+	long long amp0 = 0, mono0 = 0, ster0 = 0;
+	long long bestRes, bestAmp;
+	size_t off = 0;
+	int ch = 1;
+	size_t pcm;
+	if (DescribePcm(p, n, v)) return 1;
+	memset(v, 0, sizeof(*v));
+	if (!p || n < 512 || n > 64u * 1024u * 1024u) return 0;
+	ScoreFlacAlign(p, n, &amp0, &mono0, &ster0);
+	bestAmp = amp0;
+	bestRes = mono0;
+	if (n >= 16 && ster0 * 10 < bestRes * 9) {
+		bestRes = ster0;
+		ch = 2;
+	}
+	if (n >= 520) {
+		long long amp1 = 0, mono1 = 0, ster1 = 0;
+		ScoreFlacAlign(p + 1, n - 1, &amp1, &mono1, &ster1);
+		if (amp1 > 0 && mono1 * 10 < bestRes * 9) {
+			bestRes = mono1;
+			bestAmp = amp1;
+			off = 1;
+			ch = 1;
+		}
+		if (n >= 20 && amp1 > 0 && ster1 * 10 < bestRes * 9) {
+			bestRes = ster1;
+			bestAmp = amp1;
+			off = 1;
+			ch = 2;
+		}
+	}
+	if (scout) {
+		if (bestAmp <= 0 || bestRes > bestAmp) return 0;
+	}
+	pcm = (n - off) & ~(size_t)(ch == 2 ? 3u : 1u);
+	if (pcm < (size_t)ch * 2u) return 0;
+	v->channels = ch;
+	v->kind = 0;
+	v->pcmOff = off;
+	v->pcmBytes = pcm;
+	v->prefix = off;
+	v->suffixOff = off + pcm;
+	v->suffix = n - off - pcm;
+	return 1;
+}
+
 static int WrapAudio(int codec, const PcmView* v, const uint8_t* in, const std::vector<uint8_t>& body, size_t original, std::vector<uint8_t>& out)
 {
 	std::vector<uint8_t> o;
@@ -243,21 +333,40 @@ static FLAC__StreamEncoderTellStatus FlacTell(const FLAC__StreamEncoder*, FLAC__
 	return FLAC__STREAM_ENCODER_TELL_STATUS_OK;
 }
 
+struct TlsFlac {
+	FLAC__StreamEncoder* enc;
+	FLAC__StreamDecoder* dec;
+	std::vector<FLAC__int32> tmp;
+	TlsFlac() : enc(NULL), dec(NULL) {}
+	~TlsFlac() {
+		if (enc) FLAC__stream_encoder_delete(enc);
+		if (dec) FLAC__stream_decoder_delete(dec);
+	}
+};
+
+static TlsFlac& FlacTls(void)
+{
+	static thread_local TlsFlac tls;
+	return tls;
+}
+
 int OxzFlacCompress(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	PcmView view;
+	TlsFlac& tf = FlacTls();
 	FLAC__StreamEncoder* enc;
 	FlacBuf buf;
-	std::vector<FLAC__int32> tmp;
 	std::vector<uint8_t> body;
 	size_t samples, done = 0;
 	int level;
-	if (!DescribePcm(in, n, &view)) return 0;
+	int scout = OxzEncodeScout();
+	if (!DescribeFlacAny(in, n, scout, &view)) return 0;
 	samples = view.pcmBytes / 2 / (size_t)view.channels;
 	if (!samples) return 0;
-	enc = FLAC__stream_encoder_new();
+	if (!tf.enc) tf.enc = FLAC__stream_encoder_new();
+	enc = tf.enc;
 	if (!enc) return 0;
-	level = OxzEncodeScout() ? 0 : (OxzEncodeLevel() * 8 + 9) / 10;
+	level = scout ? 0 : (OxzEncodeLevel() * 8 + 9) / 10;
 	if (level < 0) level = 0;
 	if (level > 8) level = 8;
 	FLAC__stream_encoder_set_verify(enc, false);
@@ -267,42 +376,63 @@ int OxzFlacCompress(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	FLAC__stream_encoder_set_compression_level(enc, (unsigned)level);
 	FLAC__stream_encoder_set_blocksize(enc, 4096);
 	FLAC__stream_encoder_set_total_samples_estimate(enc, samples);
+	try { body.reserve(n / 2 + 256); } catch (...) {}
 	buf.v = &body;
 	buf.pos = 0;
 	if (FLAC__stream_encoder_init_stream(enc, FlacWrite, FlacSeek, FlacTell, NULL, &buf) != FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
 		FLAC__stream_encoder_delete(enc);
-		return 0;
+		tf.enc = FLAC__stream_encoder_new();
+		enc = tf.enc;
+		if (!enc) return 0;
+		FLAC__stream_encoder_set_verify(enc, false);
+		FLAC__stream_encoder_set_channels(enc, (unsigned)view.channels);
+		FLAC__stream_encoder_set_bits_per_sample(enc, 16);
+		FLAC__stream_encoder_set_sample_rate(enc, 44100);
+		FLAC__stream_encoder_set_compression_level(enc, (unsigned)level);
+		FLAC__stream_encoder_set_blocksize(enc, 4096);
+		FLAC__stream_encoder_set_total_samples_estimate(enc, samples);
+		if (FLAC__stream_encoder_init_stream(enc, FlacWrite, FlacSeek, FlacTell, NULL, &buf) != FLAC__STREAM_ENCODER_INIT_STATUS_OK)
+			return 0;
 	}
-	try { tmp.resize(4096u * (unsigned)view.channels); }
-	catch (...) { FLAC__stream_encoder_finish(enc); FLAC__stream_encoder_delete(enc); return 0; }
+	try {
+		if (tf.tmp.size() < 4096u * (unsigned)view.channels)
+			tf.tmp.resize(4096u * (unsigned)view.channels);
+	} catch (...) { FLAC__stream_encoder_finish(enc); return 0; }
 	while (done < samples) {
 		unsigned count = (unsigned)(samples - done);
-		unsigned i;
+		unsigned total, i = 0;
 		const uint8_t* src;
+		FLAC__int32* dst32 = tf.tmp.data();
 		if (count > 4096) count = 4096;
+		total = count * (unsigned)view.channels;
 		src = in + view.pcmOff + done * (size_t)view.channels * 2;
-		for (i = 0; i < count * (unsigned)view.channels; ++i) {
-			int lo = src[i * 2];
-			int hi = src[i * 2 + 1];
-			tmp[i] = (FLAC__int32)(int16_t)(lo | (hi << 8));
+		for (; i + 16 <= total; i += 16) {
+			__m128i s0 = _mm_loadu_si128((const __m128i*)(src + (size_t)i * 2));
+			__m128i s1 = _mm_loadu_si128((const __m128i*)(src + (size_t)i * 2 + 16));
+			_mm256_storeu_si256((__m256i*)(dst32 + i), _mm256_cvtepi16_epi32(s0));
+			_mm256_storeu_si256((__m256i*)(dst32 + i + 8), _mm256_cvtepi16_epi32(s1));
 		}
-		if (!FLAC__stream_encoder_process_interleaved(enc, tmp.data(), count)) {
+		for (; i < total; ++i) {
+			int16_t sv;
+			memcpy(&sv, src + (size_t)i * 2, 2);
+			dst32[i] = (FLAC__int32)sv;
+		}
+		if (!FLAC__stream_encoder_process_interleaved(enc, dst32, count)) {
 			FLAC__stream_encoder_finish(enc);
-			FLAC__stream_encoder_delete(enc);
 			return 0;
 		}
 		done += count;
 		OxzPulseEncode(done * (size_t)view.channels * 2, view.pcmBytes);
 	}
-	if (!FLAC__stream_encoder_finish(enc)) { FLAC__stream_encoder_delete(enc); return 0; }
-	FLAC__stream_encoder_delete(enc);
+	if (!FLAC__stream_encoder_finish(enc)) return 0;
 	return WrapAudio(1, &view, in, body, n, out);
 }
 
 struct FlacIn {
 	const uint8_t* p;
 	size_t n, pos;
-	std::vector<uint8_t>* pcm;
+	uint8_t* outPtr;
+	size_t outCap, outPos;
 	int channels;
 	int fail;
 };
@@ -352,22 +482,48 @@ static FLAC__bool FlacEof(const FLAC__StreamDecoder*, void* client)
 static FLAC__StreamDecoderWriteStatus FlacOut(const FLAC__StreamDecoder*, const FLAC__Frame* frame, const FLAC__int32* const buffer[], void* client)
 {
 	FlacIn* f = (FlacIn*)client;
-	unsigned ch, i, n;
-	size_t at;
+	unsigned ch, i = 0, n;
+	size_t bytes;
+	uint8_t* d;
 	if (!frame || frame->header.channels != (unsigned)f->channels || frame->header.bits_per_sample != 16) { f->fail = 1; return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT; }
 	ch = frame->header.channels;
 	n = frame->header.blocksize;
-	at = f->pcm->size();
-	try { f->pcm->resize(at + (size_t)n * ch * 2); }
-	catch (...) { f->fail = 1; return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT; }
-	for (i = 0; i < n; ++i) {
-		for (unsigned c = 0; c < ch; ++c) {
-			int32_t s = buffer[c][i];
-			size_t o = at + ((size_t)i * ch + c) * 2;
-			(*f->pcm)[o] = (uint8_t)s;
-			(*f->pcm)[o + 1] = (uint8_t)(s >> 8);
+	bytes = (size_t)n * ch * 2;
+	if (f->outPos >= f->outCap) return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+	if (bytes > f->outCap - f->outPos) {
+		n = (unsigned)((f->outCap - f->outPos) / (ch * 2));
+		bytes = (size_t)n * ch * 2;
+	}
+	d = f->outPtr + f->outPos;
+	if (ch == 1) {
+		const FLAC__int32* p0 = buffer[0];
+		for (; i + 16 <= n; i += 16) {
+			__m256i a = _mm256_loadu_si256((const __m256i*)(p0 + i));
+			__m256i b = _mm256_loadu_si256((const __m256i*)(p0 + i + 8));
+			__m256i pk = _mm256_permute4x64_epi64(_mm256_packs_epi32(a, b), 0xD8);
+			_mm256_storeu_si256((__m256i*)(d + (size_t)i * 2), pk);
+		}
+		for (; i < n; ++i) {
+			int16_t s = (int16_t)p0[i];
+			memcpy(d + (size_t)i * 2, &s, 2);
+		}
+	} else {
+		const FLAC__int32* pL = buffer[0];
+		const FLAC__int32* pR = buffer[1];
+		__m256i mask = _mm256_set1_epi32(0x0000FFFF);
+		for (; i + 8 <= n; i += 8) {
+			__m256i vl = _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(pL + i)), mask);
+			__m256i vr = _mm256_slli_epi32(_mm256_loadu_si256((const __m256i*)(pR + i)), 16);
+			_mm256_storeu_si256((__m256i*)(d + (size_t)i * 4), _mm256_or_si256(vl, vr));
+		}
+		for (; i < n; ++i) {
+			int16_t sl = (int16_t)pL[i];
+			int16_t sr = (int16_t)pR[i];
+			memcpy(d + (size_t)i * 4, &sl, 2);
+			memcpy(d + (size_t)i * 4 + 2, &sr, 2);
 		}
 	}
+	f->outPos += bytes;
 	return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
 
@@ -379,28 +535,37 @@ static void FlacErr(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus, 
 int OxzFlacDecompress(const uint8_t* in, size_t n, uint8_t* dst, size_t dstLen)
 {
 	AudioHead h;
+	TlsFlac& tf = FlacTls();
 	FLAC__StreamDecoder* dec;
 	FlacIn f;
-	std::vector<uint8_t> pcm;
 	int ok;
-	if (!ParseAudio(in, n, &h) || h.codec != 1) return 0;
-	dec = FLAC__stream_decoder_new();
+	if (!dst || !ParseAudio(in, n, &h) || h.codec != 1) return 0;
+	if ((uint64_t)h.prefix + h.pcmBytes + h.suffix != dstLen) return 0;
+	if (!tf.dec) tf.dec = FLAC__stream_decoder_new();
+	dec = tf.dec;
 	if (!dec) return 0;
 	f.p = in + h.body;
 	f.n = n - h.body;
 	f.pos = 0;
-	f.pcm = &pcm;
+	f.outPtr = dst + h.prefix;
+	f.outCap = h.pcmBytes;
+	f.outPos = 0;
 	f.channels = h.channels;
 	f.fail = 0;
 	if (FLAC__stream_decoder_init_stream(dec, FlacRead, FlacDSeek, FlacDTell, FlacLen, FlacEof, FlacOut, NULL, FlacErr, &f) != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
 		FLAC__stream_decoder_delete(dec);
-		return 0;
+		tf.dec = FLAC__stream_decoder_new();
+		dec = tf.dec;
+		if (!dec) return 0;
+		if (FLAC__stream_decoder_init_stream(dec, FlacRead, FlacDSeek, FlacDTell, FlacLen, FlacEof, FlacOut, NULL, FlacErr, &f) != FLAC__STREAM_DECODER_INIT_STATUS_OK)
+			return 0;
 	}
-	ok = FLAC__stream_decoder_process_until_end_of_stream(dec) && !f.fail && pcm.size() >= h.pcmBytes;
+	ok = FLAC__stream_decoder_process_until_end_of_stream(dec) && !f.fail && f.outPos == h.pcmBytes;
 	FLAC__stream_decoder_finish(dec);
-	FLAC__stream_decoder_delete(dec);
 	if (!ok) return 0;
-	return RestoreAudio(&h, in, pcm.data(), dst, dstLen);
+	if (h.prefix) memcpy(dst, in + 20, h.prefix);
+	if (h.suffix) memcpy(dst + h.prefix + h.pcmBytes, in + 20 + h.prefix, h.suffix);
+	return 1;
 }
 
 int OxzAlacCompress(const uint8_t* in, size_t n, std::vector<uint8_t>& out)

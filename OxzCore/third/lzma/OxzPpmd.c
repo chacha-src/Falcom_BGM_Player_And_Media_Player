@@ -21,22 +21,14 @@ static void PpmdWrite(IByteOutPtr p, Byte b)
 	o->buf[o->pos++] = b;
 }
 
-static void* PpmdAlloc(ISzAllocPtr p, size_t size)
-{
-	(void)p;
-	return size ? malloc(size) : NULL;
-}
-
-static void PpmdFree(ISzAllocPtr p, void* address)
-{
-	(void)p;
-	free(address);
-}
+extern void* OxzLzmaAlloc(ISzAllocPtr p, size_t size);
+extern void OxzLzmaFree(ISzAllocPtr p, void* address);
 
 int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile, int userLevel)
 {
-	static const ISzAlloc al = { PpmdAlloc, PpmdFree };
-	CPpmd7* ppmd;
+	static const ISzAlloc al = { OxzLzmaAlloc, OxzLzmaFree };
+	CPpmd7 ppmdObj;
+	CPpmd7* ppmd = &ppmdObj;
 	PpmdOut bo;
 	unsigned order;
 	UInt32 mem;
@@ -67,13 +59,9 @@ int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, siz
 		mem = 1u << 20;
 	}
 	dst = (unsigned char*)out;
-	ppmd = (CPpmd7*)malloc(sizeof(CPpmd7));
-	if (!ppmd) return 2;
 	Ppmd7_Construct(ppmd);
-	if (!Ppmd7_Alloc(ppmd, mem, &al)) {
-		free(ppmd);
+	if (!Ppmd7_Alloc(ppmd, mem, &al))
 		return 3;
-	}
 	Ppmd7_Init(ppmd, order);
 	bo.vt.Write = PpmdWrite;
 	bo.buf = dst + 5;
@@ -85,7 +73,6 @@ int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, siz
 	Ppmd7z_EncodeSymbols(ppmd, (const Byte*)in, (const Byte*)in + inSize);
 	Ppmd7z_Flush_RangeEnc(ppmd);
 	Ppmd7_Free(ppmd, &al);
-	free(ppmd);
 	if (bo.overflow || bo.pos == 0 || bo.pos + 5 >= inSize)
 		return 4;
 	dst[0] = (unsigned char)order;

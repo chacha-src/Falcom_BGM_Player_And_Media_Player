@@ -91,6 +91,11 @@ struct OpenWatch {
 struct BtnSt { WNDPROC old; int hover; int down; };
 
 static HWND gHwnd, gList, gStatus, gProg, gProgFile, gLblAll, gLblFile, gPctAll, gPctFile, gSet;
+static HWND gRenameEdit = NULL;
+static int gRenameRow = -1, gRenameClosing = 0;
+static WNDPROC gRenameOldProc = NULL;
+static void EndInlineRename(int commit);
+static void CommitRenameRow(int i, const wchar_t* neu);
 static HACCEL gAccel = NULL;
 static HFONT gFont;
 static HBRUSH gPink, gMint;
@@ -938,6 +943,7 @@ static void LoadRows(std::vector<Item>& all)
 static void Refresh()
 {
 	std::vector<Item> all;
+	EndInlineRename(0);
 	gRefreshing = 1;
 	ListView_DeleteAllItems(gList);
 	gItems.clear();
@@ -1191,6 +1197,7 @@ static void SetBarPos(HWND bar, int pos)
 
 static void SetBusy(int on, const wchar_t* text)
 {
+	if (on) EndInlineRename(0);
 	gBusy = on;
 	gBusyText = text ? text : L"";
 	gBusyTick = GetTickCount();
@@ -1713,8 +1720,7 @@ static void OnAddFolder()
 
 static void OnDelete()
 {
-	HWND ed = ListView_GetEditControl(gList);
-	if (ed) return;
+	if (gRenameEdit || ListView_GetEditControl(gList)) return;
 	std::vector<std::wstring> rels;
 	int i = -1;
 	while ((i = ListView_GetNextItem(gList, i, LVNI_SELECTED)) >= 0) {
@@ -1748,11 +1754,111 @@ static void OnDelete()
 	Refresh();
 }
 
+static void EndInlineRename(int commit)
+{
+	if (!gRenameEdit || gRenameClosing) return;
+	gRenameClosing = 1;
+	HWND ed = gRenameEdit;
+	int row = gRenameRow;
+	wchar_t buf[1024];
+	buf[0] = 0;
+	if (commit) GetWindowTextW(ed, buf, 1024);
+	gRenameEdit = NULL;
+	gRenameRow = -1;
+	DestroyWindow(ed);
+	gRenameOldProc = NULL;
+	if (gList && IsWindow(gList)) {
+		SetFocus(gList);
+		InvalidateRect(gList, NULL, FALSE);
+	}
+	gRenameClosing = 0;
+	if (commit && buf[0]) CommitRenameRow(row, buf);
+}
+
+static LRESULT CALLBACK RenameEditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	WNDPROC old = gRenameOldProc;
+	if (msg == WM_GETDLGCODE) {
+		LRESULT r = old ? CallWindowProcW(old, hwnd, msg, wp, lp) : DefWindowProcW(hwnd, msg, wp, lp);
+		return r | DLGC_WANTALLKEYS;
+	}
+	if (msg == WM_KEYDOWN) {
+		if (wp == VK_RETURN) {
+			EndInlineRename(1);
+			return 0;
+		}
+		if (wp == VK_ESCAPE) {
+			EndInlineRename(0);
+			return 0;
+		}
+	}
+	if (msg == WM_CHAR && (wp == L'\r' || wp == L'\n' || wp == 27))
+		return 0;
+	if (msg == WM_KILLFOCUS && !gRenameClosing && (HWND)wp != hwnd) {
+		LRESULT r = old ? CallWindowProcW(old, hwnd, msg, wp, lp) : DefWindowProcW(hwnd, msg, wp, lp);
+		EndInlineRename(1);
+		return r;
+	}
+	return old ? CallWindowProcW(old, hwnd, msg, wp, lp) : DefWindowProcW(hwnd, msg, wp, lp);
+}
+
 static void OnRename()
 {
-	int sel = ListView_GetNextItem(gList, -1, LVNI_FOCUSED);
-	if (sel < 0) sel = ListView_GetNextItem(gList, -1, LVNI_SELECTED);
-	if (sel >= 0 && sel < (int)gItems.size() && !gItems[sel].up) ListView_EditLabel(gList, sel);
+	if (gBusy || !gList) return;
+	if (gRenameEdit) { SetFocus(gRenameEdit); return; }
+	if (ListView_GetEditControl(gList)) return;
+	int sel = -1, idx = -1;
+	while ((idx = ListView_GetNextItem(gList, idx, LVNI_SELECTED)) >= 0) {
+		if (idx < (int)gItems.size() && !gItems[idx].up) { sel = idx; break; }
+	}
+	if (sel < 0) {
+		idx = ListView_GetNextItem(gList, -1, LVNI_FOCUSED);
+		if (idx >= 0 && idx < (int)gItems.size() && !gItems[idx].up) sel = idx;
+	}
+	if (sel < 0) {
+		for (size_t k = 0; k < gItems.size(); ++k) {
+			if (!gItems[k].up) { sel = (int)k; break; }
+		}
+	}
+	if (sel < 0 || sel >= (int)gItems.size() || gItems[sel].up) return;
+	ListView_SetItemState(gList, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	ListView_SetItemState(gList, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	ListView_EnsureVisible(gList, sel, FALSE);
+	RECT rowrc = {}, cl = {};
+	if (!ListView_GetItemRect(gList, sel, &rowrc, LVIR_LABEL)) {
+		if (!ListView_GetItemRect(gList, sel, &rowrc, LVIR_BOUNDS)) return;
+		rowrc.left += 22;
+	}
+	GetClientRect(gList, &cl);
+	int colW = ListView_GetColumnWidth(gList, 0);
+	int x = rowrc.left > 2 ? rowrc.left - 2 : 0;
+	int w = (colW > x + 24) ? (colW - x) : (rowrc.right - x + 48);
+	if (w < 180) w = 180;
+	if (cl.right > x + 40 && x + w > cl.right - 2) w = cl.right - 2 - x;
+	int h = (rowrc.bottom - rowrc.top) + 4;
+	if (h < 22) h = 22;
+	int y = rowrc.top - 2;
+	if (y < 0) y = 0;
+	const std::wstring& curName = gItems[sel].name;
+	HWND ed = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", curName.c_str(),
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
+		x, y, w, h, gList, (HMENU)(INT_PTR)1090, NULL, NULL);
+	if (!ed) return;
+	SendMessageW(ed, WM_SETFONT, (WPARAM)gFont, TRUE);
+	SendMessageW(ed, EM_SETLIMITTEXT, 255, 0);
+	gRenameEdit = ed;
+	gRenameRow = sel;
+	OxzBindAcrylic(gHwnd);
+	gRenameOldProc = (WNDPROC)SetWindowLongPtrW(ed, GWLP_WNDPROC, (LONG_PTR)RenameEditProc);
+	SetWindowPos(ed, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW);
+	size_t stemEnd = curName.size();
+	if (!gItems[sel].dir) {
+		size_t dot = curName.find_last_of(L'.');
+		if (dot != std::wstring::npos && dot > 0) stemEnd = dot;
+	}
+	SetFocus(ed);
+	SendMessageW(ed, EM_SETSEL, 0, (LPARAM)stemEnd);
+	RedrawWindow(ed, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 }
 
 static void OnTestView()
@@ -1872,7 +1978,7 @@ static void OnSave()
 
 static void SaveCurrent()
 {
-	if (gBusy || (gWork.empty() && gForeign.empty()) || (!HasFiles() && gArchive.empty() && gForeign.empty())) return;
+	if (gBusy || (gWork.empty() && gForeign.empty() && !gVirtual) || (!HasFiles() && gArchive.empty() && gForeign.empty())) return;
 	if (!OxzIsOxz(gArchive) && OxzTarWrap(gArchive.c_str()) < 0) { OnSave(); return; }
 	if (UnderWork(gArchive)) return;
 	SetBusy(1, OxzTxt(OS_COMPRESSING));
@@ -2390,13 +2496,29 @@ static void OnJobDone()
 	}
 }
 
-static void ApplyRename(NMLVDISPINFOW* di)
+static std::wstring gRenamedRel;
+
+static int ValidElemName(const wchar_t* s)
 {
-	if (!di || !di->item.pszText || !di->item.pszText[0]) return;
-	int i = di->item.iItem;
-	if (i < 0 || i >= (int)gItems.size()) return;
-	const wchar_t* neu = di->item.pszText;
-	if (wcschr(neu, L'\\') || wcschr(neu, L'/') || wcschr(neu, L':') || wcscmp(neu, L".") == 0 || wcscmp(neu, L"..") == 0) {
+	size_t n, k;
+	if (!s || !s[0]) return 0;
+	if (wcscmp(s, L".") == 0 || wcscmp(s, L"..") == 0) return 0;
+	n = wcslen(s);
+	if (s[n - 1] == L' ' || s[n - 1] == L'.') return 0;
+	for (k = 0; k < n; ++k) {
+		wchar_t c = s[k];
+		if (c < 32 || c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' || c == L'"' || c == L'<' || c == L'>' || c == L'|')
+			return 0;
+	}
+	return 1;
+}
+
+static void CommitRenameRow(int i, const wchar_t* neu)
+{
+	if (!neu || !neu[0]) return;
+	if (i < 0 || i >= (int)gItems.size() || gItems[i].up) return;
+	if (wcscmp(neu, gItems[i].name.c_str()) == 0) return;
+	if (!ValidElemName(neu)) {
 		Tell(gHwnd, OxzTxt(OS_BADNAME), MB_ICONWARNING);
 		return;
 	}
@@ -2406,14 +2528,33 @@ static void ApplyRename(NMLVDISPINFOW* di)
 	std::wstring destRel = parent.empty() ? neu : (parent + L"\\" + neu);
 	std::wstring src = gWork.empty() ? L"" : (gWork + L"\\" + rel);
 	int onDisk, moved = 0, rn;
-	if (_wcsicmp(destRel.c_str(), rel.c_str()) == 0) return;
+	if (wcscmp(destRel.c_str(), rel.c_str()) == 0) return;
+	if (_wcsicmp(destRel.c_str(), rel.c_str()) != 0) {
+		for (size_t k = 0; k < gItems.size(); ++k) {
+			if ((int)k == i || gItems[k].up) continue;
+			if (_wcsicmp(gItems[k].name.c_str(), neu) == 0) {
+				Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
+				return;
+			}
+		}
+	}
 	onDisk = !src.empty() && GetFileAttributesW(src.c_str()) != INVALID_FILE_ATTRIBUTES;
 	if (onDisk) {
-		if (!MoveFileW(src.c_str(), (gWork + L"\\" + destRel).c_str())) {
+		std::wstring dst = gWork + L"\\" + destRel;
+		if (!MoveFileW(src.c_str(), dst.c_str())) {
 			Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
 			return;
 		}
 		moved = 1;
+		{
+			std::wstring srcPre = src + L"\\";
+			for (size_t w = 0; w < gWatch.size(); ++w) {
+				if (_wcsicmp(gWatch[w].path.c_str(), src.c_str()) == 0)
+					gWatch[w].path = dst;
+				else if (gWatch[w].path.size() > srcPre.size() && _wcsnicmp(gWatch[w].path.c_str(), srcPre.c_str(), srcPre.size()) == 0)
+					gWatch[w].path = dst + gWatch[w].path.substr(src.size());
+			}
+		}
 	}
 	rn = 0;
 	if (!gForeign.empty()) {
@@ -2422,8 +2563,10 @@ static void ApplyRename(NMLVDISPINFOW* di)
 		for (size_t n = 0; n < gForeign.size(); ++n) {
 			OxzEnt& e = gForeign[n];
 			if (_wcsicmp(e.rel.c_str(), rel.c_str()) == 0) { e.rel = destRel; hit = 1; }
-			else if (e.rel.size() > prefix.size() && _wcsnicmp(e.rel.c_str(), prefix.c_str(), prefix.size()) == 0)
+			else if (e.rel.size() > prefix.size() && _wcsnicmp(e.rel.c_str(), prefix.c_str(), prefix.size()) == 0) {
 				e.rel = destRel + e.rel.substr(rel.size());
+				hit = 1;
+			}
 		}
 		rn = hit ? OXZ_CORE_OK : OXZ_CORE_ERR;
 	} else rn = OxzCoreRename(rel.c_str(), destRel.c_str());
@@ -2431,7 +2574,14 @@ static void ApplyRename(NMLVDISPINFOW* di)
 		Tell(gHwnd, OxzTxt(OS_RENAME_FAIL), MB_ICONWARNING);
 		return;
 	}
+	gRenamedRel = destRel;
 	PostMessageW(gHwnd, WM_APP + 2, 0, 0);
+}
+
+static void ApplyRename(NMLVDISPINFOW* di)
+{
+	if (!di || !di->item.pszText || !di->item.pszText[0]) return;
+	CommitRenameRow(di->item.iItem, di->item.pszText);
 }
 
 static void PaintList(NMLVCUSTOMDRAW* cd)
@@ -3753,7 +3903,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		case ID_ADDFILE: OnAddFiles(); break;
 		case ID_ADDFOLDER: OnAddFolder(); break;
 		case ID_DEL: OnDelete(); break;
-		case ID_RENAME: OnRename(); break;
+		case ID_RENAME: PostMessageW(hwnd, WM_APP + 3, 0, 0); break;
 		case ID_EXTRACT: OnExtract(); break;
 		case ID_SAVE: OnSave(); break;
 		case ID_CONV_OXZ: { std::vector<std::wstring> one(1, gArchive); StartConvert(one, L"oxz"); break; }
@@ -3810,7 +3960,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		}
 		if (nm->idFrom == ID_LIST && nm->code == LVN_BEGINLABELEDIT) {
 			int i = ((NMLVDISPINFOW*)lp)->item.iItem;
-			if (i < 0 || i >= (int)gItems.size() || gItems[i].up) return TRUE;
+			if (i >= 0 && i < (int)gItems.size() && !gItems[i].up && !gBusy) {
+				ListView_SetItemState(gList, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+				ListView_SetItemState(gList, i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+				PostMessageW(hwnd, WM_APP + 3, 0, 0);
+			}
+			return TRUE;
 		}
 		if (nm->idFrom == ID_LIST && nm->code == LVN_ENDLABELEDIT) ApplyRename((NMLVDISPINFOW*)lp);
 		if (nm->idFrom == ID_LIST && nm->code == LVN_COLUMNCLICK && !gBusy) {
@@ -3845,6 +4000,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	}
 	case WM_CONTEXTMENU: {
 		HWND from = (HWND)wp;
+		if (from && (from == gRenameEdit || (gList && from == ListView_GetEditControl(gList)))) break;
 		int onList = (from == gList || (from && GetParent(from) == gList)) ? 1 : 0;
 		QueueMenu(hwnd, from ? from : hwnd, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), onList);
 		return TRUE;
@@ -3936,6 +4092,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		return 0;
 	case WM_APP + 2:
 		Refresh();
+		if (!gRenamedRel.empty() && gList) {
+			for (size_t k = 0; k < gItems.size(); ++k) {
+				if (!gItems[k].up && _wcsicmp(gItems[k].rel.c_str(), gRenamedRel.c_str()) == 0) {
+					ListView_SetItemState(gList, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+					ListView_SetItemState(gList, (int)k, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+					ListView_EnsureVisible(gList, (int)k, FALSE);
+					break;
+				}
+			}
+			gRenamedRel.clear();
+		}
+		return 0;
+	case WM_APP + 3:
+		OnRename();
 		return 0;
 	case WM_APPCOMMAND:
 		if (GET_APPCOMMAND_LPARAM(lp) == APPCOMMAND_BROWSER_BACKWARD) { GoUp(); return TRUE; }

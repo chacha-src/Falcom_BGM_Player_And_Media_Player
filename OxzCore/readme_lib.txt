@@ -21,8 +21,18 @@ OxzCore.lib のほかに、同じランタイムで作った次の静的ライ�
   libogg_static_avx2_2026.lib
   libz-static.lib
 
-このリポジトリでは x64lib にあります。インクルードは OxzCore.h だけで足ります。
-コーデックのヘッダを、呼び出す側がインクルードする必要はありません。
+このリポジトリでは x64lib にあります。さらに、OxzGui やゲーム本体と共有している
+次の C / C++ ソース（フィルタと LZMA2 / PPMd デコード部）を一緒にコンパイルするかリンクします。
+（PPMd デコーダを使うため、コンパイル時に Z7_PPMD_SUPPORT と _7ZIP_ST を定義します。）
+
+  OxzFilt.cpp
+  lzma_sdk\LzmaDec.c
+  lzma_sdk\Lzma2Dec.c
+  lzma_sdk\Ppmd7.c
+  lzma_sdk\Ppmd7Dec.c
+  lzma_sdk\CpuArch.c
+
+インクルードは OxzCore.h だけで足ります。コーデックのヘッダを、呼び出す側がインクルードする必要はありません。
 
 
 ■ 初期設定
@@ -136,8 +146,17 @@ Link these static libraries, built with the same runtime, beside OxzCore.lib:
   libogg_static_avx2_2026.lib
   libz-static.lib
 
-In this repository they live in x64lib. The caller includes only OxzCore.h.
-Codec headers are not part of the public interface.
+In this repository they live in x64lib. Also compile or link the shared filter
+and LZMA2 / PPMd decoder sources (with Z7_PPMD_SUPPORT and _7ZIP_ST defined):
+
+  OxzFilt.cpp
+  lzma_sdk\LzmaDec.c
+  lzma_sdk\Lzma2Dec.c
+  lzma_sdk\Ppmd7.c
+  lzma_sdk\Ppmd7Dec.c
+  lzma_sdk\CpuArch.c
+
+The caller includes only OxzCore.h. Codec headers are not part of the public interface.
 
 
 Setup

@@ -14,6 +14,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <immintrin.h>
 
 #define ZSTD_STATIC_LINKING_ONLY
@@ -110,6 +111,7 @@ static int gUsePpmd = 1;
 static thread_local int tZstdLdm = 0;
 static thread_local int tInSurvey = 0;
 static thread_local int tInFilePool = 0;
+static thread_local int tRunInline = 0;
 static thread_local int tScout = 0;
 static thread_local int tZstdCeiling = 0;
 static const size_t kFastFile = 512ull * 1024ull;
@@ -245,16 +247,283 @@ static void BoostThread(std::thread& th)
 extern "C" int OxzLzma2Compress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel, void (*pulse)(void*, unsigned long long, unsigned long long), void* pulseUser);
 extern "C" int OxzLzma2EncodeChunk(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel, void (*pulse)(void*, unsigned long long, unsigned long long), void* pulseUser);
 extern "C" int OxzPpmdCompress(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, size_t profile, int userLevel);
+
+struct TlsBigBlocks {
+	enum { kSlots = 12 };
+	void* ptr[kSlots];
+	size_t cap[kSlots];
+	int used[kSlots];
+	ZSTD_CCtx* zc;
+	ZSTD_DCtx* zd;
+	struct libdeflate_compressor* defComp[13];
+	struct libdeflate_decompressor* defDec;
+	void* lzfseScratch;
+	size_t lzfseCap;
+	uint8_t* scratch;
+	size_t scratchCap;
+	uint8_t* fileBuf;
+	size_t fileCap;
+	TlsBigBlocks()
+		: zc(NULL), zd(NULL), defDec(NULL), lzfseScratch(NULL), lzfseCap(0),
+		  scratch(NULL), scratchCap(0), fileBuf(NULL), fileCap(0)
+	{
+		memset(ptr, 0, sizeof(ptr));
+		memset(cap, 0, sizeof(cap));
+		memset(used, 0, sizeof(used));
+		memset(defComp, 0, sizeof(defComp));
+	}
+	~TlsBigBlocks() {
+		int i;
+		for (i = 0; i < kSlots; ++i) free(ptr[i]);
+		if (zc) ZSTD_freeCCtx(zc);
+		if (zd) ZSTD_freeDCtx(zd);
+		for (i = 0; i < 13; ++i) if (defComp[i]) libdeflate_free_compressor(defComp[i]);
+		if (defDec) libdeflate_free_decompressor(defDec);
+		free(lzfseScratch);
+		free(scratch);
+		free(fileBuf);
+	}
+};
+
+static TlsBigBlocks& TlsPool(void)
+{
+	static thread_local TlsBigBlocks tls;
+	return tls;
+}
+
 extern "C" void* OxzLzmaAlloc(const ISzAlloc* p, size_t n)
 {
 	(void)p;
-	return n ? malloc(n) : NULL;
+	if (!n) return NULL;
+	if (n >= (32u << 10) && n <= (192u << 20)) {
+		TlsBigBlocks& t = TlsPool();
+		int k, bestFit = -1, victim = -1;
+		for (k = 0; k < TlsBigBlocks::kSlots; ++k) {
+			if (!t.used[k] && t.cap[k] >= n) {
+				if (bestFit < 0 || t.cap[k] < t.cap[bestFit]) bestFit = k;
+			}
+		}
+		if (bestFit >= 0) {
+			t.used[bestFit] = 1;
+			return t.ptr[bestFit];
+		}
+		for (k = 0; k < TlsBigBlocks::kSlots; ++k) {
+			if (!t.used[k]) {
+				if (t.cap[k] == 0) { victim = k; break; }
+				if (victim < 0 || t.cap[k] < t.cap[victim]) victim = k;
+			}
+		}
+		if (victim >= 0) {
+			void* nb = realloc(t.ptr[victim], n);
+			if (nb) {
+				t.ptr[victim] = nb;
+				t.cap[victim] = n;
+				t.used[victim] = 1;
+				return nb;
+			}
+		}
+	}
+	return malloc(n);
 }
+
 extern "C" void OxzLzmaFree(const ISzAlloc* p, void* a)
 {
 	(void)p;
+	if (!a) return;
+	{
+		TlsBigBlocks& t = TlsPool();
+		int k;
+		for (k = 0; k < TlsBigBlocks::kSlots; ++k) {
+			if (a == t.ptr[k]) { t.used[k] = 0; return; }
+		}
+	}
 	free(a);
 }
+
+static void* BrotliTlsAlloc(void* opaque, size_t size)
+{
+	(void)opaque;
+	return OxzLzmaAlloc(NULL, size);
+}
+
+static void BrotliTlsFree(void* opaque, void* address)
+{
+	(void)opaque;
+	OxzLzmaFree(NULL, address);
+}
+
+static uint8_t* TlsScratch(size_t need)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!need) need = 1;
+	if (t.scratchCap < need) {
+		size_t want = need < 65536 ? 65536 : need;
+		void* nb = realloc(t.scratch, want);
+		if (!nb) return NULL;
+		t.scratch = (uint8_t*)nb;
+		t.scratchCap = want;
+	}
+	return t.scratch;
+}
+
+static uint8_t* TlsFileBuf(size_t need)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!need) need = 1;
+	if (t.fileCap < need) {
+		size_t want = need < 65536 ? 65536 : need;
+		void* nb = realloc(t.fileBuf, want);
+		if (!nb) return NULL;
+		t.fileBuf = (uint8_t*)nb;
+		t.fileCap = want;
+	}
+	return t.fileBuf;
+}
+
+static ZSTD_CCtx* TlsZstdCCtx(void)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!t.zc) t.zc = ZSTD_createCCtx();
+	if (t.zc) ZSTD_CCtx_reset(t.zc, ZSTD_reset_session_and_parameters);
+	return t.zc;
+}
+
+static ZSTD_DCtx* TlsZstdDCtx(void)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!t.zd) t.zd = ZSTD_createDCtx();
+	if (t.zd) ZSTD_DCtx_reset(t.zd, ZSTD_reset_session_only);
+	return t.zd;
+}
+
+static struct libdeflate_compressor* TlsDeflateComp(int level)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (level < 0) level = 0;
+	if (level > 12) level = 12;
+	if (!t.defComp[level]) t.defComp[level] = libdeflate_alloc_compressor(level);
+	return t.defComp[level];
+}
+
+static struct libdeflate_decompressor* TlsDeflateDecomp(void)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!t.defDec) t.defDec = libdeflate_alloc_decompressor();
+	return t.defDec;
+}
+
+static void* TlsLzfseScratch(size_t need)
+{
+	TlsBigBlocks& t = TlsPool();
+	if (!need) return NULL;
+	if (t.lzfseCap < need) {
+		void* nb = realloc(t.lzfseScratch, need);
+		if (!nb) return NULL;
+		t.lzfseScratch = nb;
+		t.lzfseCap = need;
+	}
+	return t.lzfseScratch;
+}
+
+struct SaveWorkerPool {
+	std::mutex mu;
+	std::condition_variable cvStart;
+	std::condition_variable cvDone;
+	std::vector<std::thread> workers;
+	void (*taskFn)(void*, size_t);
+	void* taskCtx;
+	size_t taskCount;
+	std::atomic<size_t> cursor;
+	unsigned activeWorkers;
+	unsigned epoch;
+	int stop;
+	std::atomic<int> claimed;
+
+	explicit SaveWorkerPool(unsigned n)
+		: taskFn(NULL), taskCtx(NULL), taskCount(0), cursor(0), activeWorkers(0), epoch(0), stop(0), claimed(0)
+	{
+		unsigned t;
+		if (n < 1) n = 1;
+		workers.reserve(n);
+		for (t = 0; t < n; ++t) {
+			workers.push_back(std::thread([this]() {
+				unsigned seenEpoch = 0;
+				for (;;) {
+					void (*fn)(void*, size_t) = NULL;
+					void* ctx = NULL;
+					size_t count = 0;
+					{
+						std::unique_lock<std::mutex> lk(mu);
+						cvStart.wait(lk, [&]() { return stop || epoch != seenEpoch; });
+						if (stop) return;
+						seenEpoch = epoch;
+						fn = taskFn;
+						ctx = taskCtx;
+						count = taskCount;
+					}
+					for (;;) {
+						size_t i = cursor.fetch_add(1);
+						if (i >= count) break;
+						fn(ctx, i);
+					}
+					{
+						std::unique_lock<std::mutex> lk(mu);
+						if (--activeWorkers == 0) cvDone.notify_one();
+					}
+				}
+			}));
+			BoostThread(workers.back());
+		}
+	}
+
+	~SaveWorkerPool()
+	{
+		size_t t;
+		{
+			std::lock_guard<std::mutex> lk(mu);
+			stop = 1;
+		}
+		cvStart.notify_all();
+		for (t = 0; t < workers.size(); ++t) {
+			if (workers[t].joinable()) workers[t].join();
+		}
+	}
+
+	int Run(size_t count, void (*fn)(void*, size_t), void* ctx)
+	{
+		int expected = 0;
+		if (count == 0) return 1;
+		if (count == 1 || workers.empty()) {
+			size_t i;
+			for (i = 0; i < count; ++i) fn(ctx, i);
+			return 1;
+		}
+		if (!claimed.compare_exchange_strong(expected, 1)) return 0;
+		{
+			std::lock_guard<std::mutex> lk(mu);
+			taskFn = fn;
+			taskCtx = ctx;
+			taskCount = count;
+			cursor.store(0);
+			activeWorkers = (unsigned)workers.size();
+			epoch++;
+		}
+		cvStart.notify_all();
+		for (;;) {
+			size_t i = cursor.fetch_add(1);
+			if (i >= count) break;
+			fn(ctx, i);
+		}
+		{
+			std::unique_lock<std::mutex> lk(mu);
+			cvDone.wait(lk, [&]() { return activeWorkers == 0; });
+		}
+		claimed.store(0);
+		return 1;
+	}
+};
+
+static SaveWorkerPool* gSavePool = NULL;
 
 struct ILess {
 	bool operator()(const std::wstring& a, const std::wstring& b) const
@@ -333,12 +602,13 @@ struct OutItem {
 };
 
 static uint32_t gCrcTab[8][256];
-static int gCrcReady;
+static int gPcl = 0;
+static std::atomic<int> gCrcDone(0);
+static std::once_flag gCrcOnce;
 
-static void CrcInit(void)
+static void CrcBuildTables(void)
 {
 	int i, b, k;
-	if (gCrcReady) return;
 	for (i = 0; i < 256; ++i) {
 		uint32_t r = (uint32_t)i;
 		for (b = 0; b < 8; ++b) r = (r >> 1) ^ (0xEDB88320u & (0u - (r & 1u)));
@@ -350,12 +620,12 @@ static void CrcInit(void)
 			gCrcTab[k][i] = gCrcTab[0][r & 255] ^ (r >> 8);
 		}
 	}
-	gCrcReady = 1;
 }
+
+static void CrcEnsure(void);
 
 static uint32_t CrcTable(const uint8_t* p, size_t n, uint32_t c)
 {
-	CrcInit();
 	while (n >= 8) {
 		uint32_t one, two;
 		memcpy(&one, p, 4);
@@ -451,36 +721,38 @@ static uint32_t CrcPcl(uint32_t crc, const uint8_t* data, size_t len)
 	}
 }
 
-static int gPcl = -1;
-
 static void CrcEnsure(void)
 {
-	int info[4];
-	int ok, off;
-	size_t li;
-	uint8_t b[4128];
-	static const size_t lens[] = { 0, 1, 15, 16, 17, 31, 63, 64, 65, 127, 128, 129, 200, 511, 512, 1000, 4096, 4097 };
-	CrcInit();
-	if (gPcl >= 0) return;
-	gPcl = 0;
-	__cpuid(info, 1);
-	if ((info[2] & (1 << 1)) == 0 || (info[2] & (1 << 9)) == 0 || (info[2] & (1 << 19)) == 0) return;
-	for (li = 0; li < sizeof(b); ++li) b[li] = (uint8_t)(li * 17u + 3u);
-	ok = 1;
-	for (li = 0; li < sizeof(lens) / sizeof(lens[0]); ++li) {
-		for (off = 0; off <= 7; off += 3) {
-			uint32_t table = CrcTable(b + off, lens[li], 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
-			uint32_t fast = CrcPcl(0, b + off, lens[li]);
-			if (table != fast) ok = 0;
+	if (gCrcDone.load(std::memory_order_acquire)) return;
+	std::call_once(gCrcOnce, []() {
+		int info[4];
+		int ok, off;
+		size_t li;
+		uint8_t b[4128];
+		static const size_t lens[] = { 0, 1, 15, 16, 17, 31, 63, 64, 65, 127, 128, 129, 200, 511, 512, 1000, 4096, 4097 };
+		CrcBuildTables();
+		gPcl = 0;
+		__cpuid(info, 1);
+		if ((info[2] & (1 << 1)) != 0 && (info[2] & (1 << 9)) != 0 && (info[2] & (1 << 19)) != 0) {
+			for (li = 0; li < sizeof(b); ++li) b[li] = (uint8_t)(li * 17u + 3u);
+			ok = 1;
+			for (li = 0; li < sizeof(lens) / sizeof(lens[0]); ++li) {
+				for (off = 0; off <= 7; off += 3) {
+					uint32_t table = CrcTable(b + off, lens[li], 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
+					uint32_t fast = CrcPcl(0, b + off, lens[li]);
+					if (table != fast) ok = 0;
+				}
+			}
+			{
+				uint32_t whole = CrcTable(b, 1000, 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
+				uint32_t mid = CrcPcl(0, b, 300);
+				uint32_t rest = CrcPcl(mid, b + 300, 700);
+				if (rest != whole) ok = 0;
+			}
+			if (ok) gPcl = 1;
 		}
-	}
-	{
-		uint32_t whole = CrcTable(b, 1000, 0xFFFFFFFFu) ^ 0xFFFFFFFFu;
-		uint32_t mid = CrcPcl(0, b, 300);
-		uint32_t rest = CrcPcl(mid, b + 300, 700);
-		if (rest != whole) ok = 0;
-	}
-	if (ok) gPcl = 1;
+		gCrcDone.store(1, std::memory_order_release);
+	});
 }
 
 static uint32_t CrcBlock(const uint8_t* p, size_t n, uint32_t c)
@@ -513,14 +785,16 @@ static int SamePath(const std::wstring& a, const std::wstring& b)
 static int ReadAt(HANDLE h, uint64_t off, void* dst, size_t n)
 {
 	uint8_t* p = (uint8_t*)dst;
-	LARGE_INTEGER li;
-	li.QuadPart = (LONGLONG)off;
-	if (!SetFilePointerEx(h, li, NULL, FILE_BEGIN)) return 0;
 	while (n) {
 		DWORD chunk = n > (4u << 20) ? (4u << 20) : (DWORD)n;
 		DWORD rd = 0;
-		if (!ReadFile(h, p, chunk, &rd, NULL) || rd != chunk) return 0;
+		OVERLAPPED ov;
+		memset(&ov, 0, sizeof(ov));
+		ov.Offset = (DWORD)off;
+		ov.OffsetHigh = (DWORD)(off >> 32);
+		if (!ReadFile(h, p, chunk, &rd, &ov) || rd != chunk) return 0;
 		p += rd;
+		off += rd;
 		n -= rd;
 	}
 	return 1;
@@ -786,35 +1060,42 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 	for (pass = 0; pass < 2; ++pass) {
 		size_t bound, got;
 		int useLog;
+		int ownCtx = 0;
+		uint8_t* sb;
 		ZSTD_CCtx* c;
 		if (mode == 0 && pass == 1) break;
 		if (mode == 1 && pass == 0) continue;
 		if (pass == 1 && ln > 256ull * 1024ull * 1024ull) break;
 		bound = ZSTD_compressBound(n);
 		if (ZSTD_isError(bound) || bound == 0) break;
-		try { buf.resize(bound); } catch (...) { break; }
-		c = ZSTD_createCCtx();
-		if (!c) break;
+		sb = TlsScratch(bound);
+		if (!sb) break;
 		useLog = wlog;
 		if (pass == 1 && useLog < 24) useLog = 24;
+		if (!tInSurvey && !tInFilePool && tZstdCeiling != 1 && n >= 2ull * 1024ull * 1024ull && InnerThreads(n) >= 2) {
+			c = ZSTD_createCCtx();
+			ownCtx = 1;
+		} else {
+			c = TlsZstdCCtx();
+		}
+		if (!c) break;
 		ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, level);
 		ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
 		ZSTD_CCtx_setParameter(c, ZSTD_c_windowLog, useLog);
 		if (pass == 1) ZSTD_CCtx_setParameter(c, ZSTD_c_enableLongDistanceMatching, 1);
 		{
-			int zt = ZstdArm(c, n, level, useLog);
-			got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
+			int zt = ownCtx ? ZstdArm(c, n, level, useLog) : 1;
+			got = ZSTD_compress2(c, sb, bound, in, n);
 			if (ZSTD_isError(got) && zt > 1) {
 				ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, 0);
-				got = ZSTD_compress2(c, buf.data(), buf.size(), in, n);
+				got = ZSTD_compress2(c, sb, bound, in, n);
 			}
 		}
-		ZSTD_freeCCtx(c);
+		if (ownCtx) ZSTD_freeCCtx(c);
 		if (ZSTD_isError(got) || got == 0 || got >= best) continue;
+		try { out.assign(sb, sb + got); } catch (...) { break; }
 		best = got;
 		bestLdm = pass;
-		buf.resize(got);
-		out.swap(buf);
 	}
 	tZstdLdm = bestLdm;
 	return best < n;
@@ -823,16 +1104,18 @@ static int TryZstd(const uint8_t* in, size_t n, std::vector<uint8_t>& out, int m
 static int TryLz4(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	int cap, got;
+	uint8_t* sb;
 	if (n == 0 || n > kLzBlockMax) return 0;
 	cap = LZ4_compressBound((int)n);
 	if (cap <= 0) return 0;
-	try { out.resize((size_t)cap); } catch (...) { return 0; }
+	sb = TlsScratch((size_t)cap);
+	if (!sb) return 0;
 	if (tScout || gUserLevel <= 2)
-		got = LZ4_compress_default((const char*)in, (char*)out.data(), (int)n, cap);
+		got = LZ4_compress_default((const char*)in, (char*)sb, (int)n, cap);
 	else
-		got = LZ4_compress_HC((const char*)in, (char*)out.data(), (int)n, cap, Scale(4, LZ4HC_CLEVEL_MAX));
+		got = LZ4_compress_HC((const char*)in, (char*)sb, (int)n, cap, Scale(4, LZ4HC_CLEVEL_MAX));
 	if (got <= 0 || (size_t)got >= n) return 0;
-	out.resize((size_t)got);
+	try { out.assign(sb, sb + (size_t)got); } catch (...) { return 0; }
 	return 1;
 }
 
@@ -842,21 +1125,23 @@ static int DeflateOnce(const uint8_t* in, size_t n, std::vector<uint8_t>& out, i
 	int hi = 9;
 	int level;
 	struct libdeflate_compressor* c;
-	size_t bound, got;
+	size_t bound, cap, got;
+	uint8_t* sb;
 	if (n == 0) return 0;
 	if (ln <= 64ull * 1024ull * 1024ull) hi = 12;
 	else if (ln <= 512ull * 1024ull * 1024ull) hi = 9;
 	else hi = 6;
 	level = EffortCap(Scale(1, hi), 1);
-	c = libdeflate_alloc_compressor(level);
+	c = TlsDeflateComp(level);
 	if (!c) return 0;
 	bound = raw ? libdeflate_deflate_compress_bound(c, n) : libdeflate_zlib_compress_bound(c, n);
-	try { out.resize(bound ? bound : n + 64); } catch (...) { libdeflate_free_compressor(c); return 0; }
-	got = raw ? libdeflate_deflate_compress(c, in, n, out.data(), out.size())
-		: libdeflate_zlib_compress(c, in, n, out.data(), out.size());
-	libdeflate_free_compressor(c);
+	cap = bound ? bound : n + 64;
+	sb = TlsScratch(cap);
+	if (!sb) return 0;
+	got = raw ? libdeflate_deflate_compress(c, in, n, sb, cap)
+		: libdeflate_zlib_compress(c, in, n, sb, cap);
 	if (got == 0 || got >= n) return 0;
-	out.resize(got);
+	try { out.assign(sb, sb + got); } catch (...) { return 0; }
 	return 1;
 }
 
@@ -942,11 +1227,38 @@ static int MostlyText(const uint8_t* p, size_t n)
 	return samples && good * 5 >= samples * 4;
 }
 
+static int BrotliCompressFast(int q, int win, BrotliEncoderMode bm, size_t n, const uint8_t* in, size_t* encodedSize, uint8_t* outBuf)
+{
+	BrotliEncoderState* s;
+	size_t availIn = n;
+	const uint8_t* nextIn = in;
+	size_t availOut = *encodedSize;
+	uint8_t* nextOut = outBuf;
+	size_t totalOut = 0;
+	BROTLI_BOOL ok;
+	if (availOut == 0 || n == 0) return 0;
+	s = BrotliEncoderCreateInstance(BrotliTlsAlloc, BrotliTlsFree, NULL);
+	if (!s) return 0;
+	BrotliEncoderSetParameter(s, BROTLI_PARAM_QUALITY, (uint32_t)q);
+	BrotliEncoderSetParameter(s, BROTLI_PARAM_LGWIN, (uint32_t)win);
+	BrotliEncoderSetParameter(s, BROTLI_PARAM_MODE, (uint32_t)bm);
+	BrotliEncoderSetParameter(s, BROTLI_PARAM_SIZE_HINT, n > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)n);
+	if (win > BROTLI_MAX_WINDOW_BITS)
+		BrotliEncoderSetParameter(s, BROTLI_PARAM_LARGE_WINDOW, BROTLI_TRUE);
+	ok = BrotliEncoderCompressStream(s, BROTLI_OPERATION_FINISH, &availIn, &nextIn, &availOut, &nextOut, &totalOut);
+	if (!BrotliEncoderIsFinished(s)) ok = BROTLI_FALSE;
+	BrotliEncoderDestroyInstance(s);
+	if (!ok) return 0;
+	*encodedSize = totalOut;
+	return 1;
+}
+
 static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	int q, win, mode, modes;
 	size_t cap, best, ln;
 	unsigned threads;
+	uint8_t* sb;
 	if (n == 0) return 0;
 	cap = BrotliEncoderMaxCompressedSize(n);
 	if (cap == 0) return 0;
@@ -961,16 +1273,15 @@ static int TryBrotli(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	modes = (!tScout && n <= 8u * 1024u * 1024u && ln <= 8u * 1024u * 1024u && MostlyText(in, n)) ? 2 : 1;
 	threads = InnerThreads(n);
 	if (!tScout && threads > 1 && n >= 2ull * 1024ull * 1024ull && BrotliParallel(in, n, q, win, out, threads)) return 1;
+	sb = TlsScratch(cap);
+	if (!sb) return 0;
 	for (mode = 0; mode < modes; ++mode) {
-		std::vector<uint8_t> buf;
 		size_t got = cap;
 		BrotliEncoderMode bm = mode ? BROTLI_MODE_TEXT : BROTLI_MODE_GENERIC;
-		try { buf.resize(cap); } catch (...) { break; }
-		if (!BrotliEncoderCompress(q, win, bm, n, in, &got, buf.data())) continue;
+		if (!BrotliCompressFast(q, win, bm, n, in, &got, sb)) continue;
 		if (got == 0 || got >= best) continue;
+		try { out.assign(sb, sb + got); } catch (...) { break; }
 		best = got;
-		buf.resize(got);
-		out.swap(buf);
 	}
 	return best < n;
 }
@@ -1056,18 +1367,19 @@ static int TryLzma(const uint8_t* in, size_t n, std::vector<uint8_t>& out, uint8
 		}
 	}
 	cap = n + (n / 4) + 65536;
-	try { out.resize(cap); } catch (...) { return 0; }
 	{
+		uint8_t* sb = TlsScratch(cap);
 		LzWatch watch;
+		if (!sb) return 0;
 		watch.hook = gEncHook;
 		watch.base = 0;
 		watch.total = n;
 		watch.slot = NULL;
 		watch.sum = NULL;
-		if (OxzLzma2Compress(in, n, out.data(), cap, &got, &pr, LevelN(n), ul, watch.hook.fn ? LzmaPulse : NULL, watch.hook.fn ? &watch : NULL) != 0) return 0;
+		if (OxzLzma2Compress(in, n, sb, cap, &got, &pr, LevelN(n), ul, watch.hook.fn ? LzmaPulse : NULL, watch.hook.fn ? &watch : NULL) != 0) return 0;
+		if (got == 0 || got >= n) return 0;
+		try { out.assign(sb, sb + got); } catch (...) { return 0; }
 	}
-	if (got == 0 || got >= n) return 0;
-	out.resize(got);
 	*prop = pr;
 	return 1;
 }
@@ -1076,6 +1388,7 @@ static int TryLizard(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	int level, cap, got;
 	size_t ln;
+	uint8_t* sb;
 	if (n == 0 || n > kLzBlockMax) return 0;
 	ln = LevelN(n);
 	if (ln <= 4u * 1024u * 1024u) level = LIZARD_MAX_CLEVEL;
@@ -1084,26 +1397,29 @@ static int TryLizard(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	level = EffortCap(Scale(LIZARD_MIN_CLEVEL, level), 10);
 	cap = Lizard_compressBound((int)n);
 	if (cap <= 0) return 0;
-	try { out.resize((size_t)cap); } catch (...) { return 0; }
-	got = Lizard_compress((const char*)in, (char*)out.data(), (int)n, cap, level);
+	sb = TlsScratch((size_t)cap);
+	if (!sb) return 0;
+	got = Lizard_compress((const char*)in, (char*)sb, (int)n, cap, level);
 	if (got <= 0 || (size_t)got >= n) return 0;
-	out.resize((size_t)got);
+	try { out.assign(sb, sb + (size_t)got); } catch (...) { return 0; }
 	return 1;
 }
 
 static int TryLzfse(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
-	size_t scratchNeed, got;
+	size_t scratchNeed, cap, got;
 	void* scratch;
+	uint8_t* sb;
 	if (n == 0) return 0;
 	scratchNeed = lzfse_encode_scratch_size();
-	scratch = scratchNeed ? malloc(scratchNeed) : NULL;
+	scratch = scratchNeed ? TlsLzfseScratch(scratchNeed) : NULL;
 	if (scratchNeed && !scratch) return 0;
-	try { out.resize(n + 4096); } catch (...) { free(scratch); return 0; }
-	got = lzfse_encode_buffer(out.data(), out.size(), in, n, scratch);
-	free(scratch);
+	cap = n + 4096;
+	sb = TlsScratch(cap);
+	if (!sb) return 0;
+	got = lzfse_encode_buffer(sb, cap, in, n, scratch);
 	if (got == 0 || got >= n) return 0;
-	out.resize(got);
+	try { out.assign(sb, sb + got); } catch (...) { return 0; }
 	return 1;
 }
 
@@ -1116,11 +1432,13 @@ static int TryBzip2(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 static int TryPpmd(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
 	size_t got = 0;
+	uint8_t* sb;
 	if (n == 0) return 0;
-	try { out.resize(n); } catch (...) { return 0; }
-	if (OxzPpmdCompress(in, n, out.data(), out.size(), &got, LevelN(n), tScout ? 1 : gUserLevel) != 0) return 0;
+	sb = TlsScratch(n);
+	if (!sb) return 0;
+	if (OxzPpmdCompress(in, n, sb, n, &got, LevelN(n), tScout ? 1 : gUserLevel) != 0) return 0;
 	if (got == 0 || got >= n) return 0;
-	out.resize(got);
+	try { out.assign(sb, sb + got); } catch (...) { return 0; }
 	return 1;
 }
 
@@ -1222,16 +1540,16 @@ static void Delta4Enc(uint8_t* p, size_t n)
 static void Delta4Dec(uint8_t* p, size_t n)
 {
 	size_t i = 4;
-	while (i + 4 <= n) {
-		int k, s, d;
-		memcpy(&s, p + i - 4, 4);
-		memcpy(&d, p + i, 4);
-		{
-			__m128i a = _mm_add_epi8(_mm_cvtsi32_si128(s), _mm_cvtsi32_si128(d));
-			k = _mm_cvtsi128_si32(a);
-		}
-		memcpy(p + i, &k, 4);
-		i += 4;
+	if (n <= 4) return;
+	while (i + 16 <= n) {
+		int prev;
+		__m128i v = _mm_loadu_si128((const __m128i*)(p + i));
+		memcpy(&prev, p + i - 4, 4);
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 4));
+		v = _mm_add_epi8(v, _mm_slli_si128(v, 8));
+		v = _mm_add_epi8(v, _mm_set1_epi32(prev));
+		_mm_storeu_si128((__m128i*)(p + i), v);
+		i += 16;
 	}
 	for (; i < n; ++i) p[i] = (uint8_t)(p[i] + p[i - 4]);
 }
@@ -1477,6 +1795,7 @@ struct PulseGuard {
 struct Survey {
 	int method;
 	int flags;
+	int flagIdx;
 	int zstdPass;
 	int ok;
 	int zstdLdm;
@@ -1484,102 +1803,164 @@ struct Survey {
 	std::vector<uint8_t> data;
 };
 
-static size_t Lz4FilterScore(const uint8_t* raw, size_t n, int flags)
+static size_t Lz4ScoreBuf(const uint8_t* buf, size_t n, std::vector<uint8_t>& lz4Out)
 {
-	std::vector<uint8_t> b, out;
 	int cap, got;
 	if (n == 0 || n > 16u * 1024u * 1024u) return n;
-	try { b.assign(raw, raw + n); }
-	catch (...) { return n; }
-	if (flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
-	if (flags & F_DELTA4) Delta4Enc(b.data(), b.size());
-	else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
-	cap = LZ4_compressBound((int)b.size());
+	cap = LZ4_compressBound((int)n);
 	if (cap <= 0) return n;
-	try { out.resize((size_t)cap); }
-	catch (...) { return n; }
-	got = LZ4_compress_fast((const char*)b.data(), (char*)out.data(), (int)b.size(), cap, 2);
+	try {
+		if (lz4Out.size() < (size_t)cap) lz4Out.resize((size_t)cap);
+	} catch (...) { return n; }
+	got = LZ4_compress_fast((const char*)buf, (char*)lz4Out.data(), (int)n, cap, 2);
 	if (got <= 0) return n;
 	return (size_t)got;
 }
 
-static void RunJobs(std::vector<Survey>& jobs, const uint8_t* raw, size_t n, int scout)
+static void ExecOneSurvey(Survey* job, const uint8_t* const* srcPtr, size_t n, FilePulse* pulseFile, unsigned pulseCap, size_t pulseJobs, std::atomic<unsigned>* pulseStep)
 {
-	unsigned threads, t;
-	std::vector<std::thread> pool;
-	std::atomic<size_t> cursor(0);
+	std::vector<uint8_t> tmp;
+	uint8_t prop = 0;
+	const uint8_t* src;
+	if (job->ok != 0) return;
+	src = srcPtr[job->flagIdx];
+	if (src) {
+		try {
+			if (OneCodec(src, n, job->method, job->zstdPass, tmp, &prop)) {
+				job->ok = 1;
+				job->prop = prop;
+				job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
+				job->data.swap(tmp);
+			}
+		} catch (...) {
+		}
+	}
+	if (job->ok == 0) job->ok = -1;
+	if (pulseFile && pulseStep) {
+		unsigned step = pulseStep->fetch_add(1) + 1;
+		int ten = (int)((unsigned long long)step * (unsigned)pulseCap * 10ull / pulseJobs);
+		if (ten > (int)(pulseCap * 10)) ten = (int)(pulseCap * 10);
+		Publish(pulseFile, ten, 0);
+	}
+}
+
+struct SurveyBatch {
+	std::vector<Survey>* jobs;
+	const uint8_t* const* srcPtr;
+	size_t n;
 	size_t levelSnap;
 	FilePulse* pulseFile;
 	unsigned pulseCap;
-	std::atomic<unsigned> pulseStep(0);
 	size_t pulseJobs;
+	int scout;
+	std::atomic<unsigned> pulseStep;
+	SurveyBatch() : jobs(NULL), srcPtr(NULL), n(0), levelSnap(0), pulseFile(NULL), pulseCap(95), pulseJobs(1), scout(0), pulseStep(0) {}
+};
+
+static void SurveyPoolStep(void* ctx, size_t idx)
+{
+	SurveyBatch* b = (SurveyBatch*)ctx;
+	size_t prevLev = gLevelBytes;
+	int prevSurv = tInSurvey;
+	int prevScout = tScout;
+	gLevelBytes = b->levelSnap;
+	tInSurvey = 1;
+	tScout = b->scout;
+	ExecOneSurvey(&(*b->jobs)[idx], b->srcPtr, b->n, b->pulseFile, b->pulseCap, b->pulseJobs, &b->pulseStep);
+	tScout = prevScout;
+	tInSurvey = prevSurv;
+	gLevelBytes = prevLev;
+}
+
+static void RunJobs(std::vector<Survey>& jobs, const uint8_t* const* srcPtr, size_t n, int scout)
+{
+	size_t levelSnap;
+	FilePulse* pulseFile;
+	unsigned pulseCap;
+	size_t pulseJobs;
+	unsigned pending = 0;
+	size_t i;
 	if (jobs.empty()) return;
-	threads = HwCap();
-	if (tInFilePool) {
-		unsigned capThreads = HwCap() / 3;
-		if (capThreads < 1) capThreads = 1;
-		if (capThreads > 4) capThreads = 4;
-		threads = capThreads;
-	}
-	if (threads > jobs.size()) threads = (unsigned)jobs.size();
+	for (i = 0; i < jobs.size(); ++i) if (jobs[i].ok == 0) pending++;
+	if (!pending) return;
 	levelSnap = gLevelBytes;
 	pulseFile = tFilePulse;
 	pulseCap = (levelSnap > n && levelSnap - n > 4096) ? 25u : 95u;
 	pulseJobs = jobs.size() ? jobs.size() : 1;
-	for (t = 0; t < threads; ++t) {
-		pool.push_back(std::thread([&, n, levelSnap, pulseFile, pulseCap, pulseJobs, scout]() {
-			gLevelBytes = levelSnap;
-			tInSurvey = 1;
-			tScout = scout;
-			for (;;) {
-				size_t i = cursor.fetch_add(1);
-				std::vector<uint8_t> b, tmp;
-				uint8_t prop = 0;
-				Survey* job;
-				unsigned step;
-				if (i >= jobs.size()) break;
-				job = &jobs[i];
-				if (job->ok != 0) continue;
-				try {
-					b.assign(raw, raw + n);
-					if (job->flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
-					if (job->flags & F_DELTA4) Delta4Enc(b.data(), b.size());
-					else if (job->flags & F_DELTA1) Delta1Enc(b.data(), b.size());
-					if (OneCodec(b.data(), b.size(), job->method, job->zstdPass, tmp, &prop)) {
-						job->ok = 1;
-						job->prop = prop;
-						job->zstdLdm = (job->method == M_ZSTD) ? job->zstdPass : 0;
-						job->data.swap(tmp);
-					}
-				} catch (...) {
-				}
-				if (job->ok == 0) job->ok = -1;
-				if (pulseFile) {
-					int ten;
-					step = pulseStep.fetch_add(1) + 1;
-					ten = (int)((unsigned long long)step * (unsigned)pulseCap * 10ull / pulseJobs);
-					if (ten > pulseCap * 10) ten = pulseCap * 10;
-					Publish(pulseFile, ten, 0);
-				}
-			}
-			tScout = 0;
-			tInSurvey = 0;
-		}));
-		BoostThread(pool.back());
+	if (tRunInline || pending == 1 || HwCap() <= 1) {
+		std::atomic<unsigned> pulseStep(0);
+		int prevSurv = tInSurvey;
+		int prevScout = tScout;
+		tInSurvey = 1;
+		tScout = scout;
+		for (i = 0; i < jobs.size(); ++i) {
+			if (jobs[i].ok != 0) continue;
+			ExecOneSurvey(&jobs[i], srcPtr, n, pulseFile, pulseCap, pulseJobs, &pulseStep);
+		}
+		tScout = prevScout;
+		tInSurvey = prevSurv;
+		return;
 	}
-	for (t = 0; t < pool.size(); ++t) pool[t].join();
+	if (gSavePool) {
+		SurveyBatch batch;
+		batch.jobs = &jobs;
+		batch.srcPtr = srcPtr;
+		batch.n = n;
+		batch.levelSnap = levelSnap;
+		batch.pulseFile = pulseFile;
+		batch.pulseCap = pulseCap;
+		batch.pulseJobs = pulseJobs;
+		batch.scout = scout;
+		if (gSavePool->Run(jobs.size(), SurveyPoolStep, &batch))
+			return;
+	}
+	{
+		unsigned threads = HwCap();
+		unsigned t;
+		std::vector<std::thread> pool;
+		std::atomic<size_t> cursor(0);
+		std::atomic<unsigned> pulseStep(0);
+		if (tInFilePool) {
+			unsigned capThreads = HwCap() / 3;
+			if (capThreads < 1) capThreads = 1;
+			if (capThreads > 4) capThreads = 4;
+			threads = capThreads;
+		}
+		if (threads > pending) threads = pending;
+		for (t = 0; t < threads; ++t) {
+			pool.push_back(std::thread([&, n, levelSnap, pulseFile, pulseCap, pulseJobs, scout]() {
+				gLevelBytes = levelSnap;
+				tInSurvey = 1;
+				tScout = scout;
+				for (;;) {
+					size_t idx = cursor.fetch_add(1);
+					if (idx >= jobs.size()) break;
+					if (jobs[idx].ok != 0) continue;
+					ExecOneSurvey(&jobs[idx], srcPtr, n, pulseFile, pulseCap, pulseJobs, &pulseStep);
+				}
+				tScout = 0;
+				tInSurvey = 0;
+			}));
+			BoostThread(pool.back());
+		}
+		for (t = 0; t < pool.size(); ++t) pool[t].join();
+	}
 }
 
 static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 {
 	static const int kMethod[] = {
-		M_ZSTD, M_ZSTD, M_LZ4, M_LIZARD, M_LZFSE, M_DEFLATE, M_RAWDEFLATE, M_BZIP2, M_BROTLI, M_PPMD, M_LZMA2
+		M_ZSTD, M_ZSTD, M_LZ4, M_LIZARD, M_LZFSE, M_RAWDEFLATE, M_BZIP2, M_BROTLI, M_PPMD, M_LZMA2
 	};
-	static const int kPass[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	static const int kPass[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
 	int flags[6];
 	int keepFlag[6];
 	size_t score[6];
+	std::vector<uint8_t> filtBuf[6];
+	const uint8_t* srcPtr[6];
+	std::vector<uint8_t> lz4Out;
 	size_t baseScore;
+	size_t ln;
 	int nflags = 0;
 	int f, m;
 	int probing;
@@ -1595,9 +1976,11 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 	best.flags = 0;
 	best.prop = 0;
 	best.zstdLdm = 0;
-	best.data.assign(raw, raw + n);
 	if (n == 0) return best;
+	CrcEnsure();
 	WarmCodecs();
+	ln = LevelN(n);
+	for (f = 0; f < 6; ++f) srcPtr[f] = NULL;
 	flags[nflags++] = 0;
 	if (isPe) flags[nflags++] = F_RIP;
 	if (n >= 32) {
@@ -1610,23 +1993,51 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 	}
 	baseScore = 0;
 	for (f = 0; f < nflags; ++f) {
-		score[f] = Lz4FilterScore(raw, n, flags[f]);
 		keepFlag[f] = 0;
+		if (flags[f] == 0) {
+			srcPtr[f] = raw;
+		} else {
+			try {
+				if ((flags[f] & F_RIP) && flags[f] != F_RIP && nflags > 1 && flags[1] == F_RIP && srcPtr[1]) {
+					filtBuf[f] = filtBuf[1];
+				} else {
+					filtBuf[f].assign(raw, raw + n);
+					if (flags[f] & F_RIP) OxzRipConvert(filtBuf[f].data(), n, 1);
+				}
+				if (flags[f] & F_DELTA4) Delta4Enc(filtBuf[f].data(), n);
+				else if (flags[f] & F_DELTA1) Delta1Enc(filtBuf[f].data(), n);
+				srcPtr[f] = filtBuf[f].data();
+			} catch (...) {
+				srcPtr[f] = NULL;
+				score[f] = n;
+				continue;
+			}
+		}
+		score[f] = Lz4ScoreBuf(srcPtr[f], n, lz4Out);
 		if (flags[f] == 0) baseScore = score[f];
 	}
+	{ std::vector<uint8_t>().swap(lz4Out); }
 	for (f = 0; f < nflags; ++f) if (flags[f] == F_RIP && score[f] < baseScore) baseScore = score[f];
 	if (baseScore == 0) baseScore = n;
 	for (f = 0; f < nflags; ++f) {
+		if (!srcPtr[f]) continue;
 		if (flags[f] == 0 || flags[f] == F_RIP) keepFlag[f] = 1;
 		else if (score[f] + baseScore / 32 < baseScore) keepFlag[f] = 1;
+		else {
+			std::vector<uint8_t>().swap(filtBuf[f]);
+			srcPtr[f] = NULL;
+		}
 	}
+	jobs.reserve((size_t)nflags * 10 + 2);
 	for (f = 0; f < nflags; ++f) {
 		if (!keepFlag[f]) continue;
 		for (m = 0; m < (int)(sizeof(kMethod) / sizeof(kMethod[0])); ++m) {
 			Survey s;
-			if (kMethod[m] == M_PPMD && (!gUsePpmd || LevelN(n) > kPpmdMax)) continue;
+			if (kMethod[m] == M_PPMD && (!gUsePpmd || ln > kPpmdMax)) continue;
+			if (kMethod[m] == M_ZSTD && kPass[m] == 1 && ln <= 512u * 1024u) continue;
 			s.method = kMethod[m];
 			s.flags = flags[f];
+			s.flagIdx = f;
 			s.zstdPass = kPass[m];
 			s.ok = 0;
 			s.zstdLdm = 0;
@@ -1635,21 +2046,33 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 		}
 	}
 	probing = gLevelBytes > n + 4096;
-	if (!isPe && !probing && n <= 64u * 1024u) {
+	if (!isPe && n >= 512 && ln <= 64ull * 1024ull * 1024ull) {
 		Survey s;
-		s.method = M_LZSS;
+		s.method = M_FLAC;
 		s.flags = 0;
+		s.flagIdx = 0;
 		s.zstdPass = 0;
 		s.ok = 0;
 		s.zstdLdm = 0;
 		s.prop = 0;
 		jobs.push_back(std::move(s));
 	}
-	RunJobs(jobs, raw, n, gUserLevel >= 4 ? 1 : 0);
+	if (!isPe && !probing && n <= 64u * 1024u) {
+		Survey s;
+		s.method = M_LZSS;
+		s.flags = 0;
+		s.flagIdx = 0;
+		s.zstdPass = 0;
+		s.ok = 0;
+		s.zstdLdm = 0;
+		s.prop = 0;
+		jobs.push_back(std::move(s));
+	}
+	RunJobs(jobs, srcPtr, n, gUserLevel >= 4 ? 1 : 0);
 	if (gUserLevel >= 4) {
 		size_t bestSz = (size_t)-1;
 		int bestI = -1;
-		int promo[5];
+		int promo[6];
 		int np = 0, p;
 		size_t i;
 		static const int kSlow[] = { M_LZMA2, M_BROTLI, M_BZIP2 };
@@ -1680,26 +2103,42 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 			}
 			for (i = 0; i < jobs.size(); ++i) {
 				int already = 0;
-				if (jobs[i].ok != 1 || jobs[i].method == M_PPMD) continue;
+				if (jobs[i].ok != 1 || jobs[i].method == M_PPMD || jobs[i].method == M_FLAC) continue;
 				if (jobs[i].data.size() * 100 > bestSz * 115) continue;
 				for (p = 0; p < np; ++p) if (promo[p] == (int)i) already = 1;
 				if (already) continue;
 				if (jobs[i].data.size() < nearSz) { nearSz = jobs[i].data.size(); nearI = (int)i; }
 			}
 			if (nearI >= 0 && np < 5) promo[np++] = nearI;
+			for (i = 0; i < jobs.size() && np < 6; ++i) {
+				int already = 0;
+				if (jobs[i].ok != 1 || jobs[i].method != M_FLAC) continue;
+				if (jobs[i].data.size() * 100 > bestSz * 120) continue;
+				for (p = 0; p < np; ++p) if (promo[p] == (int)i) already = 1;
+				if (!already) promo[np++] = (int)i;
+			}
 			for (p = 0; p < np; ++p) {
 				jobs[promo[p]].ok = 0;
 				jobs[promo[p]].data.clear();
 			}
-			RunJobs(jobs, raw, n, 0);
+			RunJobs(jobs, srcPtr, n, 0);
 		}
 	}
 	{
-		Choice fast = best;
+		Choice fast;
 		Choice ppmd;
+		size_t fastSz = n;
+		size_t ppmdSz = n;
 		int havePpmd = 0;
+		fast.method = M_STORE;
+		fast.flags = 0;
+		fast.prop = 0;
+		fast.zstdLdm = 0;
+		ppmd.method = M_STORE;
+		ppmd.flags = 0;
+		ppmd.prop = 0;
+		ppmd.zstdLdm = 0;
 		for (size_t i = 0; i < jobs.size(); ++i) {
-			Choice* slot;
 			if (jobs[i].ok != 1) continue;
 			if (alt && CodecIsFast(jobs[i].method) && jobs[i].data.size() < alt->packed) {
 				alt->method = jobs[i].method;
@@ -1708,26 +2147,31 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 				alt->packed = jobs[i].data.size();
 			}
 			if (jobs[i].method == M_PPMD) {
-				if (!havePpmd) {
-					ppmd.method = M_STORE;
-					ppmd.data.assign(raw, raw + n);
-					havePpmd = 1;
-				}
-				slot = &ppmd;
+				if (jobs[i].data.size() >= ppmdSz) continue;
+				havePpmd = 1;
+				ppmdSz = jobs[i].data.size();
+				ppmd.method = M_PPMD;
+				ppmd.flags = jobs[i].flags;
+				ppmd.prop = jobs[i].prop;
+				ppmd.zstdLdm = 0;
+				ppmd.data.swap(jobs[i].data);
 			} else {
-				slot = &fast;
+				if (jobs[i].data.size() >= fastSz) continue;
+				fastSz = jobs[i].data.size();
+				fast.method = jobs[i].method;
+				fast.flags = jobs[i].flags;
+				fast.prop = jobs[i].prop;
+				fast.zstdLdm = jobs[i].zstdLdm;
+				fast.data.swap(jobs[i].data);
 			}
-			if (jobs[i].data.size() >= slot->data.size()) continue;
-			slot->method = jobs[i].method;
-			slot->flags = jobs[i].flags;
-			slot->prop = jobs[i].prop;
-			slot->zstdLdm = jobs[i].zstdLdm;
-			slot->data.swap(jobs[i].data);
 		}
-		if (havePpmd && ppmd.method == M_PPMD && ppmd.data.size() * 20 <= fast.data.size() * 19)
+		if (havePpmd && ppmd.method == M_PPMD && ppmdSz * 20 <= fastSz * 19)
 			best = std::move(ppmd);
 		else
 			best = std::move(fast);
+	}
+	if (best.method == M_STORE) {
+		try { best.data.assign(raw, raw + n); } catch (...) {}
 	}
 	return best;
 }
@@ -1735,13 +2179,17 @@ static Choice Search(const uint8_t* raw, size_t n, int isPe, FastAlt* alt)
 static int EmitMethod(const uint8_t* raw, size_t n, int method, int flags, int zstdLdm, Choice* out)
 {
 	std::vector<uint8_t> b, tmp;
+	const uint8_t* src = raw;
 	uint8_t prop = 0;
 	int ok = 0;
 	EncPulseUser watch;
-	try { b.assign(raw, raw + n); } catch (...) { return 0; }
-	if (flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
-	if (flags & F_DELTA4) Delta4Enc(b.data(), b.size());
-	else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+	if (flags != 0) {
+		try { b.assign(raw, raw + n); } catch (...) { return 0; }
+		if (flags & F_RIP) OxzRipConvert(b.data(), b.size(), 1);
+		if (flags & F_DELTA4) Delta4Enc(b.data(), b.size());
+		else if (flags & F_DELTA1) Delta1Enc(b.data(), b.size());
+		src = b.data();
+	}
 	watch.fp = tFilePulse;
 	watch.lo = tEmitLo;
 	if (tFilePulse && tEmitLo > 0) Publish(tFilePulse, tEmitLo, 3);
@@ -1751,7 +2199,7 @@ static int EmitMethod(const uint8_t* raw, size_t n, int method, int flags, int z
 		EmitHold() { tPulseEmit = 1; }
 		~EmitHold() { tPulseEmit = 0; gEncHook.fn = NULL; gEncHook.user = NULL; }
 	} hold;
-	ok = OneCodec(b.data(), b.size(), method, method == M_ZSTD ? (zstdLdm ? 1 : 0) : 0, tmp, &prop);
+	ok = OneCodec(src, n, method, method == M_ZSTD ? (zstdLdm ? 1 : 0) : 0, tmp, &prop);
 	(void)hold;
 	if (!ok || tmp.size() >= n) return 0;
 	out->method = method;
@@ -1899,7 +2347,6 @@ static Choice Pick(const uint8_t* raw, size_t n, int isPe)
 		best.flags = 0;
 		best.prop = 0;
 		best.zstdLdm = 0;
-		try { best.data.assign(raw, raw + n); } catch (...) { return best; }
 		tEmitLo = 250;
 		scoutSave = tScout;
 		ceilSave = tZstdCeiling;
@@ -1915,9 +2362,23 @@ static Choice Pick(const uint8_t* raw, size_t n, int isPe)
 		tZstdCeiling = ceilSave;
 		tEmitLo = 0;
 		if (got) return best;
+		try { best.data.assign(raw, raw + n); } catch (...) {}
 	}
 	return best;
 }
+
+struct ExWatch {
+	OxzCoreProgFn fn;
+	void* user;
+	const wchar_t* name;
+	unsigned index;
+	unsigned total;
+	uint64_t unpacked;
+	DWORD tick;
+};
+
+static thread_local ExWatch tExWatch = { NULL, NULL, NULL, 0, 0, 0, 0 };
+static thread_local int tExOn = 0;
 
 static void PulseExtract(uint64_t produced);
 
@@ -1931,6 +2392,13 @@ static int DecLzma(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLe
 	Lzma2Dec_Construct(&dec);
 	if (Lzma2Dec_Allocate(&dec, prop, &alloc) != SZ_OK) return 0;
 	Lzma2Dec_Init(&dec);
+	if (!tExOn) {
+		SizeT dest = dstLen;
+		SizeT slen = srcLen;
+		r = Lzma2Dec_DecodeToBuf(&dec, dst, &dest, src, &slen, LZMA_FINISH_END, &st);
+		Lzma2Dec_Free(&dec, &alloc);
+		return r == SZ_OK && dest == dstLen;
+	}
 	while (produced < dstLen) {
 		SizeT dest = dstLen - produced;
 		SizeT slen = srcLen - consumed;
@@ -1953,7 +2421,7 @@ static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dst
 {
 	size_t ip = 0, op = 0;
 	while (op < dstLen && ip < srcLen) {
-		BrotliDecoderState* s = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+		BrotliDecoderState* s = BrotliDecoderCreateInstance(BrotliTlsAlloc, BrotliTlsFree, NULL);
 		size_t availIn, availOut, produced, consumed, total = 0;
 		const uint8_t* nextIn;
 		uint8_t* nextOut;
@@ -1970,7 +2438,7 @@ static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dst
 		if (r != BROTLI_DECODER_RESULT_SUCCESS || (produced == 0 && consumed == 0)) return 0;
 		op += produced;
 		ip += consumed;
-		PulseExtract(op);
+		if (tExOn) PulseExtract(op);
 		if (op == dstLen) return 1;
 	}
 	return op == dstLen;
@@ -1979,7 +2447,8 @@ static int DecBrotli(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dst
 static int DecPpmd(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen)
 {
 	ISzAlloc alloc = { OxzLzmaAlloc, OxzLzmaFree };
-	CPpmd7* ppmd;
+	CPpmd7 ppmdObj;
+	CPpmd7* ppmd = &ppmdObj;
 	unsigned order, mem;
 	int ok = 0;
 	if (srcLen < 5) return 0;
@@ -1987,10 +2456,8 @@ static int DecPpmd(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLe
 	mem = (unsigned)src[1] | ((unsigned)src[2] << 8) | ((unsigned)src[3] << 16) | ((unsigned)src[4] << 24);
 	if (order < PPMD7_MIN_ORDER || order > PPMD7_MAX_ORDER) return 0;
 	if (mem < PPMD7_MIN_MEM_SIZE || mem > PPMD7_MAX_MEM_SIZE) return 0;
-	ppmd = (CPpmd7*)malloc(sizeof(CPpmd7));
-	if (!ppmd) return 0;
 	Ppmd7_Construct(ppmd);
-	if (!Ppmd7_Alloc(ppmd, mem, &alloc)) { free(ppmd); return 0; }
+	if (!Ppmd7_Alloc(ppmd, mem, &alloc)) return 0;
 	Ppmd7_Init(ppmd, order);
 	Ppmd7z_RangeDec_Bind(src + 5, src + srcLen);
 	if (Ppmd7z_RangeDec_Init(&ppmd->rc.dec) && !Ppmd7z_RangeDec_Over()) {
@@ -1999,87 +2466,109 @@ static int DecPpmd(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLe
 	}
 	Ppmd7z_RangeDec_Bind(0, 0);
 	Ppmd7_Free(ppmd, &alloc);
-	free(ppmd);
 	return ok;
+}
+
+struct RawBuf {
+	uint8_t* data;
+	size_t cap;
+	RawBuf() : data(NULL), cap(0) {}
+	~RawBuf() { free(data); }
+	int ensure(size_t n) {
+		if (n <= cap) return 1;
+		size_t want = n < 65536 ? 65536 : n;
+		void* nb = realloc(data, want);
+		if (!nb) return 0;
+		data = (uint8_t*)nb;
+		cap = want;
+		return 1;
+	}
+};
+
+static int DecodeToBuf(const DirEnt& e, const uint8_t* src, uint8_t* dst, size_t n)
+{
+	struct libdeflate_decompressor* d;
+	size_t got = 0;
+	enum libdeflate_result rr;
+	if (e.unpacked != (uint64_t)n) return -1;
+	if (n == 0) return e.crc == 0 && e.packed == 0;
+	if (!dst) return -1;
+	if (e.method == M_STORE) {
+		if (e.packed != e.unpacked) return 0;
+		memcpy(dst, src, n);
+	} else if (e.method == M_ZSTD) {
+		ZSTD_DCtx* zdc = TlsZstdDCtx();
+		if (!zdc) return 0;
+		got = ZSTD_decompressDCtx(zdc, dst, n, src, (size_t)e.packed);
+		if (ZSTD_isError(got) || got != n) return 0;
+	} else if (e.method == M_LZ4) {
+		int g;
+		if (n > kLzBlockMax || e.packed > kLzBlockMax) return 0;
+		g = LZ4_decompress_safe((const char*)src, (char*)dst, (int)e.packed, (int)n);
+		if (g < 0 || (size_t)g != n) return 0;
+	} else if (e.method == M_LIZARD) {
+		int g;
+		if (n > kLzBlockMax || e.packed > kLzBlockMax) return 0;
+		g = Lizard_decompress_safe((const char*)src, (char*)dst, (int)e.packed, (int)n);
+		if (g < 0 || (size_t)g != n) return 0;
+	} else if (e.method == M_LZFSE) {
+		size_t scratchNeed = lzfse_decode_scratch_size();
+		void* scratch = scratchNeed ? TlsLzfseScratch(scratchNeed) : NULL;
+		if (scratchNeed && !scratch) return 0;
+		got = lzfse_decode_buffer(dst, n, src, (size_t)e.packed, scratch);
+		if (got != n) return 0;
+	} else if (e.method == M_DEFLATE || e.method == M_RAWDEFLATE) {
+		d = TlsDeflateDecomp();
+		if (!d) return 0;
+		rr = e.method == M_RAWDEFLATE
+			? libdeflate_deflate_decompress(d, src, (size_t)e.packed, dst, n, &got)
+			: libdeflate_zlib_decompress(d, src, (size_t)e.packed, dst, n, &got);
+		if (rr != LIBDEFLATE_SUCCESS || got != n) return 0;
+	} else if (e.method == M_BZIP2) {
+		if (n > 0xFFFFFFFFull || e.packed > 0xFFFFFFFFull) return 0;
+		if (!OxzBzipDecompress(src, (size_t)e.packed, dst, n, InnerThreads(n))) return 0;
+	} else if (e.method == M_LZMA2) {
+		if (!DecLzma(src, (size_t)e.packed, dst, n, e.prop)) return 0;
+	} else if (e.method == M_BROTLI) {
+		if (!DecBrotli(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_PPMD) {
+		if (!DecPpmd(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_FLAC) {
+		if (!OxzFlacDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_ALAC) {
+		if (!OxzAlacDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_TTA) {
+		if (!OxzTtaDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_PICT) {
+		if (!OxzPictDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_VID) {
+		if (!OxzVidDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else if (e.method == M_LZSS) {
+		if (!OxzLzssDecompress(src, (size_t)e.packed, dst, n)) return 0;
+	} else {
+		return 0;
+	}
+	if (e.flags & F_DELTA4) Delta4Dec(dst, n);
+	else if (e.flags & F_DELTA1) Delta1Dec(dst, n);
+	if (e.flags & F_RIP) OxzRipConvert(dst, n, 0);
+	if (e.crc == CrcFinish(dst, n)) return 1;
+	if (e.method == M_BZIP2 && n <= 0xFFFFFFFFull && e.packed <= 0xFFFFFFFFull) {
+		if (!OxzBzipDecompress(src, (size_t)e.packed, dst, n, 0)) return 0;
+		if (e.flags & F_DELTA4) Delta4Dec(dst, n);
+		else if (e.flags & F_DELTA1) Delta1Dec(dst, n);
+		if (e.flags & F_RIP) OxzRipConvert(dst, n, 0);
+		if (e.crc == CrcFinish(dst, n)) return 1;
+	}
+	return 0;
 }
 
 static int DecodeRaw(const DirEnt& e, const uint8_t* src, std::vector<uint8_t>& plain)
 {
 	size_t n = (size_t)e.unpacked;
-	struct libdeflate_decompressor* d;
-	size_t got = 0;
-	enum libdeflate_result rr;
 	if (e.unpacked != (uint64_t)n) return -1;
-	try { plain.assign(n, 0); } catch (...) { return -1; }
+	try { plain.resize(n); } catch (...) { return -1; }
 	if (n == 0) return e.crc == 0 && e.packed == 0;
-	if (e.method == M_STORE) {
-		if (e.packed != e.unpacked) return 0;
-		memcpy(plain.data(), src, n);
-	} else if (e.method == M_ZSTD) {
-		got = ZSTD_decompress(plain.data(), n, src, (size_t)e.packed);
-		if (ZSTD_isError(got) || got != n) return 0;
-	} else if (e.method == M_LZ4) {
-		int g;
-		if (n > kLzBlockMax || e.packed > kLzBlockMax) return 0;
-		g = LZ4_decompress_safe((const char*)src, (char*)plain.data(), (int)e.packed, (int)n);
-		if (g < 0 || (size_t)g != n) return 0;
-	} else if (e.method == M_LIZARD) {
-		int g;
-		if (n > kLzBlockMax || e.packed > kLzBlockMax) return 0;
-		g = Lizard_decompress_safe((const char*)src, (char*)plain.data(), (int)e.packed, (int)n);
-		if (g < 0 || (size_t)g != n) return 0;
-	} else if (e.method == M_LZFSE) {
-		size_t scratchNeed = lzfse_decode_scratch_size();
-		void* scratch = scratchNeed ? malloc(scratchNeed) : NULL;
-		if (scratchNeed && !scratch) return 0;
-		got = lzfse_decode_buffer(plain.data(), n, src, (size_t)e.packed, scratch);
-		free(scratch);
-		if (got != n) return 0;
-	} else if (e.method == M_DEFLATE || e.method == M_RAWDEFLATE) {
-		d = libdeflate_alloc_decompressor();
-		if (!d) return 0;
-		rr = e.method == M_RAWDEFLATE
-			? libdeflate_deflate_decompress(d, src, (size_t)e.packed, plain.data(), n, &got)
-			: libdeflate_zlib_decompress(d, src, (size_t)e.packed, plain.data(), n, &got);
-		libdeflate_free_decompressor(d);
-		if (rr != LIBDEFLATE_SUCCESS || got != n) return 0;
-	} else if (e.method == M_BZIP2) {
-		if (n > 0xFFFFFFFFull || e.packed > 0xFFFFFFFFull) return 0;
-		if (!OxzBzipDecompress(src, (size_t)e.packed, plain.data(), n, InnerThreads(n))) return 0;
-	} else if (e.method == M_LZMA2) {
-		if (!DecLzma(src, (size_t)e.packed, plain.data(), n, e.prop)) return 0;
-	} else if (e.method == M_BROTLI) {
-		if (!DecBrotli(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_PPMD) {
-		if (!DecPpmd(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_FLAC) {
-		if (!OxzFlacDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_ALAC) {
-		if (!OxzAlacDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_TTA) {
-		if (!OxzTtaDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_PICT) {
-		if (!OxzPictDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_VID) {
-		if (!OxzVidDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else if (e.method == M_LZSS) {
-		if (!OxzLzssDecompress(src, (size_t)e.packed, plain.data(), n)) return 0;
-	} else {
-		return 0;
-	}
-	if (e.flags & F_DELTA4) Delta4Dec(plain.data(), plain.size());
-	else if (e.flags & F_DELTA1) Delta1Dec(plain.data(), plain.size());
-	if (e.flags & F_RIP) OxzRipConvert(plain.data(), plain.size(), 0);
-	if (e.crc == CrcFinish(plain.data(), plain.size())) return 1;
-	if (e.method == M_BZIP2 && n <= 0xFFFFFFFFull && e.packed <= 0xFFFFFFFFull) {
-		try { plain.assign(n, 0); } catch (...) { return 0; }
-		if (!OxzBzipDecompress(src, (size_t)e.packed, plain.data(), n, 0)) return 0;
-		if (e.flags & F_DELTA4) Delta4Dec(plain.data(), plain.size());
-		else if (e.flags & F_DELTA1) Delta1Dec(plain.data(), plain.size());
-		if (e.flags & F_RIP) OxzRipConvert(plain.data(), plain.size(), 0);
-		if (e.crc == CrcFinish(plain.data(), plain.size())) return 1;
-	}
-	return 0;
+	return DecodeToBuf(e, src, plain.data(), n);
 }
 
 static int MethodHasPayload(uint16_t m)
@@ -2161,11 +2650,12 @@ static int Seek(HANDLE h, uint64_t off)
 	return SetFilePointerEx(h, li, NULL, FILE_BEGIN);
 }
 
-static int CopyRange(HANDLE in, uint64_t off, uint64_t n, HANDLE out)
+static int CopyRangeBuf(HANDLE in, uint64_t off, uint64_t n, HANDLE out, std::vector<uint8_t>& buf)
 {
-	std::vector<uint8_t> buf;
 	if (!Seek(in, off)) return 0;
-	try { buf.resize(4u << 20); } catch (...) { return 0; }
+	if (buf.empty()) {
+		try { buf.resize(4u << 20); } catch (...) { return 0; }
+	}
 	while (n) {
 		DWORD chunk = n > buf.size() ? (DWORD)buf.size() : (DWORD)n;
 		DWORD rd = 0;
@@ -2174,6 +2664,12 @@ static int CopyRange(HANDLE in, uint64_t off, uint64_t n, HANDLE out)
 		n -= rd;
 	}
 	return 1;
+}
+
+static int CopyRange(HANDLE in, uint64_t off, uint64_t n, HANDLE out)
+{
+	std::vector<uint8_t> buf;
+	return CopyRangeBuf(in, off, n, out, buf);
 }
 
 static uint64_t FtToU(const FILETIME& ft)
@@ -2246,21 +2742,23 @@ static std::string RelUtf8(const std::wstring& rel)
 	return ToUtf8(s);
 }
 
-static int LoadFile(const std::wstring& path, uint64_t size, std::vector<uint8_t>& buf)
+static int LoadFileRaw(const std::wstring& path, uint64_t size, const uint8_t** outPtr)
 {
 	HANDLE h;
+	uint8_t* dst;
 	size_t got = 0;
 	const size_t step = 8u << 20;
 	if (size != (uint64_t)(size_t)size) return 0;
+	dst = TlsFileBuf((size_t)size ? (size_t)size : 1);
+	if (!dst) return 0;
 	h = OpenRead(path.c_str());
 	if (h == INVALID_HANDLE_VALUE) return 0;
-	try { buf.resize((size_t)size); }
-	catch (...) { CloseHandle(h); return 0; }
 	while (got < (size_t)size) {
 		size_t n = (size_t)size - got;
+		DWORD rd = 0;
 		int ten;
 		if (n > step) n = step;
-		if (!ReadAt(h, got, buf.data() + got, n)) { CloseHandle(h); return 0; }
+		if (!ReadFile(h, dst + got, (DWORD)n, &rd, NULL) || rd != (DWORD)n) { CloseHandle(h); return 0; }
 		got += n;
 		if (tFilePulse && size) {
 			ten = (int)(got * 240ull / (size_t)size);
@@ -2269,16 +2767,18 @@ static int LoadFile(const std::wstring& path, uint64_t size, std::vector<uint8_t
 		}
 	}
 	CloseHandle(h);
+	*outPtr = dst;
 	return 1;
 }
 
 static int FillPicked(const std::wstring& path, uint64_t size, OutItem* it)
 {
-	std::vector<uint8_t> raw;
+	const uint8_t* raw = NULL;
+	size_t n = (size_t)size;
 	Choice c;
-	if (!LoadFile(path, size, raw)) return 0;
-	c = Pick(raw.data(), raw.size(), LooksPe(raw.data(), raw.size()));
-	it->crc = size ? CrcFinish(raw.data(), raw.size()) : 0;
+	if (!LoadFileRaw(path, size, &raw)) return 0;
+	c = Pick(raw, n, LooksPe(raw, n));
+	it->crc = n ? CrcFinish(raw, n) : 0;
 	it->method = (uint16_t)c.method;
 	it->flags = (uint16_t)c.flags;
 	it->prop = c.prop;
@@ -2721,6 +3221,25 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 			}
 		}
 		if (!total) total = 1;
+		HANDLE snapSrc = INVALID_HANDLE_VALUE;
+		uint64_t snapLen = 0;
+		int snapTried = 0;
+		std::vector<uint8_t> copyBuf;
+		auto ensureSnapSrc = [&]() -> HANDLE {
+			if (!snapTried) {
+				snapTried = 1;
+				if (snapOk && !gSnap.archive.empty()) {
+					snapSrc = OpenRead(gSnap.archive.c_str());
+					if (snapSrc != INVALID_HANDLE_VALUE) snapLen = FileLen(snapSrc);
+				}
+			}
+			return snapSrc;
+		};
+		struct SnapClose {
+			HANDLE* ph;
+			explicit SnapClose(HANDLE* p) : ph(p) {}
+			~SnapClose() { if (*ph != INVALID_HANDLE_VALUE) { CloseHandle(*ph); *ph = INVALID_HANDLE_VALUE; } }
+		} snapClose(&snapSrc);
 		{
 			struct Prepared { int ready; OutItem it; Prepared() : ready(0) {} };
 			std::vector<Prepared> prepared;
@@ -2753,6 +3272,12 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 				else smallPick.push_back(i);
 			}
 			{
+				unsigned poolCap = HwCap();
+				SaveWorkerPool workerPool(poolCap > 1 ? poolCap - 1 : 0);
+				struct PoolArm {
+					explicit PoolArm(SaveWorkerPool* p) { gSavePool = p; }
+					~PoolArm() { gSavePool = NULL; }
+				} poolArm(poolCap > 1 ? &workerPool : NULL);
 				SavePulse pulse;
 				struct PulseArm {
 					int on;
@@ -2766,29 +3291,29 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 				for (i = 0; i < largePick.size(); ++i) pulse.bytesAll += items[largePick[i]].size ? items[largePick[i]].size : 1;
 				for (i = 0; i < smallPick.size(); ++i) pulse.bytesAll += items[smallPick[i]].size ? items[smallPick[i]].size : 1;
 				if (prog && pulse.total) { arm.arm(&pulse); pulsed = 1; }
-			for (i = 0; i < largePick.size(); ++i) runPick(largePick[i]);
-			if (smallPick.size() == 1) runPick(smallPick[0]);
-			else if (!smallPick.empty()) {
-				unsigned ft = HwCap() / 3;
-				unsigned t;
-				std::atomic<size_t> cursor(0);
-				std::vector<std::thread> pool;
-				if (ft < 1) ft = 1;
-				if (ft > smallPick.size()) ft = (unsigned)smallPick.size();
-				for (t = 0; t < ft; ++t) {
-					pool.push_back(std::thread([&]() {
+				for (i = 0; i < largePick.size(); ++i) runPick(largePick[i]);
+				if (smallPick.size() < poolCap || poolCap <= 1) {
+					for (i = 0; i < smallPick.size(); ++i) runPick(smallPick[i]);
+				} else {
+					std::stable_sort(smallPick.begin(), smallPick.end(), [&](size_t a, size_t b) {
+						return items[a].size > items[b].size;
+					});
+					struct SmallCtx {
+						const std::vector<size_t>* list;
+						const decltype(runPick)* fn;
+					} sctx = { &smallPick, &runPick };
+					auto step = [](void* p, size_t idx) {
+						SmallCtx* sc = (SmallCtx*)p;
+						int prevPool = tInFilePool;
+						int prevInline = tRunInline;
 						tInFilePool = 1;
-						for (;;) {
-							size_t c = cursor.fetch_add(1);
-							if (c >= smallPick.size()) break;
-							runPick(smallPick[c]);
-						}
-						tInFilePool = 0;
-					}));
-					BoostThread(pool.back());
+						tRunInline = 1;
+						(*sc->fn)((*sc->list)[idx]);
+						tRunInline = prevInline;
+						tInFilePool = prevPool;
+					};
+					workerPool.Run(smallPick.size(), step, &sctx);
 				}
-				for (t = 0; t < pool.size(); ++t) pool[t].join();
-			}
 			}
 	for (i = 0; i < items.size(); ++i) {
 		WorkItem& w = items[i];
@@ -2802,14 +3327,11 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 			PutEntry(dir, M_DIR, 0, 0, 0, w.attr, w.mtime, 0, 0, 0, w.rel);
 			count++;
 		} else if (sf && !sf->dropped && sf->origin == ORIGIN_OVERLAY && !sf->isDir && sf->size == w.size && sf->mtime == w.mtime && MethodHasPayload(sf->method)) {
-			HANDLE src = OpenRead(gSnap.archive.c_str());
-			uint64_t len;
+			HANDLE src = ensureSnapSrc();
 			int copied = 0;
 			if (src != INVALID_HANDLE_VALUE) {
-				len = FileLen(src);
-				if (sf->dataOff <= len && sf->packed <= len - sf->dataOff && Seek(out, pos))
-					copied = CopyRange(src, sf->dataOff, sf->packed, out);
-				CloseHandle(src);
+				if (sf->dataOff <= snapLen && sf->packed <= snapLen - sf->dataOff && Seek(out, pos))
+					copied = CopyRangeBuf(src, sf->dataOff, sf->packed, out, copyBuf);
 			}
 			if (!copied) {
 				OutItem it;
@@ -2862,7 +3384,6 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 		for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
 			SnapFile& sf = it->second;
 			HANDLE src;
-			uint64_t len;
 			int copied = 0;
 			if (sf.origin != ORIGIN_OVERLAY || sf.dropped) continue;
 			if (live.find(sf.rel) != live.end()) continue;
@@ -2871,12 +3392,10 @@ extern "C" int OxzCoreSave(const wchar_t* workDir, const wchar_t* archive, unsig
 				PutEntry(dir, M_DIR, 0, 0, 0, sf.attr, sf.mtime, 0, 0, 0, sf.rel);
 				count++;
 			} else if (MethodHasPayload(sf.method)) {
-				src = OpenRead(gSnap.archive.c_str());
+				src = ensureSnapSrc();
 				if (src != INVALID_HANDLE_VALUE) {
-					len = FileLen(src);
-					if (sf.dataOff <= len && sf.packed <= len - sf.dataOff && Seek(out, pos))
-						copied = CopyRange(src, sf.dataOff, sf.packed, out);
-					CloseHandle(src);
+					if (sf.dataOff <= snapLen && sf.packed <= snapLen - sf.dataOff && Seek(out, pos))
+						copied = CopyRangeBuf(src, sf.dataOff, sf.packed, out, copyBuf);
 				}
 				if (!copied) goto fail;
 				PutEntry(dir, sf.method, sf.flags, sf.prop, sf.crc, sf.attr, sf.mtime, sf.unpacked, sf.packed, pos, sf.rel);
@@ -2930,29 +3449,29 @@ static int WriteMember(const std::wstring& path, const uint8_t* p, size_t n, uin
 {
 	HANDLE h;
 	FILETIME ft;
-	EnsureParents(path);
-	h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-	if (h == INVALID_HANDLE_VALUE) return 0;
+	DWORD safeAttr = attr & (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+	DWORD flags = (safeAttr ? safeAttr : FILE_ATTRIBUTE_NORMAL) | FILE_FLAG_SEQUENTIAL_SCAN;
+	h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, flags, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		DWORD err = GetLastError();
+		if (err == ERROR_PATH_NOT_FOUND) {
+			EnsureParents(path);
+			h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, flags, NULL);
+			if (h == INVALID_HANDLE_VALUE) err = GetLastError();
+		}
+		if (h == INVALID_HANDLE_VALUE && err == ERROR_ACCESS_DENIED) {
+			SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+			h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, flags, NULL);
+		}
+		if (h == INVALID_HANDLE_VALUE) return 0;
+	}
 	if (n && !WriteAll(h, p, n)) { CloseHandle(h); DeleteFileW(path.c_str()); return 0; }
 	ft = UToFt(mtime);
 	SetFileTime(h, &ft, &ft, &ft);
 	CloseHandle(h);
-	if (attr) SetFileAttributesW(path.c_str(), attr);
+	if (attr & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path.c_str(), safeAttr | FILE_ATTRIBUTE_READONLY);
 	return 1;
 }
-
-struct ExWatch {
-	OxzCoreProgFn fn;
-	void* user;
-	const wchar_t* name;
-	unsigned index;
-	unsigned total;
-	uint64_t unpacked;
-	DWORD tick;
-};
-
-static thread_local ExWatch tExWatch = { NULL, NULL, NULL, 0, 0, 0, 0 };
-static thread_local int tExOn = 0;
 
 static void PulseExtract(uint64_t produced)
 {
@@ -3001,7 +3520,7 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 			PulseExtract(produced);
 		}
 	} else if (e.method == M_ZSTD) {
-		ZSTD_DCtx* d = ZSTD_createDCtx();
+		ZSTD_DCtx* d = TlsZstdDCtx();
 		if (!d) { CloseHandle(out); return 0; }
 		while (left || produced < e.unpacked) {
 			DWORD chunk = 0;
@@ -3009,7 +3528,7 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 			if (left) {
 				DWORD want = left > ibuf.size() ? (DWORD)ibuf.size() : (DWORD)left;
 				DWORD rd = 0;
-				if (!ReadFile(arc, ibuf.data(), want, &rd, NULL) || rd != want) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+				if (!ReadFile(arc, ibuf.data(), want, &rd, NULL) || rd != want) { CloseHandle(out); return 0; }
 				left -= rd;
 				chunk = rd;
 			}
@@ -3024,24 +3543,23 @@ static int StreamDecode(HANDLE arc, const DirEnt& e, const std::wstring& path)
 				output.size = obuf.size();
 				output.pos = 0;
 				rem = ZSTD_decompressStream(d, &output, &input);
-				if (ZSTD_isError(rem)) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+				if (ZSTD_isError(rem)) { CloseHandle(out); return 0; }
 				if (output.pos) {
 					crc = CrcBlock(obuf.data(), output.pos, crc);
-					if (!WriteAll(out, obuf.data(), output.pos)) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+					if (!WriteAll(out, obuf.data(), output.pos)) { CloseHandle(out); return 0; }
 					produced += output.pos;
 					PulseExtract(produced);
 				}
 				if (rem == 0 && input.pos == input.size) break;
 				if (input.pos == input.size && output.pos == 0) {
-					if (left == 0) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+					if (left == 0) { CloseHandle(out); return 0; }
 					break;
 				}
-				if (input.pos == before && output.pos == 0) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+				if (input.pos == before && output.pos == 0) { CloseHandle(out); return 0; }
 			}
-			if (produced > e.unpacked) { ZSTD_freeDCtx(d); CloseHandle(out); return 0; }
+			if (produced > e.unpacked) { CloseHandle(out); return 0; }
 			if (left == 0) break;
 		}
-		ZSTD_freeDCtx(d);
 	} else {
 		CloseHandle(out);
 		return 0;
@@ -3120,16 +3638,28 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 	{
 		struct ExJob { size_t ei; std::wstring full; int large; };
 		std::vector<ExJob> small, big;
+		std::set<std::wstring, ILess> parents;
 		unsigned total = overlays ? overlays : 1;
 		std::atomic<unsigned> done(0);
 		std::atomic<int> failed(0);
-		auto runOne = [&](const ExJob& job, HANDLE rh) -> int {
-			std::vector<uint8_t> packed, plain;
+		CrcEnsure();
+		auto cleanRel = [](const std::wstring& rel) -> int {
+			size_t k;
+			if (rel.empty()) return 0;
+			for (k = 0; k < rel.size(); ++k) {
+				wchar_t ch = rel[k];
+				if (ch == L'/') return 0;
+				if ((ch == L'.' || ch == L' ') && (k + 1 == rel.size() || rel[k + 1] == L'\\')) return 0;
+			}
+			return 1;
+		};
+		auto runOne = [&](const ExJob& job, HANDLE rh, const uint8_t* spanPtr, uint64_t spanOff, uint64_t spanEnd, RawBuf& packed, RawBuf& plain) -> int {
 			int dr;
+			size_t upk = 0;
 			const DirEnt& ent = ents[job.ei];
 			if (failed.load()) return 0;
 			if (prog) prog(ent.name.c_str(), done.load(), total, 0, progUser);
-			if (ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD) && ent.unpacked >= 1024ull * 1024ull) {
+			if (!spanPtr && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD) && ent.unpacked >= 1024ull * 1024ull) {
 				int sok;
 				tExWatch.fn = prog;
 				tExWatch.user = progUser;
@@ -3146,12 +3676,22 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 				if (prog) prog(ent.name.c_str(), done.load(), total, 100, progUser);
 				return 1;
 			}
-			if (ent.packed != (uint64_t)(size_t)ent.packed) dr = -1;
+			if (ent.packed != (uint64_t)(size_t)ent.packed || ent.unpacked != (uint64_t)(size_t)ent.unpacked) dr = -1;
 			else {
-				try { packed.resize((size_t)ent.packed); dr = 1; }
-				catch (...) { dr = -1; }
+				size_t pk = (size_t)ent.packed;
+				const uint8_t* pkSrc = NULL;
+				upk = (size_t)ent.unpacked;
+				if (spanPtr && ent.dataOff >= spanOff && ent.packed <= spanEnd - ent.dataOff) {
+					pkSrc = spanPtr + (size_t)(ent.dataOff - spanOff);
+					dr = (upk == 0 || plain.ensure(upk)) ? 1 : -1;
+				} else {
+					dr = ((pk == 0 || packed.ensure(pk)) && (upk == 0 || plain.ensure(upk))) ? 1 : -1;
+					if (dr == 1) {
+						if (pk && !ReadAt(rh, ent.dataOff, packed.data, pk)) return 0;
+						pkSrc = pk ? packed.data : (const uint8_t*)"";
+					}
+				}
 				if (dr == 1) {
-					if (ent.packed && !ReadAt(rh, ent.dataOff, packed.data(), packed.size())) return 0;
 					if (prog && ent.unpacked >= 1024ull * 1024ull) {
 						tExWatch.fn = prog;
 						tExWatch.user = progUser;
@@ -3162,13 +3702,13 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 						tExWatch.tick = 0;
 						tExOn = 1;
 					}
-					dr = DecodeRaw(ent, packed.data(), plain);
+					dr = DecodeToBuf(ent, pk ? pkSrc : (const uint8_t*)"", upk ? plain.data : (uint8_t*)"", upk);
 					tExOn = 0;
 				}
 			}
 			if (dr == 1) {
-				if (!WriteMember(job.full, plain.data(), plain.size(), ent.mtime, ent.attr)) return 0;
-			} else if (dr < 0 && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD)) {
+				if (!WriteMember(job.full, upk ? plain.data : NULL, upk, ent.mtime, ent.attr)) return 0;
+			} else if (dr < 0 && rh != INVALID_HANDLE_VALUE && ent.flags == 0 && (ent.method == M_STORE || ent.method == M_ZSTD)) {
 				int sok;
 				tExWatch.fn = prog;
 				tExWatch.user = progUser;
@@ -3190,17 +3730,29 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 		};
 		for (i = 0; i < ents.size(); ++i) {
 			ExJob job;
+			size_t sl;
 			if (!MethodHasPayload(ents[i].method)) continue;
 			job.ei = i;
-			job.full = FullPath(JoinPath(root, ents[i].name).c_str());
+			if (!root.empty() && root.size() + 1 + ents[i].name.size() < MAX_PATH - 4 && cleanRel(ents[i].name)) {
+				job.full = JoinPath(root, ents[i].name);
+			} else {
+				job.full = FullPath(JoinPath(root, ents[i].name).c_str());
+				if (!UnderRoot(root, job.full)) { CloseHandle(h); return OXZ_CORE_ERR; }
+			}
 			job.large = (ents[i].unpacked >= 8ull * 1024ull * 1024ull || ents[i].packed >= 8ull * 1024ull * 1024ull) ? 1 : 0;
-			if (!UnderRoot(root, job.full)) { CloseHandle(h); return OXZ_CORE_ERR; }
+			sl = job.full.find_last_of(L'\\');
+			if (sl != std::wstring::npos && sl > root.size()) parents.insert(job.full.substr(0, sl));
 			if (job.large || ents[i].packed != (uint64_t)(size_t)ents[i].packed) big.push_back(job);
 			else small.push_back(job);
 		}
+		for (std::set<std::wstring, ILess>::iterator pit = parents.begin(); pit != parents.end(); ++pit) {
+			EnsureParents(*pit);
+			CreateDirectoryW(pit->c_str(), NULL);
+		}
 		if (big.size() <= 1) {
+			RawBuf packed, plain;
 			for (i = 0; i < big.size(); ++i) {
-				int rc = runOne(big[i], h);
+				int rc = runOne(big[i], h, NULL, 0, 0, packed, plain);
 				if (rc != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
 			}
 		} else {
@@ -3219,12 +3771,13 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			for (t = 0; t < ft; ++t) {
 				bpool.push_back(std::thread([&]() {
 					HANDLE rh = OpenRead(arc.c_str());
+					RawBuf packed, plain;
 					if (rh == INVALID_HANDLE_VALUE) { failed.store(1); return; }
 					for (;;) {
 						size_t c = bcursor.fetch_add(1);
 						int rc;
 						if (c >= big.size() || failed.load()) break;
-						rc = runOne(big[c], rh);
+						rc = runOne(big[c], rh, NULL, 0, 0, packed, plain);
 						if (rc != 1) failed.store(1);
 					}
 					CloseHandle(rh);
@@ -3235,33 +3788,78 @@ extern "C" int OxzCoreExtract(const wchar_t* archive, const wchar_t* dest, OxzCo
 			if (failed.load()) { CloseHandle(h); return OXZ_CORE_ERR; }
 		}
 		if (small.size() <= 1) {
+			RawBuf packed, plain;
 			for (i = 0; i < small.size(); ++i) {
-				if (runOne(small[i], h) != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
+				if (runOne(small[i], h, NULL, 0, 0, packed, plain) != 1) { CloseHandle(h); return OXZ_CORE_ERR; }
 			}
 		} else {
 			unsigned ft = HwCap();
 			unsigned t;
-			std::atomic<size_t> cursor(0);
-			std::vector<std::thread> pool;
-			if (ft > small.size()) ft = (unsigned)small.size();
-			for (t = 0; t < ft; ++t) {
-				pool.push_back(std::thread([&]() {
-					HANDLE rh = OpenRead(arc.c_str());
-					tInFilePool = 1;
-					if (rh == INVALID_HANDLE_VALUE) { failed.store(1); return; }
-					for (;;) {
-						size_t c = cursor.fetch_add(1);
-						int rc;
-						if (c >= small.size() || failed.load()) break;
-						rc = runOne(small[c], rh);
-						if (rc != 1) failed.store(1);
-					}
-					CloseHandle(rh);
-					tInFilePool = 0;
-				}));
-				BoostThread(pool.back());
+			RawBuf arcSpan;
+			uint64_t spanOff = (uint64_t)-1, spanEnd = 0;
+			int haveSpan = 0;
+			std::stable_sort(small.begin(), small.end(), [&](const ExJob& a, const ExJob& b) {
+				return ents[a.ei].unpacked > ents[b.ei].unpacked;
+			});
+			for (i = 0; i < small.size(); ++i) {
+				const DirEnt& se = ents[small[i].ei];
+				if (!se.packed) continue;
+				if (se.dataOff < spanOff) spanOff = se.dataOff;
+				if (se.dataOff + se.packed > spanEnd) spanEnd = se.dataOff + se.packed;
 			}
-			for (t = 0; t < pool.size(); ++t) pool[t].join();
+			if (spanEnd >= spanOff && spanEnd - spanOff <= 128ull * 1024ull * 1024ull) {
+				size_t spanLen = (size_t)(spanEnd - spanOff);
+				if (spanLen == 0) {
+					haveSpan = 1;
+				} else if (arcSpan.ensure(spanLen) && ReadAt(h, spanOff, arcSpan.data, spanLen)) {
+					haveSpan = 1;
+				}
+			}
+			if (ft > small.size()) ft = (unsigned)small.size();
+			if (haveSpan) {
+				SaveWorkerPool exPool(ft > 1 ? ft - 1 : 0);
+				struct ExSpanCtx {
+					const std::vector<ExJob>* list;
+					const decltype(runOne)* fn;
+					const uint8_t* ptr;
+					uint64_t off;
+					uint64_t end;
+					std::atomic<int>* fail;
+				} ectx = { &small, &runOne, spanEnd > spanOff ? arcSpan.data : (const uint8_t*)"", spanOff, spanEnd, &failed };
+				auto step = [](void* p, size_t idx) {
+					ExSpanCtx* ec = (ExSpanCtx*)p;
+					static thread_local RawBuf tlPacked, tlPlain;
+					int prevPool = tInFilePool;
+					if (ec->fail->load()) return;
+					tInFilePool = 1;
+					if ((*ec->fn)((*ec->list)[idx], INVALID_HANDLE_VALUE, ec->ptr, ec->off, ec->end, tlPacked, tlPlain) != 1)
+						ec->fail->store(1);
+					tInFilePool = prevPool;
+				};
+				exPool.Run(small.size(), step, &ectx);
+			} else {
+				std::atomic<size_t> cursor(0);
+				std::vector<std::thread> pool;
+				for (t = 0; t < ft; ++t) {
+					pool.push_back(std::thread([&]() {
+						HANDLE rh = OpenRead(arc.c_str());
+						RawBuf packed, plain;
+						tInFilePool = 1;
+						if (rh == INVALID_HANDLE_VALUE) { failed.store(1); return; }
+						for (;;) {
+							size_t c = cursor.fetch_add(1);
+							int rc;
+							if (c >= small.size() || failed.load()) break;
+							rc = runOne(small[c], rh, NULL, 0, 0, packed, plain);
+							if (rc != 1) failed.store(1);
+						}
+						CloseHandle(rh);
+						tInFilePool = 0;
+					}));
+					BoostThread(pool.back());
+				}
+				for (t = 0; t < pool.size(); ++t) pool[t].join();
+			}
 			if (failed.load()) { CloseHandle(h); return OXZ_CORE_ERR; }
 		}
 		seen = done.load();
@@ -3355,7 +3953,7 @@ extern "C" int OxzCoreRename(const wchar_t* oldRel, const wchar_t* newRel)
 	if (!oldRel || !oldRel[0] || !newRel || !newRel[0]) return OXZ_CORE_ERR;
 	oldKey = SlashToBack(oldRel);
 	newKey = SlashToBack(newRel);
-	if (SamePath(oldKey, newKey)) return OXZ_CORE_OK;
+	if (oldKey == newKey) return OXZ_CORE_OK;
 	for (std::map<std::wstring, SnapFile, ILess>::iterator it = gSnap.files.begin(); it != gSnap.files.end(); ++it) {
 		SnapFile sf;
 		std::wstring rest;
@@ -3377,22 +3975,26 @@ extern "C" int OxzCoreMaterialize(const wchar_t* rel, const wchar_t* destPath)
 {
 	SnapFile* sf;
 	HANDLE h;
-	std::vector<uint8_t> packed, plain;
+	RawBuf plain;
+	uint8_t* pkBuf;
 	DirEnt e;
 	uint64_t len;
+	size_t pk, upk;
 	std::wstring key;
 	if (!rel || !destPath) return OXZ_CORE_ERR;
 	key = SlashToBack(rel);
 	sf = FindSnap(&gSnap, key);
 	if (!sf || sf->dropped || sf->isDir || !MethodHasPayload(sf->method)) return OXZ_CORE_ERR;
-	if (sf->unpacked != (uint64_t)(size_t)sf->unpacked) return OXZ_CORE_ERR;
+	if (sf->unpacked != (uint64_t)(size_t)sf->unpacked || sf->packed != (uint64_t)(size_t)sf->packed) return OXZ_CORE_ERR;
+	pk = (size_t)sf->packed;
+	upk = (size_t)sf->unpacked;
+	pkBuf = TlsFileBuf(pk ? pk : 1);
+	if (!pkBuf || (upk && !plain.ensure(upk))) return OXZ_CORE_ERR;
 	h = OpenRead(gSnap.archive.c_str());
 	if (h == INVALID_HANDLE_VALUE) return OXZ_CORE_ERR;
 	len = FileLen(h);
 	if (sf->dataOff > len || sf->packed > len - sf->dataOff) { CloseHandle(h); return OXZ_CORE_ERR; }
-	try { packed.resize((size_t)sf->packed); }
-	catch (...) { CloseHandle(h); return OXZ_CORE_ERR; }
-	if (sf->packed && !ReadAt(h, sf->dataOff, packed.data(), packed.size())) { CloseHandle(h); return OXZ_CORE_ERR; }
+	if (pk && !ReadAt(h, sf->dataOff, pkBuf, pk)) { CloseHandle(h); return OXZ_CORE_ERR; }
 	CloseHandle(h);
 	e.method = sf->method;
 	e.flags = sf->flags;
@@ -3403,9 +4005,9 @@ extern "C" int OxzCoreMaterialize(const wchar_t* rel, const wchar_t* destPath)
 	e.unpacked = sf->unpacked;
 	e.packed = sf->packed;
 	e.dataOff = sf->dataOff;
-	e.name = sf->rel;
-	if (DecodeRaw(e, packed.data(), plain) != 1) return OXZ_CORE_ERR;
-	if (!WriteMember(destPath, plain.empty() ? NULL : plain.data(), plain.size(), sf->mtime, sf->attr)) return OXZ_CORE_ERR;
+	CrcEnsure();
+	if (DecodeToBuf(e, pk ? pkBuf : (const uint8_t*)"", upk ? plain.data : (uint8_t*)"", upk) != 1) return OXZ_CORE_ERR;
+	if (!WriteMember(destPath, upk ? plain.data : NULL, upk, sf->mtime, sf->attr)) return OXZ_CORE_ERR;
 	return OXZ_CORE_OK;
 }
 
@@ -3486,33 +4088,121 @@ extern "C" void OxzCoreFreeItems(OxzCoreItem* items, int count)
 	free(items);
 }
 
+struct OverlayDirCache {
+	std::mutex mu;
+	int valid;
+	DWORD volSerial;
+	DWORD idxHi;
+	DWORD idxLo;
+	uint64_t fileLen;
+	uint64_t mtime;
+	std::wstring path;
+	std::vector<DirEnt> ents;
+	OverlayDirCache() : valid(0), volSerial(0), idxHi(0), idxLo(0), fileLen(0), mtime(0) {}
+};
+
+static OverlayDirCache gOvCache;
+
 extern "C" int OxzCoreReadOverlay(const wchar_t* archive, int overlay, void** data, size_t* size)
 {
 	HANDLE h;
-	std::vector<DirEnt> ents;
-	std::vector<uint8_t> packed, plain;
-	uint64_t off = 0, sz = 0, len;
+	BY_HANDLE_FILE_INFORMATION fi;
+	int haveFi;
+	DirEnt ent;
+	uint8_t* pkBuf;
+	uint64_t len;
+	size_t pk, n;
 	void* block;
-	if (!data || !size || overlay < 0) return OXZ_CORE_ERR;
+	if (!archive || !data || !size || overlay < 0) return OXZ_CORE_ERR;
 	*data = NULL;
 	*size = 0;
+	CrcEnsure();
 	h = OpenRead(archive);
 	if (h == INVALID_HANDLE_VALUE) return OXZ_CORE_ERR;
-	len = FileLen(h);
-	if (!LoadDir(h, len, ents, &off, &sz) || (size_t)overlay >= ents.size() || !MethodHasPayload(ents[overlay].method)) {
+	haveFi = GetFileInformationByHandle(h, &fi) ? 1 : 0;
+	len = haveFi ? (((uint64_t)fi.nFileSizeHigh << 32) | fi.nFileSizeLow) : FileLen(h);
+	if (haveFi) {
+		uint64_t mt = FtToU(fi.ftLastWriteTime);
+		int hit = 0;
+		{
+			std::lock_guard<std::mutex> lk(gOvCache.mu);
+			if (gOvCache.valid && gOvCache.fileLen == len && gOvCache.mtime == mt
+				&& gOvCache.volSerial == fi.dwVolumeSerialNumber
+				&& gOvCache.idxHi == fi.nFileIndexHigh && gOvCache.idxLo == fi.nFileIndexLow
+				&& ((fi.nFileIndexHigh | fi.nFileIndexLow) != 0 || SamePath(gOvCache.path, archive))) {
+				if ((size_t)overlay >= gOvCache.ents.size() || !MethodHasPayload(gOvCache.ents[overlay].method)) {
+					CloseHandle(h);
+					return OXZ_CORE_ERR;
+				}
+				const DirEnt& ce = gOvCache.ents[overlay];
+				ent.method = ce.method;
+				ent.flags = ce.flags;
+				ent.prop = ce.prop;
+				ent.crc = ce.crc;
+				ent.attr = ce.attr;
+				ent.mtime = ce.mtime;
+				ent.unpacked = ce.unpacked;
+				ent.packed = ce.packed;
+				ent.dataOff = ce.dataOff;
+				hit = 1;
+			}
+		}
+		if (!hit) {
+			std::vector<DirEnt> ents;
+			uint64_t off = 0, sz = 0;
+			if (!LoadDir(h, len, ents, &off, &sz) || (size_t)overlay >= ents.size() || !MethodHasPayload(ents[overlay].method)) {
+				CloseHandle(h);
+				return OXZ_CORE_ERR;
+			}
+			const DirEnt& ce = ents[overlay];
+			ent.method = ce.method;
+			ent.flags = ce.flags;
+			ent.prop = ce.prop;
+			ent.crc = ce.crc;
+			ent.attr = ce.attr;
+			ent.mtime = ce.mtime;
+			ent.unpacked = ce.unpacked;
+			ent.packed = ce.packed;
+			ent.dataOff = ce.dataOff;
+			{
+				std::lock_guard<std::mutex> lk(gOvCache.mu);
+				gOvCache.valid = 1;
+				gOvCache.volSerial = fi.dwVolumeSerialNumber;
+				gOvCache.idxHi = fi.nFileIndexHigh;
+				gOvCache.idxLo = fi.nFileIndexLow;
+				gOvCache.fileLen = len;
+				gOvCache.mtime = mt;
+				gOvCache.path = archive;
+				gOvCache.ents.swap(ents);
+			}
+		}
+	} else {
+		std::vector<DirEnt> ents;
+		uint64_t off = 0, sz = 0;
+		if (!LoadDir(h, len, ents, &off, &sz) || (size_t)overlay >= ents.size() || !MethodHasPayload(ents[overlay].method)) {
+			CloseHandle(h);
+			return OXZ_CORE_ERR;
+		}
+		ent = ents[overlay];
+	}
+	if (ent.packed != (uint64_t)(size_t)ent.packed || ent.unpacked != (uint64_t)(size_t)ent.unpacked) {
 		CloseHandle(h);
 		return OXZ_CORE_ERR;
 	}
-	try { packed.resize((size_t)ents[overlay].packed); }
-	catch (...) { CloseHandle(h); return OXZ_CORE_ERR; }
-	if (ents[overlay].packed && !ReadAt(h, ents[overlay].dataOff, packed.data(), packed.size())) { CloseHandle(h); return OXZ_CORE_ERR; }
+	pk = (size_t)ent.packed;
+	pkBuf = TlsFileBuf(pk ? pk : 1);
+	if (!pkBuf) { CloseHandle(h); return OXZ_CORE_ERR; }
+	if (pk && !ReadAt(h, ent.dataOff, pkBuf, pk)) { CloseHandle(h); return OXZ_CORE_ERR; }
 	CloseHandle(h);
-	if (DecodeRaw(ents[overlay], packed.data(), plain) != 1) return OXZ_CORE_ERR;
-	block = malloc(plain.size() ? plain.size() : 1);
+	n = (size_t)ent.unpacked;
+	block = malloc(n ? n : 1);
 	if (!block) return OXZ_CORE_ERR;
-	if (!plain.empty()) memcpy(block, plain.data(), plain.size());
+	if (DecodeToBuf(ent, pk ? pkBuf : (const uint8_t*)"", (uint8_t*)block, n) != 1) {
+		free(block);
+		return OXZ_CORE_ERR;
+	}
 	*data = block;
-	*size = plain.size();
+	*size = n;
 	return OXZ_CORE_OK;
 }
 
@@ -3708,6 +4398,43 @@ extern "C" int OxzSpeedSelfTest(void)
 		std::vector<uint8_t> raw2(4096), back(4096);
 		for (i = 0; i < raw2.size(); ++i) raw2[i] = (uint8_t)((i / 17) * 3);
 		if (!OxzLzssCompress(raw2.data(), raw2.size(), packed) || !OxzLzssDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != raw2) code = 55;
+	}
+	if (!code) {
+		/* Ordinary non-audio file (custom binary header + odd alignment + odd length + stereo 16-bit correlated data) */
+		std::vector<uint8_t> gen(16385), back(16385);
+		uint32_t rng = 0x12345678u;
+		int l = 0, r = 0;
+		memcpy(gen.data(), "DATBIN\x01\x99\xFE", 9);
+		for (i = 0; i + 4 <= gen.size() - 10; i += 4) {
+			rng = rng * 1664525u + 1013904223u;
+			l = (l * 31) / 32 + (int)((int32_t)rng >> 25);
+			rng = rng * 1664525u + 1013904223u;
+			r = (r * 31) / 32 + (int)((int32_t)rng >> 25);
+			int16_t sl = (int16_t)l;
+			int16_t sr = (int16_t)r;
+			memcpy(gen.data() + 9 + i, &sl, 2);
+			memcpy(gen.data() + 9 + i + 2, &sr, 2);
+		}
+		gen.back() = 0xA5;
+		if (OxzPcmMaybe(gen.data(), gen.size())) code = 56;
+		else if (!OxzFlacCompress(gen.data(), gen.size(), packed) || !OxzFlacDecompress(packed.data(), packed.size(), back.data(), back.size()) || back != gen) code = 56;
+		else {
+			gUserLevel = 6;
+			Choice picked = Pick(gen.data(), gen.size(), 0);
+			gUserLevel = 1;
+			if (picked.method != M_FLAC) code = 57;
+			else {
+				DirEnt de;
+				memset(&de, 0, sizeof(de));
+				de.method = (uint16_t)picked.method;
+				de.flags = (uint16_t)picked.flags;
+				de.prop = picked.prop;
+				de.crc = CrcFinish(gen.data(), gen.size());
+				de.unpacked = gen.size();
+				de.packed = picked.data.size();
+				if (DecodeToBuf(de, picked.data.data(), back.data(), back.size()) != 1 || back != gen) code = 58;
+			}
+		}
 	}
 	gUserLevel = saved;
 	gLevelBytes = 0;

@@ -46,20 +46,40 @@ static int MediaLevel(void)
 	return lv;
 }
 
+struct TlsMediaZstd {
+	ZSTD_CCtx* c;
+	ZSTD_DCtx* d;
+	TlsMediaZstd() : c(NULL), d(NULL) {}
+	~TlsMediaZstd() {
+		if (c) ZSTD_freeCCtx(c);
+		if (d) ZSTD_freeDCtx(d);
+	}
+};
+
+static TlsMediaZstd& MediaZstd(void)
+{
+	static thread_local TlsMediaZstd tls;
+	return tls;
+}
+
 static int ZstdPack(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 {
+	TlsMediaZstd& z = MediaZstd();
 	ZSTD_CCtx* c;
 	ZSTD_inBuffer ib;
 	ZSTD_outBuffer ob;
 	size_t bound, r;
 	if (!n) return 0;
-	c = ZSTD_createCCtx();
+	if (!z.c) z.c = ZSTD_createCCtx();
+	c = z.c;
 	if (!c) return 0;
+	ZSTD_CCtx_reset(c, ZSTD_reset_session_and_parameters);
 	ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, MediaLevel());
 	ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 0);
+	ZSTD_CCtx_setPledgedSrcSize(c, n);
 	bound = ZSTD_compressBound(n);
 	try { out.resize(bound); }
-	catch (...) { ZSTD_freeCCtx(c); return 0; }
+	catch (...) { return 0; }
 	ib.src = in;
 	ib.size = n;
 	ib.pos = 0;
@@ -68,14 +88,13 @@ static int ZstdPack(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 	ob.pos = 0;
 	while (ib.pos < ib.size) {
 		r = ZSTD_compressStream2(c, &ob, &ib, ZSTD_e_continue);
-		if (ZSTD_isError(r)) { ZSTD_freeCCtx(c); return 0; }
+		if (ZSTD_isError(r)) return 0;
 		OxzPulseEncode(ib.pos, n);
 	}
 	do {
 		r = ZSTD_compressStream2(c, &ob, &ib, ZSTD_e_end);
-		if (ZSTD_isError(r)) { ZSTD_freeCCtx(c); return 0; }
+		if (ZSTD_isError(r)) return 0;
 	} while (r != 0);
-	ZSTD_freeCCtx(c);
 	try { out.resize(ob.pos); }
 	catch (...) { return 0; }
 	return out.empty() ? 0 : 1;
@@ -83,13 +102,16 @@ static int ZstdPack(const uint8_t* in, size_t n, std::vector<uint8_t>& out)
 
 static int ZstdUnpack(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen)
 {
+	TlsMediaZstd& z = MediaZstd();
 	ZSTD_DCtx* d;
 	ZSTD_inBuffer in;
 	ZSTD_outBuffer out;
 	size_t r;
 	if (!dstLen) return srcLen == 0;
-	d = ZSTD_createDCtx();
+	if (!z.d) z.d = ZSTD_createDCtx();
+	d = z.d;
 	if (!d) return 0;
+	ZSTD_DCtx_reset(d, ZSTD_reset_session_only);
 	in.src = src;
 	in.size = srcLen;
 	in.pos = 0;
@@ -98,10 +120,9 @@ static int ZstdUnpack(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t ds
 	out.pos = 0;
 	do {
 		r = ZSTD_decompressStream(d, &out, &in);
-		if (ZSTD_isError(r)) { ZSTD_freeDCtx(d); return 0; }
+		if (ZSTD_isError(r)) return 0;
 		OxzPulseDecode(out.pos);
 	} while (r != 0);
-	ZSTD_freeDCtx(d);
 	return out.pos == dstLen;
 }
 

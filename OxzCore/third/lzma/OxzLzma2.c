@@ -38,9 +38,14 @@ static SRes OxzLzOnProg(ICompressProgressPtr p, UInt64 inSize, UInt64 outSize)
 	return SZ_OK;
 }
 
+extern void* OxzLzmaAlloc(ISzAllocPtr p, size_t size);
+extern void OxzLzmaFree(ISzAllocPtr p, void* address);
+
+static const ISzAlloc kLzAlloc = { OxzLzAlloc, OxzLzFree };
+static const ISzAlloc kLzBigAlloc = { OxzLzmaAlloc, OxzLzmaFree };
+
 static int EncodeLzma2(const void* in, size_t inSize, void* out, size_t outCap, size_t* outSize, unsigned char* prop, size_t profile, int userLevel, int wideDict, OxzLzPulseFn pulse, void* pulseUser)
 {
-	static const ISzAlloc kAlloc = { OxzLzAlloc, OxzLzFree };
 	CLzma2EncProps props;
 	CLzma2EncHandle enc;
 	size_t comp, scale, basis;
@@ -96,7 +101,7 @@ static int EncodeLzma2(const void* in, size_t inSize, void* out, size_t outCap, 
 	props.numBlockThreads_Max = 1;
 	props.numTotalThreads = 1;
 	props.numBlockThreads_Reduced = 1;
-	enc = Lzma2Enc_Create(&kAlloc, &kAlloc);
+	enc = Lzma2Enc_Create(&kLzAlloc, &kLzBigAlloc);
 	if (!enc) return 2;
 	if (Lzma2Enc_SetProps(enc, &props) != SZ_OK) {
 		Lzma2Enc_Destroy(enc);

@@ -3,11 +3,15 @@
 #define NOMINMAX
 #include <windows.h>
 #include <string.h>
+#include <stdlib.h>
+#include <intrin.h>
 #include <vector>
 #include <thread>
 #include <atomic>
 #include <mutex>
 #include "bzlib.h"
+
+static uint8_t gBzLut[65536];
 
 static void Boost(std::thread& th)
 {
@@ -18,9 +22,16 @@ static void BzWarm(void)
 {
 	static std::once_flag once;
 	std::call_once(once, []() {
+		const uint64_t kBlk = 0x314159265359ULL;
+		const uint64_t kEos = 0x177245385090ULL;
 		unsigned char in[32], out[128];
 		unsigned int dest = 128;
-		int i;
+		int i, sh;
+		memset(gBzLut, 0, sizeof(gBzLut));
+		for (sh = 0; sh < 8; ++sh) {
+			gBzLut[(uint16_t)((kBlk >> (24 + sh)) & 0xFFFFu)] |= (uint8_t)(1u << sh);
+			gBzLut[(uint16_t)((kEos >> (24 + sh)) & 0xFFFFu)] |= (uint8_t)(1u << sh);
+		}
 		for (i = 0; i < 32; ++i) in[i] = (unsigned char)i;
 		BZ2_bzBuffToBuffCompress((char*)out, &dest, (char*)in, 32, 1, 0, 0);
 	});
@@ -126,15 +137,21 @@ static void ScanMagics(const uint8_t* p, size_t n, std::vector<size_t>& blocks, 
 	size_t i;
 	const uint64_t kBlk = 0x314159265359ULL;
 	const uint64_t kEos = 0x177245385090ULL;
-	if (n < 16) return;
+	if (n < 14) return;
+	BzWarm();
 	for (i = 0; i + 8 <= n; ++i) {
-		uint64_t w = 0;
-		int sh;
-		int k;
-		for (k = 0; k < 8; ++k) w = (w << 8) | p[i + k];
-		for (sh = 0; sh < 8; ++sh) {
-			size_t bit = i * 8 + (size_t)sh;
+		uint8_t m = gBzLut[((unsigned)p[i + 1] << 8) | p[i + 2]];
+		uint64_t w;
+		if (!m) continue;
+		memcpy(&w, p + i, 8);
+		w = _byteswap_uint64(w);
+		while (m) {
+			unsigned long sh = 0;
+			size_t bit;
 			uint64_t v;
+			_BitScanForward(&sh, (unsigned long)m);
+			m &= (uint8_t)(m - 1);
+			bit = i * 8 + (size_t)sh;
 			if (bit + 48 > n * 8) continue;
 			v = (w >> (16 - sh)) & 0xFFFFFFFFFFFFULL;
 			if (v == kBlk) blocks.push_back(bit);
@@ -151,13 +168,73 @@ struct BzStream {
 	std::vector<size_t> blocks;
 };
 
+static int FindTailEos(const uint8_t* p, size_t begin, size_t limit, size_t* outEosBit)
+{
+	const uint64_t kEos = 0x177245385090ULL;
+	size_t from, i;
+	if (limit < begin + 14) return 0;
+	from = limit >= 12 ? (limit - 12) : begin;
+	if (from < begin + 4) from = begin + 4;
+	for (i = from; i + 6 <= limit; ++i) {
+		uint64_t w = 0;
+		int sh, k;
+		for (k = 0; k < 8; ++k) {
+			w <<= 8;
+			if (i + (size_t)k < limit) w |= p[i + k];
+		}
+		for (sh = 0; sh < 8; ++sh) {
+			size_t bit = i * 8 + (size_t)sh;
+			size_t endByte;
+			uint64_t v;
+			if (bit < begin * 8 + 48 || bit + 80 > limit * 8) continue;
+			endByte = (bit + 80 + 7) / 8;
+			if (endByte != limit) continue;
+			v = (w >> (16 - sh)) & 0xFFFFFFFFFFFFULL;
+			if (v == kEos) {
+				*outEosBit = bit;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
 static int FindStreams(const uint8_t* p, size_t n, std::vector<BzStream>& out)
 {
 	std::vector<size_t> blocks, eoss, heads;
-	size_t i, h;
+	size_t pos = 0, h;
+	if (n < 14 || !IsBzHdr(p, n, 0)) return 0;
+	heads.push_back(0);
+	pos = 10;
+	while (pos + 10 <= n) {
+		const void* hit = memchr(p + pos, 'B', n - 9 - pos);
+		if (!hit) break;
+		pos = (size_t)((const uint8_t*)hit - p);
+		if (IsBzHdr(p, n, pos)) {
+			heads.push_back(pos);
+			pos += 10;
+		} else {
+			pos++;
+		}
+	}
+	if (heads.size() >= 2) {
+		int allOk = 1;
+		out.reserve(heads.size());
+		for (h = 0; h < heads.size(); ++h) {
+			BzStream s;
+			size_t limit = (h + 1 < heads.size()) ? heads[h + 1] : n;
+			s.begin = heads[h];
+			s.level = p[s.begin + 3] - '0';
+			s.end = limit;
+			s.eosBit = 0;
+			if (!FindTailEos(p, s.begin, limit, &s.eosBit)) { allOk = 0; break; }
+			s.blocks.push_back(s.begin * 8 + 32);
+			out.push_back(std::move(s));
+		}
+		if (allOk && !out.empty() && out.back().end == n) return 1;
+		out.clear();
+	}
 	ScanMagics(p, n, blocks, eoss);
-	for (i = 0; i + 10 <= n; ++i) if (IsBzHdr(p, n, i)) heads.push_back(i);
-	if (heads.empty() || heads[0] != 0) return 0;
 	for (h = 0; h < heads.size(); ++h) {
 		BzStream s;
 		size_t e;
@@ -268,13 +345,18 @@ static int DecOneStream(const uint8_t* src, const BzStream& s, std::vector<uint8
 	if (s.end <= s.begin || s.end - s.begin > 0xFFFFFFFFu) return 0;
 	if (s.blocks.size() > 1) cap = cap * s.blocks.size();
 	if (cap < 64) cap = 64;
-	try { plain.resize(cap); }
-	catch (...) { return 0; }
-	destLen = (unsigned int)plain.size();
-	rc = BZ2_bzBuffToBuffDecompress((char*)plain.data(), &destLen, (char*)(src + s.begin), (unsigned int)(s.end - s.begin), 0, 0);
-	if (rc != BZ_OK || destLen == 0) return 0;
-	plain.resize(destLen);
-	return 1;
+	for (;;) {
+		try { plain.resize(cap); }
+		catch (...) { return 0; }
+		destLen = (unsigned int)plain.size();
+		rc = BZ2_bzBuffToBuffDecompress((char*)plain.data(), &destLen, (char*)(src + s.begin), (unsigned int)(s.end - s.begin), 0, 0);
+		if (rc == BZ_OK && destLen > 0) {
+			plain.resize(destLen);
+			return 1;
+		}
+		if (rc != BZ_OUTBUFF_FULL || cap >= 64u * 1024u * 1024u) return 0;
+		cap *= 2;
+	}
 }
 
 static int DecStreamBlocks(const uint8_t* src, size_t srcLen, const BzStream& s, unsigned threads, std::vector<uint8_t>& plain)

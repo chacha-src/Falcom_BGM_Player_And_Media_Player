@@ -620,14 +620,24 @@ static void PaintGlassClient(HWND hwnd, HDC dc, COLORREF fill)
 		}
 		int saved = 0;
 		HWND hdr = NULL;
-		if (ClassIs(hwnd, L"SysListView32"))
+		HWND ed = NULL;
+		if (ClassIs(hwnd, L"SysListView32")) {
 			hdr = (HWND)SendMessageW(hwnd, LVM_GETHEADER, 0, 0);
+			ed = (HWND)SendMessageW(hwnd, LVM_GETEDITCONTROL, 0, 0);
+			if (!ed) ed = FindWindowExW(hwnd, NULL, L"Edit", NULL);
+		}
+		if (hdr || ed) saved = SaveDC(dc);
 		if (hdr) {
 			RECT hr;
 			GetWindowRect(hdr, &hr);
 			MapWindowPoints(NULL, hwnd, (POINT*)&hr, 2);
-			saved = SaveDC(dc);
 			ExcludeClipRect(dc, hr.left, hr.top, hr.right, hr.bottom);
+		}
+		if (ed && IsWindowVisible(ed)) {
+			RECT er;
+			GetWindowRect(ed, &er);
+			MapWindowPoints(NULL, hwnd, (POINT*)&er, 2);
+			ExcludeClipRect(dc, er.left, er.top, er.right, er.bottom);
 		}
 		OxzPlateEnd(plate, dc, 0, 0, 0);
 		if (saved) RestoreDC(dc, saved);
@@ -802,7 +812,8 @@ static void PresentHeader(HWND hwnd)
 	ReleaseDC(hwnd, dc);
 }
 
-/* リストの全面描画は子のヘッダーに被さる。下へ入ったあと名前が消えるので、リストのあとで描き戻す。 */
+/* リストの全面描画は子のヘッダーやインライン編集欄に被さる。リストのあとで描き戻す。 */
+static void MakeWindowOpaque(HWND hwnd);
 static void RestoreListHeader(HWND list)
 {
 	if (!list) return;
@@ -810,6 +821,12 @@ static void RestoreListHeader(HWND list)
 	if (!GetClassNameW(list, cls, 32) || _wcsicmp(cls, L"SysListView32") != 0) return;
 	HWND hdr = (HWND)SendMessageW(list, LVM_GETHEADER, 0, 0);
 	if (hdr) PresentHeader(hdr);
+	HWND ed = (HWND)SendMessageW(list, LVM_GETEDITCONTROL, 0, 0);
+	if (!ed) ed = FindWindowExW(list, NULL, L"Edit", NULL);
+	if (ed && IsWindowVisible(ed)) {
+		PresentLeaf(ed);
+		MakeWindowOpaque(ed);
+	}
 }
 
 static void PaintGlassLabel(HWND hwnd, HDC dc)
@@ -903,7 +920,8 @@ static LRESULT CALLBACK GlassChild(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	int btn = ClassIs(hwnd, L"Button");
 	int list = ClassIs(hwnd, L"SysListView32") || ClassIs(hwnd, L"ListBox");
 	int head = ClassIs(hwnd, L"SysHeader32");
-	int leaf = stat || btn || list || head || ClassIs(hwnd, L"Edit")
+	int edit = ClassIs(hwnd, L"Edit");
+	int leaf = stat || btn || list || head || edit
 		|| ClassIs(hwnd, L"msctls_progress32") || ClassIs(hwnd, L"msctls_trackbar32");
 	if (!leaf) return CallWindowProcW(old, hwnd, msg, wp, lp);
 	if (msg == WM_ERASEBKGND) return 1;
@@ -912,10 +930,24 @@ static LRESULT CALLBACK GlassChild(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		if (head) PresentHeader(hwnd);
 		else {
 			PresentLeaf(hwnd);
+			if (edit && NeedsNc(hwnd)) MakeWindowOpaque(hwnd);
 			RestoreListHeader(hwnd);
 		}
 		ValidateRect(hwnd, NULL);
 		return 0;
+	}
+	if (edit && (msg == WM_CHAR || msg == WM_KEYDOWN || msg == WM_KEYUP
+		|| msg == WM_IME_COMPOSITION || msg == WM_IME_ENDCOMPOSITION
+		|| msg == WM_PASTE || msg == WM_CUT || msg == WM_CLEAR || msg == WM_UNDO
+		|| msg == EM_SETSEL || msg == WM_SETTEXT
+		|| msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_MOUSEMOVE
+		|| msg == WM_SETFOCUS || msg == WM_KILLFOCUS)) {
+		LRESULT r = CallWindowProcW(old, hwnd, msg, wp, lp);
+		if (!GetPropW(hwnd, kPostOp)) {
+			SetPropW(hwnd, kPostOp, (HANDLE)1);
+			PostMessageW(hwnd, OX_POST, 0, 0);
+		}
+		return r;
 	}
 	if (head && (msg == WM_MOUSEMOVE || msg == WM_MOUSELEAVE || msg == WM_MOUSEHOVER
 		|| msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_LBUTTONDBLCLK
