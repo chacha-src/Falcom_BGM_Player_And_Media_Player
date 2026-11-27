@@ -27,6 +27,8 @@ cbuffer Frame : register(b0)
 	float4 Hole2;
 	float4 FxNow;
 	float4 FxMore;
+	float4 Flood;
+	float4 Field;
 };
 cbuffer Obj : register(b1)
 {

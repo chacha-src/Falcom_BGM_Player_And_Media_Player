@@ -578,12 +578,17 @@ static void ShotCam(const Shot& s, float t, V3 a, V3 d, float h, V3& look, V3& e
 	V3 pairL, pairE;
 	PairFrame(a, d, h, side, t, bias, elev, pairL, pairE);
 	float skyW = Clampf((verbL.y - 2.1f) / 3.2f, 0.f, 1.f);
-	V3 groundL = Lerp(verbL, pairL, 0.84f);
-	V3 groundE = Lerp(verbE, pairE, 0.86f);
-	V3 skyL = Lerp(verbL, Lerp(chestA, chestD, 0.48f), 0.24f);
-	V3 skyE = Lerp(verbE, pairE + v3(0, 0.55f, 0), 0.42f);
+	// 各技固有の構図・見上げ・回り込みを活かしつつ、着弾時に短いドリーインで迫力を乗せる
+	V3 groundL = Lerp(verbL, pairL, 0.44f);
+	V3 groundE = Lerp(verbE, pairE, 0.48f);
+	V3 skyL = Lerp(verbL, Lerp(chestA, chestD, 0.48f), 0.22f);
+	V3 skyE = Lerp(verbE, pairE + v3(0, 0.55f, 0), 0.36f);
 	look = Lerp(groundL, skyL, skyW);
 	eye = Lerp(groundE, skyE, skyW);
+	if (t >= s.lag) {
+		float hitKick = expf(-(t - s.lag) * 5.2f);
+		eye = Lerp(eye, look, hitKick * 0.14f);
+	}
 	if (Len(eye - look) < 0.85f) eye = pairE;
 }
 

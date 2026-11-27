@@ -801,33 +801,75 @@ static int KinTone(int base, int pat, int role)
 {
 	if (base < 0) base = 0;
 	if (base > 127) base = 127;
+	const int pIdx = (pat < 0) ? 0 : (pat & 15);
+	if (pIdx < 2) return NoGhost(base, role);
+	/* スタイルの楽器族（GM の8音色ブロック）を壊さずにアレンジ別の近い音色へ寄せる。
+	   ジャズにシンセベースが混ざる等の破綻を防ぐ。 */
 	if (base <= 7) {
-		static const int kP[8] = { 0, 4, 5, 6, 2, 1, 3, 7 };
-		return kP[(base + (pat < 0 ? 0 : pat)) & 7];
+		static const int kP[8] = { 0, 1, 2, 4, 5, 0, 4, 2 };
+		return kP[(base + pIdx) & 7];
 	}
-	if (pat < 2) return NoGhost(base, role);
-	if (pat >= 8) {
-		static const int kCousin[8][8] = {
-			{ 38, 39, 43, 34, 33, 35, 36, 32 },
-			{ 18, 19, 16, 17, 27, 25, 30, 28 },
-			{ 88, 89, 90, 50, 48, 49, 51, 89 },
-			{ 80, 81, 82, 87, 62, 71, 11, 12 },
-			{ 11, 12, 13, 26, 27, 28, 16, 17 },
-			{ 24, 25, 26, 27, 28, 29, 30, 31 },
-			{ 48, 49, 61, 62, 56, 57, 45, 46 },
-			{ 80, 81, 87, 73, 75, 56, 68, 71 }
-		};
-		int p = kCousin[role & 7][(pat + role) & 7];
-		if (p <= 7) p = base;
-		return NoGhost(p, role);
+	if (base >= 32 && base <= 39) {
+		/* アコースティック系(32)は32/35、エレクトリック(33-37)はその中、シンセ(38-39)はその中 */
+		if (base == 32) return (pIdx & 4) ? 35 : 32;
+		if (base >= 38) return (pIdx & 2) ? 39 : 38;
+		static const int kEB[4] = { 33, 34, 35, 36 };
+		return kEB[(base + pIdx) & 3];
 	}
-	static const int kAlt[8] = { 0, 1, -1, 2, 3, -2, 4, -3 };
-	int d = kAlt[(pat + role * 3) & 7];
+	if (base >= 24 && base <= 31) {
+		/* クリーン/アコギ(24-28)と歪み系(29-31)を分離して維持 */
+		if (base <= 25) return (pIdx & 2) ? 25 : 24;
+		if (base <= 28) { static const int kCG[3] = { 26, 27, 28 }; return kCG[(base + pIdx) % 3]; }
+		static const int kDG[3] = { 29, 30, 29 };
+		return kDG[(base + pIdx) % 3];
+	}
+	static const int kAlt[8] = { 0, 1, -1, 2, 0, -1, 1, 2 };
+	int d = kAlt[(pIdx + role * 3) & 7];
 	int fam = base & ~7;
 	int p = fam + ((base + d) & 7);
 	if (p <= 7 && base > 7) p = base;
 	if (p < 0 || p > 127) p = base;
 	return NoGhost(p, role);
+}
+
+/* 複数チャンネル（ch1〜ch32）で同じ役割が2本以上あるとき、役割とスタイルに合う補完音色を選ぶ。 */
+static int RoleLayerProg(int style, int pat, int roleIdx, int layerIdx, const uint8_t* progAll)
+{
+	if (!progAll) return 0;
+	int base = progAll[roleIdx & 7];
+	if (layerIdx <= 0) return base;
+	const int fam = StyleFam(style);
+	const int elec = (fam == FAM_FLOOR || fam == FAM_DNB || fam == FAM_TRAP || fam == FAM_DISCO
+		|| style == SC_AS_CHIPTUNE || style == SC_AS_GAME || style == SC_AS_SYNTHWAVE);
+	const int jazz = (fam == FAM_JAZZ || fam == FAM_BLUES || fam == FAM_SHUF
+		|| style == SC_AS_BOSSA || style == SC_AS_PIANO || style == SC_AS_LOFI);
+	const int rock = (fam == FAM_8 || fam == FAM_METAL || style == SC_AS_PUNK || style == SC_AS_GRUNGE);
+	switch (roleIdx & 7) {
+	case 0: /* BASS layers */
+		if (elec) return (layerIdx & 1) ? 39 : 38;
+		if (jazz) return (layerIdx & 1) ? 35 : 32;
+		return (layerIdx & 1) ? ((base == 34) ? 33 : 34) : 38;
+	case 1: /* CHORD layers: EP / Organ / Guitar / Piano complement */
+		if (elec) { static const int cE[3] = { 81, 4, 90 }; return cE[(layerIdx + pat) % 3]; }
+		if (jazz) { static const int cJ[3] = { 4, 26, 0 }; return cJ[(layerIdx + pat) % 3]; }
+		if (rock) { static const int cR[3] = { 29, 18, 25 }; return cR[(layerIdx + pat) % 3]; }
+		{ static const int cP[3] = { 4, 27, 16 }; return cP[(layerIdx + pat) % 3]; }
+	case 2: /* PAD layers */
+		{ static const int cPd[4] = { 49, 89, 50, 88 }; return cPd[(layerIdx + pat) & 3]; }
+	case 3: /* ARP layers */
+		if (elec) { static const int cAe[3] = { 80, 87, 81 }; return cAe[(layerIdx + pat) % 3]; }
+		{ static const int cAp[3] = { 25, 11, 46 }; return cAp[(layerIdx + pat) % 3]; }
+	case 4: /* HARM layers */
+		{ static const int cHm[4] = { 48, 61, 73, 50 }; return cHm[(layerIdx + pat) & 3]; }
+	case 5: /* COUNTER layers */
+		if (elec) { static const int cCe[3] = { 87, 82, 80 }; return cCe[(layerIdx + pat) % 3]; }
+		{ static const int cCp[4] = { 73, 66, 40, 27 }; return cCp[(layerIdx + pat) & 3]; }
+	case 6: /* STAB layers */
+		if (elec) { static const int cSe[3] = { 62, 63, 81 }; return cSe[(layerIdx + pat) % 3]; }
+		{ static const int cSp[3] = { 61, 56, 62 }; return cSp[(layerIdx + pat) % 3]; }
+	default: /* COLOR layers */
+		{ static const int cCo[4] = { 11, 12, 9, 46 }; return cCo[(layerIdx + pat) & 3]; }
+	}
 }
 
 static void FillTone(int id, int pat, StylePat* s)
@@ -2186,9 +2228,12 @@ static int SlotHasPitch(const ScEvent* ev, int n, int ch, uint32_t t0, uint32_t 
 static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int melodyCh, uint32_t t0, uint32_t t1, int keySig, int prevRoot, int prevType, int* outRoot, int* outType, int* outVoiced)
 {
 	int pc[12];
+	int pcStrong[12];
 	memset(pc, 0, sizeof(pc));
+	memset(pcStrong, 0, sizeof(pcStrong));
 	int low = 127;
 	int lowPc = -1;
+	uint32_t blen = (t1 > t0) ? (t1 - t0) : 192;
 	for (int i = 0; i < n; i++) {
 		if (!NoteOverlaps(ev[i], t0, t1)) continue;
 		if (DrumChannel(ev, n, ev[i].ch, isFm)) continue;
@@ -2199,7 +2244,12 @@ static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int me
 		int m = PitchOf(ev[i], isFm);
 		if (m < 0) continue;
 		int w = ev[i].dur ? (int)ev[i].dur : 12;
-		pc[m % 12] += w;
+		uint32_t off = (ev[i].tick > t0) ? (ev[i].tick - t0) : 0;
+		int beatBoost = 1;
+		if (off < blen / 8) beatBoost = 3;
+		else if (off >= (blen * 3) / 8 && off < (blen * 5) / 8) beatBoost = 2;
+		pc[m % 12] += w * beatBoost;
+		if (beatBoost >= 2 || w >= (int)(blen / 4)) pcStrong[m % 12] += w * beatBoost;
 		if (m < low) { low = m; lowPc = m % 12; }
 	}
 	int sum = 0;
@@ -2210,34 +2260,85 @@ static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int me
 		*outVoiced = 0;
 		return;
 	}
-	/* 単音のメロディを毎小節コード扱いすると伴奏が暴れる。
-	   三和音、または根音＋3度/4度/5度の二音だけをコードとして拾う。 */
-	{
-		int distinct = 0;
-		for (int i = 0; i < 12; i++) if (pc[i] > 0) distinct++;
-		int consonant = 0;
-		if (distinct >= 3) consonant = 1;
-		else if (distinct == 2) {
-			int a = -1, b = -1;
-			for (int i = 0; i < 12; i++) if (pc[i] > 0) { if (a < 0) a = i; else b = i; }
-			int iv = (b - a + 12) % 12;
-			if (iv > 6) iv = 12 - iv;
-			if (iv == 3 || iv == 4 || iv == 5 || iv == 7) consonant = 1;
-		}
-		if (!consonant) {
-			*outRoot = prevRoot >= 0 ? prevRoot : TonicPc(keySig);
-			*outType = prevType >= 0 ? prevType : CH_MAJ;
-			*outVoiced = 0;
-			return;
-		}
-	}
 	static const int kN[8] = { 3, 3, 4, 4, 4, 3, 3, 2 };
 	static const int kIv[8][4] = {
 		{ 0, 4, 7, 0 }, { 0, 3, 7, 0 }, { 0, 4, 7, 10 }, { 0, 3, 7, 10 },
 		{ 0, 4, 7, 11 }, { 0, 5, 7, 0 }, { 0, 3, 6, 0 }, { 0, 7, 0, 0 }
 	};
-	int bestS = -100000, bestR = TonicPc(keySig), bestT = CH_MAJ;
 	int tonic = TonicPc(keySig);
+
+	/* 既存が単音メロディ（chordCh < 0）のときは、SSW風のダイアトニック・メロディ和声付けを行う。
+	   強拍・ロングトーンの旋律音をコードトーンとして最大限活かし、半音衝突(アボイド)を避け、
+	   自然なコード進行（五度圏・順次進行・過剰反復回避）で和音を選ぶ。 */
+	if (chordCh < 0) {
+		struct Cand { int off; int ty; int pri; };
+		static const Cand kDia[10] = {
+			{ 0, CH_MAJ, 14 }, /* I */
+			{ 5, CH_MAJ, 12 }, /* IV */
+			{ 7, CH_7,   11 }, /* V7 */
+			{ 9, CH_MIN, 11 }, /* vi */
+			{ 2, CH_MIN,  9 }, /* ii */
+			{ 4, CH_MIN,  7 }, /* iii */
+			{ 7, CH_MAJ, 10 }, /* V */
+			{ 2, CH_7,    4 }, /* V7/V */
+			{ 4, CH_7,    4 }, /* V7/vi */
+			{ 9, CH_7,    3 }  /* V7/ii */
+		};
+		int bestS = -1000000, bestR = tonic, bestT = CH_MAJ;
+		for (int ci = 0; ci < 10; ci++) {
+			int root = (tonic + kDia[ci].off) % 12;
+			int t = kDia[ci].ty;
+			int sc = kDia[ci].pri * 8;
+			for (int p = 0; p < 12; p++) {
+				if (pc[p] <= 0) continue;
+				int inChord = 0;
+				for (int k = 0; k < kN[t]; k++) {
+					if (((root + kIv[t][k]) % 12) == p) { inChord = 1; break; }
+				}
+				if (inChord) {
+					sc += pc[p] * 3 + pcStrong[p] * 2;
+				} else {
+					/* コードの3度/ルートと短9度(1半音上)でぶつかるアボイドを強く減点 */
+					int iv = (p - root + 12) % 12;
+					int third = (t == CH_MIN || t == CH_M7 || t == CH_DIM) ? 3 : 4;
+					if (iv == 1 || iv == ((third + 1) % 12))
+						sc -= pc[p] * 4 + pcStrong[p] * 3;
+					else
+						sc -= pc[p];
+				}
+			}
+			/* スムーズな和声進行の優先（五度下行 +18, 4度進行 +12, 同一和音継続は控えめに +4） */
+			if (prevRoot >= 0) {
+				int mv = (root - prevRoot + 12) % 12;
+				if (mv == 5) sc += 18;      /* V->I, ii->V, vi->ii 等 */
+				else if (mv == 7 || mv == 2 || mv == 9 || mv == 10) sc += 10;
+				else if (mv == 0) sc += 4;
+			}
+			if (sc > bestS) { bestS = sc; bestR = root; bestT = t; }
+		}
+		*outRoot = bestR;
+		*outType = bestT;
+		*outVoiced = 1;
+		return;
+	}
+
+	int distinct = 0;
+	for (int i = 0; i < 12; i++) if (pc[i] > 0) distinct++;
+	int consonant = (distinct >= 3) ? 1 : 0;
+	if (!consonant && distinct == 2) {
+		int a = -1, b = -1;
+		for (int i = 0; i < 12; i++) if (pc[i] > 0) { if (a < 0) a = i; else b = i; }
+		int iv = (b - a + 12) % 12;
+		if (iv > 6) iv = 12 - iv;
+		if (iv == 3 || iv == 4 || iv == 5 || iv == 7) consonant = 1;
+	}
+	if (!consonant) {
+		*outRoot = prevRoot >= 0 ? prevRoot : tonic;
+		*outType = prevType >= 0 ? prevType : CH_MAJ;
+		*outVoiced = 0;
+		return;
+	}
+	int bestS = -100000, bestR = tonic, bestT = CH_MAJ;
 	for (int root = 0; root < 12; root++) {
 		for (int t = 0; t < 8; t++) {
 			int sc = 0;
@@ -2751,51 +2852,351 @@ static void ApplyHalfBars(BarInfo* bars, int nBars, int style, int pat)
 	}
 }
 
-/* スタイルの8コードを8小節フレーズで回す。次の8小節は5度上、その次は逆行、その次は7度上。
-   2小節ループには戻さない。終わりの小節だけ主音。ジャズ/ファンク/16/ブルースは小節後半も変える。 */
-static void PaintHarmony(BarInfo* bars, int nBars, int style, int pat, int variation, int keySig)
+/* 16アレンジ（A〜P）の音楽的キャラクター詳細。
+   単なる位相ずらしではなく、バッキング奏法・ベース奏法・アーティキュレーション・拡張和音・掛け合いを変える。 */
+struct ArrProfile {
+	uint8_t compMode;  /* 0:スタイル基準 1:16分刻み/ストローク 2:ボイスリード7th/9th 3:裏打ち強調
+	                      4:ハーフタイム余白 5:8分ドライブ 6:分散カスケード 7:スタカートキメ
+	                      8:レガート持続 9:コール&レスポンス 10:ポリリズム強調 */
+	uint8_t bassMode;  /* 0:スタイル基準 1:ウォーキング/経過音多め 2:オクターブ跳躍 3:ハーフタイム重低音
+	                      4:シンコペ溜め 5:8分推進 6:ファンク・フィル多め */
+	uint8_t gatePct;   /* 42..98 基本ゲート長(%) */
+	int8_t  octShift;  /* -12..+12 上声部音域バイアス */
+	uint8_t extLevel;  /* 0:三和音/パワー 1:7th 2:9th/add9 */
+	uint8_t callResp;  /* 0:なし 1:半小節交互 2:小節交互 */
+	uint8_t progRot;   /* 0..3 進行の回し開始オフセット */
+	uint8_t velShape;  /* 0:標準 1:頭拍強め 2:裏拍/2-4強め 3:うねりクレッシェンド 4:親密ソフト */
+};
+
+static const ArrProfile kArrProf[SC_ARRANGE_COUNT] = {
+	/* A 標準スタジオ */     { 0, 0, 82,  0, 1, 0, 0, 0 },
+	/* B タイト・シンコペ */ { 1, 4, 68,  0, 1, 0, 0, 2 },
+	/* C 引き算・親密 */     { 2, 3, 86,  0, 1, 0, 0, 4 },
+	/* D フルドライブ */     { 5, 5, 84,  0, 1, 0, 1, 1 },
+	/* E コード歌い */       { 2, 1, 90,  0, 2, 0, 0, 3 },
+	/* F 裏拍アクセント */   { 3, 4, 62,  5, 1, 0, 1, 2 },
+	/* G ハーフタイム余白 */ { 4, 3, 92, -5, 2, 0, 0, 4 },
+	/* H 推進力・刻み */     { 5, 5, 74,  0, 0, 0, 2, 1 },
+	/* I 分散カスケード */   { 6, 1, 88,  7, 2, 0, 1, 3 },
+	/* J ベース主導 */       { 3, 6, 70, -7, 1, 1, 2, 2 },
+	/* K スタカートキメ */   { 7, 4, 48,  0, 1, 1, 0, 1 },
+	/* L レガート膨らみ */   { 8, 0, 96,  0, 2, 0, 0, 3 },
+	/* M ブライト高域 */     { 6, 2, 80, 12, 2, 0, 1, 0 },
+	/* N ダーク重厚 */       { 4, 3, 84,-12, 0, 0, 2, 1 },
+	/* O 掛け合い交互 */     { 9, 6, 76,  0, 1, 2, 1, 2 },
+	/* P 祝祭ポリリズム */   {10, 2, 78,  5, 2, 1, 3, 3 }
+};
+
+/* 64小節以上でも同じパターンを繰り返さないための小節別マクロ設計図。 */
+struct BarPlan {
+	uint8_t sec;       /* 0:A1 1:A2 2:B1(前サビ) 3:C1(サビ1) 4:A3(2番A) 5:D(ブリッジ) 6:E(ソロ/展開) 7:C2(大サビ) */
+	uint8_t phraseBar; /* セクション内の位置 0..7 */
+	uint8_t energy;    /* 30..100 */
+	uint8_t turn;      /* 0:通常 1:4小節折返し 2:8小節ターンアラウンド 3:最終終止 */
+	int8_t  regShift;  /* -12, 0, +12 */
+	uint8_t extLvl;    /* 0:三和音/パワー 1:7th 2:9th */
+	uint8_t varBits;   /* 全小節で異なる決定論的変異ビット */
+	uint8_t breakFeel; /* 0:通常 1:ハーフ/抜き 2:ビルドアップ */
+};
+
+static BarPlan s_plan[256];
+static int s_planN = 0;
+
+static uint32_t PlanHash(int style, int pat, int var, int bar)
 {
-	if (!bars || nBars < 1) return;
+	uint32_t h = (uint32_t)(style * 2654435761u) ^ (uint32_t)((pat + 1) * 2246822519u)
+		^ (uint32_t)((var + 7) * 3266489917u) ^ (uint32_t)((bar + 13) * 668265263u);
+	h ^= h >> 15;
+	h *= 0x85EBCA6Bu;
+	h ^= h >> 13;
+	h *= 0xC2B2AE35u;
+	h ^= h >> 16;
+	return h;
+}
+
+static const BarPlan& PlanOfBar(int bar)
+{
+	if (s_planN <= 0) return s_plan[0];
+	if (bar < 0) bar = 0;
+	if (bar < s_planN && bar < 256) return s_plan[bar];
+	return s_plan[bar % (s_planN < 256 ? s_planN : 256)];
+}
+
+/* 64小節の楽曲構成（A1→A2→B1→C1→A3→D→E→C2）と自然なコード進行を組み立てる。
+   機械的な+5/+7移調や2小節ループを避け、スタイルのkHarm[0]/[1]とダイアトニック展開で破綻なく変化させる。 */
+static void BuildSongPlan(BarInfo* bars, int nBars, int style, int pat, int variation, int keySig, int useProg)
+{
 	if (style < 0 || style >= SC_AS_COUNT) style = 0;
-	if (pat < 0) pat = 0;
-	if (pat >= SC_ARRANGE_COUNT) pat = 0;
-	ProgStep step[8];
-	int n = StyleProgression(style, variation, step, 8);
-	if (n < 1) return;
+	if (pat < 0 || pat >= SC_ARRANGE_COUNT) pat = 0;
+	const ArrProfile& ap = kArrProf[pat & 15];
 	const int tonic = TonicPc(keySig);
 	const int fam = StyleFam(style);
-	const int rot = (pat & 3) + ((pat & 8) ? 3 : 0);
-	static const int phraseAdd[4] = { 0, 5, 0, 7 };
-	const int halfFam = (fam == FAM_JAZZ || fam == FAM_FUNK || fam == FAM_16 || fam == FAM_BLUES);
-	int body = 0;
+	const int isPow = kDef[style].power ? 1 : 0;
+	const int isBlues12 = kVoice[style].form12 ? 1 : 0;
+
+	ProgStep stepA[8], stepB[8];
+	int nA = StyleProgression(style, variation & 1, stepA, 8);
+	int nB = StyleProgression(style, (variation ^ 1) & 1, stepB, 8);
+	if (nA < 1) { stepA[0].off = 0; stepA[0].type = CH_MAJ; nA = 1; }
+	if (nB < 1) { stepB[0] = stepA[0]; nB = 1; }
+
+	const int homeType = (int)stepA[0].type;
+	const int isMinor = (homeType == CH_MIN || homeType == CH_M7
+		|| kVoice[style].scale == 1 || kVoice[style].scale == 2
+		|| kVoice[style].scale == 6 || kVoice[style].scale == 7);
+	const int isRich = (fam == FAM_JAZZ || fam == FAM_BLUES || fam == FAM_BOSSA || fam == FAM_FUNK
+		|| style == SC_AS_CITYPOP || style == SC_AS_NEOSOUL || style == SC_AS_FUSION
+		|| style == SC_AS_RNB || style == SC_AS_LOFI || style == SC_AS_PIANO || style == SC_AS_GOSPEL);
+	const int halfStyle = (fam == FAM_JAZZ || fam == FAM_FUNK || fam == FAM_BOSSA || fam == FAM_BLUES
+		|| style == SC_AS_CITYPOP || style == SC_AS_FUSION || style == SC_AS_GOSPEL
+		|| style == SC_AS_SOUL || style == SC_AS_NEOSOUL || style == SC_AS_ANISON || style == SC_AS_16BEAT);
+
+	int bodyN = 0;
+	if (bars && nBars > 0) {
+		for (int i = 0; i < nBars; i++)
+			if (bars[i].section == SEC_BODY) bodyN++;
+	}
+	if (bodyN < 16) bodyN = 16;
+	s_planN = (bodyN < 256) ? bodyN : 256;
+
+	/* セクション別エネルギーと音域の設計（64小節を8セクション×8小節で展開） */
+	static const uint8_t kSecEnergy[8] = { 54, 66, 76, 90, 58, 68, 84, 98 };
+	static const int8_t  kSecReg[8]    = {  0,  0,  0, 12,  0, -12, 12, 12 };
+
+	for (int b = 0; b < s_planN; b++) {
+		int sec = 0;
+		int pBar = b & 7;
+		if (bodyN >= 48) {
+			sec = (b / 8) & 7;
+			pBar = b & 7;
+		} else if (bodyN >= 24) {
+			static const uint8_t s32[4] = { 0, 2, 3, 7 };
+			sec = s32[(b / 8) & 3];
+			pBar = b & 7;
+		} else {
+			static const uint8_t s16[4] = { 0, 2, 3, 7 };
+			sec = s16[(b / 4) & 3];
+			pBar = (b & 3) * 2;
+		}
+		BarPlan& pl = s_plan[b];
+		pl.sec = (uint8_t)sec;
+		pl.phraseBar = (uint8_t)pBar;
+		int en = (int)kSecEnergy[sec] + (pBar * 2) - 4;
+		if (sec == 2 && pBar >= 4) en += (pBar - 3) * 4; /* 前サビのビルドアップ */
+		if (sec == 6 && pBar >= 4) en += (pBar - 3) * 3; /* ソロ後半の高揚 */
+		if (ap.velShape == 4) en -= 14;
+		else if (ap.velShape == 1) en += 6;
+		if (en < 32) en = 32;
+		if (en > 100) en = 100;
+		pl.energy = (uint8_t)en;
+		pl.turn = 0;
+		if (b + 1 >= bodyN) pl.turn = 3;
+		else if (pBar == 7) pl.turn = 2;
+		else if (pBar == 3) pl.turn = 1;
+		pl.regShift = kSecReg[sec];
+		if (sec == 4 && (pat & 1)) pl.regShift = 0;
+		int ext = (int)ap.extLevel;
+		if (isPow) ext = 0;
+		else if (isRich && ext < 1) ext = 1;
+		if ((sec == 3 || sec == 5 || sec == 7) && !isPow && ext < 2) ext++;
+		pl.extLvl = (uint8_t)ext;
+		uint32_t h = PlanHash(style, pat, variation, b);
+		pl.varBits = (uint8_t)(h & 0xFFu);
+		pl.breakFeel = 0;
+		if ((sec == 4 && pBar < 4) || (sec == 5 && pBar < 2)) pl.breakFeel = 1;
+		else if ((sec == 2 && pBar >= 5) || (sec == 6 && pBar >= 5)) pl.breakFeel = 2;
+		if (ap.compMode == 4 && (sec == 0 || sec == 4 || sec == 5)) pl.breakFeel = 1;
+	}
+
+	if (!bars || nBars < 1) return;
+
+	/* セクション別の音楽的コード設計（メジャー／マイナー／12小節ブルース） */
+	static const uint8_t kPreMaj[8]  = { 0x05, 0x07, 0x14, 0x19, 0x12, 0x07, 0x05, 0x27 };
+	static const uint8_t kPreMin[8]  = { 0x08, 0x0A, 0x10, 0x15, 0x08, 0x0A, 0x15, 0x27 };
+	static const uint8_t kBrgMaj[8]  = { 0x45, 0x15, 0x34, 0x39, 0x32, 0x27, 0x34, 0x29 };
+	static const uint8_t kBrgMin[8]  = { 0x08, 0x03, 0x0A, 0x10, 0x15, 0x08, 0x12, 0x27 };
+	static const uint8_t kBrgJazz[8] = { 0x45, 0x66, 0x34, 0x29, 0x32, 0x27, 0x34, 0x29 };
+	static const uint8_t kPowPre[8]  = { 0x75, 0x77, 0x79, 0x75, 0x72, 0x75, 0x77, 0x77 };
+	static const uint8_t kPowBrg[8]  = { 0x78, 0x7A, 0x70, 0x75, 0x78, 0x7A, 0x77, 0x77 };
+
+	auto decodePacked = [&](uint8_t pk, int& outOff, int& outTy) {
+		outOff = (int)(pk & 15);
+		outTy = (int)((pk >> 4) & 7);
+		if (isPow) outTy = CH_POW;
+		else if (isRich) {
+			if (outTy == CH_MAJ) outTy = CH_MAJ7;
+			else if (outTy == CH_MIN) outTy = CH_M7;
+		}
+	};
+
+	int introTot = 0, endTot = 0;
 	for (int i = 0; i < nBars; i++) {
-		if (bars[i].section == SEC_END) {
-			int ty0 = (int)step[0].type;
-			if (ty0 == CH_7 || ty0 == CH_MAJ7 || ty0 == CH_SUS || ty0 == CH_POW) ty0 = CH_MAJ;
-			else if (ty0 == CH_M7 || ty0 == CH_DIM) ty0 = CH_MIN;
-			if (ty0 < 0 || ty0 > CH_POW) ty0 = CH_MAJ;
-			bars[i].root = tonic;
-			bars[i].type = ty0;
+		if (bars[i].section == SEC_INTRO) introTot++;
+		else if (bars[i].section == SEC_END) endTot++;
+	}
+
+	int body = 0, introCur = 0, endCur = 0;
+	for (int i = 0; i < nBars; i++) {
+		if (bars[i].section == SEC_INTRO) {
+			/* イントロ: 1小節目はI、最後はV7で本体へ繋ぐ自然なターンアラウンド */
+			int k = introCur++;
+			int offI = (int)stepA[k % nA].off;
+			int tyI = (int)stepA[k % nA].type;
+			if (introTot >= 2 && k == introTot - 1) {
+				offI = 7;
+				tyI = isPow ? CH_POW : (isRich ? CH_7 : ((pat & 1) ? CH_SUS : CH_7));
+			} else if (introTot >= 4 && k == introTot - 2) {
+				offI = isMinor ? 5 : 2;
+				tyI = isPow ? CH_POW : (isRich ? CH_M7 : CH_MIN);
+			}
+			bars[i].root = (tonic + offI) % 12;
+			bars[i].type = tyI;
 			bars[i].root2 = -1;
+			bars[i].type2 = 0;
 			continue;
 		}
-		int at = (bars[i].section == SEC_BODY) ? body++ : i;
-		int phrase = (at / 8) & 3;
-		int ix = (at + rot) % n;
-		if (phrase == 2)
-			ix = (n - 1 - ((at + rot) % n) + n) % n;
-		int off = (int)step[ix].off;
+		if (bars[i].section == SEC_END) {
+			/* エンディング: 2小節以上なら IV/ii -> V7 -> I の本格的な終止形を組む */
+			int k = endCur++;
+			int rem = endTot - 1 - k;
+			int ty0 = homeType;
+			if (ty0 == CH_7 || ty0 == CH_MAJ7 || ty0 == CH_SUS || ty0 == CH_POW) ty0 = isPow ? CH_POW : CH_MAJ;
+			else if (ty0 == CH_M7 || ty0 == CH_DIM) ty0 = CH_MIN;
+			int offE = 0, tyE = ty0;
+			if (rem == 1) {
+				offE = 7;
+				tyE = isPow ? CH_POW : CH_7;
+			} else if (rem == 2) {
+				offE = isMinor ? 5 : ((isRich || (pat & 1)) ? 2 : 5);
+				tyE = isPow ? CH_POW : ((offE == 2) ? (isRich ? CH_M7 : CH_MIN) : (isMinor ? CH_MIN : (isRich ? CH_MAJ7 : CH_MAJ)));
+			} else if (rem >= 3) {
+				offE = isMinor ? 8 : 9;
+				tyE = isPow ? CH_POW : (isMinor ? CH_MAJ : (isRich ? CH_M7 : CH_MIN));
+			}
+			bars[i].root = (tonic + offE) % 12;
+			bars[i].type = tyE;
+			bars[i].root2 = -1;
+			bars[i].type2 = 0;
+			continue;
+		}
+		if (bars[i].section == SEC_BREAK) {
+			/* ブレイク: 既存コードが無ければトニック/ドミナントで繋ぐ */
+			if (!bars[i].voiced) {
+				bars[i].root = (i > 0 && bars[i - 1].root >= 0) ? bars[i - 1].root : tonic;
+				bars[i].type = (i > 0) ? bars[i - 1].type : homeType;
+			}
+			continue;
+		}
+		int at = (bars[i].section == SEC_BODY) ? body++ : 0;
+		const BarPlan& pl = PlanOfBar(at);
+		/* 既存メロディ/コードから和声が解析されている小節は、useProg 明示時以外そのまま尊重 */
+		if (bars[i].voiced && !useProg) continue;
+		int off = 0, ty = CH_MAJ;
+		const int rot = (int)(ap.progRot & 3);
+		const int cyc = at / 64; /* 64小節超えの周回でさらに変化 */
+
+		if (isBlues12) {
+			int p12 = at % 12;
+			int chorus = at / 12;
+			static const int bOff[12] = { 0, 0, 0, 0, 5, 5, 0, 0, 7, 5, 0, 7 };
+			off = bOff[p12];
+			ty = CH_7;
+			/* クイックチェンジやジャズブルース変化をコーラス毎に変える */
+			if (p12 == 1 && ((chorus + pat) & 1)) off = 5;
+			else if (p12 == 7 && chorus >= 1) { off = 9; ty = CH_7; }
+			else if (p12 == 8 && (chorus & 1)) { off = 2; ty = CH_M7; }
+			else if (p12 == 9 && (chorus & 1)) { off = 7; ty = CH_7; }
+		} else {
+			int p8 = pl.phraseBar & 7;
+			int idxA = (p8 + rot + (cyc & 1 ? 2 : 0)) % nA;
+			int idxB = (p8 + (rot >> 1) + (cyc & 1 ? 4 : 0)) % nB;
+			switch (pl.sec) {
+			case 0: /* A1: スタイル本来の進行 A */
+				off = (int)stepA[idxA].off;
+				ty = (int)stepA[idxA].type;
+				break;
+			case 1: /* A2: 進行 A + 後半ターンアラウンド */
+				off = (int)stepA[idxA].off;
+				ty = (int)stepA[idxA].type;
+				if (p8 == 6) { off = isMinor ? 5 : 2; ty = isPow ? CH_POW : (isRich ? CH_M7 : CH_MIN); }
+				else if (p8 == 7) { off = 7; ty = isPow ? CH_POW : CH_7; }
+				break;
+			case 2: /* B1: 前サビ（テンション上昇→V7） */
+				decodePacked(isPow ? kPowPre[p8] : (isMinor ? kPreMin[p8] : kPreMaj[p8]), off, ty);
+				break;
+			case 3: /* C1: サビ1（スタイルの進行 B） */
+				off = (int)stepB[idxB].off;
+				ty = (int)stepB[idxB].type;
+				break;
+			case 4: /* A3: 2番A（リハーモナイズ版：A1の複製にしない） */
+				off = (int)stepA[(p8 + 4 + rot) % nA].off;
+				ty = (int)stepA[(p8 + 4 + rot) % nA].type;
+				if (p8 == 0) { off = (int)stepA[0].off; ty = (int)stepA[0].type; }
+				else if (p8 == 2) { off = isMinor ? 3 : 4; ty = isPow ? CH_POW : (isMinor ? CH_MAJ : (isRich ? CH_M7 : CH_MIN)); }
+				else if (p8 == 7) { off = 7; ty = isPow ? CH_POW : CH_7; }
+				break;
+			case 5: /* D: ブリッジ（調性を保った展開） */
+				if (isPow) decodePacked(kPowBrg[p8], off, ty);
+				else if (fam == FAM_JAZZ || style == SC_AS_BOSSA || style == SC_AS_FUSION)
+					decodePacked(kBrgJazz[p8], off, ty);
+				else decodePacked(isMinor ? kBrgMin[p8] : kBrgMaj[p8], off, ty);
+				break;
+			case 6: /* E: ソロ／クライマックス準備 */
+				if (p8 < 4) {
+					off = (int)stepB[(p8 + 4) % nB].off;
+					ty = (int)stepB[(p8 + 4) % nB].type;
+				} else if (p8 < 7) {
+					off = (int)stepA[(p8 + 2) % nA].off;
+					ty = (int)stepA[(p8 + 2) % nA].type;
+				} else {
+					off = 7;
+					ty = isPow ? CH_POW : ((pat & 1) ? CH_SUS : CH_7);
+				}
+				break;
+			default: /* C2: 大サビ＋強い終止 */
+				off = (int)stepB[idxB].off;
+				ty = (int)stepB[idxB].type;
+				if (p8 == 3) { off = isMinor ? 8 : 9; ty = isPow ? CH_POW : (isMinor ? CH_MAJ : (isRich ? CH_M7 : CH_MIN)); }
+				else if (p8 == 6) { off = isMinor ? 5 : 2; ty = isPow ? CH_POW : (isRich ? CH_M7 : CH_MIN); }
+				else if (p8 == 7) { off = (pl.turn == 3) ? 0 : 7; ty = (pl.turn == 3) ? homeType : (isPow ? CH_POW : CH_7); }
+				break;
+			}
+		}
+
 		if (off < 0) off = 0;
-		int ty = (int)step[ix].type;
 		if (ty < 0 || ty > CH_POW) ty = CH_MAJ;
-		int root = (tonic + off + phraseAdd[phrase]) % 12;
+		int root = (tonic + off) % 12;
 		if (root < 0) root += 12;
 		bars[i].root = root;
 		bars[i].type = ty;
 		bars[i].root2 = -1;
 		bars[i].type2 = 0;
-		if (halfFam && ((pat & 4) || ((at + pat) & 1)))
-			SecondChord(root, ty, at, style, pat, &bars[i].root2, &bars[i].type2);
+	}
+
+	/* 2パス目: 次の小節の根音を見た上で、音楽的な半小節パッシング/ドミナント分割(root2)を置く */
+	body = 0;
+	for (int i = 0; i < nBars; i++) {
+		if (bars[i].section != SEC_BODY || bars[i].len < 168) continue;
+		int at = body++;
+		if (!useProg && bars[i].voiced) continue;
+		const BarPlan& pl = PlanOfBar(at);
+		if (pl.turn == 3) continue;
+		int nextRoot = (i + 1 < nBars && bars[i + 1].root >= 0) ? bars[i + 1].root : tonic;
+		int wantHalf = 0;
+		if (pl.turn == 2) wantHalf = 1; /* 8小節末のターンアラウンド */
+		else if (halfStyle && (pl.sec >= 3 || (pl.varBits & 1))) wantHalf = ((at + pat) & 1);
+		else if (pl.sec == 6 && pl.phraseBar >= 4) wantHalf = 1; /* Eセクション後半の加速 */
+		else if (pl.sec == 7 && (pl.phraseBar == 5 || pl.phraseBar == 6)) wantHalf = 1;
+		if (!wantHalf) continue;
+		/* 次小節へのドミナント(V7 of next)またはダイアトニック経過和音 */
+		int r2 = (nextRoot + 7) % 12;
+		int t2 = isPow ? CH_POW : CH_7;
+		if (r2 == bars[i].root) {
+			r2 = (tonic + (isMinor ? 10 : 5)) % 12;
+			t2 = isPow ? CH_POW : (isRich ? CH_MAJ7 : CH_MAJ);
+		}
+		bars[i].root2 = r2;
+		bars[i].type2 = t2;
 	}
 }
 
@@ -3430,6 +3831,9 @@ static uint32_t s_wroteDrum;
 static int s_barNotes;
 static int s_putForce;
 static int s_nextRootPc = -1;
+static int s_secIdx = 0;  /* イントロ/ブレイク内の現在小節番号 (0..) */
+static int s_secLen = 1;  /* イントロ/ブレイクの総小節数 */
+static int s_endRem = 0;  /* エンディングの残り小節数 (0 = 最終小節) */
 
 static int ScaleOff(int scale, int deg)
 {
@@ -3831,180 +4235,280 @@ static int HitTimes(int pos, int span, int fig, int pat, int waltz, int* at, int
 	return n;
 }
 
-/* 16〜256小節対応・スタイル別本格メロディ生成（A-A'-B-C-D-C' の楽曲構造＋呼吸＋モチーフレガート＋装飾ベンド）。 */
+/* 16〜256小節対応・64小節展開＋form 0〜100連続制御＋全60スタイル/16アレンジ対応メロディ生成。
+   deg は楽曲のキー基準のダイアトニック度数（sing 側で強拍のみ現在コードトーンへ自然に吸着）。 */
 static void BuildMelody(int form, int melSpan)
 {
 	if (melSpan < 16) melSpan = 16;
 	if (melSpan > 256) melSpan = 256;
 	s_song.melSpan = melSpan;
 	const int style = (s_song.styleId >= 0 && s_song.styleId < SC_AS_COUNT) ? s_song.styleId : 0;
+	const StyleDef& sd = kDef[style];
 	const StyleExtra& sx = kStyleExtra[style];
 	const ArrGene& ag = kArrGene[s_song.pat & 15];
-	const int waltz = (s_song.cast.drum == 3);
-	const int dir = (s_song.cast.step < 0) ? -1 : 1;
-	const int pat = s_song.pat;
+	const ArrProfile& ap = kArrProf[s_song.pat & 15];
+	const int waltz = (s_song.cast.drum == 3) || (sd.div == 12 && (style == SC_AS_WALTZ || style == SC_AS_SWING3));
+	const int pat = s_song.pat & 15;
 	const int melFam = StyleFam(style);
 	const int melKind = s_song.melKind;
 	for (int bar = 0; bar < 256; bar++) s_song.melCount[bar] = 0;
+	if (form <= 0) return;
 
-	/* スタイル別の動機セル（度数移動・音数） */
-	static const int8_t kMotif[8][8] = {
-		{ 0, 2, 4, 2, 5, 4, 2, 0 },
-		{ 0, 4, 7, 4, 5, 4, 2, 0 },
-		{ 2, 4, 5, 4, 7, 5, 4, 2 },
-		{ 0, 1, 2, 4, 2, 1, 0, -1 },
-		{ 4, 2, 0, 2, 4, 7, 5, 4 },
-		{ 0, 3, 4, 5, 4, 3, 2, 0 },
-		{ 0, 2, 0, 4, 5, 4, 7, 4 },
-		{ 7, 5, 4, 2, 4, 5, 4, 0 }
+	/* 16種の歌いやすい動機セル（順次進行＋跳躍＋解決のバランス） */
+	static const int8_t kMotif[16][8] = {
+		{ 0, 1, 2, 4, 3, 2, 1, 0 },  /* 王道J-POP上昇アーチ */
+		{ 2, 4, 5, 4, 2, 3, 2, 0 },  /* 叙情サビ型 */
+		{ 4, 4, 2, 4, 5, 4, 2, 1 },  /* フック反復型 */
+		{ 0, 2, 4, 5, 4, 2, 0, 2 },  /* 爽やかペンタ */
+		{ 4, 3, 2, 1, 0, 2, 3, 2 },  /* 下降しっとり */
+		{ 0, 0, 2, 3, 4, 2, 1, 0 },  /* リズミック刻み */
+		{ 2, 3, 4, 6, 5, 4, 2, 4 },  /* ジャズ/都会的テンション */
+		{ 5, 4, 2, 4, 7, 5, 4, 2 },  /* 高揚サビクライマックス */
+		{ 0, 4, 3, 2, 4, 2, 1, 0 },  /* 5度跳躍フック */
+		{ 1, 2, 4, 2, 1, 0, -1, 0 }, /* 切ないマイナー寄り */
+		{ 4, 5, 7, 5, 4, 2, 4, 2 },  /* 伸びやかハイトーン */
+		{ 0, 2, 1, 2, 4, 5, 4, 2 },  /* スキップ軽快 */
+		{ 3, 2, 0, 2, 4, 3, 2, 1 },  /* 穏やかAメロ */
+		{ 2, 0, 2, 4, 5, 7, 5, 4 },  /* ビルドアップ上昇 */
+		{ 0, 2, 4, 2, 0, -1, 0, 2 }, /* フォーク/バラード語り */
+		{ 7, 6, 5, 4, 5, 4, 2, 0 }   /* 劇的エンディング下降 */
 	};
 
+	/* セクションごとの音域リフト（A1低→A2→B1上昇→C1サビ高→A3→Dブリッジ→Eソロ→C2最高潮） */
+	static const int8_t kSecLift[8] = { 0, 1, 2, 4, 1, 2, 3, 5 };
+
+	/* form 1..100 から連続的に密度・装飾・シンコペーションを決定 */
+	int fClamped = form < 1 ? 1 : (form > 100 ? 100 : form);
+	/* 0..6 の段階＋細かい端数判定で form=10,20,30,40,50,60,70,80,90,100 がすべて滑らかに変化 */
+	int prevDeg = 0;
+
 	for (int bar = 0; bar < melSpan; bar++) {
-		/* 楽曲セクション：A(平穏) -> B(上昇) -> C(サビ/高揚) -> D(間/展開) -> C'(終盤ピーク) */
-		const int cycle = bar % 32;
-		const int secType = (cycle < 8) ? 0 : (cycle < 16) ? 1 : (cycle < 24) ? 2 : 3;
-		const int phrasePos = bar & 3;
-		const int phraseEnd = (phrasePos == 3);
+		const BarPlan& pl = PlanOfBar(bar);
+		const int sec = pl.sec & 7;
+		const int pBar = pl.phraseBar & 3;
+		const int phraseEnd = (pBar == 3);
 		const int songEnd = (bar >= melSpan - 2);
+		const uint32_t h = PlanHash(style, pat, bar, 913);
 
 		int at[12], du[12];
 		uint8_t bend[12];
+		uint8_t passN[12];
 		int nd = 0;
-		for (int z = 0; z < 12; z++) bend[z] = 0;
+		for (int z = 0; z < 12; z++) { bend[z] = 0; passN[z] = 0; }
 
-		int baseDense = (int)sx.melDense;
-		if (form < 25 && baseDense > 3) baseDense = 3;
-		else if (form >= 75 && baseDense < 5) baseDense++;
-		if (secType == 2 && baseDense < 7) baseDense++;
-		if (phraseEnd && baseDense > 2) baseDense = 2;
-		if (waltz && baseDense > 3) baseDense = 3;
-		if (baseDense < 2) baseDense = 2;
-		if (baseDense > 10) baseDense = 10;
+		/* form 1..100 で滑らかに小節あたり音数を決定（最低1〜最大10） */
+		int styleBase = (int)sx.melDense; /* 2..7 */
+		if (styleBase < 2) styleBase = 2;
+		if (styleBase > 7) styleBase = 7;
+		/* form による連続スケール: form=15 -> ~1.5音, form=50 -> styleBase, form=100 -> styleBase+3 */
+		int scaled100 = styleBase * (25 + fClamped * 115 / 100); /* 26%..140% of styleBase */
+		int targetN = (scaled100 + ((int)(h % 100))) / 100;
+		/* セクションとアレンジで変化をつける */
+		if (sec == 3 || sec == 7) targetN += 1; /* サビは歌い込む */
+		else if (sec == 6) targetN += 1;        /* ソロ/展開 */
+		else if (sec == 0 && pBar == 0) targetN -= 1;
+		else if (sec == 5 && pl.breakFeel) targetN -= 1; /* ブリッジ抜き */
+
+		if (ap.compMode == 2 || ap.compMode == 6 || ag.dens == 0) targetN -= 1;
+		else if (ap.compMode == 5 || ap.compMode == 7 || ap.compMode == 10 || ag.dens >= 3) targetN += 1;
+
+		/* コール＆レスポンス系アレンジは偶数/奇数小節で呼吸を作る */
+		if (ap.callResp >= 1 && (bar & 1) == 1 && !phraseEnd && sec != 3 && sec != 7 && targetN > 2)
+			targetN -= (ap.callResp == 2 ? 2 : 1);
+
+		/* 低form時の間引き（息継ぎ小節を作る） */
+		if (fClamped <= 25 && (pBar == 3) && !songEnd && ((bar / 4 + pat) & 1)) {
+			targetN = 1;
+		}
+		if (phraseEnd && targetN > 3 && fClamped < 85) targetN = (fClamped < 40) ? 1 : 2;
+		if (waltz && targetN > 4) targetN = 4;
+		if (targetN < 1) targetN = 1;
+		int maxCap = (fClamped < 20) ? 2 : (fClamped < 35) ? 3 : (fClamped < 55) ? 5 : (fClamped < 75) ? 7 : (fClamped < 90) ? 9 : 11;
+		if (targetN > maxCap) targetN = maxCap;
+		if (targetN > 11) targetN = 11;
 
 		if (bar >= melSpan - 1) {
 			at[0] = 0; du[0] = 44; nd = 1;
 		} else if (waltz) {
-			nd = (phraseEnd) ? 2 : 3;
-			for (int k = 0; k < nd; k++) { at[k] = k * 16; du[k] = 14; }
-			if (nd == 2) du[1] = 30;
-		} else {
-			/* スタイル別の自然な拍割と呼吸（休み） */
-			int mode = (melKind + secType + (bar / 8) + pat + sx.salt) % 6;
-			if (melFam == FAM_16 || melFam == FAM_FUNK || style == SC_AS_CITYPOP || style == SC_AS_ANISON) {
-				static const int8_t r16[4][8] = {
-					{ 0, 6, 9, 12, 18, 24, 30, 36 },
-					{ 3, 6, 12, 18, 21, 24, 30, 42 },
-					{ 0, 3, 6, 12, 18, 24, 33, 36 },
-					{ 6, 12, 15, 18, 24, 30, 36, 42 }
-				};
-				const int8_t* rr = r16[(bar + (int)ag.arpStyle + (int)ag.phase + (int)sx.salt) & 3];
-				for (int k = 0; k < 8 && nd < baseDense; k++) at[nd++] = rr[k];
-			} else if (melFam == FAM_JAZZ || melFam == FAM_BLUES || melFam == FAM_SHUF) {
-				static const int8_t rj[4][7] = {
-					{ 0, 8, 12, 20, 24, 32, 36 },
-					{ 4, 12, 16, 24, 32, 40, -1 },
-					{ 0, 12, 20, 24, 36, 42, -1 },
-					{ 8, 12, 24, 28, 36, -1, -1 }
-				};
-				const int8_t* rr = rj[(bar + (int)ag.arpStyle + (int)ag.phase) & 3];
-				for (int k = 0; k < 7 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
-			} else if (melFam == FAM_BALLAD || melFam == FAM_PAD || style == SC_AS_ENKA || style == SC_AS_SLOWROCK) {
-				static const int8_t rb[4][5] = {
-					{ 0, 18, 24, 36, -1 },
-					{ 0, 12, 24, 36, 42 },
-					{ 6, 18, 24, 38, -1 },
-					{ 0, 12, 30, -1, -1 }
-				};
-				const int8_t* rr = rb[(bar + secType + (int)ag.arpStyle) & 3];
-				for (int k = 0; k < 5 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
-			} else if (melFam == FAM_HOP || melFam == FAM_TRAP || melFam == FAM_REG || melFam == FAM_SKA) {
-				static const int8_t rh[4][6] = {
-					{ 6, 12, 24, 30, 36, -1 },
-					{ 0, 9, 18, 24, 36, -1 },
-					{ 6, 18, 24, 33, 42, -1 },
-					{ 0, 12, 18, 30, -1, -1 }
-				};
-				const int8_t* rr = rh[(bar + (int)ag.arpStyle + (int)ag.phase) & 3];
-				for (int k = 0; k < 6 && rr[k] >= 0 && nd < baseDense; k++) at[nd++] = rr[k];
-			} else {
-				int step = (melFam == FAM_METAL || melKind == MEL_CHIP || melKind == MEL_SURF) ? 6 : (mode & 1 ? 6 : 12);
-				int cursor = (mode == 1) ? 6 : 0;
-				while (nd < baseDense && cursor < 42) {
-					if (!(phraseEnd && cursor >= 30)) at[nd++] = cursor;
-					cursor += step + (((nd + bar) % 3 == 2) ? 6 : 0);
-				}
-			}
-			if (phraseEnd && nd > 3) nd = 3;
+			static const int8_t rw[4][4] = {
+				{ 0, 16, 32, -1 }, { 0, 24, 32, -1 }, { 0, 8, 16, 32 }, { 0, 16, 40, -1 }
+			};
+			const int8_t* rr = rw[(sec + pBar + pat + (int)(h & 3)) & 3];
+			for (int k = 0; k < 4 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
 			if (nd < 1) { at[0] = 0; nd = 1; }
+			for (int k = 0; k < nd; k++) {
+				int nxt = (k + 1 < nd) ? (at[k + 1] - at[k] - 1) : (46 - at[k]);
+				if (nxt < 4) nxt = 4;
+				if (nxt > 36) nxt = 36;
+				du[k] = nxt;
+			}
+		} else {
+			/* スタイル族×セクション×アレンジごとの自然な拍割テーブル（48単位小節） */
+			int row = (sec * 3 + (pBar & 1) + (int)ap.compMode + (int)(pl.varBits & 3) + (int)sx.salt) & 7;
+			if (melFam == FAM_16 || melFam == FAM_FUNK || style == SC_AS_CITYPOP || style == SC_AS_ANISON || style == SC_AS_DISCO || style == SC_AS_FUSION) {
+				static const int8_t r16[8][10] = {
+					{ 0, 6, 9, 12, 18, 24, 30, 36, 42, -1 },
+					{ 3, 6, 12, 18, 21, 24, 30, 36, 42, -1 },
+					{ 0, 3, 6, 12, 15, 18, 24, 30, 33, 36 },
+					{ 6, 12, 15, 18, 24, 27, 30, 36, 42, -1 },
+					{ 0, 6, 12, 18, 24, 27, 33, 36, 42, 45 },
+					{ 0, 9, 12, 18, 24, 30, 33, 39, 42, -1 },
+					{ 6, 9, 12, 18, 24, 30, 36, 39, 42, -1 },
+					{ 0, 6, 12, 15, 21, 24, 30, 36, 42, 45 }
+				};
+				const int8_t* rr = r16[row];
+				for (int k = 0; k < 10 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
+			} else if (melFam == FAM_JAZZ || melFam == FAM_BLUES || melFam == FAM_SHUF || sd.div == 12) {
+				static const int8_t rj[8][8] = {
+					{ 0, 8, 12, 20, 24, 32, 36, 44 },
+					{ 4, 12, 16, 24, 32, 40, -1, -1 },
+					{ 0, 12, 20, 24, 28, 36, 40, -1 },
+					{ 8, 12, 20, 24, 32, 36, 44, -1 },
+					{ 0, 4, 12, 20, 24, 36, 44, -1 },
+					{ 4, 12, 20, 28, 36, 40, -1, -1 },
+					{ 0, 8, 16, 24, 32, 40, 44, -1 },
+					{ 12, 20, 24, 32, 36, 44, -1, -1 }
+				};
+				const int8_t* rr = rj[row];
+				for (int k = 0; k < 8 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
+			} else if (melFam == FAM_BALLAD || melFam == FAM_PAD || style == SC_AS_ENKA || style == SC_AS_SLOWROCK || style == SC_AS_AMBIENT) {
+				static const int8_t rb[8][7] = {
+					{ 0, 18, 24, 36, 42, -1, -1 },
+					{ 0, 12, 24, 30, 36, 42, -1 },
+					{ 6, 18, 24, 36, 42, -1, -1 },
+					{ 0, 12, 18, 30, 36, -1, -1 },
+					{ 0, 6, 18, 24, 36, 42, -1 },
+					{ 12, 24, 30, 36, 42, -1, -1 },
+					{ 0, 12, 24, 36, 42, 45, -1 },
+					{ 0, 18, 30, 36, 42, -1, -1 }
+				};
+				const int8_t* rr = rb[row];
+				for (int k = 0; k < 7 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
+			} else if (melFam == FAM_HOP || melFam == FAM_TRAP || melFam == FAM_REG || melFam == FAM_SKA || melFam == FAM_BOSSA || melFam == FAM_LATIN) {
+				static const int8_t rh[8][8] = {
+					{ 6, 12, 18, 24, 30, 36, 42, -1 },
+					{ 0, 9, 18, 24, 33, 36, 42, -1 },
+					{ 6, 18, 24, 30, 36, 42, -1, -1 },
+					{ 0, 12, 18, 27, 30, 36, 42, -1 },
+					{ 3, 12, 18, 24, 33, 42, -1, -1 },
+					{ 0, 6, 15, 24, 30, 39, 42, -1 },
+					{ 6, 12, 21, 24, 30, 36, 42, -1 },
+					{ 0, 9, 12, 24, 30, 36, 45, -1 }
+				};
+				const int8_t* rr = rh[row];
+				for (int k = 0; k < 8 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
+			} else {
+				/* 8ビート/ロック/メタル/テクノ/チップチューン等 */
+				static const int8_t r8[8][10] = {
+					{ 0, 6, 12, 18, 24, 30, 36, 42, -1, -1 },
+					{ 0, 12, 18, 24, 30, 36, 42, 45, -1, -1 },
+					{ 6, 12, 18, 24, 30, 36, 42, -1, -1, -1 },
+					{ 0, 6, 12, 24, 30, 36, 39, 42, -1, -1 },
+					{ 0, 6, 9, 12, 18, 24, 30, 36, 42, -1 },
+					{ 0, 12, 15, 18, 24, 30, 36, 42, -1, -1 },
+					{ 6, 12, 24, 30, 36, 42, 45, -1, -1, -1 },
+					{ 0, 6, 12, 18, 21, 24, 30, 36, 42, 45 }
+				};
+				const int8_t* rr = r8[row];
+				for (int k = 0; k < 10 && rr[k] >= 0 && nd < targetN; k++) at[nd++] = rr[k];
+			}
+			if (nd < 1) { at[0] = 0; nd = 1; }
+			/* フレーズ終端はロングトーンで歌い切る（後ろの音を残しつつ余韻を作る） */
+			if (phraseEnd && nd > 2 && fClamped < 85) nd = 2;
 			for (int k = 0; k < nd; k++) {
 				int nxt = (k + 1 < nd) ? (at[k + 1] - at[k] - 1) : (46 - at[k]);
 				if (phraseEnd && k == nd - 1) nxt = 46 - at[k];
 				if (nxt < 3) nxt = 3;
-				if (nxt > 36) nxt = 36;
+				if (nxt > 38) nxt = 38;
 				du[k] = nxt;
 			}
 		}
 
-		if (nd > 12) nd = 12;
-		if (ag.sync >= 2 && !waltz) {
+		/* アレンジ別のシンコペーション・前ノリ（8ビート/バラード/ワルツは崩さない） */
+		const int straightStyle = (melFam == FAM_8 || melFam == FAM_BALLAD || melFam == FAM_PAD || melFam == FAM_MARCH || waltz);
+		if ((ap.compMode == 4 || ap.compMode == 7 || ag.sync >= 2) && !straightStyle && nd >= 2) {
 			for (int k = nd - 1; k >= 1; k--) {
-				int sh = (ag.phase & 1) ? 6 : 3;
+				int sh = (ap.compMode == 7 || (pat & 1)) ? 3 : 6;
 				int lim = (k + 1 < nd) ? (at[k + 1] - 2) : 44;
-				if (at[k] > 0 && at[k] + sh <= lim) at[k] += sh;
+				if (at[k] > 0 && at[k] + sh <= lim && ((k + bar + pat) & 1))
+					at[k] += sh;
 			}
 		}
-		if (ag.dens == 0 && nd > 3 && !phraseEnd) nd = 3;
-		if (form < 35 && nd > 2 && bar < melSpan - 1) {
-			int a0 = at[0];
-			int a1 = at[nd - 1];
-			int d1 = (nd > 1) ? du[nd - 1] : 12;
-			if (a1 <= a0 + 3) a1 = (a0 + 18 > 36) ? 36 : a0 + 18;
-			int d0 = a1 - a0 - 1;
-			if (d0 < 4) d0 = 4;
-			if (d0 > 20) d0 = 20;
-			at[0] = a0; du[0] = d0;
-			at[1] = a1; du[1] = (d1 < 4) ? 8 : d1;
-			nd = 2;
-		}
-		uint8_t passN[12];
-		for (int z = 0; z < 12; z++) passN[z] = 0;
-		if (form >= 75 && !waltz && nd >= 2 && nd < 11 && !phraseEnd) {
-			for (int k = 0; k + 1 < nd; k++) {
-				if (at[k + 1] - at[k] < 9) continue;
-				if (((k + bar + pat) & 1) != 0) continue;
+
+		/* form>=65 から段階的に経過音（パッシングトーン）・装飾16分を追加 */
+		if (fClamped >= 65 && !waltz && nd >= 2 && nd < 11 && !songEnd) {
+			int maxAdd = (fClamped >= 90) ? 2 : 1;
+			int added = 0;
+			int minGap = (fClamped >= 85) ? 6 : 9;
+			for (int k = 0; k + 1 < nd && added < maxAdd && nd < 11; k++) {
+				int gap = at[k + 1] - at[k];
+				if (gap < minGap) continue;
+				if (((k + bar + pat + sec) & 1) != 0 && fClamped < 90) continue;
+				int step = (gap >= 12 && straightStyle) ? 6 : 3;
 				for (int j = nd; j > k + 1; j--) {
 					at[j] = at[j - 1];
 					du[j] = du[j - 1];
 					passN[j] = passN[j - 1];
 				}
-				at[k + 1] = at[k] + 3;
-				du[k + 1] = 3;
+				at[k + 1] = at[k] + step;
+				du[k + 1] = step;
 				passN[k + 1] = 1;
-				if (du[k] > 3) du[k] = 3;
+				if (du[k] > step) du[k] = step;
 				nd++;
-				break;
+				added++;
+				k++;
 			}
 		}
-		int secLift = (secType == 0) ? 0 : (secType == 1) ? 2 : (secType == 2) ? 4 : 1;
-		if (ag.octBias >= 7) secLift += 2;
-		else if (ag.octBias <= -7) secLift -= 2;
-		const int motifRow = ((bar / 4) + (int)ag.arpStyle + (int)ag.phase) & 7;
-		int prevDeg = secLift;
+
+		/* 64小節のセクション別モチーフ選択（A系・B系・Cサビ・Dブリッジ・Eソロで明確に別動機） */
+		int secLift = kSecLift[sec];
+		if (ap.octShift > 0) secLift += 2;
+		else if (ap.octShift < 0) secLift -= 1;
+
+		/* A1(0)/A2(1)/A3(4)は親戚モチーフ、C1(3)/C2(7)はサビ専用モチーフ、D(5)/E(6)は対照モチーフ */
+		int baseMotif = (style + pat * 3 + (int)sx.salt) & 15;
+		int motifRow;
+		if (sec == 0 || sec == 1 || sec == 4) motifRow = (baseMotif + (sec == 4 ? 1 : 0)) & 15;
+		else if (sec == 2) motifRow = (baseMotif + 5) & 15;
+		else if (sec == 3 || sec == 7) motifRow = (baseMotif + 7) & 15;
+		else if (sec == 5) motifRow = (baseMotif + 11) & 15;
+		else motifRow = (baseMotif + 13) & 15;
+
+		/* 2小節対（問い→答え）と4小節フレーズ（起承転結）で歌う */
+		int phraseLift = (pBar == 1) ? 1 : (pBar == 2) ? 2 : 0;
+		if (sec == 3 || sec == 7) phraseLift = (pBar == 2) ? 3 : (pBar == 1 ? 1 : 0);
+		else if (sec == 5) phraseLift = (pBar == 0) ? 2 : (pBar == 2 ? -1 : 0);
+
 		for (int k = 0; k < nd; k++) {
-			int mDeg = kMotif[motifRow][(phrasePos == 2) ? (7 - (k & 7)) : (k & 7)];
-			int seq = (phrasePos == 1) ? 2 : (phrasePos == 2) ? 4 : 0;
-			int deg = mDeg + secLift + seq;
-			if (passN[k]) deg = prevDeg + 1;
-			else if (k == 0 && phrasePos == 0) deg = secLift;
+			int idx = (pBar == 2) ? (7 - (k & 7)) : ((k + (pBar & 1) * 2) & 7);
+			int mDeg = kMotif[motifRow][idx];
+			int deg = mDeg + secLift + phraseLift;
+			if (passN[k]) {
+				/* 経過音は直前音から1度だけ滑らかに動く */
+				deg = prevDeg + ((deg >= prevDeg) ? 1 : -1);
+			} else if (k == 0 && pBar == 0 && (sec == 0 || sec == 3 || sec == 7)) {
+				deg = secLift + ((sec == 3 || sec == 7) ? 2 : 0);
+			} else if (k > 0) {
+				/* 歌唱可能な跳躍幅（最大5度）に収める */
+				if (deg - prevDeg > 5) deg = prevDeg + 3;
+				else if (prevDeg - deg > 5) deg = prevDeg - 3;
+			}
+			/* フレーズ末尾・曲末の自然な終止感 */
 			if (songEnd && k == nd - 1) deg = 0;
-			else if (phraseEnd && k == nd - 1) deg = (secType == 1) ? 4 : 2;
+			else if (phraseEnd && k == nd - 1) {
+				if (sec == 2) deg = secLift + 4;      /* プレコーラス末→ドミナント感でサビへ */
+				else if (sec == 3 || sec == 7) deg = secLift; /* サビ末→トニック/高音解決 */
+				else deg = (bar & 4) ? 0 : 2;
+			}
 			prevDeg = deg;
+
 			if (sx.bendMode == 3 && (k == 1 || (phraseEnd && k == 0))) bend[k] = 1;
-			else if ((sx.bendMode == 1 || sx.bendMode == 2 || sx.bendMode == 6) && du[k] >= 12 && (k == 0 || k == nd - 1)) bend[k] = 1;
-			int stored = deg * dir;
-			if (stored > 127) stored = 127;
-			if (stored < -127) stored = -127;
-			s_song.mel[bar][k].deg = (int8_t)stored;
+			else if ((sx.bendMode == 1 || sx.bendMode == 2 || sx.bendMode == 6) && du[k] >= 10 && (k == 0 || k == nd - 1)) bend[k] = 1;
+			else if (fClamped >= 80 && sx.bendMode && du[k] >= 12 && k == 0 && (sec == 3 || sec == 6 || sec == 7)) bend[k] = 1;
+
+			if (deg > 24) deg = 24;
+			if (deg < -12) deg = -12;
+			s_song.mel[bar][k].deg = (int8_t)deg;
 			s_song.mel[bar][k].at = (uint8_t)at[k];
 			s_song.mel[bar][k].du = (uint8_t)((du[k] < 1) ? 1 : du[k]);
 			s_song.mel[bar][k].leg = (uint8_t)((k == 0 || du[k] >= 10) ? 1 : 0);
@@ -4135,28 +4639,45 @@ static int IsBoom(int pos)
 	return (pos == s_song.impact || pos == s_song.impact2) ? 1 : 0;
 }
 
+static int ShapeVel(int baseVel, const BarPlan& pl, const ArrProfile& ap, int st);
+
 static void PaintDrummerLayer(Ctx* c, int ch, int di, int style, int pat, int bar, const BarInfo* b,
 	int div, const uint16_t* drm, int introSoft, int drumDur)
 {
 	if (!c || ch < 0 || di <= 0 || !b || !drm || div < 1) return;
 	if (b->section == SEC_BREAK || b->section == SEC_END) return;
-	const StyleExtra& sx = kStyleExtra[(style >= 0 && style < SC_AS_COUNT) ? style : 0];
-	const int pos = (b->section == SEC_BODY) ? PosOf(bar) : 0;
-	const int fam = StyleFam(style);
 	if (c->isFm) return;
+	if (style < 0 || style >= SC_AS_COUNT) style = 0;
+	const StyleExtra& sx = kStyleExtra[style];
+	const ArrProfile& ap = kArrProf[pat & 15];
+	const BarPlan& pl = PlanOfBar((b->section == SEC_BODY) ? bar : 0);
+	const int fam = StyleFam(style);
+	const int quiet = StyleQuiet(style);
+
+	/* 2本目以降のドラムch: セクション展開に連動するパーカッション層。
+	   A1前半や抜きセクションは抑え、A2/B1/サビ/ソロで段階的に加わる。 */
+	if (b->section == SEC_BODY) {
+		if (di == 1 && pl.sec == 0 && (bar & 1) == 0 && quiet) return;
+		if (di == 2 && pl.sec < 2 && pl.turn == 0) return;
+		if (di >= 3 && pl.sec != 3 && pl.sec != 6 && pl.sec != 7 && pl.turn < 2) return;
+		if (pl.breakFeel == 1 && pl.turn == 0 && di >= 2) return;
+	}
 
 	/* パーカッションの音色セット（スタイル固有）。キック/スネアを二重打ちして喧嘩させない。 */
-	static const uint8_t kPerc[6][4] = {
-		/* 0: Pop/Funk/CityPop */ { 54, 70, 63, 64 },
-		/* 1: Rock/Metal */       { 54, 56, 53, 52 },
-		/* 2: Jazz/Blues/Lo-fi */ { 69, 53, 37, 44 },
-		/* 3: Electro/Trap */     { 70, 69, 37, 75 },
-		/* 4: Orch/Ballad/Waltz */{ 81, 54, 41, 49 },
-		/* 5: Latin/Reggae/Afro */{ 75, 62, 63, 60 }
+	static const uint8_t kPerc[6][6] = {
+		/* 0: Pop/Funk/CityPop */ { 54, 70, 63, 64, 69, 56 }, /* Tamb, Maracas, HiConga, LowConga, Cabasa, Cowbell */
+		/* 1: Rock/Metal */       { 54, 56, 53, 52, 55, 65 }, /* Tamb, Cowbell, RideBell, China, Splash, HiTimbale */
+		/* 2: Jazz/Blues/Lo-fi */ { 69, 53, 37, 44, 70, 81 }, /* Cabasa, RideBell, Rim, PedHH, Maracas, Triangle */
+		/* 3: Electro/Trap */     { 70, 69, 37, 75, 56, 76 }, /* Maracas, Cabasa, Rim, Claves, Cowbell, HiWood */
+		/* 4: Orch/Ballad/Waltz */{ 81, 54, 41, 49, 70, 80 }, /* Triangle, Tamb, LowFloor, Crash, Maracas, MuteTri */
+		/* 5: Latin/Reggae/Afro */{ 75, 62, 63, 64, 60, 67 }  /* Claves, MuteConga, HiConga, LowConga, HiBongo, HiAgogo */
 	};
 	const uint8_t* pool = kPerc[sx.percSet % 6];
-	const int waltz = (s_song.cast.drum == 3);
+	const int waltz = (s_song.cast.drum == 3) || (div == 12 && (style == SC_AS_WALTZ || style == SC_AS_SWING3));
 	const int nSlot = div < 16 ? div : 16;
+
+	/* ターンアラウンドではパーカッションも駆け上がりフィルで呼応 */
+	const int percFill = (b->section == SEC_BODY && pl.turn >= 1 && !quiet);
 
 	for (int slot = 0; slot < nSlot && !c->overflow; slot++) {
 		uint32_t tick = b->t0 + (uint32_t)((uint64_t)slot * (uint64_t)b->len / (uint64_t)div);
@@ -4172,35 +4693,63 @@ static void PaintDrummerLayer(Ctx* c, int ch, int di, int style, int pat, int ba
 		int vel = 70;
 
 		if (waltz) {
-			if (di == 1 && (slot == 4 || slot == 8)) { pitch = pool[0]; vel = 68; }
-			else if (di >= 2 && (slot == 2 || slot == 6 || slot == 10)) { pitch = pool[1]; vel = 54; }
+			if (di == 1 && (slot == 4 || slot == 8)) { pitch = pool[(pl.sec >= 3) ? 0 : 1]; vel = 68; }
+			else if (di == 2 && (slot == 0 || slot == 8)) { pitch = pool[5]; vel = 60; }
+			else if (di >= 3 && (slot == 2 || slot == 6 || slot == 10)) { pitch = pool[(di + slot) % 6]; vel = 54; }
 		} else if (di == 1) {
-			if (fam == FAM_8 || fam == FAM_METAL) {
-				if ((slot % 4) == 2 && !mainKick && !mainSnare) { pitch = pool[0]; vel = 76; }
-				else if ((pos & 3) == 3 && slot == 12 && !mainSnare) { pitch = pool[1]; vel = 82; }
+			if (percFill && slot >= (nSlot * 3 / 4)) {
+				/* 末尾1拍のコンガ/ティンバレス/タンバリン回し */
+				int k = slot - (nSlot * 3 / 4);
+				pitch = pool[2 + ((k + pl.sec) % 4)];
+				vel = 72 + k * 6;
+			} else if (fam == FAM_8 || fam == FAM_METAL) {
+				if ((slot % 4) == 2 && !mainKick && !mainSnare) { pitch = pool[0]; vel = 74; }
+				else if ((pl.sec == 3 || pl.sec == 7) && (slot % 4) == 0 && !mainKick) { pitch = pool[1]; vel = 76; }
+				else if (pl.phraseBar == 3 && slot == (nSlot * 3 / 4) && !mainSnare) { pitch = pool[2]; vel = 80; }
+			} else if (fam == FAM_LATIN || fam == FAM_SAMBA || fam == FAM_BOSSA || fam == FAM_AFRO || fam == FAM_REG || fam == FAM_SKA) {
+				/* クラーベ/コンガ系は本格的なシンコペーション格子 */
+				static const uint16_t kClave[4] = { 0x4949u, 0x2492u, 0x5249u, 0x14A4u };
+				uint16_t cm = kClave[(pl.sec + (pl.varBits & 3) + pat) & 3];
+				if (cm & bit) {
+					pitch = pool[(slot & 2) ? 2 : 0];
+					vel = (slot % 4 == 0) ? 80 : 68;
+				} else if (!mainKick && !mainSnare && ((slot + pl.sec) & 3) == 3) {
+					pitch = pool[3]; vel = 62;
+				}
 			} else {
-				if (!mainKick && !mainSnare) {
-					int sel = ((slot + pos + pat) % 5);
-					if (sel == 0 || sel == 2) { pitch = pool[2]; vel = 74; }
-					else if (sel == 1 && (slot % 2 == 1 || fam == FAM_LATIN || fam == FAM_SAMBA || fam == FAM_BOSSA || fam == FAM_AFRO)) {
-						pitch = pool[3]; vel = 68;
-					} else if ((slot % 4) == 2) {
-						pitch = pool[1]; vel = 64;
-					}
-				} else if ((slot % 8) == 4 && sx.percSet == 4) {
-					pitch = pool[0]; vel = 72;
+				/* ポップス/ファンク/ジャズ/エレクトロ: セクションでシェイカー→コンガ→タンバリンへ展開 */
+				if ((pl.sec == 3 || pl.sec == 7) && (slot % 4) == 2) {
+					pitch = pool[0]; vel = 76;
+				} else if (!mainKick && !mainSnare) {
+					int sel = ((slot + bar + pl.sec * 2 + pat + (pl.varBits & 3)) % 6);
+					if (sel == 0) { pitch = pool[2]; vel = 72; }
+					else if (sel == 2 && (pl.sec >= 2 || ap.compMode >= 4)) { pitch = pool[3]; vel = 66; }
+					else if (sel == 4 && (slot % 2 == 1) && pl.sec >= 1) { pitch = pool[1]; vel = 58; }
+				} else if (sx.percSet == 4 && (slot % 8) == 4) {
+					pitch = pool[0]; vel = 68;
 				}
 			}
+		} else if (di == 2) {
+			/* 第2パーカッション層: オフビート・ベル/シェイカー/トライアングルで立体感 */
+			int step = (pl.sec >= 3) ? 2 : 4;
+			int off = ((di + pat + pl.sec) & 1) ? 2 : 0;
+			if (((slot + off) % step) == 0 && !mainKick) {
+				pitch = pool[(slot % 4 == 0) ? 4 : 5];
+				vel = 58 + ((pl.sec == 3 || pl.sec == 7) ? 10 : 0);
+			}
 		} else {
-			int phase = (di * 3 + pat + pos) & 3;
-			if (((slot + phase) % (3 + (di & 3))) == 0 && !mainKick) {
-				pitch = pool[(di + slot) & 3];
-				vel = 52 + ((slot % 4) == 0 ? 12 : 0) - (di > 3 ? 6 : 0);
+			/* 第3層以降: チャンネルごとに別位相・別楽器 */
+			int mod = 3 + ((di + pat) & 3);
+			int phase = (di * 5 + pat * 3 + bar + pl.sec) % mod;
+			if (((slot + phase) % mod) == 0 && !mainKick && !mainSnare) {
+				pitch = pool[(di * 2 + slot + pl.sec) % 6];
+				vel = 52 + ((slot % 4) == 0 ? 10 : 0) - (di > 4 ? 6 : 0);
 			}
 		}
 		if (pitch < 0) continue;
+		vel = ShapeVel(vel, pl, ap, slot * 48 / div);
 		if (introSoft) vel -= 14;
-		if (vel < 36) vel = 36;
+		if (vel < 34) vel = 34;
 		if (vel > 106) vel = 106;
 		PlaceDrumNote(c, ch, tick, pitch, vel, drumDur);
 	}
@@ -4212,24 +4761,56 @@ static void PaintPulse(int style, int pat, int bar, int section, int div, int en
 	for (int v = 0; v < DV_COUNT; v++) drm[v] = 0;
 	if (div > 16) div = 16;
 	if (style < 0 || style >= SC_AS_COUNT) style = 0;
+	const StyleDef& sd = kDef[style];
 	const StyleExtra& sx = kStyleExtra[style];
 	const ArrGene& ag = kArrGene[pat & 15];
-	int kind = s_song.cast.drum;
-	int q = div / 4;
-	if (q < 1) q = 1;
+	const ArrProfile& ap = kArrProf[pat & 15];
+	const BarPlan& pl = PlanOfBar((section == SEC_BODY) ? bar : 0);
+	const uint16_t slotMask = (div >= 16) ? 0xFFFFu : (uint16_t)((1u << div) - 1u);
+	const int q = (div >= 4) ? (div / 4) : 1;
+	const int famNow = StyleFam(style);
+	const int quiet = StyleQuiet(style);
+	const int waltz = (s_song.cast.drum == 3) || (div == 12 && (style == SC_AS_WALTZ || style == SC_AS_SWING3));
+	const int noOdd16 = (div >= 16) && (famNow == FAM_8 || famNow == FAM_BALLAD || famNow == FAM_PAD
+		|| famNow == FAM_REG || famNow == FAM_SKA || famNow == FAM_MARCH || style == SC_AS_SLOWROCK || style == SC_AS_ENKA);
+
 	auto bit = [&](int voice, int slot) {
 		if (slot < 0 || voice < 0 || voice >= DV_COUNT) return;
 		if (slot >= div) slot %= div;
 		if (slot < 16)
 			drm[voice] = (uint16_t)(drm[voice] | (uint16_t)(1u << slot));
 	};
-	auto at = [&](int voice, int unit) {
-		int s = unit * div / 48;
+	auto clr = [&](int voice, int slot) {
+		if (slot < 0 || slot >= 16 || voice < 0 || voice >= DV_COUNT) return;
+		drm[voice] = (uint16_t)(drm[voice] & ~(uint16_t)(1u << slot));
+	};
+	auto g16 = [&](int voice, int s16) {
+		int s = s16 * div / 16;
 		if (s >= div) s = div - 1;
 		bit(voice, s);
 	};
+
 	if (section == SEC_BREAK) {
+		/* ブレイク: 1拍目の抜けアクセント＋刻みハット/リム＋最終小節末尾の駆け上がりフィル */
+		if (s_secIdx == 0) {
+			bit(DV_KICK, 0);
+			if (!quiet) bit(DV_CRASH, 0);
+		} else {
+			bit(DV_KICK, 0);
+			bit(DV_RIM, q * 2);
+		}
 		for (int s = 0; s < div; s += (q > 1 ? q : 1)) bit(DV_HAT, s);
+		if (s_secIdx + 1 >= s_secLen) {
+			int fStart = div - q;
+			if (fStart < 1) fStart = div / 2;
+			if (quiet) {
+				bit(DV_RIM, div - 1);
+				bit(DV_OHAT, fStart);
+			} else {
+				for (int s = fStart; s < div; s++) bit((s & 1) ? DV_TOM : DV_SNARE, s);
+				bit(DV_OHAT, div - 1);
+			}
+		}
 		return;
 	}
 	if (ending) {
@@ -4237,332 +4818,365 @@ static void PaintPulse(int style, int pat, int bar, int section, int div, int en
 		bit(DV_CRASH, 0);
 		return;
 	}
-	int pos = (section == SEC_BODY) ? PosOf(bar) : 0;
-	int span = s_song.span > 0 ? s_song.span : 16;
-	int boom = IsBoom(pos);
-	int fill = (pos + 1 == s_song.impact || pos + 1 == s_song.impact2);
-	int quiet = StyleQuiet(style);
-	int late = (pos * 2 >= span);
-	int opened = (pos > span / 8);
-	int nearBoom = 0;
-	if (s_song.impact > 0 && pos < s_song.impact && pos + 4 >= s_song.impact) nearBoom = 1;
-	if (s_song.impact2 > 0 && pos < s_song.impact2 && pos + 4 >= s_song.impact2) nearBoom = 1;
-	const int famNow = StyleFam(style);
-	const int rideFam = (famNow == FAM_JAZZ || famNow == FAM_SHUF || famNow == FAM_BLUES
-		|| style == SC_AS_LOFI || style == SC_AS_SWING3 || style == SC_AS_PIANO
-		|| (ag.drumFlavor == 4 && famNow != FAM_8 && famNow != FAM_16));
-	const int hatV = rideFam ? DV_RIDE : DV_HAT;
 	if (section == SEC_INTRO) {
-		bit(DV_KICK, 0);
-		for (int s = 0; s < div; s += q) bit(DV_HAT, s);
-		if (bar + 1 >= 4) {
-			for (int s = div - q; s < div; s++) bit(DV_SNARE, s);
-			bit(DV_CRASH, 0);
+		/* イントロ: 小節ごとに段階的に楽器を増やし、最終イントロ小節で本体へ繋ぐフィルを入れる */
+		drm[DV_HAT] = (uint16_t)(Bits(sd.hat) & slotMask);
+		drm[DV_RIDE] = (uint16_t)(Bits(sd.ride) & slotMask);
+		if (!drm[DV_HAT] && !drm[DV_RIDE]) {
+			for (int s = 0; s < div; s += q) bit(DV_HAT, s);
+		}
+		if (s_secIdx == 0 && s_secLen >= 3) {
+			/* 1小節目: ハット/ライド＋リムで軽やかに導入 */
+			if (div >= 16) drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x5555u);
+			bit(DV_RIM, q);
+			bit(DV_RIM, q * 3);
+		} else if (s_secIdx == 1 && s_secLen >= 4) {
+			/* 2小節目: キックが加わる */
+			drm[DV_KICK] = (uint16_t)(Bits(sd.kick) & slotMask);
+			if (!drm[DV_KICK]) bit(DV_KICK, 0);
+			bit(DV_RIM, q * 3);
+		} else {
+			/* 後半: フルビートへ展開 */
+			drm[DV_KICK] = (uint16_t)(Bits(sd.kick) & slotMask);
+			drm[DV_SNARE] = (uint16_t)(Bits(sd.snare) & slotMask);
+			if (!drm[DV_KICK]) bit(DV_KICK, 0);
+			if (!drm[DV_SNARE] && !waltz) { bit(DV_SNARE, q); bit(DV_SNARE, q * 3); }
+		}
+		if (s_secIdx + 1 >= s_secLen) {
+			/* 最終イントロ小節: 本体1小節目のクラッシュへ繋ぐフィルイン */
+			int fStart = (s_secLen >= 2) ? (div - q) : (div / 2);
+			if (quiet) {
+				bit(DV_RIM, div - 1);
+				bit(DV_OHAT, fStart);
+			} else {
+				for (int s = fStart; s < div; s++) {
+					clr(DV_HAT, s); clr(DV_RIDE, s);
+					bit((s & 1) ? DV_TOM : DV_SNARE, s);
+				}
+				bit(DV_KICK, div - 1);
+			}
 		}
 		return;
 	}
-	if (boom) {
-		bit(DV_KICK, 0);
-		bit(DV_CRASH, 0);
-		bit(DV_SNARE, q);
-		bit(DV_OHAT, 0);
-		if (!quiet && div >= 8) {
-			bit(DV_TOM, q > 1 ? q / 2 : 1);
-			bit(DV_KICK, q * 2);
+	if (section == SEC_END) {
+		/* マルチ小節エンディングの終止前小節: 徐々に音数を抜きつつ最後の一打へ導く */
+		drm[DV_KICK] = (uint16_t)(Bits(sd.kick) & slotMask);
+		drm[DV_SNARE] = (uint16_t)(Bits(sd.snare) & slotMask);
+		drm[DV_RIDE] = (uint16_t)((Bits(sd.ride) | (Bits(sd.hat) & (div >= 16 ? 0x5555u : slotMask))) & slotMask);
+		if (!drm[DV_KICK]) bit(DV_KICK, 0);
+		if (s_endRem == 1 && !quiet) {
+			int fStart = div - q;
+			for (int s = fStart; s < div; s++) bit((s == div - 1) ? DV_TOM : DV_SNARE, s);
+			bit(DV_OHAT, fStart);
 		}
 		return;
-	}
-	if (fill && !quiet) {
-		bit(DV_KICK, 0);
-		bit(DV_SNARE, q);
-		int from = div / 2;
-		for (int s = from; s < div; s++) {
-			bit((s & 1) ? DV_SNARE : DV_TOM, s);
-		}
-		bit(DV_CRASH, div > 1 ? div - 1 : 0);
-		return;
-	}
-	if (kind == 3) {
-		int a = div / 3;
-		int b = (div * 2) / 3;
-		bit(DV_KICK, 0);
-		bit(DV_SNARE, a);
-		if (late) bit(DV_SNARE, b);
-		int step = (opened && !quiet) ? (a > 1 ? a / 2 : 1) : a;
-		if (step < 1) step = 1;
-		for (int s = 0; s < div; s += step) bit(hatV, s);
-	} else if (kind == 6) {
-		bit(DV_KICK, 0);
-		for (int s = q / 2; s < div; s += q) bit(hatV, s);
-		if (opened) {
-			for (int s = q / 2; s < div; s += q) bit(DV_SNARE, s);
-		}
-		if (late) bit(DV_RIM, q + q / 2);
-	} else if (kind == 8) {
-		bit(DV_KICK, 0);
-		if (opened && (pos % 2) == 0) bit(DV_SNARE, q * 2);
-		for (int s = 0; s < div; s += (late ? q : q * 2)) bit(hatV, s);
-	} else if (kind == 1 || kind == 9) {
-		for (int s = 0; s < div; s += q) bit(DV_KICK, s);
-		bit(DV_SNARE, q);
-		bit(DV_SNARE, q * 3);
-		int step = quiet ? q : (nearBoom && div >= 16 ? 1 : (q > 1 ? q / 2 : 1));
-		if (step < 1) step = 1;
-		for (int s = 0; s < div; s += step) bit(hatV, s);
-		if (late && kind == 9) at(DV_KICK, 30);
-		if (opened) bit(DV_OHAT, q * 3);
-	} else if (kind == 7) {
-		for (int s = 0; s < div; s += q) bit(DV_KICK, s);
-		for (int s = q; s < div; s += q * 2) bit(DV_SNARE, s);
-		for (int s = 0; s < div; s += (opened ? (q > 1 ? q / 2 : 1) : q)) bit(hatV, s);
-	} else if (kind >= 10) {
-		auto g = [&](int voice, int s16) {
-			int s = s16 * div / 16;
-			bit(voice, s);
-		};
-		int hatStep = (quiet || !opened) ? 2 : 1;
-		if (nearBoom && !quiet && !rideFam && ag.dens > 0) hatStep = 1;
-		switch (kind) {
-		case 10:
-			for (int s = 0; s < 16; s++) if ((s % 4) != 1) g(DV_KICK, s);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += hatStep) g(hatV, s);
-			break;
-		case 11:
-			for (int s = 0; s < 16; s += 2) g(DV_KICK, s);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 12:
-			g(DV_KICK, 0); if (late) g(DV_KICK, 10);
-			g(DV_SNARE, 8);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 13:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			for (int s = 0; s < 16; s += 2) g(DV_SNARE, s);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 14:
-			g(DV_KICK, 0); g(DV_KICK, 6);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 15:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			if (pat & 1) g(DV_OHAT, 12);
-			break;
-		case 16:
-			g(DV_KICK, 0); if (late) g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 17: case 46:
-			g(DV_KICK, 0); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			if (kind == 46) { g(DV_CLAP, 4); g(DV_CLAP, 12); }
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 18:
-			g(DV_KICK, 0); g(DV_KICK, 3); g(DV_KICK, 6); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += hatStep) g(hatV, s);
-			break;
-		case 19:
-			g(DV_KICK, 0); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 20:
-			g(DV_KICK, 0); if (pat & 1) g(DV_KICK, 14);
-			g(DV_SNARE, 8);
-			for (int s = 0; s < 8; s += 2) g(hatV, s);
-			for (int s = 12; s < 16; s++) g(hatV, s);
-			break;
-		case 21:
-			for (int s = 0; s < 16; s += 4) g(DV_KICK, s);
-			g(DV_CLAP, 4); g(DV_CLAP, 12);
-			for (int s = 2; s < 16; s += 4) g(hatV, s);
-			break;
-		case 22:
-			for (int s = 0; s < 16; s += 4) g(DV_KICK, s);
-			g(DV_CLAP, 4); g(DV_CLAP, 12);
-			for (int s = 2; s < 16; s += 4) g(DV_OHAT, s);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 23: case 44:
-			for (int s = 0; s < 16; s += 4) g(DV_KICK, s);
-			g(DV_CLAP, 4); g(DV_CLAP, 12);
-			for (int s = 0; s < 16; s += (kind == 44 && !nearBoom) ? 2 : 1) g(hatV, s);
-			if (opened) g(DV_OHAT, 14);
-			break;
-		case 24:
-			for (int s = 0; s < 16; s += 4) g(DV_KICK, s);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 2; s < 16; s += 4) g(DV_OHAT, s);
-			break;
-		case 25:
-			g(DV_KICK, 0); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += hatStep) g(hatV, s);
-			break;
-		case 26:
-			g(DV_KICK, 0); g(DV_KICK, 6); g(DV_KICK, 11);
-			g(DV_SNARE, 4); g(DV_SNARE, 12); g(DV_SNARE, 14);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 27:
-			g(DV_KICK, 0); g(DV_KICK, 6); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_RIM, 8); g(DV_RIM, 14);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 28:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 2; s < 16; s += 4) g(hatV, s);
-			break;
-		case 29:
-			g(DV_KICK, 8); g(DV_SNARE, 8);
-			for (int s = 2; s < 16; s += 4) g(hatV, s);
-			break;
-		case 30:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 4) { g(hatV, s); g(hatV, s + 3); }
-			break;
-		case 32:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 33:
-			g(DV_KICK, 0); g(DV_KICK, 6); g(DV_KICK, 8); g(DV_KICK, 14);
-			g(DV_SNARE, 6); g(DV_SNARE, 14);
-			break;
-		case 34:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 3); g(DV_SNARE, 6); g(DV_SNARE, 10); g(DV_SNARE, 14);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 36:
-			g(DV_RIM, 0); g(DV_RIM, 6); g(DV_RIM, 8); g(DV_RIM, 12); g(DV_RIM, 14);
-			g(DV_KICK, 0); g(DV_KICK, 10);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 40:
-		case 41: {
-			static const int kk[8][5] = {
-				{ 0, 3, 6, 10, -1 }, { 0, 4, 7, 10, 14 }, { 0, 6, 10, 13, -1 }, { 0, 3, 8, 11, 14 },
-				{ 0, 2, 6, 10, 15 }, { 0, 5, 8, 10, 13 }, { 0, 3, 7, 10, 12 }, { 0, 4, 6, 11, 14 }
-			};
-			int row = (pos + (kind == 41 ? 3 : 0) + pat) & 7;
-			for (int k = 0; k < 5; k++) if (kk[row][k] >= 0) g(DV_KICK, kk[row][k]);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			int ghost = 1 + ((pos * 2 + pat) % 7) * 2;
-			if (ghost > 15) ghost = 15;
-			if (ghost != 4 && ghost != 12) g(DV_RIM, ghost);
-			for (int s = 0; s < 16; s++) g(hatV, s);
-			g(DV_OHAT, (pos & 1) ? 7 : 11);
-			break;
-		}
-		case 42:
-			g(DV_KICK, 0); g(DV_KICK, 14);
-			g(DV_SNARE, 6); g(DV_SNARE, 12);
-			for (int s = 10; s < 16; s++) g(hatV, s);
-			break;
-		case 43:
-			g(DV_KICK, 0); g(DV_CRASH, 0);
-			for (int s = 2; s < 16; s += 2) g(DV_SNARE, s);
-			for (int s = 8; s < 16; s++) g((s & 1) ? DV_TOM : DV_SNARE, s);
-			break;
-		case 45:
-			g(DV_KICK, 0); g(DV_KICK, 14);
-			g(DV_SNARE, 8);
-			for (int s = 0; s < 16; s += 4) g(hatV, s);
-			break;
-		case 47:
-			g(DV_KICK, 0); g(DV_KICK, 8);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		case 48:
-			for (int s = 0; s < 16; s += 4) g(DV_KICK, s);
-			g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			if (opened) g(DV_CRASH, 0);
-			break;
-		default:
-			g(DV_KICK, 0); g(DV_SNARE, 4); g(DV_SNARE, 12);
-			for (int s = 0; s < 16; s += 2) g(hatV, s);
-			break;
-		}
-		(void)q;
-	} else if (kind == 2 || kind == 5) {
-		bit(DV_KICK, 0);
-		bit(DV_KICK, (div * 3) / 8);
-		if (late) bit(DV_KICK, (div * 6) / 8);
-		bit(DV_SNARE, q);
-		if (opened) bit(DV_SNARE, q * 3);
-		int step = late && !quiet ? (q > 1 ? q / 2 : 1) : q;
-		for (int s = 0; s < div; s += step) bit(hatV, s);
-		if (kind == 5) bit(DV_RIM, (div * 3) / 8);
-	} else {
-		bit(DV_KICK, 0);
-		if (opened || !quiet) bit(DV_KICK, q * 2);
-		bit(DV_SNARE, q);
-		bit(DV_SNARE, q * 3);
-		int step = q;
-		if (!quiet && opened) step = (q > 1) ? q / 2 : 1;
-		if (!quiet && nearBoom && div >= 16 && ag.dens > 0 && !rideFam) step = 1;
-		if (step < 1) step = 1;
-		for (int s = 0; s < div; s += step) bit(hatV, s);
-		if (late && !quiet && !rideFam) at(DV_RIM, 18);
-		if (opened && (pat & 1) && !rideFam) bit(DV_OHAT, q * 3);
 	}
 
-	if (section == SEC_BODY && !ending && div >= 16 && kind != 3) {
-		uint16_t extraK = (pos & 1) ? sx.kickB : sx.kickA;
-		if (famNow == FAM_8 || famNow == FAM_REG || famNow == FAM_SKA || famNow == FAM_BALLAD || famNow == FAM_PAD)
-			extraK = (uint16_t)(extraK & 0x5555u);
-		if ((pos & 3) == 1 && famNow != FAM_REG)
-			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (extraK & 0x1555u));
-		if (ag.drumFlavor == 6 && drm[DV_SNARE] && (pos & 1)) {
-			drm[DV_SNARE] = 0x0100u;
-		} else if (ag.drumFlavor == 7 && (pos & 3) == 3) {
-			drm[DV_TOM] = (uint16_t)(drm[DV_TOM] | 0xA000u);
-		}
-		if (ag.drumFlavor == 5 && (pos & 1))
-			drm[DV_RIM] = (uint16_t)(drm[DV_RIM] | 0x4040u);
-		if ((pos % 8) == 0) bit(DV_CRASH, 0);
+	/* 1) 全60スタイル固有の kDef[style] ドラム譜面をベースとして読み込む */
+	drm[DV_KICK]  = (uint16_t)(Bits(sd.kick)  & slotMask);
+	drm[DV_SNARE] = (uint16_t)(Bits(sd.snare) & slotMask);
+	drm[DV_CLAP]  = (uint16_t)(Bits(sd.clap)  & slotMask);
+	drm[DV_HAT]   = (uint16_t)(Bits(sd.hat)   & slotMask);
+	drm[DV_OHAT]  = (uint16_t)(Bits(sd.ohat)  & slotMask);
+	drm[DV_RIDE]  = (uint16_t)(Bits(sd.ride)  & slotMask);
+	drm[DV_CRASH] = (uint16_t)(Bits(sd.crash) & slotMask);
+	drm[DV_TOM]   = (uint16_t)(Bits(sd.tom)   & slotMask);
+	drm[DV_RIM]   = (uint16_t)(Bits(sd.rim)   & slotMask);
+
+	/* もし kDef にハット/ライドが両方無い場合だけスタイルに応じた基準ビートを補う */
+	const int rideNative = (drm[DV_RIDE] != 0) || famNow == FAM_JAZZ || famNow == FAM_SHUF
+		|| famNow == FAM_BLUES || style == SC_AS_SWING3 || style == SC_AS_PIANO;
+	if (!drm[DV_HAT] && !drm[DV_RIDE] && !drm[DV_OHAT]) {
+		int step = waltz ? (div / 3) : ((quiet || div < 16) ? q : (q > 1 ? q / 2 : 1));
+		if (step < 1) step = 1;
+		for (int s = 0; s < div; s += step) bit(rideNative ? DV_RIDE : DV_HAT, s);
 	}
-	if (section == SEC_BODY && kind != 6 && kind != 8 && !drm[DV_SNARE] && !drm[DV_CLAP]) {
+
+	const int sec = pl.sec & 7;
+	const int pBar = pl.phraseBar & 3;
+	const int vb = pl.varBits & 15;
+	const int pat16 = pat & 15;
+	const uint32_t dh = PlanHash(style, pat16, bar, 541);
+
+	/* 2) 64小節の楽曲セクション（A1->A2->B1->C1->A3->D->E->C2）に沿ったダイナミック展開 */
+	if (sec == 0) {
+		/* A1: 抑えめにスタート。16分ハットは前半8分へ整理、クラッシュ控えめ */
+		if (div >= 16 && drm[DV_HAT] == 0xFFFFu && !sd.power && ap.compMode != 5)
+			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x5555u);
+		if (quiet && pBar < 2 && drm[DV_SNARE]) {
+			/* バラード/ボサ/ジャズA1序盤はリムショット寄りにして歌を引き立てる */
+			drm[DV_RIM] = (uint16_t)(drm[DV_RIM] | drm[DV_SNARE]);
+			drm[DV_SNARE] = 0;
+		}
+		if (bar > 0) drm[DV_CRASH] = 0;
+	} else if (sec == 1) {
+		/* A2: 本来のスタイルグルーヴ全開＋奇数小節で kickB を少し足す */
+		if (waltz) {
+			if ((bar & 1) && !quiet) bit(DV_SNARE, (div * 2) / 3);
+		} else if ((bar & 1) && div >= 16) {
+			uint16_t ek = sx.kickB;
+			if (noOdd16) ek = (uint16_t)(ek & 0x5555u);
+			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (ek & slotMask));
+		}
+		if (bar % 8 == 0 && !quiet) bit(DV_CRASH, 0);
+	} else if (sec == 2) {
+		/* B1 プレコーラス: 緊張感を高める（オープンハット先取り・後半推進） */
+		if (waltz) {
+			bit(DV_RIM, div / 3);
+			if (pBar >= 2) bit(DV_OHAT, div - 1);
+		} else if (!quiet) {
+			if (div >= 16) g16(DV_OHAT, (vb & 1) ? 14 : 10);
+			else bit(DV_OHAT, div - 2);
+		}
+		if (pBar >= 2 && !quiet && !waltz) {
+			/* プレコーラス後半でキック/スネアの推進感 */
+			if (div >= 16) g16(DV_KICK, noOdd16 ? 12 : 14);
+			else bit(DV_KICK, div - 1);
+		}
+		if (bar % 8 == 0) bit(DV_CRASH, 0);
+	} else if (sec == 3 || sec == 7) {
+		/* C1 サビ / C2 最終サビ: 視界を開く（ライド/オープンHH開放・クラッシュ・クラップ重ね） */
+		if (waltz) {
+			bit(DV_RIDE, 0); bit(DV_RIDE, div / 3); bit(DV_RIDE, (div * 2) / 3);
+			if (sec == 7) bit(DV_SNARE, (div * 2) / 3);
+		} else if (!rideNative) {
+			/* サビでハイハットをライドへ移行（またはオープンHHアクセント追加） */
+			if (sec == 7 || (pat16 & 1) || ap.compMode == 9 || sd.power) {
+				uint16_t srcH = drm[DV_HAT] ? drm[DV_HAT] : (uint16_t)(0x5555u & slotMask);
+				if (div >= 16) srcH = (uint16_t)(srcH & 0x5555u); /* ライドは8分中心で濁らせない */
+				drm[DV_RIDE] = (uint16_t)(drm[DV_RIDE] | srcH);
+				if (sec == 7 && !quiet) drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & (div >= 16 ? 0x1111u : 0x0924u));
+				else drm[DV_HAT] = 0;
+			} else if (!quiet) {
+				if (div >= 16) { g16(DV_OHAT, 6); g16(DV_OHAT, 14); }
+				else { bit(DV_OHAT, q * 2 - 1); bit(DV_OHAT, div - 1); }
+			}
+		}
+		if ((sx.ccFlags & CCF_CLAP) || (sec == 7 && !quiet && !rideNative && famNow != FAM_METAL)) {
+			if (drm[DV_SNARE]) drm[DV_CLAP] = (uint16_t)(drm[DV_CLAP] | drm[DV_SNARE]);
+		}
+		if ((bar % 8) == 0 || (sec == 7 && (bar % 4) == 0)) bit(DV_CRASH, 0);
+		/* サビのキック強化 */
+		if (div >= 16 && !waltz && !quiet) {
+			uint16_t ek = (bar & 1) ? sx.kickB : sx.kickA;
+			if (noOdd16) ek = (uint16_t)(ek & 0x5555u);
+			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (ek & slotMask));
+		}
+	} else if (sec == 4) {
+		/* A3 2番Aメロ: 1番とは違うタイトなポケット（ゴーストリム/シンコペ変化） */
+		if (drm[DV_RIDE] && !rideNative) drm[DV_RIDE] = 0;
+		if (waltz) {
+			drm[DV_SNARE] = 0;
+			bit(DV_RIM, div / 3); bit(DV_RIM, (div * 2) / 3);
+		} else if (div >= 16) {
+			if ((vb & 1) && !noOdd16) g16(DV_RIM, 7);
+			else g16(DV_RIM, 10);
+			if ((bar & 1) && !quiet) g16(DV_OHAT, 14);
+		} else if (div == 12) {
+			bit(DV_RIM, (vb & 1) ? 7 : 10);
+		}
+		if (bar % 8 == 0 && !quiet) bit(DV_CRASH, 0);
+	} else if (sec == 5) {
+		/* D ブリッジ: ハーフタイムまたは抜きビートで明確なコントラスト */
+		if (waltz) {
+			drm[DV_SNARE] = 0;
+			bit(DV_KICK, 0);
+			bit(DV_RIDE, 0);
+			bit(DV_RIM, (div * 2) / 3);
+		} else if (pl.breakFeel == 1) {
+			/* スネアを3拍目へ落としたハーフタイム感＋空間的なライド/ハット */
+			drm[DV_SNARE] = 0;
+			drm[DV_CLAP] = 0;
+			bit(quiet ? DV_RIM : DV_SNARE, q * 2);
+			drm[DV_KICK] = (uint16_t)(drm[DV_KICK] & (div >= 16 ? 0x0501u : 0x0141u));
+			bit(DV_KICK, 0);
+			if (div >= 16) drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x1111u);
+			else drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x0249u);
+			if (!drm[DV_RIDE]) bit(DV_RIDE, 0);
+		} else {
+			/* トム/リム中心の展開グルーヴ */
+			bit(DV_TOM, q * 3);
+			if (bar % 8 == 0) bit(DV_CRASH, 0);
+		}
+	} else if (sec == 6) {
+		/* E ソロ/ビルド: 躍動的なシンバルワークとドライブ感 */
+		if (waltz) {
+			bit(DV_RIDE, 0); bit(DV_RIDE, div / 3); bit(DV_RIDE, (div * 2) / 3);
+			if ((bar & 1)) bit(DV_TOM, div - 1);
+		} else if (!quiet) {
+			if (div >= 16) {
+				g16(DV_OHAT, (bar & 1) ? 10 : 14);
+				if (pBar >= 2) {
+					uint16_t ek = (bar & 1) ? sx.kickA : sx.kickB;
+					if (noOdd16) ek = (uint16_t)(ek & 0x5555u);
+					drm[DV_KICK] = (uint16_t)(drm[DV_KICK] | (ek & slotMask));
+				}
+			} else {
+				bit(DV_RIDE, 0); bit(DV_RIDE, q); bit(DV_RIDE, q * 2); bit(DV_RIDE, q * 3);
+			}
+		}
+		if (bar % 8 == 0) bit(DV_CRASH, 0);
+	}
+
+	/* 3) アレンジA〜P（ArrProfile + ArrGene）のドラム・ポケット差別化 */
+	if (!waltz) {
+		if (ag.drumFlavor == 6 || ap.compMode == 2) {
+			/* ハーフタイム寄りアレンジ: 奇数小節は3拍目スネアで重厚に */
+			if ((bar & 1) && drm[DV_SNARE]) {
+				drm[DV_SNARE] = 0;
+				bit(DV_SNARE, q * 2);
+			}
+		} else if (ag.drumFlavor == 5 || ap.compMode == 4) {
+			/* リム/ゴーストポケット重視アレンジ */
+			if (div >= 16 && !noOdd16) {
+				g16(DV_RIM, ((bar + pat16) & 1) ? 7 : 15);
+			} else if (div == 12) {
+				bit(DV_RIM, ((bar + pat16) & 1) ? 5 : 11);
+			}
+		} else if (ag.drumFlavor == 4 || ap.compMode == 9) {
+			/* ライド主体アレンジ */
+			if (drm[DV_HAT] && !drm[DV_RIDE]) {
+				drm[DV_RIDE] = (uint16_t)(drm[DV_HAT] & (div >= 16 ? 0x5555u : slotMask));
+				drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & (div >= 16 ? 0x1111u : 0x0249u));
+			}
+		} else if (ag.drumFlavor == 7 || ap.compMode == 5 || ap.compMode == 10) {
+			/* ドライビング/高密度アレンジ */
+			if (!quiet && div >= 16 && !noOdd16 && !rideNative) {
+				drm[DV_HAT] = (uint16_t)(drm[DV_HAT] | 0x5555u);
+				if (sec >= 2) g16(DV_OHAT, 14);
+			}
+		}
+		if (ag.dens == 0 && div >= 16 && !sd.power) {
+			/* 省音アレンジはハットを4分/8分へ整理 */
+			drm[DV_HAT] = (uint16_t)(drm[DV_HAT] & 0x5555u);
+		}
+	}
+
+	/* 4) 小節固有の微細なグルーヴ揺らぎ（64小節全体で単調ループさせない） */
+	if (pl.turn == 0) {
+		int mut = (int)(dh % 7);
+		if (waltz) {
+			if (mut == 1 && !quiet) bit(DV_KICK, div / 3 * 2);
+			else if (mut == 2) bit(DV_RIM, (div / 3) + 1);
+			else if (mut == 3 && !quiet) bit(DV_OHAT, div - 1);
+			else if (mut == 4 && sec >= 2) bit(DV_SNARE, (div * 2) / 3);
+		} else if (div >= 16) {
+			if (mut == 0 && !quiet) {
+				int ks = noOdd16 ? ((vb & 1) ? 6 : 10) : ((vb & 1) ? 11 : 14);
+				g16(DV_KICK, ks);
+			} else if (mut == 1 && !quiet && !rideNative) {
+				int os = ((bar + pat16) & 1) ? 6 : 14;
+				g16(DV_OHAT, os);
+			} else if (mut == 2) {
+				int rs = noOdd16 ? 10 : ((vb & 1) ? 7 : 9);
+				if (!(drm[DV_SNARE] & (1u << rs))) g16(DV_RIM, rs);
+			} else if (mut == 3 && !quiet) {
+				uint16_t sn = (vb & 1) ? sx.snareB : sx.snareA;
+				if (noOdd16) sn = (uint16_t)(sn & 0x5555u);
+				drm[DV_SNARE] = (uint16_t)(drm[DV_SNARE] | (sn & 0x8000u ? 0 : (sn & 0xC000u)));
+			} else if (mut == 4 && sec >= 2 && !quiet) {
+				g16(DV_TOM, noOdd16 ? 14 : 15);
+			} else if (mut == 5 && !quiet && famNow != FAM_REG) {
+				int ks = noOdd16 ? 14 : 15;
+				g16(DV_KICK, ks);
+			}
+		} else if (div == 12) {
+			/* 12連（シャッフル/ジャズ/ブルース/スローロック等）の小節変化 */
+			if (mut == 0 && !quiet) bit(DV_KICK, (vb & 1) ? 8 : 11);
+			else if (mut == 1) bit(DV_RIM, (vb & 1) ? 5 : 10);
+			else if (mut == 2 && !quiet) bit(DV_OHAT, (vb & 1) ? 5 : 11);
+			else if (mut == 3 && sec >= 2 && !quiet) bit(DV_SNARE, 11);
+			else if (mut == 4 && sec >= 3) bit(DV_TOM, 10);
+		}
+	}
+
+	/* 5) 4小節・8小節・16小節ごとの多彩なフィルイン（8パターンの語彙・静スタイル配慮） */
+	if (pl.turn == 1) {
+		/* 4小節ミニフィル: 最後の1拍（12..15 または 9..11）を小粋に返す */
+		int fKind = ((bar / 4) + sec + pat16 + (int)sx.salt) & 7;
+		int fStart = div - q;
+		if (fStart < 1) fStart = div / 2;
+		if (quiet) {
+			/* 静かなスタイルはソフトなピックアップだけ */
+			bit(DV_RIM, div - 1);
+			if (fKind & 1) bit(DV_OHAT, fStart);
+			else bit(DV_TOM, div - (q > 1 ? 2 : 1));
+		} else {
+			for (int s = fStart; s < div; s++) { clr(DV_HAT, s); clr(DV_RIDE, s); }
+			switch (fKind) {
+			case 0: bit(DV_SNARE, fStart); bit(DV_SNARE, div - 1); bit(DV_TOM, (fStart + div) / 2); break;
+			case 1: bit(DV_TOM, fStart); bit(DV_TOM, div - 1); bit(DV_KICK, div - 1); break;
+			case 2: bit(DV_SNARE, fStart); bit(DV_OHAT, div - 1); bit(DV_KICK, (fStart + div) / 2); break;
+			case 3: for (int s = fStart; s < div; s++) bit((s == div - 1) ? DV_TOM : DV_SNARE, s); break;
+			case 4: bit(DV_KICK, fStart); bit(DV_SNARE, (fStart + div) / 2); bit(DV_TOM, div - 1); break;
+			case 5: bit(DV_RIM, fStart); bit(DV_SNARE, div - 1); bit(DV_OHAT, (fStart + div) / 2); break;
+			case 6: bit(DV_SNARE, fStart); bit(DV_TOM, fStart + 1); bit(DV_TOM, div - 1); break;
+			default: bit(DV_KICK, fStart); bit(DV_OHAT, fStart); bit(DV_SNARE, div - 1); break;
+			}
+		}
+	} else if (pl.turn == 2) {
+		/* 8小節/16小節のセクション境界フィル: 後半2拍をダイナミックに展開 */
+		int fKind = ((bar / 8) * 3 + sec + pat16 + (int)sx.salt) & 7;
+		int fStart = div / 2;
+		if (quiet) {
+			for (int s = fStart; s < div; s++) clr(DV_HAT, s);
+			bit(DV_SNARE, fStart);
+			bit(DV_TOM, fStart + q);
+			bit(DV_OHAT, div - 1);
+			if (sec == 2 || sec == 6) bit(DV_CRASH, div - 1);
+		} else {
+			for (int s = fStart; s < div; s++) {
+				clr(DV_HAT, s); clr(DV_RIDE, s); clr(DV_OHAT, s); clr(DV_SNARE, s); clr(DV_KICK, s);
+			}
+			switch (fKind) {
+			case 0: /* 王道スネア→タム回し */
+				bit(DV_SNARE, fStart); bit(DV_SNARE, fStart + 1);
+				for (int s = fStart + q; s < div; s++) bit((s & 1) ? DV_TOM : DV_SNARE, s);
+				break;
+			case 1: /* シンコペーション・キック＆スネア掛け合い */
+				bit(DV_SNARE, fStart); bit(DV_KICK, fStart + 1);
+				bit(DV_TOM, fStart + q); bit(DV_KICK, div - 2); bit(DV_SNARE, div - 1);
+				break;
+			case 2: /* クレッシェンド・スネアビルド */
+				for (int s = fStart; s < div; s += (noOdd16 ? 2 : 1)) bit(DV_SNARE, s);
+				bit(DV_KICK, fStart); bit(DV_KICK, fStart + q);
+				break;
+			case 3: /* タム連打＋シンバル先食い */
+				for (int s = fStart; s < div - 1; s += (noOdd16 ? 2 : 1)) bit(DV_TOM, s);
+				bit(DV_CRASH, div - 1); bit(DV_KICK, div - 1);
+				break;
+			case 4: /* ブレイク風キメ（3拍目ストップ→4拍目フィル） */
+				bit(DV_KICK, fStart); bit(DV_CRASH, fStart);
+				bit(DV_SNARE, div - q); bit(DV_TOM, div - 1);
+				break;
+			case 5: /* ジャズ/ファンク風コンプフィル */
+				bit(DV_SNARE, fStart + 1); bit(DV_TOM, fStart + q);
+				bit(DV_RIM, div - 2); bit(DV_OHAT, div - 1); bit(DV_KICK, div - 1);
+				break;
+			case 6: /* ロック/メタル向けダブルキック＆タム */
+				bit(DV_KICK, fStart); bit(DV_SNARE, fStart);
+				bit(DV_TOM, fStart + q); bit(DV_KICK, div - 2); bit(DV_TOM, div - 1); bit(DV_KICK, div - 1);
+				break;
+			default: /* クラップ＆スネア＋オープンハット駆け上がり */
+				bit(DV_SNARE, fStart); bit(DV_CLAP, fStart);
+				bit(DV_TOM, fStart + q); bit(DV_SNARE, div - 2); bit(DV_OHAT, div - 1);
+				break;
+			}
+		}
+	} else if (pl.turn == 3) {
+		/* 曲末の終止小節 */
+		for (int v = 0; v < DV_COUNT; v++) drm[v] = 0;
+		bit(DV_KICK, 0);
+		bit(DV_CRASH, 0);
+		return;
+	}
+
+	/* 6) 安全装置（キック・バックビートの最低保証） */
+	if (section == SEC_BODY && !drm[DV_KICK] && famNow != FAM_REG) bit(DV_KICK, 0);
+	if (section == SEC_BODY && !waltz && famNow != FAM_BALLAD && famNow != FAM_PAD && famNow != FAM_REG
+		&& pl.breakFeel == 0 && pl.turn == 0 && !drm[DV_SNARE] && !drm[DV_CLAP] && !drm[DV_RIM]) {
 		bit(DV_SNARE, q);
 		bit(DV_SNARE, q * 3);
-	}
-	if (section == SEC_BODY && !ending && div >= 16 && kind != 3) {
-		int sixteen = (kind == 40 || kind == 41 || kind == 18 || kind == 25 || kind == 10);
-		int slot = 1 + ((pos * 3 + pat * 5 + (int)sx.salt) & 7) * 2;
-		if (slot > 15) slot = 15;
-		if (sixteen)
-			bit(DV_KICK, slot * div / 16);
-		else
-			bit(DV_OHAT, (((pos + pat) & 3) * 4) * div / 16);
-	}
-	if (section == SEC_BODY && !drm[DV_KICK]) bit(DV_KICK, 0);
-	if (pos + 2 >= span && section == SEC_BODY && kind < 10) {
-		uint16_t kk = drm[DV_KICK];
-		uint16_t sn = drm[DV_SNARE];
-		for (int v = 0; v < DV_COUNT; v++) {
-			if (v == DV_KICK || v == DV_SNARE || v == DV_CRASH) continue;
-			drm[v] = 0;
-		}
-		drm[DV_KICK] = kk ? kk : 1;
-		if (kind != 6 && kind != 8) drm[DV_SNARE] = sn ? sn : (uint16_t)((1u << (q < 16 ? q : 0)) | (1u << ((q * 3) < 16 ? q * 3 : 0)));
-		for (int s = 0; s < div; s += q) bit(hatV, s);
-		if (pos + 1 >= span) bit(DV_CRASH, 0);
 	}
 }
 
@@ -4638,6 +5252,137 @@ static int ApproachMidi(int curRoot, int type, int nextPc)
 	return ap;
 }
 
+/* スムーズなボイスリーディング付きコードボイシング。
+   前小節の中心音（prevCenter）に一番近い転回形を選び、機械的なルート跳躍を防ぐ。 */
+static int BuildChordVoicing(int pc, int type, int power, int extLvl, int prevCenter, int lo, int hi, int* out, int cap)
+{
+	if (!out || cap < 1) return 0;
+	int iv[5];
+	int n = 0;
+	iv[n++] = 0;
+	if (power || type == CH_POW) {
+		iv[n++] = 7;
+		if (cap >= 3) iv[n++] = 12;
+	} else {
+		if (type == CH_SUS) iv[n++] = 5;
+		else iv[n++] = ThirdIv(type);
+		iv[n++] = (type == CH_DIM) ? 6 : 7;
+		if (type == CH_7 || type == CH_M7 || (extLvl >= 1 && (type == CH_MIN)))
+			iv[n++] = 10;
+		else if (type == CH_MAJ7 || (extLvl >= 1 && type == CH_MAJ))
+			iv[n++] = 11;
+		else if (type == CH_DIM)
+			iv[n++] = 9;
+		if (extLvl >= 2 && n < 5 && type != CH_DIM && type != CH_SUS)
+			iv[n++] = 14; /* 9th / add9 */
+	}
+	if (n > cap) n = cap;
+	int target = (prevCenter >= lo && prevCenter <= hi) ? prevCenter : ((lo + hi) / 2);
+	int best[5];
+	int bestScore = 999999;
+	for (int inv = 0; inv < n; inv++) {
+		for (int baseOct = 3; baseOct <= 6; baseOct++) {
+			int cand[5];
+			int sum = 0;
+			int ok = 1;
+			for (int k = 0; k < n; k++) {
+				int idx = (inv + k) % n;
+				int m = baseOct * 12 + (pc % 12) + iv[idx];
+				if (idx < inv) m += 12;
+				while (k > 0 && m <= cand[k - 1]) m += 12;
+				if (m < lo - 2 || m > hi + 2) { ok = 0; break; }
+				cand[k] = m;
+				sum += m;
+			}
+			if (!ok) continue;
+			int avg = sum / n;
+			int score = avg - target;
+			if (score < 0) score = -score;
+			if (cand[n - 1] - cand[0] > 17) score += 6;
+			if (score < bestScore) {
+				bestScore = score;
+				for (int k = 0; k < n; k++) best[k] = cand[k];
+			}
+		}
+	}
+	if (bestScore >= 999999) {
+		int base = 48 + (pc % 12);
+		while (base < lo) base += 12;
+		while (base > hi - 7) base -= 12;
+		for (int k = 0; k < n; k++) {
+			int m = base + iv[k];
+			while (m > hi) m -= 12;
+			while (m < lo) m += 12;
+			best[k] = m;
+		}
+	}
+	for (int k = 0; k < n; k++) {
+		if (best[k] < 0) best[k] = 0;
+		if (best[k] > 127) best[k] = 127;
+		out[k] = best[k];
+	}
+	return n;
+}
+
+static int ShapeVel(int baseVel, const BarPlan& pl, const ArrProfile& ap, int st)
+{
+	int v = baseVel + ((int)pl.energy - 70) * 3 / 10;
+	if (ap.velShape == 1) v += ((st % 12) == 0) ? 10 : -4;
+	else if (ap.velShape == 2) v += ((st % 12) != 0 || st == 12 || st == 36) ? 10 : -4;
+	else if (ap.velShape == 3) v += (st / 6) * 2 - 6;
+	else if (ap.velShape == 4) v -= 10;
+	if (v < 36) v = 36;
+	if (v > 124) v = 124;
+	return v;
+}
+
+/* キー基準の歌唱メロディ音高解決:
+   曲全体のキー(tonic, scale)上で滑らかな旋律輪郭を保ちつつ、強拍・ロングトーンは現在コードの構成音へ
+   ±2半音優先で自然に吸着し、弱拍の経過音でもコード3度/ルートとの半音ぶつかり(アボイド)を避ける。 */
+static int MelPitch(int tonic, int scale, int pcC, int tyC, int rawDeg, int strong, int prev, int lo, int hi)
+{
+	int tPc = ((tonic % 12) + 12) % 12;
+	int target = 60 + tPc + ScaleOff(scale, rawDeg);
+	if (prev >= 0) {
+		while (target - prev > 7 && target - 12 >= lo) target -= 12;
+		while (prev - target > 7 && target + 12 <= hi) target += 12;
+	}
+	while (target < lo) target += 12;
+	while (target > hi) target -= 12;
+
+	int ct[4];
+	int nc = ChordTones(pcC, tyC, 0, ct, 4);
+	if (nc < 1) return target;
+
+	if (strong) {
+		int best = target;
+		int bestScore = 9999;
+		for (int oct = -2; oct <= 2; oct++) {
+			for (int i = 0; i < nc; i++) {
+				int cand = ct[i] + oct * 12;
+				if (cand < lo || cand > hi) continue;
+				int dt = cand - target; if (dt < 0) dt = -dt;
+				int dp = (prev >= 0) ? (cand - prev) : 0; if (dp < 0) dp = -dp;
+				int score = dt * 10 + ((dp > 7) ? (dp - 7) * 3 : 0);
+				if (score < bestScore) { bestScore = score; best = cand; }
+			}
+		}
+		return best;
+	}
+
+	int mPc = target % 12;
+	int rPc = ct[0] % 12;
+	int thirdPc = (nc > 1) ? (ct[1] % 12) : -1;
+	int clash = (((mPc - rPc + 12) % 12) == 1) || (thirdPc >= 0 && ((mPc - thirdPc + 12) % 12) == 1);
+	if (clash) {
+		int up = target + 1;
+		int dn = target - 1;
+		if (up <= hi && ((up % 12) == rPc || (up % 12) == thirdPc || ((up - rPc + 12) % 12) == 2)) return up;
+		if (dn >= lo) return dn;
+	}
+	return target;
+}
+
 static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	int nBass, const int* bassCh, int nChord, const int* chordCh,
 	int nPad, const int* padCh, int nArp, const int* arpCh,
@@ -4645,11 +5390,16 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	int nStab, const int* stabCh, int nColor, const int* colorCh,
 	int melodyCh, int genMel)
 {
-	if (!c || !b || b->len < 4 || b->section == SEC_BREAK) return;
+	if (!c || !b || b->len < 4) return;
 	const int style = (s_song.styleId >= 0 && s_song.styleId < SC_AS_COUNT) ? s_song.styleId : 0;
+	const StyleDef& sd = kDef[style];
 	const StyleExtra& sx = kStyleExtra[style];
 	const ArrGene& ag = kArrGene[s_song.pat & 15];
-	const int end = (b->section == SEC_END);
+	const ArrProfile& ap = kArrProf[s_song.pat & 15];
+	const BarPlan& pl = PlanOfBar((b->section == SEC_BODY) ? bar : 0);
+	const int end = (b->section == SEC_END && s_endRem <= 0);
+	const int endCadence = (b->section == SEC_END && s_endRem > 0);
+	const int isBreak = (b->section == SEC_BREAK);
 	const int pos = (b->section == SEC_BODY) ? PosOf(bar) : 0;
 	const int span = s_song.span > 0 ? s_song.span : 16;
 	const int melSpan = s_song.melSpan >= 16 ? s_song.melSpan : span;
@@ -4659,31 +5409,26 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	const int fig = s_song.fig;
 	const int waltz = (s_song.cast.drum == 3);
 	const int thin = (ag.dens == 0);
-	const int boom = IsBoom(pos) && b->section == SEC_BODY;
+	const int boom = (IsBoom(pos) || pl.sec == 3 || pl.sec == 7) && b->section == SEC_BODY;
 	const int quiet = (fig == 5 || fig == 0) && (s_song.cast.drum == 8 || fig == 5);
 
+	/* メロディを3〜4chへ丸コピーするユニゾン潰しをやめる。
+	   form 0..100 に応じて対旋律(Counter)とサビの3度/6度ハモリ(Harm)が段階的に呼応する。
+	   ch1が無いときだけ、form>=25 でハモリ/対旋律の1本に歌の動機を託す。 */
 	const int melActive = (form >= 1 && b->section == SEC_BODY);
-	const int face = (s_song.pat >> 2) & 3;
-	const int boostNoCh1 = (!genMel && form >= 1) ? 1 : 0;
+	const int boostNoCh1 = (!genMel && form >= 25) ? 1 : 0;
 	int melChord = 0, melArp = 0, melBass = 0, melPad = 0, melHarm = 0, melCnt = 0;
 	if (melActive) {
-		if (face == 0) {
-			melHarm = 1; melChord = (form >= 15 || boostNoCh1 || ag.dockBoost >= 2) ? 1 : 0;
-			if (form >= 45 || boostNoCh1) melCnt = 1;
-			if (form >= 75) melArp = 1;
-		} else if (face == 1) {
-			melChord = 1; if (form >= 20 || boostNoCh1) melArp = 1;
-			if (form >= 50) melHarm = 1;
-		} else if (face == 2) {
-			melArp = 1; melChord = (form >= 25 || boostNoCh1) ? 1 : 0;
-			if (form >= 40) melBass = 1;
-			if (form >= 70) melCnt = 1;
-		} else {
-			melPad = 1; if (form >= 20 || boostNoCh1) melChord = 1;
-			if (form >= 50) melBass = 1;
-			if (form >= 75) melCnt = 1;
+		if (boostNoCh1) {
+			if (nHarm > 0) melHarm = 1;
+			else if (nCnt > 0) melCnt = 1;
+		} else if (genMel) {
+			if (form >= 65 && (pl.sec >= 2 || ap.callResp > 0)) melCnt = 1;
+			else if (form >= 35 && (pl.sec == 3 || pl.sec == 7 || pl.phraseBar == 3)) melCnt = 1;
+			if (form >= 85 && nHarm > 0 && (pl.sec == 3 || pl.sec == 7)) melHarm = 2; /* サビの3度ハモリ */
 		}
 	}
+	(void)melChord; (void)melArp; (void)melBass; (void)melPad;
 
 	auto emitBend = [&](int ch, int at, int amt) {
 		if (c->isFm || ch < 0) return;
@@ -4706,6 +5451,7 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 		int wrote = 0;
 		for (int k = 0; k < n && !c->overflow; k++) {
 			if (mode == 2 && (k & 1)) continue;
+			if (mode == 1 && form < 65 && k + 1 < n) continue; /* 中formではフレーズ末尾だけ呼応 */
 			int at = s_song.mel[src][k].at;
 			int du = s_song.mel[src][k].du;
 			if (mode == 1) { at += 6; if (at > 42) continue; }
@@ -4720,23 +5466,19 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			}
 			int pcS, tyS;
 			ChordAt(b, at, &pcS, &tyS);
-			const int strong = ((at % 12) == 0) || k == 0 || k == n - 1;
+			const int strong = ((at % 12) == 0) || k == 0 || k == n - 1 || du >= 12;
+			int degAdj = (mode == 1) ? (raw - 2) : (mode == 2) ? (raw - 2) : raw;
 			int m;
-			if (k == n - 1 && pos >= span - 1)
+			if (k == n - 1 && pl.turn == 3)
 				m = ChordPick(pcS, tyS, 0, *prev, lo, hi);
 			else if (mode == 3)
 				m = ChordPick(pcS, tyS, k, *prev, lo, hi);
-			else if (mode == 1)
-				m = strong ? SnapChord(pcS, tyS, raw - 2, *prev, lo, hi)
-					: ScalePick(pcS, tyS, raw - 2, *prev, lo, hi);
-			else if (strong)
-				m = SnapChord(pcS, tyS, raw, *prev, lo, hi);
 			else
-				m = ScalePick(pcS, tyS, raw, *prev, lo, hi);
+				m = MelPitch(tonic, s_song.cast.scale, pcS, tyS, degAdj, strong, *prev, lo, hi);
 			*prev = m;
 			int keep = s_putForce;
 			s_putForce = 1;
-			PutFrac(c, ch, b, at, du, m, vel0 - ((k & 1) ? 8 : 0), mode == 2 ? 100 : 80);
+			PutFrac(c, ch, b, at, du, m, ShapeVel(vel0 - ((k & 1) ? 8 : 0), pl, ap, at), mode == 2 ? 92 : 80);
 			if (s_song.mel[src][k].bend && sx.bendMode && ag.bendScale >= 2)
 				emitBend(ch, at, (sx.bendMode == 4) ? -14 : -10);
 			s_putForce = keep;
@@ -4747,40 +5489,125 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 
 	s_barNotes = 0;
 	s_putForce = 0;
-	auto dyad = [&](int ch, int degA, int degB, int* prev, int st, int du, int lo, int hi, int vel) {
-		if (ch < 0) return;
-		int a = Tone(tonic, degA, *prev, lo, hi);
-		*prev = a;
-		PutFrac(c, ch, b, st, du, a, vel, 96);
-		int b2 = Tone(tonic, degB, a, lo, hi);
-		if (b2 != a) PutFrac(c, ch, b, st, du, b2, vel - 8, 96);
-	};
+	if (isBreak) {
+		/* ブレイク小節: 1小節目頭のキメ打ち＋柔らかなパッド余韻＋最終小節末尾のベースピックアップ */
+		s_putForce = 1;
+		int pcK, tyK;
+		ChordAt(b, 0, &pcK, &tyK);
+		int nextPcK = (s_nextRootPc >= 0) ? (s_nextRootPc % 12) : pcK;
+		if (s_secIdx == 0) {
+			int bm = ChordPick(pcK, tyK, 0, s_song.prevBass, 28, 48);
+			s_song.prevBass = bm;
+			if (nBass > 0) PutFrac(c, bassCh[0], b, 0, 12, bm, 98, 72);
+			if (nChord > 0) {
+				int tones[4];
+				int nt = BuildChordVoicing(pcK, tyK, sd.power, pl.extLvl, s_song.prevCh, 52, 78, tones, 4);
+				int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+				for (int v = 0; v < nv; v++)
+					PutFrac(c, chordCh[0], b, 0, 12, tones[v], 96 - v * 5, 62);
+			}
+		}
+		if (nPad > 0) {
+			int tones[4];
+			int nt = BuildChordVoicing(pcK, tyK, 0, pl.extLvl, s_song.prevPad, 58, 84, tones, 4);
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++)
+				PutFrac(c, padCh[0], b, 0, 44, tones[v], 56 - v * 3, 98);
+		}
+		if (s_secIdx + 1 >= s_secLen && nBass > 0) {
+			/* ブレイク明けへ勢いよく戻るピックアップ2音 */
+			int m1 = ChordPick(pcK, tyK, 2, s_song.prevBass, 28, 48);
+			int m2 = ApproachMidi(pcK, tyK, nextPcK);
+			PutFrac(c, bassCh[0], b, 36, 5, m1, 88, 78);
+			PutFrac(c, bassCh[0], b, 42, 5, m2, 98, 86);
+			s_song.prevBass = m2;
+		}
+		return;
+	}
 	if (end) {
 		s_putForce = 1;
-		int m = Tone(tonic, 0, s_song.prevBass, 28, 52);
-		s_song.prevBass = m;
-		for (int i = 0; i < nBass; i++) PutFrac(c, bassCh[i], b, 0, 48, m - (i > 0 ? 12 : 0), 100 - i * 8, 96);
-		for (int i = 0; i < nChord; i++) dyad(chordCh[i], 0, 4, &s_song.prevCh, 0, 48, 52, 76, 78 - i * 6);
-		for (int i = 0; i < nPad; i++) dyad(padCh[i], 0, 7, &s_song.prevPad, 0, 48, 55, 81, 66);
+		int pcE, tyE;
+		ChordAt(b, 0, &pcE, &tyE);
+		int bm = ChordPick(pcE, tyE, 0, s_song.prevBass, 28, 48);
+		s_song.prevBass = bm;
+		for (int i = 0; i < nBass; i++) {
+			int m = bm + (i == 1 ? -12 : i >= 2 ? 12 : 0);
+			while (m < 24) m += 12;
+			while (m > 60) m -= 12;
+			PutFrac(c, bassCh[i], b, 0, 48, m, 98 - i * 8, 96);
+		}
+		for (int i = 0; i < nChord; i++) {
+			int tones[4];
+			int nt = BuildChordVoicing(pcE, tyE, sd.power, pl.extLvl, s_song.prevCh, 52 + i * 4, 78 + i * 4, tones, 4);
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++)
+				PutFrac(c, chordCh[i], b, 0, 48, tones[v], 80 - i * 6 - v * 4, 96);
+		}
+		for (int i = 0; i < nPad; i++) {
+			int tones[4];
+			int nt = BuildChordVoicing(pcE, tyE, 0, pl.extLvl, s_song.prevPad, 56 + i * 5, 84 + i * 4, tones, 4);
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++)
+				PutFrac(c, padCh[i], b, 0, 48, tones[v], 66 - i * 5 - v * 3, 98);
+		}
 		if (genMel && melodyCh >= 0 && form >= 1) {
-			int lm = Tone(tonic, 0, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+			int lm = MelPitch(tonic, s_song.cast.scale, pcE, tyE, 0, 1, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
 			s_song.prevMel = lm;
-			PutFrac(c, melodyCh, b, 0, 48, lm, 110, 96);
+			PutFrac(c, melodyCh, b, 0, 48, lm, 108, 96);
 		}
 		return;
 	}
 
 	if (!c->isFm && (sx.ccFlags & CCF_EXPR) && b->section == SEC_BODY) {
+		/* 64小節の楽曲エネルギー(pl.energy)に連動したエクスプレッション・クレッシェンド */
+		int baseEx = 62 + (int)(pl.energy * 50 / 100);
+		int midEx = baseEx + ((pl.phraseBar == 3 || pl.phraseBar == 7) ? 14 : 6);
+		if (baseEx > 116) baseEx = 116;
+		if (midEx > 126) midEx = 126;
 		if (nPad > 0 && padCh[0] >= 0) {
-			int v0 = 76 + (pos & 3) * 6;
-			int v1 = (pos % 4 == 3) ? 116 : 98;
-			PlaceExpr(c, padCh[0], b->t0, v0);
-			PlaceExpr(c, padCh[0], b->t0 + (uint32_t)(b->len / 2), v1);
+			PlaceExpr(c, padCh[0], b->t0, baseEx);
+			PlaceExpr(c, padCh[0], b->t0 + (uint32_t)(b->len / 2), midEx);
 		}
 		if (genMel && melodyCh >= 0 && form >= 1) {
-			PlaceExpr(c, melodyCh, b->t0, 96);
-			PlaceExpr(c, melodyCh, b->t0 + (uint32_t)(b->len / 2), boom ? 124 : 112);
+			int m0 = baseEx + 12; if (m0 > 120) m0 = 120;
+			int m1 = midEx + 8; if (m1 > 127) m1 = 127;
+			PlaceExpr(c, melodyCh, b->t0, m0);
+			PlaceExpr(c, melodyCh, b->t0 + (uint32_t)(b->len / 2), m1);
 		}
+	}
+	if (endCadence) {
+		/* マルチ小節エンディングの終止前小節(IV/ii -> V7): ゆったり減速しながら最終Iへ導く */
+		s_putForce = 1;
+		int pcE, tyE;
+		ChordAt(b, 0, &pcE, &tyE);
+		int nextPcE = (s_nextRootPc >= 0) ? (s_nextRootPc % 12) : pcE;
+		int bm = ChordPick(pcE, tyE, 0, s_song.prevBass, 28, 48);
+		s_song.prevBass = bm;
+		for (int i = 0; i < nBass; i++) {
+			int m0 = bm + (i == 1 ? -12 : i >= 2 ? 12 : 0);
+			while (m0 < 24) m0 += 12;
+			while (m0 > 60) m0 -= 12;
+			PutFrac(c, bassCh[i], b, 0, 22, m0, 92 - i * 8, 92);
+			int m1 = (s_endRem == 1 && i == 0) ? ApproachMidi(pcE, tyE, nextPcE) : ChordPick(pcE, tyE, 2, m0, 28, 52);
+			PutFrac(c, bassCh[i], b, 24, 22, m1, 86 - i * 8, 88);
+		}
+		for (int i = 0; i < nChord && i < 2; i++) {
+			int tones[4];
+			int nt = BuildChordVoicing(pcE, tyE, sd.power, pl.extLvl, s_song.prevCh, 52 + i * 4, 78 + i * 4, tones, 4);
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++) {
+				PutFrac(c, chordCh[i], b, 0, 22, tones[v], 82 - i * 6 - v * 4, 92);
+				PutFrac(c, chordCh[i], b, 24, 22, tones[v], 76 - i * 6 - v * 4, 90);
+			}
+		}
+		for (int i = 0; i < nPad && i < 2; i++) {
+			int tones[4];
+			int nt = BuildChordVoicing(pcE, tyE, 0, pl.extLvl, s_song.prevPad, 56 + i * 5, 84 + i * 4, tones, 4);
+			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			for (int v = 0; v < nv; v++)
+				PutFrac(c, padCh[i], b, 0, 44, tones[v], 62 - i * 5 - v * 3, 98);
+		}
+		return;
 	}
 	if (!c->isFm && (sx.ccFlags & CCF_PEDAL) && nChord > 0 && chordCh[0] >= 0) {
 		Push(c, b->t0, chordCh[0], SC_EV_PEDAL_ON, 127, 0, 0, 0);
@@ -4796,89 +5623,185 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	{
 		const int famB = StyleFam(style);
 		const int patB = s_song.pat & 15;
-		const int srcB = (melBar >= 0 && melBar < 256) ? melBar : 0;
-		const int nMelB = s_song.melCount[srcB];
+		const int divB = (sd.div == 12) ? 12 : 16;
+		const int unitB = 48 / divB;
+		const int allowOdd16 = (divB == 16) && (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB
+			|| famB == FAM_LATIN || famB == FAM_SAMBA || famB == FAM_AFRO
+			|| famB == FAM_HOP || famB == FAM_BOSSA || famB == FAM_TRAP);
 		int nextPc = (s_nextRootPc >= 0) ? (s_nextRootPc % 12) : 0;
 		if (nextPc < 0) nextPc += 12;
+
 		for (int i = 0; i < nBass && !c->overflow; i++) {
-			int at[12], deg[12], appr[12];
+			/* 3小節以上のイントロでは1小節目のベースを抜き、2小節目から入って立体感を出す */
+			if (b->section == SEC_INTRO && s_secLen >= 3 && s_secIdx == 0) continue;
+			int at[16], deg[16], appr[16];
 			int nh = 0;
-			auto addB = [&](int a, int d, int ap) {
-				if (nh >= 12 || a > 44) return;
+			auto addB = [&](int a, int d, int apFlag) {
+				if (nh >= 16 || a > 45) return;
 				if (a < 0) a = 0;
-				at[nh] = a; deg[nh] = d; appr[nh] = ap; nh++;
+				for (int z = 0; z < nh; z++) {
+					if (at[z] == a) { deg[z] = d; appr[z] = apFlag; return; }
+				}
+				at[nh] = a; deg[nh] = d; appr[nh] = apFlag; nh++;
 			};
-			if (waltz || famB == FAM_WALTZ) {
-				addB(0, 1, 0); addB(16, 2, 0); addB(32, (patB & 1) ? 5 : 1, 0);
-			} else if (famB == FAM_JAZZ || famB == FAM_BLUES || famB == FAM_SHUF) {
-				static const int wdeg[4][4] = {
-					{ 1, 5, 2, 8 }, { 1, 8, 5, 2 }, { 1, 2, 5, 8 }, { 1, 5, 8, 2 }
-				};
-				const int row = (bar + (patB & 3) + ((patB & 8) ? 2 : 0)) & 3;
-				addB(0, wdeg[row][0], 0); addB(12, wdeg[row][1], 0);
-				addB(24, wdeg[row][2], 0); addB(36, 1, 1);
-			} else if (famB == FAM_BALLAD || famB == FAM_PAD) {
+
+			if (i == 1) {
+				/* ch2本目のベース: サブベース／土台アンカー（1本目の細かい動きと濁らせない） */
 				addB(0, 1, 0);
-				if (ag.dens != 0) addB(24, 2, 0);
-				if (ag.dens >= 2) addB(36, 1, 1);
-			} else if (famB == FAM_REG || famB == FAM_SKA) {
-				addB(24, 1, 0);
-				if (ag.dens != 0) addB(36, 2, 0);
-				if (ag.dens >= 2 || (bar & 1)) addB(42, 1, 1);
-			} else if (famB == FAM_FLOOR || famB == FAM_DISCO) {
-				addB(0, 1, 0); addB(12, 3, 0); addB(24, 1, 0); addB(36, 3, 0);
-			} else if (famB == FAM_8 || famB == FAM_METAL || famB == FAM_MARCH || famB == FAM_TANGO) {
-				static const int d8[8] = { 1, 2, 5, 2, 1, 8, 2, 1 };
-				int shift = patB & 3;
-				for (int k = 0; k < 8; k++)
-					addB(k * 6, d8[(k + shift) & 7], (k == 7) ? 1 : 0);
-			} else if (famB == FAM_HOP || famB == FAM_TRAP) {
-				addB(0, 1, 0); addB(18, 1, 0); addB(24, 7, 0); addB(36, 1, 0);
-				if (ag.dens >= 2) addB(9, 2, 0);
-			} else if (famB == FAM_BOSSA) {
-				addB(0, 1, 0); addB(9, 5, 0); addB(24, 2, 0); addB(33, 8, 0);
-			} else if (famB == FAM_SAMBA || famB == FAM_LATIN || famB == FAM_AFRO) {
-				addB(0, 1, 0); addB(6, 5, 0); addB(12, 1, 0); addB(18, 2, 0);
-				addB(24, 1, 0); addB(30, 5, 0); addB(36, 8, 0); addB(42, 1, 1);
+				if (b->root2 >= 0) addB(24, 1, 0);
+				else if (pl.sec >= 2 && !waltz) addB(24, (pl.varBits & 1) ? 2 : 1, 0);
+				else if (waltz && pl.sec >= 3) addB(16, 2, 0);
+			} else if (i == 2) {
+				/* 3本目ベース: 高域オクターブの補完グルーヴ（前サビ・サビ・展開で厚みを足す） */
+				if (pl.sec < 2 && pl.turn == 0 && ag.dens < 2) continue;
+				if (waltz) { addB(16, 3, 0); addB(32, 2, 0); }
+				else {
+					addB(12, 3, 0);
+					addB(36, (pl.turn >= 1) ? 1 : 2, pl.turn >= 1 ? 1 : 0);
+					if (pl.sec >= 3 && allowOdd16) addB(21, 5, 0);
+				}
+			} else if (i >= 3) {
+				/* 4本目以降のベース: サビ・ソロ限定のシンコペ/ペダル層（3本目と非重複） */
+				if (pl.sec != 3 && pl.sec != 6 && pl.sec != 7 && pl.turn < 2) continue;
+				if (waltz) { addB(0, 3, 0); addB(32, 5, 0); }
+				else {
+					int sh = (i & 1) ? 6 : 0;
+					addB(sh, 1, 0);
+					addB(18 + sh, 2, 0);
+					addB(30 + (sh ? 6 : 0), 3, pl.turn >= 1 ? 1 : 0);
+				}
 			} else {
-				static const int s16[5] = { 0, 9, 18, 30, 39 };
-				static const int d16[4][5] = {
-					{ 1, 2, 5, 2, 1 }, { 1, 5, 3, 2, 8 }, { 1, 2, 1, 5, 2 }, { 1, 8, 2, 5, 1 }
-				};
-				const int row = (bar + (patB & 3) + ((patB & 8) ? 1 : 0)) & 3;
-				for (int k = 0; k < 5; k++)
-					addB(s16[k], d16[row][k], (k == 4) ? 1 : 0);
-				if (ag.dens >= 2 && famB == FAM_FUNK) {
-					addB(6, 1, 0); addB(27, 5, 0);
-				}
-			}
-			if (patB == 6 && nh > 2) {
-				int w = 0;
-				for (int k = 0; k < nh; k++) {
-					if ((at[k] % 24) == 0 || appr[k] || k == 0) {
-						at[w] = at[k]; deg[w] = deg[k]; appr[w] = appr[k]; w++;
+				/* メインベース: 全60スタイル固有の kDef[style].bass 格子を土台に読み出す */
+				if (sd.bass && sd.bass[0]) {
+					for (int s = 0; s < divB && sd.bass[s]; s++) {
+						char ch = sd.bass[s];
+						if (ch >= '1' && ch <= '9') {
+							int d = SafeDeg(ch - '0');
+							/* 64小節内で毎回同じ度数にならないようセクションと変異ビットで彩る */
+							if (s > 0 && d == 1 && (pl.sec == 3 || pl.sec == 7) && (pl.varBits & (1u << (s & 3))))
+								d = (famB == FAM_FLOOR || famB == FAM_DISCO || famB == FAM_16 || famB == FAM_FUNK) ? 3 : 2;
+							else if (s > 0 && d == 5 && (pl.sec == 1 || pl.sec == 4) && ((pl.varBits >> 2) & 1))
+								d = 8;
+							else if (s > 0 && famB == FAM_BLUES && ((bar / 12) & 1) && (s == 6 || s == 9))
+								d = (d == 5) ? 6 : 5;
+							addB(s * unitB, d, 0);
+						}
 					}
 				}
-				if (w > 0) nh = w;
-			}
-			if (ag.dens == 0 && nh > 3) {
-				int w = 0;
-				for (int k = 0; k < nh; k++) {
-					if ((k & 1) == 0 || appr[k]) {
-						at[w] = at[k]; deg[w] = deg[k]; appr[w] = appr[k]; w++;
+				if (nh == 0) {
+					addB(0, 1, 0);
+					if (waltz) { addB(16, 2, 0); addB(32, 5, 0); }
+					else addB(24, 2, 0);
+				}
+
+				/* 半小節コード変化時は 24(3拍目頭) に必ず根音を置く */
+				if (b->root2 >= 0 && !waltz) addB(24, 1, 0);
+
+				/* アレンジ別ベース奏法（A〜P）＋64小節セクション展開 */
+				if (ap.bassMode == 1 && !waltz) {
+					/* ウォーキング・経過音主導 */
+					static const int wd[4][4] = {
+						{ 1, 5, 2, 8 }, { 1, 2, 5, 8 }, { 1, 8, 5, 2 }, { 1, 5, 8, 2 }
+					};
+					const int row = (bar + (patB & 3) + pl.sec) & 3;
+					nh = 0;
+					addB(0, wd[row][0], 0);
+					addB(12, wd[row][1], 0);
+					addB(24, (b->root2 >= 0) ? 1 : wd[row][2], 0);
+					addB(36, wd[row][3], 1);
+					if (pl.turn >= 1 && (pl.varBits & 1)) addB(42, 1, 1);
+				} else if (ap.bassMode == 2 && !waltz && famB != FAM_BALLAD && famB != FAM_PAD) {
+					/* オクターブ跳躍バウンス */
+					int step = (famB == FAM_8 || famB == FAM_METAL || famB == FAM_16 || famB == FAM_DISCO || famB == FAM_FLOOR) ? 6 : 12;
+					if (pl.breakFeel == 1) step = 12;
+					nh = 0;
+					for (int st = 0; st < 48; st += step) {
+						int isOff = ((st / step) & 1);
+						int d = isOff ? 3 : ((st == 24 && b->root2 < 0 && (pl.varBits & 1)) ? 2 : 1);
+						addB(st, d, (st + step >= 48 && pl.turn >= 1) ? 1 : 0);
+					}
+				} else if ((ap.bassMode == 3 || pl.breakFeel == 1) && nh > 2) {
+					/* ハーフタイム・抜きセクション：細かい打点を間引いて重心を下げる */
+					int w = 0;
+					for (int k = 0; k < nh; k++) {
+						if (at[k] == 0 || at[k] == 24 || (waltz && at[k] == 16) || (pl.turn >= 1 && k == nh - 1)) {
+							at[w] = at[k]; deg[w] = deg[k]; appr[w] = appr[k]; w++;
+						}
+					}
+					if (w > 0) nh = w;
+				} else if (ap.bassMode == 5 && !waltz && famB != FAM_BALLAD && famB != FAM_PAD && famB != FAM_JAZZ) {
+					/* 推進力 8分ドライブ */
+					static const int d8[4][8] = {
+						{ 1, 1, 2, 1, 5, 2, 8, 1 },
+						{ 1, 2, 1, 5, 1, 2, 3, 1 },
+						{ 1, 1, 5, 2, 1, 8, 2, 1 },
+						{ 1, 3, 2, 5, 1, 2, 5, 1 }
+					};
+					const int row = (bar + pl.sec + (pl.varBits & 3)) & 3;
+					nh = 0;
+					for (int k = 0; k < 8; k++)
+						addB(k * 6, (k == 4 && b->root2 >= 0) ? 1 : d8[row][k], (k == 7) ? 1 : 0);
+				} else {
+					/* スタイル固有パターンの 64小節マイクロ変異 */
+					if (pl.sec == 4 && nh > 3) {
+						/* 2番A: 1か所抜いて新鮮な間を作る */
+						int drop = 1 + (pl.varBits % (nh - 1));
+						for (int k = drop; k + 1 < nh; k++) {
+							at[k] = at[k + 1]; deg[k] = deg[k + 1]; appr[k] = appr[k + 1];
+						}
+						nh--;
+					}
+					if ((pl.sec == 2 || pl.sec == 3 || pl.sec == 6 || pl.sec == 7) && !waltz) {
+						/* 前サビ・サビ・展開: 推進ピックアップ追加 */
+						int pickSt = allowOdd16 ? ((pl.varBits & 1) ? 39 : 42) : ((divB == 12) ? 40 : 42);
+						addB(pickSt, (pl.varBits & 2) ? 2 : 5, 1);
+						if ((pl.sec == 3 || pl.sec == 7) && allowOdd16 && nh < 10)
+							addB((pl.varBits & 4) ? 15 : 21, 3, 0);
+					}
+					if (ap.bassMode == 4 && allowOdd16 && nh > 1) {
+						/* シンコペ溜め（16分系スタイル限定。8ビートやジャズは崩さない） */
+						for (int k = nh - 1; k >= 1; k--) {
+							if ((k + (pl.varBits & 1)) & 1) {
+								int lim = (k + 1 < nh) ? (at[k + 1] - 3) : 45;
+								if (at[k] + 3 <= lim) at[k] += 3;
+							}
+						}
+					}
+					if (ap.bassMode == 6 && !waltz && (pl.turn >= 1 || (pl.varBits & 3) == 0)) {
+						/* ファンク/ベース主導フィル */
+						if (allowOdd16) { addB(36, 2, 0); addB(39, 8, 0); addB(42, 3, 0); addB(45, 1, 1); }
+						else { addB(36, 2, 0); addB(42, 1, 1); }
+					}
+					if (famB == FAM_BLUES && !waltz && b->section == SEC_BODY) {
+						/* 12小節ブルースの5コーラス展開（64小節全体でコーラス毎に別ベースライン） */
+						int chs = (bar / 12) % 5;
+						static const int blWalk[5][4] = {
+							{ 1, 5, 2, 8 }, { 1, 2, 5, 6 }, { 1, 3, 2, 8 }, { 1, 5, 6, 8 }, { 1, 8, 2, 5 }
+						};
+						if (chs > 0 && nh >= 2) {
+							deg[nh - 1] = blWalk[chs][(bar + chs) & 3];
+							if (chs >= 2 && (bar & 1)) addB(divB == 12 ? 32 : 30, blWalk[chs][2], 0);
+							if (chs >= 3 && (pl.phraseBar & 1)) addB(divB == 12 ? 44 : 42, blWalk[chs][3], 1);
+						}
+					}
+					if (pl.turn == 2 && !waltz && !quiet && b->section == SEC_BODY) {
+						/* 8小節境界の推進ウォークアップ（次セクション頭へ自然に繋ぐ） */
+						addB(36, (pl.varBits & 1) ? 2 : 5, 0);
+						addB(divB == 12 ? 44 : 42, 1, 1);
 					}
 				}
-				if (w > 0) nh = w;
-			}
-			if (ag.sync >= 2 && nh > 1
-				&& (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB
-					|| famB == FAM_LATIN || famB == FAM_SAMBA || famB == FAM_AFRO
-					|| famB == FAM_HOP || famB == FAM_BOSSA)) {
-				for (int k = nh - 1; k >= 1; k--) {
-					int lim = (k + 1 < nh) ? (at[k + 1] - 2) : 45;
-					if (at[k] + 3 <= lim) at[k] += 3;
+
+				/* 4小節/8小節ターンアラウンドでは末尾音を次小節へのアプローチ音にする */
+				if (nh > 1 && (pl.turn >= 1 || (pl.varBits & 3) == 3))
+					appr[nh - 1] = 1;
+				if (pl.turn == 3) {
+					/* 曲の最終小節は解決の長い1〜2音で締める */
+					nh = 1;
+					at[0] = 0; deg[0] = 1; appr[0] = 0;
 				}
 			}
+
+			/* 発音位置順に整列 */
 			for (int a = 0; a < nh; a++) {
 				for (int c2 = a + 1; c2 < nh; c2++) {
 					if (at[c2] < at[a]) {
@@ -4888,55 +5811,50 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 					}
 				}
 			}
+
 			for (int k = 0; k < nh && !c->overflow; k++) {
 				if (k > 0 && at[k] == at[k - 1]) continue;
 				int st = at[k];
 				int pc, ty;
 				ChordAt(b, st, &pc, &ty);
 				int midi;
-				if (appr[k] && k == nh - 1)
+				if (appr[k] && k == nh - 1 && pl.turn != 3)
 					midi = ApproachMidi(pc, ty, nextPc);
-				else if (melBass && nMelB > 0) {
-					int raw = s_song.mel[srcB][k % nMelB].deg;
-					if (raw < 0) raw = -raw;
-					int dsel = (raw % 3 == 0) ? 1 : (raw % 3 == 1) ? 5 : 2;
-					midi = BassMidi(pc, dsel, ty);
-				} else
+				else
 					midi = BassMidi(pc, deg[k], ty);
-				if (i > 0) midi -= 12;
-				if (ag.octBias <= -7) midi -= 12;
-				while (midi < 28) midi += 12;
-				while (midi > 50) midi -= 12;
+				int loB = (i >= 2) ? 40 : 28;
+				int hiB = (i >= 2) ? 58 : ((deg[k] == 3) ? 56 : 50);
+				if (i == 1) { midi -= 12; hiB = 45; }
+				if (ap.octShift <= -7 && i == 0) midi -= 12;
+				while (midi < loB) midi += 12;
+				while (midi > hiB) midi -= 12;
+
 				int du = (k + 1 < nh) ? (at[k + 1] - st) : (48 - st);
 				if (du < 2) du = 2;
-				if (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB) {
-					if (du > 9) du = 9;
-				} else if (famB == FAM_8 || famB == FAM_METAL) {
-					if (du > 6) du = 6;
-				}
+				if (i == 0 && (famB == FAM_16 || famB == FAM_FUNK || famB == FAM_DNB) && du > 9) du = 9;
+				else if (i == 0 && (famB == FAM_8 || famB == FAM_METAL) && du > 6 && pl.turn != 3) du = 6;
 				if (st + du > 48) du = 48 - st;
-				int vel = ((st % 12) == 0) ? 114 : ((st % 6) == 0) ? 100 : 86;
-				if (appr[k]) vel = 92;
-				vel -= i * 8;
-				if (vel < 60) vel = 60;
-				PutFrac(c, bassCh[i], b, st, du, midi, vel, 80);
-				s_song.prevBass = midi;
+
+				int baseVel = ((st % 12) == 0) ? 112 : ((st % 6) == 0) ? 98 : 84;
+				if (appr[k]) baseVel = 94;
+				if (i == 1) baseVel -= 10;
+				else if (i >= 2) baseVel -= 16;
+				int vel = ShapeVel(baseVel, pl, ap, st);
+				int gate = (i == 1) ? 94 : (ap.gatePct > 86 ? 88 : (ap.gatePct < 55 ? 58 : 78));
+				PutFrac(c, bassCh[i], b, st, du, midi, vel, gate);
+				if (i == 0) s_song.prevBass = midi;
 				if (i == 0 && sx.bendMode == 4 && k == nh - 1 && !c->isFm)
 					emitBend(bassCh[i], st, -16);
 			}
 			if (s_song.soloAcc && i == 0 && !c->isFm && nChord < 1) {
 				int pc0, ty0;
 				ChordAt(b, waltz ? 16 : 24, &pc0, &ty0);
-				int tones[3];
-				int nt = ChordTones(pc0, ty0, 0, tones, 3);
+				int tones[4];
+				int nt = BuildChordVoicing(pc0, ty0, sd.power, pl.extLvl, 64, 55, 76, tones, 3);
 				int hst = waltz ? 16 : 24;
 				int hdu = waltz ? 10 : 6;
-				for (int t = 0; t < nt && t < 2; t++) {
-					int m = tones[t];
-					while (m < 55) m += 12;
-					while (m > 76) m -= 12;
-					PutFrac(c, bassCh[0], b, hst, hdu, m, 74 - t * 4, 80);
-				}
+				for (int t = 0; t < nt && t < 2; t++)
+					PutFrac(c, bassCh[0], b, hst, hdu, tones[t], ShapeVel(74 - t * 4, pl, ap, hst), 80);
 			}
 		}
 	}
@@ -4945,218 +5863,360 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 	for (int i = 0; i < nChord && !c->overflow; i++) {
 		const int famC = StyleFam(style);
 		const int patC = s_song.pat & 15;
-		int loC = 55, hiC = 84;
-		if (ag.octBias >= 7) { loC += 12; hiC += 12; }
-		else if (ag.octBias <= -7) { loC -= 12; hiC -= 12; }
-		if (i >= 1) { loC -= 12; hiC -= 12; }
+		const int divC = (sd.div == 12) ? 12 : 16;
+		const int unitC = 48 / divC;
+		const int isPowC = sd.power ? 1 : 0;
+		const int extC = isPowC ? 0 : (int)pl.extLvl;
+
+		int loC = 52 + (int)ap.octShift / 2 + (pl.regShift > 0 ? 4 : pl.regShift < 0 ? -4 : 0);
+		int hiC = 78 + (int)ap.octShift / 2 + (pl.regShift > 0 ? 5 : pl.regShift < 0 ? -4 : 0);
+		if (i == 1) { loC -= 5; hiC -= 4; }
+		else if (i >= 2) { loC += 7; hiC += 10; }
 		if (loC < 48) loC = 48;
-		if (hiC > 96) hiC = 96;
-		if (hiC < loC + 7) hiC = loC + 7;
-		auto fitC = [&](int midi) {
-			while (midi < loC) midi += 12;
-			while (midi > hiC) midi -= 12;
-			if (midi < 0) midi = 0;
-			if (midi > 127) midi = 127;
-			return midi;
-		};
-		auto one = [&](int st, int du, int midi, int vel) {
+		if (hiC > 94) hiC = 94;
+		if (hiC < loC + 10) hiC = loC + 10;
+
+		const int baseGate = (int)ap.gatePct;
+		auto emitVoice = [&](int st, int du, int velBase, int maxNotes, int gateOv) {
 			if (st < 0 || st > 46 || du < 1) return;
-			if (patC == 10 && du > 2) du = 2;
-			else if (patC == 11 && du < 10 && du > 2) du += 3;
 			if (st + du > 48) du = 48 - st;
-			if (vel < 48) vel = 48;
-			if (vel > 124) vel = 124;
-			int m = fitC(midi);
-			PutFrac(c, chordCh[i], b, st, du, m, vel - i * 4, (patC == 10) ? 42 : 86);
-			s_song.prevCh = m;
-		};
-		auto block = [&](int st, int du, int vel) {
 			int pc, ty;
 			ChordAt(b, st, &pc, &ty);
-			int tones[4];
-			int nt = ChordTones(pc, ty, 0, tones, 4);
+			int tones[5];
+			int nt = BuildChordVoicing(pc, ty, isPowC, extC, s_song.prevCh, loC, hiC, tones, 5);
 			if (nt < 1) return;
-			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
-			for (int v = 0; v < nv; v++)
-				one(st, du, tones[v], vel - v * 6);
+			int nv = c->isFm ? 1 : (nt < maxNotes ? nt : maxNotes);
+			int gate = (gateOv > 0) ? gateOv : baseGate;
+			if (ap.compMode == 7 && du > 3) du = 3;
+			else if (ap.compMode == 8 && du < 16) gate = 96;
+			int sum = 0;
+			for (int v = 0; v < nv; v++) {
+				int idx = (c->isFm) ? ((bar + st + i) % nt) : v;
+				int vv = ShapeVel(velBase - v * 5 - i * 4, pl, ap, st);
+				PutFrac(c, chordCh[i], b, st, du, tones[idx], vv, gate);
+				sum += tones[idx];
+			}
+			if (i == 0 && nv > 0) s_song.prevCh = sum / nv;
 		};
-		auto dy = [&](int st, int du, int vel) {
+		auto emitSingle = [&](int st, int du, int pick, int velBase, int gateOv) {
+			if (st < 0 || st > 46 || du < 1) return;
+			if (st + du > 48) du = 48 - st;
 			int pc, ty;
 			ChordAt(b, st, &pc, &ty);
-			int tones[4];
-			int nt = ChordTones(pc, ty, 0, tones, 4);
+			int tones[5];
+			int nt = BuildChordVoicing(pc, ty, isPowC, extC, s_song.prevCh, loC, hiC, tones, 5);
 			if (nt < 1) return;
-			int a = (bar + patC) & 1;
-			one(st, du, tones[a % nt], vel);
-			if (!c->isFm && nt > 1)
-				one(st, du, tones[(a + 1) % nt], vel - 10);
+			int m = tones[(pick < 0 ? -pick : pick) % nt];
+			int vv = ShapeVel(velBase - i * 4, pl, ap, st);
+			PutFrac(c, chordCh[i], b, st, du, m, vv, gateOv > 0 ? gateOv : baseGate);
+			if (i == 0) s_song.prevCh = m;
 		};
-		if (i > 0) {
-			block(0, (b->root2 >= 0) ? 22 : 40, 74);
-			if (b->root2 >= 0) block(24, 20, 70);
+
+		/* 曲の最終小節は解決の長いボイシング */
+		if (pl.turn == 3) {
+			emitVoice(0, 44, 88, 4, 96);
 			continue;
 		}
-		if (famC == FAM_BALLAD || famC == FAM_PAD || famC == FAM_MARCH) {
-			int hold = (patC == 10) ? 8 : ((b->root2 >= 0) ? 22 : 44);
-			block(0, hold, 80);
-			if (b->root2 >= 0) block(24, 20, 76);
-		} else if (famC == FAM_JAZZ || famC == FAM_BLUES || famC == FAM_SHUF || famC == FAM_BOSSA) {
-			int ats[3] = { 0, 18, 36 };
-			if (famC == FAM_BOSSA) { ats[0] = 6; ats[1] = 18; ats[2] = 30; }
-			else if (patC == 5) { ats[0] = 6; ats[1] = 24; ats[2] = 42; }
-			int nHit = (ag.dens == 0) ? 2 : 3;
-			for (int k = 0; k < nHit; k++)
-				block(ats[k], (patC == 11) ? 14 : 8, 104 - k * 4);
-		} else if (famC == FAM_REG || famC == FAM_SKA) {
-			int ats[4] = { 6, 18, 30, 42 };
-			int step = (ag.dens == 0) ? 2 : 1;
-			for (int k = 0; k < 4; k += step)
-				block(ats[k], 4, 102);
-		} else if (famC == FAM_WALTZ) {
-			block(0, 14, 84);
-			dy(16, 8, 96);
-			dy(32, 8, 100);
-		} else if (famC == FAM_8 || famC == FAM_METAL || famC == FAM_TANGO) {
-			int start = 0;
-			for (int st = start; st <= 42 && !c->overflow; st += 6) {
-				if (ag.dens == 0 && (st % 12) != 0 && st != 24) continue;
-				int vel = (st == 24) ? 118 : (((st % 12) == 0) ? 84 : 70);
-				int du = (patC == 10) ? 2 : 5;
-				dy(st, du, vel);
+
+		/* 複数コードチャンネル（ch1〜ch32対応）: 2本目以降は1本目と違う奏法で立体化 */
+		if (i == 1) {
+			/* 2本目: 持続ボイシング／半小節コード変更に追従する温かいコード床 */
+			if (pl.breakFeel == 1 && (pl.phraseBar & 1) && ag.dens < 2) continue;
+			int d0 = (b->root2 >= 0) ? 22 : 44;
+			emitVoice(0, d0, 72, 3, 94);
+			if (b->root2 >= 0) emitVoice(24, 22, 70, 3, 94);
+			continue;
+		} else if (i == 2) {
+			/* 3本目コード: 上声部の分散アルペジオ／裏打ちスパークル（2本目と非重複） */
+			if (pl.sec == 0 && (pl.phraseBar & 1) == 0 && ag.dens < 2) continue;
+			int step = (divC == 12) ? 8 : 6;
+			int start = (divC == 12) ? 4 : 6;
+			for (int st = start, k = 0; st <= 44 && !c->overflow; st += step * 2, k++) {
+				if (pl.breakFeel == 1 && (k & 1)) continue;
+				emitSingle(st, 3, k + bar + (pl.varBits & 3), 78 - ((k & 1) ? 8 : 0), 62);
 			}
-		} else if (famC == FAM_FLOOR || famC == FAM_DISCO) {
-			for (int st = 6; st <= 42 && !c->overflow; st += 12)
-				block(st, 4, 104);
-			if (ag.dens >= 2) {
-				int pc, ty; ChordAt(b, 0, &pc, &ty);
-				int tones[4]; int nt = ChordTones(pc, ty, 0, tones, 4);
-				if (nt > 0) one(0, 3, tones[0], 96);
+			continue;
+		} else if (i >= 3) {
+			/* 4本目以降コード: サビ/展開/ターンアラウンド限定のアクセントボイシング */
+			if (pl.sec != 3 && pl.sec != 6 && pl.sec != 7 && pl.turn == 0) continue;
+			int st0 = (i & 1) ? 12 : 24;
+			if (waltz) { emitVoice(16, 8, 76, 2, 72); }
+			else {
+				emitVoice(st0, 6, 80, 2, 68);
+				if (pl.turn >= 1 || pl.sec == 7) emitVoice(36 + ((i & 1) ? 6 : 0), 4, 84, 2, 60);
 			}
-		} else if (famC == FAM_HOP || famC == FAM_TRAP) {
-			int ats[4] = { 0, 18, 24, 36 };
-			if (ag.sync >= 2) { ats[1] = 15; ats[3] = 39; }
-			int nHit = (ag.dens == 0) ? 2 : 4;
-			for (int k = 0; k < nHit; k++)
-				dy(ats[k], 4, ((ats[k] % 12) == 0) ? 92 : 76);
-		} else {
-			static const uint16_t masks[8] = {
-				0xEEEEu, 0xAAAAu, 0x4444u, 0xFFFFu, 0x6DB6u, 0xBBBBu, 0x5555u, 0xDDDDu
+			continue;
+		}
+
+		/* メインコードチャンネル (i == 0):
+		   アレンジ性格 (ap.compMode) × スタイル固有リズム (kDef.chord / kStyleExtra.chordA/B) × 64小節展開 */
+		if (ap.compMode == 6 || ((famC == FAM_BALLAD || style == SC_AS_PIANO || style == SC_AS_ACOUSTIC || style == SC_AS_ENKA) && (pl.sec == 0 || pl.sec == 4 || pl.sec == 5) && ap.compMode == 0)) {
+			/* 分散カスケード／アルペジオ伴奏（SSW風ピアノ/ギター） */
+			int step = (divC == 12) ? 4 : ((famC == FAM_BALLAD || famC == FAM_PAD) ? 6 : 3);
+			if (pl.breakFeel == 1 && step < 6) step = 6;
+			static const int ord[4][8] = {
+				{ 0, 1, 2, 3, 2, 1, 2, 3 },
+				{ 0, 2, 1, 3, 0, 2, 3, 1 },
+				{ 0, 1, 2, 1, 3, 2, 1, 2 },
+				{ 3, 2, 1, 0, 1, 2, 3, 2 }
 			};
-			int mi = (patC & 7) ^ ((patC & 8) ? 3 : 0);
-			uint16_t mask = masks[mi & 7];
-			if (ag.dens == 0) mask = (uint16_t)(mask & 0x2222u);
-			else if (ag.dens == 1 && (patC & 2)) mask = (uint16_t)(mask & 0xAAAAu);
-			if (patC == 6) mask = 0x1111u;
-			if (!mask) mask = 0x2222u;
-			for (int s = 0; s < 16 && !c->overflow; s++) {
+			const int row = (pl.sec + (pl.varBits & 3) + (patC & 3)) & 3;
+			for (int st = 0, k = 0; st <= 44 && !c->overflow; st += step, k++) {
+				if (pl.breakFeel == 1 && k > 0 && ((k + pl.varBits) % 3 == 2)) continue;
+				int vel = ((st % 12) == 0) ? 92 : 76 - ((k & 1) ? 6 : 0);
+				emitSingle(st, step > 3 ? step - 1 : 3, ord[row][k & 7], vel, 88);
+			}
+		} else if (ap.compMode == 8 || famC == FAM_PAD || ((famC == FAM_BALLAD || style == SC_AS_ORCH) && ap.compMode != 7)) {
+			/* レガート・持続コード（セクションで呼吸と動きをつける） */
+			if (b->root2 >= 0) {
+				emitVoice(0, 22, 82, 4, 96);
+				emitVoice(24, 22, 80, 4, 96);
+			} else if (pl.sec == 3 || pl.sec == 7 || pl.turn >= 1) {
+				emitVoice(0, 28, 84, 4, 96);
+				emitVoice(30, 16, 78, 3, 94);
+			} else {
+				emitVoice(0, 44, 78, 4, 96);
+			}
+		} else if (ap.compMode == 3 || famC == FAM_REG || famC == FAM_SKA) {
+			/* 裏打ちスカンク／オフビート強調 */
+			static const int skA[4] = { 6, 18, 30, 42 };
+			for (int k = 0; k < 4 && !c->overflow; k++) {
+				if (pl.breakFeel == 1 && (k == 0 || k == 2)) continue;
+				emitVoice(skA[k], 3, (k == 1 || k == 3) ? 104 : 94, 3, 46);
+				if ((pl.sec == 3 || pl.sec == 7 || (pl.varBits & 1)) && k == 3 && !c->isFm)
+					emitVoice(45, 2, 82, 2, 40); /* ダブルスカンクの跳ね */
+			}
+		} else if (isPowC || ap.compMode == 5 || famC == FAM_8 || famC == FAM_METAL) {
+			/* ロック／メタル／パンク／8ビート／サーフ：パワー dyad 刻み＋強拍/シンコペアクセント */
+			int step = (style == SC_AS_METAL && (pl.sec == 3 || pl.sec == 6 || pl.sec == 7)) ? 3 : 6;
+			if (pl.breakFeel == 1) step = 12;
+			uint16_t mask = (pl.phraseBar & 1) ? sx.chordB : sx.chordA;
+			if (!mask) mask = 0x5555u;
+			for (int st = 0; st <= 44 && !c->overflow; st += step) {
+				int s16 = st / 3;
+				if (step == 3 && !(mask & (uint16_t)(1u << (s16 & 15))) && (st % 6) != 0) continue;
+				if (ap.callResp == 2 && (bar & 1) && st >= 24 && st < 42) continue;
+				int accent = (st == 0 || st == 24 || (pl.turn >= 1 && st == 36));
+				if ((pl.sec == 2 || pl.sec == 6) && (st == 18 || st == 42)) accent = 1;
+				int vel = accent ? 114 : (((st % 12) == 0) ? 88 : 74);
+				int du = accent ? (step > 3 ? 5 : 3) : (step > 3 ? 4 : 2);
+				emitVoice(st, du, vel, isPowC ? 2 : 3, accent ? 84 : 58);
+			}
+		} else if (famC == FAM_JAZZ || famC == FAM_BLUES || famC == FAM_SHUF || famC == FAM_BOSSA || style == SC_AS_LOFI || ap.compMode == 2) {
+			/* ジャズ／ブルース／ボサ／ボイスリード：64小節で毎小節リズムが変わるコンピング */
+			static const int8_t jPat[8][4] = {
+				{ 0, 20, -1, -1 }, { 0, 12, 32, -1 }, { 8, 24, 40, -1 }, { 0, 20, 36, -1 },
+				{ 4, 20, 32, -1 }, { 0, 16, 28, 40 }, { 12, 32, -1, -1 }, { 0, 24, 42, -1 }
+			};
+			static const int8_t bPat[4][4] = {
+				{ 0, 9, 18, 30 }, { 6, 18, 27, 39 }, { 0, 12, 21, 36 }, { 0, 9, 24, 33 }
+			};
+			int row = (bar + pl.sec + (pl.varBits & 7) + (patC & 3)) & 7;
+			const int8_t* rp = (famC == FAM_BOSSA) ? bPat[row & 3] : jPat[row];
+			for (int k = 0; k < 4 && rp[k] >= 0 && !c->overflow; k++) {
+				if (pl.breakFeel == 1 && k >= 2) break;
+				int st = rp[k];
+				int nextSt = (k + 1 < 4 && rp[k + 1] >= 0) ? rp[k + 1] : 46;
+				int du = nextSt - st - 1;
+				if (du > 12) du = (pl.sec >= 3 || ap.compMode == 8) ? 14 : 8;
+				if (du < 3) du = 3;
+				emitVoice(st, du, (k == 0) ? 98 : 88, 4, (du <= 4) ? 55 : 82);
+			}
+		} else if (waltz || famC == FAM_WALTZ) {
+			/* 3/4 ワルツ・ジャズワルツ */
+			emitVoice(0, 12, 84, 3, 86);
+			emitVoice(16, (pl.varBits & 1) ? 10 : 6, 94, 3, 72);
+			emitVoice(32, (pl.varBits & 2) ? 12 : 6, 96, 3, 72);
+		} else if (famC == FAM_FLOOR || famC == FAM_DISCO || famC == FAM_TRAP || famC == FAM_HOP) {
+			/* ダンス／エレクトロ／ヒップホップ：スタイル固有 chord 格子＋ビルドアップ */
+			uint16_t mask = Bits(sd.chord);
+			if (pl.sec == 1 || pl.sec == 4) mask = (uint16_t)(mask | (sx.chordA & 0x5555u));
+			else if (pl.sec == 3 || pl.sec == 7) mask = (uint16_t)(mask | sx.chordB);
+			else if (pl.breakFeel == 2) mask = (uint16_t)(mask | 0x5555u);
+			if (!mask) mask = 0x4444u;
+			for (int s = 0; s < divC && !c->overflow; s++) {
 				if (!(mask & (uint16_t)(1u << s))) continue;
-				int st = s * 3;
-				int pc, ty;
-				ChordAt(b, st, &pc, &ty);
-				int tones[4];
-				int nt = ChordTones(pc, ty, 0, tones, 4);
-				if (nt < 1) continue;
+				if (pl.breakFeel == 1 && s > 0 && (s & 3) != 0) continue;
+				int st = s * unitC;
+				int du = (ap.compMode == 7 || (s & 3) == 2) ? 3 : 6;
+				emitVoice(st, du, ((s & 3) == 2) ? 104 : 90, 3, (du <= 3) ? 54 : 80);
+			}
+		} else {
+			/* 16ビート／ファンク／シティポップ／アニソン／フュージョン／ラテン／チップチューン等：
+			   kDef[style].chord + kStyleExtra.chordA/B を土台に、A/A3はSSW風の粒立ち単音カッティング、
+			   サビ(C1/C2)やキメ(K/P)ではボイスリード和音カッティングへ展開する */
+			uint16_t mDef = Bits(sd.chord);
+			uint16_t mBar = ((pl.phraseBar + patC) & 1) ? sx.chordB : sx.chordA;
+			uint16_t mask = (pl.sec == 0 || pl.sec == 4) ? (uint16_t)(mDef | (mBar & 0xAAAAu))
+				: (uint16_t)(mDef | mBar);
+			if (ap.compMode == 1 || style == SC_AS_16BEAT || style == SC_AS_FUNK || style == SC_AS_CITYPOP || style == SC_AS_CHIPTUNE) {
+				/* 16分粒立ちパターンの変異（64小節内で毎回少しずつ変える） */
+				static const uint16_t m16[8] = {
+					0xEEEEu, 0xDB6Du, 0x6DB6u, 0xBBBBu, 0xAAAAu, 0xDDDDu, 0x7777u, 0x5AD6u
+				};
+				uint16_t alt = m16[(pl.sec + (pl.varBits & 7) + (patC & 3)) & 7];
+				if (pl.sec == 0 || pl.sec == 4) mask = (uint16_t)(alt & ~1u);
+				else mask = alt;
+			}
+			if (ap.compMode == 4 || pl.breakFeel == 1) mask = (uint16_t)(mask & 0x1111u);
+			else if (ap.compMode == 7) mask = (uint16_t)(mask & 0x4924u);
+			if (ap.callResp == 1 && (bar & 1)) mask = (uint16_t)(mask & 0xFF00u);
+			else if (ap.callResp == 1) mask = (uint16_t)(mask & 0x00FFu);
+			if (!mask) mask = mDef ? mDef : 0x4444u;
+
+			const int useBlock = (ap.compMode == 7 || ap.compMode == 10 || pl.sec == 3 || pl.sec == 7 || pl.turn >= 2);
+			for (int s = 0; s < divC && !c->overflow; s++) {
+				if (!(mask & (uint16_t)(1u << s))) continue;
+				int st = s * unitC;
 				int sub = s & 3;
-				int vel = 108 - sub * 14 - ((bar & 1) ? 4 : 0);
+				int vel = 106 - sub * 13;
 				if (vel < 62) vel = 62;
-				int midi = tones[(s + bar + patC) % nt];
-				if (s_song.prevCh > 0) {
-					while (midi < s_song.prevCh - 7) midi += 12;
-					while (midi > s_song.prevCh + 6) midi -= 12;
-				}
-				one(st, (patC == 11) ? 3 : 2, midi, vel);
+				if (useBlock && ((s & 3) == 0 || (s & 3) == 2))
+					emitVoice(st, (ap.compMode == 7) ? 2 : 3, vel, 3, (ap.compMode == 7) ? 44 : 66);
+				else
+					emitSingle(st, (ap.compMode == 8) ? 4 : 2, s + bar + (pl.varBits & 3), vel, 64);
 			}
 		}
 	}
 
 	for (int i = 0; i < nPad && !c->overflow; i++) {
 		if (b->section == SEC_INTRO) continue;
-		if (melPad && i == 0) {
-			sing(padCh[i], &s_song.prevPad, 52, 81, 2, 70);
-			continue;
-		}
+		if (pl.sec == 0 && pl.phraseBar < 4 && ag.dens == 0 && i == 0) continue;
+		if (i == 2 && pl.sec < 2) continue; /* 3本目のパッドは前サビ・サビから登場 */
+		if (i >= 3 && pl.sec != 3 && pl.sec != 5 && pl.sec != 7) continue; /* 4本目以降はサビ/ブリッジ専用 */
+		int loP = 55 + (i == 1 ? 7 : i == 2 ? 12 : i >= 3 ? 16 : 0) + (pl.regShift > 0 ? 5 : 0);
+		int hiP = 81 + (i == 1 ? 7 : i == 2 ? 10 : i >= 3 ? 12 : 0) + (pl.regShift > 0 ? 5 : 0);
+		if (hiP > 96) hiP = 96;
 		auto holdPad = [&](int st, int du) {
 			int pc, ty;
 			ChordAt(b, st, &pc, &ty);
 			int tones[4];
-			int nt = ChordTones(pc, ty, 0, tones, 4);
+			int nt = BuildChordVoicing(pc, ty, 0, pl.extLvl, s_song.prevPad, loP, hiP, tones, 4);
 			if (nt < 1) return;
-			int nv = c->isFm ? 1 : (nt < 3 ? nt : 3);
+			int nv = c->isFm ? 1 : ((i >= 2) ? (nt < 2 ? nt : 2) : (nt < 3 ? nt : 3));
+			int sum = 0;
 			for (int v = 0; v < nv; v++) {
-				int m = tones[(v + i) % nt];
-				while (m < 55) m += 12;
-				while (m > 81) m -= 12;
-				PutFrac(c, padCh[i], b, st, du, m, 64 - i * 4 - v * 3, 100);
-				s_song.prevPad = m;
+				int idx = c->isFm ? ((v + i + bar) % nt) : ((v + (i >= 2 ? 1 : 0)) % nt);
+				int vv = ShapeVel(62 - i * 4 - v * 3, pl, ap, st);
+				PutFrac(c, padCh[i], b, st, du, tones[idx], vv, 100);
+				sum += tones[idx];
 			}
+			if (i == 0 && nv > 0) s_song.prevPad = sum / nv;
 		};
-		int du = (b->root2 >= 0) ? 22 : 44;
-		holdPad(0, du);
-		if (b->root2 >= 0) holdPad(24, 22);
+		if (i >= 3) {
+			/* 4本目以降: 後半から膨らむクワイア/ストリングス層 */
+			holdPad(12, 34);
+		} else {
+			int du = (b->root2 >= 0) ? 22 : 44;
+			holdPad(0, du);
+			if (b->root2 >= 0) holdPad(24, 22);
+		}
 	}
 
-	if (nArp > 0 && arpCh && !(thin && form < 1 && (pos & 1) && !boom)) {
+	if (nArp > 0 && arpCh && !(thin && form < 1 && pl.sec == 0 && (bar & 1))) {
 		const int arpFam = StyleFam(style);
-		int shape = (pos + s_song.pat + sx.arpMode) % 6;
+		const int divA = (sd.div == 12) ? 12 : 16;
+		const int unitA = 48 / divA;
 		for (int i = 0; i < nArp && !c->overflow; i++) {
-			if (melArp && i == 0 && !waltz) {
-				sing(arpCh[i], &s_song.prevArp, 60, 91, 0, 90);
-				continue;
-			}
+			if (i == 1 && pl.sec == 0 && (bar & 1) == 0) continue; /* 2本目は1本目と密度差をつける */
+			if (i == 2 && pl.sec < 2) continue;
+			if (i >= 3 && pl.sec != 3 && pl.sec != 6 && pl.sec != 7) continue;
+			if (ap.callResp == 2 && (bar & 1) == 0 && i == 0 && pl.sec < 6) continue;
+			int shape = (pl.sec + (pl.varBits & 7) + (int)sx.arpMode + i * 2) % 6;
 			if (waltz) {
 				for (int k = 0; k < 3 && !c->overflow; k++) {
+					int st = k * 16 + ((i & 1) ? 8 : 0) + ((i >= 2) ? 4 : 0);
+					if (st > 44) continue;
 					int pcA, tyA;
-					ChordAt(b, k * 16, &pcA, &tyA);
-					int m = ChordPick(pcA, tyA, k + i + shape, s_song.prevArp, 52, 88);
+					ChordAt(b, st, &pcA, &tyA);
+					int tones[4];
+					int nt = BuildChordVoicing(pcA, tyA, 0, pl.extLvl, s_song.prevArp, 55 + i * 5, 88 + i * 2, tones, 4);
+					int m = nt > 0 ? tones[(k + shape) % nt] : 64;
 					s_song.prevArp = m;
-					PutFrac(c, arpCh[i], b, k * 16, 6, m, 86 - i * 6, 58);
+					PutFrac(c, arpCh[i], b, st, 6, m, ShapeVel(84 - i * 6, pl, ap, st), 62);
 				}
 				continue;
 			}
-			uint16_t am = FamMask(arpFam, s_song.pat + i * 2, pos, 2);
+			uint16_t am = ((bar + i) & 1) ? sx.arpB : sx.arpA;
+			if (!am) am = FamMask(arpFam, s_song.pat + i * 2, bar, 2);
+			if (pl.breakFeel == 1) am = (uint16_t)(am & 0x5555u);
+			else if (pl.sec == 3 || pl.sec == 7 || ap.compMode == 6) am = (uint16_t)(am | (sx.arpA & 0xAAAAu));
+			if (i == 1) {
+				/* 2本目: 裏位相＋間引きで対話するアルペジオ */
+				am = (uint16_t)((((am << 2) | (am >> 14)) & 0xAAAAu));
+			} else if (i == 2) {
+				/* 3本目: 8分中心のハイ・スパークル */
+				am = (uint16_t)((((am << 4) | (am >> 12)) & 0x5555u));
+			} else if (i >= 3) {
+				/* 4本目以降: 後半ビート集中シマー */
+				am = (uint16_t)((((am << (i * 3)) | (am >> (16 - ((i * 3) & 15)))) & 0xFF00u));
+			}
+			if (ap.callResp == 1) am = (uint16_t)(am & ((bar & 1) ? 0x00FFu : 0xFF00u));
+			if (!am) am = (i & 1) ? 0x2222u : 0x1111u;
 			int k = 0;
-			for (int s = 0; s < 16 && !c->overflow; s++) {
+			for (int s = 0; s < divA && !c->overflow; s++) {
 				if (!(am & (uint16_t)(1u << s))) continue;
+				int st = s * unitA;
 				int pcA, tyA;
-				ChordAt(b, s * 3, &pcA, &tyA);
-				int m = ChordPick(pcA, tyA, k + i + shape, s_song.prevArp, 52, 88);
-				if (i > 0 && (i & 1)) m += 12;
-				while (m > 88) m -= 12;
-				while (m < 52) m += 12;
+				ChordAt(b, st, &pcA, &tyA);
+				int loA = 55 + i * 5 + (ap.octShift > 0 ? 5 : 0);
+				int hiA = 86 + i * 3;
+				if (loA > 78) loA = 78;
+				if (hiA > 98) hiA = 98;
+				int tones[5];
+				int nt = BuildChordVoicing(pcA, tyA, 0, pl.extLvl, s_song.prevArp, loA, hiA, tones, 5);
+				if (nt < 1) continue;
+				static const int dirPat[6][4] = {
+					{ 0, 1, 2, 3 }, { 3, 2, 1, 0 }, { 0, 2, 1, 3 },
+					{ 0, 1, 3, 2 }, { 1, 2, 3, 0 }, { 2, 0, 3, 1 }
+				};
+				int m = tones[dirPat[shape][k & 3] % nt];
 				s_song.prevArp = m;
-				int du = (arpFam == FAM_BALLAD || arpFam == FAM_PAD) ? 8 : 2;
-				int nextS = 16;
-				for (int s2 = s + 1; s2 < 16; s2++) {
+				int du = (arpFam == FAM_BALLAD || arpFam == FAM_PAD || ap.compMode == 8) ? 8 : (unitA > 3 ? 3 : 2);
+				int nextS = divA;
+				for (int s2 = s + 1; s2 < divA; s2++) {
 					if (am & (uint16_t)(1u << s2)) { nextS = s2; break; }
 				}
-				int maxDu = (nextS - s) * 3 - 1;
+				int maxDu = (nextS - s) * unitA - 1;
 				if (maxDu < 2) maxDu = 2;
 				if (du > maxDu) du = maxDu;
-				PutFrac(c, arpCh[i], b, s * 3, du, m, 86 - i * 6 - ((k & 1) ? 8 : 0), 58);
+				int vv = ShapeVel(84 - i * 6 - ((k & 1) ? 8 : 0), pl, ap, st);
+				PutFrac(c, arpCh[i], b, st, du, m, vv, (ap.compMode == 7) ? 46 : 64);
 				k++;
 			}
 		}
 	}
 
 	for (int i = 0; i < nHarm && !c->overflow; i++) {
-		if (melHarm && i == 0) {
-			sing(harmCh[i], &s_song.prevHarm, 60, 88, 0, 84);
+		if (melHarm == 1 && i == 0) {
+			sing(harmCh[i], &s_song.prevHarm, 60, 88, 0, 82);
 			continue;
 		}
+		if (melHarm == 2 && i == 0) {
+			/* 高formのサビでは3度下ハモリでメロディを分厚く支える */
+			sing(harmCh[i], &s_song.prevHarm, 57, 86, 2, 78);
+			continue;
+		}
+		if (i == 2 && pl.sec < 3) continue;
+		if (i >= 3 && pl.sec != 3 && pl.sec != 7) continue;
+		if (pl.sec == 0 && pl.phraseBar < 4 && thin && i == 0) continue;
 		int hat[6];
-		int nh = HitTimes(pos + 3 + i, span, (fig == 3) ? 0 : fig, s_song.pat + 2 + i, waltz, hat, quiet ? 2 : 4, 3);
+		int nh = HitTimes(bar + 3 + i * 2 + (pl.varBits & 3), 64, (fig == 3) ? 0 : fig, s_song.pat + 2 + i * 3, waltz, hat, (quiet || pl.breakFeel == 1 || i >= 2) ? 2 : 4, 3);
 		for (int k = 0; k < nh && !c->overflow; k++) {
 			int du = (k + 1 < nh) ? (hat[k + 1] - hat[k] - 1) : (46 - hat[k]);
 			if (du > 18) du = 18;
 			if (du < 4) du = 4;
 			int pcH, tyH;
 			ChordAt(b, hat[k], &pcH, &tyH);
-			int m = ChordPick(pcH, tyH, k + i, s_song.prevHarm, 60, 92);
+			int tones[4];
+			int nt = BuildChordVoicing(pcH, tyH, 0, pl.extLvl, s_song.prevHarm, 60 + i * 4, 90 + (i > 0 ? 4 : 0), tones, 4);
+			if (nt < 1) continue;
+			int m = tones[(k + i + (pl.varBits & 3)) % nt];
 			s_song.prevHarm = m;
-			PutFrac(c, harmCh[i], b, hat[k], du, m, 80 - i * 5, 84);
-			if (!c->isFm && (form >= 30 || i == 0)) {
-				int m2 = ChordPick(pcH, tyH, k + i + 1, m, 64, 94);
-				if (m2 != m) PutFrac(c, harmCh[i], b, hat[k], du, m2, 68 - i * 5, 80);
+			PutFrac(c, harmCh[i], b, hat[k], du, m, ShapeVel(78 - i * 5, pl, ap, hat[k]), 84);
+			if (!c->isFm && nt > 1 && i == 0 && (pl.sec >= 2 || form >= 30)) {
+				int m2 = tones[(k + i + 1 + (pl.varBits & 3)) % nt];
+				if (m2 != m) PutFrac(c, harmCh[i], b, hat[k], du, m2, ShapeVel(68 - i * 5, pl, ap, hat[k]), 80);
 			}
 		}
 	}
@@ -5166,8 +6226,11 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 		if (src < 0 || src >= 256) src = 0;
 		int melN = s_song.melCount[src];
 		if (b->section == SEC_INTRO && melN > 2) melN = 2;
-		if (thin && melN > 3 && !boom && form < 75) melN = 3;
 		if (melN > 12) melN = 12;
+		int loM = s_song.cast.lo;
+		int hiM = s_song.cast.hi;
+		if (pl.sec == 3 || pl.sec == 7) { loM += 2; hiM += 3; }
+		if (hiM > 96) hiM = 96;
 		for (int k = 0; k < melN && !c->overflow; k++) {
 			int mst = s_song.mel[src][k].at;
 			int mdu = s_song.mel[src][k].du;
@@ -5175,19 +6238,19 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			int raw = (int)s_song.mel[src][k].deg;
 			int pcM, tyM;
 			ChordAt(b, mst, &pcM, &tyM);
-			int strong = ((mst % 12) == 0) || k == 0 || k == melN - 1;
+			int strong = ((mst % 12) == 0) || k == 0 || k == melN - 1 || mdu >= 12;
 			int m;
-			if (b->section == SEC_BODY && pos >= span - 1 && k == melN - 1)
-				m = ChordPick(pcM, tyM, 0, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
-			else if (strong)
-				m = SnapChord(pcM, tyM, raw, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+			if (b->section == SEC_BODY && pl.turn == 3 && k == melN - 1)
+				m = MelPitch(tonic, s_song.cast.scale, pcM, tyM, 0, 1, s_song.prevMel, loM, hiM);
 			else
-				m = ScalePick(pcM, tyM, raw, s_song.prevMel, s_song.cast.lo, s_song.cast.hi);
+				m = MelPitch(tonic, s_song.cast.scale, pcM, tyM, raw, strong, s_song.prevMel, loM, hiM);
 			s_song.prevMel = m;
-			int vel = mlg ? 108 : 94;
-			if (boom) vel = 118;
+			int vel = mlg ? 106 : 94;
+			if (pl.sec == 3 || pl.sec == 7) vel += 8;
+			else if (pl.sec == 0) vel -= 6;
+			vel = ShapeVel(vel, pl, ap, mst);
 			s_putForce = 1;
-			PutFrac(c, melodyCh, b, mst, mdu, m, vel, mlg ? 92 : 74);
+			PutFrac(c, melodyCh, b, mst, mdu, m, vel, mlg ? 92 : 76);
 			if (!c->isFm && s_song.mel[src][k].bend && sx.bendMode)
 				emitBend(melodyCh, mst, (sx.bendMode == 3) ? -14 : -10);
 			if (!c->isFm && (sx.ccFlags & CCF_MOD) && mdu >= 18) {
@@ -5200,89 +6263,120 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 
 	s_putForce = 1;
 	for (int i = 0; i < nCnt && !c->overflow; i++) {
-		if (pos >= span - 1) {
+		if (pl.turn == 3 || b->section == SEC_END) {
 			int pc, ty;
 			ChordAt(b, 0, &pc, &ty);
-			int m = ChordPick(pc, ty, (i & 1) ? 1 : 2, s_song.prevCnt, 55, 84);
+			int tones[4];
+			int nt = BuildChordVoicing(pc, ty, 0, pl.extLvl, s_song.prevCnt, 55 + i * 4, 84 + i * 3, tones, 4);
+			int m = nt > 0 ? tones[i % nt] : 64;
 			s_song.prevCnt = m;
-			PutFrac(c, cntCh[i], b, 0, 24, m, 76, 84);
+			PutFrac(c, cntCh[i], b, 0, 24, m, ShapeVel(76 - i * 4, pl, ap, 0), 84);
 			continue;
 		}
 		if (melCnt && i == 0) {
 			sing(cntCh[i], &s_song.prevCnt, 55, 84, 1, 80);
 			continue;
 		}
+		if (i == 1 && pl.sec == 0 && (bar & 1)) continue;
+		if (i == 2 && pl.sec < 2) continue;
+		if (i >= 3 && pl.sec != 3 && pl.sec != 6 && pl.sec != 7) continue;
 		int cat[6];
-		int nc = HitTimes(pos + 5 + i, span, fig, s_song.pat + 4 + i, waltz, cat, 4, 4);
+		int nc = HitTimes(bar + 5 + i * 3 + (pl.varBits & 3), 64, fig, s_song.pat + 4 + i * 2, waltz, cat, (pl.breakFeel == 1 || i >= 2) ? 2 : 4, 4);
 		for (int k = 0; k < nc && !c->overflow; k++) {
 			int du = (k + 1 < nc) ? (cat[k + 1] - cat[k] - 1) : 10;
 			if (du > 12) du = 12;
 			if (du < 3) du = 3;
 			int pc, ty;
 			ChordAt(b, cat[k], &pc, &ty);
-			int m = ChordPick(pc, ty, k + 5 + i, s_song.prevCnt, 52 + i * 4, 86);
+			int tones[4];
+			int nt = BuildChordVoicing(pc, ty, 0, pl.extLvl, s_song.prevCnt, 52 + i * 5, 86 + i * 3, tones, 4);
+			if (nt < 1) continue;
+			int m = tones[(k + i + (pl.varBits & 3)) % nt];
 			s_song.prevCnt = m;
-			PutFrac(c, cntCh[i], b, cat[k], du, m, 76 - i * 4, 78);
+			PutFrac(c, cntCh[i], b, cat[k], du, m, ShapeVel(76 - i * 4, pl, ap, cat[k]), 78);
 		}
 	}
 	for (int i = 0; i < nStab && !c->overflow; i++) {
 		const int famS = StyleFam(style);
 		const int patS = s_song.pat & 15;
+		/* 抜きセクションやA1前半はスタブを控えて、サビ・ターンアラウンドで効かせる */
+		if (pl.breakFeel == 1 && pl.turn == 0 && ap.compMode != 7) continue;
+		if (i == 1 && pl.sec < 2 && pl.turn == 0) continue;
+		if (i >= 2 && pl.sec != 3 && pl.sec != 6 && pl.sec != 7 && pl.turn < 2) continue;
+		if (ap.callResp == 2 && (bar & 1) == 0 && pl.turn == 0) continue;
+
 		int ats[4];
 		int ns = 0;
 		int sdu = 3;
-		int vel = 114;
-		if (pos >= span - 1 || b->section == SEC_END) {
-			ats[0] = 0; ns = 1; sdu = 8; vel = 100;
+		int vel = 108;
+		if (pl.turn == 3 || b->section == SEC_END) {
+			ats[0] = 0; ns = 1; sdu = 8; vel = 102;
 		} else if (famS == FAM_BALLAD || famS == FAM_PAD || famS == FAM_MARCH) {
-			if ((bar & 3) != 0 && patS != 15) continue;
-			ats[0] = 0; ns = 1; sdu = 10; vel = 88;
+			if (pl.turn == 0 && pl.phraseBar != 0 && patS != 15) continue;
+			ats[0] = (pl.turn >= 1) ? 36 : 0; ns = 1; sdu = 8; vel = 88;
 		} else if (famS == FAM_JAZZ || famS == FAM_BLUES || famS == FAM_SHUF || famS == FAM_BOSSA) {
-			ats[0] = 18; ats[1] = 42; ns = (ag.dens >= 2) ? 2 : 1; sdu = 4; vel = 96;
+			static const int jSt[4][2] = { { 18, 42 }, { 8, 32 }, { 20, 44 }, { 12, 36 } };
+			int row = (bar + pl.sec + (pl.varBits & 3)) & 3;
+			ats[0] = jSt[row][0]; ats[1] = jSt[row][1];
+			ns = (pl.sec >= 3 || ag.dens >= 2 || pl.turn >= 1) ? 2 : 1;
+			sdu = 4; vel = 96;
 		} else if (famS == FAM_8 || famS == FAM_METAL || famS == FAM_TANGO) {
-			ats[0] = 24; ns = 1; sdu = 6; vel = 118;
-			if (ag.dens >= 3) { ats[1] = 42; ns = 2; }
+			if (pl.sec == 0 && (bar & 1) && pl.turn == 0) continue;
+			ats[0] = (pl.varBits & 1) ? 24 : 0;
+			ns = 1; sdu = 5; vel = 114;
+			if (pl.sec >= 3 || pl.turn >= 1 || ag.dens >= 3) { ats[1] = (pl.turn >= 1) ? 42 : 36; ns = 2; }
 		} else if (famS == FAM_FUNK || famS == FAM_REG || famS == FAM_SKA) {
-			ats[0] = 6; ats[1] = 18; ats[2] = 30; ats[3] = 42;
-			ns = (ag.dens == 0) ? 2 : 4; sdu = 3; vel = 114;
+			static const int fSt[4][3] = { { 6, 18, 42 }, { 18, 30, 42 }, { 6, 30, 39 }, { 12, 30, 42 } };
+			int row = (bar + pl.sec + (pl.varBits & 3)) & 3;
+			ats[0] = fSt[row][0]; ats[1] = fSt[row][1]; ats[2] = fSt[row][2];
+			ns = (pl.sec >= 3 || ap.compMode == 7) ? 3 : ((ag.dens == 0) ? 1 : 2);
+			sdu = 3; vel = 110;
 		} else if (famS == FAM_WALTZ) {
-			ats[0] = 16; ats[1] = 32; ns = 2; sdu = 4; vel = 104;
+			ats[0] = 16; ats[1] = 32; ns = (pl.sec >= 2) ? 2 : 1; sdu = 4; vel = 98;
 		} else {
-			ats[0] = 15; ats[1] = 39; ns = (ag.dens == 0) ? 1 : 2; sdu = 3; vel = 112;
-			if (ag.dens >= 3) { ats[2] = 27; ns = 3; }
+			static const int pSt[4][3] = { { 15, 39, 45 }, { 18, 42, 30 }, { 9, 33, 42 }, { 21, 39, 45 } };
+			int row = (bar + pl.sec + (pl.varBits & 3) + (patS & 3)) & 3;
+			ats[0] = pSt[row][0]; ats[1] = pSt[row][1]; ats[2] = pSt[row][2];
+			ns = (pl.sec >= 3 || pl.turn >= 1) ? 2 : 1;
+			if (ap.compMode == 7 || ap.compMode == 10 || ag.dens >= 3) ns = 3;
+			sdu = 3; vel = 108;
 		}
-		int shift = (patS & 3) * 3;
-		if (famS == FAM_8 || famS == FAM_METAL || famS == FAM_BALLAD || famS == FAM_PAD || famS == FAM_WALTZ)
-			shift = 0;
-		int nv = c->isFm ? 1 : 2;
+		if (i > 0) {
+			for (int s = 0; s < ns; s++) {
+				ats[s] = (ats[s] + i * 6) % 42;
+			}
+		}
+		int nv = c->isFm ? 1 : ((pl.sec >= 3 || ap.compMode == 7) ? 3 : 2);
 		for (int s = 0; s < ns && !c->overflow; s++) {
 			int st = ats[s];
-			if (s > 0) st += shift;
-			if (st > 44) st = ats[s];
+			if (st < 0 || st > 44) continue;
 			int pc, ty;
 			ChordAt(b, st, &pc, &ty);
 			int tones[4];
-			int nn = ChordTones(pc, ty, 0, tones, 4);
+			int nn = BuildChordVoicing(pc, ty, sd.power, pl.extLvl, 78 + i * 4, 68 + i * 3, 94, tones, 4);
 			if (nn < 1) continue;
 			for (int v = 0; v < nv && v < nn; v++) {
-				int m = tones[v] + 12;
-				while (m < 70) m += 12;
-				while (m > 96) m -= 12;
-				PutFrac(c, stabCh[i], b, st, sdu, m, vel - v * 8 - i * 4, 40);
+				int idx = c->isFm ? ((bar + s + i) % nn) : v;
+				PutFrac(c, stabCh[i], b, st, sdu, tones[idx], ShapeVel(vel - v * 7 - i * 5, pl, ap, st), 42);
 			}
 		}
 	}
 	for (int i = 0; i < nColor && !c->overflow; i++) {
-		if (pos >= span - 1) {
+		if (pl.turn == 3 || b->section == SEC_END) {
 			int pc, ty;
 			ChordAt(b, 0, &pc, &ty);
-			int m = ChordPick(pc, ty, 2, s_song.prevCol, 74, 98);
+			int tones[4];
+			int nn = BuildChordVoicing(pc, ty, 0, pl.extLvl, s_song.prevCol, 74, 96, tones, 4);
+			int m = nn > 0 ? tones[nn - 1] : 79;
 			s_song.prevCol = m;
-			PutFrac(c, colorCh[i], b, 0, 24, m, 74, 82);
+			PutFrac(c, colorCh[i], b, 0, 24, m, ShapeVel(74, pl, ap, 0), 82);
 			continue;
 		}
+		if (pl.sec == 0 && (bar & 1) && ag.dens < 2 && i == 0) continue;
+		if (i == 1 && pl.sec < 3) continue;
+		if (i >= 2 && pl.sec != 3 && pl.sec != 6 && pl.sec != 7) continue;
 		int colAt[6];
-		int ncol = HitTimes(pos + 2 + i, span, fig, s_song.pat + 5 + i, waltz, colAt, (ag.dens == 0) ? 2 : 3, 3);
+		int ncol = HitTimes(bar + 2 + i * 3 + (pl.varBits & 3), 64, fig, s_song.pat + 5 + i * 2, waltz, colAt, (pl.sec >= 3 || ag.dens >= 2) ? (i >= 2 ? 2 : 3) : 2, 3);
 		for (int k = 0; k < ncol && !c->overflow; k++) {
 			int cdu = (form >= 60) ? 4 : 6;
 			int lim = (k + 1 < ncol) ? (colAt[k + 1] - colAt[k] - 1) : (46 - colAt[k]);
@@ -5290,9 +6384,12 @@ static void ComposeBar(Ctx* c, const BarInfo* b, int bar, int form, int tonic,
 			if (cdu > lim) cdu = lim;
 			int pc, ty;
 			ChordAt(b, colAt[k], &pc, &ty);
-			int m = ChordPick(pc, ty, k + i + 1, s_song.prevCol, 74, 100);
+			int tones[4];
+			int nn = BuildChordVoicing(pc, ty, 0, pl.extLvl, s_song.prevCol, 74 + i * 3, 98, tones, 4);
+			if (nn < 1) continue;
+			int m = tones[(k + i + (pl.varBits & 3)) % nn];
 			s_song.prevCol = m;
-			PutFrac(c, colorCh[i], b, colAt[k], cdu, m, 78 - i * 4, 60);
+			PutFrac(c, colorCh[i], b, colAt[k], cdu, m, ShapeVel(76 - i * 4, pl, ap, colAt[k]), 64);
 		}
 	}
 	s_putForce = 0;
@@ -5517,7 +6614,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	const int explicitTargets = opt->targetMask != 0;
 	const int totalNotes = ScAutoArrangeCountNotes(ev, *evCount);
 	const int variation = opt->variation < 0 ? 0 : opt->variation;
-	const int useProg = opt->useProg || explicitTargets || totalNotes <= 0;
+	const int useProg = opt->useProg || (totalNotes <= 0);
 	const int rewrite = (opt->mode == SC_AM_REWRITE);
 	s_arrGsMap = opt->gsMap;
 	s_arrPat = opt->patVar < 0 ? 0 : opt->patVar;
@@ -5537,6 +6634,9 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			bodyBars = melBars;
 		if (bodyBars < 16) bodyBars = 16;
 		if (bodyBars > 1280) bodyBars = 1280;
+		/* 64小節以上でもメロディが16/32小節で機械ループしないよう本体小節数へ合わせる */
+		if (opt->melBars < 16 && melBars < bodyBars)
+			melBars = (bodyBars > 256) ? 256 : bodyBars;
 	}
 
 	const int isFm = opt->isFm ? 1 : 0;
@@ -6131,8 +7231,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (patVar < 0 || patVar >= SC_ARRANGE_COUNT) patVar = 0;
 	LoadStyle(opt->style, patVar, &st);
 	ApplyHalfBars(bars, nBars, opt->style, patVar);
-	if (useProg && nBars > 0)
-		PaintHarmony(bars, nBars, opt->style, patVar, variation, opt->defKey);
+	BuildSongPlan(bars, nBars, opt->style, patVar, variation, opt->defKey, useProg);
 	SetHeadTempo(&ctx, StyleBpm(opt->style), rewrite, opt->docTempoT);
 	{
 		const int stIdx = (opt->style >= 0 && opt->style < SC_AS_COUNT) ? opt->style : 0;
@@ -6177,14 +7276,14 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		}
 	}
 	for (int i = 0; i < nDrum; i++) EnsureDrum(&ctx, opt->ui, drumChs[i], drumChSlot[i], anySolo, (i == 0) ? st.progKit : 0, haveAcc);
-	for (int i = 0; i < nBass; i++) EnsureMelodic(&ctx, opt->ui, bassCh[i], 0, st.progAll[(0 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nChord; i++) EnsureMelodic(&ctx, opt->ui, chordCh[i], 1, st.progAll[(1 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nPad; i++) EnsureMelodic(&ctx, opt->ui, padCh[i], 2, st.progAll[(2 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nArp; i++) EnsureMelodic(&ctx, opt->ui, arpCh[i], 1, st.progAll[(3 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nHarm; i++) EnsureMelodic(&ctx, opt->ui, harmCh[i], 2, st.progAll[(4 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nCnt; i++) EnsureMelodic(&ctx, opt->ui, cntCh[i], 2, st.progAll[(5 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nStab; i++) EnsureMelodic(&ctx, opt->ui, stabCh[i], 1, st.progAll[(6 + i * 3) & 7], anySolo, haveAcc);
-	for (int i = 0; i < nColor; i++) EnsureMelodic(&ctx, opt->ui, colorCh[i], 2, st.progAll[(7 + i * 3) & 7], anySolo, haveAcc);
+	for (int i = 0; i < nBass; i++) EnsureMelodic(&ctx, opt->ui, bassCh[i], 0, RoleLayerProg(opt->style, patVar, 0, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nChord; i++) EnsureMelodic(&ctx, opt->ui, chordCh[i], 1, RoleLayerProg(opt->style, patVar, 1, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nPad; i++) EnsureMelodic(&ctx, opt->ui, padCh[i], 2, RoleLayerProg(opt->style, patVar, 2, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nArp; i++) EnsureMelodic(&ctx, opt->ui, arpCh[i], 1, RoleLayerProg(opt->style, patVar, 3, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nHarm; i++) EnsureMelodic(&ctx, opt->ui, harmCh[i], 2, RoleLayerProg(opt->style, patVar, 4, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nCnt; i++) EnsureMelodic(&ctx, opt->ui, cntCh[i], 2, RoleLayerProg(opt->style, patVar, 5, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nStab; i++) EnsureMelodic(&ctx, opt->ui, stabCh[i], 1, RoleLayerProg(opt->style, patVar, 6, i, st.progAll), anySolo, haveAcc);
+	for (int i = 0; i < nColor; i++) EnsureMelodic(&ctx, opt->ui, colorCh[i], 2, RoleLayerProg(opt->style, patVar, 7, i, st.progAll), anySolo, haveAcc);
 	if (genMel && melodyCh >= 0)
 		EnsureMelodic(&ctx, opt->ui, melodyCh, 2, LeadProg(opt->style), anySolo, 0);
 
@@ -6210,12 +7309,13 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		for (int i = 0; i < nColor; i++) takeTone(colorCh[i]);
 	}
 
-	int introN = 0, endN = 0;
+	int introN = 0, breakN = 0, endN = 0;
 	for (int i = 0; i < nBars; i++) {
 		if (bars[i].section == SEC_INTRO) introN++;
+		else if (bars[i].section == SEC_BREAK) breakN++;
 		else if (bars[i].section == SEC_END) endN++;
 	}
-	int introI = 0, endI = 0, bodyI = 0;
+	int introI = 0, breakI = 0, endI = 0, bodyI = 0;
 	MotifBegin();
 	const int totNormal = nBass + nChord + nPad + nArp + nHarm + nCnt + nStab + nColor;
 	LineBegin(opt->style, patVar, variation, form, melBars, totNormal == 1 ? 1 : 0, totNormal == 2 ? 1 : 0);
@@ -6320,13 +7420,16 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		int skipChord = 0;
 		int phase = PH_FULL;
 		int introAt = 0;
+		int breakAt = 0;
 		int endFromEnd = 0;
 		if (b.section == SEC_BODY) phase = BodyPhase(patVar, bodyI);
 		else if (b.section == SEC_INTRO) introAt = introI;
+		else if (b.section == SEC_BREAK) breakAt = breakI;
 		else if (b.section == SEC_END) endFromEnd = endN - endI - 1;
 		ApplyForm(b.section, last, phase, div, introAt, introN, endFromEnd,
 			drm, bass, &chordMask, &chordSlots, &skipChord, IntroHot(opt->style));
 		if (b.section == SEC_INTRO) introI++;
+		else if (b.section == SEC_BREAK) breakI++;
 		else if (b.section == SEC_END) endI++;
 		else if (b.section == SEC_BODY) bodyI++;
 		const int hot = IntroHot(opt->style);
@@ -6448,13 +7551,16 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			fillRole(colM, nColor, (uint16_t)(0x0101 & slotLow));
 			if (nHarm > 1 && !innBlock) innBlock = innM;
 		}
+		s_secIdx = (b.section == SEC_INTRO) ? introAt : (b.section == SEC_BREAK) ? breakAt : 0;
+		s_secLen = (b.section == SEC_INTRO) ? (introN > 0 ? introN : 1) : (b.section == SEC_BREAK) ? (breakN > 0 ? breakN : 1) : 1;
+		s_endRem = (b.section == SEC_END) ? endFromEnd : 0;
 		PaintPulse(opt->style, patVar, barAt, b.section, div,
 			(b.section == SEC_END && endFromEnd <= 0) ? 1 : 0, drm);
 		s_nextRootPc = (b.root >= 0) ? b.root : TonicPc(opt->defKey);
 		if (bi + 1 < nBars && bars[bi + 1].root >= 0)
 			s_nextRootPc = bars[bi + 1].root;
-		if (b.section != SEC_BREAK && (allowBar || form >= 1))
-			ComposeBar(&ctx, &b, (b.section == SEC_BODY) ? barAt : 0, form, TonicPc(opt->defKey),
+		if (allowBar || form >= 1 || b.section == SEC_BREAK)
+			ComposeBar(&ctx, &b, (b.section == SEC_BODY) ? barAt : s_secIdx, form, TonicPc(opt->defKey),
 				nBass, bassCh, nChord, chordCh, nPad, padCh, nArp, arpCh,
 				nHarm, harmCh, nCnt, cntCh, nStab, stabCh, nColor, colorCh,
 				melodyCh, genMel);
@@ -6550,14 +7656,44 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 						int dv = ghostHat ? (48 + (slot & 3) * 6)
 							: DrumHitVol(opt->style, v, slot, div, introSoft);
 						if (ghostHat && introSoft) dv = 42;
-						if (di > 0) {
+						/* 64小節セクション強弱・ゴーストノート・フィルクレッシェンド・ハット抑揚（生ドラマー表現） */
+						const BarPlan& plD = PlanOfBar((b.section == SEC_BODY) ? barAt : 0);
+						const ArrProfile& apD = kArrProf[patVar & 15];
+						const int qD = (div >= 4) ? (div / 4) : 1;
+						if (b.section == SEC_BODY) {
+							/* セクションエネルギー補正（A1/ブリッジ控えめ → サビ/最終サビ強め） */
+							dv += ((int)plD.energy - 74) / 3;
+							if (apD.velShape == 4) dv -= 8;
+							else if (apD.velShape == 1) dv += 5;
+							/* フィルイン（4/8/16小節末）のクレッシェンド */
+							int fFrom = (plD.turn == 2) ? (div / 2) : (plD.turn == 1 ? (div - qD) : div);
+							if (slot >= fFrom && (v == DV_SNARE || v == DV_TOM || v == DV_KICK)) {
+								int spanF = div - fFrom;
+								int prog = (spanF > 1) ? ((slot - fFrom) * 38 / (spanF - 1)) : 24;
+								dv = 76 + prog;
+							} else if (v == DV_SNARE || v == DV_RIM) {
+								/* バックビート(2/4拍)はしっかり鳴らし、裏拍ゴーストノートは繊細に落とす */
+								int backbeat = (slot == qD || slot == qD * 3 || (plD.breakFeel == 1 && slot == qD * 2));
+								if (backbeat && v == DV_SNARE) dv += 8;
+								else if (!backbeat) dv = (v == DV_RIM) ? (dv - 18) : (dv - 26);
+							} else if (v == DV_HAT || v == DV_RIDE) {
+								/* ハット/ライドの拍子アクセント（頭強 → 8分裏中 → 16分裏弱） */
+								int sub = slot % qD;
+								if (sub == 0) dv += 6;
+								else if (qD >= 4 && sub == 2) dv -= 6;
+								else dv -= 16;
+							} else if (v == DV_KICK && (slot % qD) == 0) {
+								dv += 8;
+							}
+						} else if (b.section == SEC_INTRO) {
+							/* イントロは徐々にクレッシェンドして本体へ繋ぐ */
+							dv -= (s_secLen - 1 - s_secIdx) * 6;
+						} else if (b.section == SEC_END && s_endRem > 0) {
 							dv -= 8;
-							if (dv < 48) dv = 48;
 						}
-						if ((v == DV_KICK || v == DV_SNARE) && ((slot % 4) == 0 || (slot % 4) == 2)) {
-							dv += 12;
-							if (dv > 127) dv = 127;
-						}
+						if (di > 0) dv -= 8;
+						if (dv < 36) dv = 36;
+						if (dv > 127) dv = 127;
 						if (openInstead)
 							PlaceDrumNote(&ctx, drumChs[di], tick, 46, dv > 121 ? 127 : dv + 6, drumDur);
 						else if (v == DV_CRASH)

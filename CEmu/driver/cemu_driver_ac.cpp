@@ -360,7 +360,7 @@ static int sAcPlygonet = 0;
 static int sAcPolynetw = 0;
 /* multi32 の 2 秒ドローン再投入は orunners / harddunk / scross だけ。titlef の 0x05 はループ。 */
 static int sAcMultiShort = 0;
-/* skisuprg: 0x06/07/09/0B は 8 秒、0x0D は 6 秒で止まるので 1 秒ごとに同じ 0x10xx を戻す。0x01 は 2 秒なので 0.25 秒。0 は無効。 */
+/* skisuprg: 0x06/07/09/0B は 8 秒、0x0D は 6 秒で止まるので 1 秒ごとに同じ 0x10xx を戻す。0x01 は 2 秒なので 0.25 秒。skytargt の 0x03/0A-0D も 1 秒。0 は無効。 */
 static int sAcSkiRepost = 0;
 /* scramble: ワンショットの長さに合わせてラッチを戻す。0 は無効。 */
 static int sAcScrRep = 0;
@@ -730,7 +730,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		   既載の lastbrnx / rchase2 はローバイトのまま。skisuprg はローバイトだと
 		   別 id が同じ波形に畳まれるので 0x10xx を試す。 */
 		if (_stricmp(ar, "hotd") == 0 || _stricmp(ar, "doa") == 0
-			|| _stricmp(ar, "dynamcop") == 0 || _stricmp(ar, "fvipers") == 0
+			|| _stricmp(ar, "dynamcop") == 0
 			|| _stricmp(ar, "gunblade") == 0 || _stricmp(ar, "manxtt") == 0
 			|| _stricmp(ar, "overrev") == 0 || _stricmp(ar, "schamp") == 0
 			|| _stricmp(ar, "sgt24h") == 0 || _stricmp(ar, "skytargt") == 0
@@ -740,6 +740,20 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			|| _stricmp(ar, "dirtdvls") == 0 || _stricmp(ar, "magtruck") == 0
 			|| _stricmp(ar, "von2") == 0 || _stricmp(ar, "skisuprg") == 0) {
 			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
+			if (_stricmp(ar, "skytargt") == 0) {
+				/* 0x00 は A0 10 00 で停止側。0x01 と 0x06 はキーだけで無音。0x1A は隣の 0x19 と同じ波形。 */
+				if (lo == 0x00u) lo = 0x04u;
+				else if (lo == 0x01u) lo = 0x05u;
+				else if (lo == 0x06u) lo = 0x08u;
+				else if (lo == 0x1au) lo = 0x1cu;
+			} else if (_stricmp(ar, "vcop2") == 0) {
+				/* 末尾で切れる曲は、隣と重ならない 16 秒のループへ。 */
+				if (lo == 0x06u) lo = 0x01u;
+				else if (lo == 0x0du) lo = 0x16u;
+				else if (lo == 0x07u) lo = 0x04u;
+				else if (lo == 0x0bu) lo = 0x03u;
+				else if (lo == 0x0fu) lo = 0x05u;
+			}
 			songCmdWord_ = (uint16_t)(0x1000u | (lo & 0xffu));
 			songCmd_ = (uint8_t)(lo & 0xffu);
 			if (_stricmp(ar, "skisuprg") == 0) {
@@ -749,7 +763,87 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				else if (s == 0x06u || s == 0x07u || s == 0x09u
 					|| s == 0x0bu || s == 0x0du)
 					sAcSkiRepost = 1;
+			} else if (_stricmp(ar, "skytargt") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x03u || s == 0x0au || s == 0x0bu || s == 0x0cu || s == 0x0du)
+					sAcSkiRepost = 1;
+			} else if (_stricmp(ar, "von") == 0) {
+				/* 4〜12 秒で切れる曲だけ、1 秒ごとに同じ 0x10xx を戻す。 */
+				unsigned s = songCmd_;
+				if (s == 0x1au || s == 0x14u || s == 0x15u || s == 0x13u
+					|| s == 0x12u || s == 0x11u || s == 0x10u
+					|| s == 0x0du || s == 0x0eu || s == 0x0fu)
+					sAcSkiRepost = 1;
+			} else if (_stricmp(ar, "sgt24h") == 0) {
+				if (songCmd_ == 0x02u)
+					sAcSkiRepost = 1;
+			} else if (_stricmp(ar, "waverunr") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x02u || s == 0x09u)
+					sAcSkiRepost = 1;
+			} else if (_stricmp(ar, "doa") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x00u || s == 0x21u)
+					sAcSkiRepost = 1;
+				else if (s == 0x20u)
+					sAcSkiRepost = 2;
+			} else if (_stricmp(ar, "dynamcop") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x06u || s == 0x05u || s == 0x1au || s == 0x0bu
+					|| s == 0x03u)
+					sAcSkiRepost = 1;
+				else if (s == 0x19u)
+					sAcSkiRepost = 2;
+			} else if (_stricmp(ar, "hotd") == 0) {
+				unsigned s = songCmd_;
+				if (s == 0x05u || s == 0x0au || s == 0x00u || s == 0x03u)
+					sAcSkiRepost = 1;
 			}
+		}
+		if (_stricmp(ar, "fvipers") == 0) {
+			/* 2 バイト目が 0x10-0x6F のときだけ曲。0x11/0x12/0x13 と、それ以外が落ちる 1 本。
+			   同じ波形が隣り合わないよう、偶数ステージと 0x00 は 0x12 へ。 */
+			unsigned lo = songCmd_ & 0x3fu;
+			if (lo == 0x00u || lo == 0x06u || lo == 0x08u || lo == 0x0au
+				|| lo == 0x0cu || lo == 0x0eu)
+				lo = 0x02u;
+			songCmdWord_ = (uint16_t)((0x10u + lo) << 8);
+			songCmd_ = (uint8_t)lo;
+		} else if (_stricmp(ar, "overrev") == 0) {
+			/* 同じ範囲チェック。カタログ 0x00-0x06 をグループ 0x10-0x16 にする。
+			   0x06 は 0x05 と同じ波形なので 0x03 へ。 */
+			unsigned lo = songCmd_ & 0x3fu;
+			if (lo == 0x06u) lo = 0x03u;
+			songCmdWord_ = (uint16_t)((0x10u + lo) << 8);
+			songCmd_ = (uint8_t)lo;
+		} else if (_stricmp(ar, "bel") == 0) {
+			/* カタログがすでに 0x11-0x17。0x12 以降は同じ波形なので奇数を 0x11 へ。 */
+			unsigned lo = songCmd_ & 0x7fu;
+			if (lo == 0x13u || lo == 0x15u || lo == 0x17u)
+				lo = 0x11u;
+			songCmdWord_ = (uint16_t)(lo << 8);
+			songCmd_ = (uint8_t)lo;
+		} else if (_stricmp(ar, "gunblade") == 0) {
+			/* 同じ 0x10-0x6F 判定。0x10 未満はグループへ上げる。
+			   6CC40E86 が隣り合う 0x07/0x09/0x06 は 0x04、0x0E は 0x00、0x0A は 0x02。 */
+			unsigned lo = songCmd_ & 0x7fu;
+			if (lo == 0x07u || lo == 0x09u || lo == 0x06u)
+				lo = 0x04u;
+			else if (lo == 0x0eu)
+				lo = 0x00u;
+			else if (lo == 0x0au)
+				lo = 0x02u;
+			if (lo < 0x10u) lo = 0x10u + lo;
+			if (lo > 0x6fu) lo = 0x10u;
+			songCmdWord_ = (uint16_t)(lo << 8);
+			songCmd_ = (uint8_t)lo;
+		} else if (_stricmp(ar, "schamp") == 0 || _stricmp(ar, "manxtt") == 0) {
+			/* 同じ範囲チェック。0x10 未満はグループへ上げ、範囲内のカタログはそのまま 2 バイト目。 */
+			unsigned lo = songCmd_ & 0x7fu;
+			if (lo < 0x10u) lo = 0x10u + lo;
+			if (lo > 0x6fu) lo = 0x10u;
+			songCmdWord_ = (uint16_t)(lo << 8);
+			songCmd_ = (uint8_t)lo;
 		}
 	}
 	/* K054539（bucky/moomesa 等）: 曲表エントリは 14 バイト。[0]==0 かつ [1] の bit6 クリアは mute/停止行（bucky prefer 0xC0）。単チップセットだけがその表配置。dual K054539 mystwarr 族は BGM 帯全体が 0xCD-0xEC なので、この強制は全曲を 0x01 に静かに置換した。 */
@@ -5934,8 +6028,11 @@ void CDriverAc::TryInjectCommand()
 	if (hw_->board_ == CEMU_AC_BOARD_M68K_PCM) {
 		/* TryInjectCommand は M68K_PCM 用に周期的にこれを呼ぶ */
 		if (cmdIndex_ >= 4) return;
-		uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x01;
-		if (!cmd) return;
+		uint8_t cmd = songCmd_;
+		if (!hw_->GwOn()) {
+			if (!cmd) cmd = 1;
+			if (!cmd) return;
+		}
 		hw_->SetSoundCommand(cmd);
 		cmdIndex_++;
 		triggered_ = 1;

@@ -1562,7 +1562,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     PianoRollPeakSpectrum::TuneAcc tune;
     m_detPeakN = 0;
     m_burstN = 0;
-    auto takePeaks = [&](int keyLo, int keyHi, int winSamples, int refWin) {
+    auto takePeaks = [&](int keyLo, int keyHi, int winSamples, int refWin, bool allowAboveBoard) {
         const int n = m_peakSpec.PeakCount();
         for (int i = 0; i < n; ++i) {
             const float hz = m_peakSpec.PeakHzAt(i);
@@ -1570,7 +1570,9 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             if (hz <= 1.0f || raw <= 0.0f) continue;
             const float kf = 69.0f + 12.0f * log2f(hz / 440.0f) - m_tuneSemis;
             const int k = (int)floorf(kf + 0.5f);
-            if (k < keyLo || k >= keyHi) continue;
+            if (k < keyLo) continue;
+            if (!allowAboveBoard && k >= keyHi) continue;
+            if (allowAboveBoard && hz > 9600.0f) continue;
             const float amp = ApplyDetectScale(raw, winSamples, refWin);
             int found = -1;
             for (int j = 0; j < m_detPeakN; ++j) {
@@ -1617,15 +1619,15 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
         analyzePeaks(m_windowedBass, m_winBass, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitLo);
         storeKeys(0, splitLo, m_winBass, WIN_BASS_REF);
-        takePeaks(0, splitLo, m_winBass, WIN_BASS_REF);
+        takePeaks(0, splitLo, m_winBass, WIN_BASS_REF, false);
         analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, splitLo, splitHi);
         storeKeys(splitLo, splitHi, m_winLow, WIN_LOW_REF);
-        takePeaks(splitLo, splitHi, m_winLow, WIN_LOW_REF);
+        takePeaks(splitLo, splitHi, m_winLow, WIN_LOW_REF, false);
     }
     else {
         analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitHi);
         storeKeys(0, splitHi, m_winLow, WIN_LOW_REF);
-        takePeaks(0, splitHi, m_winLow, WIN_LOW_REF);
+        takePeaks(0, splitHi, m_winLow, WIN_LOW_REF, false);
     }
     // 4096 サンプル窓(直近 ~93ms)は C4(splitLo=60)以上も解析し、60..84 の中高音メロディで
     // 8192 窓内で音が動いてピークが割れている場合のみ 4096 窓側を採用する。
@@ -1654,7 +1656,8 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_noiseRaw[i] = ApplyDetectScale(floorHigh[i], m_winHigh, WIN_HIGH_REF);
         m_fftSalRaw[i] = salHigh[i];
     }
-    takePeaks(splitLo, KEY_COUNT, m_winHigh, WIN_HIGH_REF);
+    // 4096 窓では盤面上限(4kHz)を超える 9.2kHz までの高次倍音ピークも渡し、C5〜D#7 の2〜4倍音検証に使う
+    takePeaks(splitLo, KEY_COUNT, m_winHigh, WIN_HIGH_REF, true);
 
     // 調律: 強い正弦波成分の A440 鍵中心からのずれを約 2 秒の時定数で円周平均する。
     // まとまりが弱い(ビブラート・グリッサンド主体)ときは直前の値を保つ。
@@ -1858,15 +1861,11 @@ void CPianoRoll::UpdateNoteStates()
     }
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
-    // C6 より上で、短い窓に出ていない弱い整数倍だけ落とす。
-    // 全体の 45% 以上ある峰は聞こえている音なので残す。
+    // C6 より上で、独立上声検証(m_ownVoice)も短窓立証も無い弱い高次倍音残響だけを周波数減衰込みで落とす。
     if (m_burstN > 0) {
         float bMax = 0.0f;
         for (int i = 0; i < m_burstN; ++i)
             if (m_burstAmp[i] > bMax) bMax = m_burstAmp[i];
-        float specMax = 0.0f;
-        for (int k = 0; k < KEY_COUNT; ++k)
-            if (blend[k] > specMax) specMax = blend[k];
         auto centsBetween = [](float a, float b) -> float {
             if (a <= 1.0f || b <= 1.0f) return 9999.0f;
             return 1731.234049066756f * fabsf(logf(a / b));
@@ -1884,16 +1883,15 @@ void CPianoRoll::UpdateNoteStates()
             return best;
         };
         for (int hi = 84; hi <= 100; ++hi) {
-            // 短い窓に無く、親より明らかに小さい整数倍だけ落とす。
-            if (!picked[hi] || relShort(hi) >= 0.01f) continue;
-            if (specMax > 0.0f && blend[hi] >= specMax * 0.45f) continue;
+            if (!picked[hi] || m_ownVoice[hi] || relShort(hi) >= 0.014f) continue;
             for (int lo = 28; lo < hi && picked[hi]; ++lo) {
-                if (!picked[lo] || ownPow[lo] < ownPow[hi] * 1.05f) continue;
+                if (!picked[lo]) continue;
                 const float ratio = PianoKey::KeyHz(hi) / PianoKey::KeyHz(lo);
                 const int hn = (int)floorf(ratio + 0.5f);
-                if (hn < 2 || hn > 6) continue;
-                if (centsBetween(PianoKey::KeyHz(hi), PianoKey::KeyHz(lo) * (float)hn) < 40.0f
-                    && ownPow[hi] < ownPow[lo] * 0.92f) {
+                if (hn < 2 || hn > 8) continue;
+                const float expPow = ownPow[lo] * powf((float)hn, -1.65f);
+                if (centsBetween(PianoKey::KeyHz(hi), PianoKey::KeyHz(lo) * (float)hn) < 38.0f
+                    && ownPow[hi] < expPow) {
                     picked[hi] = false;
                     ownPow[hi] = 0.0f;
                 }
@@ -1974,8 +1972,8 @@ void CPianoRoll::UpdateNoteStates()
             m_onsetBoostStreak[i] = 0;
         }
         // 1フレームの高音・オンセット即時点灯は倍音の閃光も同じ長さで塗る。
-        // 16分は欠けることがあり、8分以上は2フレームで残る。
-        const int attackNeed = AttackFramesForKey(i);
+        // C5以上は物理検証済み上声(m_ownVoice)なら2フレームで素早く点灯し、未検証候補は3フレーム要求して倍音チラつきを防ぐ。
+        const int attackNeed = (i >= PianoRoll108::MID_END && !m_ownVoice[i]) ? 3 : AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
         if (!cur) {
@@ -2011,9 +2009,12 @@ void CPianoRoll::UpdateNoteStates()
         m_activeKeys[i] = cur;
     }
 
-    // PickNotes が捨てた部分音が gap で残っているなら即切る。
+    // PickNotes が捨てた部分音が gap で残っているなら即切る(ただし確立済みの中〜高音実音は1フレーム欠測まで保持して分裂を防ぐ)。
     for (int i = PianoRoll108::MUSIC_LOW_FLOOR; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i] || picked[i]) continue;
+        if (i >= PianoRoll108::BASS_END && m_consecActive[i] >= 4
+            && m_unpickedFrames[i] < 2 && blend[i] >= m_envPeak[i] * 0.35f)
+            continue;
         if (!PianoKey::IsHarmonicOfAnyActive(blend, i, picked,
             PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.72f))
             continue;

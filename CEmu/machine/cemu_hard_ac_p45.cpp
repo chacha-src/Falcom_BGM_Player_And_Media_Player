@@ -1110,6 +1110,33 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		break;
 	}
 	if (!anyCode) { free(prog); return 0; }
+	if (ge->archive && _stricmp(ge->archive, "pltkids") == 0) {
+		/* BGM #11 の先頭ストリームは約 2 秒の無音。即終了させ、続くストリームから鳴らす。 */
+		if (prog[0x2faa0] == 0xb1 && prog[0x2faa1] == 0x07) {
+			prog[0x2faa0] = 0xff;
+			prog[0x2faa1] = 0x2f;
+		}
+		/* BGM #12 は約 8 秒で ff 2f。余白へ 4 回つなぎ、16 秒を埋める。 */
+		if (prog[0x95ca] == 0x00 && prog[0x95cb] == 0x61
+			&& prog[0x95cc] == 0x6a && prog[0x95cd] == 0xa4
+			&& prog[0x16ef7] == 0xff && prog[0x16ef8] == 0x2f
+			&& prog[0xab00] == 0 && prog[0xab01] == 0) {
+			const unsigned src = 0x16aa4u;
+			const unsigned n = 0x16ef7u - src;
+			unsigned dst = 0xab00u;
+			for (int c = 0; c < 4; c++) {
+				for (unsigned k = 0; k < n; k++)
+					prog[dst + k] = prog[src + k];
+				dst += n;
+			}
+			prog[dst] = 0xff;
+			prog[dst + 1] = 0x2f;
+			prog[0x95ca] = 0x00;
+			prog[0x95cb] = 0x60;
+			prog[0x95cc] = 0xab;
+			prog[0x95cd] = 0x00;
+		}
+	}
 	ms1Rom_ = prog;
 	ms1RomSize_ = romNeed;
 

@@ -2170,7 +2170,86 @@ static int HumanJoint(const Renderer& r, const Model& m, const char* a, const ch
 	return j;
 }
 
-// 浮いている人の脚は歩きのクリップを捨て、休みの形から ActorUpdate のばねの角度で置き直す。
+static void ApplyCrouchPose(Actor& a, const Renderer& r)
+{
+	a.crouchRig = 0;
+	float cr = a.crouch;
+	if (!a.poseValid || cr <= 0.005f || a.poseHold != 0) return;
+	if (a.clip == CL_DEATH || a.clip == CL_STUN || a.clip == CL_SPAWN) return;
+	if (a.proc == 1 || a.proc == 2) return;
+	if (a.model < 0 || a.model >= (int)r.models.size()) return;
+	const Model& m = r.models[a.model];
+	int ul = HumanJoint(r, m, "UpperLeg.L", "upperleg.l");
+	int ur = HumanJoint(r, m, "UpperLeg.R", "upperleg.r");
+	int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
+	int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+	int fl = HumanJoint(r, m, "Foot.L", "foot.l");
+	int fr = HumanJoint(r, m, "Foot.R", "foot.r");
+	int hips = HumanJoint(r, m, "Hips", "hips");
+	if (ul < 0 || ur < 0 || ll < 0 || lr < 0 || hips < 0) return;
+
+	auto syncGlobal = [&]() {
+		for (int j = 0; j < m.nJ && j < a.pose.nJ; j++) {
+			int pa = m.parent[j];
+			a.pose.global[j] = MMul(a.pose.local[j], pa >= 0 ? a.pose.global[pa] : m.top);
+		}
+	};
+	BOOL hasFoot = (fl >= 0 && fr >= 0 && fl < a.pose.nJ && fr < a.pose.nJ);
+	float footBefore = hasFoot
+		? min(a.pose.global[fl].m[13], a.pose.global[fr].m[13])
+		: min(a.pose.global[ll].m[13], a.pose.global[lr].m[13]);
+
+	// 歩行・走行クリップの脚運びを維持したまま、股・膝・足首を曲げて腰を落とす
+	SpinJointBack(m, a.pose, ul, 0.78f * cr);
+	SpinJointBack(m, a.pose, ur, 0.78f * cr);
+	syncGlobal();
+	SpinJointBack(m, a.pose, ll, -1.42f * cr);
+	SpinJointBack(m, a.pose, lr, -1.42f * cr);
+	syncGlobal();
+	if (hasFoot) {
+		SpinJointBack(m, a.pose, fl, 0.64f * cr);
+		SpinJointBack(m, a.pose, fr, 0.64f * cr);
+		syncGlobal();
+	}
+
+	// 胴と胸を前傾させて頭が上レイヤーに当たらないよう屈め、視線だけやや前へ戻す
+	int abd = HumanJoint(r, m, "Abdomen", "spine_01");
+	if (abd < 0) abd = HumanJoint(r, m, "Spine", "spine");
+	int chest = HumanJoint(r, m, "Chest", "chest");
+	int neck = HumanJoint(r, m, "Neck", "neck");
+	int head = HumanJoint(r, m, "Head", "head");
+	if (abd >= 0) {
+		SpinJointBack(m, a.pose, abd, -0.44f * cr);
+		syncGlobal();
+	}
+	if (chest >= 0) {
+		SpinJointBack(m, a.pose, chest, -0.48f * cr);
+		syncGlobal();
+	}
+	if (neck >= 0) {
+		SpinJointBack(m, a.pose, neck, 0.16f * cr);
+		syncGlobal();
+	}
+	if (head >= 0) {
+		SpinJointBack(m, a.pose, head, 0.24f * cr);
+		syncGlobal();
+	}
+
+	// 接地足裏の高さが浮かないよう、膝曲げによる上昇分だけ骨盤の Y を下げる
+	float footAfter = hasFoot
+		? min(a.pose.global[fl].m[13], a.pose.global[fr].m[13])
+		: min(a.pose.global[ll].m[13], a.pose.global[lr].m[13]);
+	float dy = footBefore - footAfter;
+	if (fabsf(dy) > 1e-5f) {
+		M4 G = a.pose.global[hips];
+		G.m[13] += dy;
+		int pa = m.parent[hips];
+		const M4& P = (pa >= 0 && pa < a.pose.nJ) ? a.pose.global[pa] : m.top;
+		a.pose.local[hips] = MMul(G, MInverse(P));
+	}
+	r.FinishPose(m, a.pose, &a.mods);
+	a.crouchRig = 1;
+}
 // 歩きの脚を残したまま後ろへ倒すと、太ももが水平まで上がって長い裾を突き破る。
 static void ApplyFlyTrail(Actor& a, const Renderer& r)
 {
@@ -2270,6 +2349,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		a.poseValid = 1;
 		a.poseFrame = r.m_frame;
 	} else if (a.proc == 2) {
+		a.crouchRig = 0;
 		a.poseValid = 1;
 		a.poseFrame = r.m_frame;
 		return;
@@ -2309,6 +2389,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 	}
 	ApplyFlyTrail(a, r);
 	ApplyDownPose(a, r);
+	ApplyCrouchPose(a, r);
 	if (a.poseValid && (a.clip == CL_DODGE || a.clip == CL_BLOCK) && a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size()) {
 		const Model& rm = r.models[a.model];
 		if (strncmp(rm.name, "Hum", 3) == 0) {
@@ -2473,7 +2554,14 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 M4 ActorWorld(const Actor& a, V3 pos, float face)
 {
 	float lean = -a.recoil * .72f;
-	return MMul(MMul(MMul(MScale(a.scale, a.scale, a.scale), MRotX(lean)), MRotY(face + PI)), MTrans(pos.x, pos.y, pos.z));
+	float sx = a.scale, sy = a.scale, sz = a.scale;
+	if (a.crouch > 0.005f && !a.crouchRig && a.poseHold == 0) {
+		sy *= (1.f - 0.36f * a.crouch);
+		float w = 1.f + 0.08f * a.crouch;
+		sx *= w;
+		sz *= w;
+	}
+	return MMul(MMul(MMul(MScale(sx, sy, sz), MRotX(lean)), MRotY(face + PI)), MTrans(pos.x, pos.y, pos.z));
 }
 
 V3 ActorJointWorld(const Actor& a, const M4& world, int which)
@@ -2798,10 +2886,14 @@ static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& 
 	float flapSp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
 	float ph = (a.wingGrade > 0) ? sinf(a.wingPh) : sinf(time * flapSp);
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+	float tuck = a.underRoof * 0.72f > a.crouch ? a.underRoof * 0.72f : a.crouch;
+	if (tuck > 1.f) tuck = 1.f;
+	amp *= (1.f - 0.78f * tuck);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
 	float y, z, x, yaw;
 	WingMount(r, a, m, cj, human, y, z, x, yaw);
-	float rest = human ? 0.20f : 0.35f;
+	float rest = (human ? 0.20f : 0.35f) - 0.32f * tuck;
+	yaw += 0.28f * tuck;
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
 		M4 fl = MRotZ(s * flap);
@@ -2834,10 +2926,14 @@ BOOL WingSpanPoint(Renderer& r, const Actor& a, const M4& world, int side, float
 	BOOL human = a.proc == 3 && strncmp(m.name, "Hum", 3) == 0;
 	float ph = (a.wingGrade > 0) ? sinf(use) : 0.f;
 	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+	float tuck = a.underRoof * 0.72f > a.crouch ? a.underRoof * 0.72f : a.crouch;
+	if (tuck > 1.f) tuck = 1.f;
+	amp *= (1.f - 0.78f * tuck);
 	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
 	float y, z, x, yaw;
 	WingMount(r, a, m, cj, human, y, z, x, yaw);
-	float rest = human ? 0.20f : 0.35f;
+	float rest = (human ? 0.20f : 0.35f) - 0.32f * tuck;
+	yaw += 0.28f * tuck;
 	float sgn = side == 0 ? 1.f : -1.f;
 	M4 fl = MRotZ(sgn * flap);
 	M4 base = MMul(MMul(MRotY(sgn * yaw), MRotZ(sgn * rest)), MTrans(sgn * x, y, z));

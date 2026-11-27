@@ -11,6 +11,7 @@ extern void OmakeTacticsPumpInput();
 #include <immintrin.h>
 
 namespace otac {
+static void VeilInvalidate();
 
 static const float PI = 3.14159265f;
 
@@ -29,6 +30,7 @@ static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t);
 static BOOL ItemPays(const Battle& b, const GoodDef* g, const Unit& t);
 static BOOL ItemHelps(const Battle& b, const GoodDef* g, const Unit& src, const Unit& t);
 static int CorpseAt(const Battle& b, int x, int z);
+static void FormatBuffCallout(int effect, int turns, wchar_t* out, int cap, DWORD* colOut = NULL);
 
 enum {
 	ID_BT_NOMOVE = 448,
@@ -163,7 +165,8 @@ V3 Game::UnitGroundPos(const Unit& u) const
 		const Cell& c = m_b.map.At(u.x, u.z);
 		if (UnitMoveType(u) == MV_FLY) {
 			if (c.t == T_CHASM) p.y = 0;
-			p.y = max(p.y, m_b.map.TopY(u.x, u.z));
+			if (!BridgeFloor(c) || u.deck > 0)
+				p.y = max(p.y, m_b.map.TopY(u.x, u.z));
 		}
 		return p;
 	}
@@ -204,7 +207,10 @@ V3 Game::UnitGroundPos(const Unit& u) const
 		if (chasm) p.y = 0;
 		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
 			int x = u.x + dx, z = u.z + dz;
-			if (Map::In(x, z)) p.y = max(p.y, m_b.map.TopY(x, z));
+			if (!Map::In(x, z)) continue;
+			const Cell& c = m_b.map.At(x, z);
+			if (!BridgeFloor(c) || originL > 0)
+				p.y = max(p.y, m_b.map.TopY(x, z));
 		}
 	}
 	return p;
@@ -280,6 +286,8 @@ void Game::BindImportedActors()
 	InvalidatePortraits();
 }
 
+static float CrouchUnderCeiling(float clearY, float bodyH);
+
 void Game::ActorForUnit(int i)
 {
 	Unit& u = m_b.u[i];
@@ -298,12 +306,67 @@ void Game::ActorForUnit(int i)
 			}
 		}
 	} else ActorFromMonster(m_act[i], m_lib, m_r, u.monster, u.boss);
-	if (!UnitIsHumanFoe(u) && UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f) m_act[i].hover = .35f;
+	{
+		float foot0 = m_b.map.WalkY(u.x, u.z, u.deck);
+		float off0 = (UnitSpan(u) - 1) * 0.5f;
+		float clr0 = MapOverheadClearance(m_b.map, (float)u.x + 0.5f + off0, (float)u.z + 0.5f + off0, u.deck, UnitSpan(u), foot0, 0);
+		float duck0 = (u.alive && u.hp > 0) ? CrouchUnderCeiling(clr0, m_act[i].height) : 0.f;
+		if (!UnitIsHumanFoe(u) && UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f && duck0 <= 0.02f)
+			m_act[i].hover = .35f;
+		else if (duck0 > 0.02f)
+			m_act[i].hover = 0.f;
+		m_act[i].underRoof = duck0 > 0.02f ? 1.f : 0.f;
+		m_act[i].crouch = duck0;
+	}
 	if (!u.alive || u.hp <= 0) HoldCorpse(m_act[i]);
 	else {
 		ActorPlay(m_act[i], CL_IDLE, 1, 0);
 		m_act[i].t = m_rng.F(0, 2);
 	}
+}
+
+// 0 巡航 1 カメラ前で手を振る 2 突進 3 攻撃後の溜め 4 飛び去り
+static int FairyPose(float u, int cut)
+{
+	if (cut) {
+		if (u < 0.36f) return 0;
+		if (u < 0.52f) return 1;
+		if (u < 0.66f) return 2;
+		if (u < 0.81f) return 3;
+		return 4;
+	}
+	if (u < 0.50f) return 0;
+	if (u < 0.66f) return 2;
+	if (u < 0.81f) return 3;
+	return 4;
+}
+
+static void FairySample(float u, int cut, V3 from, V3 thru, V3 past, V3& pos, V3& vel)
+{
+	u = Clampf(u, 0.f, 1.f);
+	V3 g0, g1;
+	if (cut) {
+		g0 = thru + v3(-1.7f, 0.95f, -6.5f);
+		g1 = thru + v3(1.55f, 0.72f, -3.85f);
+	} else {
+		g0 = Lerp(from, thru, 0.62f);
+		g0.y += 0.55f;
+		g1 = g0;
+	}
+	const float k0 = cut ? 0.36f : 0.50f;
+	const float k1 = cut ? 0.52f : 0.50f;
+	const float k2 = 0.66f;
+	const float k3 = 0.81f;
+	auto seg = [&](float a, float b, V3 p0, V3 p1) {
+		float t = Smooth01((u - a) / max(0.001f, b - a));
+		pos = Lerp(p0, p1, t);
+		vel = p1 - p0;
+	};
+	if (u < k0) seg(0.f, k0, from, g0);
+	else if (u < k1) seg(k0, k1, g0, g1);
+	else if (u < k2) seg(k1, k2, g1, thru);
+	else if (u < k3) { pos = thru; vel = thru - g1; }
+	else seg(k3, 1.f, thru, past);
 }
 
 void Game::EnsureFairyGhost()
@@ -329,28 +392,37 @@ void Game::EnsureFairyGhost()
 	c.cape = 0;
 	m_r.EnsureBody("HumF1");
 	ActorFromChar(m_fairyAct, m_lib, m_r, c);
-	m_fairyAct.wings = 0;
-	m_fairyAct.hover = 0;
+	m_fairyAct.wings = 1;
+	m_fairyAct.hover = 0.46f;
+	m_fairyAct.flap = 1.f;
+	m_fairyAct.gait = GAIT_FLY;
 	m_fairyAct.legOk = 0;
-	m_fairyAct.flyLean = 0;
-	m_fairyAct.flap = 0;
-	m_fairyAct.gait = GAIT_BIPED;
-	ActorPlay(m_fairyAct, CL_2H_SPIN, 1, 0.f);
-	m_fairyAct.animSpeed = 1.38f;
+	ActorPlay(m_fairyAct, CL_IDLE, 1, 0.f);
+	m_fairyAct.animSpeed = 1.f;
 }
 
 void Game::TickFairyGhost(float dt)
 {
 	if (!m_fairyGhost) return;
 	m_fairyGhostT += dt;
+	float dur = m_fairyGhostDur > 0.05f ? m_fairyGhostDur : 3.35f;
+	float u = Clampf(m_fairyGhostT / dur, 0.f, 1.f);
+	int cut = (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) ? 1 : 0;
+	int pose = FairyPose(u, cut);
+	if (pose == 1) {
+		if (m_fairyAct.clip != CL_CHEER) ActorPlay(m_fairyAct, CL_CHEER, 0, 0.08f);
+	} else if (pose == 2) {
+		if (m_fairyAct.clip != CL_1H_SLICE) ActorPlay(m_fairyAct, CL_1H_SLICE, 0, 0.04f);
+	} else if (pose == 0 || pose == 4) {
+		if (m_fairyAct.clip != CL_IDLE) ActorPlay(m_fairyAct, CL_IDLE, 1, 0.1f);
+	}
+	m_fairyAct.wings = 1;
+	m_fairyAct.hover = 0.46f;
+	m_fairyAct.gait = GAIT_FLY;
+	m_fairyAct.flap = (pose == 1 || pose == 3) ? 0.12f : 1.f;
+	m_fairyAct.animSpeed = (pose == 2) ? 1.25f : 1.f;
 	ActorUpdate(m_fairyAct, dt);
-	m_fairyAct.wings = 0;
-	m_fairyAct.hover = 0;
-	m_fairyAct.legOk = 0;
-	m_fairyAct.flyLean = 0;
-	m_fairyAct.flap = 0;
-	m_fairyAct.gait = GAIT_BIPED;
-	if (m_fairyGhostT >= m_fairyGhostDur) {
+	if (m_fairyGhostT >= dur) {
 		m_fairyGhost = 0;
 		m_fairyGhostT = 0;
 	}
@@ -359,44 +431,38 @@ void Game::TickFairyGhost(float dt)
 void Game::DrawFairyGhost()
 {
 	if (!m_fairyGhost) return;
-	float dur = m_fairyGhostDur > 0.05f ? m_fairyGhostDur : 2.05f;
+	float dur = m_fairyGhostDur > 0.05f ? m_fairyGhostDur : 3.35f;
 	float u = Clampf(m_fairyGhostT / dur, 0.f, 1.f);
-	V3 a = m_fairyGhostFrom, b = m_fairyGhostThru, c = m_fairyGhostPast;
-	V3 p;
-	V3 dir;
-	if (u < 0.36f) {
-		float t = Smooth01(u / 0.36f);
-		p = Lerp(a, b, t);
-		p.y += sinf(t * PI) * 0.58f;
-		dir = b - a;
-	} else {
-		float t = Smooth01((u - 0.36f) / 0.64f);
-		p = Lerp(b, c, t);
-		p.y += (1.f - t) * 0.22f + t * 0.62f;
-		dir = c - b;
+	int cut = (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) ? 1 : 0;
+	V3 p, vel;
+	FairySample(u, cut, m_fairyGhostFrom, m_fairyGhostThru, m_fairyGhostPast, p, vel);
+	int pose = FairyPose(u, cut);
+	float yaw;
+	if (pose == 1) yaw = atan2f(-p.x, -2.2f - p.z);
+	else {
+		if (Len(v3(vel.x, 0, vel.z)) < 0.04f) vel = m_fairyGhostPast - p;
+		if (Len(v3(vel.x, 0, vel.z)) < 0.04f) vel = v3(0, 0, 1);
+		yaw = atan2f(vel.x, vel.z);
 	}
-	if (Len(v3(dir.x, 0, dir.z)) < 0.04f) dir = v3(0, 0, 1);
-	float yaw = atan2f(dir.x, dir.z);
-	float fade = 1.f;
-	if (u > 0.62f) fade = 1.f - Smooth01((u - 0.62f) / 0.38f);
-	int al = (int)(fade * 218.f);
-	if (al < 8) al = 8;
+	float fadeIn = Smooth01(u / 0.07f);
+	float fadeOut = u < 0.86f ? 1.f : (1.f - Smooth01((u - 0.86f) / 0.14f));
+	float fade = fadeIn * fadeOut;
+	int al = (int)(fade * 176.f);
+	if (al < 18) al = 18;
 	DrawParams dp;
-	dp.tint = RGBA8(255, 214, 255, al);
-	dp.emissive = 1.42f + 0.28f * sinf(m_time * 8.f);
-	dp.flash = 0.48f;
-	dp.rim = 1.f;
-	dp.dissolve = (1.f - fade) * 0.88f;
-	dp.outline = 0.02f;
-	dp.outlineColor = RGBA8(255, 186, 255);
+	dp.tint = RGBA8(232, 186, 224, al);
+	dp.emissive = 0.16f;
+	dp.flash = 0.04f;
+	dp.rim = 0.55f;
+	dp.dissolve = fade > 0.94f ? 0.f : (1.f - fade) * 0.72f;
+	dp.outline = 0.012f;
+	dp.outlineColor = RGBA8(186, 140, 210, al);
 	dp.noTess = 1;
 	ActorPose(m_fairyAct, m_lib, m_r);
-	BOOL cut = m_r.CutActors();
+	BOOL cutActors = m_r.CutActors();
 	m_r.SetCutActors(FALSE);
-	m_r.SetDepthTest(FALSE);
 	ActorDraw(m_r, m_lib, m_fairyAct, ActorWorld(m_fairyAct, p, yaw), dp, m_time);
-	m_r.SetDepthTest(TRUE);
-	m_r.SetCutActors(cut);
+	m_r.SetCutActors(cutActors);
 }
 
 static const DWORD kSnapMagic = 0x31504153u;
@@ -995,7 +1061,17 @@ void Game::ProbeSuspend()
 
 void Game::DropSuspend(int kind)
 {
-	WaitSuspend();
+	// 書き出しスレッドが戻らないと、勝利表示のまま本編が止まる。待っても中断削除だけは続ける。
+	const DWORD t0 = GetTickCount();
+	for (;;) {
+		SnapLock();
+		int pending = g_qMid || g_qAuto || g_snapBusy;
+		SnapUnlock();
+		if (!pending) break;
+		if (GetTickCount() - t0 > 2000) break;
+		OmakeTacticsPumpInput();
+		Sleep(10);
+	}
 	DatArc_FlushSuspend(TRUE);
 	if (kind == 0 || kind == 1) { DatArc_Delete(TacLeafMid()); m_midStage = 0; }
 	if (kind == 0 || kind == 2) { DatArc_Delete(TacLeafAuto()); m_autoStage = 0; }
@@ -1197,11 +1273,23 @@ void Game::ApplyStageResume()
 {
 	TacSnap* s = &g_snapLoad;
 	m_b = s->b;
+	MapSpiralForget();
 	m_b.RebuildOcc();
 	memset(m_seen, 0, sizeof(m_seen));
+	VeilInvalidate();
 	m_fieldClock = 0.f;
 	m_wave = 0.f;
-	m_waveStr = m_waveH = m_waveHit = 0;
+	m_faultPulse = 0.f;
+	m_waveStr = m_waveH = m_waveHit = m_waveDir = 0;
+	m_warpOn = 0; m_warpT = 0.f;
+	TacFrostReset();
+	if (TacHasVar(m_b, TAC_VAR_FROST)) {
+		Rng fr(m_b.map.seed ^ 0xF2057u);
+		int iceN = 16 + m_b.turnCount * 3;
+		if (iceN > 200) iceN = 200;
+		TacFrostSeed(m_b, fr, iceN);
+	}
+	TacApplyFieldRules(m_b);
 	m_rng.s = s->rng ? s->rng : 1;
 	m_battleStage = s->stage;
 	for (int i = 0; i < 8; i++) m_save.itemN[i] = s->itemN[i];
@@ -1616,10 +1704,13 @@ void Game::ApplyStageStart(int stage)
 	DWORD seed = m_mapSeed;
 	SetupBattle(m_b, stage, seed, chars, idx, n, m_themeSel);
 	memset(m_seen, 0, sizeof(m_seen));
+	VeilInvalidate();
 	m_fieldClock = 0.f;
 	m_wave = 0.f;
-	m_waveStr = m_waveH = m_waveHit = 0;
-	if (m_b.sweep != TAC_VAR_MIST && m_b.sweep != TAC_VAR_RAID && (m_homeWx >= 0 || m_homeHr >= 0)) {
+	m_faultPulse = 0.f;
+	m_waveStr = m_waveH = m_waveHit = m_waveDir = 0;
+	m_warpOn = 0; m_warpT = 0.f;
+	if (!TacHasVar(m_b, TAC_VAR_MIST) && !TacHasVar(m_b, TAC_VAR_RAID) && (m_homeWx >= 0 || m_homeHr >= 0)) {
 		int wx = m_homeWx >= 0 ? m_homeWx : TacWx(m_b.weather);
 		int hr = m_homeHr >= 0 ? m_homeHr : TacHour(m_b.weather);
 		m_b.weather = TacPackSky(wx, hr);
@@ -1737,30 +1828,76 @@ void Game::ApplyStageStart(int stage)
 	memset(m_ovMove, 0, sizeof(m_ovMove));
 	memset(m_ovAtk, 0, sizeof(m_ovAtk));
 	memset(m_ovThreat, 0, sizeof(m_ovThreat));
-	wchar_t t[64], sub[160];
+	wchar_t t[96], sub[160], mixName[80];
 	int title = 0;
 	DWORD titleCol = RGBA8(255, 226, 150);
-	if (m_b.sweep == TAC_VAR_SWEEP) { title = TX_BT_SWEEP; titleCol = RGBA8(150, 220, 170); }
-	else if (m_b.sweep == TAC_VAR_REMNANT) { title = TX_BT_REMNANT; titleCol = RGBA8(220, 190, 120); }
-	else if (m_b.sweep == TAC_VAR_BOSS) { title = TX_BT_BOSSMAP; titleCol = RGBA8(255, 170, 90); }
-	else if (m_b.sweep == TAC_VAR_SCAR) { title = TX_BT_SCAR; titleCol = RGBA8(220, 140, 140); }
-	else if (m_b.sweep == TAC_VAR_MIST) { title = TX_BT_MIST; titleCol = RGBA8(180, 200, 220); }
-	else if (m_b.sweep == TAC_VAR_RAID) { title = TX_BT_RAID; titleCol = RGBA8(160, 170, 230); }
-	else if (m_b.sweep == TAC_VAR_AMBUSH) { title = TX_BT_AMBUSH; titleCol = RGBA8(230, 160, 90); }
-	else if (m_b.sweep == TAC_VAR_TWIN) { title = TX_BT_TWIN; titleCol = RGBA8(230, 120, 160); }
-	else if (m_b.sweep == TAC_VAR_VAULT) { title = TX_BT_VAULT; titleCol = RGBA8(230, 200, 90); }
-	else if (m_b.sweep == TAC_VAR_BLESS) { title = TX_BT_BLESS; titleCol = RGBA8(160, 220, 190); }
-	else if (m_b.sweep == TAC_VAR_RAGE) { title = TX_BT_RAGE; titleCol = RGBA8(255, 90, 50); }
-	else if (m_b.sweep == TAC_VAR_RING) { title = TX_BT_RING; titleCol = RGBA8(255, 170, 70); }
-	else if (m_b.sweep == TAC_VAR_FALL) { title = TX_BT_FALL; titleCol = RGBA8(180, 140, 110); }
-	else if (m_b.sweep == TAC_VAR_FLOOD) { title = TX_BT_FLOOD; titleCol = RGBA8(80, 160, 230); }
-	else if (m_b.sweep == TAC_VAR_WAVE) { title = TX_BT_WAVE; titleCol = RGBA8(60, 140, 220); }
-	else if (m_b.sweep == TAC_VAR_VEIL) { title = TX_BT_VEIL; titleCol = RGBA8(210, 180, 130); }
-	else if (m_b.sweep == TAC_VAR_DUST) { title = TX_BT_DUST; titleCol = RGBA8(190, 160, 100); }
+	mixName[0] = 0;
+	int mixOn = TacSweepBits(m_b.sweep) > 1;
+	if (mixOn) {
+		int mask = TacSweepMask(m_b.sweep);
+		for (int k = 1; k < TAC_VAR_COUNT; k++) {
+			if ((mask & (1 << k)) == 0) continue;
+			int id = 0;
+			switch (k) {
+			case TAC_VAR_SWEEP: id = TX_BT_SWEEP; break;
+			case TAC_VAR_REMNANT: id = TX_BT_REMNANT; break;
+			case TAC_VAR_BOSS: id = TX_BT_BOSSMAP; break;
+			case TAC_VAR_SCAR: id = TX_BT_SCAR; break;
+			case TAC_VAR_MIST: id = TX_BT_MIST; break;
+			case TAC_VAR_RAID: id = TX_BT_RAID; break;
+			case TAC_VAR_AMBUSH: id = TX_BT_AMBUSH; break;
+			case TAC_VAR_TWIN: id = TX_BT_TWIN; break;
+			case TAC_VAR_VAULT: id = TX_BT_VAULT; break;
+			case TAC_VAR_BLESS: id = TX_BT_BLESS; break;
+			case TAC_VAR_RAGE: id = TX_BT_RAGE; break;
+			case TAC_VAR_RING: id = TX_BT_RING; break;
+			case TAC_VAR_FALL: id = TX_BT_FALL; break;
+			case TAC_VAR_FLOOD: id = TX_BT_FLOOD; break;
+			case TAC_VAR_WAVE: id = TX_BT_WAVE; break;
+			case TAC_VAR_VEIL: id = TX_BT_VEIL; break;
+			case TAC_VAR_DUST: id = TX_BT_DUST; break;
+			case TAC_VAR_FAULT: id = TX_BT_FAULT; break;
+			case TAC_VAR_FROST: id = TX_BT_FROST; break;
+			case TAC_VAR_GRAV: id = TX_BT_GRAV; break;
+			case TAC_VAR_RECOIL: id = TX_BT_RECOIL; break;
+			}
+			if (!id) continue;
+			wchar_t sh[24];
+			wcsncpy_s(sh, TT(id), _TRUNCATE);
+			wchar_t* cut = wcsstr(sh, L"ステージ");
+			if (cut) *cut = 0;
+			if (mixName[0]) wcscat_s(mixName, L"＋");
+			wcscat_s(mixName, sh);
+		}
+		wcscat_s(mixName, L"マップ");
+		title = TX_BT_MIX_HELP;
+		titleCol = RGBA8(230, 210, 150);
+	} else if (TacHasVar(m_b, TAC_VAR_SWEEP)) { title = TX_BT_SWEEP; titleCol = RGBA8(150, 220, 170); }
+	else if (TacHasVar(m_b, TAC_VAR_REMNANT)) { title = TX_BT_REMNANT; titleCol = RGBA8(220, 190, 120); }
+	else if (TacHasVar(m_b, TAC_VAR_BOSS)) { title = TX_BT_BOSSMAP; titleCol = RGBA8(255, 170, 90); }
+	else if (TacHasVar(m_b, TAC_VAR_SCAR)) { title = TX_BT_SCAR; titleCol = RGBA8(220, 140, 140); }
+	else if (TacHasVar(m_b, TAC_VAR_MIST)) { title = TX_BT_MIST; titleCol = RGBA8(180, 200, 220); }
+	else if (TacHasVar(m_b, TAC_VAR_RAID)) { title = TX_BT_RAID; titleCol = RGBA8(160, 170, 230); }
+	else if (TacHasVar(m_b, TAC_VAR_AMBUSH)) { title = TX_BT_AMBUSH; titleCol = RGBA8(230, 160, 90); }
+	else if (TacHasVar(m_b, TAC_VAR_TWIN)) { title = TX_BT_TWIN; titleCol = RGBA8(230, 120, 160); }
+	else if (TacHasVar(m_b, TAC_VAR_VAULT)) { title = TX_BT_VAULT; titleCol = RGBA8(230, 200, 90); }
+	else if (TacHasVar(m_b, TAC_VAR_BLESS)) { title = TX_BT_BLESS; titleCol = RGBA8(160, 220, 190); }
+	else if (TacHasVar(m_b, TAC_VAR_RAGE)) { title = TX_BT_RAGE; titleCol = RGBA8(255, 90, 50); }
+	else if (TacHasVar(m_b, TAC_VAR_RING)) { title = TX_BT_RING; titleCol = RGBA8(255, 170, 70); }
+	else if (TacHasVar(m_b, TAC_VAR_FALL)) { title = TX_BT_FALL; titleCol = RGBA8(180, 140, 110); }
+	else if (TacHasVar(m_b, TAC_VAR_FLOOD)) { title = TX_BT_FLOOD; titleCol = RGBA8(80, 160, 230); }
+	else if (TacHasVar(m_b, TAC_VAR_WAVE)) { title = TX_BT_WAVE; titleCol = RGBA8(60, 140, 220); }
+	else if (TacHasVar(m_b, TAC_VAR_VEIL)) { title = TX_BT_VEIL; titleCol = RGBA8(210, 180, 130); }
+	else if (TacHasVar(m_b, TAC_VAR_DUST)) { title = TX_BT_DUST; titleCol = RGBA8(190, 160, 100); }
+	else if (TacHasVar(m_b, TAC_VAR_FAULT)) { title = TX_BT_FAULT; titleCol = RGBA8(210, 170, 110); }
+	else if (TacHasVar(m_b, TAC_VAR_FROST)) { title = TX_BT_FROST; titleCol = RGBA8(170, 220, 255); }
+	else if (TacHasVar(m_b, TAC_VAR_GRAV)) { title = TX_BT_GRAV; titleCol = RGBA8(160, 140, 190); }
+	else if (TacHasVar(m_b, TAC_VAR_RECOIL)) { title = TX_BT_RECOIL; titleCol = RGBA8(230, 180, 90); }
 	else if (m_b.stampede) { title = TX_BT_STAMPEDE; titleCol = RGBA8(255, 150, 70); }
 	else if (MapIsSpiral(m_b.map)) { title = TX_BT_SPIRAL; titleCol = RGBA8(140, 210, 230); }
 	if (title) {
-		swprintf_s(t, L"%s", TT(title));
+		if (mixOn) wcsncpy_s(t, mixName, _TRUNCATE);
+		else swprintf_s(t, L"%s", TT(title));
 		wchar_t sn[48];
 		StageCaption(stage, sn, 48);
 		wchar_t extra[96] = L"";
@@ -1839,12 +1976,19 @@ static void BurstToGate(Unit& u, int unitIndex, Rng& rng, long long& pool, Level
 
 void Game::EndBattle(int victory)
 {
+	TacClearFieldRules();
+	TacFrostReset();
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		if (u.team != TEAM_PLAYER) continue;
 		if (u.rosterIdx < 0 || u.rosterIdx >= MAX_ROSTER) continue;
 		if (victory) {
-			int bonus = m_battleStage * 50;
+			unsigned __int64 stNeed = ExpRewardBaseU((unsigned __int64)max(1, m_battleStage <= TAC_STAGE_EX ? m_battleStage : TAC_STAGE_EX));
+			long long dynBonus = (long long)(stNeed * 26ull / 100ull);
+			long long floorBonus = (long long)m_battleStage * 50LL;
+			long long bonus64 = dynBonus > floorBonus ? dynBonus : floorBonus;
+			if (bonus64 > 2000000000LL) bonus64 = 2000000000LL;
+			int bonus = (int)bonus64;
 			if (bonus > 0) {
 				long long pool = (long long)u.ch.exp + bonus;
 				BurstToGate(u, i, m_rng, pool, m_lvq, m_lvqN, MAX_PARTY * 4);
@@ -1892,29 +2036,49 @@ void Game::EndBattle(int victory)
 	m_camPitch = .5f;
 }
 
+static unsigned char s_veilShow[MAPN][MAPN];
+static int s_veilSerial = 1;
+static int s_veilBuilt = 0;
+static void VeilInvalidate() { s_veilSerial++; }
+
 BOOL Game::VeilShows(int x, int z) const
 {
-	if (m_b.sweep != TAC_VAR_VEIL) return TRUE;
+	if (!TacHasVar(m_b, TAC_VAR_VEIL)) return TRUE;
 	if (!Map::In(x, z)) return FALSE;
-	if (m_seen[z][x]) return TRUE;
-	if (m_ovMove[z][x] || m_ovAtk[z][x]) return TRUE;
-	static const int dd[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-	for (int k = 0; k < 4; k++) {
-		int nx = x + dd[k][0], nz = z + dd[k][1];
-		if (!Map::In(nx, nz)) continue;
-		if (m_ovMove[nz][nx] || m_ovAtk[nz][nx]) return TRUE;
+	if (s_veilBuilt != s_veilSerial) {
+		float front = (m_fieldClock - 3.f) * 1.7f;
+		static const int dd[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+		for (int zz = 0; zz < MAPN; zz++) for (int xx = 0; xx < MAPN; xx++) {
+			int show = 0;
+			if (m_seen[zz][xx] || m_ovMove[zz][xx] || m_ovAtk[zz][xx]) show = 1;
+			else {
+				for (int k = 0; k < 4; k++) {
+					int nx = xx + dd[k][0], nz = zz + dd[k][1];
+					if (Map::In(nx, nz) && (m_ovMove[nz][nx] || m_ovAtk[nz][nx])) { show = 1; break; }
+				}
+			}
+			if (!show) {
+				if (front <= 0.f) show = 1;
+				else {
+					int rim = min(min(xx, MAPN - 1 - xx), min(zz, MAPN - 1 - zz));
+					show = ((float)rim > front) ? 1 : 0;
+				}
+			}
+			s_veilShow[zz][xx] = (unsigned char)show;
+		}
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& p = m_b.u[i];
+			if (!p.alive || p.team != TEAM_PLAYER) continue;
+			int s = UnitSpan(p);
+			if (s < 1) s = 1;
+			for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+				int px = p.x + dx, pz = p.z + dz;
+				if (Map::In(px, pz)) s_veilShow[pz][px] = 1;
+			}
+		}
+		s_veilBuilt = s_veilSerial;
 	}
-	for (int i = 0; i < m_b.nUnits; i++) {
-		const Unit& p = m_b.u[i];
-		if (!p.alive || p.team != TEAM_PLAYER) continue;
-		int s = UnitSpan(p);
-		if (s < 1) s = 1;
-		if (x >= p.x && z >= p.z && x < p.x + s && z < p.z + s) return TRUE;
-	}
-	float front = (m_fieldClock - 3.f) * 1.7f;
-	if (front <= 0.f) return TRUE;
-	int rim = min(min(x, MAPN - 1 - x), min(z, MAPN - 1 - z));
-	return (float)rim > front;
+	return s_veilShow[z][x] != 0;
 }
 
 BOOL Game::FieldHides(int ui) const
@@ -1922,8 +2086,8 @@ BOOL Game::FieldHides(int ui) const
 	if (ui < 0 || ui >= m_b.nUnits) return FALSE;
 	const Unit& u = m_b.u[ui];
 	if (!u.alive || u.hp <= 0 || u.team != TEAM_ENEMY) return FALSE;
-	if (m_b.sweep == TAC_VAR_VEIL) return !VeilShows(u.x, u.z);
-	if (m_b.sweep != TAC_VAR_DUST) return FALSE;
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) return !VeilShows(u.x, u.z);
+	if (!TacHasVar(m_b, TAC_VAR_DUST)) return FALSE;
 	int best = 99;
 	int s = UnitSpan(u);
 	if (s < 1) s = 1;
@@ -1943,7 +2107,7 @@ BOOL Game::FieldHides(int ui) const
 
 void Game::CommitCollapse()
 {
-	if (m_b.sweep != TAC_VAR_FALL) return;
+	if (!TacHasVar(m_b, TAC_VAR_FALL)) return;
 	if (m_phase == PH_MOVING || m_phase == PH_E_MOVE) return;
 	static unsigned char keep[MAPN][MAPN];
 	memset(keep, 0, sizeof(keep));
@@ -2048,15 +2212,44 @@ void Game::CommitCollapse()
 			c.prop = 0;
 		}
 		SpawnSlab(tx + 0.5f, y0 + 0.04f, tz + 0.5f, sink);
-		Burst(v3(tx + 0.5f, y0 + 0.2f, tz + 0.5f), 8, 1.1f, 0.05f, 0.45f, 0.62f, 0.55f, 0.46f, 0, 1, 2.f, 0.2f, 0.8f);
+		StampGroundRing(tx + 0.5f, tz + 0.5f, 0.58f, 0.75f, 0, FALSE);
+		SpawnDebris(v3(tx + 0.5f, y0 + 0.12f, tz + 0.5f), v3(0, 2.2f, 0), 0, 5, 0.22f, RGBA8(146, 128, 102));
+		Burst(v3(tx + 0.5f, y0 + 0.2f, tz + 0.5f), 12, 1.4f, 0.06f, 0.52f, 0.65f, 0.57f, 0.46f, 0, 1, 2.5f, 0.3f, 0.9f);
 		fell++;
 	}
 	if (fell > 0) {
+		TacSfx(TS_FALL);
 		m_r.BuildTerrain(m_b.map);
-		m_shake = max(m_shake, 0.62f);
-		m_quakeT = max(m_quakeT, 0.45f);
-		m_quakeMag = max(m_quakeMag, 0.42f);
+		MapSpiralForget();
+		m_shake = max(m_shake, 0.68f);
+		m_quakeT = max(m_quakeT, 0.52f);
+		m_quakeMag = max(m_quakeMag, 0.45f);
 	}
+}
+
+void Game::CommitFault()
+{
+	if (!TacHasVar(m_b, TAC_VAR_FAULT)) return;
+	if (m_phase == PH_MOVING || m_phase == PH_E_MOVE) return;
+	int ox = 0, oz = 0;
+	if (TacCommitFault(m_b, m_rng, &ox, &oz) < 2) return;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		Unit& u = m_b.u[i];
+		if (!u.alive) continue;
+		if (!LayerOn(m_b.map.At(u.x, u.z), u.deck)) u.deck = 0;
+		V3 p = UnitGroundPos(u);
+		u.px = p.x; u.py = p.y; u.pz = p.z;
+	}
+	m_r.BuildTerrain(m_b.map);
+	MapSpiralForget();
+	m_shake = max(m_shake, 0.72f);
+	m_quakeT = max(m_quakeT, 0.48f);
+	m_quakeMag = max(m_quakeMag, 0.4f);
+	m_faultPulse = 1.f;
+	float y = Map::In(ox, oz) ? m_b.map.WalkY(ox, oz, 0) : 0.f;
+	Burst(v3((float)ox + 0.5f, y + 0.4f, (float)oz + 0.5f), 16, 2.2f, 0.08f, 0.5f, 0.72f, 0.58f, 0.4f, 0, 1, 2.2f, 0.4f, 0.8f);
+	SpawnDebris(v3((float)ox + 0.5f, y + 0.2f, (float)oz + 0.5f), v3(0, 1.6f, 0), 0, 6, 0.2f, RGBA8(150, 130, 100));
+	AddBanner(TT(TX_BT_FAULT), NULL, RGBA8(220, 180, 120), 1, 1.1f, MSG_BLUR);
 }
 
 void Game::TickField(float dt)
@@ -2064,7 +2257,8 @@ void Game::TickField(float dt)
 	if (m_screen != SC_BATTLE || m_phase == PH_INTRO) {
 		m_fieldClock += dt;
 	} else m_fieldClock += dt;
-	if (m_b.sweep == TAC_VAR_VEIL) {
+	if (m_faultPulse > 0.f) m_faultPulse = max(0.f, m_faultPulse - dt * 0.85f);
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) {
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (!u.alive || u.team != TEAM_PLAYER) continue;
@@ -2085,15 +2279,29 @@ void Game::TickField(float dt)
 		if (mine && m_phase == PH_ACTION) {
 			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) if (m_ovAtk[z][x]) m_seen[z][x] = 1;
 		}
+		VeilInvalidate();
 		FillHideGreen();
 	}
 	if (m_wave > 0.f) {
 		float prev = m_wave;
 		m_wave = max(0.f, m_wave - dt);
-		m_wxFlash = max(m_wxFlash, sinf((1.35f - m_wave) / 1.35f * 3.1415926f) * 0.85f);
-		m_wxFlashCol[0] = 0.62f; m_wxFlashCol[1] = 0.78f; m_wxFlashCol[2] = 1.f;
-		m_shake = max(m_shake, 0.35f);
-		if (m_waveHit == 0 && prev > 0.62f && m_wave <= 0.62f) {
+		float prog = Clampf((1.65f - m_wave) / 1.65f, 0.f, 1.f);
+		m_wxFlash = max(m_wxFlash, sinf(prog * 3.1415926f) * 0.45f);
+		m_wxFlashCol[0] = 0.62f; m_wxFlashCol[1] = 0.82f; m_wxFlashCol[2] = 1.f;
+		m_shake = max(m_shake, 0.38f);
+		if (m_parts.size() < 3400 && ((int)(m_wave * 24.f) != (int)(prev * 24.f))) {
+			float front = -8.f + prog * (MAPN + 16.f);
+			int dir = m_waveDir & 3;
+			for (int k = 0; k < 5; k++) {
+				float lat = m_camTarget.x + m_rng.F(-12.f, 12.f);
+				if (dir < 2) lat = m_camTarget.z + m_rng.F(-12.f, 12.f);
+				V3 sp = (dir == 0) ? v3(front, m_camTarget.y + 1.4f, lat)
+					: (dir == 1 ? v3(MAPN - front, m_camTarget.y + 1.4f, lat)
+					: (dir == 2 ? v3(lat, m_camTarget.y + 1.4f, front) : v3(lat, m_camTarget.y + 1.4f, MAPN - front)));
+				Burst(sp, 3, 2.8f, 0.09f, 0.55f, 0.78f, 0.92f, 1.f, 0, 1, 5.f, 0.8f, 1.2f);
+			}
+		}
+		if (m_waveHit == 0 && prev > 0.82f && m_wave <= 0.82f) {
 			m_waveHit = 1;
 			int rad = m_waveStr;
 			if (m_waveStr <= 3) rad = (m_waveStr <= 1) ? 1 : 2;
@@ -2143,15 +2351,19 @@ void Game::TickField(float dt)
 					const Cell& c = m_b.map.At(nx, nz);
 					if (!LayerOn(c, u.deck)) u.deck = 0;
 				}
-				Burst(v3(ox + 0.5f, u.py + 0.4f, oz + 0.5f), 10, 2.2f, 0.08f, 0.6f, 0.55f, 0.75f, 1.f, 0, 1, 4.f, 0.6f, 1.4f);
+				V3 np = UnitGroundPos(u);
+				u.px = np.x; u.py = np.y; u.pz = np.z;
+				Burst(v3(ox + 0.5f, u.py + 0.4f, oz + 0.5f), 12, 2.4f, 0.08f, 0.6f, 0.55f, 0.78f, 1.f, 0, 1, 4.f, 0.6f, 1.4f);
+				Burst(v3(np.x, np.y + 0.35f, np.z), 10, 2.0f, 0.08f, 0.55f, 0.72f, 0.90f, 1.f, 1, 1, 3.5f, 0.8f, 1.0f);
 			}
 			m_b.RebuildOcc();
-			m_shake = max(m_shake, 1.1f);
+			m_ovDirty = TRUE;
+			m_shake = max(m_shake, 1.15f);
 		}
 	}
 	if (m_parts.size() > 3400) return;
 	float camx = m_camTarget.x, camz = m_camTarget.z;
-	if (m_b.sweep == TAC_VAR_RAGE) {
+	if (TacHasVar(m_b, TAC_VAR_RAGE)) {
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (!u.alive || u.team != TEAM_ENEMY) continue;
@@ -2161,12 +2373,16 @@ void Game::TickField(float dt)
 			Burst(v3(u.px, u.py + m_act[i].height * 0.55f, u.pz), 4, 0.7f, 0.09f, 0.45f, 1.f, 0.28f, 0.08f, 0, 1, -0.4f, 0.8f, 1.1f);
 		}
 	}
-	if (m_b.sweep == TAC_VAR_FLOOD) {
-		m_wetGlobal = max(m_wetGlobal, 0.82f);
+	if (TacHasVar(m_b, TAC_VAR_FLOOD)) {
 		int drops = 0;
-		for (int z = 0; z < MAPN && drops < 18; z++) for (int x = 0; x < MAPN && drops < 18; x++) {
-			if (!TacFloodWet(m_b, x, z, 0) && !MapIsSpiral(m_b.map)) continue;
-			if (MapIsSpiral(m_b.map) && !TacFloodWet(m_b, x, z, 0)) continue;
+		int x0 = (int)floorf(camx) - 22, x1 = (int)floorf(camx) + 22;
+		int z0 = (int)floorf(camz) - 22, z1 = (int)floorf(camz) + 22;
+		if (x0 < 0) x0 = 0;
+		if (z0 < 0) z0 = 0;
+		if (x1 >= MAPN) x1 = MAPN - 1;
+		if (z1 >= MAPN) z1 = MAPN - 1;
+		for (int z = z0; z <= z1 && drops < 18; z++) for (int x = x0; x <= x1 && drops < 18; x++) {
+			if (!TacFloodWet(m_b, x, z, 0)) continue;
 			int edge = 0;
 			static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 			for (int k = 0; k < 4; k++) {
@@ -2181,10 +2397,25 @@ void Game::TickField(float dt)
 			drops++;
 		}
 	}
-	if (m_b.sweep == TAC_VAR_DUST || m_b.sweep == TAC_VAR_VEIL) {
+	if (TacHasVar(m_b, TAC_VAR_DUST) || TacHasVar(m_b, TAC_VAR_VEIL)) {
 		if (((int)(m_fieldClock * 8.f) & 1) == 0) {
 			float y = m_camTarget.y + 1.2f;
 			Burst(v3(camx + m_rng.F(-8.f, 8.f), y, camz + m_rng.F(-8.f, 8.f)), 3, 1.4f, 0.07f, 0.8f, 0.78f, 0.68f, 0.46f, 0, 1, 0.2f, 1.6f, 0.3f);
+		}
+	}
+	if (TacHasVar(m_b, TAC_VAR_SCAR) && ((int)(m_fieldClock * 6.f) & 1) == 0) {
+		float sx = camx + m_rng.F(-10.f, 10.f), sz = camz + m_rng.F(-10.f, 10.f);
+		int ix = (int)sx, iz = (int)sz;
+		if (Map::In(ix, iz) && m_b.map.At(ix, iz).t != T_VOID) {
+			float sy = m_b.map.WalkY(ix, iz, 0) + 0.08f;
+			Burst(v3(sx, sy, sz), 2, 0.6f, 0.045f, 0.75f, 1.f, 0.45f, 0.14f, 0, 1, -0.8f, 0.6f, 1.1f);
+		}
+	} else if (TacHasVar(m_b, TAC_VAR_BLESS) && ((int)(m_fieldClock * 5.f) & 1) == 0) {
+		float sx = camx + m_rng.F(-10.f, 10.f), sz = camz + m_rng.F(-10.f, 10.f);
+		int ix = (int)sx, iz = (int)sz;
+		if (Map::In(ix, iz) && m_b.map.At(ix, iz).t != T_VOID) {
+			float sy = m_b.map.WalkY(ix, iz, 0) + 2.4f;
+			Burst(v3(sx, sy, sz), 2, 0.35f, 0.055f, 1.1f, 1.f, 0.94f, 0.68f, 2, 1, 0.45f, 0.f, -0.2f);
 		}
 	}
 	if ((m_fieldClock - floorf(m_fieldClock)) > 0.08f) return;
@@ -2219,6 +2450,41 @@ void Game::TickField(float dt)
 		else if (c.gimm == GM_FENCE) Burst(p, 1, 0.2f, 0.03f, 0.35f, 0.72f, 0.62f, 0.4f, 0, 0, 1.2f, 0.f, 0.2f);
 		sparks++;
 	}
+}
+
+// 螺旋の一番高い床。味方の手番4回でここまで水を上げる。
+static int FloodCeiling(const Map& m)
+{
+	static DWORD seed = 0xFFFFFFFFu;
+	static int theme = -1;
+	static int cap = 1;
+	if (seed == m.seed && theme == (int)m.theme && cap > 0) return cap;
+	int mx = 1;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.At(x, z);
+		int n = CellLayN(c);
+		for (int L = 0; L < n; L++) {
+			int tr = LayerTr(c, L);
+			if (tr == T_VOID || tr == T_CHASM) continue;
+			int h = LayerHt(c, L);
+			if (h > mx) mx = h;
+		}
+	}
+	seed = m.seed;
+	theme = (int)m.theme;
+	cap = mx;
+	return cap;
+}
+static int FloodStep(int cap)
+{
+	int step = (cap - 1 + 3) / 4;
+	if (step < 4) step = 4;
+	return step;
+}
+static int FloodTurnsLeft(int line, int cap, int step)
+{
+	if (line >= cap || step < 1) return 0;
+	return (cap - line + step - 1) / step;
 }
 
 // ============================================================ 手番
@@ -2265,20 +2531,28 @@ void Game::BeginTurn()
 	if (poison > 0) {
 		swprintf_s(s, L"-%s %s", TacNum(poison), EffectWord(EF_POISON));
 		AddPopup(hp, s, RGBA8(190, 120, 255), 1, MSG_BURST, 0, 0, 2);
+		{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, s); AddLog(lg, RGBA8(190, 120, 255)); }
 		Burst(v3(u.px, u.py + .4f, u.pz), 14, 1.2f, .14f, 1.f, .6f, .3f, .9f, 0, 1, -1.f, 0, .8f);
 		TacSfx(TS_POISON);
 	}
 	if (burn > 0) {
 		swprintf_s(s, L"-%s %s", TacNum(burn), EffectWord(EF_BURN));
 		AddPopup(hp, s, RGBA8(255, 120, 40), 1, MSG_BURST, 0, 0, 3);
+		{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, s); AddLog(lg, RGBA8(255, 120, 40)); }
 		Burst(v3(u.px, u.py + .5f, u.pz), 10, 1.4f, .12f, .8f, 1.f, .35f, .05f, 0, 1, -0.4f, 0, 1.1f);
 	}
 	if (bleed > 0) {
 		swprintf_s(s, L"-%s %s", TacNum(bleed), EffectWord(EF_BLEED));
 		AddPopup(hp, s, RGBA8(220, 40, 50), 1, MSG_BURST, 0, 0, 4);
+		{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, s); AddLog(lg, RGBA8(220, 40, 50)); }
 		Burst(v3(u.px, u.py + .3f, u.pz), 8, .6f, .08f, .7f, .75f, .05f, .05f, 0, 0, 1.2f, 0, .2f);
 	}
-	if (showHeal > 0) { swprintf_s(s, L"+%s", TacNum(showHeal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE, dotSum > 0 ? .2f : 0.f); TacSfx(TS_HEAL); }
+	if (showHeal > 0) {
+		swprintf_s(s, L"+%s", TacNum(showHeal));
+		AddPopup(hp, s, RGBA8(120, 255, 140), 0, MSG_RISE, dotSum > 0 ? .2f : 0.f);
+		wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, s); AddLog(lg, RGBA8(120, 255, 140));
+		TacSfx(TS_HEAL);
+	}
 	if (dotSum > 0 || heal > 0) m_bgmTick++;
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
@@ -2300,6 +2574,7 @@ void Game::BeginTurn()
 		wchar_t nm[64], dead[96];
 		UnitTitle(u, nm, 64);
 		swprintf_s(dead, L"%s  %s", nm, TT(u.team == TEAM_PLAYER ? TX_RS_KO : TX_BT_DEFEATED));
+		AddLog(dead, u.team == TEAM_PLAYER ? RGBA8(255, 150, 140) : RGBA8(255, 226, 150));
 		AddBanner(dead, NULL, u.team == TEAM_PLAYER ? RGBA8(255, 150, 140) : RGBA8(255, 226, 150), 2, 1.6f, u.team == TEAM_PLAYER ? MSG_DROP : MSG_BLUR);
 		if (CheckBattleOver()) return;
 		FinishUnitTurn(1);
@@ -2311,19 +2586,36 @@ void Game::BeginTurn()
 	m_cmdFaced = 0;
 	m_target = -1;
 	m_pathN = 0;
-	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_FLOOD && MapIsSpiral(m_b.map)) {
-		m_b.stampedeLine += 2;
-		if (m_b.stampedeLine > 240) m_b.stampedeLine = 240;
+	TacApplyFieldRules(m_b);
+	if (u.team == TEAM_PLAYER && TacHasVar(m_b, TAC_VAR_FAULT)) CommitFault();
+	if (u.team == TEAM_PLAYER && TacHasVar(m_b, TAC_VAR_FROST)) TacFrostGrow(m_b, m_rng);
+	if (u.team == TEAM_PLAYER && TacHasVar(m_b, TAC_VAR_FLOOD) && MapIsSpiral(m_b.map)) {
+		int cap = FloodCeiling(m_b.map);
+		int step = FloodStep(cap);
+		if (m_b.stampedeLine < cap) {
+			m_b.stampedeLine += step;
+			if (m_b.stampedeLine > cap) m_b.stampedeLine = cap;
+			wchar_t msg[64];
+			int left = FloodTurnsLeft(m_b.stampedeLine, cap, step);
+			if (left <= 0) swprintf_s(msg, L"%s", TT(TX_BT_FLOOD_FULL));
+			else swprintf_s(msg, TT(TX_BT_FLOOD_LEFT), TacNum(left));
+			const wchar_t* show = msg;
+			while (*show == L' ') show++;
+			AddLog(show, RGBA8(140, 210, 255));
+			AddBanner(show, NULL, RGBA8(140, 210, 255), 1, 1.3f, MSG_BLUR);
+		}
 	}
-	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_FALL) CommitCollapse();
-	if (u.team == TEAM_PLAYER && m_b.sweep == TAC_VAR_WAVE && m_wave <= 0.f) {
+	if (u.team == TEAM_PLAYER && TacHasVar(m_b, TAC_VAR_FALL)) CommitCollapse();
+	if (u.team == TEAM_PLAYER && TacHasVar(m_b, TAC_VAR_WAVE) && m_wave <= 0.f) {
 		if (m_b.stampedeLeft > 0) m_b.stampedeLeft--;
 		if (m_b.stampedeLeft <= 0) {
-			m_wave = 1.35f;
+			m_wave = 1.65f;
 			m_waveStr = m_rng.Range(1, 10);
 			m_waveH = m_rng.Range(1, 10);
 			m_waveHit = 0;
+			m_waveDir = m_rng.Range(0, 3);
 			m_b.stampedeLeft = m_rng.Range(2, 4);
+			TacSfx(TS_SUM_IN + 5);
 		}
 	}
 	ComputeReach(m_b, ui, m_reach);
@@ -2332,17 +2624,19 @@ void Game::BeginTurn()
 	UnitTitle(u, nm, 64);
 	wchar_t b[128];
 	swprintf_s(b, L"%s  %s", TT(u.team == TEAM_PLAYER ? TX_BT_TURN_PLAYER : TX_BT_TURN_ENEMY), nm);
+	AddLog(b, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130));
 	AddBanner(b, NULL, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130), 2, 1.3f, MSG_FACE);
 	m_lastTeam = u.team;
 	if (u.team == TEAM_PLAYER) {
 		int warned = WakeNearPlayers(m_b, TAC_NOTICE_STEPS);
-		if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
+		if (warned) { AddLog(TT(TX_BT_REIN), RGBA8(255, 210, 120)); AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH); }
 	}
 	TacSfx(u.team == TEAM_PLAYER ? TS_TURN_P : TS_TURN_E);
 	if (u.freeze > 0 || u.sleep > 0 || u.stun > 0) {
 		const wchar_t* word = u.freeze > 0 ? EffectWord(EF_FREEZE) : (u.sleep > 0 ? TT(TX_BT_ASLEEP) : TT(TX_BT_STUN));
 		DWORD col = u.freeze > 0 ? RGBA8(150, 210, 255) : (u.sleep > 0 ? RGBA8(170, 210, 255) : RGBA8(255, 220, 90));
 		AddPopup(hp, word, col, 1, MSG_ORBIT, 0, 0, 2);
+		{ wchar_t lg[96]; swprintf_s(lg, L"%s  %s", nm, word); AddLog(lg, col); }
 		TacSfx(u.sleep > 0 ? TS_SLEEP : TS_STUN);
 		if (u.freeze > 0) u.freeze--;
 		else if (u.sleep > 0) u.sleep = 0;
@@ -2358,6 +2652,7 @@ void Game::BeginTurn()
 		FieldNudgeAi(m_b, ui, m_ai, m_rng);
 		if (u.confuse > 0) u.confuse--;
 		AddPopup(hp, TT(TX_BT_CONFUSE), RGBA8(255, 150, 220), 1, MSG_ORBIT, 0, 0, 2);
+		{ wchar_t lg[96]; swprintf_s(lg, L"%s  %s", nm, TT(TX_BT_CONFUSE)); AddLog(lg, RGBA8(255, 150, 220)); }
 		TacSfx(TS_CONFUSE);
 		m_phase = PH_E_SHOW;
 	} else if (u.team == TEAM_PLAYER) {
@@ -2450,11 +2745,12 @@ void Game::DemoDrive(float dt)
 		int wantL = m_ai.moveL;
 		if (wantL < 0 || wantL >= LAY_N || !ReachCanStopLayer(m_reach, gx, gz, wantL)) {
 			wantL = -1;
-			int best = 99999;
+			int bestH = 999, best = 99999;
 			for (int L = 0; L < LAY_N; L++) {
 				if (!ReachCanStopLayer(m_reach, gx, gz, L)) continue;
 				int c = ReachCostAt(m_reach, L, gx, gz);
-				if (c >= 0 && c < best) { best = c; wantL = L; }
+				int h = ReachMinHopsAt(m_reach, L, gx, gz);
+				if (c >= 0 && (h < bestH || (h == bestH && c < best))) { bestH = h; best = c; wantL = L; }
 			}
 		}
 		int prefer = wantL >= 0 ? wantL : u.deck;
@@ -2462,7 +2758,14 @@ void Game::DemoDrive(float dt)
 		auto arrive = [&]() {
 			if (wantL >= 0) m_cLayer = wantL;
 			else if (!ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
-				for (int L = 0; L < LAY_N; L++) if (ReachCanStopLayer(m_reach, m_cx, m_cz, L)) { m_cLayer = L; break; }
+				int bH = 999, bC = 99999, bL = -1;
+				for (int L = 0; L < LAY_N; L++) {
+					if (!ReachCanStopLayer(m_reach, m_cx, m_cz, L)) continue;
+					int c = ReachCostAt(m_reach, L, m_cx, m_cz);
+					int h = ReachMinHopsAt(m_reach, L, m_cx, m_cz);
+					if (c >= 0 && (h < bH || (h == bH && c < bC))) { bH = h; bC = c; bL = L; }
+				}
+				if (bL >= 0) m_cLayer = bL;
 			}
 			BOOL moved = (m_cx != u.x || m_cz != u.z || m_cLayer != u.deck);
 			if (moved && ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
@@ -2476,9 +2779,10 @@ void Game::DemoDrive(float dt)
 			arrive();
 			return;
 		}
-		if (m_cx == gx && m_cz == gz) { arrive(); return; }
+		if (m_cx == gx && m_cz == gz && (wantL < 0 || m_cLayer == wantL)) { arrive(); return; }
 		int at = -1;
-		for (int i = 0; i < n; i++) if (PackX(m_path[i]) == m_cx && PackZ(m_path[i]) == m_cz) { at = i; break; }
+		for (int i = 0; i < n; i++) if (PackX(m_path[i]) == m_cx && PackZ(m_path[i]) == m_cz && PackDeck(m_path[i]) == m_cLayer) { at = i; break; }
+		if (at < 0) for (int i = 0; i < n; i++) if (PackX(m_path[i]) == m_cx && PackZ(m_path[i]) == m_cz) { at = i; break; }
 		int nxt = at >= 0 ? at + 1 : 1;
 		if (nxt >= n) { arrive(); return; }
 		m_cx = PackX(m_path[nxt]);
@@ -2631,6 +2935,7 @@ void Game::DemoDrive(float dt)
 				BOOL brk = m_b.map.At(ox, oz).gimm == GM_FENCE;
 				OpenDoor(m_b, ox, oz);
 				AddPopup(CellCenter(ox, oz) + v3(0, .6f, 0), TT(brk ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
+				{ wchar_t nm[40], lg[96]; UnitTitle(m_b.u[m_cur], nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(brk ? TX_BT_FENCE : TX_BT_DOOR)); AddLog(lg, RGBA8(220, 200, 140)); }
 				TacSfx(TS_DOOR);
 				m_r.BuildTerrain(m_b.map);
 				FinishUnitTurn(1);
@@ -2992,7 +3297,7 @@ void Game::ConfuseSelf(int ui)
 	AddPopup(v3(u.px, u.py + m_act[ui].height, u.pz), s, RGBA8(255, 160, 120), 1, MSG_BURST);
 	wchar_t nm[40], line[80];
 	UnitTitle(u, nm, 40);
-	swprintf_s(line, L"%s  %s  -%d", nm, EffectWord(EF_CONFUSE), dmg);
+	swprintf_s(line, L"%s  %s  -%s", nm, EffectWord(EF_CONFUSE), TacNum(dmg));
 	AddLog(line, RGBA8(255, 160, 180));
 	TacSfx(u.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
 	if (u.hp <= 0) {
@@ -3021,6 +3326,7 @@ void Game::FinishUnitTurn(int acted)
 			wchar_t s[48];
 			swprintf_s(s, L"-%s %s", TacNum(lava), TT(TX_TER_LAVA));
 			AddPopup(hp, s, RGBA8(255, 120, 40), 1, MSG_BURST);
+			{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, s); AddLog(lg, RGBA8(255, 120, 40)); }
 			m_dispHp[ui] = (float)u.hp;
 			if (!u.alive || u.hp <= 0) {
 				u.hp = 0; u.alive = 0; u.killed = 1;
@@ -4171,7 +4477,9 @@ void Game::UpdateHover()
 	if (m_screen != SC_BATTLE) return;
 	BOOL menuLook = (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON);
 	BOOL mouseMiss = FALSE;
-	if (m_mouseSeen && !m_seqCut && !m_demo && (!m_navMode || menuLook)) {
+	if (m_dragPan && menuLook) {
+		mouseMiss = FALSE;
+	} else if (m_mouseSeen && !m_seqCut && !m_demo && (!m_navMode || menuLook)) {
 		BOOL overUi = FALSE;
 		for (auto& b : m_btnsPrev) if (m_mx >= b.x && m_my >= b.y && m_mx < b.x + b.w && m_my < b.y + b.h) overUi = TRUE;
 		int prevX = m_cx, prevZ = m_cz, prevL = m_cLayer;
@@ -4244,22 +4552,31 @@ void Game::UpdateHover()
 			if (same) m_pathN = s_pn;
 			else {
 				const Unit& u = m_b.u[m_cur];
-				int tx = m_cx, tz = m_cz;
+				int tx = m_cx, tz = m_cz, tPreferL = m_cLayer;
 				if (!ReachCanStopLayer(m_reach, tx, tz, m_cLayer)) {
-					int t = m_b.UnitAt(tx, tz);
+					int t = m_b.UnitAt(tx, tz, m_cLayer);
+					if (t < 0) t = m_b.UnitAt(tx, tz);
 					if (t >= 0 && m_b.u[t].team != u.team && m_ovAtk[tz][tx]) {
-						int best = -1, bc = 9999;
+						int best = -1, bestL = u.deck, bestH = 999, bc = 999999;
+						int rmin = UnitRangeMin(u), rmax = UnitRangeMax(u), foeL = m_b.u[t].deck;
 						for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 							if (!m_ovMove[z][x]) continue;
-							if (!InAttackRange(m_b, x, z, UnitRangeMin(u), UnitRangeMax(u), tx, tz, true)) continue;
-							int c = ReachBestCost(m_reach, x, z) * 4 + Dist(x, z, tx, tz);
-							if (c < bc) { bc = c; best = z * MAPN + x; }
+							int nLay = CellLayN(m_b.map.At(x, z));
+							for (int L = 0; L < nLay; L++) {
+								if (!ReachCanStopLayer(m_reach, x, z, L)) continue;
+								if (!AttackReachLayer(m_b, x, z, L, rmin, rmax, tx, tz, foeL, true)) continue;
+								int h = ReachMinHopsAt(m_reach, L, x, z);
+								int c = ReachCostAt(m_reach, L, x, z) * 4 + Dist(x, z, tx, tz);
+								if (h < bestH || (h == bestH && c < bc)) {
+									bestH = h; bc = c; best = z * MAPN + x; bestL = L;
+								}
+							}
 						}
-						if (best >= 0) { tx = best % MAPN; tz = best / MAPN; }
+						if (best >= 0) { tx = best % MAPN; tz = best / MAPN; tPreferL = bestL; }
 						else { s_ph = m_phase; s_pu = m_cur; s_px = m_cx; s_pz = m_cz; s_pl = m_cLayer; s_pn = 0; return; }
 					} else { s_ph = m_phase; s_pu = m_cur; s_px = m_cx; s_pz = m_cz; s_pl = m_cLayer; s_pn = 0; return; }
 				}
-				m_pathN = ReachPath(m_reach, u.x, u.z, tx, tz, m_path, MAPN * 4, m_cLayer);
+				m_pathN = ReachPath(m_reach, u.x, u.z, tx, tz, m_path, MAPN * 4, tPreferL);
 				s_ph = m_phase; s_pu = m_cur; s_px = m_cx; s_pz = m_cz; s_pl = m_cLayer; s_pn = m_pathN;
 			}
 		} else {
@@ -4330,6 +4647,76 @@ BOOL Game::ChestInRange(int ui, int x, int z) const
 	return InAttackRange(m_b, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), x, z, true) ? TRUE : FALSE;
 }
 
+int Game::GrantChestExp(int ui, BOOL queueCard)
+{
+	if (ui < 0 || ui >= m_b.nUnits) return 0;
+	Unit& u = m_b.u[ui];
+	if (u.team != TEAM_PLAYER || !u.alive) return 0;
+	long long g = (long long)ExpForChest(u, m_battleStage);
+	if (UnitHasPas(u, PAS_EXP2)) g = g * (100 + 40 * (PasMag(u, PAS_EXP2) < 100 ? 100 : PasMag(u, PAS_EXP2)) / 100) / 100;
+	else if (UnitHasPas(u, PAS_EXP)) g = g * (100 + 20 * (PasMag(u, PAS_EXP) < 100 ? 100 : PasMag(u, PAS_EXP)) / 100) / 100;
+	int topLv = 1;
+	for (int i = 0; i < m_b.nUnits; i++)
+		if (m_b.u[i].team == TEAM_PLAYER && m_b.u[i].ch.lv > topLv) topLv = m_b.u[i].ch.lv;
+	int gap = topLv - u.ch.lv;
+	if (gap > 0) {
+		int pct = 100 + gap * 10;
+		if (pct > 400) pct = 400;
+		long long boosted = g * (long long)pct / 100;
+		if (boosted > g) g = boosted;
+	}
+	if (g < 1) g = 1;
+	if (g > 2000000000LL) g = 2000000000LL;
+	long long acc = (long long)m_expGain[ui] + g;
+	if (acc > 2147483647LL) acc = 2147483647LL;
+	m_expGain[ui] = (int)acc;
+	unsigned __int64 fromTrue = CharTrueLv(u.ch);
+	long long pool = (long long)u.ch.exp + g;
+	LevelUpInfo localQ[8];
+	int localQN = 0;
+	if (queueCard && !m_demo) {
+		m_lvqN = 0;
+		m_promoAsk = 0;
+		BurstToGate(u, ui, m_rng, pool, m_lvq, m_lvqN, MAX_PARTY * 4);
+		for (int q = 0; q < m_lvqN; q++) {
+			for (int lk = 0; lk < m_lvq[q].nLearned; lk++) {
+				wchar_t nm[40], lvline[120];
+				UnitTitle(u, nm, 40);
+				swprintf_s(lvline, L"%s  %s: %s", nm, TT(TX_BT_LEARNED), SkillLabel(m_lvq[q].learned[lk]));
+				AddLog(lvline, RGBA8(255, 226, 150));
+			}
+		}
+	} else {
+		BurstToGate(u, ui, m_rng, pool, localQ, localQN, 8);
+		for (int q = 0; q < localQN; q++) {
+			for (int lk = 0; lk < localQ[q].nLearned; lk++) {
+				wchar_t nm[40], lvline[120];
+				UnitTitle(u, nm, 40);
+				swprintf_s(lvline, L"%s  %s: %s", nm, TT(TX_BT_LEARNED), SkillLabel(localQ[q].learned[lk]));
+				AddLog(lvline, RGBA8(255, 226, 150));
+			}
+		}
+	}
+	if (CharTrueLv(u.ch) >= ~0ull) pool = 0;
+	if (pool < 0) pool = 0;
+	if (pool > 2000000000LL) pool = 2000000000LL;
+	u.ch.exp = (int)pool;
+	u.hpShow = (float)u.hp;
+	m_dispHp[ui] = (float)u.hp;
+	unsigned __int64 nowTrue = CharTrueLv(u.ch);
+	if (nowTrue != fromTrue) {
+		wchar_t nm[40], lvline[180];
+		UnitTitle(u, nm, 40);
+		swprintf_s(lvline, L"%s  %s  %s%s → %s%s", nm, TT(TX_BT_LEVELUP), TT(TX_MISC_LV), TacNumU64(fromTrue), TT(TX_MISC_LV), TacNumU64(nowTrue));
+		AddLog(lvline, RGBA8(140, 255, 150));
+		if (!queueCard && !m_demo) {
+			TacSfx(TS_LEVEL);
+			AddBanner(TT(TX_BT_LEVELUP), lvline, RGBA8(140, 255, 150), 1, 1.8f, MSG_RISE);
+		}
+	}
+	return (int)g;
+}
+
 BOOL Game::OpenChestAt(int ui, int x, int z)
 {
 	if (!ChestInRange(ui, x, z)) return FALSE;
@@ -4343,31 +4730,31 @@ BOOL Game::OpenChestAt(int ui, int x, int z)
 	else if (gp >= 3) it = IT_SHARD;
 	int cashed = (it >= 0 && it < IT_COUNT) ? GainItemN(m_save, it, 1) : 0;
 	BOOL opener = CanOpenDoor(u);
-	int add = max(1, u.ch.stat[S_HP] * (opener ? 40 : 25) / 100);
+	int add = max(1, u.ch.stat[S_HP] * (opener ? 45 : 30) / 100);
 	u.hp = min(u.ch.stat[S_HP], u.hp + add);
+	int addMp = max(1, u.ch.stat[S_MP] * (opener ? 40 : 25) / 100);
+	u.mp = min(u.ch.stat[S_MP], u.mp + addMp);
 	u.hpShow = (float)u.hp;
 	if (opener || gp == 2) u.mulTurns = max(u.mulTurns, 3);
-	if (opener || gp == 1) u.expGained += 12;
 	c.gimm = GM_NONE;
 	c.prop = PK_NONE;
+	int xp = GrantChestExp(ui, TRUE);
 	const wchar_t* in = L"";
 	if (it == IT_HERB) in = TT(TX_IT_HERB);
 	else if (it == IT_ORE) in = TT(TX_IT_ORE);
 	else if (it == IT_CRYSTAL) in = TT(TX_IT_CRYSTAL);
 	else if (it == IT_SHARD) in = TT(TX_IT_SHARD);
 	wchar_t cash[32];
-	if (cashed > 0) swprintf_s(cash, L"+%dG", cashed);
+	if (cashed > 0) swprintf_s(cash, L"+%sG", TacNum(cashed));
 	const wchar_t* shown = cashed > 0 ? cash : in;
-	wchar_t msg[160];
-	if (it >= 0 && (opener || gp == 1))
-		swprintf_s(msg, L"%s  %s  %s+%d  %s+12", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), add, TT(TX_MISC_EXP));
-	else if (it >= 0)
-		swprintf_s(msg, L"%s  %s  %s+%d", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), add);
+	wchar_t msg[200];
+	if (it >= 0)
+		swprintf_s(msg, L"%s  %s  %s+%s  %s +%s", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), TacNum(add), TT(TX_MISC_EXP), TacNum(xp));
 	else
-		swprintf_s(msg, L"%s  %s+%d", TT(TX_GM_CHEST), TT(TX_ST_HP), add);
+		swprintf_s(msg, L"%s  %s+%s  %s +%s", TT(TX_GM_CHEST), TT(TX_ST_HP), TacNum(add), TT(TX_MISC_EXP), TacNum(xp));
 	V3 p = CellCenter(x, z);
-	AddPopup(p + v3(0, 1.1f, 0), msg, RGBA8(255, 210, 120), 1, MSG_RISE, 0, 3.6f);
-	AddLog(msg, RGBA8(255, 210, 120));
+	AddPopup(p + v3(0, 1.1f, 0), msg, RGBA8(255, 224, 110), 1, MSG_RISE, 0, 3.8f);
+	AddLog(msg, RGBA8(255, 224, 110));
 	FaceTowards(ui, x, z);
 	TacSfx(TS_CHEST);
 	m_r.BuildTerrain(m_b.map);
@@ -4472,6 +4859,7 @@ void Game::BattleConfirmCursor()
 			if (fence || CanOpenDoor(u)) {
 				OpenDoor(m_b, m_cx, m_cz);
 				AddPopup(CellCenter(m_cx, m_cz) + v3(0, .6f, 0), TT(fence ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
+				{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(fence ? TX_BT_FENCE : TX_BT_DOOR)); AddLog(lg, RGBA8(220, 200, 140)); }
 				TacSfx(TS_DOOR);
 				m_r.BuildTerrain(m_b.map);
 				FinishUnitTurn(1);
@@ -4481,7 +4869,11 @@ void Game::BattleConfirmCursor()
 		if (CanTerrace(m_b, m_cur, m_cx, m_cz)) { ApplyTerrace(m_cx, m_cz); return; }
 		if (m_cx == u.x && m_cz == u.z && m_cLayer == u.deck) { OpenCommand(); return; }
 		if (ChestInRange(m_cur, m_cx, m_cz)) {
-			if (OpenChestAt(m_cur, m_cx, m_cz)) { FinishUnitTurn(1); return; }
+			if (OpenChestAt(m_cur, m_cx, m_cz)) {
+				if (!m_demo && m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; TacSfx(TS_LEVEL); }
+				else FinishUnitTurn(1);
+				return;
+			}
 		}
 		if (ReachCanStopLayer(m_reach, m_cx, m_cz, m_cLayer)) {
 			m_moved = 1;
@@ -4500,6 +4892,7 @@ void Game::BattleConfirmCursor()
 				int dst = m_path[m_pathN - 1];
 				m_target = t;
 				m_moved = 1;
+				m_cLayer = PackDeck(dst);
 				StartMove(m_cur, PackX(dst), PackZ(dst), PH_P_TARGET);
 				return;
 			}
@@ -4519,7 +4912,8 @@ void Game::BattleConfirmCursor()
 			V3 p = UnitGroundPos(d);
 			d.px = p.x; d.py = p.y; d.pz = p.z;
 			AddPopup(p + v3(0, m_act[t].height, 0), TT(TX_BT_SHOVE), RGBA8(255, 220, 140), 1, MSG_SLAB);
-			if (WakeNearPlayers(m_b, TAC_NOTICE_STEPS)) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
+			{ wchar_t an[40], dn[40], lg[96]; UnitTitle(m_b.u[m_cur], an, 40); UnitTitle(d, dn, 40); swprintf_s(lg, L"%s  %s  %s", an, TT(TX_BT_SHOVE), dn); AddLog(lg, RGBA8(255, 220, 140)); }
+			if (WakeNearPlayers(m_b, TAC_NOTICE_STEPS)) { AddLog(TT(TX_BT_REIN), RGBA8(255, 210, 120)); AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH); }
 			if (d.hp >= hp0) {
 				TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
 				FinishUnitTurn(1);
@@ -4550,7 +4944,10 @@ void Game::BattleConfirmCursor()
 	if (m_phase == PH_P_TARGET) {
 		int t = m_b.UnitAt(m_cx, m_cz, m_cLayer);
 		if (CanTarget(m_cur, t, -1)) BeginAttack(m_cur, t, -1, m_cx, m_cz);
-		else if (ChestInRange(m_cur, m_cx, m_cz) && OpenChestAt(m_cur, m_cx, m_cz)) FinishUnitTurn(1);
+		else if (ChestInRange(m_cur, m_cx, m_cz) && OpenChestAt(m_cur, m_cx, m_cz)) {
+			if (!m_demo && m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; TacSfx(TS_LEVEL); }
+			else FinishUnitTurn(1);
+		}
 		return;
 	}
 	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
@@ -4799,6 +5196,37 @@ void Game::BattleCancel()
 }
 
 // ============================================================ 移動
+// 上レイヤーがあっても、歩く身長より上なら屈まない。頭が届くときだけ 1。
+static float CrouchUnderCeiling(float clearY, float bodyH)
+{
+	float h = bodyH > 0.4f ? bodyH : 1.75f;
+	if (!(clearY < h + 0.22f)) return 0.f;
+	float crouchTop = h * 0.58f + 0.10f;
+	float denom = (h + 0.22f) - crouchTop;
+	if (denom < 0.30f) denom = 0.30f;
+	return Clampf((h + 0.22f - clearY) / denom, 0.f, 1.f);
+}
+
+static BOOL MoveNowBetweenLayers(const Map& m, const Unit& u, const int* pts, int nPts, float moveT, float bodyH)
+{
+	if (!pts || nPts <= 1) return FALSE;
+	int seg = Clampi((int)moveT, 0, nPts - 2);
+	float f = Clampf(moveT - (float)seg, 0.f, 1.f);
+	int a = pts[seg], b = pts[seg + 1];
+	if (PackDeck(a) != PackDeck(b)) return FALSE;
+	int ax = PackX(a), az = PackZ(a), bx = PackX(b), bz = PackZ(b);
+	int deck = PackDeck(a);
+	float ya = m.WalkY(ax, az, deck);
+	float yb = m.WalkY(bx, bz, deck);
+	if (fabsf(yb - ya) > 0.95f) return FALSE;
+	float off = (float)(UnitSpan(u) - 1) * 0.5f;
+	float wx = Lerpf((float)ax + 0.5f + off, (float)bx + 0.5f + off, f);
+	float wz = Lerpf((float)az + 0.5f + off, (float)bz + 0.5f + off, f);
+	float wy = Lerpf(ya, yb, f);
+	float clr = MapOverheadClearance(m, wx, wz, deck, UnitSpan(u), wy, 0);
+	return CrouchUnderCeiling(clr, bodyH) > 0.02f ? TRUE : FALSE;
+}
+
 void Game::StartMove(int ui, int tx, int tz, int next)
 {
 	Unit& u = m_b.u[ui];
@@ -4809,6 +5237,34 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 		prefer = m_ai.moveL;
 	m_moveN = ReachPath(m_reach, u.x, u.z, tx, tz, m_movePts, MAPN * 4, prefer);
 	if (m_moveN < 1) { m_movePts[0] = PackCell(u.x, u.z, u.deck); m_moveN = 1; }
+	if (TacHasVar(m_b, TAC_VAR_FROST) && m_moveN >= 2) {
+		int guard = 0;
+		while (m_moveN < MAPN * 4 - 1 && guard++ < MAPN) {
+			int last = m_movePts[m_moveN - 1];
+			int x = PackX(last), z = PackZ(last);
+			if (!TacFrostAt(x, z)) break;
+			int prev = m_movePts[m_moveN - 2];
+			int dx = x - PackX(prev), dz = z - PackZ(prev);
+			if (dx > 1) dx = 1; else if (dx < -1) dx = -1;
+			if (dz > 1) dz = 1; else if (dz < -1) dz = -1;
+			if (dx != 0 && dz != 0) {
+				if (abs(x - PackX(prev)) >= abs(z - PackZ(prev))) dz = 0;
+				else dx = 0;
+			}
+			if (dx == 0 && dz == 0) break;
+			int nx = x + dx, nz = z + dz;
+			if (!Map::In(nx, nz)) break;
+			int occ = m_b.UnitAt(nx, nz);
+			if (occ >= 0 && occ != ui) break;
+			const Cell& c = m_b.map.At(nx, nz);
+			int deck = PackDeck(last);
+			if (!LayerOn(c, deck)) deck = 0;
+			int tr = LayerOn(c, deck) ? LayerTr(c, deck) : c.t;
+			if (tr == T_VOID) break;
+			m_movePts[m_moveN++] = PackCell(nx, nz, deck);
+			if (tr == T_CHASM || tr == T_LAVA) break;
+		}
+	}
 	m_moveUnit = ui;
 	m_moveT = 0;
 	m_moveNext = next;
@@ -4818,7 +5274,9 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	m_camPan = v3(0, 0, 0);
 	m_act[ui].flap = 0.f;
 	if (m_moveN > 1 && !PoseGround(m_act[ui], u, m_dieT[ui])) {
-		BOOL fly = UnitMoveType(u) == MV_FLY && (m_act[ui].wings > 0 || u.team == TEAM_PLAYER);
+		BOOL flyCap = UnitMoveType(u) == MV_FLY && (m_act[ui].wings > 0 || u.team == TEAM_PLAYER);
+		BOOL footUnder = flyCap && MoveNowBetweenLayers(m_b.map, u, m_movePts, m_moveN, 0.f, m_act[ui].height);
+		BOOL fly = flyCap && !footUnder;
 		if (fly) {
 			if (m_act[ui].wings == 0) m_act[ui].wings = 1;
 			if (m_act[ui].hover < .2f) m_act[ui].hover = .35f;
@@ -4833,15 +5291,135 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	}
 }
 
+void Game::FinishAfterMove(int ui, int next)
+{
+	Unit& u = m_b.u[ui];
+	if (u.team == TEAM_PLAYER && WakeNearPlayers(m_b, TAC_NOTICE_STEPS))
+		AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
+	m_act[ui].animSpeed = 1.f;
+	m_act[ui].flap = 0.f;
+	if (!PoseKeep(m_act[ui], u, m_dieT[ui])) ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
+	if (u.team == TEAM_PLAYER && m_ai.wild == 0) {
+		if (next == PH_P_TARGET && m_target >= 0) {
+			m_phase = PH_P_TARGET;
+			FaceTowards(ui, m_b.u[m_target].x, m_b.u[m_target].z);
+			ComputeOverlays();
+			m_cx = m_b.u[m_target].x; m_cz = m_b.u[m_target].z; m_cLayer = m_b.u[m_target].deck;
+			m_cursorValid = TRUE;
+		} else OpenCommand();
+	} else {
+		if (m_ai.wild == 2) { ConfuseSelf(ui); return; }
+		if (m_ai.target >= 0 && m_b.u[m_ai.target].alive) {
+			const SkillDef* sd = m_ai.skill >= 0 ? &SkillInfo(m_ai.skill) : NULL;
+			BOOL ok = sd ? (sd->rMax == 0 || CanTarget(ui, m_ai.target, m_ai.skill)) : CanTarget(ui, m_ai.target, -1);
+			if (!ok && m_ai.wild && m_ai.skill < 0 && m_ai.target != ui) {
+				const Unit& t = m_b.u[m_ai.target];
+				ok = t.alive && InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t, true);
+			}
+			if (ok) { BeginAttack(ui, m_ai.target, m_ai.skill, m_ai.castX, m_ai.castZ); return; }
+		}
+		FinishUnitTurn(m_ai.wild ? 1 : 0);
+	}
+}
+
+void Game::UpdateWarp(float dt)
+{
+	if (!m_warpOn || m_warpUi < 0 || m_warpUi >= m_b.nUnits) { m_warpOn = 0; return; }
+	Unit& u = m_b.u[m_warpUi];
+	float pace = TacPaceTime(m_save);
+	if (pace < 0.12f) pace = 0.12f;
+	float prev = m_warpT;
+	m_warpT += dt / pace;
+	static const DWORD kWarpCol[8] = {
+		RGBA8(255, 95, 95), RGBA8(95, 175, 255), RGBA8(255, 220, 75), RGBA8(95, 240, 140),
+		RGBA8(210, 100, 255), RGBA8(95, 240, 240), RGBA8(255, 155, 60), RGBA8(255, 135, 195)
+	};
+	DWORD wc = kWarpCol[m_warpColor & 7];
+	float wr = (wc & 255) / 255.f, wg = ((wc >> 8) & 255) / 255.f, wb = ((wc >> 16) & 255) / 255.f;
+	m_faceShow[m_warpUi] += dt * 26.f / pace;
+	if (m_warpT < 0.46f) {
+		float f = Clampf(m_warpT / 0.46f, 0.f, 1.f);
+		float ease = f * f;
+		float rad = (1.f - f) * 0.36f;
+		float ang = m_warpT * 24.f;
+		u.px = m_warpSrc.x + cosf(ang) * rad;
+		u.pz = m_warpSrc.z + sinf(ang) * rad;
+		u.py = m_warpSrc.y + ease * 2.15f;
+		if ((int)(m_warpT * 40.f) != (int)(prev * 40.f) && m_parts.size() < 3600) {
+			for (int k = 0; k < 3; k++) {
+				float a = ang + k * 2.094f;
+				float rr = 0.85f * (1.f - f * 0.55f);
+				Particle q = {};
+				q.p = v3(m_warpSrc.x + cosf(a) * rr, m_warpSrc.y + f * 1.4f, m_warpSrc.z + sinf(a) * rr);
+				q.v = v3(-cosf(a) * 2.4f - sinf(a) * 2.8f, 3.6f, -sinf(a) * 2.4f + cosf(a) * 2.8f);
+				q.life = q.max = 0.38f;
+				q.size = 0.09f; q.size1 = 0.02f;
+				q.r = wr * 0.65f + 0.35f; q.g = wg * 0.65f + 0.35f; q.b = wb * 0.65f + 0.35f; q.a = 0.95f;
+				q.shape = 2; q.add = 1; q.grav = -1.5f; q.stretch = 1.8f; q.drag = 1.4f;
+				m_parts.push_back(q);
+			}
+		}
+	} else if (m_warpT < 0.66f) {
+		float f = Clampf((m_warpT - 0.46f) / 0.20f, 0.f, 1.f);
+		V3 mid = Lerp(m_warpSrc, m_warpDst, Smooth01(f));
+		u.px = mid.x; u.pz = mid.z; u.py = mid.y + 2.2f;
+		if (prev < 0.46f) {
+			Burst(m_warpSrc + v3(0, 1.4f, 0), 18, 2.8f, 0.08f, 0.45f, wr * 0.7f + 0.3f, wg * 0.7f + 0.3f, wb * 0.7f + 0.3f, 2, 1, -2.f, 1.6f, 1.4f);
+			StampGroundRing(m_warpSrc.x, m_warpSrc.z, 0.62f, 0.65f, 1, FALSE);
+		}
+	} else if (m_warpT < 1.08f) {
+		float f = Clampf((m_warpT - 0.66f) / 0.42f, 0.f, 1.f);
+		if (prev < 0.66f) {
+			TacSfx(TS_WARP);
+			Burst(m_warpDst + v3(0, 1.8f, 0), 22, 3.2f, 0.09f, 0.5f, wr * 0.6f + 0.4f, wg * 0.6f + 0.4f, wb * 0.6f + 0.4f, 2, 1, 2.5f, 1.8f, -0.6f);
+		}
+		float inv = 1.f - f;
+		float rad = inv * 0.32f;
+		float ang = m_warpT * 22.f;
+		u.px = m_warpDst.x + cosf(ang) * rad;
+		u.pz = m_warpDst.z + sinf(ang) * rad;
+		u.py = m_warpDst.y + inv * inv * 2.15f;
+	} else {
+		u.px = m_warpDst.x; u.py = m_warpDst.y; u.pz = m_warpDst.z;
+		m_warpOn = 0;
+		StampGroundRing(m_warpDst.x, m_warpDst.z, 0.68f, 0.75f, 1, FALSE);
+		Burst(m_warpDst + v3(0, 0.18f, 0), 20, 2.6f, 0.08f, 0.48f, wr * 0.65f + 0.35f, wg * 0.65f + 0.35f, wb * 0.65f + 0.35f, 1, 1, 1.2f, 1.4f, 0.4f);
+		AddPopup(m_warpDst + v3(0, m_act[m_warpUi].height, 0), TT(TX_GM_WARP), RGBA8((int)(wr * 180 + 75), (int)(wg * 180 + 75), (int)(wb * 180 + 75)), 1, MSG_ORBIT);
+		m_shake = max(m_shake, 0.22f);
+		FinishAfterMove(m_warpUi, m_warpNext);
+	}
+}
+
 void Game::UpdateMove(float dt)
 {
+	if (m_warpOn) { UpdateWarp(dt); return; }
 	int ui = m_moveUnit;
 	Unit& u = m_b.u[ui];
-	BOOL fly = UnitMoveType(u) == MV_FLY;
+	BOOL flyCap = UnitMoveType(u) == MV_FLY;
+	BOOL footUnder = flyCap && m_moveN > 1 && MoveNowBetweenLayers(m_b.map, u, m_movePts, m_moveN, m_moveT, m_act[ui].height);
+	BOOL fly = flyCap && !footUnder;
+	if (flyCap && m_moveN > 1 && !PoseGround(m_act[ui], u, m_dieT[ui])) {
+		if (footUnder) {
+			m_act[ui].flap = 0.f;
+			int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
+			if (m_act[ui].clip != clip) {
+				ActorPlay(m_act[ui], clip, 1, .12f);
+				m_act[ui].animSpeed = clip == CL_RUN ? 1.15f : 1.f;
+			}
+		} else if (m_act[ui].wings > 0 || u.team == TEAM_PLAYER) {
+			if (m_act[ui].wings == 0) m_act[ui].wings = 1;
+			if (m_act[ui].hover < .2f) m_act[ui].hover = .35f;
+			m_act[ui].flap = 1.f;
+			if (m_act[ui].clip != CL_IDLE) {
+				ActorPlay(m_act[ui], CL_IDLE, 1, .12f);
+				m_act[ui].animSpeed = 1.2f;
+			}
+		}
+	}
 	float pace = TacPaceTime(m_save);
 	if (pace < 0.05f) pace = 0.05f;
 	float speed = 2.6f * 1.5f / pace;
-	// 徒歩はそのまま。飛行は無印 1.3、改 2、聖 3、女神 4。
+	// 徒歩はそのまま。飛行は無印 1.3、改 2、聖 3、女神 4。上レイヤー下を歩行/走行するときは地上速度。
 	if (fly) {
 		int g = m_act[ui].wingGrade;
 		if (g < 0) g = 0;
@@ -4855,6 +5433,15 @@ void Game::UpdateMove(float dt)
 		static int stepSeg = -999;
 		BOOL wing = fly && u.team == TEAM_PLAYER && m_act[ui].wings > 0;
 		if (seg != stepSeg) {
+			if (stepSeg >= 0 && seg > stepSeg && stepSeg < m_moveN - 1) {
+				int left = m_movePts[stepSeg];
+				int lx = PackX(left), lz = PackZ(left);
+				if (TacFrostMelt(lx, lz)) {
+					float y = m_b.map.WalkY(lx, lz, PackDeck(left)) + 0.16f;
+					Burst(v3((float)lx + 0.5f, y, (float)lz + 0.5f), 10, 0.7f, 0.04f, 0.85f, 0.82f, 0.92f, 1.f, 0, 1, 3.2f, 1.6f, 0.2f);
+					m_shake = max(m_shake, 0.12f);
+				}
+			}
 			if (stepSeg >= 0 && seg > stepSeg && !fly && seg >= 0 && seg < m_moveN)
 				WeatherTread(u, PackX(m_movePts[seg]), PackZ(m_movePts[seg]));
 			if (stepSeg < 0 && wing && m_moveN > 1) TacSfx(TS_FLY);
@@ -4869,7 +5456,17 @@ void Game::UpdateMove(float dt)
 		u.deck = PackDeck(last);
 		if (!LayerOn(m_b.map.At(u.x, u.z), u.deck)) u.deck = 0;
 		m_b.RebuildOcc();
+		V3 prePos = UnitGroundPos(u);
 		int gp = m_b.map.At(u.x, u.z).gparam;
+		{
+			int sp = UnitSpan(u);
+			for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
+				if (Map::In(u.x + dx, u.z + dz) && m_b.map.At(u.x + dx, u.z + dz).gimm != GM_NONE) {
+					gp = m_b.map.At(u.x + dx, u.z + dz).gparam;
+					dx = sp; dz = sp;
+				}
+			}
+		}
 		int tile = ApplyTile(m_b, ui);
 		int chestItem = -1, chestCash = 0;
 		if (tile == GM_CHEST && u.team == TEAM_PLAYER) {
@@ -4884,15 +5481,61 @@ void Game::UpdateMove(float dt)
 		V3 p = UnitGroundPos(u);
 		u.px = p.x; u.py = p.y; u.pz = p.z;
 		u.hpShow = (float)u.hp;
+		if (TacHasVar(m_b, TAC_VAR_FROST)) {
+			int tr = LayerOn(m_b.map.At(u.x, u.z), u.deck) ? LayerTr(m_b.map.At(u.x, u.z), u.deck) : m_b.map.At(u.x, u.z).t;
+			if (tr == T_CHASM || tr == T_LAVA || tr == T_VOID) {
+				int dmg = max(1, u.ch.stat[S_HP] * 28 / 100);
+				u.hp = max(0, u.hp - dmg);
+				u.hpShow = (float)u.hp;
+				wchar_t fs[32];
+				swprintf_s(fs, L"-%s", TacNum(dmg));
+				AddPopup(p + v3(0, m_act[ui].height, 0), fs, RGBA8(180, 210, 255), 1, MSG_DROP);
+				{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, fs); AddLog(lg, RGBA8(180, 210, 255)); }
+				if (u.hp <= 0) {
+					u.hp = 0; u.alive = 0; u.killed = 1;
+					if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
+					if (m_dieT[ui] < 0) m_dieT[ui] = 0;
+					TacSfx(TS_FALL);
+					if (CheckBattleOver()) return;
+					FinishUnitTurn(1);
+					return;
+				}
+				if (m_moveN >= 2) {
+					int back = m_movePts[m_moveN - 2];
+					u.x = PackX(back); u.z = PackZ(back); u.deck = PackDeck(back);
+					m_b.RebuildOcc();
+					p = UnitGroundPos(u);
+					u.px = p.x; u.py = p.y; u.pz = p.z;
+				}
+				TacSfx(TS_FALL);
+			}
+		}
 		if (tile == GM_HEAL) {
 			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_HEAL), RGBA8(120, 255, 160), 0, MSG_RISE);
+			{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(TX_GM_HEAL)); AddLog(lg, RGBA8(120, 255, 160)); }
 			TacSfx(TS_HEAL);
 		} else if (tile == GM_MIGHT) {
-			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_MIGHT), RGBA8(255, 220, 120), 1, MSG_FACE);
+			wchar_t bmsg[96];
+			DWORD bcol = RGBA8(255, 224, 100);
+			FormatBuffCallout(-2, u.mulTurns > 0 ? u.mulTurns : 3, bmsg, 96, &bcol);
+			AddPopup(p + v3(0, m_act[ui].height, 0), bmsg, bcol, 1, MSG_FACE);
+			AddLog(bmsg, bcol);
 			TacSfx(TS_BUFF);
 		} else if (tile == GM_WARP) {
-			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_WARP), RGBA8(180, 140, 255), 1, MSG_ORBIT);
 			TacSfx(TS_WARP);
+			{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(TX_GM_WARP)); AddLog(lg, RGBA8(180, 140, 255)); }
+			if (!m_demo) {
+				m_warpOn = 1;
+				m_warpUi = ui;
+				m_warpNext = m_moveNext;
+				m_warpColor = gp & 7;
+				m_warpT = 0.f;
+				m_warpSrc = prePos;
+				m_warpDst = p;
+				u.px = prePos.x; u.py = prePos.y; u.pz = prePos.z;
+				return;
+			}
+			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_WARP), RGBA8(180, 140, 255), 1, MSG_ORBIT);
 		} else if (tile == GM_CHEST) {
 			const wchar_t* in = L"";
 			if (chestItem == IT_HERB) in = TT(TX_IT_HERB);
@@ -4900,26 +5543,32 @@ void Game::UpdateMove(float dt)
 			else if (chestItem == IT_CRYSTAL) in = TT(TX_IT_CRYSTAL);
 			else if (chestItem == IT_SHARD) in = TT(TX_IT_SHARD);
 			BOOL opener = CanOpenDoor(u);
-			int add = max(1, u.ch.stat[S_HP] * (opener ? 40 : 25) / 100);
+			int add = max(1, u.ch.stat[S_HP] * (opener ? 45 : 30) / 100);
+			int xp = (u.team == TEAM_PLAYER) ? GrantChestExp(ui, FALSE) : 0;
 			wchar_t cash[32];
-			if (chestCash > 0) swprintf_s(cash, L"+%dG", chestCash);
+			if (chestCash > 0) swprintf_s(cash, L"+%sG", TacNum(chestCash));
 			const wchar_t* shown = chestCash > 0 ? cash : in;
-			wchar_t msg[160];
-			if (chestItem >= 0 && (opener || gp == 1))
-				swprintf_s(msg, L"%s  %s  %s+%d  %s+12", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), add, TT(TX_MISC_EXP));
+			wchar_t msg[200];
+			if (chestItem >= 0 && xp > 0)
+				swprintf_s(msg, L"%s  %s  %s+%s  %s +%s", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), TacNum(add), TT(TX_MISC_EXP), TacNum(xp));
+			else if (xp > 0)
+				swprintf_s(msg, L"%s  %s+%s  %s +%s", TT(TX_GM_CHEST), TT(TX_ST_HP), TacNum(add), TT(TX_MISC_EXP), TacNum(xp));
 			else if (chestItem >= 0)
-				swprintf_s(msg, L"%s  %s  %s+%d", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), add);
+				swprintf_s(msg, L"%s  %s  %s+%s", TT(TX_GM_CHEST), shown, TT(TX_ST_HP), TacNum(add));
 			else
-				swprintf_s(msg, L"%s  %s+%d", TT(TX_GM_CHEST), TT(TX_ST_HP), add);
-			AddPopup(p + v3(0, m_act[ui].height, 0), msg, RGBA8(255, 210, 120), 1, MSG_RISE, 0, 3.6f);
-			AddLog(msg, RGBA8(255, 210, 120));
+				swprintf_s(msg, L"%s  %s+%s", TT(TX_GM_CHEST), TT(TX_ST_HP), TacNum(add));
+			AddPopup(p + v3(0, m_act[ui].height, 0), msg, RGBA8(255, 224, 110), 1, MSG_RISE, 0, 3.8f);
+			AddLog(msg, RGBA8(255, 224, 110));
 			TacSfx(TS_CHEST);
+			m_r.BuildTerrain(m_b.map);
 		} else if (tile == GM_LEVER) {
 			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_LEVER), RGBA8(120, 230, 210), 1, MSG_SLAB);
+			{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(TX_GM_LEVER)); AddLog(lg, RGBA8(120, 230, 210)); }
 			TacSfx(TS_DOOR);
 			m_r.BuildTerrain(m_b.map);
 		} else if (tile == GM_DROP) {
 			AddPopup(p + v3(0, m_act[ui].height, 0), TT(TX_GM_DROP), RGBA8(255, 150, 60), 1, MSG_DROP);
+			{ wchar_t nm[40], lg[96]; UnitTitle(u, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(TX_GM_DROP)); AddLog(lg, RGBA8(255, 150, 60)); }
 			TacSfx(u.alive ? TS_HURT : TS_FALL);
 			m_r.BuildTerrain(m_b.map);
 			if (!u.alive || u.hp <= 0) {
@@ -4931,33 +5580,7 @@ void Game::UpdateMove(float dt)
 				return;
 			}
 		}
-		if (u.team == TEAM_PLAYER && WakeNearPlayers(m_b, TAC_NOTICE_STEPS))
-			AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f, MSG_DEPTH);
-		m_act[ui].animSpeed = 1.f;
-		m_act[ui].flap = 0.f;
-		if (!PoseKeep(m_act[ui], u, m_dieT[ui])) ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
-		int next = m_moveNext;
-		if (u.team == TEAM_PLAYER && m_ai.wild == 0) {
-			if (next == PH_P_TARGET && m_target >= 0) {
-				m_phase = PH_P_TARGET;
-				FaceTowards(ui, m_b.u[m_target].x, m_b.u[m_target].z);
-				ComputeOverlays();
-				m_cx = m_b.u[m_target].x; m_cz = m_b.u[m_target].z; m_cLayer = m_b.u[m_target].deck;
-				m_cursorValid = TRUE;
-			} else OpenCommand();
-		} else {
-			if (m_ai.wild == 2) { ConfuseSelf(ui); return; }
-			if (m_ai.target >= 0 && m_b.u[m_ai.target].alive) {
-				const SkillDef* sd = m_ai.skill >= 0 ? &SkillInfo(m_ai.skill) : NULL;
-				BOOL ok = sd ? (sd->rMax == 0 || CanTarget(ui, m_ai.target, m_ai.skill)) : CanTarget(ui, m_ai.target, -1);
-				if (!ok && m_ai.wild && m_ai.skill < 0 && m_ai.target != ui) {
-					const Unit& t = m_b.u[m_ai.target];
-					ok = t.alive && InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t, true);
-				}
-				if (ok) { BeginAttack(ui, m_ai.target, m_ai.skill, m_ai.castX, m_ai.castZ); return; }
-			}
-			FinishUnitTurn(m_ai.wild ? 1 : 0);
-		}
+		FinishAfterMove(ui, m_moveNext);
 		return;
 	}
 	float f = m_moveT - seg;
@@ -5967,7 +6590,18 @@ float Game::ActorFace(int ui) const
 						return formSide == 0 ? -PI * .5f : PI * .5f;
 				}
 			}
-			return side == 0 ? PI * .5f : -PI * .5f;
+			const V3* mine = side == 0 ? m_cutAllyPos : m_cutFoePos;
+			const V3* theirs = side == 0 ? m_cutFoePos : m_cutAllyPos;
+			int mineN = side == 0 ? m_cutAllyN : m_cutFoeN;
+			int tn = side == 0 ? m_cutFoeN : m_cutAllyN;
+			if (idx < 0 || idx >= mineN || tn <= 0) return side == 0 ? PI * .5f : -PI * .5f;
+			V3 me = mine[idx];
+			V3 them = v3(0, 0, 0);
+			for (int i = 0; i < tn; i++) them = them + theirs[i];
+			them = them * (1.f / (float)tn);
+			float dx = them.x - me.x, dz = them.z - me.z;
+			if (dx * dx + dz * dz < 0.04f) return side == 0 ? PI * .5f : -PI * .5f;
+			return atan2f(dx, dz);
 		}
 	}
 	return m_faceShow[ui];
@@ -6005,8 +6639,10 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			mid = mp + v3(0, m_act[d].height * .5f, 0);
 		}
 		if (h.volley > 0) {
-			head.y += h.volley * 0.46f;
-			head.x += (h.volley & 1) ? 0.26f : -0.22f;
+			int slot = h.volley % 4;
+			head.y += 0.06f + slot * 0.04f;
+			head.x += (slot & 1) ? 0.32f : -0.32f;
+			head.z += (slot >= 2) ? 0.14f : -0.10f;
 		}
 		wchar_t s[48];
 		auto pop = [&](const wchar_t* txt, DWORD col, int style, int pat, float delay, int lane = 0) {
@@ -6037,7 +6673,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 				wchar_t an[40], dn[40], line[96];
 				UnitTitle(m_b.u[h.attacker], an, 40);
 				UnitTitle(du, dn, 40);
-				swprintf_s(line, L"%s  %s  %+d", an, dn, -h.dmg);
+				swprintf_s(line, L"%s  %s  +%s", an, dn, TacNum(-h.dmg));
 				AddLog(line, RGBA8(120, 255, 160));
 			}
 			if (sfxOnce(1)) TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), 0);
@@ -6046,7 +6682,21 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			continue;
 		}
 		if (kind == SK_BUFF) {
-			pop(TT(TX_BT_BUFF), RGBA8(150, 210, 255), 1, MSG_FACE, 0);
+			wchar_t bmsg[96];
+			DWORD bcol = RGBA8(150, 210, 255);
+			int turns = 3;
+			if (sd && sd->effect == EF_BUFF_ATK) turns = du.buffAtk > 0 ? du.buffAtk : 3;
+			else if (sd && sd->effect == EF_BUFF_DEF) turns = du.buffDef > 0 ? du.buffDef : 3;
+			else if (sd && sd->effect == EF_BUFF_AGI) turns = du.buffAgi > 0 ? du.buffAgi : 3;
+			FormatBuffCallout(sd ? sd->effect : 0, turns, bmsg, 96, &bcol);
+			pop(bmsg, bcol, 1, MSG_FACE, 0);
+			{
+				wchar_t an[40], dn[40], line[140];
+				UnitTitle(m_b.u[h.attacker], an, 40);
+				UnitTitle(du, dn, 40);
+				swprintf_s(line, L"%s  %s  %s", an, dn, bmsg);
+				AddLog(line, bcol);
+			}
 			if (sfxOnce(1)) TacSfx(TS_BUFF);
 			if (visible || !cutView) ElementFx(EL_NONE, SK_BUFF, mid, mid, FALSE);
 			continue;
@@ -6078,6 +6728,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			m_dispHp[h.attacker] = min((float)m_b.u[h.attacker].ch.stat[S_HP], m_dispHp[h.attacker] + h.drain);
 			swprintf_s(s, L"+%s", TacNum(h.drain));
 			AddPopup(ActorPos(h.attacker) + v3(0, min(m_act[h.attacker].height, cutView ? 1.32f : m_act[h.attacker].height) + .1f, cutView ? -.4f : 0.f), s, RGBA8(120, 255, 150), 0, MSG_RISE, .25f);
+			{ wchar_t an[40], lg[96]; UnitTitle(m_b.u[h.attacker], an, 40); swprintf_s(lg, L"%s  %s", an, s); AddLog(lg, RGBA8(120, 255, 150)); }
 		}
 		swprintf_s(s, L"%s", TacNum(h.dmg));
 		BOOL followDead = h.overkill && !h.kill && du.hp <= 0;
@@ -6087,7 +6738,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			pop(s, RGBA8(255, 210, 255), 2, MSG_BURST, .12f, 0);
 			Shake(.78f);
 			m_hitScreenT = m_hitScreenMax = 0.42f;
-			m_fairyScreenT = m_fairyScreenMax = 2.05f;
+			m_fairyScreenT = m_fairyScreenMax = 0.42f;
 			m_fairyFxT = max(m_fairyFxT, 2.05f);
 			m_fairyPosA = ActorPos(h.attacker);
 			m_fairyPosD = mid;
@@ -6097,7 +6748,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 				Burst(mid, 3, .1f, 1.15f, .62f, 1.f, .86f, .52f, 1, 1, 0, 0, 0, 2.2f);
 				SpawnDebris(mid, v3(0, 2.6f, 0), 3, 10, 0.085f, RGBA8(255, 196, 255));
 			}
-			m_flashWhite = max(m_flashWhite, cutView ? 0.85f : 0.48f);
+			m_flashWhite = max(m_flashWhite, cutView ? 0.16f : 0.08f);
 		} else if (h.crit) {
 			pop(TT(TX_BT_CRITICAL), RGBA8(255, 230, 80), 2, MSG_BLUR, 0, 1);
 			if (sfxOnce(8)) TacSfx(TS_CRIT);
@@ -6138,7 +6789,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			UnitTitle(m_b.u[h.attacker], an, 40);
 			UnitTitle(du, dn, 40);
 			const wchar_t* sk = sd ? (IsCraftId(st.skill) ? CraftName(st.skill) : SkillLabel(st.skill)) : TT(TX_BT_ATTACK);
-			swprintf_s(line, L"%s  %s  %s  %d%s", an, sk, dn, h.dmg, h.crit ? L" !" : L"");
+			swprintf_s(line, L"%s  %s  %s  %s%s", an, sk, dn, TacNum(h.dmg), h.crit ? L" !" : L"");
 			if (h.overkill) { wcscat_s(line, L"  "); wcscat_s(line, TT(TX_BT_OVERKILL)); }
 			if (h.guts) { wcscat_s(line, L"  "); wcscat_s(line, TT(TX_BT_GUTS)); }
 			if (h.counter == 2) { wcscat_s(line, L"  "); wcscat_s(line, TT(TX_BT_FAIRY)); }
@@ -6166,22 +6817,88 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			ActorPlay(m_act[d], guard ? CL_BLOCK : (h.crit ? CL_HIT_B : CL_HIT_A), 0, .06f);
 		}
 		}
-		if (!followDead && sd && sd->effect != EF_NONE && sd->effect != EF_DRAIN && sd->effect != EF_IGNDEF && !h.kill) {
-			int tx = -1;
-			switch (sd->effect) {
-			case EF_POISON: tx = TX_BT_POISON; break;
-			case EF_SLOW: tx = TX_BT_SLOWED; break;
-			case EF_DEFDOWN: tx = TX_ST_DEF; break;
+		if (!followDead && sd && sd->effect != EF_NONE && sd->effect != EF_DRAIN && sd->effect != EF_IGNDEF
+			&& sd->effect != EF_BUFF_ATK && sd->effect != EF_BUFF_DEF && sd->effect != EF_BUFF_AGI
+			&& sd->effect != EF_RAISE && sd->effect != EF_REACT && sd->effect != EF_WARP && sd->effect != EF_CLEANSE) {
+			int fx = sd->effect;
+			int elShow = EL_NONE;
+			if (fx == EF_BURN) elShow = EL_FIRE;
+			else if (fx == EF_FREEZE) elShow = EL_ICE;
+			else if (fx == EF_POISON) elShow = EL_POISON;
+			else if (fx == EF_BLEED || fx == EF_BLIND || fx == EF_SILENCE) elShow = EL_DARK;
+			else if (fx == EF_SLEEP || fx == EF_STUN) elShow = EL_HOLY;
+			else if (fx == EF_SLOW) elShow = EL_WIND;
+			else if (fx == EF_CONFUSE) elShow = EL_THUNDER;
+			else if (fx == EF_DEFDOWN) elShow = EL_EARTH;
+			BOOL blocked = UnitResistsEffect(m_b.u[d], fx);
+			if (!blocked && !h.kill) {
+				VisAil& va = m_visAil[d];
+				if (fx == EF_BURN && va.burn <= 0) va.burn = 2;
+				else if (fx == EF_FREEZE && va.freeze <= 0) va.freeze = 2;
+				else if (fx == EF_POISON && va.poison <= 0) va.poison = 2;
+				else if (fx == EF_BLEED && va.bleed <= 0) va.bleed = 2;
+				else if (fx == EF_SLEEP && va.sleep <= 0) va.sleep = 1;
+				else if (fx == EF_STUN && va.stun <= 0) va.stun = 1;
+				else if (fx == EF_SLOW && va.slow <= 0) va.slow = 2;
+				else if (fx == EF_BLIND && va.blind <= 0) va.blind = 2;
+				else if (fx == EF_SILENCE && va.silence <= 0) va.silence = 2;
+				else if (fx == EF_CONFUSE && va.confuse <= 0) va.confuse = 2;
+				else if (fx == EF_DEFDOWN && va.defDown <= 0) va.defDown = 2;
 			}
-			const wchar_t* ail = EffectWord(sd->effect);
-			BOOL blocked = UnitResistsEffect(m_b.u[d], sd->effect);
-			if (blocked || ((tx >= 0 || ail) && h.landed)) {
+			if (!blocked && elShow != EL_NONE && (visible || !cutView))
+				ElementFx(elShow, SK_MAGIC, mid, mid, TRUE);
+			int tx = -1;
+			if (fx == EF_POISON) tx = TX_BT_POISON;
+			else if (fx == EF_SLOW) tx = TX_BT_SLOWED;
+			else if (fx == EF_DEFDOWN) tx = TX_ST_DEF;
+			const wchar_t* ail = EffectWord(fx);
+			if (blocked || tx >= 0 || ail) {
 				wchar_t e[48];
 				if (blocked) swprintf_s(e, L"%s", LangPick14(L"無効", L"Blocked", L"Bloqué", L"Annullato", L"Anulado", L"무효", L"无效", L"مُبطل", L"Блок", L"Geblockt", L"Anulado", L"Geblokkeerd", L"Zablokowane", L"Geçersiz"));
 				else if (ail) swprintf_s(e, L"%s", ail);
-				else swprintf_s(e, L"%s%s", TT(tx), sd->effect == EF_DEFDOWN ? L"↓" : L"");
-				pop(e, blocked ? RGBA8(180, 220, 255) : RGBA8(220, 160, 255), 1, blocked ? MSG_DROP : MSG_ORBIT, .35f, 2);
-				if (sfxOnce(blocked ? 512 : 1024)) TacSfxStatus(sd->effect, blocked ? 1 : 0);
+				else swprintf_s(e, L"%s%s", TT(tx), fx == EF_DEFDOWN ? L"↓" : L"");
+				pop(e, blocked ? RGBA8(180, 220, 255) : RGBA8(220, 160, 255), 1, blocked ? MSG_DROP : MSG_ORBIT, 0.06f, 2 + (h.volley % 3));
+				{ wchar_t who[40], lg[96]; UnitTitle(du, who, 40); swprintf_s(lg, L"%s  %s", who, e); AddLog(lg, blocked ? RGBA8(180, 220, 255) : RGBA8(220, 160, 255)); }
+				if (sfxOnce(blocked ? 512 : 1024)) TacSfxStatus(fx, blocked ? 1 : 0);
+			}
+		}
+	}
+	if (TacHasVar(m_b, TAC_VAR_RECOIL) && kind != SK_HEAL && kind != SK_BUFF) {
+		int steps[MAX_UNITS];
+		int rdx[MAX_UNITS], rdz[MAX_UNITS];
+		memset(steps, 0, sizeof(steps));
+		int atk = st.attacker;
+		int bestDef = -1, bestN = 0, adx = 0, adz = 0;
+		for (int k = 0; k < st.nHits; k++) {
+			const Strike& h = st.hits[k];
+			if (h.volley != volley || !h.hit || h.dmg <= 0) continue;
+			int d = h.defender;
+			if (d < 0 || d >= m_b.nUnits || d == atk) continue;
+			if (steps[d] == 0 && atk >= 0 && atk < m_b.nUnits) {
+				rdx[d] = m_b.u[d].x - m_b.u[atk].x;
+				rdz[d] = m_b.u[d].z - m_b.u[atk].z;
+			}
+			steps[d]++;
+			if (steps[d] > bestN) {
+				bestN = steps[d]; bestDef = d;
+				adx = -rdx[d]; adz = -rdz[d];
+			}
+		}
+		for (int d = 0; d < m_b.nUnits; d++) {
+			if (steps[d] <= 0) continue;
+			Unit& du = m_b.u[d];
+			int moved = TacRecoilStep(m_b, d, rdx[d], rdz[d], steps[d]);
+			if (moved > 0) {
+				V3 p = UnitGroundPos(du);
+				du.px = p.x; du.py = p.y; du.pz = p.z;
+			}
+		}
+		if (bestN > 0 && atk >= 0 && atk < m_b.nUnits && bestDef >= 0) {
+			Unit& a = m_b.u[atk];
+			int moved = TacRecoilStep(m_b, atk, adx, adz, bestN);
+			if (moved > 0) {
+				V3 p = UnitGroundPos(a);
+				a.px = p.x; a.py = p.y; a.pz = p.z;
 			}
 		}
 	}
@@ -6593,28 +7310,35 @@ void Game::UpdateSeq(float dt)
 			else TacSfxMotion(st.skill, sd ? sd->kind : SK_PHYS, sd ? sd->element : EL_NONE, style);
 		}
 		if (st.counter == 2) {
-			m_stepTi = max(m_stepTi, 0.78f);
-			m_fairyFxT = m_stepTi + 1.85f;
-			m_fairyPosA = ActorPos(A);
-			m_fairyPosD = ActorPos(D);
+			m_proj.active = 0;
+			if (!PoseGround(aa, au, m_dieT[A], m_dispHp[A])) ActorPlay(aa, CL_CAST_RAISE, 0, 0.08f);
 			EnsureFairyGhost();
 			m_fairyGhost = 1;
 			m_fairyGhostT = 0;
-			m_fairyGhostDur = 2.15f;
-			m_fairyGhostFrom = ActorPos(A) + v3(0, 0.18f, 0);
-			m_fairyGhostThru = ActorPos(D) + v3(0, m_act[D].height * 0.48f, 0);
-			{
-				V3 dir = m_fairyGhostThru - m_fairyGhostFrom;
-				dir.y = 0;
-				float L = Len(dir);
-				if (L < 0.08f) dir = v3(sinf(ActorFace(A)), 0, cosf(ActorFace(A)));
-				else dir = dir * (1.f / L);
-				m_fairyGhostPast = m_fairyGhostThru + dir * 2.35f + v3(0, 0.42f, 0);
+			m_fairyGhostDur = 3.35f;
+			V3 foe = ActorPos(D) + v3(0, m_act[D].height * 0.55f, 0);
+			m_fairyGhostThru = foe;
+			if (m_seqCut) {
+				m_fairyGhostFrom = foe + v3(-8.2f, 2.35f, -18.f);
+				m_fairyGhostPast = foe + v3(7.4f, 2.8f, 12.f);
+			} else {
+				float camYaw = m_camYaw;
+				V3 look = v3(sinf(camYaw), 0.f, cosf(camYaw));
+				float ll = Len(look);
+				if (ll < 0.01f) look = v3(0.f, 0.f, 1.f);
+				else look = look * (1.f / ll);
+				V3 side = v3(-look.z, 0.f, look.x);
+				m_fairyGhostFrom = foe - look * 2.4f + side * 16.f + v3(0, 2.15f, 0);
+				m_fairyGhostPast = foe + look * 14.f + v3(0, 2.7f, 0);
 			}
-			m_fairyScreenT = m_fairyScreenMax = 2.15f;
+			m_stepTi = m_fairyGhostDur * 0.66f;
+			m_stepL = m_fairyGhostDur;
+			m_fairyFxT = 0.55f;
+			m_fairyPosA = ActorPos(A);
+			m_fairyPosD = foe;
+			m_fairyScreenT = m_fairyScreenMax = 0.45f;
 			TacSfx(TS_LEARN);
-			Burst(m_fairyPosA + v3(0, .8f, 0), 22, 2.8f, .12f, .85f, 1.f, .62f, .96f, 2, 1, -1.6f, 0, .6f);
-			Burst(m_fairyPosA + v3(0, .1f, 0), 2, 0, .9f, .75f, .62f, .96f, 1.f, 1, 1, 0, 0, 0, 1.75f);
+			Burst(m_fairyGhostFrom, 10, 1.6f, .08f, .55f, .85f, .55f, .95f, 8, 1, -0.4f, 2.f, .25f);
 		}
 		if (m_seqCut && m_cutStage == 2 && m_cutKind == 0 && st.counter == 0 && m_seqCur == 0 && !follow) {
 			float hold = CutShotHold();
@@ -6622,17 +7346,14 @@ void Game::UpdateSeq(float dt)
 		}
 	}
 	m_seqT += dt;
-	if (st.counter == 2) {
+	if (st.counter == 2 && m_fairyGhost) {
 		m_fairyPosA = ActorPos(A);
-		m_fairyPosD = ActorPos(D) + v3(0, m_act[D].height * .5f, 0);
-		if (m_seqT < m_stepTi) {
-			float fu = Clampf(m_seqT / max(0.05f, m_stepTi), 0.f, 1.f);
-			V3 fp = Lerp(m_fairyPosA + v3(0, 1.05f, 0), m_fairyPosD, fu * fu);
-			fp.y += sinf(fu * PI) * 0.85f;
-			fp.x += cosf(m_time * 12.f) * (1.f - fu) * 0.35f;
-			fp.z += sinf(m_time * 12.f) * (1.f - fu) * 0.35f;
-			Burst(fp, 2, 1.1f, .10f, .42f, 1.f, .65f, .95f, 2, 1, -.6f, 0, .2f);
-			Burst(fp, 1, 0.8f, .08f, .38f, .58f, .95f, 1.f, 8, 1, -.2f, 4.f, .3f, .07f);
+		m_fairyPosD = m_fairyGhostThru;
+		float fu = Clampf(m_fairyGhostT / max(0.05f, m_fairyGhostDur), 0.f, 1.f);
+		if (fu < 0.92f) {
+			V3 fp, fv;
+			FairySample(fu, m_seqCut ? 1 : 0, m_fairyGhostFrom, m_fairyGhostThru, m_fairyGhostPast, fp, fv);
+			Burst(fp + v3(0, -0.15f, 0), 1, 0.55f, .05f, .22f, .72f, .48f, .92f, 8, 1, -.12f, 1.6f, .12f, .03f);
 		}
 	}
 	// 召喚は息や一撃が乗るまで着弾しない。浴びせた瞬間にダメージを出す。
@@ -6660,8 +7381,9 @@ void Game::UpdateSeq(float dt)
 		else if (m_seqT < u1) l = Smooth01((m_seqT - u0) / max(.01f, u1 - u0));
 		else l = 1.f - Smooth01((m_seqT - u1 - .15f) / .35f);
 		m_lunge[A] = maxL * Clampf(l, 0, 1);
-		BOOL jumpSkill = (style == AS_CHOP2 || style == AS_SPIN || st.skill == SKL_COLOSSMASH || st.skill == SKL_GRANDSLASH || st.skill == SKL_WHIRL || st.skill == SKL_CLEAVE || st.counter == 2);
-		m_lungeY[A] = (jumpSkill && l > 0.01f) ? sinf(Clampf(l, 0.f, 1.f) * PI) * (st.counter == 2 ? 0.52f : 0.36f) : 0.f;
+		BOOL jumpSkill = (style == AS_CHOP2 || style == AS_SPIN || st.skill == SKL_COLOSSMASH || st.skill == SKL_GRANDSLASH || st.skill == SKL_WHIRL || st.skill == SKL_CLEAVE);
+		m_lungeY[A] = (jumpSkill && l > 0.01f) ? sinf(Clampf(l, 0.f, 1.f) * PI) * 0.36f : 0.f;
+		if (st.counter == 2) { m_lunge[A] = 0; m_lungeY[A] = 0; }
 		if (m_cutKind == 2 && m_seqCut && m_cutStage == 2) {
 			for (int i = 0; i < m_cutAllyN; i++) {
 				int id = m_cutAlly[i];
@@ -6755,21 +7477,30 @@ void Game::UpdateSeq(float dt)
 	const float kGap = 0.42f;
 	if (m_seqT >= m_stepTi) {
 		int due = min(span, (int)((m_seqT - m_stepTi) / kGap));
-		while (m_seqImpact <= due) {
+		int budget = span + 1;
+		if (budget < 1) budget = 1;
+		if (budget > 128) budget = 128;
+		while (m_seqImpact <= due && budget-- > 0) {
 			int v = minV + m_seqImpact;
 			BOOL stop = TRUE, any = FALSE;
-			for (int k = 0; k < st.nHits; k++) {
+			int nHits = st.nHits;
+			if (nHits < 0) nHits = 0;
+			if (nHits > MAX_UNITS) nHits = MAX_UNITS;
+			for (int k = 0; k < nHits; k++) {
 				if (st.hits[k].volley != v) continue;
 				any = TRUE;
 				if (!FoeAlreadyDown(m_seq, m_seqN, A, st.skill, st.hits[k].defender, v)) stop = FALSE;
 			}
 			if (any && stop) break;
-			SeqImpact(st, v);
+			if (any) SeqImpact(st, v);
 			m_seqImpact++;
 		}
 	}
 	BOOL kill = FALSE;
-	for (int k = 0; k < st.nHits; k++) if (st.hits[k].kill) kill = TRUE;
+	int nKill = st.nHits;
+	if (nKill < 0) nKill = 0;
+	if (nKill > MAX_UNITS) nKill = MAX_UNITS;
+	for (int k = 0; k < nKill; k++) if (st.hits[k].kill) kill = TRUE;
 	float endT = channel
 		? (m_stepTi + 0.18f + (kill ? .4f : 0.f))
 		: follow
@@ -6858,7 +7589,7 @@ void Game::GrantFoeLoot(int ui, int coop)
 		int it = m_rng.Chance(50) ? IT_ORE : IT_HERB;
 		int cashed = GainItemN(m_save, it, 1);
 		wchar_t shown[64];
-		if (cashed > 0) swprintf_s(shown, L"+%dG", cashed);
+		if (cashed > 0) swprintf_s(shown, L"+%sG", TacNum(cashed));
 		else wcsncpy_s(shown, TT(it == IT_ORE ? TX_IT_ORE : TX_IT_HERB), _TRUNCATE);
 		AddPopup(v3(u.px, u.py + 1.9f, u.pz), shown, RGBA8(180, 220, 160), 1, MSG_RISE, .2f, 3.6f);
 		AddLog(shown, RGBA8(180, 220, 160));
@@ -7006,7 +7737,11 @@ void Game::AwardExp()
 		if (s.hit && e > 1 && d.team == TEAM_ENEMY) {
 			int coop = PlayerCoop(m_b, m_strk, m_strkN, s.defender);
 			if (coop >= 2) {
-				long long extra = e * (50LL * (coop - 1)) / 100;
+				// 2人で約1.14倍、8人で2倍。人数がそれ以上でも2倍で止める。
+				int extraPct = (coop - 1) * 100 / 7;
+				if (extraPct > 100) extraPct = 100;
+				if (extraPct < 1) extraPct = 1;
+				long long extra = e * (long long)extraPct / 100;
 				if (extra < 1) extra = 1;
 				e += extra;
 				coopHit[s.attacker] = 1;
@@ -7148,7 +7883,40 @@ void Game::UpdateUnitsVisual(float dt)
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		Actor& a = m_act[i];
+		BOOL movingEarly = (m_phase == PH_MOVING || m_phase == PH_E_MOVE) && m_moveUnit == i;
+		bool hasUpperNow = false;
+		{
+			int visDeck = u.deck;
+			if (movingEarly && m_moveN > 1) {
+				int cs = Clampi((int)m_moveT, 0, m_moveN - 2);
+				float cf = m_moveT - (float)cs;
+				visDeck = PackDeck(m_movePts[cf > 0.5f ? cs + 1 : cs]);
+			}
+			float clearY = MapOverheadClearance(m_b.map, u.px, u.pz, visDeck, UnitSpan(u), u.py, &hasUpperNow);
+			float crouchGoal = 0.f;
+			if (u.alive && m_dieT[i] < 0.f && !PoseGround(a, u, m_dieT[i]) && a.poseHold == 0)
+				crouchGoal = CrouchUnderCeiling(clearY, a.height);
+			if (!UnitIsHumanFoe(u) && u.alive && m_dieT[i] < 0.f
+				&& a.clip != CL_DEATH && a.clip != CL_SPAWN && a.wingHop <= 0.f
+				&& !PoseGround(a, u, m_dieT[i])
+				&& (UnitMoveType(u) == MV_FLY || a.wings > 0)) {
+				BOOL wantGround = crouchGoal > 0.02f;
+				float hoverGoal = wantGround ? 0.f : ((UnitMoveType(u) == MV_FLY && (a.wings > 0 || u.team == TEAM_PLAYER)) ? 0.35f : 0.f);
+				a.hover = Lerpf(a.hover, hoverGoal, Clampf(dt * 12.f, 0.f, 1.f));
+				if (a.hover < 0.005f) a.hover = 0.f;
+			}
+			float roofGoal = crouchGoal > 0.02f ? 1.f : 0.f;
+			a.underRoof = Lerpf(a.underRoof, roofGoal, Clampf(dt * 14.f, 0.f, 1.f));
+			if (a.underRoof < 0.003f) a.underRoof = 0.f;
+			a.crouch = Lerpf(a.crouch, crouchGoal, Clampf(dt * 16.f, 0.f, 1.f));
+			if (a.crouch < 0.003f) a.crouch = 0.f;
+			hasUpperNow = crouchGoal > 0.02f;
+		}
 		ActorUpdate(a, dt);
+		if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3 && UnitMoveType(u) != MV_FLY && a.wings == 0) {
+			a.flap = 0.f;
+			a.flyLean = 0.f;
+		}
 		if (UnitIsHumanFoe(u)) {
 			a.wings = 0;
 			a.hover = 0;
@@ -7177,9 +7945,9 @@ void Game::UpdateUnitsVisual(float dt)
 			if (uHop < 0.f) uHop = 0.f;
 			if (uHop > 1.f) uHop = 1.f;
 			float arc = sinf(uHop * 3.14159265f);
-			a.hover = arc * 0.9f;
+			a.hover = hasUpperNow ? 0.f : (arc * 0.9f);
 			a.wingTear = 1.f - Clampf((uHop - 0.12f) / 0.5f, 0.f, 1.f);
-			if (uHop > 0.28f) {
+			if (uHop > 0.28f && !hasUpperNow) {
 				a.flap = 1.f;
 				a.wingPh += dt * 11.f;
 			}
@@ -7187,7 +7955,7 @@ void Game::UpdateUnitsVisual(float dt)
 			if (a.wingHop <= 0.f) {
 				a.wingHop = 0.f;
 				a.wingTear = 0.f;
-				a.hover = 0.35f;
+				a.hover = hasUpperNow ? 0.f : 0.35f;
 				if (a.clip != CL_WALK && a.clip != CL_RUN) a.flap = 0.f;
 			}
 		} else if (a.wings > 0 && a.wingGrade > 0 && u.alive && a.wingTear <= 0.001f) {
@@ -7209,6 +7977,7 @@ void Game::UpdateUnitsVisual(float dt)
 			av.burn = u.burn; av.bleed = u.bleed; av.blind = u.blind; av.silence = u.silence;
 		}
 		if (m_ailBlend[i] > 0.f) m_ailBlend[i] = max(0.f, m_ailBlend[i] - dt);
+		if (TacFieldGrav()) { a.hover = 0.f; a.flap = 0.f; }
 		BOOL bodyUp = u.alive && ((m_phase == PH_ACTION) ? (m_dispHp[i] > 0.5f) : (u.hp > 0));
 		BOOL hum = FALSE;
 		if (a.proc == 3 && a.model >= 0 && a.model < (int)m_r.models.size()) {
@@ -7379,9 +8148,13 @@ void Game::UpdateCamera(float dt)
 {
 	V3 focus = m_camGoal;
 	BOOL blindFollow = (m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].team == TEAM_ENEMY
-		&& (m_b.sweep == TAC_VAR_VEIL || m_b.sweep == TAC_VAR_DUST));
+		&& (TacHasVar(m_b, TAC_VAR_VEIL) || TacHasVar(m_b, TAC_VAR_DUST)));
 	if (blindFollow) focus = m_camTarget;
-	else if (m_cur >= 0 && m_phase != PH_INTRO) {
+	else if (m_warpOn && m_warpUi >= 0 && m_warpUi < m_b.nUnits) {
+		if (m_warpT < 0.46f) focus = m_warpSrc;
+		else if (m_warpT < 0.66f) focus = Lerp(m_warpSrc, m_warpDst, Smooth01((m_warpT - 0.46f) / 0.20f));
+		else focus = m_warpDst;
+	} else if (m_cur >= 0 && m_phase != PH_INTRO) {
 		const Unit& u = m_b.u[m_cur];
 		focus = v3(u.px, u.py, u.pz);
 		if (m_phase == PH_ACTION && m_seqPrimary >= 0 && m_seqPrimary != m_cur) {
@@ -7436,7 +8209,9 @@ void Game::UpdateCamera(float dt)
 
 void Game::UpdateBattle(float dt)
 {
+	TacApplyFieldRules(m_b);
 	if (m_demo == 3) return;
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) VeilInvalidate();
 	// 装備の確認や売却はデモでは出さない。セーブは戻すので、ここで選ばせない。
 	if (m_demo && (m_stashFull || m_shopFit)) { m_stashFull = 0; m_shopFit = 0; }
 	if (m_stashFull) { UpdateUnitsVisual(dt); return; }
@@ -7471,7 +8246,7 @@ void Game::UpdateBattle(float dt)
 	case PH_E_SHOW: {
 		float wait = 0.85f * TacPaceTime(m_save);
 		if (wait < 0.04f) wait = 0.04f;
-		BOOL blind = (m_b.sweep == TAC_VAR_VEIL || m_b.sweep == TAC_VAR_DUST);
+		BOOL blind = (TacHasVar(m_b, TAC_VAR_VEIL) || TacHasVar(m_b, TAC_VAR_DUST));
 		if (m_cur >= 0 && m_cur < m_b.nUnits && !blind) {
 			const Unit& u = m_b.u[m_cur];
 			float f = Clampf(m_phaseT / max(0.05f, wait), 0.f, 1.f);
@@ -7574,6 +8349,18 @@ static void MarkJoiners(const Battle& b, int cur, int skill, int cx, int cz, int
 	}
 }
 
+static V3 HourLightDir(V3 base, int hr)
+{
+	V3 d = base;
+	if (hr == HR_DAWN) d = v3(base.x * 1.25f + 0.35f, max(0.32f, base.y * 0.50f), base.z * 0.9f);
+	else if (hr == HR_MORNING) d = v3(base.x * 1.1f + 0.12f, max(0.55f, base.y * 0.82f), base.z);
+	else if (hr == HR_DUSK) d = v3(-base.x * 1.25f - 0.35f, max(0.28f, base.y * 0.44f), base.z * 0.85f);
+	else if (hr == HR_NIGHT || hr == HR_DEEP || hr == HR_STAR || hr == HR_MOON)
+		d = v3(-base.x * 0.72f, max(0.58f, base.y * 0.86f), -base.z * 0.65f + 0.25f);
+	else if (hr == HR_ECLIPSE) d = v3(base.x * 0.55f, max(0.68f, base.y * 0.95f), base.z * 0.65f);
+	return Norm(d);
+}
+
 void Game::DrawBattle3D()
 {
 	m_r.SetTheme(m_b.map.theme);
@@ -7616,6 +8403,10 @@ void Game::DrawBattle3D()
 		battleFov = Lerpf(.62f, .55f, cu);
 	}
 	SetupCamera(battleTarget, m_camYaw, m_camPitch, battleDist, battleFov);
+	if (TacHasVar(m_b, TAC_VAR_FLOOD) && m_b.stampedeLine > 0 && MapIsSpiral(m_b.map))
+		m_r.SetFloodPlane(TacHToY(m_b.stampedeLine) + 0.22f, 1);
+	else m_r.SetFloodPlane(0.f, 0);
+	m_r.SetFieldGrade(TacHasVar(m_b, TAC_VAR_GRAV) ? 1.f : 0.f, TacHasVar(m_b, TAC_VAR_RECOIL) ? 1.f : 0.f, Clampf(m_faultPulse, 0.f, 1.f), TacHasVar(m_b, TAC_VAR_FROST) ? 0.7f : 0.f);
 	V3 camDir = v3(sinf(m_camYaw) * cosf(m_camPitch), sinf(m_camPitch), cosf(m_camYaw) * cosf(m_camPitch));
 	V3 camFwd = v3(-camDir.x, -camDir.y, -camDir.z);
 	V3 camEye = stable + camDir * m_camDist;
@@ -7726,9 +8517,9 @@ void Game::DrawBattle3D()
 			sightN++;
 		}
 		m_r.SetSight(sightXz, sightN, (float)TacSightTiles(m_b.weather));
-		if (m_b.sweep == TAC_VAR_VEIL) m_r.SetVeilMask(1);
+		if (TacHasVar(m_b, TAC_VAR_VEIL)) m_r.SetVeilMask(1);
 	}
-	m_r.SetLight(e.light, m_camTarget, min(30.f, m_camDist * 1.35f + 6.f));
+	m_r.SetLight(HourLightDir(e.light, TacHour(m_b.weather)), m_camTarget, min(30.f, m_camDist * 1.35f + 6.f));
 	int fadeAbove = -1, fadeX = -1, fadeZ = -1;
 	{
 		int fx = m_cx, fz = m_cz, fL = m_cLayer;
@@ -7821,9 +8612,17 @@ void Game::DrawBattle3D()
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= .5f) || !nearCam(u) || !inLight(u)) continue;
+			if (m_warpOn && i == m_warpUi && m_warpT >= 0.46f && m_warpT < 0.66f) continue;
 			DrawParams dp;
 			if (offLayer(i)) dp.tint = 0x55FFFFFF;
-			ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], AilmentPos(m_act[i], ActorPos(i)), ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+			V3 sp = AilmentPos(m_act[i], ActorPos(i));
+			M4 uw = ActorWorld(m_act[i], sp, ActorFace(i));
+			if (m_warpOn && i == m_warpUi) {
+				float u01 = (m_warpT < 0.46f) ? Clampf(m_warpT / 0.46f, 0.f, 1.f) : (1.f - Clampf((m_warpT - 0.66f) / 0.42f, 0.f, 1.f));
+				float sx = max(0.08f, 1.f - 0.90f * u01), sy = 1.f + 0.72f * u01;
+				uw = MMul(uw, MMul(MMul(MTrans(-sp.x, -sp.y, -sp.z), MScale(sx, sy, sx)), MTrans(sp.x, sp.y, sp.z)));
+			}
+			ActorDraw(m_r, m_lib, m_act[i], uw, dp, m_act[i].poseHold == 3 ? 0.f : m_time);
 			// 影は深度だけ。数人ずつ出すと、残りをCPUが組むあいだGPUが影を描ける。絵は同じ。
 			if ((++fed & 3) == 0) m_r.FeedInst();
 		}
@@ -7843,11 +8642,18 @@ void Game::DrawBattle3D()
 				for (int i = 0; i < m_b.nUnits; i++) {
 					const Unit& u = m_b.u[i];
 					if (foeGone(i) || (u.team != TEAM_PLAYER && u.dissolve >= 1.f) || !nearCam(u)) continue;
+					if (m_warpOn && i == m_warpUi && m_warpT >= 0.46f && m_warpT < 0.66f) continue;
 					DrawParams dp;
 					dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
 					dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
 					V3 drawPos = AilmentPos(m_act[i], ActorPos(i));
-					ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+					M4 uw = ActorWorld(m_act[i], drawPos, ActorFace(i));
+					if (m_warpOn && i == m_warpUi) {
+						float u01 = (m_warpT < 0.46f) ? Clampf(m_warpT / 0.46f, 0.f, 1.f) : (1.f - Clampf((m_warpT - 0.66f) / 0.42f, 0.f, 1.f));
+						float sx = max(0.08f, 1.f - 0.90f * u01), sy = 1.f + 0.72f * u01;
+						uw = MMul(uw, MMul(MMul(MTrans(-drawPos.x, -drawPos.y, -drawPos.z), MScale(sx, sy, sx)), MTrans(drawPos.x, drawPos.y, drawPos.z)));
+					}
+					ActorDraw(m_r, m_lib, m_act[i], uw, dp, m_act[i].poseHold == 3 ? 0.f : m_time);
 					// 反射の不透明だけ先に出す。半透明は列に残る。
 					if ((++fed & 3) == 0) m_r.FeedInst();
 				}
@@ -7864,7 +8670,8 @@ void Game::DrawBattle3D()
 			int x = (int)floorf(u.px), z = (int)floorf(u.pz);
 			if (!Map::In(x, z)) continue;
 			int tt = m_b.map.At(x, z).t;
-			if (tt != T_WATER && tt != T_LAVA) { m_ripSeenT[i] = -100.f; continue; }
+			BOOL floodWet = TacFloodWet(m_b, x, z, u.deck);
+			if (tt != T_WATER && tt != T_LAVA && !floodWet) { m_ripSeenT[i] = -100.f; continue; }
 			float dx = u.px - m_ripSeen[i][0], dz = u.pz - m_ripSeen[i][1];
 			float since = m_time - m_ripSeenT[i];
 			BOOL walk = (m_phase == PH_MOVING || m_phase == PH_E_MOVE) && m_moveUnit == i;
@@ -8108,11 +8915,13 @@ void Game::DrawBattle3D()
 			dp.dissolve = (u.team == TEAM_PLAYER) ? 0.f : u.dissolve;
 			dp.flash = u.flash;
 			dp.rim = u.team == TEAM_PLAYER ? .35f : .45f;
-			if (m_b.sweep == TAC_VAR_RAGE && u.team == TEAM_ENEMY && u.alive) {
+			if (TacHasVar(m_b, TAC_VAR_RAGE) && u.team == TEAM_ENEMY && u.alive) {
 				float p = 0.5f + 0.5f * sinf(m_time * 6.f + (float)i);
-				dp.tint = RGBA8(255, (int)(70 + 50 * p), 36);
-				dp.rim = 1.15f;
-				dp.emissive = 0.85f + 0.45f * p;
+				dp.tint = RGBA8(255, (int)(58 + 48 * p), 32);
+				dp.rim = 1.35f;
+				dp.emissive = 0.95f + 0.50f * p;
+				dp.outline = max(dp.outline, 0.022f);
+				dp.outlineColor = RGBA8(255, 48, 24);
 			}
 			if (!u.alive && u.team == TEAM_PLAYER) {
 				dp.tint = RGBA8(176, 196, 222);
@@ -8205,11 +9014,20 @@ void Game::DrawBattle3D()
 				dp.flash = 1.f;
 			}
 			if (!ghost && u.deck > 0) drawPos.y += 0.04f;
+			if (m_warpOn && i == m_warpUi && m_warpT >= 0.46f && m_warpT < 0.66f) continue;
+			M4 uWorld = ActorWorld(m_act[i], drawPos, ActorFace(i));
+			if (m_warpOn && i == m_warpUi) {
+				float u01 = (m_warpT < 0.46f) ? Clampf(m_warpT / 0.46f, 0.f, 1.f) : (1.f - Clampf((m_warpT - 0.66f) / 0.42f, 0.f, 1.f));
+				float sx = max(0.08f, 1.f - 0.90f * u01), sy = 1.f + 0.72f * u01;
+				uWorld = MMul(uWorld, MMul(MMul(MTrans(-drawPos.x, -drawPos.y, -drawPos.z), MScale(sx, sy, sx)), MTrans(drawPos.x, drawPos.y, drawPos.z)));
+				dp.emissive = max(dp.emissive, 0.45f + 0.85f * u01);
+				dp.flash = max(dp.flash, 0.35f * u01);
+			}
 			if (ghost) {
 				dp.tint = (dp.tint & 0x00FFFFFF) | 0x60000000;
 				m_r.SetDepthTest(FALSE);
 			}
-			ActorDraw(m_r, m_lib, m_act[i], ActorWorld(m_act[i], drawPos, ActorFace(i)), dp, m_act[i].poseHold == 3 ? 0.f : m_time);
+			ActorDraw(m_r, m_lib, m_act[i], uWorld, dp, m_act[i].poseHold == 3 ? 0.f : m_time);
 			BOOL showIce = (m_phase == PH_ACTION ? vt.freeze > 0 : u.freeze > 0) && (m_phase != PH_ACTION || m_dispHp[i] > 0.5f);
 			if (u.alive && showIce && m_lib.ice.vb) {
 				DrawParams ip;
@@ -8256,31 +9074,461 @@ void Game::DrawBattle3D()
 	}
 	m_r.EndInstBatch();
 	DrawDebris();
+	DrawSpecialStage3D();
+	DrawGimmickEffects();
 	DrawFairyGhost();
-	if (m_fairyFxT > 0.f) {
-		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
-		V3 fp = Lerp(m_fairyPosD + v3(0, 0.65f, 0), m_fairyPosA + v3(0, 1.15f, 0), max(0.f, (fu - 0.55f) / 0.45f));
-		fp.y += sinf(m_time * 7.f) * 0.16f + (1.f - fu) * 0.45f;
-		float fs = (0.24f + 0.14f * sinf(m_time * 12.f)) * min(1.f, fu * 2.5f);
-		DrawParams fpdp = {};
-		fpdp.noTess = 1; fpdp.twoSided = 1; fpdp.emissive = 1.4f; fpdp.flash = 0.75f; fpdp.rim = 1.f;
-		fpdp.tint = RGBA8(255, 186, 255);
-		m_r.DrawStatic(m_lib.orb, MMul(MScale(fs, fs, fs), MTrans(fp.x, fp.y, fp.z)), fpdp);
-		fpdp.tint = RGBA8(130, 236, 255);
-		float rsc = 0.65f + (1.f - fu) * 0.9f;
-		m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(rsc, 0.05f, rsc), MRotY(m_time * 5.f)), MTrans(fp.x, fp.y, fp.z)), fpdp);
-		for (int w = 0; w < 2; w++) {
-			float side = w ? -1.f : 1.f;
-			float flap = sinf(m_time * 18.f) * 0.42f;
-			M4 wm = MMul(MMul(MScale(0.36f * side, 0.36f, 0.36f), MRotY(side * (0.4f + flap))), MTrans(fp.x + side * 0.14f, fp.y + 0.06f, fp.z));
-			fpdp.tint = w ? RGBA8(255, 196, 240) : RGBA8(180, 230, 255);
-			m_r.DrawStatic(m_lib.wing[0][w], wm, fpdp);
-		}
-	}
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 	DrawCc0Props(m_parts.data(), m_parts.size(), NULL, 0);
 	DrawGust();
 	m_r.DrawWxGpu();
+}
+
+static void PushRibQuad(Buf<VtxP>& out, V3 a0, V3 a1, V3 b0, V3 b1, float r, float g, float b, float al0, float al1)
+{
+	if ((int)out.size() + 6 > 40960) return;
+	VtxP v[4];
+	v[0].p[0] = a0.x; v[0].p[1] = a0.y; v[0].p[2] = a0.z; v[0].u = 0.f; v[0].v = 0.5f; v[0].shape = 3.f;
+	v[0].c[0] = r; v[0].c[1] = g; v[0].c[2] = b; v[0].c[3] = al0;
+	v[1].p[0] = a1.x; v[1].p[1] = a1.y; v[1].p[2] = a1.z; v[1].u = 1.f; v[1].v = 0.5f; v[1].shape = 3.f;
+	v[1].c[0] = r; v[1].c[1] = g; v[1].c[2] = b; v[1].c[3] = al0;
+	v[2].p[0] = b1.x; v[2].p[1] = b1.y; v[2].p[2] = b1.z; v[2].u = 1.f; v[2].v = 0.5f; v[2].shape = 3.f;
+	v[2].c[0] = r; v[2].c[1] = g; v[2].c[2] = b; v[2].c[3] = al1;
+	v[3].p[0] = b0.x; v[3].p[1] = b0.y; v[3].p[2] = b0.z; v[3].u = 0.f; v[3].v = 0.5f; v[3].shape = 3.f;
+	v[3].c[0] = r; v[3].c[1] = g; v[3].c[2] = b; v[3].c[3] = al1;
+	out.push_back(v[0]); out.push_back(v[1]); out.push_back(v[2]);
+	out.push_back(v[0]); out.push_back(v[2]); out.push_back(v[3]);
+}
+
+static void PushWaterQuad(Buf<VtxS>& out, V3 a, V3 b, V3 c, V3 d, V3 nrm, float u0, float v0, float u1, float v1, DWORD col)
+{
+	if ((int)out.size() + 6 > 262144) return;
+	VtxS v[4];
+	V3 pts[4] = { a, b, c, d };
+	float us[4] = { u0, u0, u1, u1 }, vs[4] = { v0, v1, v1, v0 };
+	for (int k = 0; k < 4; k++) {
+		v[k].p[0] = pts[k].x; v[k].p[1] = pts[k].y; v[k].p[2] = pts[k].z;
+		v[k].n[0] = nrm.x; v[k].n[1] = nrm.y; v[k].n[2] = nrm.z;
+		v[k].uv[0] = us[k]; v[k].uv[1] = vs[k];
+		v[k].c = col;
+	}
+	out.push_back(v[0]); out.push_back(v[1]); out.push_back(v[2]);
+	out.push_back(v[0]); out.push_back(v[2]); out.push_back(v[3]);
+}
+
+void Game::DrawGimmickEffects()
+{
+	m_fxRib.clear();
+	const Map& m = m_b.map;
+	static const DWORD kWarpCol[8] = {
+		RGBA8(255, 95, 95), RGBA8(95, 175, 255), RGBA8(255, 220, 75), RGBA8(95, 240, 140),
+		RGBA8(210, 100, 255), RGBA8(95, 240, 240), RGBA8(255, 155, 60), RGBA8(255, 135, 195)
+	};
+	int hotWarp = -1;
+	if (m_cursorValid && Map::In(m_cx, m_cz) && m.At(m_cx, m_cz).gimm == GM_WARP)
+		hotWarp = m.At(m_cx, m_cz).gparam;
+	if (m_warpOn) hotWarp = m_warpColor;
+
+	float cx = m_camTarget.x, cz = m_camTarget.z;
+	float maxR2 = (m_camDist * 1.65f + 12.f);
+	maxR2 = min(38.f, maxR2);
+	maxR2 *= maxR2;
+
+	DrawParams rdp = {};
+	rdp.noTess = 1;
+	rdp.twoSided = 1;
+	rdp.mode = 9.f;
+
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.At(x, z);
+		if (!c.gimm) continue;
+		if (TacHasVar(m_b, TAC_VAR_VEIL) && !VeilShows(x, z)) continue;
+		float px = x + 0.5f, pz = z + 0.5f;
+		float dx = px - cx, dz = pz - cz;
+		if (dx * dx + dz * dz > maxR2) continue;
+		float py = m.WalkY(x, z, 0);
+
+		if (c.gimm == GM_WARP) {
+			int id = c.gparam & 7;
+			DWORD wc = kWarpCol[id];
+			float wr = (wc & 255) / 255.f, wg = ((wc >> 8) & 255) / 255.f, wb = ((wc >> 16) & 255) / 255.f;
+			BOOL active = (hotWarp == (int)c.gparam);
+			float boost = active ? 1.48f : 1.f;
+			float spin = m_time * (active ? 8.2f : 4.8f) + id * 1.1f;
+			float topH = (active ? 2.55f : 1.78f) + 0.12f * sinf(m_time * 3.4f + x + z);
+
+			// 3本の半透明らせん竜巻リボン（下端は細く吸い込み、上端はロート状に広がる）
+			for (int s = 0; s < 3; s++) {
+				float baseAng = spin + s * 2.094395f;
+				const int SEG = 11;
+				V3 prev0 = v3(0, 0, 0), prev1 = v3(0, 0, 0);
+				float prevA = 0.f;
+				for (int k = 0; k <= SEG; k++) {
+					float t = (float)k / (float)SEG;
+					float rad = (0.12f + 0.46f * powf(t, 1.25f)) * (active ? 1.15f : 1.f);
+					float ang = baseAng + t * 8.4f;
+					float y = py + 0.04f + t * topH;
+					float hw = (0.045f + 0.065f * sinf(t * 3.14159f)) * boost;
+					V3 cen = v3(px + cosf(ang) * rad, y, pz + sinf(ang) * rad);
+					V3 outDir = v3(cosf(ang) * 0.55f, 0.82f, sinf(ang) * 0.55f);
+					V3 p0 = cen - outDir * hw;
+					V3 p1 = cen + outDir * hw;
+					float al = sinf(t * 3.14159f) * (active ? 0.62f : 0.42f);
+					if (k > 0) PushRibQuad(m_fxRib, prev0, prev1, p0, p1, wr * 0.68f + 0.32f, wg * 0.68f + 0.32f, wb * 0.68f + 0.32f, prevA, al);
+					prev0 = p0; prev1 = p1; prevA = al;
+				}
+			}
+			// 地表の吸い込み気流（外周から中心へ渦巻きながら吸い込まれる4本のリボン）
+			for (int s = 0; s < 4; s++) {
+				float ph = fmodf(m_time * (active ? 2.2f : 1.35f) + s * 0.25f, 1.f);
+				const int SEG = 6;
+				V3 prev0 = v3(0, 0, 0), prev1 = v3(0, 0, 0);
+				float prevA = 0.f;
+				for (int k = 0; k <= SEG; k++) {
+					float u = Clampf(ph - k * 0.085f, 0.f, 1.f);
+					float r = 0.52f * (1.f - u) + 0.06f;
+					float a = spin * 0.8f + s * 1.5708f + u * 3.6f;
+					V3 cen = v3(px + cosf(a) * r, py + 0.045f + u * 0.16f, pz + sinf(a) * r);
+					V3 side = v3(-sinf(a), 0.25f, cosf(a)) * 0.038f;
+					float al = sinf(u * 3.14159f) * (active ? 0.55f : 0.36f);
+					if (k > 0) PushRibQuad(m_fxRib, prev0, prev1, cen - side, cen + side, wr * 0.5f + 0.5f, wg * 0.5f + 0.5f, wb * 0.5f + 0.5f, prevA, al);
+					prev0 = cen - side; prev1 = cen + side; prevA = al;
+				}
+			}
+			if (m_lib.ring.vb) {
+				for (int r = 0; r < 2; r++) {
+					float ry = fmodf(m_time * (active ? 1.45f : 0.85f) + r * 0.5f, 1.f);
+					float rsc = (0.22f + ry * 0.44f) * (active ? 1.15f : 1.f);
+					rdp.emissive = 1.25f;
+					rdp.tint = RGBA8((int)(wr * 180 + 75), (int)(wg * 180 + 75), (int)(wb * 180 + 75), (int)((1.f - ry) * (active ? 210 : 155)));
+					m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(rsc, 0.035f, rsc), MRotY(spin * (r ? -1.2f : 1.2f))), MTrans(px, py + 0.06f + ry * topH * 0.78f, pz)), rdp);
+				}
+			}
+		} else if (c.gimm == GM_HEAL) {
+			float spin = m_time * 2.4f + (x + z) * 0.7f;
+			for (int s = 0; s < 2; s++) {
+				float baseAng = spin + s * 3.14159f;
+				V3 prev0 = v3(0, 0, 0), prev1 = v3(0, 0, 0);
+				float prevA = 0.f;
+				for (int k = 0; k <= 8; k++) {
+					float t = k / 8.f;
+					float rad = 0.36f - t * 0.08f;
+					float ang = baseAng + t * 4.2f;
+					V3 cen = v3(px + cosf(ang) * rad, py + 0.05f + t * 1.15f, pz + sinf(ang) * rad);
+					V3 up = v3(0, 0.048f, 0);
+					float al = sinf(t * 3.14159f) * 0.42f;
+					if (k > 0) PushRibQuad(m_fxRib, prev0, prev1, cen - up, cen + up, 0.38f, 1.f, 0.65f, prevA, al);
+					prev0 = cen - up; prev1 = cen + up; prevA = al;
+				}
+			}
+			if (m_lib.ring.vb) {
+				float pulse = 0.36f + 0.05f * sinf(m_time * 3.2f + x);
+				rdp.emissive = 1.1f;
+				rdp.tint = RGBA8(110, 255, 175, 175);
+				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(pulse, 0.03f, pulse), MRotY(spin * 0.6f)), MTrans(px, py + 0.05f, pz)), rdp);
+			}
+		} else if (c.gimm == GM_MIGHT) {
+			float spin = m_time * 3.6f + x * 0.5f;
+			for (int s = 0; s < 4; s++) {
+				float ang = spin + s * 1.5708f;
+				float wave = 0.5f + 0.5f * sinf(m_time * 6.5f + s * 1.7f);
+				V3 b0 = v3(px + cosf(ang - 0.16f) * 0.36f, py + 0.04f, pz + sinf(ang - 0.16f) * 0.36f);
+				V3 b1 = v3(px + cosf(ang + 0.16f) * 0.36f, py + 0.04f, pz + sinf(ang + 0.16f) * 0.36f);
+				V3 t0 = v3(px + cosf(ang - 0.05f) * 0.42f, py + 0.62f + wave * 0.48f, pz + sinf(ang - 0.05f) * 0.42f);
+				V3 t1 = v3(px + cosf(ang + 0.05f) * 0.42f, py + 0.62f + wave * 0.48f, pz + sinf(ang + 0.05f) * 0.42f);
+				PushRibQuad(m_fxRib, b0, b1, t0, t1, 1.f, 0.72f, 0.22f, 0.52f, 0.f);
+			}
+			if (m_lib.ring.vb) {
+				rdp.emissive = 1.25f;
+				rdp.tint = RGBA8(255, 195, 70, 190);
+				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(0.40f, 0.035f, 0.40f), MRotY(-spin)), MTrans(px, py + 0.055f, pz)), rdp);
+			}
+		} else if (c.gimm == GM_CHEST) {
+			float pulse = 0.5f + 0.5f * sinf(m_time * 4.2f + x + z);
+			for (int s = 0; s < 2; s++) {
+				float ang = m_time * 1.4f + s * 1.5708f;
+				V3 d0 = v3(cosf(ang) * 0.18f, 0, sinf(ang) * 0.18f);
+				PushRibQuad(m_fxRib, v3(px, py + 0.18f, pz) - d0, v3(px, py + 0.18f, pz) + d0,
+					v3(px, py + 1.05f + pulse * 0.22f, pz) - d0 * 0.45f, v3(px, py + 1.05f + pulse * 0.22f, pz) + d0 * 0.45f,
+					1.f, 0.88f, 0.42f, 0.34f, 0.f);
+			}
+			if (m_lib.ring.vb) {
+				rdp.emissive = 1.15f;
+				rdp.tint = RGBA8(255, 215, 90, (int)(135 + 60 * pulse));
+				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(0.35f, 0.03f, 0.35f), MRotY(m_time * 1.8f)), MTrans(px, py + 0.05f, pz)), rdp);
+			}
+		} else if (c.gimm == GM_LEVER) {
+			float pulse = fmodf(m_time * 1.1f + (x + z) * 0.13f, 1.f);
+			if (m_lib.ring.vb) {
+				rdp.emissive = 1.2f;
+				rdp.tint = RGBA8(90, 240, 225, (int)((1.f - pulse) * 190));
+				float sc = 0.20f + pulse * 0.28f;
+				m_r.DrawStatic(m_lib.ring, MMul(MScale(sc, 0.03f, sc), MTrans(px, py + 0.06f + pulse * 0.35f, pz)), rdp);
+			}
+		} else if (c.gimm == GM_DROP) {
+			float sh = sinf(m_time * 22.f + x * 3.f + z * 5.f) * 0.015f;
+			for (int s = 0; s < 2; s++) {
+				float ang = s * 1.5708f + 0.55f;
+				V3 dir = v3(cosf(ang) * 0.42f, 0, sinf(ang) * 0.42f);
+				V3 perp = v3(-sinf(ang) * 0.032f, 0, cosf(ang) * 0.032f);
+				V3 c0 = v3(px + sh, py + 0.042f, pz - sh);
+				PushRibQuad(m_fxRib, c0 - dir - perp, c0 - dir + perp, c0 + dir - perp, c0 + dir + perp, 1.f, 0.45f, 0.12f, 0.65f, 0.65f);
+			}
+		}
+	}
+	if (!m_fxRib.empty()) m_r.DrawRibbon(m_fxRib);
+}
+
+void Game::DrawSpecialStage3D()
+{
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) VeilInvalidate();
+	m_floodV.clear();
+	m_fxRib.clear();
+	const Map& m = m_b.map;
+	int inCut = (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3);
+	float cx = inCut ? m_cutAnchor.x : m_camTarget.x;
+	float cz = inCut ? m_cutAnchor.z : m_camTarget.z;
+	float maxR = min(40.f, m_camDist * 1.75f + 14.f);
+	if (inCut && maxR < 28.f) maxR = 28.f;
+	float maxR2 = maxR * maxR;
+
+	// 1) 水没ステージ (TAC_VAR_FLOOD): 水面は水位が変わるまで同じなので、一度 GPU に置いて描く。
+	if (TacHasVar(m_b, TAC_VAR_FLOOD) && m_b.stampedeLine > 0) {
+		BOOL spiral = MapIsSpiral(m);
+		unsigned key = m_b.map.seed ^ ((unsigned)m_b.stampedeLine * 0x9E3779B9u) ^ (spiral ? 0x85EBCA6Bu : 0u);
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			const Cell& c = m.At(x, z);
+			key = key * 16777619u ^ (unsigned)c.t ^ ((unsigned)c.h << 8) ^ ((unsigned)c.nLay << 24);
+		}
+		if (!m_r.FloodMeshReady(key)) {
+			DWORD surfCol = RGBA8(135, 195, 235, 225);
+			DWORD fallCol = RGBA8(150, 215, 250, 195);
+			m_floodV.clear();
+			static const int ndx[4] = { 0, 0, -1, 1 }, ndz[4] = { -1, 1, 0, 0 };
+			auto pushSheet = [&](float x0, float x1, float z0, float z1, float wy) {
+				PushWaterQuad(m_floodV, v3(x0, wy, z0), v3(x0, wy, z1), v3(x1, wy, z1), v3(x1, wy, z0),
+					v3(0, 1, 0), x0 * 0.25f, z0 * 0.25f, x1 * 0.25f, z1 * 0.25f, surfCol);
+			};
+			auto pushSkirt = [&](int d, float x0, float x1, float z0, float z1, float wy, float lowY) {
+				V3 a, b;
+				if (d == 0) { a = v3(x0, wy, z0); b = v3(x1, wy, z0); }
+				else if (d == 1) { a = v3(x1, wy, z1); b = v3(x0, wy, z1); }
+				else if (d == 2) { a = v3(x0, wy, z1); b = v3(x0, wy, z0); }
+				else { a = v3(x1, wy, z0); b = v3(x1, wy, z1); }
+				V3 nrm = v3((float)ndx[d], 0.05f, (float)ndz[d]);
+				PushWaterQuad(m_floodV, a, v3(a.x, lowY, a.z), v3(b.x, lowY, b.z), b, nrm, 0.f, 0.f, 1.f, 1.f, fallCol);
+			};
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				const Cell& c = m.At(x, z);
+				float x0 = (float)x, x1 = (float)(x + 1), z0 = (float)z, z1 = (float)(z + 1);
+				if (!spiral) {
+					if (c.t == T_VOID || c.t == T_CHASM) continue;
+					if (!TacFloodWet(m_b, x, z, 0)) continue;
+					float wy = m.WalkY(x, z, 0) + 0.16f;
+					pushSheet(x0, x1, z0, z1, wy);
+					for (int d = 0; d < 4; d++) {
+						int nx = x + ndx[d], nz = z + ndz[d];
+						BOOL drop = !Map::In(nx, nz) || m.At(nx, nz).t == T_VOID || m.At(nx, nz).t == T_CHASM;
+						float lowY = -9.5f;
+						if (!drop) {
+							float ny = m.WalkY(nx, nz, 0) + 0.16f;
+							if (wy - ny > 0.45f) { drop = TRUE; lowY = ny; }
+						}
+						if (drop) pushSkirt(d, x0, x1, z0, z1, wy, lowY);
+					}
+					continue;
+				}
+				// 螺旋は水位が一番上でも、見ている床は下の階。その階の足元に水面を置く。
+				int nLay = CellLayN(c);
+				for (int L = 0; L < nLay; L++) {
+					int tr = LayerTr(c, L);
+					if (tr == T_VOID || tr == T_CHASM) continue;
+					int h = LayerHt(c, L);
+					if (h > m_b.stampedeLine) continue;
+					float wy = m.WalkY(x, z, L) + 0.16f;
+					pushSheet(x0, x1, z0, z1, wy);
+					for (int d = 0; d < 4; d++) {
+						int nx = x + ndx[d], nz = z + ndz[d];
+						BOOL covered = FALSE;
+						float lowY = wy - 1.15f;
+						if (Map::In(nx, nz)) {
+							const Cell& nb = m.At(nx, nz);
+							int nn = CellLayN(nb);
+							for (int NL = 0; NL < nn; NL++) {
+								int ntr = LayerTr(nb, NL);
+								if (ntr == T_VOID || ntr == T_CHASM) continue;
+								int nh = LayerHt(nb, NL);
+								if (nh > m_b.stampedeLine) continue;
+								if (abs(nh - h) <= 3) { covered = TRUE; break; }
+								float ny = m.WalkY(nx, nz, NL) + 0.16f;
+								if (ny < wy && ny > lowY) lowY = ny;
+							}
+						}
+						if (!covered) pushSkirt(d, x0, x1, z0, z1, wy, lowY);
+					}
+				}
+			}
+			m_r.UploadFloodMesh(key, m_floodV.data(), (int)m_floodV.size());
+			m_floodV.clear();
+		}
+		m_r.DrawFloodMesh(RGBA8(52, 138, 205));
+	} else m_r.DropFloodMesh();
+
+	// 2) 津波ステージ (TAC_VAR_WAVE): 戦場を横断する巨大な3D津波ウォール＋白波クレスト
+	if (m_wave > 0.f) {
+		float prog = Clampf((1.65f - m_wave) / 1.65f, 0.f, 1.f);
+		float front = -8.f + prog * (MAPN + 16.f);
+		float wallH = 1.85f + m_waveH * 0.42f;
+		float baseY = (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) ? m_cutAnchor.y : (m_camTarget.y - 1.2f);
+		if (MapIsSpiral(m)) baseY = min(baseY, TacHToY(max(0, m_waveH - 2)));
+		DWORD waveCol = RGBA8(95, 195, 255, 235);
+		DWORD backCol = RGBA8(65, 145, 220, 210);
+		int dir = m_waveDir & 3;
+		for (int s = -2; s < MAPN + 2; s += 2) {
+			float s0 = (float)s, s1 = (float)(s + 2);
+			float curl0 = sinf(s0 * 0.25f + m_time * 6.f) * 0.35f;
+			float curl1 = sinf(s1 * 0.25f + m_time * 6.f) * 0.35f;
+			auto mkPt = [&](float lat, float along, float y) -> V3 {
+				if (dir == 0) return v3(along, y, lat);
+				if (dir == 1) return v3(MAPN - along, y, lat);
+				if (dir == 2) return v3(lat, y, along);
+				return v3(lat, y, MAPN - along);
+			};
+			V3 fBot0 = mkPt(s0, front + 1.4f + curl0, baseY);
+			V3 fBot1 = mkPt(s1, front + 1.4f + curl1, baseY);
+			V3 crest0 = mkPt(s0, front + curl0, baseY + wallH);
+			V3 crest1 = mkPt(s1, front + curl1, baseY + wallH);
+			V3 tail0 = mkPt(s0, front - 5.5f, baseY + wallH * 0.28f);
+			V3 tail1 = mkPt(s1, front - 5.5f, baseY + wallH * 0.28f);
+			V3 fNrm = (dir == 0) ? v3(1, 0.2f, 0) : (dir == 1 ? v3(-1, 0.2f, 0) : (dir == 2 ? v3(0, 0.2f, 1) : v3(0, 0.2f, -1)));
+			PushWaterQuad(m_floodV, crest0, fBot0, fBot1, crest1, fNrm, 0.f, 0.f, 1.f, 1.f, waveCol);
+			PushWaterQuad(m_floodV, tail0, crest0, crest1, tail1, v3(0, 1, 0), s0 * 0.2f, 0.f, s1 * 0.2f, 1.f, backCol);
+			PushRibQuad(m_fxRib, crest0 - v3(0, 0.15f, 0), crest0 + v3(0, 0.28f, 0), crest1 - v3(0, 0.15f, 0), crest1 + v3(0, 0.28f, 0),
+				0.92f, 0.98f, 1.f, 0.82f, 0.82f);
+		}
+	}
+
+	if (!m_floodV.empty())
+		m_r.DrawWaterTris(m_floodV.data(), (int)m_floodV.size(), RGBA8(52, 138, 205));
+	if (TacHasVar(m_b, TAC_VAR_FROST)) {
+		m_floodV.clear();
+		int sheets = 0;
+		DWORD iceCol = RGBA8(236, 248, 255, 220);
+		for (int z = 0; z < MAPN && sheets < 480; z++) for (int x = 0; x < MAPN && sheets < 480; x++) {
+			if (!TacFrostAt(x, z)) continue;
+			const Cell& c = m.At(x, z);
+			int nL = CellLayN(c);
+			int drawn = 0;
+			float x0 = (float)x, x1 = (float)x + 1.f, z0 = (float)z, z1 = (float)z + 1.f;
+			for (int L = 0; L < nL && drawn < 3 && sheets < 480; L++) {
+				int tr = LayerTr(c, L);
+				if (tr == T_VOID || tr == T_CHASM || tr == T_LAVA) continue;
+				float y = m.WalkY(x, z, L) + 0.07f;
+				PushWaterQuad(m_floodV, v3(x0, y, z0), v3(x0, y, z1), v3(x1, y, z1), v3(x1, y, z0),
+					v3(0, 1, 0), x0 * 0.5f, z0 * 0.5f, x1 * 0.5f, z1 * 0.5f, iceCol);
+				drawn++;
+				sheets++;
+			}
+		}
+		if (!m_floodV.empty())
+			m_r.DrawWaterTris(m_floodV.data(), (int)m_floodV.size(), iceCol);
+		m_floodV.clear();
+	}
+
+	// 3) 砂塵ステージ (TAC_VAR_DUST): 味方視界(4マス)外周を渦巻く立体砂嵐カーテン
+	if (TacHasVar(m_b, TAC_VAR_DUST)) {
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.team != TEAM_PLAYER) continue;
+			float ux = u.px, uz = u.pz, uy = u.py;
+			if ((ux - cx) * (ux - cx) + (uz - cz) * (uz - cz) > maxR2) continue;
+			for (int b = 0; b < 3; b++) {
+				float baseA = m_time * (0.95f + b * 0.25f) + i * 1.7f + b * 2.094f;
+				V3 prev0 = v3(0, 0, 0), prev1 = v3(0, 0, 0);
+				float prevAl = 0.f;
+				for (int k = 0; k <= 10; k++) {
+					float t = k / 10.f;
+					float ang = baseA + t * 2.2f;
+					float rad = 4.55f + b * 0.55f + sinf(ang * 3.f + m_time * 2.f) * 0.25f;
+					float wx = ux + cosf(ang) * rad, wz = uz + sinf(ang) * rad;
+					float wy = Map::In((int)wx, (int)wz) ? m.WalkY((int)wx, (int)wz, 0) : uy;
+					V3 p0 = v3(wx, wy + 0.05f, wz);
+					V3 p1 = v3(wx, wy + 1.65f + b * 0.35f, wz);
+					float al = sinf(t * 3.14159f) * 0.26f;
+					if (k > 0) PushRibQuad(m_fxRib, prev0, prev1, p0, p1, 0.86f, 0.72f, 0.46f, prevAl, al);
+					prev0 = p0; prev1 = p1; prevAl = al;
+				}
+			}
+		}
+	}
+
+	// 4) 幻覚ステージ (TAC_VAR_VEIL): 浸食境界に沿って煌めく黄金蜃気楼リボン
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) {
+		for (int z = 1; z < MAPN - 1; z++) for (int x = 1; x < MAPN - 1; x++) {
+			if (!VeilShows(x, z)) continue;
+			float px = x + 0.5f, pz = z + 0.5f;
+			if ((px - cx) * (px - cx) + (pz - cz) * (pz - cz) > maxR2) continue;
+			BOOL border = !VeilShows(x - 1, z) || !VeilShows(x + 1, z) || !VeilShows(x, z - 1) || !VeilShows(x, z + 1);
+			if (!border) continue;
+			float py = m.WalkY(x, z, 0);
+			float wv = 0.5f + 0.5f * sinf(m_time * 3.8f + x * 0.9f + z * 1.1f);
+			PushRibQuad(m_fxRib, v3(x + 0.1f, py + 0.04f, pz), v3(x + 0.1f, py + 0.75f + wv * 0.45f, pz),
+				v3(x + 0.9f, py + 0.04f, pz), v3(x + 0.9f, py + 0.75f + wv * 0.45f, pz),
+				1.f, 0.82f, 0.42f, 0.34f, 0.08f);
+		}
+	}
+
+	// 5) 憤怒(RAGE) / 包囲(RING) / 濃霧(MIST) / 爪痕(SCAR) / 祝福(BLESS) の空間演出
+	if (TacHasVar(m_b, TAC_VAR_RAGE) || TacHasVar(m_b, TAC_VAR_RING)) {
+		DrawParams bdp = {};
+		bdp.noTess = 1; bdp.twoSided = 1; bdp.mode = 9.f; bdp.emissive = 1.3f;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.team != TEAM_ENEMY) continue;
+			if (TacHasVar(m_b, TAC_VAR_RING) && !u.boss) continue;
+			if ((u.px - cx) * (u.px - cx) + (u.pz - cz) * (u.pz - cz) > maxR2) continue;
+			float spn = (float)max(1, UnitSpan(u));
+			if (TacHasVar(m_b, TAC_VAR_RAGE)) {
+				for (int s = 0; s < 3; s++) {
+					float a = m_time * 5.2f + i * 1.3f + s * 2.094f;
+					float r = 0.36f * spn;
+					V3 b0 = v3(u.px + cosf(a - 0.18f) * r, u.py + 0.05f, u.pz + sinf(a - 0.18f) * r);
+					V3 b1 = v3(u.px + cosf(a + 0.18f) * r, u.py + 0.05f, u.pz + sinf(a + 0.18f) * r);
+					V3 t0 = v3(u.px + cosf(a + 0.35f) * r * 0.65f, u.py + m_act[i].height * 0.95f, u.pz + sinf(a + 0.35f) * r * 0.65f);
+					PushRibQuad(m_fxRib, b0, b1, t0, t0 + v3(0, 0.08f, 0), 1.f, 0.22f, 0.08f, 0.52f, 0.f);
+				}
+			} else if (m_lib.ring.vb) {
+				float pulse = 0.55f * spn + 0.06f * sinf(m_time * 4.f + i);
+				bdp.tint = RGBA8(255, 165, 55, 195);
+				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(pulse, 0.04f, pulse), MRotY(m_time * 2.2f + i)), MTrans(u.px, u.py + 0.05f, u.pz)), bdp);
+			}
+		}
+	} else if (TacHasVar(m_b, TAC_VAR_MIST)) {
+		for (int b = 0; b < 14; b++) {
+			float bx = cx + sinf(b * 2.399f + m_time * 0.12f) * 11.f;
+			float bz = cz + cosf(b * 1.732f + m_time * 0.09f) * 11.f;
+			int ix = (int)bx, iz = (int)bz;
+			if (!Map::In(ix, iz) || m.At(ix, iz).t == T_VOID) continue;
+			float by = m.WalkY(ix, iz, 0) + 0.22f;
+			V3 d = v3(cosf(b * 1.1f) * 2.4f, 0.f, sinf(b * 1.1f) * 2.4f);
+			PushRibQuad(m_fxRib, v3(bx, by, bz) - d, v3(bx, by + 0.55f, bz) - d, v3(bx, by, bz) + d, v3(bx, by + 0.55f, bz) + d,
+				0.78f, 0.86f, 0.94f, 0.16f, 0.16f);
+		}
+	} else if (TacHasVar(m_b, TAC_VAR_BLESS)) {
+		for (int b = 0; b < 10; b++) {
+			float bx = fmodf(b * 13.7f + 9.f, (float)(MAPN - 8)) + 4.f;
+			float bz = fmodf(b * 19.3f + 7.f, (float)(MAPN - 8)) + 4.f;
+			if ((bx - cx) * (bx - cx) + (bz - cz) * (bz - cz) > maxR2) continue;
+			int ix = (int)bx, iz = (int)bz;
+			if (!Map::In(ix, iz) || m.At(ix, iz).t == T_VOID) continue;
+			float by = m.WalkY(ix, iz, 0);
+			float w = 0.42f + 0.12f * sinf(m_time * 1.8f + b);
+			PushRibQuad(m_fxRib, v3(bx - w, by + 0.05f, bz), v3(bx + w, by + 0.05f, bz),
+				v3(bx - w * 1.8f + 0.9f, by + 6.5f, bz - 0.5f), v3(bx + w * 1.8f + 0.9f, by + 6.5f, bz - 0.5f),
+				1.f, 0.96f, 0.76f, 0.20f, 0.f);
+		}
+	}
+
+	if (!m_fxRib.empty()) m_r.DrawRibbon(m_fxRib);
 }
 
 // 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
@@ -9032,12 +10280,13 @@ static void CutSeeBoth(V3 a, V3 d, float h, int strike, V3& look, V3& eye)
 		float tl = Len(toF);
 		if (tl > 0.05f) {
 			float c = Dot(toF, fwd) / tl;
-			if (c < 0.55f) fix = max(fix, Clampf((0.55f - c) / 0.7f, 0.f, 1.f));
+			if (c < 0.2f) fix = max(fix, Clampf((0.2f - c) / 0.55f, 0.f, 1.f));
+			else if (c < 0.55f) fix = max(fix, Clampf((0.55f - c) / 1.6f, 0.f, 0.28f));
 			foeAng = acosf(Clampf(c, -1.f, 1.f));
 		}
 	} else fix = 1.f;
-	if (strike && foeAng > 0.46f)
-		fix = max(fix, Clampf((foeAng - 0.46f) / 0.4f, 0.f, 1.f));
+	if (strike && foeAng > 0.85f)
+		fix = max(fix, Clampf((foeAng - 0.85f) / 0.7f, 0.f, 0.65f));
 	float dist = span * 0.34f + 3.2f;
 	if (dist < 3.4f) dist = 3.4f;
 	if (dist > 7.6f) dist = 7.6f;
@@ -9048,7 +10297,7 @@ static void CutSeeBoth(V3 a, V3 d, float h, int strike, V3& look, V3& eye)
 	if (elev > 2.8f) elev = 2.8f;
 	wantE.y = wantL.y + elev;
 	if (fix > 0.001f) {
-		look = Lerp(look, wantL, fix * 0.92f);
+		look = Lerp(look, wantL, fix * 0.55f);
 		eye = Lerp(eye, wantE, fix);
 	}
 	V3 sep = eye - look;
@@ -9530,18 +10779,48 @@ void Game::DrawCutIn3D()
 		{
 			float aspect = (float)m_w / (float)(m_h > 1 ? m_h : 1);
 			CutPullToFit(look, eye, fitPt, fitN, 0.72f, aspect);
-			float orbit = sinf(m_time * 0.45f) * 0.22f;
+			float orbit = sinf(m_time * 0.45f) * 0.04f;
 			V3 rel = eye - look;
 			float cs = cosf(orbit), sn = sinf(orbit);
 			eye = look + v3(rel.x * cs - rel.z * sn, rel.y, rel.x * sn + rel.z * cs);
 		}
+		if (m_fairyGhost && m_cutStage == 2) {
+			float dur = m_fairyGhostDur > 0.05f ? m_fairyGhostDur : 3.35f;
+			float u = Clampf(m_fairyGhostT / dur, 0.f, 1.f);
+			V3 fp, fv;
+			FairySample(u, 1, m_fairyGhostFrom, m_fairyGhostThru, m_fairyGhostPast, fp, fv);
+			V3 homeEye = v3(0.15f, 1.38f, -2.15f);
+			if (u < 0.52f) {
+				look = fp + v3(0, 0.12f, 0);
+				eye = homeEye;
+			} else if (u < 0.81f) {
+				V3 strike = m_fairyGhostThru + v3(0, 0.18f, 0);
+				float t = Smooth01((u - 0.52f) / 0.16f);
+				look = Lerp(fp + v3(0, 0.1f, 0), strike, t);
+				eye = Lerp(homeEye, strike + v3(-1.7f, 0.9f, -3.5f), t);
+			} else {
+				look = fp + v3(0, 0.08f, 0);
+				eye = fp + v3(-2.3f, 1.05f, -4.1f);
+			}
+		}
 	}
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
-	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 220.f);
+	float cutFov = 0.75f;
+	if (!m_fairyGhost) {
+		float hitPulse = (m_hitScreenMax > 0.01f && m_hitScreenT > 0.f) ? Clampf(m_hitScreenT / m_hitScreenMax, 0.f, 1.f) : 0.f;
+		float stageTight = (m_cutStage == 1) ? -0.04f : ((m_cutStage == 2) ? -0.02f : 0.02f);
+		cutFov = Clampf(0.75f + stageTight - hitPulse * 0.065f - min(m_shake, 1.f) * 0.02f, 0.64f, 0.80f);
+	}
+	M4 proj = MPerspLH(cutFov, (float)m_w / max(1, m_h), .05f, 220.f);
 	m_r.SetCamera(view, proj, eye, m_time);
 	// 敵が立つ +X へ、マップ上の相手の方向を回す。床は戦闘地点の高さ。
 	M4 scene = CutSceneXform();
 	m_r.SetSceneShift(scene);
+	// 視点も地形も戦闘地点を原点にずらしてある。水面の高さだけ同じだけ下げる。
+	if (TacHasVar(m_b, TAC_VAR_FLOOD) && m_b.stampedeLine > 0 && MapIsSpiral(m_b.map))
+		m_r.SetFloodPlane(TacHToY(m_b.stampedeLine) + 0.22f - m_cutAnchor.y, 1);
+	else m_r.SetFloodPlane(0.f, 0);
+	m_r.SetFieldGrade(TacHasVar(m_b, TAC_VAR_GRAV) ? 1.f : 0.f, TacHasVar(m_b, TAC_VAR_RECOIL) ? 1.f : 0.f, Clampf(m_faultPulse, 0.f, 1.f), TacHasVar(m_b, TAC_VAR_FROST) ? 0.7f : 0.f);
 	float sightXz[32];
 	int sightN = 0;
 	auto addSight = [&](int id) {
@@ -9585,7 +10864,7 @@ void Game::DrawCutIn3D()
 	else if (hr == HR_ECLIPSE) amb *= 0.94f;
 	else if (hr == HR_DUSK || hr == HR_DAWN) amb *= 0.97f;
 	m_r.SetAmbient(e.ambSky, e.ambGnd, amb, e.hard);
-	m_r.SetLight(e.light, look, 56.f);
+	m_r.SetLight(HourLightDir(e.light, hr), look, 56.f);
 	{
 		// 他層の床も残す。視線の手前は焦点のキャラより前だけ半透明にする。
 		m_r.SetCutDeck(-1);
@@ -9741,6 +11020,8 @@ void Game::DrawCutIn3D()
 		ActorDraw(m_r, m_lib, m_sumAct, sumWorld(), dp, m_time);
 	}
 	m_r.EndInstBatch();
+	DrawSpecialStage3D();
+	DrawGimmickEffects();
 	m_r.SetCamNear(cutHide, cutSolid, 1.f);
 	m_r.CommitFrame();
 	if (m_sumOn) DrawSummonGate();
@@ -9855,6 +11136,8 @@ void Game::DrawCutIn3D()
 	}
 	for (int i = 0; i < m_cutFoeN; i++) {
 		if (!m_cutFoePlinth[i]) continue;
+		int fid = m_cutFoe[i];
+		if (fid >= 0 && fid < m_b.nUnits && (m_dieT[fid] >= 0.f || m_dispHp[fid] <= 0.5f)) continue;
 		V3 p = m_cutFoePos[i];
 		DrawParams pl = {}; pl.noTess = 1; pl.twoSided = 1; pl.emissive = 0.55f; pl.rim = 0.8f; pl.tint = RGBA8(255, 160, 140);
 		m_r.DrawStatic(m_lib.sq, MMul(MScale(0.75f, 0.08f, 0.75f), MTrans(p.x, p.y - 0.05f, p.z)), pl);
@@ -9868,32 +11151,13 @@ void Game::DrawCutIn3D()
 		}
 	}
 	DrawFairyGhost();
-	if (m_fairyFxT > 0.f) {
-		float fu = Clampf(m_fairyFxT / 1.8f, 0.f, 1.f);
-		V3 fp = Lerp(m_fairyPosD + v3(0, 0.65f, 0), m_fairyPosA + v3(0, 1.15f, 0), max(0.f, (fu - 0.55f) / 0.45f));
-		fp.y += sinf(m_time * 7.f) * 0.16f + (1.f - fu) * 0.45f;
-		float fs = (0.28f + 0.14f * sinf(m_time * 12.f)) * min(1.f, fu * 2.5f);
-		DrawParams fpdp = {};
-		fpdp.noTess = 1; fpdp.twoSided = 1; fpdp.emissive = 1.45f; fpdp.flash = 0.8f; fpdp.rim = 1.f;
-		fpdp.tint = RGBA8(255, 186, 255);
-		m_r.DrawStatic(m_lib.orb, MMul(MScale(fs, fs, fs), MTrans(fp.x, fp.y, fp.z)), fpdp);
-		fpdp.tint = RGBA8(130, 236, 255);
-		float rsc = 0.72f + (1.f - fu) * 0.95f;
-		m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(rsc, 0.05f, rsc), MRotY(m_time * 5.f)), MTrans(fp.x, fp.y, fp.z)), fpdp);
-		for (int w = 0; w < 2; w++) {
-			float side = w ? -1.f : 1.f;
-			float flap = sinf(m_time * 18.f) * 0.42f;
-			M4 wm = MMul(MMul(MScale(0.40f * side, 0.40f, 0.40f), MRotY(side * (0.4f + flap))), MTrans(fp.x + side * 0.16f, fp.y + 0.06f, fp.z));
-			fpdp.tint = w ? RGBA8(255, 196, 240) : RGBA8(180, 230, 255);
-			m_r.DrawStatic(m_lib.wing[0][w], wm, fpdp);
-		}
-	}
 	// 人型同士でも敵だと分かるよう、種類ごとの輪を足元と胴に置く。毎フレーム同じ位相なので点滅しない。
 	for (int k = 0; k < nId; k++) {
 		int id = ids[k];
 		if (id < 0 || id >= m_b.nUnits) continue;
 		const Unit& u = m_b.u[id];
 		if (u.team != TEAM_ENEMY) continue;
+		if (m_dieT[id] >= 0.f || m_dispHp[id] <= 0.5f) continue;
 		float ar = 1.f, ag = 0.28f, ab = 0.22f;
 		if (u.boss) { ar = 1.f; ag = 0.82f; ab = 0.28f; }
 		else if (UnitIsHumanFoe(u)) {
@@ -10106,6 +11370,155 @@ static DWORD HpBackCol(const Unit& u)
 	return UnitIsLucky(u) ? RGBA8(16, 48, 72) : RGBA8(40, 120, 50);
 }
 
+// ============================================================ 強化表示（LL14対応）
+static const wchar_t* BuffTurnSuffix()
+{
+	return LangPick14(L"T", L"T", L"T", L"T", L"T", L"턴", L"回合", L"د", L"х", L"R", L"T", L"B", L"T", L"T");
+}
+
+static const wchar_t* BuffShortTag(int kind)
+{
+	switch (kind) {
+	case 0: return LangPick14(L"全×2", L"ALL×2", L"TOUT×2", L"TUT×2", L"TOD×2", L"전×2", L"全×2", L"كل×2", L"ВСЕ×2", L"ALL×2", L"TUD×2", L"ALL×2", L"WSZ×2", L"TÜM×2");
+	case 1: return LangPick14(L"攻↑", L"ATK↑", L"ATQ↑", L"ATT↑", L"ATQ↑", L"공↑", L"攻↑", L"هجم↑", L"АТК↑", L"ANG↑", L"ATQ↑", L"AAN↑", L"ATK↑", L"SLD↑");
+	case 2: return LangPick14(L"防↑", L"DEF↑", L"DÉF↑", L"DIF↑", L"DEF↑", L"방↑", L"防↑", L"دفع↑", L"ЗАЩ↑", L"ABW↑", L"DEF↑", L"VER↑", L"OBR↑", L"SVN↑");
+	default: return LangPick14(L"速↑", L"SPD↑", L"VIT↑", L"VEL↑", L"VEL↑", L"속↑", L"速↑", L"سرع↑", L"СКР↑", L"TEM↑", L"VEL↑", L"SNL↑", L"SZB↑", L"HIZ↑");
+	}
+}
+
+static void FormatBuffCallout(int effect, int turns, wchar_t* out, int cap, DWORD* colOut)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	const wchar_t* tSuf = BuffTurnSuffix();
+	if (effect == EF_BUFF_ATK) {
+		const wchar_t* lbl = LangPick14(
+			L"攻撃・魔力 +25%", L"ATK & MAG +25%", L"ATQ & MAG +25 %", L"ATT & MAG +25%", L"ATQ y MAG +25%",
+			L"공격·마력 +25%", L"攻击·魔力 +25%", L"الهجوم والسحر +25%", L"АТК и МАГ +25%", L"ANG & MAG +25 %",
+			L"ATQ e MAG +25%", L"AAN & MAG +25%", L"ATK i MAG +25%", L"SLD ve BÜY +25%");
+		if (turns > 0) swprintf_s(out, (size_t)cap, L"%s (%d%s)", lbl, turns, tSuf);
+		else wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(255, 196, 110);
+	} else if (effect == EF_BUFF_DEF) {
+		const wchar_t* lbl = LangPick14(
+			L"守備・魔防 +30%", L"DEF & RES +30%", L"DÉF & RÉS +30 %", L"DIF & RES +30%", L"DEF y RES +30%",
+			L"방어·마방 +30%", L"防御·魔防 +30%", L"الدفاع والمقاومة +30%", L"ЗАЩ и СТОЙ +30%", L"ABW & RES +30 %",
+			L"DEF e RES +30%", L"VER & WRS +30%", L"OBR i ODP +30%", L"SVN ve DİR +30%");
+		if (turns > 0) swprintf_s(out, (size_t)cap, L"%s (%d%s)", lbl, turns, tSuf);
+		else wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(130, 224, 255);
+	} else if (effect == EF_BUFF_AGI) {
+		const wchar_t* lbl = LangPick14(
+			L"素早さ +30%", L"SPD +30%", L"Vitesse +30 %", L"Velocità +30%", L"Velocidad +30%",
+			L"민첩 +30%", L"速度 +30%", L"السرعة +30%", L"Скорость +30%", L"Tempo +30 %",
+			L"Velocidade +30%", L"Snelheid +30%", L"Szybkość +30%", L"Hız +30%");
+		if (turns > 0) swprintf_s(out, (size_t)cap, L"%s (%d%s)", lbl, turns, tSuf);
+		else wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(130, 255, 186);
+	} else if (effect == EF_REACT) {
+		const wchar_t* lbl = LangPick14(
+			L"即時再行動！", L"Instant Extra Turn!", L"Tour immédiat !", L"Turno immediato!", L"¡Turno inmediato!",
+			L"즉시 재행동!", L"立即再行动！", L"دور فوري!", L"Мгновенный ход!", L"Sofortzug!",
+			L"Turno imediato!", L"Directe beurt!", L"Natychmiastowy ruch!", L"Anında hamle!");
+		wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(255, 236, 150);
+	} else if (effect == -2) {
+		const wchar_t* lbl = LangPick14(
+			L"全能力 2倍", L"All Stats ×2", L"Toutes stats ×2", L"Tutte stat ×2", L"Todas hab. ×2",
+			L"전 능력 2배", L"全能力 2倍", L"كل القدرات ×2", L"Все хар-ки ×2", L"Alle Werte ×2",
+			L"Todos atrib. ×2", L"Alle stats ×2", L"Wszystkie cechy ×2", L"Tüm nitelikler ×2");
+		if (turns > 0) swprintf_s(out, (size_t)cap, L"%s (%d%s)", lbl, turns, tSuf);
+		else wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(255, 224, 100);
+	} else if (effect == -3) {
+		const wchar_t* lbl = LangPick14(
+			L"攻・防・速 強化", L"ATK/DEF/SPD Up", L"ATQ/DÉF/VIT +", L"ATT/DIF/VEL +", L"ATQ/DEF/VEL +",
+			L"공·방·속 강화", L"攻·防·速 强化", L"رفع الهجوم والدفاع والسرعة", L"АТК/ЗАЩ/СКР ↑", L"ANG/ABW/TEM +",
+			L"ATQ/DEF/VEL +", L"AAN/VER/SNL +", L"ATK/OBR/SZB +", L"SLD/SVN/HIZ +");
+		if (turns > 0) swprintf_s(out, (size_t)cap, L"%s (%d%s)", lbl, turns, tSuf);
+		else wcsncpy_s(out, (size_t)cap, lbl, _TRUNCATE);
+		if (colOut) *colOut = RGBA8(255, 230, 140);
+	} else {
+		wcsncpy_s(out, (size_t)cap, TT(TX_BT_BUFF), _TRUNCATE);
+		if (colOut) *colOut = RGBA8(150, 210, 255);
+	}
+}
+
+static void AppendUnitBuffsText(const Unit& u, wchar_t* st, size_t cap)
+{
+	wchar_t bit[48];
+	const wchar_t* tSuf = BuffTurnSuffix();
+	if (u.mulTurns > 0) { swprintf_s(bit, L"%s:%d%s ", BuffShortTag(0), u.mulTurns, tSuf); wcscat_s(st, cap, bit); }
+	if (u.buffAtk > 0)  { swprintf_s(bit, L"%s%d%s ",  BuffShortTag(1), u.buffAtk, tSuf);  wcscat_s(st, cap, bit); }
+	if (u.buffDef > 0)  { swprintf_s(bit, L"%s%d%s ",  BuffShortTag(2), u.buffDef, tSuf);  wcscat_s(st, cap, bit); }
+	if (u.buffAgi > 0)  { swprintf_s(bit, L"%s%d%s ",  BuffShortTag(3), u.buffAgi, tSuf);  wcscat_s(st, cap, bit); }
+}
+
+void Game::DrawPortraitBuffs(const Unit& u, float px, float py, float ps)
+{
+	if (!u.alive || ps < 18.f) return;
+	if (m_seqCut && m_cutStage == 0) return;
+	struct Pill { wchar_t txt[24]; DWORD bg; DWORD fg; };
+	Pill pills[4];
+	int np = 0;
+	if (u.mulTurns > 0) {
+		swprintf_s(pills[np].txt, L"%s%d", BuffShortTag(0), u.mulTurns);
+		pills[np].bg = RGBA8(68, 46, 6, 228);
+		pills[np].fg = RGBA8(255, 228, 105);
+		np++;
+	}
+	if (u.buffAtk > 0) {
+		swprintf_s(pills[np].txt, L"%s%d", BuffShortTag(1), u.buffAtk);
+		pills[np].bg = RGBA8(72, 22, 12, 226);
+		pills[np].fg = RGBA8(255, 186, 120);
+		np++;
+	}
+	if (u.buffDef > 0) {
+		swprintf_s(pills[np].txt, L"%s%d", BuffShortTag(2), u.buffDef);
+		pills[np].bg = RGBA8(10, 42, 68, 226);
+		pills[np].fg = RGBA8(135, 226, 255);
+		np++;
+	}
+	if (u.buffAgi > 0) {
+		swprintf_s(pills[np].txt, L"%s%d", BuffShortTag(3), u.buffAgi);
+		pills[np].bg = RGBA8(10, 56, 36, 226);
+		pills[np].fg = RGBA8(135, 255, 188);
+		np++;
+	}
+	if (np <= 0) return;
+	bool tiny = ps < U(54.f);
+	float ph = tiny ? max(9.f, min(U(12.f), ps * 0.34f)) : max(U(13.f), min(U(16.f), ps * 0.17f));
+	float fs = ph * 0.76f;
+	if (tiny) {
+		int show = min(np, 2);
+		float bx = px + 1.f;
+		float by = py + ps - ph - 1.f;
+		float cellW = (ps - 2.f) / (float)show;
+		for (int i = 0; i < show; i++) {
+			float x0 = bx + i * cellW;
+			float w0 = cellW - (i + 1 < show ? 1.f : 0.f);
+			m_r.HudRect(x0, by, w0, ph, pills[i].bg);
+			m_r.HudFrame(x0, by, w0, ph, 1.f, pills[i].fg);
+			m_r.HudText(pills[i].txt, x0 + w0 * 0.5f, by + ph * 0.52f, FitTextPx(pills[i].txt, max(4.f, w0 - 2.f), fs, 1), pills[i].fg, 1, 1);
+		}
+		return;
+	}
+	int cols = np >= 3 ? 2 : np;
+	int rows = (np + cols - 1) / cols;
+	float gap = 2.f;
+	float cellW = (ps - 4.f - gap * (cols - 1)) / (float)cols;
+	float yBase = py + ps - 2.f - rows * ph - (rows - 1) * gap;
+	for (int i = 0; i < np; i++) {
+		int r = i / cols;
+		int c = i % cols;
+		float x0 = px + 2.f + c * (cellW + gap);
+		float y0 = yBase + r * (ph + gap);
+		m_r.HudRect(x0, y0, cellW, ph, pills[i].bg);
+		m_r.HudFrame(x0, y0, cellW, ph, 1.f, pills[i].fg);
+		m_r.HudText(pills[i].txt, x0 + cellW * 0.5f, y0 + ph * 0.52f, FitTextPx(pills[i].txt, max(6.f, cellW - 4.f), fs, 1), pills[i].fg, 1, 1);
+	}
+}
+
 // ============================================================ HUD（戦闘）
 void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, float* rx, float* ry, float* rw, float* rh)
 {
@@ -10134,7 +11547,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			swprintf_s(ko, L"%s  %s", nm, TT(TX_RS_KO));
 			wcscpy_s(nm, ko);
 		}
-		swprintf_s(lv, L"%s%d  %s%s", TT(TX_MISC_LV), u.ch.lv, ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
+		swprintf_s(lv, L"%s%d  %s%s", TT(TX_MISC_LV), u.ch.lv, UnitClassOrRaceLabel(u), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
 		UnitWeakText(u, wk, 240);
 		st[0] = 0;
 		if (big && !(m_seqCut && m_cutStage == 0)) {
@@ -10150,7 +11563,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			if (u.bleed > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLEED), u.bleed); wcscat_s(st, bit); }
 			if (u.blind > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLIND), u.blind); wcscat_s(st, bit); }
 			if (u.silence > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SILENCE), u.silence); wcscat_s(st, bit); }
-			if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
+			AppendUnitBuffsText(u, st, _countof(st));
 			if (!u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		}
 		float gapN = U(big ? 20.f : 18.f);
@@ -10182,6 +11595,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		Panel(x, y, w, h);
 		DWORD fc = FoeInk(u);
 		DrawPortrait(BattlePortrait(ui), x + pad, y + pad, ps, fc);
+		DrawPortraitBuffs(u, x + pad, y + pad, ps);
 		float cy = y + U(12);
 		float textLim = y + h - U(6);
 		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? (UnitIsHumanFoe(u) ? RGBA8(230, 190, 255) : (UnitIsLucky(u) ? RGBA8(180, 240, 255) : RGBA8(255, 255, 255))) : RGBA8(255, 176, 168), 0, 1);
@@ -10281,6 +11695,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 	Panel(x, y, w, h);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
 		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(10), ps, fc);
+		DrawPortraitBuffs(u, x + U(10), y + U(10), ps);
 	float tx = x + ps + U(20), tw = w - ps - U(30);
 	if (tw < U(48)) tw = U(48);
 	wchar_t nm[96];
@@ -10316,7 +11731,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 			cy += U(10);
 		}
 	} else {
-		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNum(u.ch.lv), ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
+		swprintf_s(l, L"%s%s  %s%s", TT(TX_MISC_LV), TacNum(u.ch.lv), UnitClassOrRaceLabel(u), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
 		m_r.HudText(l, tx, y + U(36), FitTextPx(l, tw, U(13), 0), RGBA8(255, 226, 150), 0, 0);
 		wchar_t wk[240];
 		UnitWeakText(u, wk, 240);
@@ -10386,7 +11801,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, flo
 		if (u.bleed > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLEED), u.bleed); wcscat_s(st, bit); }
 		if (u.blind > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_BLIND), u.blind); wcscat_s(st, bit); }
 		if (u.silence > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SILENCE), u.silence); wcscat_s(st, bit); }
-		if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
+		AppendUnitBuffsText(u, st, _countof(st));
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		}
 		if (st[0] && by + U(8) < y + h - U(2)) m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
@@ -10483,6 +11898,7 @@ void Game::DrawTurnOrder()
 		float ps = max(4.f, rh * 0.72f);
 		float py = y0 + max(1.f, (rh - ps) * .35f);
 		DrawPortrait(BattlePortrait(ui), x + U(4) + xoff, py, ps, fc);
+		DrawPortraitBuffs(u, x + U(4) + xoff, py, ps);
 		if (ui >= 0 && ui < MAX_UNITS && aimOn[ui] && aimN > 0 && ps >= 12.f) {
 			wchar_t nb[8];
 			swprintf_s(nb, L"%d", aimN);
@@ -10776,7 +12192,7 @@ void Game::DrawMinimap(float x, float y, float s, int layer)
 			m_r.HudRect(sx - d * .5f, sy - d * .5f, d, d, RGBA8(8, 10, 18, 214));
 		}
 	}
-	if (m_b.sweep == TAC_VAR_VEIL) {
+	if (TacHasVar(m_b, TAC_VAR_VEIL)) {
 		for (int z = z0; z <= z1; z++) for (int xx = x0; xx <= x1; xx++) {
 			if (VeilShows(xx, z)) continue;
 			float sx, sy;
@@ -11291,6 +12707,7 @@ void Game::UseConsumable(int good, int target)
 	Unit* dst = &m_b.u[target];
 	int hpBefore = dst->hp;
 	int aliveBefore = dst->alive;
+	int mulBefore = dst->mulTurns, atkBefore = dst->buffAtk, defBefore = dst->buffDef, agiBefore = dst->buffAgi;
 	if (g->item == IT_ELIXIR) {
 		dst->hp = min(dst->ch.stat[S_HP], dst->hp + max(1, dst->ch.stat[S_HP] / 2));
 	} else if (g->item == IT_MIGHT) {
@@ -11419,8 +12836,20 @@ void Game::UseConsumable(int good, int target)
 	}
 	if (dst->hp != hpBefore || dst->alive != aliveBefore) m_bgmTick++;
 	dst->flash = 1.f;
-	AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), GoodFace(good), RGBA8(140, 230, 170), 1, MSG_FACE);
-	AddLog(GoodFace(good), RGBA8(140, 230, 170));
+	{
+		wchar_t popTxt[160];
+		DWORD popCol = RGBA8(140, 230, 170);
+		wchar_t btxt[96] = L"";
+		if (dst->mulTurns > mulBefore) FormatBuffCallout(-2, dst->mulTurns, btxt, 96, &popCol);
+		else if (dst->buffAtk > atkBefore && dst->buffDef > defBefore && dst->buffAgi > agiBefore) FormatBuffCallout(-3, dst->buffAtk, btxt, 96, &popCol);
+		else if (dst->buffAtk > atkBefore) FormatBuffCallout(EF_BUFF_ATK, dst->buffAtk, btxt, 96, &popCol);
+		else if (dst->buffDef > defBefore) FormatBuffCallout(EF_BUFF_DEF, dst->buffDef, btxt, 96, &popCol);
+		else if (dst->buffAgi > agiBefore) FormatBuffCallout(EF_BUFF_AGI, dst->buffAgi, btxt, 96, &popCol);
+		if (btxt[0]) swprintf_s(popTxt, L"%s  %s", GoodFace(good), btxt);
+		else wcsncpy_s(popTxt, GoodFace(good), _TRUNCATE);
+		AddPopup(v3(dst->px, dst->py + 1.f, dst->pz), popTxt, popCol, 1, MSG_FACE);
+		AddLog(popTxt, popCol);
+	}
 	if (g->item == IT_RAISE || g->extra == 106 || g->extra == 116 || VaultKind(g) == 2) TacSfx(TS_RAISE);
 	else if (g->item == IT_ELIXIR) TacSfx(TS_HEAL);
 	else if (g->item == IT_MIGHT) TacSfx(TS_BUFF);
@@ -11981,6 +13410,7 @@ void Game::DrawCommandMenu()
 		if (x0 + mw > (float)m_w - U(8)) x0 = max(m_hud.margin, (float)m_w - mw - U(8));
 		return x0;
 	};
+	float menuSee = (m_dragPan && (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON)) ? 0.30f : 1.f;
 	float x = pinX(w), y = pinY;
 	if (m_phase == PH_P_ITEM) {
 		float iw = min(U(380.f), (float)m_w - U(24));
@@ -11990,7 +13420,7 @@ void Game::DrawCommandMenu()
 			float ph = bh * rows + gap * max(0, rows - 1) + U(16) + descH + gap;
 			y = pinY;
 			x = pinX(iw);
-			Panel(x - U(8), y - U(8), iw + U(16), ph);
+			Panel(x - U(8), y - U(8), iw + U(16), ph, menuSee);
 		};
 		if (m_itemAim < 0) {
 			int list[64], ln = 0;
@@ -12085,7 +13515,7 @@ void Game::DrawCommandMenu()
 			float ph = rowH * (shown + 2 + (pages > 1 ? 1 : 0) + (tn < 1 ? 1 : 0)) + gap * max(0, shown) + U(16) + descH;
 			y = pinY;
 			x = pinX(iw);
-			Panel(x - U(8), y - U(8), iw + U(16), ph);
+			Panel(x - U(8), y - U(8), iw + U(16), ph, menuSee);
 		}
 		m_r.HudText(gd ? GoodFace(m_itemAim) : L"?", x + U(8), y + U(14), U(15), RGBA8(255, 226, 150), 0, 1);
 		m_r.HudTextBox(gd ? GoodDesc(m_itemAim) : L"", x + U(8), y + U(30), iw - U(16), descH, U(12), RGBA8(214, 222, 234));
@@ -12100,6 +13530,7 @@ void Game::DrawCommandMenu()
 			if (Btn(ID_BT_ITT0 + (k - a), x, yy, iw, rowH, L"", help, FALSE, U(14))) { UseConsumable(m_itemAim, tg[k]); return; }
 			float ps = rowH - U(10);
 			DrawPortrait(BattlePortrait(tg[k]), x + U(4), yy + U(5), ps, tgU.team == TEAM_PLAYER ? RGBA8(120, 170, 255) : RGBA8(255, 120, 100));
+			DrawPortraitBuffs(tgU, x + U(4), yy + U(5), ps);
 			DWORD nameC = help ? RGBA8(248, 244, 236) : RGBA8(140, 140, 150);
 			DWORD subC = help ? RGBA8(196, 206, 224) : RGBA8(120, 120, 128);
 			m_r.HudText(nm, x + ps + U(14), yy + U(16), U(15), nameC, 0, 1);
@@ -12133,7 +13564,7 @@ void Game::DrawCommandMenu()
 		float ph = bh * rows + gap * 2 + U(112);
 		x = pinX(sw);
 		y = pinY;
-		Panel(x - U(8), y - U(8), sw + U(16), ph, .5f);
+		Panel(x - U(8), y - U(8), sw + U(16), ph, .5f * menuSee);
 		m_r.HudText(SummonWord(), x + sw * .5f, y + U(16), U(18), RGBA8(255, 210, 140), 1, 1);
 		float yy = y + U(36);
 		int hov = -1;
@@ -12224,7 +13655,7 @@ void Game::DrawCommandMenu()
 		}
 		y = pinY;
 		x = pinX(cw);
-		Panel(x - U(8), y - U(8), cw + U(16), bh * n + gapc * max(0, n - 1) + extra, .55f);
+		Panel(x - U(8), y - U(8), cw + U(16), bh * n + gapc * max(0, n - 1) + extra, .55f * menuSee);
 		BOOL hasSkill = FALSE, skillLive = FALSE;
 		for (int s = 0; s < SKL_COUNT; s++) {
 			if (IsFormSkill(s)) {
@@ -12339,7 +13770,7 @@ void Game::DrawCommandMenu()
 					Unit& gu = m_b.u[m_cur];
 					if (gu.buffDef < 1) gu.buffDef = 1;
 					AddPopup(v3(gu.px, gu.py + 1.f, gu.pz), TT(TX_BT_GUARD), RGBA8(180, 210, 255), 1, MSG_FACE);
-					AddLog(TT(TX_BT_GUARD), RGBA8(180, 210, 255));
+					{ wchar_t nm[40], lg[80]; UnitTitle(gu, nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(TX_BT_GUARD)); AddLog(lg, RGBA8(180, 210, 255)); }
 				}
 				FinishUnitTurn(0);
 				return;
@@ -12372,6 +13803,7 @@ void Game::DrawCommandMenu()
 				BOOL brk = m_b.map.At(ox, oz).gimm == GM_FENCE;
 				OpenDoor(m_b, ox, oz);
 				AddPopup(CellCenter(ox, oz) + v3(0, .6f, 0), TT(brk ? TX_BT_FENCE : TX_BT_DOOR), RGBA8(220, 200, 140), 1, MSG_SLAB);
+				{ wchar_t nm[40], lg[96]; UnitTitle(m_b.u[m_cur], nm, 40); swprintf_s(lg, L"%s  %s", nm, TT(brk ? TX_BT_FENCE : TX_BT_DOOR)); AddLog(lg, RGBA8(220, 200, 140)); }
 				TacSfx(TS_DOOR);
 				m_r.BuildTerrain(m_b.map);
 				FinishUnitTurn(1);
@@ -12535,7 +13967,7 @@ void Game::DrawCommandMenu()
 		x = pinX(sw);
 		y = pinY;
 		if (y < U(8)) y = U(8);
-		Panel(x - U(8), y - U(8), sw + U(16), ph, .48f);
+		Panel(x - U(8), y - U(8), sw + U(16), ph, .48f * menuSee);
 		float tw = (sw - gap * 3.f) / 4.f;
 		const int tabTx[4] = { TX_SK_TAB_ATK, TX_SK_TAB_HEAL, TX_SK_TAB_CRAFT, TX_SK_TAB_FORM };
 		for (int t = 0; t < 4; t++) {
@@ -12971,9 +14403,12 @@ void Game::DrawCutInUi()
 			UnitTitle(u, nm, 64);
 			unsigned __int64 tlv = CharTrueLv(u.ch);
 			swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNumU64(tlv));
-			const wchar_t* job = (u.team == TEAM_PLAYER || UnitIsHumanFoe(u) || u.monster < 0) ? ClassName(u.ch.cls) : MonsterLabel(u.monster);
+			const wchar_t* job = UnitClassOrRaceLabel(u);
 			if (!job) job = L"";
-			swprintf_s(sub, L"%s  %s", job, lv);
+			wchar_t btag[96] = L"";
+			AppendUnitBuffsText(u, btag, _countof(btag));
+			if (btag[0]) swprintf_s(sub, L"%s  %s  %s", job, lv, btag);
+			else swprintf_s(sub, L"%s  %s", job, lv);
 			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : FoeInk(u);
 			float nameFs = U(14);
 			float subFs = U(11);
@@ -13008,6 +14443,7 @@ void Game::DrawCutInUi()
 		};
 		col(m_cutAlly, m_cutAllyN, 0);
 		col(m_cutFoe, m_cutFoeN, 1);
+		float skillBanY0 = -1.f, skillBanY1 = -1.f;
 		if (m_seqSkill >= 0) {
 			const SkillDef& sd = SkillInfo(m_seqSkill);
 			DWORD ec = m_cutKind == 2 ? RGBA8(150, 214, 255) : ElemColor(sd.element);
@@ -13034,6 +14470,8 @@ void Game::DrawCutInUi()
 				if (fam == 2) { slideX = 0.f; slideY = -travel * .28f; }
 				else if (fam == 3) { slideX = 0.f; slideY = travel * .22f; }
 				else if (fam == 4) { slideX = 0.f; slideY = 0.f; }
+				skillBanY0 = by + slideY;
+				skillBanY1 = skillBanY0 + bh2;
 				m_r.HudRectGrad(-slideX, by + slideY, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(210 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(230 * a)));
 				float edgeH = (ougi || form || craft) ? U(7) : U(3);
 				m_r.HudRect(-slideX, by + slideY, (float)m_w, edgeH, RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
@@ -13043,23 +14481,65 @@ void Game::DrawCutInUi()
 					m_r.HudRect(m_w * .08f - slideX, by + slideY + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
 					m_r.HudRect(m_w * .92f + slideX, by + slideY + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
 				}
-				m_r.HudText(title, m_w * .5f, by + slideY + bh2 * .48f, ougi ? U(72) : (form || sum ? U(56) : (craft ? U(58) : (m_ult ? U(64) : U(44)))), ec, 1, 1, 1, a);
+				float titlePx = ougi ? U(72) : (form || sum ? U(56) : (craft ? U(58) : (m_ult ? U(64) : U(44))));
+				float titleCap = bh2 * 0.36f;
+				if (titlePx > titleCap) titlePx = titleCap;
+				m_r.HudText(title, m_w * .5f, by + slideY + bh2 * .40f, titlePx, ec, 1, 1, 1, a);
 				const wchar_t* kind = ougi ? TT(TX_OUGI) : (craft ? TT(TX_CRAFT) : (form ? TT(TX_SK_TAB_FORM) : (sum ? SummonRankWord(m_sumRank) : (m_ult ? TT(TX_BT_ULT) : NULL))));
 				if (kind) m_r.HudText(kind, m_w * .5f, by + slideY + U(22), form || ougi ? U(24) : U(18), form ? RGBA8(255, 220, 130) : RGBA8(255, 226, 150), 1, 1, 1, a);
 				wchar_t nm[64];
 				UnitTitle(m_b.u[m_cutA], nm, 64);
-				m_r.HudText(nm, m_w * .5f, by + slideY + bh2 * .82f, U(16), RGBA8(255, 255, 255), 1, 0, 1, a);
+				m_r.HudText(nm, m_w * .5f, by + slideY + bh2 * .86f, U(15), RGBA8(255, 255, 255), 1, 0, 1, a);
+				if (sd.kind == SK_BUFF) {
+					wchar_t bmsg[96];
+					DWORD bcol = RGBA8(150, 210, 255);
+					int turns = 3;
+					int pIdx = m_seqPrimary >= 0 && m_seqPrimary < m_b.nUnits ? m_seqPrimary : m_cutA;
+					const Unit& pu = m_b.u[pIdx];
+					if (sd.effect == EF_BUFF_ATK && pu.buffAtk > 0) turns = pu.buffAtk;
+					else if (sd.effect == EF_BUFF_DEF && pu.buffDef > 0) turns = pu.buffDef;
+					else if (sd.effect == EF_BUFF_AGI && pu.buffAgi > 0) turns = pu.buffAgi;
+					FormatBuffCallout(sd.effect, turns, bmsg, 96, &bcol);
+					float cw = max(U(320.f), m_r.TextWidth(bmsg, U(22), 1) + U(56.f));
+					float ch = U(38.f);
+					float cx0 = m_w * .5f - cw * .5f;
+					float cy0 = by + slideY + bh2 + U(10.f);
+					if (cy0 + ch > (float)m_h - bar - U(8.f)) cy0 = by + slideY - ch - U(10.f);
+					m_r.HudRect(cx0, cy0, cw, ch, RGBA8(8, 16, 28, (int)(225 * a)));
+					m_r.HudFrame(cx0, cy0, cw, ch, 1.5f, RGBA8(bcol & 255, (bcol >> 8) & 255, (bcol >> 16) & 255, (int)(245 * a)));
+					m_r.HudText(bmsg, m_w * .5f, cy0 + ch * .52f, U(20), bcol, 1, 1, 1, a);
+				}
 			}
 			if (m_cutStage == 2) {
 				const wchar_t* title = m_cutKind == 1 ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
 				const wchar_t* kind = m_cutKind == 1 ? (IsCraftSuper(m_seqSkill) ? TT(TX_OUGI) : TT(TX_CRAFT)) : (m_cutKind == 2 ? TT(TX_SK_TAB_FORM) : (m_cutKind == 3 ? SummonRankWord(m_sumRank) : NULL));
 				if (kind) m_r.HudText(kind, U(24), U(22), U(14), RGBA8(255, 220, 140), 0, 1);
 				m_r.HudText(title, U(24), kind ? U(42) : U(28), U(22), ec, 0, 1);
+				if (sd.kind == SK_BUFF) {
+					wchar_t bmsg[96];
+					DWORD bcol = RGBA8(150, 210, 255);
+					int turns = 3;
+					int pIdx = m_seqPrimary >= 0 && m_seqPrimary < m_b.nUnits ? m_seqPrimary : m_cutA;
+					const Unit& pu = m_b.u[pIdx];
+					if (sd.effect == EF_BUFF_ATK && pu.buffAtk > 0) turns = pu.buffAtk;
+					else if (sd.effect == EF_BUFF_DEF && pu.buffDef > 0) turns = pu.buffDef;
+					else if (sd.effect == EF_BUFF_AGI && pu.buffAgi > 0) turns = pu.buffAgi;
+					FormatBuffCallout(sd.effect, turns, bmsg, 96, &bcol);
+					float pulse = 0.85f + 0.15f * sinf(m_time * 9.f);
+					float cw = max(U(300.f), m_r.TextWidth(bmsg, U(20), 1) + U(48.f));
+					float ch = U(36.f);
+					float cx0 = m_w * .5f - cw * .5f;
+					float cy0 = bar + U(12.f);
+					m_r.HudRect(cx0, cy0, cw, ch, RGBA8(8, 18, 32, 215));
+					m_r.HudFrame(cx0, cy0, cw, ch, 1.5f, bcol);
+					m_r.HudText(bmsg, m_w * .5f, cy0 + ch * .52f, U(19) * pulse, bcol, 1, 1, 1, 1.f);
+				}
 			}
 		}
 		// 頭上に名前・職業・Lv。体が画面外なら出さない。はみ出す札だけ画面内へ寄せる。
 		auto cutTag = [&](int ui) {
 			if (ui < 0 || ui >= m_b.nUnits) return;
+			if (m_dieT[ui] >= 0.f || m_dispHp[ui] <= 0.5f) return;
 			const Unit& u = m_b.u[ui];
 			float hh = m_act[ui].height;
 			if (hh < 0.45f) hh = 0.9f;
@@ -13074,14 +14554,16 @@ void Game::DrawCutInUi()
 			V3 head = ActorPos(ui) + v3(0, hh + 0.18f, 0);
 			float sx, sy;
 			if (!m_r.ProjectToScreen(head, sx, sy)) { sx = cx; sy = cy - U(28); }
-			wchar_t nm[64], sub[96], lv[32];
+			wchar_t nm[64], sub[96], exp[128], lv[32];
 			UnitTitle(u, nm, 64);
-			unsigned __int64 tlv = CharTrueLv(u.ch);
+			unsigned __int64 tlv; int showExp, showNeed, leftExp;
+			CharExpView(u.ch, tlv, showExp, showNeed, leftExp);
 			swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNumU64(tlv));
-			const wchar_t* job = (u.team == TEAM_PLAYER || UnitIsHumanFoe(u) || u.monster < 0) ? ClassName(u.ch.cls) : MonsterLabel(u.monster);
+			const wchar_t* job = UnitClassOrRaceLabel(u);
 			if (!job) job = L"";
 			swprintf_s(sub, L"%s  %s", job, lv);
-			float labelW = min(U(240.f), max(U(96.f), (float)m_w * 0.46f));
+			swprintf_s(exp, L"%s %s/%s  %s%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed), TT(TX_EXP_LEFT), TacNum(leftExp));
+			float labelW = min(U(360.f), max(U(120.f), (float)m_w * 0.52f));
 			float half = labelW * 0.5f;
 			float edge = U(8);
 			float x0 = edge + half;
@@ -13091,15 +14573,19 @@ void Game::DrawCutInUi()
 			if (sx > x1) sx = x1;
 			float line1 = U(16);
 			float line2 = U(13);
-			float block = line1 + line2 + U(2);
+			float line3 = U(12);
+			float block = line1 + line2 + line3 + U(2);
 			float y0 = playT + U(2);
 			float y1 = playB - block - U(2);
 			if (y1 < y0) y0 = y1 = (playT + playB - block) * 0.5f;
 			if (sy < y0) sy = y0;
 			if (sy > y1) sy = y1;
+			if (m_cutStage == 1 && skillBanY0 >= 0.f && sy + block > skillBanY0 && sy < skillBanY1 && sx > (float)m_w * 0.06f && sx < (float)m_w * 0.94f)
+				return;
 			DWORD nc = u.team == TEAM_PLAYER ? RGBA8(186, 220, 255) : FoeInk(u);
 			m_r.HudText(nm, sx, sy, FitTextPx(nm, labelW, line1, 1), nc, 1, 1, 1);
 			m_r.HudText(sub, sx, sy + line1, FitTextPx(sub, labelW, line2, 1), RGBA8(255, 228, 170), 1, 0, 1);
+			m_r.HudText(exp, sx, sy + line1 + line2, FitTextPx(exp, labelW, line3, 0), RGBA8(180, 230, 255), 1, 0, 1);
 		};
 		for (int i = 0; i < m_cutAllyN; i++) cutTag(m_cutAlly[i]);
 		for (int i = 0; i < m_cutFoeN; i++) cutTag(m_cutFoe[i]);
@@ -13380,28 +14866,85 @@ void Game::DrawBattleUi()
 		else if (hx) swprintf_s(th, L"%s  %s", TT(ThemeNameTx(m_b.map.theme)), TT(hx));
 		else wcscpy_s(th, TT(ThemeNameTx(m_b.map.theme)));
 		swprintf_s(info, L"%s %s   %s %s / %s %s   %s %s", TT(TX_BT_ENDTURN), TacNum(m_b.turnCount + 1), TT(TX_BT_ALLY), TacNum(m_b.AliveCount(TEAM_PLAYER)), TT(TX_BT_ENEMY), TacNum(m_b.AliveCount(TEAM_ENEMY)), TT(TX_GOLD), TacNum(m_save.gold));
+		if (TacHasVar(m_b, TAC_VAR_FLOOD)) {
+			wchar_t bit[48];
+			if (!MapIsSpiral(m_b.map)) swprintf_s(bit, L"   %s", TT(TX_BT_FLOOD_FULL));
+			else {
+				int cap = FloodCeiling(m_b.map);
+				int left = FloodTurnsLeft(m_b.stampedeLine, cap, FloodStep(cap));
+				if (left <= 0) swprintf_s(bit, L"   %s", TT(TX_BT_FLOOD_FULL));
+				else swprintf_s(bit, TT(TX_BT_FLOOD_LEFT), TacNum(left));
+			}
+			wcscat_s(info, bit);
+		}
 		const wchar_t* sp = m_b.stampede ? TT(TX_BT_STAMPEDE) : NULL;
 		const wchar_t* spi = MapIsSpiral(m_b.map) ? TT(TX_BT_SPIRAL) : NULL;
 		int varTx = 0;
 		DWORD varCol = RGBA8(220, 220, 230), varHot = RGBA8(255, 255, 255);
-		if (m_b.sweep == TAC_VAR_SWEEP) { varTx = TX_BT_SWEEP; varCol = RGBA8(150, 220, 170); varHot = RGBA8(210, 255, 220); }
-		else if (m_b.sweep == TAC_VAR_REMNANT) { varTx = TX_BT_REMNANT; varCol = RGBA8(210, 180, 110); varHot = RGBA8(240, 220, 160); }
-		else if (m_b.sweep == TAC_VAR_BOSS) { varTx = TX_BT_BOSSMAP; varCol = RGBA8(255, 160, 80); varHot = RGBA8(255, 210, 150); }
-		else if (m_b.sweep == TAC_VAR_SCAR) { varTx = TX_BT_SCAR; varCol = RGBA8(220, 130, 130); varHot = RGBA8(255, 190, 180); }
-		else if (m_b.sweep == TAC_VAR_MIST) { varTx = TX_BT_MIST; varCol = RGBA8(170, 190, 210); varHot = RGBA8(220, 235, 245); }
-		else if (m_b.sweep == TAC_VAR_RAID) { varTx = TX_BT_RAID; varCol = RGBA8(150, 160, 220); varHot = RGBA8(200, 210, 255); }
-		else if (m_b.sweep == TAC_VAR_AMBUSH) { varTx = TX_BT_AMBUSH; varCol = RGBA8(220, 150, 80); varHot = RGBA8(255, 200, 140); }
-		else if (m_b.sweep == TAC_VAR_TWIN) { varTx = TX_BT_TWIN; varCol = RGBA8(220, 110, 150); varHot = RGBA8(255, 180, 200); }
-		else if (m_b.sweep == TAC_VAR_VAULT) { varTx = TX_BT_VAULT; varCol = RGBA8(220, 190, 80); varHot = RGBA8(255, 230, 150); }
-		else if (m_b.sweep == TAC_VAR_BLESS) { varTx = TX_BT_BLESS; varCol = RGBA8(140, 210, 180); varHot = RGBA8(200, 245, 220); }
-		else if (m_b.sweep == TAC_VAR_RAGE) { varTx = TX_BT_RAGE; varCol = RGBA8(255, 90, 50); varHot = RGBA8(255, 180, 140); }
-		else if (m_b.sweep == TAC_VAR_RING) { varTx = TX_BT_RING; varCol = RGBA8(255, 160, 70); varHot = RGBA8(255, 210, 150); }
-		else if (m_b.sweep == TAC_VAR_FALL) { varTx = TX_BT_FALL; varCol = RGBA8(180, 140, 100); varHot = RGBA8(230, 200, 160); }
-		else if (m_b.sweep == TAC_VAR_FLOOD) { varTx = TX_BT_FLOOD; varCol = RGBA8(80, 150, 220); varHot = RGBA8(170, 210, 255); }
-		else if (m_b.sweep == TAC_VAR_WAVE) { varTx = TX_BT_WAVE; varCol = RGBA8(60, 130, 210); varHot = RGBA8(160, 200, 255); }
-		else if (m_b.sweep == TAC_VAR_VEIL) { varTx = TX_BT_VEIL; varCol = RGBA8(200, 170, 120); varHot = RGBA8(240, 220, 180); }
-		else if (m_b.sweep == TAC_VAR_DUST) { varTx = TX_BT_DUST; varCol = RGBA8(180, 150, 90); varHot = RGBA8(230, 200, 150); }
-		const wchar_t* swp = varTx ? TT(varTx) : NULL;
+		if (TacHasVar(m_b, TAC_VAR_SWEEP)) { varTx = TX_BT_SWEEP; varCol = RGBA8(150, 220, 170); varHot = RGBA8(210, 255, 220); }
+		else if (TacHasVar(m_b, TAC_VAR_REMNANT)) { varTx = TX_BT_REMNANT; varCol = RGBA8(210, 180, 110); varHot = RGBA8(240, 220, 160); }
+		else if (TacHasVar(m_b, TAC_VAR_BOSS)) { varTx = TX_BT_BOSSMAP; varCol = RGBA8(255, 160, 80); varHot = RGBA8(255, 210, 150); }
+		else if (TacHasVar(m_b, TAC_VAR_SCAR)) { varTx = TX_BT_SCAR; varCol = RGBA8(220, 130, 130); varHot = RGBA8(255, 190, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_MIST)) { varTx = TX_BT_MIST; varCol = RGBA8(170, 190, 210); varHot = RGBA8(220, 235, 245); }
+		else if (TacHasVar(m_b, TAC_VAR_RAID)) { varTx = TX_BT_RAID; varCol = RGBA8(150, 160, 220); varHot = RGBA8(200, 210, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_AMBUSH)) { varTx = TX_BT_AMBUSH; varCol = RGBA8(220, 150, 80); varHot = RGBA8(255, 200, 140); }
+		else if (TacHasVar(m_b, TAC_VAR_TWIN)) { varTx = TX_BT_TWIN; varCol = RGBA8(220, 110, 150); varHot = RGBA8(255, 180, 200); }
+		else if (TacHasVar(m_b, TAC_VAR_VAULT)) { varTx = TX_BT_VAULT; varCol = RGBA8(220, 190, 80); varHot = RGBA8(255, 230, 150); }
+		else if (TacHasVar(m_b, TAC_VAR_BLESS)) { varTx = TX_BT_BLESS; varCol = RGBA8(140, 210, 180); varHot = RGBA8(200, 245, 220); }
+		else if (TacHasVar(m_b, TAC_VAR_RAGE)) { varTx = TX_BT_RAGE; varCol = RGBA8(255, 90, 50); varHot = RGBA8(255, 180, 140); }
+		else if (TacHasVar(m_b, TAC_VAR_RING)) { varTx = TX_BT_RING; varCol = RGBA8(255, 160, 70); varHot = RGBA8(255, 210, 150); }
+		else if (TacHasVar(m_b, TAC_VAR_FALL)) { varTx = TX_BT_FALL; varCol = RGBA8(180, 140, 100); varHot = RGBA8(230, 200, 160); }
+		else if (TacHasVar(m_b, TAC_VAR_FLOOD)) { varTx = TX_BT_FLOOD; varCol = RGBA8(80, 150, 220); varHot = RGBA8(170, 210, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_WAVE)) { varTx = TX_BT_WAVE; varCol = RGBA8(60, 130, 210); varHot = RGBA8(160, 200, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_VEIL)) { varTx = TX_BT_VEIL; varCol = RGBA8(200, 170, 120); varHot = RGBA8(240, 220, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_DUST)) { varTx = TX_BT_DUST; varCol = RGBA8(180, 150, 90); varHot = RGBA8(230, 200, 150); }
+		else if (TacHasVar(m_b, TAC_VAR_FAULT)) { varTx = TX_BT_FAULT; varCol = RGBA8(210, 170, 110); varHot = RGBA8(245, 220, 170); }
+		else if (TacHasVar(m_b, TAC_VAR_FROST)) { varTx = TX_BT_FROST; varCol = RGBA8(170, 220, 255); varHot = RGBA8(220, 240, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_GRAV)) { varTx = TX_BT_GRAV; varCol = RGBA8(160, 140, 190); varHot = RGBA8(210, 200, 235); }
+		else if (TacHasVar(m_b, TAC_VAR_RECOIL)) { varTx = TX_BT_RECOIL; varCol = RGBA8(230, 180, 90); varHot = RGBA8(255, 220, 160); }
+		wchar_t mixChip[80];
+		mixChip[0] = 0;
+		if (TacSweepBits(m_b.sweep) > 1) {
+			int mask = TacSweepMask(m_b.sweep);
+			for (int k = 1; k < TAC_VAR_COUNT && wcslen(mixChip) < 48; k++) {
+				if ((mask & (1 << k)) == 0) continue;
+				int id = 0;
+				switch (k) {
+				case TAC_VAR_SWEEP: id = TX_BT_SWEEP; break;
+				case TAC_VAR_REMNANT: id = TX_BT_REMNANT; break;
+				case TAC_VAR_BOSS: id = TX_BT_BOSSMAP; break;
+				case TAC_VAR_SCAR: id = TX_BT_SCAR; break;
+				case TAC_VAR_MIST: id = TX_BT_MIST; break;
+				case TAC_VAR_RAID: id = TX_BT_RAID; break;
+				case TAC_VAR_AMBUSH: id = TX_BT_AMBUSH; break;
+				case TAC_VAR_TWIN: id = TX_BT_TWIN; break;
+				case TAC_VAR_VAULT: id = TX_BT_VAULT; break;
+				case TAC_VAR_BLESS: id = TX_BT_BLESS; break;
+				case TAC_VAR_RAGE: id = TX_BT_RAGE; break;
+				case TAC_VAR_RING: id = TX_BT_RING; break;
+				case TAC_VAR_FALL: id = TX_BT_FALL; break;
+				case TAC_VAR_FLOOD: id = TX_BT_FLOOD; break;
+				case TAC_VAR_WAVE: id = TX_BT_WAVE; break;
+				case TAC_VAR_VEIL: id = TX_BT_VEIL; break;
+				case TAC_VAR_DUST: id = TX_BT_DUST; break;
+				case TAC_VAR_FAULT: id = TX_BT_FAULT; break;
+				case TAC_VAR_FROST: id = TX_BT_FROST; break;
+				case TAC_VAR_GRAV: id = TX_BT_GRAV; break;
+				case TAC_VAR_RECOIL: id = TX_BT_RECOIL; break;
+				}
+				if (!id) continue;
+				wchar_t sh[24];
+				wcsncpy_s(sh, TT(id), _TRUNCATE);
+				wchar_t* cut = wcsstr(sh, L"ステージ");
+				if (cut) *cut = 0;
+				if (mixChip[0]) wcscat_s(mixChip, L"＋");
+				wcscat_s(mixChip, sh);
+			}
+			wcscat_s(mixChip, L"マップ");
+			varCol = RGBA8(230, 210, 150);
+			varHot = RGBA8(255, 240, 200);
+		}
+		const wchar_t* swp = mixChip[0] ? mixChip : (varTx ? TT(varTx) : NULL);
 		float fs = U(17), sfs = U(13), ifs = U(12);
 		float need = U(42) + m_r.TextWidth(l, fs, 0) + U(18) + m_r.TextWidth(th, sfs, 0);
 		float infoNeed = m_r.TextWidth(info, ifs, 0) + U(28);
@@ -13467,6 +15010,15 @@ void Game::DrawBattleUi()
 	}
 	float partyRight = m_hud.margin;
 	float partyBottom = m_hud.partyT;
+	BYTE linkMark[MAX_UNITS];
+	memset(linkMark, 0, sizeof(linkMark));
+	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cur < m_b.nUnits && CursorInAttackRange()) {
+		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
+			int ax = m_cx, az = m_cz;
+			if (SkillInfo(m_cmdSkill).rMax == 0) { ax = m_b.u[m_cur].x; az = m_b.u[m_cur].z; }
+			MarkJoiners(m_b, m_cur, m_cmdSkill, ax, az, m_cLayer, linkMark);
+		} else MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, linkMark);
+	}
 	{
 		int ids[MAX_PARTY];
 		int nP = 0;
@@ -13513,14 +15065,18 @@ void Game::DrawBattleUi()
 				const Unit& u = m_b.u[ids[k]];
 				float ay = top + k * row;
 				float rh = row;
-				wchar_t nm[48], lv[48], job[64], fr[64];
+				wchar_t nm[48], showNm[64], lv[48], job[64], fr[96];
 				UnitTitle(u, nm, 48);
 				unsigned __int64 tlv; int showExp, showNeed, leftExp;
 				CharExpView(u.ch, tlv, showExp, showNeed, leftExp);
-				(void)leftExp;
+				BOOL linked = ids[k] >= 0 && ids[k] < MAX_UNITS && linkMark[ids[k]];
 				swprintf_s(lv, L"%s%s", TT(TX_MISC_LV), TacNumU64(tlv));
 				wcscpy_s(job, ClassName(u.ch.cls));
-				swprintf_s(fr, L"%s %s/%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed));
+				if (linked) swprintf_s(fr, L"%s/%s %s%s", TacNum(showExp), TacNum(showNeed), TT(TX_EXP_LEFT), TacNum(leftExp));
+				else swprintf_s(fr, L"%s %s/%s", TT(TX_MISC_EXP), TacNum(showExp), TacNum(showNeed));
+				if (linked) swprintf_s(showNm, L"%s %s", TT(TX_MK_LINK), nm);
+				else wcscpy_s(showNm, nm);
+				if (linked) m_r.HudRect(x0, ay, colW, max(1.f, rh - 1.f), RGBA8(16, 88, 82, 210));
 				BOOL rowHit = Hit(x0, ay, colW, rh);
 				if (rowHit) m_r.HudRect(x0, ay, colW, max(1.f, rh - 1.f), u.alive ? RGBA8(255, 255, 255, 28) : RGBA8(255, 160, 140, 46));
 				BOOL lookOk = m_phase != PH_P_MOVE && m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET
@@ -13558,9 +15114,9 @@ void Game::DrawBattleUi()
 				float lvMax = min(inner * 0.34f, U(78.f));
 				float nameMax = inner - lvMax - U(4);
 				if (nameMax < 12.f) nameMax = 12.f;
-				m_r.HudText(nm, x0 + pad, y1, FitTextPx(nm, nameMax, fs, 0), nc, 0, 0);
+				m_r.HudText(showNm, x0 + pad, y1, FitTextPx(showNm, nameMax, fs, 0), linked ? RGBA8(170, 255, 230) : nc, 0, 0);
 				m_r.HudText(lv, x0 + colW - pad, y1, FitTextPx(lv, lvMax, fs, 0), ic, 2, 0);
-				float jobMax = inner * 0.42f;
+				float jobMax = linked ? inner * 0.34f : inner * 0.42f;
 				float expMax = inner - jobMax - U(4);
 				if (expMax < 16.f) { expMax = inner * 0.62f; jobMax = inner - expMax - U(4); }
 				if (jobMax < 12.f) jobMax = 12.f;
@@ -13619,16 +15175,7 @@ void Game::DrawBattleUi()
 		aimTotal = n;
 		for (int k = 0; k < n; k++) if (tg[k] >= 0 && tg[k] < MAX_UNITS) aimMark[tg[k]] = k + 1;
 	}
-	BYTE linkMark[MAX_UNITS];
-	memset(linkMark, 0, sizeof(linkMark));
-	if ((m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && m_cur >= 0 && m_cur < m_b.nUnits && CursorInAttackRange()) {
-		if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0) {
-			int ax = m_cx, az = m_cz;
-			if (SkillInfo(m_cmdSkill).rMax == 0) { ax = m_b.u[m_cur].x; az = m_b.u[m_cur].z; }
-			MarkJoiners(m_b, m_cur, m_cmdSkill, ax, az, m_cLayer, linkMark);
-		} else MarkJoiners(m_b, m_cur, -1, m_cx, m_cz, m_cLayer, linkMark);
-	}
-	float usedSx[MAX_UNITS], usedSy[MAX_UNITS];
+	float usedSx[MAX_UNITS], usedSy[MAX_UNITS], usedTop[MAX_UNITS], usedBot[MAX_UNITS];
 	int usedN = 0;
 	float barBx[48], barBy[48], barBw[48], barBh[48];
 	int barBn = 0;
@@ -13648,12 +15195,34 @@ void Game::DrawBattleUi()
 		if (u.team != TEAM_PLAYER && dx * dx + dz * dz > barFar * barFar) continue;
 		float sx, sy;
 		if (!m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + .12f, u.pz), sx, sy)) continue;
-		if (linkMark[i] && i != m_cur) {
-			float lx, ly;
-			if (m_r.ProjectToScreen(v3(u.px, u.py + m_act[i].height + 0.72f, u.pz), lx, ly))
-				m_r.HudText(TT(TX_MK_LINK), lx, ly, U(16), RGBA8(170, 255, 230), 1, 1);
+		if (i == m_cur && m_phase == PH_P_MOVE && !m_moved && u.team == TEAM_PLAYER && u.alive && !m_statOpen && !m_demo) {
+			float bw = U(72), bh = U(24);
+			float bx = sx + U(28);
+			float by = sy - bh * 0.5f;
+			if (bx < m_hud.partyR + U(4)) bx = m_hud.partyR + U(6);
+			if (bx + bw > m_hud.orderX - U(6)) bx = sx - bw - U(10);
+			if (by < U(8)) by = U(8);
+			if (by + bh > (float)m_h - U(8)) by = (float)m_h - bh - U(8);
+			m_btnSfx = TS_BLOCK;
+			if (Btn(ID_BT_WAIT, bx, by, bw, bh, TT(TX_BT_GUARD), TRUE, FALSE, U(12))) {
+				Unit& gu = m_b.u[m_cur];
+				if (gu.buffDef < 1) gu.buffDef = 1;
+				AddPopup(v3(gu.px, gu.py + 1.f, gu.pz), TT(TX_BT_GUARD), RGBA8(180, 210, 255), 1, MSG_FACE);
+				wchar_t gnm[40], glg[80];
+				UnitTitle(gu, gnm, 40);
+				swprintf_s(glg, L"%s  %s", gnm, TT(TX_BT_GUARD));
+				AddLog(glg, RGBA8(180, 210, 255));
+				FinishUnitTurn(0);
+				break;
+			}
 		}
 		float bw = U(36);
+		BOOL off = (sx < 0.f || sy < 0.f || sx > (float)m_w || sy > (float)m_h);
+		// 左のパーティ一覧やステージ見出しの裏に隠れたユニットの頭上バー・距離表示が文字へ被らないよう抑止
+		if (!off) {
+			if (sx < partyRight + bw * .5f + U(4) && sy >= m_hud.partyT - U(12) && sy <= partyBottom + U(12)) continue;
+			if (sx < m_hud.stageR + bw * .5f + U(4) && sy <= m_hud.stageB + U(12)) continue;
+		}
 		int cells = 0;
 		int noPath = 0;
 		if (u.team == TEAM_ENEMY) {
@@ -13674,29 +15243,54 @@ void Game::DrawBattleUi()
 			if (a > 255) a = 255;
 			return (c & 0x00ffffff) | ((DWORD)a << 24);
 		};
-		BOOL off = (sx < 0.f || sy < 0.f || sx > (float)m_w || sy > (float)m_h);
-		float xMin = bw * .5f + U(4);
+		BOOL showLinkTag = (linkMark[i] && i != m_cur);
+		BOOL showDist = (u.team == TEAM_ENEMY && cells > 0 && (off || cells >= 4));
+		float myTop = showLinkTag ? U(20) : (showDist ? U(14) : U(3));
+		float myBot = (u.ch.stat[S_MP] > 0) ? U(16) : U(11);
+		float xMin = max(bw * .5f + U(4), partyRight + bw * .5f + U(8));
 		float xMax = m_hud.orderX - U(8) - bw * .5f;
 		if (xMax < xMin) xMax = xMin;
-		float yMin = U(10);
-		float yMax = (float)m_h - U(18);
-		if (sx + bw * .5f > m_hud.orderX - U(4))
-			sx = xMax;
-		for (int uix = 0; uix < usedN; uix++) {
-			if (fabsf(sy - usedSy[uix]) < U(16) && fabsf(sx - usedSx[uix]) < bw + U(8))
-				sx += (uix & 1) ? U(22) : -U(22);
-		}
+		float yMin = U(10) + myTop;
+		float yMax = (float)m_h - U(10) - myBot;
+		if (yMax < yMin) yMax = yMin;
 		if (sx < xMin) sx = xMin;
 		if (sx > xMax) sx = xMax;
 		if (sy < yMin) sy = yMin;
 		if (sy > yMax) sy = yMax;
-		if (usedN < MAX_UNITS) { usedSx[usedN] = sx; usedSy[usedN] = sy; usedN++; }
+		for (int pass = 0; pass < 6; pass++) {
+			BOOL moved = FALSE;
+			for (int uix = 0; uix < usedN; uix++) {
+				float needW = bw + U(10);
+				if (fabsf(sx - usedSx[uix]) < needW && (sy - myTop) < (usedSy[uix] + usedBot[uix] + U(2)) && (sy + myBot) > (usedSy[uix] - usedTop[uix] - U(2))) {
+					float upY = usedSy[uix] - usedTop[uix] - myBot - U(3);
+					if (upY >= yMin) sy = upY;
+					else sx += (sx <= usedSx[uix]) ? -(needW - fabsf(sx - usedSx[uix]) + U(2)) : (needW - fabsf(sx - usedSx[uix]) + U(2));
+					if (sx < xMin) sx = xMin;
+					if (sx > xMax) sx = xMax;
+					if (sy < yMin) sy = yMin;
+					if (sy > yMax) sy = yMax;
+					moved = TRUE;
+				}
+			}
+			if (!moved) break;
+		}
+		if (usedN < MAX_UNITS) { usedSx[usedN] = sx; usedSy[usedN] = sy; usedTop[usedN] = myTop; usedBot[usedN] = myBot; usedN++; }
 		if (barBn < 48) {
 			barBx[barBn] = sx - bw * .5f - U(20);
-			barBy[barBn] = sy - U(20);
+			barBy[barBn] = sy - myTop - U(4);
 			barBw[barBn] = bw + U(40);
-			barBh[barBn] = U(36);
+			barBh[barBn] = myTop + myBot + U(8);
 			barBn++;
+		}
+		if (showLinkTag) {
+			const wchar_t* ltxt = TT(TX_MK_LINK);
+			float lfs = U(12);
+			float lpw = max(U(20), m_r.TextWidth(ltxt, lfs, 1) + U(8));
+			float lph = U(16);
+			float lpy = sy - lph - U(3);
+			m_r.HudRect(sx - lpw * .5f, lpy, lpw, lph, RGBA8(8, 36, 34, 224));
+			m_r.HudFrame(sx - lpw * .5f, lpy, lpw, lph, 1.f, RGBA8(110, 235, 210, 220));
+			m_r.HudText(ltxt, sx, lpy + lph * .5f, lfs, RGBA8(175, 255, 232), 1, 1);
 		}
 		float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
 		DWORD col = !u.alive ? RGBA8(150, 150, 160) : (u.team == TEAM_PLAYER ? RGBA8(80, 220, 120) : FoeBarCol(u));
@@ -13706,7 +15300,7 @@ void Game::DrawBattleUi()
 			m_r.HudText(L"☆", sx - bw * .5f - U(2), sy - U(1), U(11), fadeA(RGBA8(80, 235, 255)), 2, 0, 1, fade);
 		else if (UnitIsHumanFoe(u) && u.alive)
 			m_r.HudText(UnitFoeMark(u), sx - bw * .5f - U(2), sy - U(1), U(11), fadeA(RGBA8(220, 140, 255)), 2, 0, 1, fade);
-		if (u.team == TEAM_ENEMY && cells > 0 && (off || cells >= 4)) {
+		if (showDist) {
 			wchar_t dlab[24];
 			swprintf_s(dlab, L"%d%s", cells, LangPick14(L"マス", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
 			m_r.HudText(dlab, sx, sy - U(8), U(9), RGBA8(255, 236, 200), 1, 0, 1, fade);
@@ -13921,6 +15515,7 @@ void Game::DrawBattleUi()
 	DrawBattleLog(logX, logTop, logW, logH);
 	if (m_seqCut && m_cutStage == 4) DrawCutInUi();
 	// 地形情報
+	float terrX = 0, terrY = 0, terrW = 0, terrH = 0;
 	if (m_cursorValid && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)) {
 		const Cell& c = m_b.map.At(m_cx, m_cz);
 		int useL = (m_cLayer >= 0 && LayerOn(c, m_cLayer)) ? m_cLayer : 0;
@@ -13964,6 +15559,7 @@ void Game::DrawBattleUi()
 		if (tx < panelX) { tx = panelX; tw = max(40.f, m_hud.col - gap - tx); }
 		if (ty >= 0.f && tx + 40.f < m_hud.col) {
 			if (tx + tw > m_hud.col - 4.f) tw = m_hud.col - 4.f - tx;
+			terrX = tx; terrY = ty; terrW = tw; terrH = U(30);
 			m_r.HudPanel(tx, ty, tw, U(30), RGBA8(16, 20, 36, 210), RGBA8(150, 128, 86));
 			m_r.HudText(l, tx + U(12), ty + U(15), FitTextPx(l, tw - U(20), U(13), 0), RGBA8(236, 236, 240), 0, 0);
 		}
@@ -14065,6 +15661,101 @@ void Game::DrawBattleUi()
 			}
 		}
 	}
+	// 連携パネルはヒント帯・予測・カード・ログ・地形バーを避けて配置し、一切の文字被りを防ぐ
+	float linkX = 0, linkY = 0, linkW = 0, linkH = 0;
+	{
+		int lk[MAX_PARTY];
+		int ln = 0;
+		for (int i = 0; i < m_b.nUnits && ln < MAX_PARTY; i++)
+			if (i < MAX_UNITS && linkMark[i] && m_b.u[i].team == TEAM_PLAYER && m_b.u[i].alive) lk[ln++] = i;
+		for (int a = 1; a < ln; a++) {
+			int v = lk[a];
+			unsigned __int64 lv = CharTrueLv(m_b.u[v].ch);
+			int b = a;
+			while (b > 0 && CharTrueLv(m_b.u[lk[b - 1]].ch) > lv) { lk[b] = lk[b - 1]; b--; }
+			lk[b] = v;
+		}
+		if (ln > 0) {
+			float minX = partyRight + U(8);
+			float maxX = m_hud.col - U(8);
+			float availW = maxX - minX;
+			if (availW >= U(150)) {
+				auto xHits = [](float ax, float aw, float bx, float bw) -> BOOL {
+					return bw > 1.f && ax < bx + bw + 2.f && ax + aw > bx - 2.f;
+				};
+				auto calcSlot = [&](float cx, float cw, float& outY, float& outBot) {
+					float y0 = m_hud.partyT;
+					if (hintH > 1.f && xHits(cx, cw, hintX, hintW)) y0 = max(y0, hintY + hintH + U(6));
+					if (fh > 1.f && xHits(cx, cw, fx, fw)) y0 = max(y0, fy + fh + U(6));
+					float b0 = (float)m_h - U(8);
+					if (cardH > 1.f && xHits(cx, cw, cardX, cardW)) b0 = min(b0, cardY - U(6));
+					if (hovH > 1.f && xHits(cx, cw, hovX, hovW)) b0 = min(b0, hovY - U(6));
+					if (logH > 1.f && xHits(cx, cw, logX, logW)) b0 = min(b0, logTop - U(6));
+					if (terrH > 1.f && xHits(cx, cw, terrX, terrW)) b0 = min(b0, terrY - U(6));
+					outY = y0;
+					outBot = b0;
+				};
+				float wantH = U(20) + U(18) * (float)ln + U(4);
+				float bestX = minX, bestW = min(U(300.f), availW), bestY = m_hud.partyT, bestRoom = -1.f;
+				auto trySlot = [&](float cx, float cw) {
+					if (cw < U(150)) return;
+					if (cx < minX) cx = minX;
+					if (cx + cw > maxX) cw = maxX - cx;
+					if (cw < U(150)) return;
+					float y0, b0;
+					calcSlot(cx, cw, y0, b0);
+					float rm = b0 - y0;
+					if (bestRoom < 0.f || (bestRoom < wantH && rm > bestRoom + 1.f)) {
+						bestRoom = rm; bestX = cx; bestW = cw; bestY = y0;
+					}
+				};
+				// 候補1: 左寄り（パーティ欄のすぐ右・ヒント帯の下）
+				trySlot(minX, min(U(300.f), availW));
+				// 候補2: 予測パネルの左側または右側
+				if (fh > 1.f) {
+					float leftRoomW = fx - U(8) - minX;
+					if (leftRoomW >= U(160)) trySlot(minX, min(U(300.f), leftRoomW));
+					float rightX = fx + fw + U(8);
+					if (maxX - rightX >= U(160)) trySlot(rightX, min(U(300.f), maxX - rightX));
+				}
+				// 候補3: 右寄り（ホバーカードと干渉しにくい側）
+				if (availW >= U(220)) {
+					float rw = min(U(300.f), availW);
+					trySlot(maxX - rw, rw);
+				}
+				float lx = bestX, lw = bestW, ly = bestY;
+				float maxH = bestRoom;
+				if (maxH >= U(38)) {
+					float headH = U(20);
+					float rh = U(18);
+					float needH = headH + rh * (float)ln + U(4);
+					if (needH > maxH) {
+						float shrink = (maxH - headH - U(4)) / (float)ln;
+						rh = Clampf(shrink, U(13.5f), U(18.f));
+					}
+					int fit = (int)((maxH - headH - U(2)) / rh);
+					if (fit > ln) fit = ln;
+					if (fit < 1) fit = 1;
+					float lh = min(maxH, headH + rh * (float)fit + U(4));
+					linkX = lx; linkY = ly; linkW = lw; linkH = lh;
+					m_r.HudRect(lx, ly, lw, lh, RGBA8(8, 28, 28, 224));
+					m_r.HudFrame(lx, ly, lw, lh, 1.f, RGBA8(120, 220, 200, 220));
+					const wchar_t* hd = LangPick14(L"連携", L"Link", L"Lien", L"Legame", L"Enlace", L"연계", L"连携", L"ربط", L"Связь", L"Verbund", L"Elo", L"Schakel", L"Więź", L"Bağ");
+					m_r.HudText(hd, lx + U(6), ly + headH * .5f, U(12), RGBA8(170, 255, 230), 0, 1);
+					float lineFs = min(U(12.f), rh * 0.72f);
+					for (int k = 0; k < fit; k++) {
+						const Unit& lu = m_b.u[lk[k]];
+						wchar_t nm[40], line[128];
+						UnitTitle(lu, nm, 40);
+						unsigned __int64 tlv; int showExp, showNeed, leftExp;
+						CharExpView(lu.ch, tlv, showExp, showNeed, leftExp);
+						swprintf_s(line, L"%s  %s%s  %s/%s  %s%s", nm, TT(TX_MISC_LV), TacNumU64(tlv), TacNum(showExp), TacNum(showNeed), TT(TX_EXP_LEFT), TacNum(leftExp));
+						m_r.HudText(line, lx + U(6), ly + headH + k * rh + rh * 0.5f, FitTextPx(line, lw - U(12), lineFs, 0), RGBA8(220, 245, 240), 0, 0);
+					}
+				}
+			}
+		}
+	}
 	if (aimHold && (aimCount[0] || aimTagN > 0)) {
 		float pxC = U(14), pxG = U(12);
 		float lineC = pxC * 1.7f + 4.f;
@@ -14091,6 +15782,8 @@ void Game::DrawBattleUi()
 		addB(logX, logTop, logW, logH);
 		addB(fx, fy, fw, fh);
 		addB(hintX, hintY, hintW, hintH);
+		addB(linkX, linkY, linkW, linkH);
+		addB(terrX, terrY, terrW, terrH);
 		addB(miniLeft, miniTop, ms, (float)nMap * miniStep);
 		addB(aimSx - U(22), aimSy - U(22), U(44), U(44));
 		for (int i = 0; i < barBn; i++) addB(barBx[i], barBy[i], barBw[i], barBh[i]);
@@ -14270,22 +15963,27 @@ void Game::DrawBattleUi()
 	if (varHov) {
 		int help = TX_BT_SWEEP_HELP;
 		DWORD edge = RGBA8(140, 210, 160), ink = RGBA8(220, 245, 226);
-		if (m_b.sweep == TAC_VAR_REMNANT) { help = TX_BT_REMNANT_HELP; edge = RGBA8(190, 160, 80); ink = RGBA8(245, 230, 190); }
-		else if (m_b.sweep == TAC_VAR_BOSS) { help = TX_BT_BOSSMAP_HELP; edge = RGBA8(210, 120, 50); ink = RGBA8(255, 220, 180); }
-		else if (m_b.sweep == TAC_VAR_SCAR) { help = TX_BT_SCAR_HELP; edge = RGBA8(180, 80, 80); ink = RGBA8(255, 210, 200); }
-		else if (m_b.sweep == TAC_VAR_MIST) { help = TX_BT_MIST_HELP; edge = RGBA8(140, 170, 190); ink = RGBA8(220, 235, 245); }
-		else if (m_b.sweep == TAC_VAR_RAID) { help = TX_BT_RAID_HELP; edge = RGBA8(110, 120, 190); ink = RGBA8(210, 215, 245); }
-		else if (m_b.sweep == TAC_VAR_AMBUSH) { help = TX_BT_AMBUSH_HELP; edge = RGBA8(190, 120, 50); ink = RGBA8(255, 220, 180); }
-		else if (m_b.sweep == TAC_VAR_TWIN) { help = TX_BT_TWIN_HELP; edge = RGBA8(180, 70, 110); ink = RGBA8(255, 210, 220); }
-		else if (m_b.sweep == TAC_VAR_VAULT) { help = TX_BT_VAULT_HELP; edge = RGBA8(180, 150, 50); ink = RGBA8(255, 235, 190); }
-		else if (m_b.sweep == TAC_VAR_BLESS) { help = TX_BT_BLESS_HELP; edge = RGBA8(80, 170, 140); ink = RGBA8(210, 245, 225); }
-		else if (m_b.sweep == TAC_VAR_RAGE) { help = TX_BT_RAGE_HELP; edge = RGBA8(200, 70, 40); ink = RGBA8(255, 210, 180); }
-		else if (m_b.sweep == TAC_VAR_RING) { help = TX_BT_RING_HELP; edge = RGBA8(200, 120, 40); ink = RGBA8(255, 220, 180); }
-		else if (m_b.sweep == TAC_VAR_FALL) { help = TX_BT_FALL_HELP; edge = RGBA8(140, 100, 70); ink = RGBA8(240, 220, 190); }
-		else if (m_b.sweep == TAC_VAR_FLOOD) { help = TX_BT_FLOOD_HELP; edge = RGBA8(50, 110, 180); ink = RGBA8(200, 225, 255); }
-		else if (m_b.sweep == TAC_VAR_WAVE) { help = TX_BT_WAVE_HELP; edge = RGBA8(40, 100, 170); ink = RGBA8(190, 220, 255); }
-		else if (m_b.sweep == TAC_VAR_VEIL) { help = TX_BT_VEIL_HELP; edge = RGBA8(160, 130, 80); ink = RGBA8(245, 230, 200); }
-		else if (m_b.sweep == TAC_VAR_DUST) { help = TX_BT_DUST_HELP; edge = RGBA8(150, 120, 60); ink = RGBA8(240, 220, 180); }
+		if (TacSweepBits(m_b.sweep) > 1) { help = TX_BT_MIX_HELP; edge = RGBA8(190, 160, 90); ink = RGBA8(245, 230, 200); }
+		else if (TacHasVar(m_b, TAC_VAR_REMNANT)) { help = TX_BT_REMNANT_HELP; edge = RGBA8(190, 160, 80); ink = RGBA8(245, 230, 190); }
+		else if (TacHasVar(m_b, TAC_VAR_BOSS)) { help = TX_BT_BOSSMAP_HELP; edge = RGBA8(210, 120, 50); ink = RGBA8(255, 220, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_SCAR)) { help = TX_BT_SCAR_HELP; edge = RGBA8(180, 80, 80); ink = RGBA8(255, 210, 200); }
+		else if (TacHasVar(m_b, TAC_VAR_MIST)) { help = TX_BT_MIST_HELP; edge = RGBA8(140, 170, 190); ink = RGBA8(220, 235, 245); }
+		else if (TacHasVar(m_b, TAC_VAR_RAID)) { help = TX_BT_RAID_HELP; edge = RGBA8(110, 120, 190); ink = RGBA8(210, 215, 245); }
+		else if (TacHasVar(m_b, TAC_VAR_AMBUSH)) { help = TX_BT_AMBUSH_HELP; edge = RGBA8(190, 120, 50); ink = RGBA8(255, 220, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_TWIN)) { help = TX_BT_TWIN_HELP; edge = RGBA8(180, 70, 110); ink = RGBA8(255, 210, 220); }
+		else if (TacHasVar(m_b, TAC_VAR_VAULT)) { help = TX_BT_VAULT_HELP; edge = RGBA8(180, 150, 50); ink = RGBA8(255, 235, 190); }
+		else if (TacHasVar(m_b, TAC_VAR_BLESS)) { help = TX_BT_BLESS_HELP; edge = RGBA8(80, 170, 140); ink = RGBA8(210, 245, 225); }
+		else if (TacHasVar(m_b, TAC_VAR_RAGE)) { help = TX_BT_RAGE_HELP; edge = RGBA8(200, 70, 40); ink = RGBA8(255, 210, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_RING)) { help = TX_BT_RING_HELP; edge = RGBA8(200, 120, 40); ink = RGBA8(255, 220, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_FALL)) { help = TX_BT_FALL_HELP; edge = RGBA8(140, 100, 70); ink = RGBA8(240, 220, 190); }
+		else if (TacHasVar(m_b, TAC_VAR_FLOOD)) { help = TX_BT_FLOOD_HELP; edge = RGBA8(50, 110, 180); ink = RGBA8(200, 225, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_WAVE)) { help = TX_BT_WAVE_HELP; edge = RGBA8(40, 100, 170); ink = RGBA8(190, 220, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_VEIL)) { help = TX_BT_VEIL_HELP; edge = RGBA8(160, 130, 80); ink = RGBA8(245, 230, 200); }
+		else if (TacHasVar(m_b, TAC_VAR_DUST)) { help = TX_BT_DUST_HELP; edge = RGBA8(150, 120, 60); ink = RGBA8(240, 220, 180); }
+		else if (TacHasVar(m_b, TAC_VAR_FAULT)) { help = TX_BT_FAULT_HELP; edge = RGBA8(170, 130, 70); ink = RGBA8(245, 225, 190); }
+		else if (TacHasVar(m_b, TAC_VAR_FROST)) { help = TX_BT_FROST_HELP; edge = RGBA8(80, 150, 190); ink = RGBA8(220, 240, 255); }
+		else if (TacHasVar(m_b, TAC_VAR_GRAV)) { help = TX_BT_GRAV_HELP; edge = RGBA8(110, 90, 150); ink = RGBA8(230, 220, 250); }
+		else if (TacHasVar(m_b, TAC_VAR_RECOIL)) { help = TX_BT_RECOIL_HELP; edge = RGBA8(180, 140, 50); ink = RGBA8(255, 230, 190); }
 		float tw = min(U(520.f), max(U(300.f), (float)m_w * .46f));
 		float tx = varX;
 		if (tx + tw > (float)m_w - U(16)) tx = max(U(12.f), (float)m_w - U(16) - tw);
@@ -14298,9 +15996,9 @@ void Game::DrawBattleUi()
 		DrawCombatScreenFx(m_r, m_w, m_h, m_time, m_critScreenT, m_critScreenMax, m_fairyScreenT, m_fairyScreenMax);
 		if (m_flashWhite > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_flashWhite * 140)));
 		if (m_wave > 0.f) {
-			float a = sinf((1.35f - m_wave) / 1.35f * 3.1415926f);
+			float a = sinf(Clampf((1.65f - m_wave) / 1.65f, 0.f, 1.f) * 3.1415926f);
 			if (a < 0.f) a = 0.f;
-			m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(150, 200, 255, (int)(a * 200.f)));
+			m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(130, 195, 255, (int)(a * 48.f)));
 		}
 	}
 	if (m_fastFwd && (m_phase == PH_E_SHOW || m_phase == PH_E_MOVE || m_phase == PH_ACTION)) m_r.HudText(L"▶▶", (float)m_w - U(210), U(30), U(20), RGBA8(255, 226, 150), 1, 1);

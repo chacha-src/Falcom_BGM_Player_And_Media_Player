@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kbsasami", "kb_sasami\kbsas
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kbsasami_host", "kb_sasami\kbsasami_host.vcxproj", "{C4A91E20-6B17-4F3D-8A55-1D2E9B7C0F44}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ogg_dat_viewer", "DatView\ogg_dat_viewer.vcxproj", "{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		avx2_vs2026_debug|x64(oggのみ) = avx2_vs2026_debug|x64(oggのみ)
@@ -45,6 +47,12 @@ Global
 		{C4A91E20-6B17-4F3D-8A55-1D2E9B7C0F44}.avx2_vs2026_debug|x86(ogghost32のみ).ActiveCfg = uni_2026_de|Win32
 		{C4A91E20-6B17-4F3D-8A55-1D2E9B7C0F44}.uni_avx2_vs2026|x64(oggのみ).ActiveCfg = uni_avx2_vs2026|x64
 		{C4A91E20-6B17-4F3D-8A55-1D2E9B7C0F44}.uni_avx2_vs2026|x86(ogghost32のみ).ActiveCfg = uni_avx2_vs2026|Win32
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.avx2_vs2026_debug|x64(oggのみ).ActiveCfg = uni_avx2_vs2026|x64
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.avx2_vs2026_debug|x64(oggのみ).Build.0 = uni_avx2_vs2026|x64
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.avx2_vs2026_debug|x86(ogghost32のみ).ActiveCfg = uni_avx2_vs2026|x64
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.uni_avx2_vs2026|x64(oggのみ).ActiveCfg = uni_avx2_vs2026|x64
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.uni_avx2_vs2026|x64(oggのみ).Build.0 = uni_avx2_vs2026|x64
+		{D7A1C3E2-4B58-4F0A-9C61-2E8B5A7D4F10}.uni_avx2_vs2026|x86(ogghost32のみ).ActiveCfg = uni_avx2_vs2026|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

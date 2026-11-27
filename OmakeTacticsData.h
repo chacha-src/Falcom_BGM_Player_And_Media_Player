@@ -342,6 +342,7 @@ float TacVisY(const Map& m, int cx, int cz, float px, float pz, int kind, int la
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
 int  MapIsSpiral(const Map& m);
+void MapSpiralForget();
 int  MapSpiralBand(const Map& m);
 void TacRollSky(int theme, DWORD seed, int& wx, int& hour);
 
@@ -432,6 +433,7 @@ int JobCount();
 int PromoteLevel(int tier);
 int ExpToNext(int lv);
 unsigned __int64 ExpToNextU(unsigned __int64 lv);
+unsigned __int64 ExpRewardBaseU(unsigned __int64 lv);
 const wchar_t* TacNum(int v);
 const wchar_t* TacNumU64(unsigned __int64 v);
 int NextPromoteClass(int cls);
@@ -808,6 +810,7 @@ inline const wchar_t* UnitFoeMark(const Unit& u)
 	return L"";
 }
 const wchar_t* HumFoeTitle(const Unit& u);
+const wchar_t* UnitClassOrRaceLabel(const Unit& u);
 int UnitStat(const Unit& u, int s);     // バフ込み
 float AilmentBreak(const Unit& d, int el); // 状態と属性の相性。弱点なら 2
 void UnitWeakText(const Unit& u, wchar_t* out, int cap); // 弱点に、状態の三つ巴で残った属性を足す
@@ -829,16 +832,26 @@ void UnitHeldText(const Unit& u, wchar_t* out, int cap);
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r);
 
 // ---------------- 経路 ----------------
+enum { REACH_HOP_TIERS = 4, REACH_HOP_LAY = 16 };
 struct Reach {
-	short cost[LAY_N][MAPN][MAPN];   // -1=到達不可
-	int   from[LAY_N][MAPN][MAPN];   // PackCell。層はビット12から
+	short cost[LAY_N][MAPN][MAPN];                              // -1=到達不可
+	int   from[LAY_N][MAPN][MAPN];                              // PackCell。層はビット12から
 	BYTE  canStop[LAY_N][MAPN][MAPN];
+	BYTE  minHops[LAY_N][MAPN][MAPN];                           // 到達可能な最小レイヤー跨ぎ回数 (0xff=不可)
+	short hopCost[REACH_HOP_TIERS][REACH_HOP_LAY][MAPN][MAPN];  // レイヤー跨ぎ回数別の最小コスト
+	int   hopFrom[REACH_HOP_TIERS][REACH_HOP_LAY][MAPN][MAPN];  // PackCell | (prevHop << 18)
 };
 inline int ReachCostAt(const Reach& r, int layer, int x, int z)
 {
 	if (layer < 0 || layer >= LAY_N) return -1;
 	return r.cost[layer][z][x];
 }
+inline int ReachMinHopsAt(const Reach& r, int layer, int x, int z)
+{
+	if (layer < 0 || layer >= LAY_N) return 99;
+	return r.cost[layer][z][x] >= 0 ? (int)r.minHops[layer][z][x] : 99;
+}
+float MapOverheadClearance(const Map& m, float wx, float wz, int layer, int span, float footY, bool* outHasUpper = 0);
 inline int ReachBestCost(const Reach& r, int x, int z)
 {
 	int b = -1;
@@ -970,6 +983,7 @@ int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
 int  ExpForHeal(const Unit& a, const Unit& d, int healed, int stage);
 int  ExpForSupport(int stage);
+int  ExpForChest(const Unit& u, int stage);
 long long ExpShareAoe(long long e, int nHit);
 int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
 int  SkillMpCost(int maxMp, int skill);
@@ -1024,17 +1038,51 @@ enum {
 	TAC_VAR_FLOOD = 14,
 	TAC_VAR_WAVE = 15,
 	TAC_VAR_VEIL = 16,
-	TAC_VAR_DUST = 17
+	TAC_VAR_DUST = 17,
+	TAC_VAR_FAULT = 18,
+	TAC_VAR_FROST = 19,
+	TAC_VAR_GRAV = 20,
+	TAC_VAR_RECOIL = 21,
+	TAC_VAR_COUNT = 22
 };
+// 単独は従来の番号のまま。複合だけ上位ビットを立て、下位に同時発生の種類を置く。
+inline int TacSweepMask(int sweep)
+{
+	if (sweep == 0) return 0;
+	if (sweep & (1 << 30)) return sweep & ((1 << TAC_VAR_COUNT) - 1);
+	if (sweep > 0 && sweep < TAC_VAR_COUNT) return 1 << sweep;
+	return 0;
+}
+inline int TacHasVar(const Battle& b, int kind)
+{
+	if (kind <= 0 || kind >= TAC_VAR_COUNT) return 0;
+	return (TacSweepMask(b.sweep) & (1 << kind)) != 0;
+}
+inline int TacSweepBits(int sweep)
+{
+	int m = TacSweepMask(sweep), n = 0;
+	while (m) { n += m & 1; m >>= 1; }
+	return n;
+}
 inline int TacFloodWet(const Battle& b, int x, int z, int layer)
 {
-	if (b.sweep != TAC_VAR_FLOOD || b.stampedeLine <= 0) return 0;
+	if (!TacHasVar(b, TAC_VAR_FLOOD) || b.stampedeLine <= 0) return 0;
 	if (!MapIsSpiral(b.map)) return 1;
 	if (!Map::In(x, z)) return 0;
 	const Cell& c = b.map.At(x, z);
 	if (!LayerOn(c, layer)) layer = 0;
 	return LayerHt(c, layer) <= b.stampedeLine;
 }
+void TacApplyFieldRules(const Battle& b);
+void TacClearFieldRules();
+int TacFieldGrav();
+void TacFrostReset();
+int TacFrostAt(int x, int z);
+void TacFrostSeed(Battle& b, Rng& r, int n);
+void TacFrostGrow(Battle& b, Rng& r);
+int TacFrostMelt(int x, int z);
+int TacCommitFault(Battle& b, Rng& r, int* outX, int* outZ);
+int TacRecoilStep(Battle& b, int ui, int dx, int dz, int tiles);
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
 int TacSpiralAuditRun(const wchar_t* path);
 int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);

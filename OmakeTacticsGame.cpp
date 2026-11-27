@@ -474,6 +474,11 @@ Game::Game()
 	m_orderBottom = 0;
 	m_overT = 0;
 	m_moveUnit = -1;
+	m_wave = 0.f;
+	m_waveStr = m_waveH = m_waveHit = m_waveDir = 0;
+	m_warpOn = m_warpUi = m_warpNext = m_warpColor = 0;
+	m_warpT = 0.f;
+	m_warpSrc = m_warpDst = v3(0, 0, 0);
 	SaveDefaults(m_save);
 }
 
@@ -2010,7 +2015,8 @@ void Game::OnMouseMove(int x, int y)
 		ClampPreviewPan(m_previewPan, h);
 	}
 	if (m_lDown && m_monDrag) m_monYaw += (x - m_mx) * .012f;
-	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON);
+	BOOL menuPhase = (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON);
+	BOOL scout = m_lDown && (!m_downUi || menuPhase) && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || menuPhase);
 	BOOL lookPan = m_lDown && !m_downUi && m_screen == SC_BASE && m_mapLook;
 	if (m_rDown || m_mDown || scout || lookPan) {
 		int dx = x - m_dragLastX, dy = y - m_dragLastY;
@@ -2090,7 +2096,7 @@ void Game::OnMouseUp(int btn, int x, int y)
 		m_lDown = FALSE;
 		m_previewDrag = FALSE;
 		m_monDrag = FALSE;
-		if (abs(x - m_downX) < 12 && abs(y - m_downY) < 12) {
+		if (!m_dragPan && abs(x - m_downX) < 12 && abs(y - m_downY) < 12) {
 			m_click = TRUE; m_clickX = x; m_clickY = y;
 			if (m_textFocus == 1
 				&& m_textBox[2] > 1.f && m_textBox[3] > 1.f
@@ -2706,12 +2712,15 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 		top = RGBA8(r, g, b, 238);
 		bot = RGBA8(r * 45 / 100, g * 45 / 100, b * 45 / 100, 235);
 	}
+	float wash = 1.f;
+	if (m_dragPan && m_screen == SC_BATTLE && (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON))
+		wash = 0.30f;
 	DWORD fill = RGBA8(
 		((top & 255) + (bot & 255)) / 2,
 		(((top >> 8) & 255) + ((bot >> 8) & 255)) / 2,
 		(((top >> 16) & 255) + ((bot >> 16) & 255)) / 2,
-		(top >> 24) & 255);
-	m_r.HudGlass(x, y, w, h, fill, (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(150, 128, 86), 1.f);
+		(int)(((top >> 24) & 255) * wash));
+	m_r.HudGlass(x, y, w, h, fill, (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(150, 128, 86), wash);
 	if (foc) {
 		float pulse = .5f + .5f * sinf(m_time * 6.f);
 		m_r.HudFrame(x - U(3), y - U(3), w + U(6), h + U(6), U(2), RGBA8(255, 220, 120, (int)(120 + 120 * pulse)));
@@ -2720,7 +2729,7 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 	float usePx = px > 0 ? px : U(17);
 	int bold = sel ? 0 : 1;
 	usePx = FitTextPx(label, w - U(8), usePx, bold);
-	m_r.HudText(label, x + w * .5f, y + h * .5f, usePx, tc, 1, 1, sel ? 0 : 1);
+	m_r.HudText(label, x + w * .5f, y + h * .5f, usePx, tc, 1, 1, sel ? 0 : 1, wash);
 	return fire;
 }
 
@@ -3042,9 +3051,9 @@ void Game::AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style,
 void Game::AddLog(const wchar_t* s, DWORD col)
 {
 	if (!s || !s[0]) return;
-	if (m_logN >= 24) {
-		memmove(&m_log[0], &m_log[1], sizeof(m_log[0]) * 23);
-		m_logN = 23;
+	if (m_logN >= 64) {
+		memmove(&m_log[0], &m_log[1], sizeof(m_log[0]) * 63);
+		m_logN = 63;
 	}
 	TacLog& L = m_log[m_logN++];
 	wcsncpy_s(L.s, s, _TRUNCATE);
@@ -3055,21 +3064,34 @@ void Game::DrawBattleLog(float lx, float top, float lw, float lh)
 	if (lw < U(80) || lh < U(40)) return;
 	m_r.HudRect(lx, top, lw, lh, RGBA8(6, 10, 18, 150));
 	m_r.HudFrame(lx, top, lw, lh, U(1.5f), RGBA8(220, 190, 120, 180));
-	m_r.HudText(TT(TX_BT_LOG), lx + U(12), top + U(16), U(14), RGBA8(255, 226, 150), 0, 1);
-	float y = top + U(34);
-	int n = m_logN;
-	int first = 0;
-	float row = U(18);
-	int fit = (int)((lh - U(44)) / row);
+	m_r.HudText(TT(TX_BT_LOG), lx + U(12), top + U(14), U(13), RGBA8(255, 226, 150), 0, 1);
+	int cols = 1;
+	if (lw >= U(520)) cols = 3;
+	else if (lw >= U(280)) cols = 2;
+	float gap = U(6);
+	float inner = lw - gap * (float)(cols + 1);
+	float colW = inner / (float)cols;
+	if (colW < U(96) && cols > 1) { cols = 1; colW = lw - gap * 2.f; }
+	float row = U(16);
+	float body = lh - U(28);
+	int fit = (int)(body / row);
 	if (fit < 1) fit = 1;
-	if (n > fit) first = n - fit;
-	for (int i = first; i < n; i++) {
-		int age = n - 1 - i;
-		int a = age == 0 ? 255 : (age < 4 ? 210 : 150);
-		DWORD c = m_log[i].col;
-		DWORD col = RGBA8(c & 255, (c >> 8) & 255, (c >> 16) & 255, a);
-		m_r.HudText(m_log[i].s, lx + U(12), y + U(8), U(13), col, 0, 0);
-		y += row;
+	int n = m_logN;
+	int show = fit * cols;
+	int first = n > show ? n - show : 0;
+	for (int c = 0; c < cols; c++) {
+		float x = lx + gap + c * (colW + gap);
+		if (c > 0) m_r.HudRect(x - gap * 0.5f, top + U(24), 1.f, lh - U(30), RGBA8(220, 190, 120, 90));
+		for (int r = 0; r < fit; r++) {
+			int i = first + c * fit + r;
+			if (i < 0 || i >= n) break;
+			int age = n - 1 - i;
+			int a = age == 0 ? 255 : (age < 6 ? 220 : 160);
+			DWORD cc = m_log[i].col;
+			DWORD col = RGBA8(cc & 255, (cc >> 8) & 255, (cc >> 16) & 255, a);
+			float y = top + U(26) + r * row;
+			m_r.HudText(m_log[i].s, x, y + row * 0.5f, FitTextPx(m_log[i].s, colW - U(4), U(12), 0), col, 0, 0);
+		}
 	}
 }
 void Game::AddPopup(V3 p, const wchar_t* s, DWORD col, int style, int pat, float delay, float life, int lane)
@@ -3098,11 +3120,16 @@ void Game::DrawPopups(float)
 			float px = (p.style == 1 ? U(17) : U(26)) * p.size;
 			float step = U(34) * p.size;
 			float ox = 0.f, oy = 0.f;
-			if (p.lane == 1) oy = -step;
-			else if (p.lane == 2) { ox = U(84); oy = -step * 0.2f; }
-			else if (p.lane == 3) { ox = -U(78); oy = -step * 0.2f; }
-			else if (p.lane == 4) oy = -step * 2.15f;
-			DrawMsgLine(m_r, p.s, sx + ox, sy + oy, px, p.col, p.pat, u, p.t * 0.7f + p.pat, 1);
+			if (p.lane == 1) oy = -step * 0.42f;
+			else if (p.lane == 2) { ox = U(72); oy = step * 0.15f; }
+			else if (p.lane == 3) { ox = -U(68); oy = step * 0.15f; }
+			else if (p.lane == 4) oy = -step * 0.85f;
+			float yDraw = sy + oy;
+			float top = (float)m_h * 0.09f;
+			float bot = (float)m_h * 0.82f;
+			if (yDraw < top) yDraw = top + (float)(p.lane % 3) * step * 0.42f;
+			if (yDraw > bot) yDraw = bot;
+			DrawMsgLine(m_r, p.s, sx + ox, yDraw, px, p.col, p.pat, u, p.t * 0.7f + p.pat, 1);
 		}
 		++i;
 	}
@@ -4143,19 +4170,21 @@ void Game::SpawnSlab(float x, float y, float z, float sink)
 	d.y = d.ry = y;
 	d.z = d.oz = z;
 	d.sink = sink;
-	d.sc = 0.92f;
-	d.life = d.maxLife = 2.6f;
-	d.tint = RGBA8(150, 132, 108);
-	d.srx = m_rng.F(-1.2f, 1.2f);
-	d.sry = m_rng.F(-0.6f, 0.6f);
+	d.sc = 0.96f;
+	d.life = d.maxLife = 2.8f;
+	d.tint = RGBA8(152, 134, 108);
+	d.srx = m_rng.F(-1.6f, 1.6f);
+	d.sry = m_rng.F(-0.9f, 0.9f);
+	d.srz = m_rng.F(-1.4f, 1.4f);
 }
 
 void Game::FillHideGreen()
 {
-	if (m_screen != SC_BATTLE || m_b.sweep != TAC_VAR_VEIL) return;
+	if (m_screen != SC_BATTLE || !TacHasVar(m_b, TAC_VAR_VEIL)) return;
 	float scale = (float)MARKS_N / (float)MAPN;
 	int step = (int)scale;
 	if (step < 1) step = 1;
+	BOOL changed = FALSE;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		int v = VeilShows(x, z) ? 0 : 220;
 		int tx0 = (int)(x * scale);
@@ -4163,10 +4192,13 @@ void Game::FillHideGreen()
 		for (int dz = 0; dz < step; dz++) for (int dx = 0; dx < step; dx++) {
 			int tx = tx0 + dx, tz = tz0 + dz;
 			if (tx < 0 || tz < 0 || tx >= MARKS_N || tz >= MARKS_N) continue;
-			s_battleMarks[(tz * MARKS_N + tx) * 4 + 1] = (BYTE)v;
+			BYTE& px = s_battleMarks[(tz * MARKS_N + tx) * 4 + 1];
+			if (px == (BYTE)v) continue;
+			px = (BYTE)v;
+			changed = TRUE;
 		}
 	}
-	s_battleMarksDirty = TRUE;
+	if (changed) s_battleMarksDirty = TRUE;
 }
 
 void Game::UpdateDebris(float dt)
@@ -4234,8 +4266,12 @@ void Game::UpdateDebris(float dt)
 			if (d.sink > -8.f && d.y <= d.sink && d.vy < 0.f) {
 				float ix = d.x, iy = d.sink, iz = d.z;
 				d.on = 0;
-				SpawnDebris(v3(ix, iy + 0.05f, iz), v3(0, 3.2f, 0), 0, 10, 0.28f, RGBA8(168, 146, 118));
-				Burst(v3(ix, iy + 0.08f, iz), 16, 2.4f, 0.08f, 0.55f, 0.72f, 0.64f, 0.52f, 0, 1, 6.f, 0.4f, 1.2f);
+				TacSfx(TS_FALL);
+				m_shake = max(m_shake, 0.52f);
+				StampGroundRing(ix, iz, 0.72f, 0.85f, 0, home);
+				SpawnDebris(v3(ix, iy + 0.06f, iz), v3(0, 3.8f, 0), 0, 14, 0.30f, RGBA8(168, 146, 118));
+				Burst(v3(ix, iy + 0.10f, iz), 22, 2.8f, 0.09f, 0.62f, 0.72f, 0.64f, 0.52f, 0, 1, 6.f, 0.4f, 1.2f);
+				Burst(v3(ix, iy + 0.06f, iz), 10, 3.2f, 0.12f, 0.45f, 0.85f, 0.76f, 0.62f, 1, 1, 1.5f, 1.2f, 0.2f);
 				continue;
 			}
 			if (d.y < -28.f) d.on = 0;
@@ -4280,7 +4316,7 @@ void Game::DrawDebris(const M4* mapXform)
 		float s = d.sc * (0.5f + 0.5f * fade);
 		if (d.kind == 4) s = d.sc;
 		M4 rot = MMul(MMul(MRotX(d.rx), MRotY(d.ry)), MRotZ(d.rz));
-		float sy = (d.kind == 4) ? s * 0.16f : s * (d.kind == 2 ? 1.55f : 0.85f);
+		float sy = (d.kind == 4) ? s * 0.48f : s * (d.kind == 2 ? 1.55f : 0.85f);
 		M4 w = MMul(MMul(MScale(s, sy, (d.kind == 4) ? s : s * 1.15f), rot), MTrans(d.x, d.y, d.z));
 		if (mapXform) w = MMul(w, *mapXform);
 		DrawParams dp = {};
@@ -6181,102 +6217,106 @@ void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
 	};
 	switch (el) {
 	case EL_FIRE:
-		for (int i = 0; i < (int)(12 * k); i++) {
+		for (int i = 0; i < (int)(16 * k); i++) {
 			Particle q = {};
-			q.p = to + v3(m_rng.F(-.55f, .55f), .05f, m_rng.F(-.55f, .55f));
-			q.v = v3(m_rng.F(-.7f, .7f), m_rng.F(1.6f, 3.8f), m_rng.F(-.7f, .7f));
+			q.p = to + v3(m_rng.F(-.62f, .62f), .05f, m_rng.F(-.62f, .62f));
+			q.v = v3(m_rng.F(-.85f, .85f), m_rng.F(1.8f, 4.4f), m_rng.F(-.85f, .85f));
 			q.life = q.max = m_rng.F(0.65f, 1.35f);
-			q.size = .30f * k; q.size1 = .06f;
-			q.r = 1; q.g = m_rng.F(.25f, .62f); q.b = .05f; q.a = 1;
-			q.shape = 5; q.add = 1; q.grav = -0.5f; q.drag = .6f;
+			q.size = .32f * k; q.size1 = .05f;
+			q.r = 1; q.g = m_rng.F(.28f, .68f); q.b = .06f; q.a = 1;
+			q.shape = 5; q.add = 1; q.grav = -0.6f; q.drag = .55f;
 			m_parts.push_back(q);
 		}
-		Burst(to, n, 2.8f * k, .16f, .85f, 1.f, .75f, .2f, 0, 1, -2.4f, .02f, 1.1f, .04f);
-		Burst(to, (int)(10 * k), 1.6f * k, .24f * k, .95f, .18f, .16f, .16f, 0, 0, -1.2f, 0, 1.4f, .42f * k);
-		Burst(to + v3(0, .05f, 0), 2, .2f, 1.25f * k, .55f, 1.f, .42f, .08f, 1, 1, 0, 0, 0, 1.9f * k);
+		Burst(to, n + 10, 3.6f * k, .14f, .92f, 1.f, .78f, .24f, 3, 1, -1.8f, .035f, 1.25f, .03f);
+		Burst(to, (int)(12 * k), 1.8f * k, .26f * k, 1.05f, .18f, .15f, .15f, 0, 0, -1.3f, 0, 1.5f, .48f * k);
+		Burst(to + v3(0, .06f, 0), 3, .18f, 1.35f * k, .52f, 1.f, .48f, .10f, 1, 1, 0, 0, 0, 2.25f * k);
 		stampAt(0.95f * k, 0.85f, 1);
 		break;
 	case EL_ICE:
-		Burst(to, n, 3.4f * k, .22f * k, .95f, .65f, .88f, 1.f, 2, 1, 2.f, 0, .45f);
-		Burst(to, n / 2 + 4, 5.5f * k, .09f, .75f, .88f, .96f, 1.f, 3, 1, 4.f, .05f, .5f);
-		Burst(to, 2, .2f, 1.0f * k, .55f, .75f, .92f, 1.f, 1, 1, 0, 0, 0, 1.85f * k);
-		SpawnDebris(to + v3(0, .2f, 0), v3(0, 2.2f * k, 0), 2, big ? 8 : 5, 0.08f * k, RGBA8(180, 232, 255));
+		Burst(to, n + 8, 3.8f * k, .24f * k, 1.0f, .68f, .90f, 1.f, 7, 1, 1.8f, 0, .52f, .05f);
+		Burst(to, n / 2 + 8, 6.2f * k, .09f, .72f, .90f, .97f, 1.f, 3, 1, 3.8f, .055f, .55f);
+		Burst(to + v3(0, .06f, 0), 3, .16f, 1.1f * k, .58f, .75f, .94f, 1.f, 1, 1, 0, 0, 0, 2.1f * k);
+		SpawnDebris(to + v3(0, .2f, 0), v3(0, 2.5f * k, 0), 2, big ? 10 : 6, 0.085f * k, RGBA8(186, 236, 255));
 		stampAt(0.95f * k, 0.82f, 3);
 		break;
 	case EL_THUNDER:
-		for (int bolt = 0; bolt < (big ? 4 : 2); bolt++) {
-			float ox = m_rng.F(-.75f, .75f), oz = m_rng.F(-.75f, .75f);
-			for (int s = 0; s < 8; s++) {
+		for (int bolt = 0; bolt < (big ? 5 : 3); bolt++) {
+			float ox = m_rng.F(-.82f, .82f), oz = m_rng.F(-.82f, .82f);
+			for (int s = 0; s < 9; s++) {
 				Particle q = {};
-				float y = 5.6f - s * .70f;
-				q.p = to + v3(ox + m_rng.F(-.22f, .22f), y, oz + m_rng.F(-.22f, .22f));
-				q.v = v3(0, -6.5f, 0);
-				q.life = q.max = .18f + s * .02f;
-				q.size = .24f; q.size1 = .08f;
-				q.r = .85f; q.g = .94f; q.b = 1.f; q.a = 1;
-				q.shape = 6; q.add = 1; q.stretch = .04f; q.drag = 0;
+				float y = 6.0f - s * .68f;
+				q.p = to + v3(ox + m_rng.F(-.24f, .24f), y, oz + m_rng.F(-.24f, .24f));
+				q.v = v3(0, -6.8f, 0);
+				q.life = q.max = .20f + s * .02f;
+				q.size = .26f; q.size1 = .08f;
+				q.r = .86f; q.g = .95f; q.b = 1.f; q.a = 1;
+				q.shape = 6; q.add = 1; q.stretch = .045f; q.drag = 0;
 				m_parts.push_back(q);
 			}
 		}
-		Burst(to, 3, .15f, 1.5f * k, .25f, .9f, .95f, 1.f, 1, 1, 0, 0, 0, 2.4f * k);
-		Burst(to, n + 6, 7.5f * k, .09f, .38f, 1.f, 1.f, .75f, 3, 1, 1.f, .025f, .25f);
-		SpawnDebris(to + v3(0, .1f, 0), v3(0, 2.4f, 0), 0, big ? 6 : 3, 0.06f * k, RGBA8(75, 72, 70));
+		Burst(to + v3(0, .08f, 0), 4, .14f, 1.6f * k, .28f, .88f, .96f, 1.f, 1, 1, 0, 0, 0, 2.65f * k);
+		Burst(to, n + 12, 8.2f * k, .09f, .42f, 1.f, 1.f, .78f, 3, 1, 1.f, .03f, .32f);
+		SpawnDebris(to + v3(0, .1f, 0), v3(0, 2.6f, 0), 0, big ? 7 : 4, 0.065f * k, RGBA8(75, 72, 70));
 		stampAt(0.9f * k, 0.88f, 1);
 		m_flashWhite = max(m_flashWhite, big ? .75f : .4f);
 		m_shake = max(m_shake, big ? .7f : .35f);
 		break;
 	case EL_HOLY:
-		Burst(to, n + 6, 2.4f * k, .18f, 1.25f, 1.f, .95f, .72f, 2, 1, -2.5f, 0, 1.1f);
-		Burst(to + v3(0, .2f, 0), (int)(10 * k), 1.8f * k, .14f, 1.4f, 1.f, .98f, .88f, 8, 1, -0.4f, 4.f, .9f, .1f);
-		for (int i = 0; i < 4; i++) Burst(to + v3(0, i * .38f, 0), 1, 0, .42f, .72f + i * .14f, 1.f, .94f, .64f, 1, 1, 0, 0, 0, 1.55f * k);
+		Burst(to, n + 10, 2.6f * k, .19f, 1.32f, 1.f, .96f, .74f, 2, 1, -2.6f, 0, 1.15f);
+		Burst(to + v3(0, .2f, 0), (int)(14 * k), 2.0f * k, .15f, 1.45f, 1.f, .98f, .88f, 8, 1, -0.45f, 4.f, .95f, .09f);
+		for (int i = 0; i < 5; i++) Burst(to + v3(0, i * .36f, 0), 1, 0, .44f, .72f + i * .14f, 1.f, .95f, .66f, 1, 1, 0, 0, 0, 1.75f * k);
 		break;
 	case EL_DARK:
-		Burst(to, n + 4, 2.8f * k, .32f, .95f, .52f, .18f, .85f, 0, 1, -1.f, 0, .3f, .02f);
-		Burst(to, 3, .1f, 1.5f * k, .65f, .68f, .22f, .95f, 1, 1, 0, 0, 0, .2f);
-		Burst(to, (int)(12 * k), 3.6f * k, .12f, .6f, .95f, .35f, .85f, 3, 1, 0.5f, .03f, .2f);
+		Burst(to, n + 8, 3.0f * k, .34f, 1.0f, .54f, .18f, .88f, 0, 1, -1.f, 0, .35f, .02f);
+		Burst(to + v3(0, .08f, 0), 4, .1f, 1.7f * k, .65f, .72f, .24f, .98f, 1, 1, 0, 0, 0, .18f);
+		Burst(to, (int)(16 * k), 4.2f * k, .12f, .62f, .96f, .38f, .92f, 3, 1, 0.4f, .035f, .25f);
 		stampAt(0.85f * k, 0.72f, 1);
 		break;
 	case EL_WIND:
-		for (int w = 0; w < 2; w++) {
-			float r0 = (w == 0 ? .55f : .95f) * k;
+		for (int w = 0; w < 3; w++) {
+			float r0 = (0.48f + w * 0.36f) * k;
 			for (int i = 0; i < 12; i++) {
-				float a = i * 6.28318f / 12.f + w * 0.4f;
+				float a = i * 6.28318f / 12.f + w * 0.45f;
 				Particle q = {};
-				q.p = to + v3(cosf(a) * r0, 0.18f + w * 0.45f, sinf(a) * r0);
-				q.v = v3(-sinf(a) * 5.2f * k, 1.6f + w * 0.8f, cosf(a) * 5.2f * k);
-				q.life = q.max = 0.45f; q.size = 0.24f * k; q.size1 = 0.05f;
-				q.r = 0.62f; q.g = 1.f; q.b = 0.78f; q.a = 0.9f;
-				q.shape = 4; q.add = 1; q.stretch = 0.03f;
+				q.p = to + v3(cosf(a) * r0, 0.16f + w * 0.38f, sinf(a) * r0);
+				q.v = v3(-sinf(a) * 5.6f * k, 1.7f + w * 0.75f, cosf(a) * 5.6f * k);
+				q.life = q.max = 0.48f; q.size = 0.25f * k; q.size1 = 0.05f;
+				q.r = 0.64f; q.g = 1.f; q.b = 0.80f; q.a = 0.92f;
+				q.shape = 4; q.add = 1; q.stretch = 0.032f;
 				m_parts.push_back(q);
 			}
 		}
-		Burst(to, n, 4.4f * k, .46f, .65f, .65f, 1.f, .76f, 4, 1, 0, 0, .25f);
+		Burst(to, n + 6, 4.8f * k, .46f, .68f, .68f, 1.f, .80f, 4, 1, 0, 0, .28f);
 		stampAt(0.85f * k, 0.55f, 0);
 		break;
 	case EL_EARTH:
-		Burst(to, n + 6, 4.8f * k, .16f, 1.f, .55f, .42f, .3f, 0, 0, 9.f, 0, 1.2f);
-		Burst(to, n / 2 + 4, 1.8f, .52f, .9f, .62f, .55f, .45f, 0, 0, -.3f, 0, .25f, 1.05f);
-		Burst(to + v3(0, .06f, 0), 2, .1f, .9f * k, .45f, .88f, .72f, .46f, 1, 1, 0, 0, 0, 1.85f * k);
-		SpawnDebris(to + v3(0, .15f, 0), v3(0, 3.2f * k, 0), 0, big ? 9 : 6, 0.095f * k, RGBA8(132, 112, 92));
+		Burst(to, n + 10, 5.2f * k, .17f, 1.05f, .58f, .44f, .32f, 0, 0, 9.2f, 0, 1.3f);
+		Burst(to, n / 2 + 6, 2.0f, .54f, .95f, .64f, .56f, .46f, 0, 0, -.3f, 0, .28f, 1.15f);
+		Burst(to + v3(0, .06f, 0), 3, .1f, .95f * k, .48f, .92f, .76f, .48f, 1, 1, 0, 0, 0, 2.15f * k);
+		SpawnDebris(to + v3(0, .15f, 0), v3(0, 3.6f * k, 0), 0, big ? 11 : 7, 0.10f * k, RGBA8(136, 114, 92));
 		stampAt(1.1f * k, 0.9f, 0);
 		break;
 	case EL_POISON:
-		Burst(to, n + 4, 2.1f * k, .22f, 1.15f, .55f, .92f, .28f, 1, 1, -1.6f, 0, .85f);
-		Burst(to, n / 2 + 6, 1.4f * k, .16f, 1.35f, .7f, .3f, .9f, 0, 1, -1.1f, 0, .65f);
+		Burst(to, n + 8, 2.2f * k, .23f, 1.2f, .56f, .95f, .30f, 1, 1, -1.6f, 0, .88f);
+		Burst(to, n / 2 + 8, 1.5f * k, .17f, 1.38f, .74f, .32f, .94f, 0, 1, -1.1f, 0, .68f);
 		stampAt(0.75f * k, 0.55f, 2);
 		break;
 	default:
 		if (kind == SK_HEAL) {
-			Burst(to, n + 6, 1.8f, .16f, 1.25f, .5f, 1.f, .65f, 2, 1, -2.5f, 0, 1.2f);
-			for (int i = 0; i < 3; i++) Burst(to + v3(0, i * .3f, 0), 1, 0, .65f, .75f, .5f, 1.f, .74f, 1, 1, 0, 0, 0, 1.35f);
+			Burst(to, n + 10, 1.9f, .17f, 1.3f, .52f, 1.f, .68f, 2, 1, -2.6f, 0, 1.25f);
+			for (int i = 0; i < 4; i++) Burst(to + v3(0, i * .28f, 0), 1, 0, .65f, .78f, .52f, 1.f, .76f, 1, 1, 0, 0, 0, 1.45f);
 		} else if (kind == SK_BUFF) {
-			Burst(to, n + 6, 1.8f, .16f, 1.25f, .5f, .82f, 1.f, 2, 1, -2.f, 0, 1.2f);
-			for (int i = 0; i < 3; i++) Burst(to + v3(0, i * .3f, 0), 1, 0, .52f, .82f, 1.f, .86f, .42f, 1, 1, 0, 0, 0, 1.1f);
+			Burst(to, n + 10, 1.9f, .17f, 1.3f, .52f, .84f, 1.f, 2, 1, -2.1f, 0, 1.25f);
+			for (int i = 0; i < 4; i++) Burst(to + v3(0, i * .28f, 0), 1, 0, .54f, .84f, 1.f, .88f, .44f, 1, 1, 0, 0, 0, 1.22f);
 		} else {
-			Burst(to, n, 5.2f * k, .08f, .38f, 1.f, .95f, .8f, 3, 1, 5.f, .05f, .3f);
-			Burst(to, 2, 0, .95f * k, .26f, 1.f, 1.f, 1.f, 4, 1, 0, 0, 0, 1.45f * k);
+			Burst(to, n + 8, 5.8f * k, .085f, .42f, 1.f, .96f, .82f, 3, 1, 4.8f, .055f, .35f);
+			Burst(to, 3, 0, 1.05f * k, .28f, 1.f, .98f, .92f, 4, 1, 0, 0, 0, 1.65f * k);
+			Burst(to + v3(0, .06f, 0), 2, .1f, .75f * k, .32f, 1.f, .90f, .65f, 1, 1, 0, 0, 0, 1.55f * k);
 		}
 		break;
+	}
+	if (big && kind != SK_HEAL && kind != SK_BUFF && m_hitScreenT < 0.24f) {
+		m_hitScreenT = m_hitScreenMax = 0.24f;
 	}
 	(void)from;
 }

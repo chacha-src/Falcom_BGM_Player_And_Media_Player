@@ -403,6 +403,7 @@ Renderer::Renderer()
 	memset(m_hairCapN, 0, sizeof(m_hairCapN));
 	m_csHair[0] = m_csHair[1] = NULL; m_cbHairSim = NULL;
 	m_csWx = NULL; m_vsPWx = NULL;
+	m_floodVB = NULL; m_floodN = 0; m_floodKey = 0; m_floodLive = 0;
 	m_wxGpuSB[0] = m_wxGpuSB[1] = NULL;
 	m_wxGpuUAV[0] = m_wxGpuUAV[1] = NULL;
 	m_wxGpuSRV[0] = m_wxGpuSRV[1] = NULL;
@@ -505,6 +506,7 @@ void Renderer::Release()
 	m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
 	m_props.clear();
+	DropFloodMesh();
 	for (auto& m : models) for (auto& p : m.parts) p.Release();
 	models.clear();
 	for (auto& a : attaches) a.mesh.Release();
@@ -12951,6 +12953,8 @@ void Renderer::BeginFrame()
 	memset(m_fcb.hole2, 0, sizeof(m_fcb.hole2));
 	memset(m_fcb.fxNow, 0, sizeof(m_fcb.fxNow));
 	memset(m_fcb.fxMore, 0, sizeof(m_fcb.fxMore));
+	memset(m_fcb.flood, 0, sizeof(m_fcb.flood));
+	memset(m_fcb.field, 0, sizeof(m_fcb.field));
 	m_cutDeck = -1;
 	m_coverGhost = 0;
 	ID3D11Buffer* frame = TacCbCur(g_frameR, m_cbFrame);
@@ -14621,6 +14625,108 @@ void Renderer::DrawWater()
 	}
 }
 
+BOOL Renderer::FloodMeshReady(unsigned key) const
+{
+	if (!m_floodLive || m_floodKey != key) return FALSE;
+	if (m_floodN == 0) return TRUE;
+	return m_floodVB && m_floodN >= 3;
+}
+
+void Renderer::DropFloodMesh()
+{
+	TAC_REL(m_floodVB);
+	m_floodN = 0;
+	m_floodKey = 0;
+	m_floodLive = 0;
+}
+
+void Renderer::UploadFloodMesh(unsigned key, const VtxS* v, int n)
+{
+	DropFloodMesh();
+	if (!v || n < 3) {
+		m_floodKey = key;
+		m_floodLive = 1;
+		return;
+	}
+	if (!m_dev) return;
+	n -= n % 3;
+	D3D11_BUFFER_DESC bd = {};
+	bd.ByteWidth = (UINT)n * (UINT)sizeof(VtxS);
+	bd.Usage = D3D11_USAGE_IMMUTABLE;
+	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	D3D11_SUBRESOURCE_DATA sd = { v, 0, 0 };
+	if (FAILED(m_dev->CreateBuffer(&bd, &sd, &m_floodVB))) { m_floodVB = NULL; return; }
+	m_floodN = (UINT)n;
+	m_floodKey = key;
+	m_floodLive = 1;
+}
+
+void Renderer::DrawFloodMesh(DWORD waterCol)
+{
+	if (m_pass == PASS_SHADOW || !m_floodVB || m_floodN < 3 || !m_ctx || !m_psWater) return;
+	FlushQueuedDraws();
+	ClearTess();
+	DrawParams dp;
+	dp.mode = 1.f;
+	dp.twoSided = 1;
+	dp.tint = m_coverGhost ? 0x4CFFFFFF : ((waterCol & 0xFFFFFF) | 0xEA000000);
+	SetObj(m_sceneShift, dp, 0);
+	m_ctx->PSSetShaderResources(0, 1, &m_srv[TEX_WHITE]);
+	m_ctx->IASetInputLayout(m_ilS);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_ctx->VSSetShader(m_vsS, NULL, 0);
+	m_ctx->PSSetShader(m_psWater, NULL, 0);
+	m_ctx->RSSetState(m_rsNone);
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+	m_ctx->OMSetBlendState(m_bsAlpha, NULL, 0xFFFFFFFF);
+	m_bindKey = -1;
+	UINT st = sizeof(VtxS), off = 0;
+	m_ctx->IASetVertexBuffers(0, 1, &m_floodVB, &st, &off);
+	m_ctx->Draw(m_floodN, 0);
+	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+	m_dsWant = m_dsWrite;
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+}
+
+void Renderer::DrawWaterTris(const VtxS* v, int n, DWORD waterCol)
+{
+	FlushQueuedDraws();
+	ClearTess();
+	if (!v || n <= 0 || m_pass == PASS_SHADOW || !m_vbDyn || !m_psWater) return;
+	DrawParams dp;
+	dp.mode = 1.f;
+	dp.twoSided = 1;
+	dp.tint = m_coverGhost ? 0x4CFFFFFF : ((waterCol & 0xFFFFFF) | 0xEA000000);
+	SetObj(m_sceneShift, dp, 0);
+	m_ctx->PSSetShaderResources(0, 1, &m_srv[TEX_WHITE]);
+	m_ctx->IASetInputLayout(m_ilS);
+	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_ctx->VSSetShader(m_vsS, NULL, 0);
+	m_ctx->PSSetShader(m_psWater, NULL, 0);
+	m_ctx->RSSetState(m_rsNone);
+	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
+	m_ctx->OMSetBlendState(m_bsAlpha, NULL, 0xFFFFFFFF);
+	m_bindKey = -1;
+	UINT st = sizeof(VtxS), off = 0;
+	int cap = (int)(m_vbDynBytes / sizeof(VtxS));
+	cap -= cap % 3;
+	for (int p = 0; p < n; p += cap) {
+		int cnt = n - p;
+		if (cnt > cap) cnt = cap;
+		cnt -= cnt % 3;
+		if (cnt <= 0) break;
+		void* dst = DynMap((UINT)(cnt * sizeof(VtxS)), off);
+		if (!dst) break;
+		memcpy(dst, v + p, cnt * sizeof(VtxS));
+		m_ctx->Unmap(m_vbDyn, 0);
+		m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
+		m_ctx->Draw((UINT)cnt, 0);
+	}
+	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+	m_dsWant = m_dsWrite;
+	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
+}
+
 void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 {
 	FlushQueuedDraws();
@@ -14686,6 +14792,8 @@ void Renderer::DrawRibbon(const Buf<VtxP>& v)
 	FlushQueuedDraws();
 	ClearTess();
 	if (v.empty() || m_pass == PASS_SHADOW) return;
+	DrawParams dp = {};
+	SetObj(m_sceneShift, dp, 0);
 	size_t bytes = v.size() * sizeof(VtxP);
 	if (bytes > m_vbDynBytes) return;
 	UINT st = sizeof(VtxP), off = 0;
@@ -15975,21 +16083,18 @@ static BOOL InteriorPool(const Map& m, int x, int z)
 static void EmitCeilingFall(MeshBuild& wb, Renderer::SceneryPuff* puff, int& puffN, const Map& m, int x, int z)
 {
 	float surf = m.StandY(x, z);
-	float ceilY = 20.f;
+	float top = surf + 5.4f;
 	float bot = surf + 0.12f;
 	DWORD col = FallTint(LiquidFlow(m, x, z, T_WATER), 1);
+	col = (col & 0x00FFFFFF) | 0x70000000;
 	unsigned h = CellHash(x, z, 91);
 	float cx = x + 0.5f, cz = z + 0.5f;
-	float half = 0.4f;
-	if (h & 16) {
-		EmitCurtain(wb, cx - half, cz, cx + half, cz, ceilY, bot, 0, 1, 0.08f, col);
-		EmitCurtain(wb, cx - half, cz, cx + half, cz, ceilY, bot, 0, 1, -0.08f, col);
-	} else {
-		EmitCurtain(wb, cx, cz - half, cx, cz + half, ceilY, bot, 1, 0, 0.08f, col);
-		EmitCurtain(wb, cx, cz - half, cx, cz + half, ceilY, bot, 1, 0, -0.08f, col);
-	}
-	AddPuff(puff, puffN, 1, cx, (ceilY + surf) * 0.5f, cz, 8.f);
-	AddPuff(puff, puffN, 16, cx, surf + 0.08f, cz, 5.f);
+	float half = 0.22f;
+	if (h & 16)
+		EmitCurtain(wb, cx - half, cz, cx + half, cz, top, bot, 0, 1, 0.03f, col);
+	else
+		EmitCurtain(wb, cx, cz - half, cx, cz + half, top, bot, 1, 0, 0.03f, col);
+	AddPuff(puff, puffN, 16, cx, surf + 0.08f, cz, 2.1f);
 }
 
 static void EmitEdgeWall(MeshBuild& geo, const Map& m, int x, int z, int dir, int kind, int layer, float drop, float floorY, int useFloor, DWORD col)
@@ -16495,6 +16600,28 @@ BOOL Renderer::BuildTerrain(Map& m)
 		}
 		return bestD <= 2 ? best : -9999;
 	};
+	// 平地用の高さ仕切り（2.5m / 6m / 12m）に螺旋の階を入れると、中・大は 16×16 区画の中に
+	// 数階が重なる。境界球の中心が階と階のあいだに浮き、見ている階ごと描かれなくなる。
+	// 螺旋の階は 8m（高さ20）ごと別メッシュ。平地の重なりは今まで通り。
+	auto deckMesh = [&](int ch, int h, int layer) -> MeshBuild& {
+		if (h > MAXH) {
+			int band = h / 20;
+			if (band < 1) return tch[ch];
+			if (band > 4) band = 4;
+			int ci = band - 1;
+			if (ci == 0) return cov1[ch];
+			if (ci == 1) return cov2[ch];
+			if (ci == 2) return cov3[ch];
+			return cov4[ch];
+		}
+		if (layer <= 0) return tch[ch];
+		float y = TacHToY(h);
+		int bkt = y > 12.f ? 3 : (y > 6.f ? 2 : (y > 2.5f ? 1 : 0));
+		if (bkt == 0) return cov1[ch];
+		if (bkt == 1) return cov2[ch];
+		if (bkt == 2) return cov3[ch];
+		return cov4[ch];
+	};
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		const Cell& c = m.At(x, z);
 		int nCov = CellLayN(c);
@@ -16531,10 +16658,7 @@ BOOL Renderer::BuildTerrain(Map& m)
 			for (int L = 1; L < nCov; L++) {
 				int tr = LayerTr(c, L);
 				if (tr == T_VOID || tr == T_CHASM) continue;
-				int ch = tchI;
-				float y = TacHToY(LayerHt(c, L));
-				int bkt = y > 12.f ? 3 : (y > 6.f ? 2 : (y > 2.5f ? 1 : 0));
-				MeshBuild& dk = bkt == 0 ? cov1[ch] : bkt == 1 ? cov2[ch] : bkt == 2 ? cov3[ch] : cov4[ch];
+				MeshBuild& dk = deckMesh(tchI, LayerHt(c, L), L);
 				EmitCurved(dk, m, x, z, 2, L, 0xFFFFFFFF);
 				emitDeckLayer(dk, L, 2, 0.72f);
 			}
@@ -16542,8 +16666,9 @@ BOOL Renderer::BuildTerrain(Map& m)
 		}
 		DWORD col = (c.t == T_CHASM) ? RGBAf(.35f, .32f, .33f) : 0xFFFFFFFF;
 		if (c.t == T_WATER) col = 0xFEFFFFFF;
+		MeshBuild& floor = ((int)c.h > MAXH) ? deckMesh(tchI, (int)c.h, 0) : geo;
 		if (c.t != T_BRIDGE) {
-			EmitCurved(geo, m, x, z, 0, 0, col);
+			EmitCurved(floor, m, x, z, 0, 0, col);
 		} else {
 			float y = m.TopY(x, z);
 			int fl = BridgeFloor(c);
@@ -16579,7 +16704,7 @@ BOOL Renderer::BuildTerrain(Map& m)
 		}
 		if (c.t != T_BRIDGE) {
 			if (c.h > MAXH) {
-				emitDeckLayer(geo, 0, 0, 0.96f);
+				emitDeckLayer(floor, 0, 0, 0.96f);
 			}
 			for (int k = 0; k < 4; k++) {
 				int nx = x + dx[k], nz = z + dz[k];
@@ -16618,13 +16743,14 @@ BOOL Renderer::BuildTerrain(Map& m)
 					float fallBot = offMap ? -9.f : ny + 0.15f;
 					if (nbIn && (nbT == T_CHASM || nbT == T_VOID)) fallBot = -9.f;
 					DWORD wc = FallTint(LiquidFlow(m, x, z, T_WATER), 0);
-					EmitCurtain(wb, ex0, ez0, ex1, ez1, surf, fallBot, nxn, nzn, 0.08f, wc);
-					EmitCurtain(wb, ex0, ez0, ex1, ez1, surf, fallBot, nxn, nzn, 0.18f, wc);
-					float mxOut = (ex0 + ex1) * 0.5f + nxn * 0.14f, mzOut = (ez0 + ez1) * 0.5f + nzn * 0.14f;
-					AddPuff(m_puff, m_puffN, 1, mxOut, (surf + fallBot) * 0.5f, mzOut, 5.f);
-					AddPuff(m_puff, m_puffN, 16, mxOut, surf + 0.05f, mzOut, 4.f);
-					if (fallBot > -8.f)
-						AddPuff(m_puff, m_puffN, 16, mxOut, fallBot + 0.1f, mzOut, 4.f);
+					float dropH = surf - fallBot;
+					BOOL tall = dropH > 5.5f || fallBot < -8.f;
+					wc = (wc & 0x00FFFFFF) | (tall ? 0xE8000000 : 0xD4000000);
+					EmitCurtain(wb, ex0, ez0, ex1, ez1, surf, fallBot, nxn, nzn, tall ? 0.06f : 0.035f, wc);
+					float mxOut = (ex0 + ex1) * 0.5f + nxn * 0.1f, mzOut = (ez0 + ez1) * 0.5f + nzn * 0.1f;
+					AddPuff(m_puff, m_puffN, 16, mxOut, surf + 0.05f, mzOut, tall ? 2.6f : 1.6f);
+					if (tall)
+						AddPuff(m_puff, m_puffN, 1, mxOut, (surf + fallBot) * 0.5f, mzOut, 2.4f);
 				}
 				if (c.t == T_LAVA && (offMap || (nbIn && (nbT == T_CHASM || nbT == T_VOID)))) {
 					float ex0, ez0, ex1, ez1;
@@ -16656,13 +16782,11 @@ BOOL Renderer::BuildTerrain(Map& m)
 			EmitCurved(wb, m, x, z, 1, T_WATER, LiquidFlow(m, x, z, T_WATER));
 		else if (c.t == T_LAVA)
 			EmitCurved(lb, m, x, z, 1, T_LAVA, LiquidFlow(m, x, z, T_LAVA));
-		if (m.theme != TH_SEABED && c.t == T_WATER && InteriorPool(m, x, z) && (CellHash(x, z, 91) % 10) == 0)
+		int skyEvery = (m.theme == TH_FALLS || m.theme == TH_LANTERN) ? 18 : 32;
+		if (m.theme != TH_SEABED && c.t == T_WATER && InteriorPool(m, x, z) && (CellHash(x, z, 91) % skyEvery) == 0)
 			EmitCeilingFall(wb, m_puff, m_puffN, m, x, z);
 		for (int L = 1; L < nCov; L++) {
-			int ch = ((z >> 4) << 2) + (x >> 4);
-			float y = TacHToY(LayerHt(c, L));
-			int bkt = y > 12.f ? 3 : (y > 6.f ? 2 : (y > 2.5f ? 1 : 0));
-			MeshBuild& dk = bkt == 0 ? cov1[ch] : bkt == 1 ? cov2[ch] : bkt == 2 ? cov3[ch] : cov4[ch];
+			MeshBuild& dk = deckMesh(tchI, LayerHt(c, L), L);
 			EmitCurved(dk, m, x, z, 2, L, 0xFFFFFFFF);
 			emitDeckLayer(dk, L, 2, 0.72f);
 		}

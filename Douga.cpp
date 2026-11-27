@@ -8873,8 +8873,9 @@ static void DougaEqPresetComboCb(void* /*ctx*/, int index, LPCTSTR /*text*/)
 
 static void DougaEqEnvComboCb(void* /*ctx*/, int index, LPCTSTR /*text*/)
 {
+	// セパレーターを除いた論理インデックス 0..100 をそのまま savedata.eqsoundenv へ反映
 	if (index < 0) index = 0;
-	if (index >= MP_REMOTE_EQ_ENV_COUNT) index = MP_REMOTE_EQ_ENV_COUNT - 1;
+	if (index > 100) index = 100;
 	savedata.eqsoundenv = index;
 	DougaEqSyncUi();
 }
@@ -9209,21 +9210,27 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					L"Preset de ambiente e quantidade wet", L"Omgevingspreset en wet-hoeveelheid",
 					L"Preset srodowiska i ilosc wet", L"Ortam onayari ve wet miktari"));
 			if (env) {
-				static const wchar_t* kEnvNames[MP_REMOTE_EQ_ENV_COUNT];
+				// セパレーター("--[[")を除いた論理インデックス 0..100 のみを固定配列へ構築
+				static const wchar_t* kEnvNames[101];
+				static int kEnvCount = 0;
 				static BOOL kEnvInit = FALSE;
 				if (!kEnvInit) {
-					for (int ei = 0; ei < MP_REMOTE_EQ_ENV_COUNT; ++ei)
-						kEnvNames[ei] = MpRemoteEqEnvLabel(ei);
+					kEnvCount = 0;
+					for (int ei = 0; ei < MP_REMOTE_EQ_ENV_COUNT && kEnvCount < 101; ++ei) {
+						const wchar_t* raw = MpRemoteEqEnvLabel(ei);
+						if (raw && wcsstr(raw, L"--[[") != NULL) continue;
+						kEnvNames[kEnvCount++] = raw ? raw : L"?";
+					}
 					kEnvInit = TRUE;
 				}
 				int envCur = savedata.eqsoundenv;
 				if (envCur < 0) envCur = 0;
-				if (envCur >= MP_REMOTE_EQ_ENV_COUNT) envCur = MP_REMOTE_EQ_ENV_COUNT - 1;
+				if (envCur >= kEnvCount) envCur = (kEnvCount > 0) ? (kEnvCount - 1) : 0;
 				env->AddCombo(
 					LL14(L"環境プリセット", L"Env preset", L"Preset env", L"Preset amb", L"Preset entorno",
 						L"환경 프리셋", L"环境预设", L"إعداد بيئة", L"Пресет среды", L"Umgebungs-Preset",
 						L"Preset ambiente", L"Omgevingspreset", L"Preset srodowiska", L"Ortam onayari"),
-					kEnvNames, MP_REMOTE_EQ_ENV_COUNT, envCur, DougaEqEnvComboCb, NULL, NULL);
+					kEnvNames, kEnvCount, envCur, DougaEqEnvComboCb, NULL, NULL);
 				int eff = savedata.eqsoundeffect * 2;
 				if (eff < 0) eff = 0;
 				if (eff > 200) eff = 200;

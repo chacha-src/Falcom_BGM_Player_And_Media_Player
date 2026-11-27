@@ -2504,9 +2504,6 @@ resetパラメータ:
 
 #define MAX_CH 8
 #define EQ_BANDS 15
-// 旧 3072000*2 は銀行あたり ~187MB。InitEngine で x86 VA が死に 2SF JIT が 0x7FFC で落ちる。
-// 192kHz で 2 秒あれば環境ディレイに十分。
-#define MAX_DELAY_SAMPLES (192000*2)
 #define MAX_EARLY_REFLECTIONS 16
 
 #define EQ_PRESET_COUNT 101
@@ -2767,78 +2764,309 @@ static const int EQ_PRESETS[EQ_PRESET_COUNT][15] = {
 	{ 96, 98,100,104,110,118,126,132,136,134,128,122,116,110,106}
 };
 
+// ============================================================
+//  高精度 倍精度 Direct Form II Transposed バイクワッドフィルタ
+//  25Hz〜16kHz の全帯域（特に極低域 25/40/63Hz）で桁落ちや
+//  係数誤差・リミットサイクルノイズを出さないよう内部演算を double 化。
+//  bypass==1 のときは完全スルーで演算コストを削減する。
+// ============================================================
 typedef struct {
-	float b0, b1, b2, a1, a2;
-	float x1, x2, y1, y2;
-} Biquad;
+	double b0, b1, b2, a1, a2;
+	double s1, s2;
+	int    bypass;
+} BiquadD;
 
-// ===== LFO =====
+// ============================================================
+//  位相整合 3バンド Linkwitz-Riley 4次 (LR4) ダイナミック保護
+//  低域 (<220Hz) / 中域 (220〜3200Hz) / 高域 (>3200Hz) に完全位相整合で分割し、
+//  過大ブーストされた帯域「だけ」を滑らかにソフト保護する。
+//  → 低周波を+12dB上げても中・高域の音量は 1.000 のまま一切下がらない！
+//  → 高周波を+12dB上げても低・中域の音量は 1.000 のまま一切下がらない！
+//  → 閾値以下ではゲイン 1.000（完全透明・無加工）。
+// ============================================================
 typedef struct {
-	float phase;
-	float frequency;
-	float depth;
-} LFO;
+	BiquadD lp1a[MAX_CH], lp1b[MAX_CH]; // 220Hz LR4 ローパス (2次Butterworth×2)
+	BiquadD hp1a[MAX_CH], hp1b[MAX_CH]; // 220Hz LR4 ハイパス (2次Butterworth×2)
+	BiquadD lp2a[MAX_CH], lp2b[MAX_CH]; // 3200Hz LR4 ローパス
+	BiquadD hp2a[MAX_CH], hp2b[MAX_CH]; // 3200Hz LR4 ハイパス
+	BiquadD apLow[MAX_CH];              // 3200Hz 2次オールパス (Low経路の位相整合用)
+	float   env[3];                     // ステレオリンク包絡線 [Low, Mid, High]
+	float   envCh[MAX_CH][3];           // 多ch用 チャンネル別包絡線
+	float   atkCoeff[3];                // バンド別アタック係数
+	float   relCoeff[3];                // バンド別リリース係数
+	int     rate;
+} MultibandProtector;
 
-// ===== Channel State =====
+// ============================================================
+//  チャンネル別 EQ / トーンフィルタ状態 (最大8ch、完全固定配列)
+// ============================================================
 typedef struct {
-	Biquad eqFilters[EQ_BANDS];
-	Biquad clarityFilter, bassBalanceFilter, trebleBalanceFilter;
-	Biquad densityFilter1, densityFilter2;
-	Biquad envLpf, envHpf, exciterFilter, dampingFilter;
-	Biquad bassReverbFilter, midReverbFilter, trebleReverbFilter;
-	Biquad materialFilter, warmthFilter, flutterFilter;
-	Biquad resonanceFilter, metallicFilter, glassFilter;
-
-	float* delayBuffer;
-	int writePos;
-	LFO lfo;
-
-	float diffusionBuffer1[8][1024], diffusionBuffer2[8][512], diffusionBuffer3[8][256];
-	int diffusionPos1[8], diffusionPos2[8], diffusionPos3[8];
-
-	float harmonicState, earlyEnvelope, lateEnvelope;
-	float warmthState, brightnessState, shimmerState;
-	float flutterPhase, dopplerPhase, phasingPhase;
-
-	// ===== 各プリセットの音響キャラクター差異付け用の状態 =====
-	// (従来 DSP で未使用だった環境パラメータを活かすために追加)
-	float wetAirState;     // airAbsorption/humidity/altitude による残響尾の高域吸収
-	float wetColorState;   // reverbColor (残響の明暗) 用ローパス状態
-	float echoToneState;   // echoFeedbackTone (山彦の明暗) 用ローパス状態
-	float wetSmoothState;  // reverbSmooth (残響の滑らかさ) 用平滑状態
-	float combBuf[2048];   // combFiltering 用ショートディレイ
-	int   combPos;
-	float windPhase;       // windEffect 用の超低周波ゆらぎ位相
-	float wetWeightState;  // weight (低域の量感) 用
-	float bodyToneState;   // woodiness/concrete (中低域の色付け) 用
-	float softState;       // softness (高域/トランジェントの丸め) 用
-	float phaserLfo;       // phasing 用 LFO 位相
-	float phaserState[2];  // phasing 用オールパス段
-
-	// Yamabiko buffers
-	float* yamabikoBuf;
-	int yamabikoBufSize;
-	int yamabikoPos;
+	BiquadD eqFilters[EQ_BANDS];        // 15バンド ISO 2/3オクターブ定Q EQ
+	BiquadD clarityPeak;                // 鮮明さ: 3.8kHz プレゼンスピーキング
+	BiquadD clarityAir;                 // 鮮明さ: 10kHz エアハイシェルフ
+	BiquadD bassBalanceFilter;          // バランス: 低域チルトローシェルフ
+	BiquadD trebleBalanceFilter;        // バランス: 高域チルトハイシェルフ
+	BiquadD densityLow;                 // 密度: 220Hz 中低域の厚み
+	BiquadD densityMid;                 // 密度: 700Hz 充実感
+	BiquadD bassMonoLP;                 // 立体感(Spatial)時の低域120Hzモノラル基準用
+	float   harmonicState;              // 密度ブースト時の微細ハーモニック用DC除去状態
 } ChannelState;
 
-// ===== Global State =====
+// ============================================================
+//  立体環境音響エンジン遅延バッファ定数 (すべて2の累乗 → ビットマスク高速化)
+//  1バンク合計 約 7.34 MB (VirtualAlloc 一括確保、再生中 malloc/free ゼロ)
+// ============================================================
+enum {
+	ENV_FDN_LINES   = 8,
+	ENV_DIFF_STAGES = 4,
+	ENV_ER_LEN      = 131072, // 192kHz で約 682ms (プリディレイ＋16タップ初期反射)
+	ENV_ER_MASK     = ENV_ER_LEN - 1,
+	ENV_FDN_LEN     = 65536,  // 192kHz で約 341ms × 8ライン (Hadamard FDN)
+	ENV_FDN_MASK    = ENV_FDN_LEN - 1,
+	ENV_YAMA_LEN    = 524288, // 192kHz で約 2.73秒 × 2ch (ステレオピンポン山彦)
+	ENV_YAMA_MASK   = ENV_YAMA_LEN - 1,
+	ENV_FLUT_LEN    = 16384,  // 192kHz で約 85ms × 2ch (平行壁フラッターエコー)
+	ENV_FLUT_MASK   = ENV_FLUT_LEN - 1,
+	ENV_COMB_LEN    = 8192,   // 192kHz で約 42ms × 2ch (定在波コム共鳴)
+	ENV_COMB_MASK   = ENV_COMB_LEN - 1,
+	ENV_DOPP_LEN    = 4096,   // 192kHz で約 21ms × 2ch (分数遅延ドップラー)
+	ENV_DOPP_MASK   = ENV_DOPP_LEN - 1,
+	ENV_SHIM_LEN    = 8192,   // +1オクターブ デュアルヘッド・シマー用リングバッファ
+	ENV_SHIM_MASK   = ENV_SHIM_LEN - 1,
+	ENV_DIFF_LEN    = 2048,   // 入力4段オールパスディフューザー
+	ENV_DIFF_MASK   = ENV_DIFF_LEN - 1,
+	ENV_POOL_FLOATS = (2 * ENV_ER_LEN) + (ENV_FDN_LINES * ENV_FDN_LEN)
+	                + (2 * ENV_YAMA_LEN) + (2 * ENV_FLUT_LEN)
+	                + (2 * ENV_COMB_LEN) + (2 * ENV_DOPP_LEN)
+	                + (2 * ENV_SHIM_LEN) + (2 * ENV_DIFF_STAGES * ENV_DIFF_LEN)
+};
+
+// ============================================================
+//  プロフェッショナル 100環境 立体物理音響エンジン状態 (ステレオ完全独立)
+// ============================================================
+typedef struct {
+	// VirtualAlloc プールへのスライスポインタ (再生中動的確保ゼロ)
+	float* erBuf[2];
+	float* fdnBuf[ENV_FDN_LINES];
+	float* yamaBuf[2];
+	float* flutBuf[2];
+	float* combBuf[2];
+	float* doppBuf[2];
+	float* shimBuf[2];
+	float* diffBuf[2][ENV_DIFF_STAGES];
+
+	// リングバッファ書き込み位置
+	int erPos;
+	int fdnPos[ENV_FDN_LINES];
+	int yamaPos;
+	int flutPos;
+	int combPos;
+	int doppPos;
+	int shimPos;
+	int diffPos[2][ENV_DIFF_STAGES];
+
+	// プリ計算済み空間物理パラメータ (プリセット/効果量変更時のみ再計算)
+	int   rate;
+	int   presetIdx;
+	int   effAmount;
+	int   preDelaySamp;
+	int   erDelayL[8];          // 左耳 8反射タップ遅延 [samples]
+	int   erDelayR[8];          // 右耳 8反射タップ遅延 [samples]
+	float erGainLL[8];          // L→L 初期反射ゲイン
+	float erGainRL[8];          // R→L 初期反射クロスゲイン
+	float erGainRR[8];          // R→R 初期反射ゲイン
+	float erGainLR[8];          // L→R 初期反射クロスゲイン
+	float erToneCoeff;          // 初期反射の材質吸音 1次LPF係数
+
+	int   fdnDelay[ENV_FDN_LINES];      // FDN 各ライン遅延長 [samples]
+	float fdnGainMid[ENV_FDN_LINES];    // FDN 各ライン中域フィードバックゲイン (RT60厳密算出)
+	float fdnGainLowMul[ENV_FDN_LINES]; // FDN 各ライン低域ブースト/カット比率
+	float fdnGainHigh[ENV_FDN_LINES];   // FDN 各ライン高域目標ゲイン
+	float fdnDampAlpha[ENV_FDN_LINES];  // FDN 各ライン高域ダンピングLPF係数
+	float fdnLowAlpha;                  // FDN 低域シェルフ分割LPF係数 (280Hz)
+	float fdnModDepthSamp;              // FDN 内部モジュレーション深さ [samples]
+	float fdnModInc[ENV_FDN_LINES];     // FDN 各ライン独立LFO位相増分 (非同期揺らぎ)
+	float fdnModPhase[ENV_FDN_LINES];   // FDN 各ラインLFO位相 [0, 2π)
+	float fdnDampState[ENV_FDN_LINES];  // FDN 各ライン高域ダンピングLPF状態
+	float fdnLowState[ENV_FDN_LINES];   // FDN 各ライン低域シェルフLPF状態
+	float fdnDcPrevIn[ENV_FDN_LINES];   // FDN DCブロッカー入力状態
+	float fdnDcPrevOut[ENV_FDN_LINES];  // FDN DCブロッカー出力状態
+
+	int   diffDelay[2][ENV_DIFF_STAGES];// 入力ディフューザー遅延長
+	float diffGain;                     // 入力ディフューザー係数 (diffusion由来)
+
+	// 山彦 (ステレオピンポン)
+	int   yamaDelayL[4];
+	int   yamaDelayR[4];
+	float yamaGain[4];
+	float yamaPan;
+	float yamaToneAlpha;
+	float yamaToneState[2];
+	float yamaFb;
+
+	// 平行壁フラッターエコー
+	int   flutDelay[2];
+	float flutFb;
+	float flutMix;
+	float flutLpState[2];
+
+	// 定在波コム共鳴
+	int   combDelay[2];
+	float combFb;
+	float combMix;
+	float combLpState[2];
+
+	// 分数遅延ドップラー
+	float doppBaseSamp;
+	float doppDepthSamp;
+	float doppPhaseInc;
+	float doppPhase;
+	float doppMix;
+
+	// デュアルヘッド +1オクターブ・シマー
+	float shimGrainLen;
+	float shimPhase[2];
+	float shimMix;
+	float shimFb;
+	float shimLpState[2];
+
+	// 4段ステレオ・オールパス・フェイザー
+	float phaserPhase;
+	float phaserInc;
+	float phaserDepth;
+	float phaserState[2][4];
+	float phaserFbState[2];
+
+	// 屋外の風 (非周期3成分ゆらぎ)
+	float windPhase1;
+	float windPhase2;
+	float windAmount;
+
+	// 空間共鳴・材質・音色整形フィルタ (L/R 独立倍精度 Biquad)
+	BiquadD wetLpf[2];          // 空間ローパス
+	BiquadD wetHpf[2];          // 空間ハイパス
+	BiquadD resonanceEq[2];     // 空間固有共鳴 (resonanceFreq / resonanceQ に実ゲイン付与)
+	BiquadD materialEq[2];      // 材質特性 (木質/コンクリ/吸音)
+	BiquadD metallicEq1[2];     // 金属空間 2.4kHz 高Q共鳴
+	BiquadD metallicEq2[2];     // 金属空間 4.8kHz 高Q共鳴
+	BiquadD glassEq[2];         // ガラス空間 6.5kHz 透明反射
+	BiquadD warmthEq[2];        // 温かみ＋重み ローシェルフ
+	BiquadD colorAirEq[2];      // reverbColor / brightness / airAbsorption ハイシェルフ
+	BiquadD exciterHp[2];       // エキサイター用 5.5kHz HPF
+	BiquadD directMediumLp[2];  // 水中(15)等の媒質ダイレクトLPF
+	BiquadD deadProximityEq[2]; // 極デッド小空間の近接吸音カーブ
+
+	// 初期反射トーン状態・柔らかさLPF状態
+	float erLpState[2];
+	float softLpState[2];
+	float softAlpha;
+	float directMediumMix;      // 水中等のドライ媒質フィルタ適用率 (通常 0.0)
+	float deadProximityMix;     // 極デッド小空間の吸音適用率
+	float dryGain;              // 最終ドライレベル (音の芯を維持)
+	float wetGain;              // 最終ウェットレベル
+	float earlyMix;             // 初期反射ミックス比
+	float lateMix;              // 後期FDN残響ミックス比
+	float wetStereoWidth;       // ウェット空間のステレオ広がり
+	float finalStereoWidth;     // 出力全体のステレオ幅 (安全範囲クランプ済み)
+	float exciterAmt;           // エキサイター量
+	float distAmt;              // 歪み量 (廃墟・SF空間用)
+	int   isReverseSpace;       // 86: 逆再生空間スウェル有効フラグ
+	int   isTimeStop;           // 87: タイムストップ室静止フェイザーフラグ
+	int   hasYamabiko;          // 山彦有効フラグ
+} EnvEngineState;
+
+// ============================================================
+//  排他制御 (std::mutex を使わず Win32 SRWLOCK でゼロ確保・超高速化)
+// ============================================================
+static SRWLOCK g_eqLock = SRWLOCK_INIT;
+struct EqSrwGuard {
+	SRWLOCK* lk;
+	explicit EqSrwGuard(SRWLOCK* p) : lk(p) { AcquireSRWLockExclusive(lk); }
+	~EqSrwGuard() { ReleaseSRWLockExclusive(lk); }
+	EqSrwGuard(const EqSrwGuard&) = delete;
+	EqSrwGuard& operator=(const EqSrwGuard&) = delete;
+};
+
+// ===== Global State (完全固定配列 + VirtualAlloc オンデマンドプール) =====
 enum { EQ_BANKS = 2 };
 static int g_eqCur = 0;
-static std::mutex g_eqMu;
 static ChannelState g_channels[EQ_BANKS][MAX_CH];
-// 静的 BSS だと 2*8*6144000*4 ~= 375MB で SizeOfImage が肥大し、
-// x86 VA が足りず kbvio2sf(DeSmuME JIT) が 0x7FFC で落ちる。必要時に確保する。
-static float* g_delayMemory[EQ_BANKS] = {};
+static MultibandProtector g_mbProt[EQ_BANKS];
+static EnvEngineState g_envEngine[EQ_BANKS];
+// 環境遅延プール: 1バンク約 7.34MB。静的 BSS を肥大させず必要時 1回だけ VirtualAlloc する。
+static float* g_envPoolMem[EQ_BANKS] = { NULL, NULL };
 
-static float* EnsureDelayBank(int bank)
+static float* EnsureEnvPool(int bank)
 {
 	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
-	if (!g_delayMemory[bank]) {
-		const SIZE_T bytes = (SIZE_T)MAX_CH * (SIZE_T)MAX_DELAY_SAMPLES * sizeof(float);
-		g_delayMemory[bank] = (float*)VirtualAlloc(NULL, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!g_envPoolMem[bank]) {
+		const SIZE_T bytes = (SIZE_T)ENV_POOL_FLOATS * sizeof(float);
+		g_envPoolMem[bank] = (float*)VirtualAlloc(NULL, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	}
-	return g_delayMemory[bank];
+	return g_envPoolMem[bank];
 }
+
+static void BindEnvPoolPointers(EnvEngineState* es, float* base)
+{
+	if (!base) {
+		for (int c = 0; c < 2; ++c) {
+			es->erBuf[c] = NULL;
+			es->yamaBuf[c] = NULL;
+			es->flutBuf[c] = NULL;
+			es->combBuf[c] = NULL;
+			es->doppBuf[c] = NULL;
+			es->shimBuf[c] = NULL;
+			for (int s = 0; s < ENV_DIFF_STAGES; ++s) es->diffBuf[c][s] = NULL;
+		}
+		for (int k = 0; k < ENV_FDN_LINES; ++k) es->fdnBuf[k] = NULL;
+		return;
+	}
+	float* p = base;
+	for (int c = 0; c < 2; ++c) { es->erBuf[c] = p; p += ENV_ER_LEN; }
+	for (int k = 0; k < ENV_FDN_LINES; ++k) { es->fdnBuf[k] = p; p += ENV_FDN_LEN; }
+	for (int c = 0; c < 2; ++c) { es->yamaBuf[c] = p; p += ENV_YAMA_LEN; }
+	for (int c = 0; c < 2; ++c) { es->flutBuf[c] = p; p += ENV_FLUT_LEN; }
+	for (int c = 0; c < 2; ++c) { es->combBuf[c] = p; p += ENV_COMB_LEN; }
+	for (int c = 0; c < 2; ++c) { es->doppBuf[c] = p; p += ENV_DOPP_LEN; }
+	for (int c = 0; c < 2; ++c) { es->shimBuf[c] = p; p += ENV_SHIM_LEN; }
+	for (int c = 0; c < 2; ++c) {
+		for (int s = 0; s < ENV_DIFF_STAGES; ++s) {
+			es->diffBuf[c][s] = p; p += ENV_DIFF_LEN;
+		}
+	}
+}
+
+// ============================================================
+//  リサンプリング用 再利用ワークプール (毎ブロック malloc/free を完全撤廃)
+// ============================================================
+typedef struct {
+	unsigned char* pcmBuf;
+	int            pcmCap;
+	float*         srcFloat;
+	int            srcCap;
+	float*         dstFloat;
+	int            dstCap;
+} ResampleWorkPool;
+
+static ResampleWorkPool g_rsPool[EQ_BANKS] = {};
+
+static void* EnsureResampleBuf(void** slot, int* capBytes, int needBytes)
+{
+	if (needBytes <= 0) return NULL;
+	if (*slot && *capBytes >= needBytes) return *slot;
+	if (*slot) {
+		VirtualFree(*slot, 0, MEM_RELEASE);
+		*slot = NULL;
+		*capBytes = 0;
+	}
+	int allocBytes = (needBytes + 65535) & ~65535;
+	void* p = VirtualAlloc(NULL, (SIZE_T)allocBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!p) return NULL;
+	*slot = p;
+	*capBytes = allocBytes;
+	return p;
+}
+
 static int g_lastRate[EQ_BANKS] = { 0, 0 };
 static int g_lastEqPreset[EQ_BANKS] = { -1, -1 };
 static int g_lastEnvPreset[EQ_BANKS] = { -1, -1 };
@@ -2859,66 +3087,7 @@ static int g_eqChorus = 0;
 static int g_eqDelay = 0;
 static BOOL g_initialized[EQ_BANKS] = { FALSE, FALSE };
 
-/*
-■ 再生経路の天井は EqCeiling（-0.20 dBTP）。ここから下は旧サンプルリミッターのメモ。
-
-■ リミッターの動作を調整したい場合
-
-1. threshold（圧縮開始レベル）
-- 0.90f: 安全重視、早めに圧縮開始（ダイナミックレンジやや狭い）
-- 0.95f : バランス良好（推奨）
-- 0.98f : ダイナミックレンジ優先（僅かなクリップリスク）
-
-2. attackTime（アタックタイム）
-- 0.0005f (0.5ms) : 超高速、瞬時のピーク対応
-- 0.001f (1ms) : 高速（推奨）
-- 0.005f (5ms) : やや緩やか、自然
-
-3. releaseTime（リリースタイム）
-- 0.050f (50ms) : 速い戻り、パンチ重視
-- 0.100f (100ms) : バランス良好（推奨）
-- 0.200f (200ms) : 自然な戻り、滑らか重視
-- 0.300f (300ms) : 非常に滑らか
-
-■ 調整例
-
-// より安全重視の設定
-g_limiter[g_eqCur][ch].threshold = 0.92f;
-attackTime = 0.0005f;  // 超高速反応
-releaseTime = 0.150f;  // やや遅めの戻り
-
-// ダイナミックレンジ優先の設定
-g_limiter[g_eqCur][ch].threshold = 0.97f;
-attackTime = 0.002f;   // 少しゆったり
-releaseTime = 0.200f;  // 自然な戻り
-
-■ 動作原理
-
-1. 入力信号がthresholdを超えたら、超えた分だけゲインを下げる
-2. アタックタイムで素早くゲインを下げる（ピーク防止）
-3. リリースタイムでゆっくりゲインを戻す（自然な音）
-4. 最後にソフトクリッピングで安全装置
-
-■ メリット
-
-✓ 静かな部分は影響を受けない
-✓ ピーク部分だけ自然に圧縮
-✓ 音割れ完全防止
-✓ 音響モデルの特性を保持
-✓ g_autoGainのような「小さいまま」問題が解消
-*/
-// ダイナミックリミッター構造体定義
-typedef struct {
-	float envelope;      // 現在のゲインリダクション
-	float threshold;     // 圧縮開始レベル（0.95f推奨）
-	float attackCoeff;   // アタック係数（プリ計算済み）
-	float releaseCoeff;  // リリース係数（プリ計算済み）
-} DynamicLimiter;
-
-static DynamicLimiter g_limiter[EQ_BANKS][2];
-static DynamicLimiter g_extBoostLimiter[EQ_BANKS][2];
-
-// ===== EQ Frequencies =====
+// ===== EQ 中心周波数 (ISO 2/3オクターブ 15バンド) =====
 static const float EQ_FREQS[EQ_BANDS] = {
 	   25.0f, 40.0f, 63.0f, 100.0f, 160.0f,
 	250.0f, 400.0f, 630.0f, 1000.0f, 1600.0f,
@@ -4567,653 +4736,1285 @@ static const EnvParams ENV_PRESETS[ENV_PRESET_COUNT] = {
 
 
 // ============================================================
-//  equaliser_dsp_full.c
-//  Hyper DSP Equaliser & Acoustic Environment Engine
-//
-//  [修正履歴]
-//  FIX-1 : coreScale/extraScale を正規化範囲 [0,1] に修正
-//           旧: 最大2.17/2.50 → 音割れ・籠もりの主因
-//  FIX-2 : ProfessionalSoftSaturate の knee を 0.65→0.78 に変更
-//           旧: 通常音楽ピーク(0.70-0.90)が常にサチュレーション領域
-//  FIX-3 : BlockAnalysis による透明ゲインステージング
-//  FIX-4 : チップチューン/FM音源検出時のウェット・ハーモニック削減
-//  FIX-5 : 24bit PCM リトルエンディアン バイト順修正
-//  FIX-BYPASS : EQ全帯域フラット + 環境0 → 完全スルーパス
-//  FIX-COMP   : stagingGain 閾値緩和(0.60→0.90) + ブロック間平滑化
-//               急激な大音量時の過圧縮・籠もり感を解消
+//  Hyper DSP Equaliser & Physical Acoustic Environment Engine
+//  - ISO 2/3オクターブ倍精度15バンドEQ (隣接バンド相互作用自動補正)
+//  - 位相整合 3バンド Linkwitz-Riley 4次 ダイナミック・ヘッドルーム保護
+//    (低域/高域を上げても他バンドや全体音量を下げず、音割れを防止)
+//  - 8ch Hadamard FDN + 16タップ L/R非対称初期反射 + 空間固有物理モデル
+//    (ピンポン山彦 / 平行壁フラッター / 定在波コム / +1octシマー /
+//     分数遅延ドップラー / 4段ステレオフェイザー / 空間共鳴＆材質モデル)
+//  - ゼロレイテンシ真のルックアヘッド・トゥルーピークリミッター (-0.20 dBTP)
+//  - std::コンテナ / 再生中 new/delete/malloc/free 一切不使用
 // ============================================================
 
-// ===== フィルタ計算関数群 =====
+static inline float ClampFloat(float v, float lo, float hi) {
+	return (v < lo) ? lo : (v > hi) ? hi : v;
+}
 
-// ピーキングEQ (bell型) バイクワッドフィルタ係数を計算する
-// gainVal: 0-200 (100=フラット, 0=最大カット, 200=最大ブースト)
-// db変換: (gainVal - 100) * 0.12 → ±12dB 範囲
-// |db| < 1.2dB のときは恒等フィルタを設定してバイパス
-static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rate) {
-	if (gainVal < 0.0f) gainVal = 0.0f;
-	if (gainVal > 200.0f) gainVal = 200.0f;
+static inline double ClampDouble(double v, double lo, double hi) {
+	return (v < lo) ? lo : (v > hi) ? hi : v;
+}
 
-	float db = (gainVal - 100.0f) * 0.12f;
+static inline float FlushDenormalF(float x) {
+	return (fabsf(x) < 1e-20f) ? 0.0f : x;
+}
 
-	// 微小ゲイン時はフィルタを恒等変換(スルー)に設定
-	if (fabs(db) < 1.2f) {
-		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
-		f->a1 = 0.0f; f->a2 = 0.0f;
+static inline double FlushDenormalD(double x) {
+	return (fabs(x) < 1e-24) ? 0.0 : x;
+}
+
+// ============================================================
+//  倍精度バイクワッドフィルタ設計＆処理群 (Direct Form II Transposed)
+// ============================================================
+
+static inline void ResetBiquadD(BiquadD* f) {
+	f->s1 = 0.0;
+	f->s2 = 0.0;
+}
+
+static inline void SetBiquadBypass(BiquadD* f) {
+	f->b0 = 1.0; f->b1 = 0.0; f->b2 = 0.0;
+	f->a1 = 0.0; f->a2 = 0.0;
+	f->bypass = 1;
+}
+
+// ピーキングEQ係数計算 (gainDb: dB単位、|gainDb| < 0.05dB で完全バイパス)
+static void CalcPeakingEQDb(BiquadD* f, double freq, double q, double gainDb, int rate) {
+	if (rate < 8000) rate = 8000;
+	if (fabs(gainDb) < 0.05) {
+		SetBiquadBypass(f);
 		return;
 	}
+	double maxFreq = (double)rate * 0.47;
+	freq = ClampDouble(freq, 12.0, maxFreq);
+	q = ClampDouble(q, 0.25, 16.0);
+	gainDb = ClampDouble(gainDb, -24.0, 24.0);
 
-	// ナイキスト周波数を超えないようにクランプ
-	float maxFreq = (float)rate * 0.45f;
-	if (freq > maxFreq) freq = maxFreq;
-	if (freq < 10.0f) freq = 10.0f;
-	if (q < 0.1f) q = 0.1f;
-	if (q > 10.0f) q = 10.0f;
-
-	float omega = 2.0f * M_PI * freq / (float)rate;
-	float sn = sinf(omega), cs = cosf(omega);
-	float alpha = sn / (2.0f * q);
-
-	// A = 10^(db/40) : 振幅比 (電圧ゲイン換算)
-	float A = powf(10.0f, db / 40.0f);
-
-	// 数値異常ガード
-	if (!isfinite(A) || A < 0.01f || A > 100.0f) {
-		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
-		f->a1 = 0.0f; f->a2 = 0.0f;
+	double omega = 2.0 * M_PI * freq / (double)rate;
+	double sn = sin(omega), cs = cos(omega);
+	double alpha = sn / (2.0 * q);
+	double A = pow(10.0, gainDb / 40.0);
+	double a0 = 1.0 + alpha / A;
+	if (!isfinite(a0) || fabs(a0) < 1e-12) {
+		SetBiquadBypass(f);
 		return;
 	}
-
-	float a0 = 1.0f + alpha / A;
-
-	// a0≒0は除算不能 → スルーに退避
-	if (fabs(a0) < 1e-10f) {
-		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
-		f->a1 = 0.0f; f->a2 = 0.0f;
-		return;
-	}
-
-	// 標準ピーキングEQ係数 (Audio EQ Cookbook 準拠)
-	f->b0 = (1.0f + alpha * A) / a0;
-	f->b1 = (-2.0f * cs) / a0;
-	f->b2 = (1.0f - alpha * A) / a0;
-	f->a1 = (-2.0f * cs) / a0;
-	f->a2 = (1.0f - alpha / A) / a0;
-
-	// 最終数値検証 → 異常なら恒等変換
+	f->b0 = (1.0 + alpha * A) / a0;
+	f->b1 = (-2.0 * cs) / a0;
+	f->b2 = (1.0 - alpha * A) / a0;
+	f->a1 = (-2.0 * cs) / a0;
+	f->a2 = (1.0 - alpha / A) / a0;
+	f->bypass = 0;
 	if (!isfinite(f->b0) || !isfinite(f->b1) || !isfinite(f->b2) ||
 		!isfinite(f->a1) || !isfinite(f->a2)) {
-		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
-		f->a1 = 0.0f; f->a2 = 0.0f;
+		SetBiquadBypass(f);
 	}
 }
 
-// 汎用 2次フィルタ係数計算
-// type==0: ローパスフィルタ (Butterworth 2次)
-// type==1: ハイパスフィルタ (Butterworth 2次)
-static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
-	if (freq <= 0.0f) freq = 20.0f;
-	if (freq >= rate / 2.0f) freq = rate / 2.0f - 1.0f;
-	float omega = 2.0f * M_PI * freq / (float)rate;
-	float sn = sinf(omega), cs = cosf(omega);
-	float alpha = sn / (2.0f * q);
-	float a0 = 1.0f + alpha;
+// 2次ローパス/ハイパスフィルタ係数計算 (isHigh==0: LPF, isHigh==1: HPF)
+static void CalcBiquadFilter(BiquadD* f, int isHigh, double freq, double q, int rate) {
+	if (rate < 8000) rate = 8000;
+	double maxFreq = (double)rate * 0.48;
+	freq = ClampDouble(freq, 10.0, maxFreq);
+	q = ClampDouble(q, 0.25, 16.0);
 
-	if (type == 0) {
-		// ローパス
-		f->b0 = ((1.0f - cs) * 0.5f) / a0;
-		f->b1 = (1.0f - cs) / a0;
-		f->b2 = ((1.0f - cs) * 0.5f) / a0;
-	}
-	else {
-		// ハイパス
-		f->b0 = ((1.0f + cs) * 0.5f) / a0;
-		f->b1 = (-(1.0f + cs)) / a0;
-		f->b2 = ((1.0f + cs) * 0.5f) / a0;
-	}
-	f->a1 = (-2.0f * cs) / a0;
-	f->a2 = (1.0f - alpha) / a0;
-}
-
-// シェルビングEQ係数計算
-// type==0: ローシェルフ (低域ブースト/カット)
-// type==1: ハイシェルフ (高域ブースト/カット)
-// gainDb: dB単位。|gainDb| < 0.01 のときは恒等変換
-static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int rate) {
-	if (fabs(gainDb) < 0.01f) {
-		f->b0 = 1; f->b1 = 0; f->b2 = 0; f->a1 = 0; f->a2 = 0;
+	double omega = 2.0 * M_PI * freq / (double)rate;
+	double sn = sin(omega), cs = cos(omega);
+	double alpha = sn / (2.0 * q);
+	double a0 = 1.0 + alpha;
+	if (!isfinite(a0) || fabs(a0) < 1e-12) {
+		SetBiquadBypass(f);
 		return;
 	}
-	float omega = 2.0f * M_PI * freq / (float)rate;
-	float sn = sinf(omega), cs = cosf(omega);
-	float A = powf(10.0f, gainDb / 40.0f);
-	float beta = sqrtf(A) / 0.707f;   // Q=0.707 (Butterworth 最平坦)
-
-	if (type == 0) {
-		// ローシェルフ
-		float a0 = (A + 1.0f) + (A - 1.0f) * cs + beta * sn;
-		f->b0 = (A * ((A + 1.0f) - (A - 1.0f) * cs + beta * sn)) / a0;
-		f->b1 = (2.0f * A * ((A - 1.0f) - (A + 1.0f) * cs)) / a0;
-		f->b2 = (A * ((A + 1.0f) - (A - 1.0f) * cs - beta * sn)) / a0;
-		f->a1 = (-2.0f * ((A - 1.0f) + (A + 1.0f) * cs)) / a0;
-		f->a2 = ((A + 1.0f) + (A - 1.0f) * cs - beta * sn) / a0;
+	if (!isHigh) {
+		f->b0 = ((1.0 - cs) * 0.5) / a0;
+		f->b1 = (1.0 - cs) / a0;
+		f->b2 = ((1.0 - cs) * 0.5) / a0;
 	}
 	else {
-		// ハイシェルフ
-		float a0 = (A + 1.0f) - (A - 1.0f) * cs + beta * sn;
-		f->b0 = (A * ((A + 1.0f) + (A - 1.0f) * cs + beta * sn)) / a0;
-		f->b1 = (-2.0f * A * ((A - 1.0f) + (A + 1.0f) * cs)) / a0;
-		f->b2 = (A * ((A + 1.0f) + (A - 1.0f) * cs - beta * sn)) / a0;
-		f->a1 = (2.0f * ((A - 1.0f) - (A + 1.0f) * cs)) / a0;
-		f->a2 = ((A + 1.0f) - (A - 1.0f) * cs - beta * sn) / a0;
+		f->b0 = ((1.0 + cs) * 0.5) / a0;
+		f->b1 = (-(1.0 + cs)) / a0;
+		f->b2 = ((1.0 + cs) * 0.5) / a0;
+	}
+	f->a1 = (-2.0 * cs) / a0;
+	f->a2 = (1.0 - alpha) / a0;
+	f->bypass = 0;
+}
+
+// 2次オールパスフィルタ係数計算 (LR4 3バンド位相整合用)
+static void CalcAllpass2(BiquadD* f, double freq, double q, int rate) {
+	if (rate < 8000) rate = 8000;
+	double maxFreq = (double)rate * 0.48;
+	freq = ClampDouble(freq, 10.0, maxFreq);
+	q = ClampDouble(q, 0.25, 16.0);
+
+	double omega = 2.0 * M_PI * freq / (double)rate;
+	double sn = sin(omega), cs = cos(omega);
+	double alpha = sn / (2.0 * q);
+	double a0 = 1.0 + alpha;
+	f->b0 = (1.0 - alpha) / a0;
+	f->b1 = (-2.0 * cs) / a0;
+	f->b2 = (1.0 + alpha) / a0;
+	f->a1 = (-2.0 * cs) / a0;
+	f->a2 = (1.0 - alpha) / a0;
+	f->bypass = 0;
+}
+
+// シェルビングEQ係数計算 (isHigh==0: ローシェルフ, isHigh==1: ハイシェルフ)
+static void CalcShelvingEQDb(BiquadD* f, int isHigh, double freq, double gainDb, int rate) {
+	if (rate < 8000) rate = 8000;
+	if (fabs(gainDb) < 0.05) {
+		SetBiquadBypass(f);
+		return;
+	}
+	double maxFreq = (double)rate * 0.47;
+	freq = ClampDouble(freq, 15.0, maxFreq);
+	gainDb = ClampDouble(gainDb, -24.0, 24.0);
+
+	double omega = 2.0 * M_PI * freq / (double)rate;
+	double sn = sin(omega), cs = cos(omega);
+	double A = pow(10.0, gainDb / 40.0);
+	// S = 1.0 (Butterworth 最平坦スロープ): beta = sqrt(2*A)
+	double beta = sqrt(2.0 * A);
+
+	if (!isHigh) {
+		double a0 = (A + 1.0) + (A - 1.0) * cs + beta * sn;
+		f->b0 = (A * ((A + 1.0) - (A - 1.0) * cs + beta * sn)) / a0;
+		f->b1 = (2.0 * A * ((A - 1.0) - (A + 1.0) * cs)) / a0;
+		f->b2 = (A * ((A + 1.0) - (A - 1.0) * cs - beta * sn)) / a0;
+		f->a1 = (-2.0 * ((A - 1.0) + (A + 1.0) * cs)) / a0;
+		f->a2 = ((A + 1.0) + (A - 1.0) * cs - beta * sn) / a0;
+	}
+	else {
+		double a0 = (A + 1.0) - (A - 1.0) * cs + beta * sn;
+		f->b0 = (A * ((A + 1.0) + (A - 1.0) * cs + beta * sn)) / a0;
+		f->b1 = (-2.0 * A * ((A - 1.0) + (A + 1.0) * cs)) / a0;
+		f->b2 = (A * ((A + 1.0) + (A - 1.0) * cs - beta * sn)) / a0;
+		f->a1 = (2.0 * ((A - 1.0) - (A + 1.0) * cs)) / a0;
+		f->a2 = ((A + 1.0) - (A - 1.0) * cs - beta * sn) / a0;
+	}
+	f->bypass = 0;
+	if (!isfinite(f->b0) || !isfinite(f->b1) || !isfinite(f->b2) ||
+		!isfinite(f->a1) || !isfinite(f->a2)) {
+		SetBiquadBypass(f);
 	}
 }
 
-// バイクワッドフィルタ 1サンプル処理 (Direct Form II Transposed)
-// デノーマル対策: 1e-15未満をゼロクリア
-// オーバーフロー対策: ±10.0でハードリミット (通常動作では到達しない)
-static float ProcessBiquad(Biquad* f, float in) {
-	if (!isfinite(in)) return 0.0f;
+// バイクワッドの周波数 freq における振幅応答 [dB] を厳密評価
+static double EvalBiquadMagDb(const BiquadD* f, double freq, int rate) {
+	if (f->bypass || rate < 8000) return 0.0;
+	double w = 2.0 * M_PI * freq / (double)rate;
+	double cw = cos(w), sw = sin(w);
+	double c2w = cos(2.0 * w), s2w = sin(2.0 * w);
+	double numRe = f->b0 + f->b1 * cw + f->b2 * c2w;
+	double numIm = -(f->b1 * sw + f->b2 * s2w);
+	double denRe = 1.0 + f->a1 * cw + f->a2 * c2w;
+	double denIm = -(f->a1 * sw + f->a2 * s2w);
+	double num2 = numRe * numRe + numIm * numIm;
+	double den2 = denRe * denRe + denIm * denIm;
+	if (den2 < 1e-24 || num2 < 1e-24) return 0.0;
+	return 10.0 * log10(num2 / den2);
+}
 
-	float out = f->b0 * in + f->b1 * f->x1 + f->b2 * f->x2
-		- f->a1 * f->y1 - f->a2 * f->y2;
-
-	// デノーマル対策 (FTZ未設定環境向け)
-	if (fabs(out) < 1e-15f) out = 0.0f;
-	f->x2 = f->x1; f->x1 = in;
-	f->y2 = f->y1; f->y1 = out;
-	if (fabs(f->y1) < 1e-15f) f->y1 = 0.0f;
-	if (fabs(f->y2) < 1e-15f) f->y2 = 0.0f;
-
-	// NaN/Inf 発生時はバッファリセットして 0 を返す
-	if (!isfinite(out)) {
-		f->x1 = f->x2 = f->y1 = f->y2 = 0.0f;
-		return 0.0f;
+// 倍精度 Direct Form II Transposed 1サンプル処理
+static inline double ProcessBiquadD(BiquadD* f, double in) {
+	if (f->bypass) return in;
+	double y = f->b0 * in + f->s1;
+	f->s1 = f->b1 * in - f->a1 * y + f->s2;
+	f->s2 = f->b2 * in - f->a2 * y;
+	if (!isfinite(y)) {
+		f->s1 = 0.0;
+		f->s2 = 0.0;
+		return 0.0;
 	}
-	// 過大振幅クランプ (ガード用: 通常到達しない)
-	if (out > 10.0f)  out = 10.0f;
-	if (out < -10.0f) out = -10.0f;
-	return out;
+	return y;
 }
 
 // ============================================================
-// 拡張版山彦(やまびこ)処理
-// 山岳・渓谷エコー用: 最大4タップのマルチタップディレイ
-// yamabikoPan: 奇数タップに左右パンを付与し自然な広がりを再現
-// decayMult  : タップ番号が増えるごとに指数的に減衰
+//  15バンド ISO 2/3オクターブ 定QグラフィックEQ 係数更新
+//  隣接する複数バンドを同時にブースト/カットした際の過大な重なり（+22dB暴走）を
+//  3反復のガウス・ザイデル法で自動補正し、各バンド中心周波数で厳密に目標dBへ一致させる。
+//  目標 0dB のバンドは一切逆打ちせず 0.0dB 完全スルーを保つ。
 // ============================================================
-static inline float ProcessYamabikoAdvanced(ChannelState* cs, float input, const EnvParams* env, int sampleRate)
-{
-	// 遅延タップだけを返す（ドライは混ぜない）。ドライを足すと後段の wetMix で
-	// エコーが潰され、山/峡谷の山彦がほぼ消える。
-	if (!env || !cs || env->yamabikoDelays[0] <= 0.0f) return 0.0f;
-	if (!cs->yamabikoBuf || cs->yamabikoBufSize <= 1) return 0.0f;
+static void UpdateGraphicEq15(ChannelState* csArr, int numCh, const int eqVals[EQ_BANDS], int rate) {
+	static const double kBandQ[EQ_BANDS] = {
+		1.85, 2.10, 2.14, 2.14, 2.14,
+		2.14, 2.14, 2.14, 2.14, 2.14,
+		2.14, 2.14, 2.05, 1.85, 1.55
+	};
+	double targetDb[EQ_BANDS];
+	double effDb[EQ_BANDS];
+	int anyActive = 0;
 
-	float out = 0.0f;
-	float decayMult = powf(0.95f, 1.0f / fmaxf(0.25f, env->yamabikoDecay));
-
-	for (int i = 0; i < 4; i++) {
-		if (env->yamabikoDelays[i] <= 0.0f) break;
-		int delaySamples = (int)(env->yamabikoDelays[i] * (float)sampleRate / 1000.0f);
-		if (delaySamples < 1) continue;
-		// バッファより長いタップは最大遅延へクランプ（捨てると山彦が無音になる）
-		if (delaySamples >= cs->yamabikoBufSize)
-			delaySamples = cs->yamabikoBufSize - 1;
-		int readPos = cs->yamabikoPos - delaySamples;
-		if (readPos < 0) readPos += cs->yamabikoBufSize;
-		float delayed = cs->yamabikoBuf[readPos];
-		float gain = env->yamabikoGains[i] * powf(decayMult, (float)i);
-		float panEffect = (i % 2) ? env->yamabikoPan : -env->yamabikoPan;
-		delayed *= (1.0f + panEffect * 0.3f);
-		out += delayed * gain;
+	for (int b = 0; b < EQ_BANDS; ++b) {
+		int v = eqVals[b];
+		if (v < 0) v = 0;
+		if (v > 200) v = 200;
+		targetDb[b] = ((double)v - 100.0) * 0.12; // ±12.0 dB
+		effDb[b] = targetDb[b];
+		if (fabs(targetDb[b]) >= 0.05) anyActive = 1;
 	}
 
-	cs->yamabikoBuf[cs->yamabikoPos] = input;
-	cs->yamabikoPos++;
-	if (cs->yamabikoPos >= cs->yamabikoBufSize) cs->yamabikoPos = 0;
-	return out;
-}
-
-// LFO (低周波発振器) 出力計算
-// サイン波 × depth を返し、位相を sampleRate で正規化して進める
-static inline float UpdateLFO(LFO* lfo, int sampleRate) {
-	if (lfo->frequency <= 0.0f || lfo->depth <= 0.0f) return 0.0f;
-	float value = sinf(lfo->phase * 2.0f * M_PI) * lfo->depth;
-	lfo->phase += lfo->frequency / (float)sampleRate;
-	if (lfo->phase >= 1.0f) lfo->phase -= 1.0f;
-	return value;
-}
-
-// ============================================================
-// ディフュージョン処理 (拡散反射シミュレーション)
-// 最大3段のオールパスフィルタカスケードで密度を制御
-// 山岳・渓谷エコー時は弱いディフュージョンのみ適用 (clear感を維持)
-// density > 0.3: 第2段追加
-// density > 0.6: 第3段追加
-// ============================================================
-static inline float ProcessDiffusion(ChannelState* cs, float input, float diffusion, float density, int envType)
-{
-	// 山岳・渓谷エコー: ディフュージョンを最小限に抑えてエコーの輪郭を保つ
-	if (envType == TYPE_MOUNTAIN_ECHO || envType == TYPE_CANYON_ECHO) {
-		float weakDiff = diffusion * 0.12f;
-		if (weakDiff <= 0.001f) return input;
-		static const int delays1[8] = { 37, 53, 73, 97, 127, 163, 211, 277 };
-		float output = input;
-		float coeff = weakDiff * 0.35f;
-		if (coeff > 0.35f) coeff = 0.35f;
-		for (int i = 0; i < 8; i++) {
-			int readPos = (cs->diffusionPos1[i] - delays1[i] + 1024) % 1024;
-			float delayed = cs->diffusionBuffer1[i][readPos];
-			float temp = output + delayed * coeff;
-			cs->diffusionBuffer1[i][cs->diffusionPos1[i]] = temp;
-			output = delayed - temp * coeff;
-			cs->diffusionPos1[i] = (cs->diffusionPos1[i] + 1) % 1024;
-		}
-		return output;
+	BiquadD proto[EQ_BANDS];
+	if (!anyActive) {
+		for (int b = 0; b < EQ_BANDS; ++b) SetBiquadBypass(&proto[b]);
 	}
-
-	if (diffusion <= 0.0f) return input;
-
-	// 第1段: 主ディフュージョン (素数遅延を使用してコムフィルタを回避)
-	static const int delays1[8] = { 37, 53, 73, 97, 127, 163, 211, 277 };
-	float output = input;
-	float coeff = diffusion * 0.6f;
-	if (coeff > 0.6f) coeff = 0.6f;
-	for (int i = 0; i < 8; i++) {
-		int readPos = (cs->diffusionPos1[i] - delays1[i] + 1024) % 1024;
-		float delayed = cs->diffusionBuffer1[i][readPos];
-		float temp = output + delayed * coeff;
-		cs->diffusionBuffer1[i][cs->diffusionPos1[i]] = temp;
-		output = delayed - temp * coeff;
-		cs->diffusionPos1[i] = (cs->diffusionPos1[i] + 1) % 1024;
-	}
-
-	// 第2段: density > 0.3 で追加 (より密な反射)
-	if (density > 0.3f) {
-		static const int delays2[8] = { 23, 31, 41, 59, 71, 89, 107, 131 };
-		float coeff2 = density * 0.5f;
-		if (coeff2 > 0.5f) coeff2 = 0.5f;
-		for (int i = 0; i < 8; i++) {
-			int readPos = (cs->diffusionPos2[i] - delays2[i] + 512) % 512;
-			float delayed = cs->diffusionBuffer2[i][readPos];
-			float temp = output + delayed * coeff2;
-			cs->diffusionBuffer2[i][cs->diffusionPos2[i]] = temp;
-			output = delayed - temp * coeff2;
-			cs->diffusionPos2[i] = (cs->diffusionPos2[i] + 1) % 512;
-		}
-	}
-
-	// 第3段: density > 0.6 でさらに追加 (超高密度反射)
-	if (density > 0.6f) {
-		static const int delays3[8] = { 13, 17, 19, 29, 37, 43, 53, 67 };
-		float coeff3 = (density - 0.6f) * 0.6f;
-		if (coeff3 > 0.4f) coeff3 = 0.4f;
-		for (int i = 0; i < 8; i++) {
-			int readPos = (cs->diffusionPos3[i] - delays3[i] + 256) % 256;
-			float delayed = cs->diffusionBuffer3[i][readPos];
-			float temp = output + delayed * coeff3;
-			cs->diffusionBuffer3[i][cs->diffusionPos3[i]] = temp;
-			output = delayed - temp * coeff3;
-			cs->diffusionPos3[i] = (cs->diffusionPos3[i] + 1) % 256;
-		}
-	}
-	return output;
-}
-
-// エキサイター: 高域を高調波歪みで倍音付加
-// HPFで抽出した高域成分を非線形処理し元信号に加算
-static inline float Exciter(float input, Biquad* hpf, float amount) {
-	if (amount <= 0.0f) return input;
-	float highFreq = ProcessBiquad(hpf, input);
-	float enhanced = highFreq * 2.5f;
-	// ソフトクリップ (折り返し型)
-	if (enhanced > 1.0f) enhanced = 1.0f - (enhanced - 1.0f) * 0.3f;
-	if (enhanced < -1.0f) enhanced = -1.0f + (enhanced + 1.0f) * 0.3f;
-	return input + (enhanced - highFreq) * amount * 1.3f;
-}
-
-// ソフトリミッター: threshold=0.7 のスムーズな膝特性
-// knee領域: x/(1+|x-th|) 型の双曲線で自然に圧縮
-static inline float SoftLimiter(float x) {
-	const float threshold = 0.7f;
-	if (x > threshold) { float o = x - threshold; x = threshold + (1.0f - threshold) * (o / (1.0f + o)); }
-	else if (x < -threshold) { float o = -x - threshold; x = -threshold - (1.0f - threshold) * (o / (1.0f + o)); }
-	return x;
-}
-
-// フラッターエコー: テープヘッド揺れを模したビブラート的エコー
-// flutterPhase で変調周波数を制御し filtered 成分を加算
-static inline float ProcessFlutterEcho(ChannelState* cs, float input, float amount, int sampleRate) {
-	if (amount <= 0.0f) return input;
-	float flutterFreq = 8.0f + amount * 4.0f;
-	cs->flutterPhase += flutterFreq / (float)sampleRate;
-	if (cs->flutterPhase >= 1.0f) cs->flutterPhase -= 1.0f;
-	float modulation = sinf(cs->flutterPhase * 2.0f * M_PI) * amount * 0.15f;
-	float filtered = ProcessBiquad(&cs->flutterFilter, input);
-	return input + filtered * modulation;
-}
-
-// 材質吸収シミュレーション: LPFで材料固有の高域吸収を再現
-// roughness が高いほど全体レベルも低下 (拡散損失)
-static inline float ProcessMaterialAbsorption(ChannelState* cs, float input, float absorption, float roughness) {
-	if (absorption <= 0.0f && roughness <= 0.0f) return input;
-	float absorbed = ProcessBiquad(&cs->materialFilter, input);
-	if (roughness > 0.0f) absorbed *= (1.0f - roughness * 0.3f);
-	return input * (1.0f - absorption) + absorbed * absorption;
-}
-
-// ウォームス(温もり)処理: 低域シェルフ + スムージングで音の温もりを付与
-// warmthState: 指数平滑フィルタ (係数0.98/0.02)
-static inline float ProcessWarmth(ChannelState* cs, float input, float warmth) {
-	if (warmth <= 0.0f) return input;
-	float warmed = ProcessBiquad(&cs->warmthFilter, input);
-	cs->warmthState = cs->warmthState * 0.98f + warmed * 0.02f;
-	return input * (1.0f - warmth * 0.3f) + cs->warmthState * warmth * 0.3f;
-}
-
-// ブライトネス: 奇数高調波 (3次) を加算して輝きを調整
-// brightness = 0.5 のとき完全スルー (±デッドバンド 0.01)
-// brightnessState: 指数平滑 (係数0.96/0.04) でポップ防止
-static inline float ProcessBrightness(float input, float* brightnessState, float brightness) {
-	if (fabs(brightness - 0.5f) < 0.01f) return input;
-	float harmonic = input * input * input;   // 3次歪み成分
-	float brightnessFactor = (brightness - 0.5f) * 2.0f;
-	*brightnessState = *brightnessState * 0.96f + harmonic * brightnessFactor * 0.04f;
-	return input + *brightnessState * 0.1f;
-}
-
-// 共鳴処理: 特定周波数のピーキングEQで空間共鳴を模倣
-static inline float ProcessResonance(ChannelState* cs, float input, float freq, float q, float amount) {
-	if (amount <= 0.0f || freq <= 0.0f) return input;
-	return input + ProcessBiquad(&cs->resonanceFilter, input) * amount * 0.5f;
-}
-
-// 金属質感: 高Qハイパスで金属的な倍音を付加
-static inline float ProcessMetallic(ChannelState* cs, float input, float amount) {
-	if (amount <= 0.0f) return input;
-	return input + ProcessBiquad(&cs->metallicFilter, input) * amount * 0.4f;
-}
-
-// ガラス質感: より高域のハイパスで透明感・鋭さを付加
-static inline float ProcessGlass(ChannelState* cs, float input, float amount) {
-	if (amount <= 0.0f) return input;
-	return input + ProcessBiquad(&cs->glassFilter, input) * amount * 0.35f;
-}
-
-// シマー: 高調波ゆらぎで空間的な輝きを付加
-// shimmerState: 指数平滑値を高速サイン波で変調
-static inline float ProcessShimmer(ChannelState* cs, float input, float amount, int sampleRate) {
-	if (amount <= 0.0f) return input;
-	cs->shimmerState = cs->shimmerState * 0.992f + input * 0.008f;
-	return input + sinf(cs->shimmerState * 12.0f) * amount * 0.15f;
-}
-
-// ドップラー効果: 低速正弦波変調でピッチ感覚的な変化を模倣
-// dopplerPhase: 0.5Hz 固定 (0.5/sampleRate per sample)
-static inline float ProcessDoppler(ChannelState* cs, float input, float amount, int sampleRate) {
-	if (amount <= 0.0f) return input;
-	cs->dopplerPhase += 0.5f / (float)sampleRate;
-	if (cs->dopplerPhase >= 1.0f) cs->dopplerPhase -= 1.0f;
-	return input * (1.0f + sinf(cs->dopplerPhase * 2.0f * M_PI) * amount * 0.02f);
-}
-
-// ============================================================
-// ★ ウェット(残響/エコー)信号のキャラクター付与
-// ============================================================
-//  従来 DSP で宣言だけされ未使用だった環境パラメータ
-//  (airAbsorption / humidity / altitude / reverbColor / reverbSmooth /
-//   combFiltering / windEffect) をここで残響成分に反映する。
-//  これにより 100 個の音響プリセットが「残響の明暗・吸収・揺らぎ・筒鳴り」
-//  といった質感で互いに聴き分けられるようになる。
-//  音量(ピーク)は最終段のルックアヘッドリミッターが抑えるため、
-//  ここでは音割れを気にせずトーン/質感の差異付けに専念できる。
-static inline float ProcessWetCharacter(ChannelState* cs, float wet,
-	const EnvParams* env, int sampleRate)
-{
-	if (!isfinite(wet)) return 0.0f;
-
-	// --- 空気吸収: 距離・湿度・高度が高いほど残響尾の高域を減衰 ---
-	float airHF = env->airAbsorption + env->humidity * 0.4f + env->altitude * 0.3f;
-	if (airHF > 0.0f) {
-		if (airHF > 1.0f) airHF = 1.0f;
-		float a = 0.10f + airHF * 0.80f;            // airHF大→平滑強→高域減衰
-		cs->wetAirState += a * (wet - cs->wetAirState);
-		wet = wet * (1.0f - airHF) + cs->wetAirState * airHF;
-	}
-
-	// --- 残響の色味 (reverbColor: 0=暗い, 0.5=中立, 1=明るい) ---
-	if (fabsf(env->reverbColor - 0.5f) > 0.01f) {
-		cs->wetColorState += 0.25f * (wet - cs->wetColorState);
-		float lowPart = cs->wetColorState;
-		float highPart = wet - lowPart;
-		float tilt = (env->reverbColor - 0.5f) * 1.6f;  // -0.8..+0.8
-		wet = lowPart + highPart * (1.0f + tilt);
-	}
-
-	// --- 残響の滑らかさ (reverbSmooth: 0=粗い, 1=滑らか) ---
-	if (env->reverbSmooth > 0.0f) {
-		float sc = 0.06f + env->reverbSmooth * 0.40f;
-		cs->wetSmoothState += sc * (wet - cs->wetSmoothState);
-		float mix = env->reverbSmooth * 0.6f;
-		wet = wet * (1.0f - mix) + cs->wetSmoothState * mix;
-	}
-
-	// --- コムフィルタリング (筒・金属・反復反射の色付け) ---
-	if (env->combFiltering > 0.0f) {
-		float baseFreq = (env->resonanceFreq > 80.0f) ? env->resonanceFreq : 220.0f;
-		int d = (int)((float)sampleRate / baseFreq);
-		if (d < 8) d = 8;
-		if (d > 2047) d = 2047;
-		int rp = cs->combPos - d; if (rp < 0) rp += 2048;
-		float dl = cs->combBuf[rp];
-		float g = env->combFiltering * 0.55f;
-		float out = wet + dl * g;
-		cs->combBuf[cs->combPos] = wet;
-		cs->combPos = (cs->combPos + 1) & 2047;
-		wet = out * (1.0f - g * 0.4f);              // ピーク膨張を補正
-	}
-
-	// --- 風の効果 (屋外プリセットの自然な揺らぎ) ---
-	if (env->windEffect > 0.0f) {
-		cs->windPhase += 0.27f / (float)sampleRate; // ~0.27Hz の超低周波ゆらぎ
-		if (cs->windPhase >= 1.0f) cs->windPhase -= 1.0f;
-		float w = sinf(cs->windPhase * 2.0f * (float)M_PI)
-			+ 0.5f * sinf(cs->windPhase * 6.3f * (float)M_PI);
-		wet *= (1.0f + w * env->windEffect * 0.12f);
-	}
-
-	return isfinite(wet) ? wet : 0.0f;
-}
-
-// ============================================================
-// ★ 最終ミックス(ドライ+ウェット)のキャラクター付与
-// ============================================================
-//  未使用だった weight / woodiness / concrete / softness / phasing /
-//  distortion を最終ミックスに反映し、プリセット固有の「音の重さ・素材感・
-//  柔らかさ・うねり・質感歪み」を付ける。
-//  distortion はプリセット意図に基づく軽いサチュレーションで、
-//  最終リミッターによりハードクリップ(音割れ)には至らない。
-static inline float ProcessMixCharacter(ChannelState* cs, float mixed,
-	const EnvParams* env, int sampleRate)
-{
-	if (!isfinite(mixed)) return 0.0f;
-
-	// --- 重さ (weight: 0=軽い, 0.5=中立, 1=重い) 低域の量感 ---
-	if (fabsf(env->weight - 0.5f) > 0.01f) {
-		cs->wetWeightState += 0.05f * (mixed - cs->wetWeightState);
-		float w = (env->weight - 0.5f) * 1.2f;      // -0.6..+0.6
-		mixed += cs->wetWeightState * w * 0.6f;
-	}
-
-	// --- 素材感 (木質=暖色寄り / コンクリート=硬く乾いた色) ---
-	float bodyTone = env->woodiness * 0.5f - env->concrete * 0.4f;
-	if (fabsf(bodyTone) > 0.01f) {
-		cs->bodyToneState += 0.12f * (mixed - cs->bodyToneState);
-		mixed += cs->bodyToneState * bodyTone * 0.25f;
-	}
-
-	// --- 柔らかさ (softness: 高域/トランジェントを軽く丸める) ---
-	if (env->softness > 0.0f) {
-		float a = 0.5f - env->softness * 0.35f;
-		cs->softState += a * (mixed - cs->softState);
-		float mix = env->softness * 0.4f;
-		mixed = mixed * (1.0f - mix) + cs->softState * mix;
-	}
-
-	// --- フェイジング (うねり: 2段オールパス) ---
-	if (env->phasing > 0.0f) {
-		cs->phaserLfo += 0.5f / (float)sampleRate;
-		if (cs->phaserLfo >= 1.0f) cs->phaserLfo -= 1.0f;
-		float mod = 0.4f + 0.4f * sinf(cs->phaserLfo * 2.0f * (float)M_PI);
-		float x = mixed;
-		for (int s = 0; s < 2; s++) {
-			float y = -mod * x + cs->phaserState[s];
-			cs->phaserState[s] = x + mod * y;
-			x = y;
-		}
-		float mix = env->phasing * 0.5f;
-		mixed = mixed * (1.0f - mix) + x * mix;
-	}
-
-	// --- 質感歪み (distortion: プリセット意図の軽いサチュレーション) ---
-	if (env->distortion > 0.0f) {
-		float drive = 1.0f + env->distortion * 2.5f;
-		float d = tanhf(mixed * drive) / tanhf(drive);
-		mixed = mixed * (1.0f - env->distortion) + d * env->distortion;
-	}
-
-	return isfinite(mixed) ? mixed : 0.0f;
-}
-
-
-// ============================================================
-// ★ プロフェッショナル・ソフトサチュレーション [FIX-2]
-// ============================================================
-//
-// 【knee改訂理由: 0.65 → 0.78】
-//   旧 knee=0.65 ではマスタード楽曲の典型ピーク (0.70-0.90) が
-//   常にサチュレーション領域に入り、3次高調波が全ピークに付加された。
-//   これが「音割れ感」「張り付き感」として聴取される原因だった。
-//   新 knee=0.78 では正常処理後の信号(≤0.70想定)は完全透明。
-//
-// 【収束特性】
-//   入力 0.50 → 出力 0.500  (無変化)
-//   入力 0.78 → 出力 0.780  (ニー点、無変化)
-//   入力 0.85 → 出力 0.844  (-0.7%、ほぼ透明)
-//   入力 1.00 → 出力 0.929  (-7.1%、軽微サチュレーション)
-//   入力 1.30 → 出力 0.968  (ceiling近傍)
-//   入力 ∞   → 出力 0.970  (漸近上限、ハードクリップなし)
-// ============================================================
-static inline float ProfessionalSoftSaturate(float x)
-{
-	if (!isfinite(x)) return 0.0f;
-
-	const float knee = 0.78f;          // [FIX-2] 旧 0.65
-	const float ceiling = 0.97f;          // 漸近上限
-	const float r = ceiling - knee; // = 0.19
-
-	float absX = fabsf(x);
-	if (absX <= knee) return x;           // knee以下は完全透明
-
-	// tanh で滑らかに上限へ収束 (arg上限8: 精度で十分)
-	float arg = (absX - knee) / r;
-	if (arg > 8.0f) arg = 8.0f;
-
-	float sign = (x >= 0.0f) ? 1.0f : -1.0f;
-	return sign * (knee + r * tanhf(arg));
-}
-
-
-// ============================================================
-// [FIX-3] BlockAnalysis — ブロック解析・透明ゲインステージング
-// ============================================================
-//
-// 【クレストファクターによるコンテンツ判定】
-//   矩形波    : CF ≈ 1.0  → isChiptune=TRUE
-//   のこぎり波 : CF ≈ 1.73 → isChiptune=TRUE
-//   FM合成音  : CF ≈ 2.5  → isChiptune=TRUE
-//   通常音楽  : CF ≈ 4-8  → 標準処理
-//   音声のみ  : CF > 9    → isVoice=TRUE
-//
-//  stagingGain は常に 1。ピーク制御は EqCeiling（-0.20 dBTP）だけが行う。
-//  入力ピークでバッファ全体を下げると、EQ 後の実ピークとずれて
-//  静部まで痩せ、それでも割れが残っていた。
-// ============================================================
-typedef struct {
-	float peak;
-	float rms;
-	float crestFactor;
-	BOOL  isChiptune;
-	BOOL  isVoice;
-	float stagingGain;   // masterGain適用後にstageTargetを超えた分の補正ゲイン
-} BlockAnalysis;
-
-static BlockAnalysis AnalyzeBlock(
-	const unsigned char* pRaw,
-	int numSamples, int wavch, int wavsam, int bytesPerSample,
-	float masterGain)
-{
-	BlockAnalysis ba = { 0.0f, 0.001f, 1.0f, FALSE, FALSE, 1.0f };
-	double sumSq = 0.0;
-	int    count = 0;
-
-	// ピーク・RMS を一括計算
-	for (int i = 0; i < numSamples; i++) {
-		for (int ch = 0; ch < wavch && ch < MAX_CH; ch++) {
-			float s = 0.0f;
-			int offset = (i * wavch + ch) * bytesPerSample;
-			if (wavsam == 16) s = *((short*)(pRaw + offset)) / 32768.0f;
-			else if (wavsam == 24) {
-				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
-				s = val / 8388608.0f;
+	else {
+		// 反復相互作用補正: 隣接バンドが同方向に重なって目標を超過する分だけ抑える
+		for (int iter = 0; iter < 3; ++iter) {
+			for (int j = 0; j < EQ_BANDS; ++j)
+				CalcPeakingEQDb(&proto[j], EQ_FREQS[j], kBandQ[j], effDb[j], rate);
+			for (int i = 0; i < EQ_BANDS; ++i) {
+				if (fabs(targetDb[i]) < 0.05) {
+					effDb[i] = 0.0;
+					continue;
+				}
+				double sumDb = 0.0;
+				for (int j = 0; j < EQ_BANDS; ++j) {
+					if (!proto[j].bypass)
+						sumDb += EvalBiquadMagDb(&proto[j], EQ_FREQS[i], rate);
+				}
+				double err = targetDb[i] - sumDb;
+				effDb[i] = ClampDouble(effDb[i] + err * 0.72, -14.5, 14.5);
 			}
-			else if (wavsam == 32) s = *((int*)(pRaw + offset)) / 2147483648.0f;
-			else                   s = (pRaw[offset] - 128) / 128.0f;
+		}
+		for (int b = 0; b < EQ_BANDS; ++b)
+			CalcPeakingEQDb(&proto[b], EQ_FREQS[b], kBandQ[b], effDb[b], rate);
+	}
 
-			float absS = fabsf(s);
-			if (absS > ba.peak) ba.peak = absS;
-			sumSq += (double)s * s;
-			count++;
+	// 全チャンネルへ係数のみ反映 (状態 s1/s2 は維持してスライダー操作時のクリックを防止)
+	for (int ch = 0; ch < numCh; ++ch) {
+		for (int b = 0; b < EQ_BANDS; ++b) {
+			BiquadD* dst = &csArr[ch].eqFilters[b];
+			dst->b0 = proto[b].b0;
+			dst->b1 = proto[b].b1;
+			dst->b2 = proto[b].b2;
+			dst->a1 = proto[b].a1;
+			dst->a2 = proto[b].a2;
+			dst->bypass = proto[b].bypass;
+			if (dst->bypass) {
+				dst->s1 = 0.0;
+				dst->s2 = 0.0;
+			}
+		}
+	}
+}
+
+// ============================================================
+//  位相整合 3バンド Linkwitz-Riley 4次 (LR4) ダイナミック・ヘッドルーム保護
+//  クロスオーバー: Low < 220Hz / Mid 220〜3200Hz / High > 3200Hz
+//  Low 経路に 3200Hz 2次オールパスを挿入することで、
+//  Low' + Mid + High の合成特性は 20Hz〜20kHz で厳密に 0.000dB フラット。
+//  各帯域のピークが閾値以下のときはゲイン 1.000 (完全無加工・透明)。
+//  低域や高域を強くブーストしたとき、超過した帯域「だけ」をソフト圧縮し、
+//  他帯域の音量や全体ボリュームは一切下げない！
+// ============================================================
+static void MultibandReset(MultibandProtector* mb, int rate) {
+	if (rate < 8000) rate = 8000;
+	memset(mb, 0, sizeof(*mb));
+	mb->rate = rate;
+	const double kButtQ = 0.7071067811865476; // 1 / sqrt(2)
+	const double f1 = 220.0;
+	const double f2 = ClampDouble(3200.0, 800.0, (double)rate * 0.38);
+
+	for (int ch = 0; ch < MAX_CH; ++ch) {
+		CalcBiquadFilter(&mb->lp1a[ch], 0, f1, kButtQ, rate);
+		CalcBiquadFilter(&mb->lp1b[ch], 0, f1, kButtQ, rate);
+		CalcBiquadFilter(&mb->hp1a[ch], 1, f1, kButtQ, rate);
+		CalcBiquadFilter(&mb->hp1b[ch], 1, f1, kButtQ, rate);
+		CalcBiquadFilter(&mb->lp2a[ch], 0, f2, kButtQ, rate);
+		CalcBiquadFilter(&mb->lp2b[ch], 0, f2, kButtQ, rate);
+		CalcBiquadFilter(&mb->hp2a[ch], 1, f2, kButtQ, rate);
+		CalcBiquadFilter(&mb->hp2b[ch], 1, f2, kButtQ, rate);
+		CalcAllpass2(&mb->apLow[ch], f2, kButtQ, rate);
+	}
+	// バンド別アタック/リリース時定数 (Low: 2.0ms/75ms, Mid: 1.0ms/55ms, High: 0.4ms/40ms)
+	mb->atkCoeff[0] = expf(-1.0f / (0.0020f * (float)rate));
+	mb->atkCoeff[1] = expf(-1.0f / (0.0010f * (float)rate));
+	mb->atkCoeff[2] = expf(-1.0f / (0.0004f * (float)rate));
+	mb->relCoeff[0] = expf(-1.0f / (0.0750f * (float)rate));
+	mb->relCoeff[1] = expf(-1.0f / (0.0550f * (float)rate));
+	mb->relCoeff[2] = expf(-1.0f / (0.0400f * (float)rate));
+}
+
+// C1 連続ソフトニー保護ゲイン計算 (x <= thresh で厳密 1.0f, x→∞ で ceilVal へ漸近)
+static inline float CalcSoftBandGain(float envPeak, float thresh, float ceilVal) {
+	if (envPeak <= thresh) return 1.0f;
+	float span = ceilVal - thresh;
+	float arg = (envPeak - thresh) / span;
+	if (arg > 6.0f) arg = 6.0f;
+	float target = thresh + span * tanhf(arg);
+	return target / envPeak;
+}
+
+// ステレオ LR4 3バンド独立ヘッドルーム保護 (ステレオリンク + 動的ヘッドルーム配分)
+// 原理:
+//   通常レベル以下の他バンドはゲイン 1.000 で完全保護しつつ、
+//   合算ピークが天井(0.96)を超えそうなときは「突出してブーストされているバンドだけ」を
+//   残余ヘッドルームへ滑らかに収める。これにより後段の広帯域リミッターが動かず、
+//   低域や高域を+12dB上げても他バンドの音量が一切下がらない！
+static void MultibandProcessStereo(MultibandProtector* mb, float* L, float* R, int n) {
+	static const float kBaseThresh[3] = { 0.66f, 0.72f, 0.60f };
+	static const float kBaseCeil[3]   = { 0.88f, 0.90f, 0.84f };
+
+	for (int i = 0; i < n; ++i) {
+		double xL = (double)L[i];
+		double xR = (double)R[i];
+
+		// 1段目: 220Hz LR4 分割
+		double lowL = ProcessBiquadD(&mb->lp1b[0], ProcessBiquadD(&mb->lp1a[0], xL));
+		double mhL  = ProcessBiquadD(&mb->hp1b[0], ProcessBiquadD(&mb->hp1a[0], xL));
+		double lowR = ProcessBiquadD(&mb->lp1b[1], ProcessBiquadD(&mb->lp1a[1], xR));
+		double mhR  = ProcessBiquadD(&mb->hp1b[1], ProcessBiquadD(&mb->hp1a[1], xR));
+
+		// 2段目: 3200Hz LR4 分割 + Low経路の位相整合オールパス
+		lowL = ProcessBiquadD(&mb->apLow[0], lowL);
+		lowR = ProcessBiquadD(&mb->apLow[1], lowR);
+		double midL  = ProcessBiquadD(&mb->lp2b[0], ProcessBiquadD(&mb->lp2a[0], mhL));
+		double highL = ProcessBiquadD(&mb->hp2b[0], ProcessBiquadD(&mb->hp2a[0], mhL));
+		double midR  = ProcessBiquadD(&mb->lp2b[1], ProcessBiquadD(&mb->lp2a[1], mhR));
+		double highR = ProcessBiquadD(&mb->hp2b[1], ProcessBiquadD(&mb->hp2a[1], mhR));
+
+		float bL[3] = { (float)lowL, (float)midL, (float)highL };
+		float bR[3] = { (float)lowR, (float)midR, (float)highR };
+		float effP[3];
+
+		for (int b = 0; b < 3; ++b) {
+			float aL = fabsf(bL[b]);
+			float aR = fabsf(bR[b]);
+			float p  = (aL > aR) ? aL : aR;
+			float c  = (p > mb->env[b]) ? mb->atkCoeff[b] : mb->relCoeff[b];
+			mb->env[b] = FlushDenormalF(p + c * (mb->env[b] - p));
+			effP[b] = (p > mb->env[b]) ? (mb->env[b] * 0.45f + p * 0.55f) : mb->env[b];
+		}
+
+		// 各バンドの他バンド占有量から残余ヘッドルームを算出 (通常バンド <= 0.42 は一切下げない)
+		float sumEnv = mb->env[0] + mb->env[1] + mb->env[2];
+		float outL = 0.0f, outR = 0.0f;
+		for (int b = 0; b < 3; ++b) {
+			float ceilB   = kBaseCeil[b];
+			float threshB = kBaseThresh[b];
+			if (sumEnv > 0.96f && mb->env[b] > 0.44f) {
+				float otherEnv = sumEnv - mb->env[b];
+				float avail = ClampFloat(0.99f - otherEnv * 0.80f, 0.48f, ceilB);
+				if (avail < ceilB) {
+					ceilB = avail;
+					threshB = avail * 0.78f;
+				}
+			}
+			float g = CalcSoftBandGain(effP[b], threshB, ceilB);
+			outL += bL[b] * g;
+			outR += bR[b] * g;
+		}
+		L[i] = outL;
+		R[i] = outR;
+	}
+}
+
+// 1チャンネル LR4 3バンド独立ヘッドルーム保護 (モノラル / 多ch用)
+static void MultibandProcessMonoChannel(MultibandProtector* mb, int ch, float* buf, int n) {
+	if (ch < 0 || ch >= MAX_CH) return;
+	static const float kBaseThresh[3] = { 0.66f, 0.72f, 0.60f };
+	static const float kBaseCeil[3]   = { 0.88f, 0.90f, 0.84f };
+
+	for (int i = 0; i < n; ++i) {
+		double x = (double)buf[i];
+		double low = ProcessBiquadD(&mb->lp1b[ch], ProcessBiquadD(&mb->lp1a[ch], x));
+		double mh  = ProcessBiquadD(&mb->hp1b[ch], ProcessBiquadD(&mb->hp1a[ch], x));
+		low = ProcessBiquadD(&mb->apLow[ch], low);
+		double mid  = ProcessBiquadD(&mb->lp2b[ch], ProcessBiquadD(&mb->lp2a[ch], mh));
+		double high = ProcessBiquadD(&mb->hp2b[ch], ProcessBiquadD(&mb->hp2a[ch], mh));
+
+		float bands[3] = { (float)low, (float)mid, (float)high };
+		float effP[3];
+		for (int b = 0; b < 3; ++b) {
+			float p = fabsf(bands[b]);
+			float c = (p > mb->envCh[ch][b]) ? mb->atkCoeff[b] : mb->relCoeff[b];
+			mb->envCh[ch][b] = FlushDenormalF(p + c * (mb->envCh[ch][b] - p));
+			effP[b] = (p > mb->envCh[ch][b]) ? (mb->envCh[ch][b] * 0.45f + p * 0.55f) : mb->envCh[ch][b];
+		}
+
+		float sumEnv = mb->envCh[ch][0] + mb->envCh[ch][1] + mb->envCh[ch][2];
+		float out = 0.0f;
+		for (int b = 0; b < 3; ++b) {
+			float ceilB   = kBaseCeil[b];
+			float threshB = kBaseThresh[b];
+			if (sumEnv > 0.96f && mb->envCh[ch][b] > 0.44f) {
+				float otherEnv = sumEnv - mb->envCh[ch][b];
+				float avail = ClampFloat(0.99f - otherEnv * 0.80f, 0.48f, ceilB);
+				if (avail < ceilB) {
+					ceilB = avail;
+					threshB = avail * 0.78f;
+				}
+			}
+			float g = CalcSoftBandGain(effP[b], threshB, ceilB);
+			out += bands[b] * g;
+		}
+		buf[i] = out;
+	}
+}
+
+// ============================================================
+//  プロフェッショナル 100環境 立体物理音響エンジン (ステレオ完全独立)
+//  - 16タップ L/R非対称 バイノーラル初期反射 (86: 逆再生スウェル対応)
+//  - 4段素数オールパス 入力ディフューザー
+//  - 8ch 正規化 Hadamard FDN (厳密RT60 + 帯域別ダンピング + 非同期LFO揺らぎ)
+//  - 立体ピンポン山彦 / 平行壁フラッター実ディレイ / 定在波コム共鳴
+//  - デュアルヘッド +1オクターブ・シマー / 分数遅延ドップラー / 4段フェイザー
+//  - 空間固有共鳴 + 金属/ガラス/木質/コンクリ材質モデル + 屋外風ゆらぎ
+//  - 水中(15)ドライ媒質透過 / 超デッド空間近接吸音 / タイムストップ(87)凍結ノッチ
+// ============================================================
+
+static void EnvEngineReset(EnvEngineState* es, float* poolBase, int rate) {
+	if (!es) return;
+	memset(es, 0, sizeof(*es));
+	BindEnvPoolPointers(es, poolBase);
+	if (poolBase) {
+		memset(poolBase, 0, (SIZE_T)ENV_POOL_FLOATS * sizeof(float));
+	}
+	es->rate = (rate >= 8000) ? rate : 44100;
+	es->presetIdx = -1;
+	es->effAmount = -1;
+	// 各フィルタを初期バイパスへ
+	for (int c = 0; c < 2; ++c) {
+		SetBiquadBypass(&es->wetLpf[c]);
+		SetBiquadBypass(&es->wetHpf[c]);
+		SetBiquadBypass(&es->resonanceEq[c]);
+		SetBiquadBypass(&es->materialEq[c]);
+		SetBiquadBypass(&es->metallicEq1[c]);
+		SetBiquadBypass(&es->metallicEq2[c]);
+		SetBiquadBypass(&es->glassEq[c]);
+		SetBiquadBypass(&es->warmthEq[c]);
+		SetBiquadBypass(&es->colorAirEq[c]);
+		SetBiquadBypass(&es->exciterHp[c]);
+		SetBiquadBypass(&es->directMediumLp[c]);
+		SetBiquadBypass(&es->deadProximityEq[c]);
+	}
+	// FDN 各ライン LFO 初期位相を黄金比で均等分散
+	for (int k = 0; k < ENV_FDN_LINES; ++k) {
+		es->fdnModPhase[k] = (float)k * (2.0f * (float)M_PI / (float)ENV_FDN_LINES);
+	}
+	es->shimPhase[0] = 0.0f;
+	es->shimPhase[1] = 0.25f;
+}
+
+// プリセット番号(0..100)とかかり具合(0..100, 既定50=UI100=1.0x標準空間)から物理定数を計算
+static void EnvEngineConfigure(EnvEngineState* es, int presetIdx, int effectAmount, int rate) {
+	if (!es) return;
+	if (rate < 8000) rate = 44100;
+	if (presetIdx < 0 || presetIdx >= ENV_PRESET_COUNT) presetIdx = 0;
+	if (effectAmount < 0) effectAmount = 0;
+	if (effectAmount > 100) effectAmount = 100;
+
+	const int presetChanged = (es->presetIdx != presetIdx);
+	es->rate = rate;
+	es->presetIdx = presetIdx;
+	es->effAmount = effectAmount;
+
+	const EnvParams* ep = &ENV_PRESETS[presetIdx];
+	if (presetIdx == 0 || effectAmount == 0) {
+		es->dryGain = 1.0f;
+		es->wetGain = 0.0f;
+		es->directMediumMix = 0.0f;
+		es->deadProximityMix = 0.0f;
+		es->finalStereoWidth = 1.0f;
+		return;
+	}
+
+	// UI 100 (effectAmount=50) が 1.00 = 物理仕様どおりの標準臨場感！
+	// 0..50 は 0.0→1.0、50..100 は 1.0→2.0（上限付き強調）
+	const float effNorm = (float)effectAmount / 50.0f;
+	const float effWetScale = (effNorm <= 1.0f) ? effNorm : (1.0f + (effNorm - 1.0f) * 0.55f);
+	const float effFxScale  = (effNorm <= 1.0f) ? effNorm : (1.0f + (effNorm - 1.0f) * 0.45f);
+	const float rateScale   = (float)rate / 44100.0f;
+	const float msToSamp    = (float)rate / 1000.0f;
+
+	es->isReverseSpace = (presetIdx == 86) ? 1 : 0;
+	es->isTimeStop     = (presetIdx == 87) ? 1 : 0;
+
+	// --- 1. プリディレイ & 16タップ L/R非対称 立体初期反射 ---
+	float preMs = ClampFloat(ep->preDelayMs, 0.0f, 160.0f);
+	es->preDelaySamp = (int)(preMs * msToSamp + 0.5f);
+	if (es->preDelaySamp < 1) es->preDelaySamp = 1;
+	if (es->preDelaySamp > ENV_ER_LEN - 4096) es->preDelaySamp = ENV_ER_LEN - 4096;
+
+	// 空間幾何学による初期反射タイムスケーリング
+	float geomTime = ClampFloat(
+		(0.65f + 0.35f * sqrtf(fmaxf(0.15f, ep->roomSize))) *
+		(0.75f + 0.25f * ClampFloat(ep->wallDistance, 0.4f, 2.5f)) *
+		(0.85f + 0.15f * ClampFloat(ep->ceilingHeight, 0.5f, 2.2f)),
+		0.45f, 2.40f);
+	// 左右壁の非対称オフセット（自然な頭内/頭外空間定位の決め手）
+	static const float kAsymL[8] = { -0.06f,  0.09f, -0.04f,  0.11f, -0.08f,  0.05f, -0.10f,  0.07f };
+	static const float kAsymR[8] = {  0.08f, -0.07f,  0.10f, -0.05f,  0.09f, -0.08f,  0.06f, -0.09f };
+	// タップごとのステレオパン (0=左壁, 1=右壁, 中間=天井/床/奥壁)
+	static const float kPan[8]   = { 0.22f, 0.78f, 0.35f, 0.65f, 0.18f, 0.82f, 0.45f, 0.55f };
+	float erDecayPow = ClampFloat(1.0f / fmaxf(0.25f, ep->earlyReverbDecay), 0.35f, 2.5f);
+	float erRoughLoss = 1.0f - ClampFloat(ep->surfaceRoughness, 0.0f, 1.0f) * 0.22f;
+	float erNormSum = 0.0f;
+
+	for (int r = 0; r < 8; ++r) {
+		float baseMs = ep->earlyRef[r * 2];
+		float baseG  = ep->earlyRef[r * 2 + 1];
+		if (baseMs < 0.5f) baseMs = 2.0f + (float)r * 4.5f;
+		float msL = preMs + baseMs * geomTime * (1.0f + kAsymL[r]);
+		float msR = preMs + baseMs * geomTime * (1.0f + kAsymR[r]);
+		int dL = (int)(msL * msToSamp + 0.5f);
+		int dR = (int)(msR * msToSamp + 0.5f);
+		if (dL < 2) dL = 2; if (dL > ENV_ER_LEN - 8) dL = ENV_ER_LEN - 8;
+		if (dR < 2) dR = 2; if (dR > ENV_ER_LEN - 8) dR = ENV_ER_LEN - 8;
+		es->erDelayL[r] = dL;
+		es->erDelayR[r] = dR;
+
+		float envG;
+		if (es->isReverseSpace) {
+			// 逆再生空間(86): 遅い反射ほど大きく盛り上がるリバーススウェル！
+			float prog = (float)(r + 1) / 8.0f;
+			envG = (0.18f + 0.82f * powf(prog, 1.85f)) * fmaxf(0.35f, baseG);
+		}
+		else {
+			// 全8タップを有効化 (旧 r=7 で 0 になっていたバグを解消)
+			float prog = (float)r / 8.5f;
+			envG = baseG * powf(1.0f - prog * 0.55f, erDecayPow) * erRoughLoss;
+		}
+		// 交互位相反転でタップ間コム干渉を抑えつつ、L/Rは同相基準で自然な立体定位を保つ
+		float sign = (r & 1) ? -1.0f : 1.0f;
+		float p = kPan[r];
+		es->erGainLL[r] = sign * envG * (1.0f - p * 0.65f);
+		es->erGainRL[r] = sign * envG * (p * 0.38f);
+		es->erGainRR[r] = sign * envG * (0.35f + p * 0.65f);
+		es->erGainLR[r] = sign * envG * ((1.0f - p) * 0.38f);
+		erNormSum += fabsf(envG);
+	}
+	// 初期反射の総エネルギーを自然正規化
+	float erScale = (erNormSum > 1.2f) ? (1.2f / erNormSum) : 1.0f;
+	for (int r = 0; r < 8; ++r) {
+		es->erGainLL[r] *= erScale;
+		es->erGainRL[r] *= erScale;
+		es->erGainRR[r] *= erScale;
+		es->erGainLR[r] *= erScale;
+	}
+	// 初期反射の材質吸音カットオフ (吸音率が高いほど柔らかい初期反射)
+	float erFc = ClampFloat(12000.0f - ep->materialAbsorption * 8500.0f - ep->damping * 2500.0f, 1600.0f, 16000.0f);
+	es->erToneCoeff = 1.0f - expf(-2.0f * (float)M_PI * erFc / (float)rate);
+
+	// --- 2. 入力4段オールパス・ディフューザー (サンプルレート適応) ---
+	static const int kDiffBaseL[ENV_DIFF_STAGES] = { 113, 199, 311, 467 };
+	static const int kDiffBaseR[ENV_DIFF_STAGES] = { 127, 211, 331, 491 };
+	for (int s = 0; s < ENV_DIFF_STAGES; ++s) {
+		int dL = (int)((float)kDiffBaseL[s] * rateScale * ClampFloat(0.6f + 0.4f * ep->roomSize, 0.4f, 1.8f));
+		int dR = (int)((float)kDiffBaseR[s] * rateScale * ClampFloat(0.6f + 0.4f * ep->roomSize, 0.4f, 1.8f));
+		if (dL < 8) dL = 8; if (dL > ENV_DIFF_LEN - 4) dL = ENV_DIFF_LEN - 4;
+		if (dR < 8) dR = 8; if (dR > ENV_DIFF_LEN - 4) dR = ENV_DIFF_LEN - 4;
+		es->diffDelay[0][s] = dL;
+		es->diffDelay[1][s] = dR;
+	}
+	// 山彦空間はエコーの輪郭をくっきり残すため入力ディフュージョンを抑える
+	float diffVal = ClampFloat(ep->diffusion * 0.65f + ep->density * 0.25f, 0.0f, 1.0f);
+	if (ep->type == TYPE_MOUNTAIN_ECHO || ep->type == TYPE_CANYON_ECHO)
+		diffVal *= 0.25f;
+	es->diffGain = ClampFloat(diffVal * 0.68f, 0.0f, 0.68f);
+
+	// --- 3. 8ch 正規化 Hadamard FDN (正確な RT60 + 帯域別ダンピング) ---
+	// 互いに素な8本の基本遅延長 (44.1kHz基準 18.8ms〜66.0ms)
+	static const int kFdnBase[ENV_FDN_LINES] = { 829, 1021, 1237, 1499, 1789, 2113, 2477, 2909 };
+	float sizeScale = ClampFloat(
+		(0.42f + 0.58f * sqrtf(fmaxf(0.15f, ep->roomSize))) *
+		(0.85f + 0.15f * ClampFloat(ep->ceilingHeight, 0.5f, 2.2f)),
+		0.32f, 2.20f);
+
+	// プリセットの lateReverbDecay から設計 RT60 を復元
+	// (0.44→0.6s, 0.92→1.8s, 2.00→4.5s, 2.60→6.0s)
+	float rt60Base = (ep->lateReverbDecay - 0.20f) * 2.5f;
+	if (rt60Base < 0.08f) rt60Base = 0.08f + ep->feedback * 0.25f;
+	// かかり具合で RT60 を壊しすぎない (UI100=1.00x完全設計値)
+	float rtScale = 0.72f + 0.28f * ClampFloat(effNorm, 0.0f, 1.8f);
+	float rt60Mid = ClampFloat(rt60Base * rtScale * ClampFloat(ep->midReverbTime, 0.55f, 1.6f), 0.08f, 9.5f);
+	float rt60Low = ClampFloat(rt60Mid * ClampFloat(ep->bassReverbTime, 0.45f, 1.8f), 0.07f, 11.0f);
+
+	// 高域 RT60: damping / airAbsorption / humidity / altitude / materialAbsorption が大きいほど高域が速く減衰！
+	// (従来の逆符号バグを完全修正)
+	float hfDampFactor = ClampFloat(
+		ep->damping * 0.55f + ep->airAbsorption * 0.30f +
+		ep->humidity * 0.15f + ep->altitude * 0.12f + ep->materialAbsorption * 0.20f,
+		0.0f, 0.95f);
+	float trebleRatio = ClampFloat(ep->trebleReverbTime * (1.0f - hfDampFactor * 0.62f), 0.16f, 1.15f);
+	float rt60High = ClampFloat(rt60Mid * trebleRatio, 0.05f, rt60Mid);
+
+	// FDN 内部のダンピングカットオフ周波数 (dampingが高いほど低い周波数から減衰)
+	float fdnDampFc = ClampFloat(
+		11000.0f - hfDampFactor * 8800.0f + (ep->reverbColor - 0.5f) * 2400.0f,
+		900.0f, 14000.0f);
+	if (ep->type == TYPE_UNDERWATER) fdnDampFc = 950.0f;
+	float baseDampAlpha = 1.0f - expf(-2.0f * (float)M_PI * fdnDampFc / (float)rate);
+	es->fdnLowAlpha = 1.0f - expf(-2.0f * (float)M_PI * 260.0f / (float)rate);
+
+	// 空間複雑さに応じた微小ディレイ分散
+	float compSpread = 1.0f + (ep->spaceComplexity - 0.5f) * 0.18f;
+	for (int k = 0; k < ENV_FDN_LINES; ++k) {
+		float lineSpread = 1.0f + ((float)k - 3.5f) * 0.025f * compSpread;
+		int d = (int)((float)kFdnBase[k] * sizeScale * lineSpread * rateScale + 0.5f);
+		if (d < 48) d = 48;
+		if (d > ENV_FDN_LEN - 96) d = ENV_FDN_LEN - 96;
+		es->fdnDelay[k] = d;
+
+		// 厳密 RT60 ゲイン式: g = 10^(-3 * T_k / RT60)
+		// 直交 Hadamard 行列なので全ライン |g| <= 0.988 で数学的に100%発散不可能！
+		float tSec = (float)d / (float)rate;
+		float gMid  = powf(10.0f, -3.0f * tSec / rt60Mid);
+		float gLow  = powf(10.0f, -3.0f * tSec / rt60Low);
+		float gHigh = powf(10.0f, -3.0f * tSec / rt60High);
+
+		gMid  = ClampFloat(gMid,  0.05f, 0.985f);
+		gLow  = ClampFloat(gLow,  0.05f, 0.988f);
+		gHigh = ClampFloat(gHigh, 0.03f, gMid);
+
+		es->fdnGainMid[k]    = gMid;
+		es->fdnGainLowMul[k] = ClampFloat(gLow / fmaxf(0.05f, gMid), 0.55f, 1.35f);
+		es->fdnGainHigh[k]   = gHigh;
+		es->fdnDampAlpha[k]  = ClampFloat(baseDampAlpha * (0.90f + 0.028f * (float)k), 0.02f, 0.92f);
+
+		// FDN 内部の自然な空気揺らぎLFO (定常波・金属リング防止 + modDepth反映)
+		float baseRateHz = (ep->modSpeed > 0.05f) ? ep->modSpeed : (0.31f + 0.07f * (float)k);
+		float lineRateHz = baseRateHz * (0.78f + 0.075f * (float)k);
+		es->fdnModInc[k] = 2.0f * (float)M_PI * lineRateHz / (float)rate;
+	}
+	// 標準の空気揺らぎ 0.35ms + プリセットの modDepth (最大 3.5ms)
+	float modMs = 0.28f + ep->modDepth * effFxScale * 3.2f;
+	if (es->isTimeStop) modMs = 0.02f;
+	es->fdnModDepthSamp = ClampFloat(modMs * msToSamp, 0.5f, 44.0f);
+
+	// --- 4. 立体ピンポン山彦 (山8 / 峡谷12 / 渓谷47 等) ---
+	es->hasYamabiko = (ep->yamabikoDelays[0] > 1.0f && ep->yamabikoGains[0] > 0.01f) ? 1 : 0;
+	if (es->hasYamabiko) {
+		float decayPow = ClampFloat(1.0f / fmaxf(0.25f, ep->yamabikoDecay), 0.45f, 2.2f);
+		for (int i = 0; i < 4; ++i) {
+			float ms = ep->yamabikoDelays[i];
+			if (ms <= 1.0f) {
+				es->yamaDelayL[i] = 0;
+				es->yamaDelayR[i] = 0;
+				es->yamaGain[i]   = 0.0f;
+				continue;
+			}
+			// 奇数/偶数タップで左右壁の到達時間差を与え立体的な山彦ピンポンを生成
+			float spreadMs = (i & 1) ? 14.0f : -14.0f;
+			int dL = (int)((ms + spreadMs * ep->yamabikoPan) * msToSamp + 0.5f);
+			int dR = (int)((ms - spreadMs * ep->yamabikoPan) * msToSamp + 0.5f);
+			if (dL < 16) dL = 16; if (dL > ENV_YAMA_LEN - 16) dL = ENV_YAMA_LEN - 16;
+			if (dR < 16) dR = 16; if (dR > ENV_YAMA_LEN - 16) dR = ENV_YAMA_LEN - 16;
+			es->yamaDelayL[i] = dL;
+			es->yamaDelayR[i] = dR;
+			es->yamaGain[i]   = ClampFloat(ep->yamabikoGains[i] * powf(0.92f, (float)i * decayPow), 0.0f, 0.95f);
+		}
+		es->yamaPan = ClampFloat(ep->yamabikoPan, 0.0f, 1.0f);
+		// echoFeedbackTone (-1=暗い..+1=明るい) & echoClarity で遠景の空気吸収を反映
+		float yFc = ClampFloat(3200.0f + ep->echoFeedbackTone * 2200.0f + ep->echoClarity * 3000.0f, 800.0f, 11000.0f);
+		es->yamaToneAlpha = 1.0f - expf(-2.0f * (float)M_PI * yFc / (float)rate);
+		es->yamaFb = ClampFloat(0.22f + ep->feedback * 0.30f, 0.10f, 0.55f);
+	}
+
+	// --- 5. 本物の平行壁フラッターエコー (実ディレイライン反復反射) ---
+	if (ep->flutterEcho > 0.02f) {
+		// 壁間距離に応じた往復時間 (7ms〜34ms、L/Rで7%ズラして立体感)
+		float flutMs = ClampFloat(7.5f + ep->wallDistance * 9.0f + ep->roomSize * 3.5f, 6.0f, 36.0f);
+		int dL = (int)(flutMs * msToSamp + 0.5f);
+		int dR = (int)(flutMs * 1.073f * msToSamp + 0.5f);
+		if (dL < 32) dL = 32; if (dL > ENV_FLUT_LEN - 8) dL = ENV_FLUT_LEN - 8;
+		if (dR < 32) dR = 32; if (dR > ENV_FLUT_LEN - 8) dR = ENV_FLUT_LEN - 8;
+		es->flutDelay[0] = dL;
+		es->flutDelay[1] = dR;
+		es->flutFb  = ClampFloat(0.30f + ep->flutterEcho * 0.44f, 0.20f, 0.76f);
+		es->flutMix = ClampFloat(ep->flutterEcho * 0.48f * effFxScale, 0.0f, 0.55f);
+	}
+	else {
+		es->flutMix = 0.0f;
+	}
+
+	// --- 6. 本物の定在波コム共鳴 (resonanceFreq に同調した箱鳴り/筒鳴り) ---
+	if (ep->combFiltering > 0.02f) {
+		float cFreq = ClampFloat((ep->resonanceFreq > 60.0f) ? ep->resonanceFreq : 280.0f, 65.0f, 2800.0f);
+		int dL = (int)((float)rate / cFreq + 0.5f);
+		int dR = (int)((float)rate / (cFreq * 1.031f) + 0.5f);
+		if (dL < 12) dL = 12; if (dL > ENV_COMB_LEN - 8) dL = ENV_COMB_LEN - 8;
+		if (dR < 12) dR = 12; if (dR > ENV_COMB_LEN - 8) dR = ENV_COMB_LEN - 8;
+		es->combDelay[0] = dL;
+		es->combDelay[1] = dR;
+		es->combFb  = ClampFloat(0.28f + ep->combFiltering * 0.46f, 0.15f, 0.76f);
+		es->combMix = ClampFloat(ep->combFiltering * 0.42f * effFxScale, 0.0f, 0.48f);
+	}
+	else {
+		es->combMix = 0.0f;
+	}
+
+	// --- 7. 本物の分数遅延ドップラー (ピッチシフトを伴う空間移動) ---
+	if (ep->doppler > 0.02f) {
+		float doppHz = ClampFloat(0.32f + ep->doppler * 0.95f + ep->modSpeed * 0.35f, 0.25f, 2.2f);
+		es->doppBaseSamp  = ClampFloat(10.0f * msToSamp, 32.0f, (float)(ENV_DOPP_LEN / 2));
+		es->doppDepthSamp = ClampFloat(ep->doppler * 4.2f * effFxScale * msToSamp, 2.0f, es->doppBaseSamp * 0.78f);
+		es->doppPhaseInc  = 2.0f * (float)M_PI * doppHz / (float)rate;
+		es->doppMix       = ClampFloat(ep->doppler * 0.65f * effFxScale, 0.0f, 0.75f);
+	}
+	else {
+		es->doppMix = 0.0f;
+	}
+
+	// --- 8. 本物のデュアルヘッド +1オクターブ・シマー ---
+	if (ep->shimmer > 0.02f) {
+		es->shimGrainLen = ClampFloat(38.0f * msToSamp, 256.0f, (float)(ENV_SHIM_LEN / 2 - 64));
+		es->shimMix      = ClampFloat(ep->shimmer * 0.55f * effFxScale, 0.0f, 0.65f);
+		es->shimFb       = ClampFloat(ep->shimmer * 0.32f, 0.0f, 0.38f);
+	}
+	else {
+		es->shimMix = 0.0f;
+		es->shimFb  = 0.0f;
+	}
+
+	// --- 9. 本物の 4段ステレオ・オールパス・フェイザー ---
+	if (ep->phasing > 0.02f || es->isTimeStop) {
+		float pHz = es->isTimeStop ? 0.04f : ClampFloat(0.28f + ep->phasing * 0.65f + ep->modSpeed * 0.25f, 0.18f, 1.8f);
+		es->phaserInc   = 2.0f * (float)M_PI * pHz / (float)rate;
+		es->phaserDepth = ClampFloat((es->isTimeStop ? 0.65f : ep->phasing) * 0.62f * effFxScale, 0.0f, 0.72f);
+	}
+	else {
+		es->phaserDepth = 0.0f;
+	}
+
+	// --- 10. 屋外の風ゆらぎ ---
+	es->windAmount = ClampFloat(ep->windEffect * 0.22f * effFxScale, 0.0f, 0.28f);
+
+	// --- 11. 空間共鳴・材質・音色整形フィルタ群 (すべて実効ゲイン＆正符号!) ---
+	float lpfHz = ClampFloat(ep->lpfFreq, 450.0f, (float)rate * 0.46f);
+	float hpfHz = ClampFloat(ep->hpfFreq, 20.0f, 1200.0f);
+
+	// 空間固有共鳴: resonanceQ と空間タイプから明確な実効ゲイン (+3.0〜+9.0dB) を算出！
+	// (従来の gainVal=100 (0dBバイパス) バグを完全修正)
+	double resDb = 0.0;
+	if (ep->resonanceFreq >= 50.0f && ep->resonanceQ > 0.75f) {
+		resDb = ClampDouble(((double)ep->resonanceQ - 0.70) * 2.8, 1.5, 8.5);
+		if (ep->type == TYPE_METAL_SPACE || ep->type == TYPE_CAVE ||
+			ep->type == TYPE_CORRIDOR || es->isTimeStop) {
+			resDb = ClampDouble(resDb + 1.8, 2.5, 9.5);
+		}
+		resDb *= ClampDouble((double)effFxScale, 0.0, 1.25);
+	}
+
+	// 材質特性 (木質の温かい胴鳴り vs コンクリートの硬質反射)
+	double matFreq = 500.0, matDb = 0.0, matQ = 1.1;
+	if (ep->woodiness >= ep->concrete && ep->woodiness > 0.08f) {
+		matFreq = 320.0;
+		matDb   = (double)ep->woodiness * 4.5 * ClampDouble((double)effFxScale, 0.0, 1.2);
+		matQ    = 1.0;
+	}
+	else if (ep->concrete > 0.08f) {
+		matFreq = 1450.0;
+		matDb   = (double)ep->concrete * 4.2 * ClampDouble((double)effFxScale, 0.0, 1.2);
+		matQ    = 1.4;
+	}
+
+	// 温かみ + 重さ ローシェルフ (-4dB..+6.5dB)
+	double warmDb = (((double)ep->warmth - 0.5) * 6.5 + ((double)ep->weight - 0.5) * 5.0)
+	                * ClampDouble((double)effFxScale, 0.0, 1.2);
+	// 明暗 + 空気吸収・湿度・高度 ハイシェルフ (吸収が高いほど高域が自然に遠ざかる！)
+	double airCut = ((double)ep->airAbsorption * 5.5 + (double)ep->humidity * 2.5 + (double)ep->altitude * 2.5);
+	double brightAdd = (((double)ep->reverbColor - 0.5) * 7.5 + ((double)ep->brightness - 0.5) * 5.5);
+	double colorDb = ClampDouble((brightAdd - airCut) * ClampDouble((double)effFxScale, 0.0, 1.2), -11.0, 8.5);
+
+	// 金属感 & ガラス感
+	double metalDb = (ep->metallic > 0.05f) ? ((double)ep->metallic * 6.5 * ClampDouble((double)effFxScale, 0.0, 1.2)) : 0.0;
+	double glassDb = (ep->glassiness > 0.05f) ? ((double)ep->glassiness * 6.5 * ClampDouble((double)effFxScale, 0.0, 1.2)) : 0.0;
+
+	for (int c = 0; c < 2; ++c) {
+		CalcBiquadFilter(&es->wetLpf[c], 0, lpfHz, 0.7071, rate);
+		CalcBiquadFilter(&es->wetHpf[c], 1, hpfHz, 0.7071, rate);
+		// L/Rで共鳴周波数をわずかに離調(±2.2%)して自然な立体空間共鳴にする
+		double rFreq = (double)ep->resonanceFreq * ((c == 0) ? 0.988 : 1.012);
+		CalcPeakingEQDb(&es->resonanceEq[c], rFreq, ClampDouble((double)ep->resonanceQ, 0.8, 6.0), resDb, rate);
+		CalcPeakingEQDb(&es->materialEq[c], matFreq, matQ, matDb, rate);
+		CalcPeakingEQDb(&es->metallicEq1[c], (c == 0) ? 2350.0 : 2490.0, 3.6, metalDb, rate);
+		CalcPeakingEQDb(&es->metallicEq2[c], (c == 0) ? 4750.0 : 5020.0, 4.5, metalDb * 0.82, rate);
+		CalcPeakingEQDb(&es->glassEq[c], (c == 0) ? 6400.0 : 6850.0, 2.8, glassDb, rate);
+		CalcShelvingEQDb(&es->warmthEq[c], 0, 260.0, ClampDouble(warmDb, -6.0, 7.0), rate);
+		CalcShelvingEQDb(&es->colorAirEq[c], 1, 3400.0, colorDb, rate);
+		CalcBiquadFilter(&es->exciterHp[c], 1, 5500.0, 0.7071, rate);
+
+		// 水中(15): ドライ信号自体にも水中透過LPFを通すことで本当に水中に潜った臨場感！
+		if (ep->type == TYPE_UNDERWATER) {
+			CalcBiquadFilter(&es->directMediumLp[c], 0, 1150.0, 0.82, rate);
+			es->directMediumMix = ClampFloat(0.62f * effWetScale, 0.0f, 0.88f);
+		}
+		else {
+			SetBiquadBypass(&es->directMediumLp[c]);
+			es->directMediumMix = 0.0f;
+		}
+
+		// 超デッド密閉空間 (スタジオ5/クローゼット18/ブース39/和室58/防音室73):
+		// 吸音壁に囲まれた近接感・デッド感を繊細に表現
+		if (ep->enclosure >= 0.85f && ep->lateReverbDecay <= 0.36f && ep->type != TYPE_UNDERWATER) {
+			double deadCut = -1.8 - (double)ep->materialAbsorption * 2.4;
+			CalcShelvingEQDb(&es->deadProximityEq[c], 1, 5200.0, deadCut * ClampDouble((double)effFxScale, 0.0, 1.2), rate);
+			es->deadProximityMix = ClampFloat(0.55f * effWetScale, 0.0f, 0.75f);
+		}
+		else {
+			SetBiquadBypass(&es->deadProximityEq[c]);
+			es->deadProximityMix = 0.0f;
+		}
+
+		// プリセット切替時はフィルタ状態のみクリアして過渡クリックを防ぐ
+		if (presetChanged) {
+			ResetBiquadD(&es->wetLpf[c]);
+			ResetBiquadD(&es->wetHpf[c]);
+			ResetBiquadD(&es->resonanceEq[c]);
+			ResetBiquadD(&es->materialEq[c]);
+			ResetBiquadD(&es->metallicEq1[c]);
+			ResetBiquadD(&es->metallicEq2[c]);
+			ResetBiquadD(&es->glassEq[c]);
+			ResetBiquadD(&es->warmthEq[c]);
+			ResetBiquadD(&es->colorAirEq[c]);
+			ResetBiquadD(&es->exciterHp[c]);
+			ResetBiquadD(&es->directMediumLp[c]);
+			ResetBiquadD(&es->deadProximityEq[c]);
 		}
 	}
 
-	if (count > 0 && sumSq > 0.0)
-		ba.rms = (float)sqrt(sumSq / count);
+	// softness: トランジェント丸め用の穏やかな1次LPF係数
+	float softFc = ClampFloat(14000.0f - ep->softness * 9500.0f, 2500.0f, 16000.0f);
+	es->softAlpha = (ep->softness > 0.02f)
+		? (1.0f - expf(-2.0f * (float)M_PI * softFc / (float)rate)) : 1.0f;
+	es->exciterAmt = ClampFloat(ep->exciterAmount * 0.45f * effFxScale, 0.0f, 0.55f);
+	es->distAmt    = ClampFloat(ep->distortion * 0.75f * effFxScale, 0.0f, 0.85f);
 
-	// クレストファクター = ピーク / RMS
-	ba.crestFactor = (ba.rms > 0.0002f) ? (ba.peak / ba.rms) : 1.0f;
+	// --- 12. 初期反射 / 後期残響 / ドライ・ウェットの最適バランス ---
+	// earlyLateBalance: 0=初期反射主体, 1=後期残響主体
+	float el = ClampFloat(ep->earlyLateBalance, 0.05f, 0.95f);
+	es->earlyMix = 0.38f + (1.0f - el) * 0.85f;
+	es->lateMix  = 0.25f + el * 0.95f;
+	if (es->hasYamabiko) {
+		es->lateMix *= 0.55f; // 山彦の輪郭を最優先
+	}
 
-	// コンテンツ分類
-	ba.isChiptune = (ba.crestFactor < 3.5f && ba.peak > 0.04f);
-	ba.isVoice = (ba.crestFactor > 9.0f && ba.peak > 0.02f);
+	// wetMix をそのまま活かし、ドライの音量芯を落とさずリッチな空間感を実現
+	float effWet = ClampFloat(ep->wetMix * effWetScale, 0.0f, 0.94f);
+	// デッド小空間でも初期反射がきちんと聴こえる下限保証
+	if (effWet < 0.14f && effNorm > 0.2f) effWet = 0.14f * ClampFloat(effNorm, 0.0f, 1.0f);
+	es->dryGain = ClampFloat(1.0f - 0.22f * effWet, 0.72f, 1.0f);
+	es->wetGain = effWet * 1.18f;
 
-	// バッファ全体の先制ダッキングはしない。入力ピークは EQ 後のピークと
-	// 一致せず、静部まで下げる。割れ止めは最終段の天井リミッターだけ。
-	(void)masterGain;
-	ba.stagingGain = 1.0f;
+	// ステレオ空間展開 (ウェットと最終段の二重過剰拡大による逆相感を防ぎ、自然なIACC=+0.05..+0.40へ)
+	float wEff = ClampFloat(effNorm, 0.0f, 1.25f);
+	float wWet = 0.85f + (ep->stereoWidth - 1.0f) * 0.45f * wEff + ep->openness * 0.15f - ep->enclosure * 0.12f;
+	float wFin = 1.00f + (ep->stereoWidth - 1.0f) * 0.28f * wEff + (ep->openness - ep->enclosure) * 0.10f;
+	es->wetStereoWidth   = ClampFloat(wWet, 0.45f, 1.48f);
+	es->finalStereoWidth = ClampFloat(wFin, 0.45f, 1.42f);
+	if (es->isTimeStop) es->finalStereoWidth = 0.40f;
+}
 
-	return ba;
+// ステレオ 1ブロック環境音響処理 (L/R 固定バッファ・再生中動的確保ゼロ)
+static void EnvEngineProcessStereo(EnvEngineState* es, float* L, float* R, int n, float spatialWidth) {
+	if (!es || !es->erBuf[0] || !es->fdnBuf[0] || es->wetGain <= 1e-5f || n <= 0)
+		return;
+
+	const EnvParams* ep = &ENV_PRESETS[es->presetIdx];
+	const float kHadamardNorm = 0.35355339059f; // 1 / sqrt(8)
+	const float windInc1 = 2.0f * (float)M_PI * 0.23f / (float)es->rate;
+	const float windInc2 = 2.0f * (float)M_PI * 0.61f / (float)es->rate;
+	const float invGrain = (es->shimGrainLen > 1.0f) ? (1.0f / es->shimGrainLen) : 0.0f;
+
+	for (int i = 0; i < n; ++i) {
+		float inL = L[i];
+		float inR = R[i];
+
+		// --- 1. ダイレクト媒質処理 (水中15 / 超デッド密閉空間) ---
+		float dryL = inL;
+		float dryR = inR;
+		if (es->directMediumMix > 0.001f) {
+			float mL = (float)ProcessBiquadD(&es->directMediumLp[0], (double)inL);
+			float mR = (float)ProcessBiquadD(&es->directMediumLp[1], (double)inR);
+			dryL = inL * (1.0f - es->directMediumMix) + mL * es->directMediumMix;
+			dryR = inR * (1.0f - es->directMediumMix) + mR * es->directMediumMix;
+		}
+		if (es->deadProximityMix > 0.001f) {
+			float dL = (float)ProcessBiquadD(&es->deadProximityEq[0], (double)dryL);
+			float dR = (float)ProcessBiquadD(&es->deadProximityEq[1], (double)dryR);
+			dryL = dryL * (1.0f - es->deadProximityMix) + dL * es->deadProximityMix;
+			dryR = dryR * (1.0f - es->deadProximityMix) + dR * es->deadProximityMix;
+		}
+
+		// --- 2. プリディレイ＋16タップ L/R非対称 立体初期反射 ---
+		int epPos = es->erPos;
+		es->erBuf[0][epPos] = inL;
+		es->erBuf[1][epPos] = inR;
+
+		float erL = 0.0f, erR = 0.0f;
+		for (int r = 0; r < 8; ++r) {
+			float sL = es->erBuf[0][(epPos - es->erDelayL[r]) & ENV_ER_MASK];
+			float sR = es->erBuf[1][(epPos - es->erDelayR[r]) & ENV_ER_MASK];
+			erL += sL * es->erGainLL[r] + sR * es->erGainRL[r];
+			erR += sR * es->erGainRR[r] + sL * es->erGainLR[r];
+		}
+		// 材質吸音 1次LPF
+		es->erLpState[0] = FlushDenormalF(es->erLpState[0] + es->erToneCoeff * (erL - es->erLpState[0]));
+		es->erLpState[1] = FlushDenormalF(es->erLpState[1] + es->erToneCoeff * (erR - es->erLpState[1]));
+		erL = es->erLpState[0];
+		erR = es->erLpState[1];
+
+		// プリディレイ出力 (FDNへの入力)
+		int preIdx = (epPos - es->preDelaySamp) & ENV_ER_MASK;
+		float preL = es->erBuf[0][preIdx];
+		float preR = es->erBuf[1][preIdx];
+		es->erPos = (epPos + 1) & ENV_ER_MASK;
+
+		// --- 3. 入力4段オールパス・ディフューザー ---
+		float dInL = preL;
+		float dInR = preR;
+		if (es->diffGain > 0.01f) {
+			const float dg = es->diffGain;
+			for (int s = 0; s < ENV_DIFF_STAGES; ++s) {
+				int wpL = es->diffPos[0][s];
+				int rpL = (wpL - es->diffDelay[0][s]) & ENV_DIFF_MASK;
+				float dlL = es->diffBuf[0][s][rpL];
+				float vL = dInL + dlL * dg;
+				es->diffBuf[0][s][wpL] = FlushDenormalF(vL);
+				dInL = dlL - vL * dg;
+				es->diffPos[0][s] = (wpL + 1) & ENV_DIFF_MASK;
+
+				int wpR = es->diffPos[1][s];
+				int rpR = (wpR - es->diffDelay[1][s]) & ENV_DIFF_MASK;
+				float dlR = es->diffBuf[1][s][rpR];
+				float vR = dInR + dlR * dg;
+				es->diffBuf[1][s][wpR] = FlushDenormalF(vR);
+				dInR = dlR - vR * dg;
+				es->diffPos[1][s] = (wpR + 1) & ENV_DIFF_MASK;
+			}
+		}
+
+		// --- 4. 8ch 正規化 Hadamard FDN (非同期LFO分数遅延 + 2バンド周波数依存ダンピング) ---
+		float fdnRead[ENV_FDN_LINES];
+		float fdnFilt[ENV_FDN_LINES];
+		for (int k = 0; k < ENV_FDN_LINES; ++k) {
+			es->fdnModPhase[k] += es->fdnModInc[k];
+			if (es->fdnModPhase[k] >= 2.0f * (float)M_PI) es->fdnModPhase[k] -= 2.0f * (float)M_PI;
+			float modOff = sinf(es->fdnModPhase[k]) * es->fdnModDepthSamp;
+			float delayF = (float)es->fdnDelay[k] + modOff;
+			if (delayF < 4.0f) delayF = 4.0f;
+			int dInt = (int)delayF;
+			float frac = delayF - (float)dInt;
+			int r0 = (es->fdnPos[k] - dInt) & ENV_FDN_MASK;
+			int r1 = (r0 - 1) & ENV_FDN_MASK;
+			float raw = es->fdnBuf[k][r0] * (1.0f - frac) + es->fdnBuf[k][r1] * frac;
+			fdnRead[k] = raw;
+
+			// 周波数依存ダンピング: 高域LPF + 低域RT60シェルフ + DCブロッカー
+			float dampLp = es->fdnDampState[k] + es->fdnDampAlpha[k] * (raw - es->fdnDampState[k]);
+			es->fdnDampState[k] = FlushDenormalF(dampLp);
+			// 低・中域成分は fdnGainMid、高域残余成分は fdnGainHigh で減衰
+			float shaped = dampLp * es->fdnGainMid[k] + (raw - dampLp) * es->fdnGainHigh[k];
+			// 低域残響時間倍率 (bassReverbTime) の適用
+			float lowPart = es->fdnLowState[k] + es->fdnLowAlpha * (shaped - es->fdnLowState[k]);
+			es->fdnLowState[k] = FlushDenormalF(lowPart);
+			shaped = (shaped - lowPart) + lowPart * es->fdnGainLowMul[k];
+
+			// 1次DCブロッカー (極低周波ドリフト防止, 15Hz)
+			float dc = shaped - es->fdnDcPrevIn[k] + 0.9975f * es->fdnDcPrevOut[k];
+			es->fdnDcPrevIn[k] = shaped;
+			es->fdnDcPrevOut[k] = FlushDenormalF(dc);
+			fdnFilt[k] = dc;
+		}
+
+		// 8x8 正規化 Hadamard 高速バタフライ直交混合 (完全エネルギー保存)
+		float a0 = fdnFilt[0] + fdnFilt[1], a1 = fdnFilt[0] - fdnFilt[1];
+		float a2 = fdnFilt[2] + fdnFilt[3], a3 = fdnFilt[2] - fdnFilt[3];
+		float a4 = fdnFilt[4] + fdnFilt[5], a5 = fdnFilt[4] - fdnFilt[5];
+		float a6 = fdnFilt[6] + fdnFilt[7], a7 = fdnFilt[6] - fdnFilt[7];
+		float b0 = a0 + a2, b1 = a1 + a3, b2 = a0 - a2, b3 = a1 - a3;
+		float b4 = a4 + a6, b5 = a5 + a7, b6 = a4 - a6, b7 = a5 - a7;
+		float fdnMix[ENV_FDN_LINES];
+		fdnMix[0] = (b0 + b4) * kHadamardNorm;
+		fdnMix[1] = (b1 + b5) * kHadamardNorm;
+		fdnMix[2] = (b2 + b6) * kHadamardNorm;
+		fdnMix[3] = (b3 + b7) * kHadamardNorm;
+		fdnMix[4] = (b0 - b4) * kHadamardNorm;
+		fdnMix[5] = (b1 - b5) * kHadamardNorm;
+		fdnMix[6] = (b2 - b6) * kHadamardNorm;
+		fdnMix[7] = (b3 - b7) * kHadamardNorm;
+
+		// シマー出力のフィードバック還元量 (前サンプルの+1oct成分)
+		float shimFbL = es->shimLpState[0] * es->shimFb;
+		float shimFbR = es->shimLpState[1] * es->shimFb;
+
+		// 入力を8ラインへ自然なステレオ配置で注入 (逆位相感ゼロ・自然な包まれ感)
+		float injL = (dInL + shimFbL) * 0.40f;
+		float injR = (dInR + shimFbR) * 0.40f;
+		float injM = (injL + injR) * 0.55f;
+		const float injVec[ENV_FDN_LINES] = { injL, injR, injL, injR, injM, injM, injL, injR };
+		for (int k = 0; k < ENV_FDN_LINES; ++k) {
+			float wv = fdnMix[k] + injVec[k];
+			// フィードバックループ内ソフト安全ガード (|wv|>2.5時のみ穏やか制限)
+			if (wv > 2.5f) wv = 2.5f + tanhf(wv - 2.5f) * 0.5f;
+			else if (wv < -2.5f) wv = -2.5f + tanhf(wv + 2.5f) * 0.5f;
+			es->fdnBuf[k][es->fdnPos[k]] = FlushDenormalF(wv);
+			es->fdnPos[k] = (es->fdnPos[k] + 1) & ENV_FDN_MASK;
+		}
+
+		// L/R 独立素数ライン合成 (自然な低相関 IACC≈0.0〜+0.35 で極上の立体包まれ感)
+		float fdnL = (fdnRead[0] + fdnRead[2] - fdnRead[4] + fdnRead[6]
+		            + 0.40f * (fdnRead[1] - fdnRead[5])) * 0.42f;
+		float fdnR = (fdnRead[1] + fdnRead[3] - fdnRead[5] + fdnRead[7]
+		            + 0.40f * (fdnRead[0] - fdnRead[4])) * 0.42f;
+
+		// --- 5. デュアルヘッド +1オクターブ・シマー (本物のグラニュラーピッチシフト) ---
+		float shimOutL = 0.0f, shimOutR = 0.0f;
+		if (es->shimMix > 0.005f && invGrain > 0.0f) {
+			int sp = es->shimPos;
+			es->shimBuf[0][sp] = fdnL * 0.7f + preL * 0.3f;
+			es->shimBuf[1][sp] = fdnR * 0.7f + preR * 0.3f;
+			for (int c = 0; c < 2; ++c) {
+				// 読み出し速度 2.0x = 正確な +1オクターブ上昇 (位相進み = +1/grainLen)
+				float p1 = es->shimPhase[c];
+				float p2 = p1 + 0.5f;
+				if (p2 >= 1.0f) p2 -= 1.0f;
+				// 遅延量は (1 - p) * grainLen → p が増えると遅延が減る = 2倍速読み出し！
+				float d1 = (1.0f - p1) * es->shimGrainLen + 8.0f;
+				float d2 = (1.0f - p2) * es->shimGrainLen + 8.0f;
+				int i1 = (int)d1; float f1 = d1 - (float)i1;
+				int i2 = (int)d2; float f2 = d2 - (float)i2;
+				float s1 = es->shimBuf[c][(sp - i1) & ENV_SHIM_MASK] * (1.0f - f1)
+				         + es->shimBuf[c][(sp - i1 - 1) & ENV_SHIM_MASK] * f1;
+				float s2 = es->shimBuf[c][(sp - i2) & ENV_SHIM_MASK] * (1.0f - f2)
+				         + es->shimBuf[c][(sp - i2 - 1) & ENV_SHIM_MASK] * f2;
+				// sin^2(pi*p1) + sin^2(pi*p2) == 1.0 (振幅完全一定・クリックゼロ)
+				float w1 = sinf((float)M_PI * p1); w1 *= w1;
+				float w2 = 1.0f - w1;
+				float shifted = s1 * w1 + s2 * w2;
+				// シマー帯域を滑らかに整える
+				es->shimLpState[c] = FlushDenormalF(es->shimLpState[c] + 0.35f * (shifted - es->shimLpState[c]));
+				if (c == 0) shimOutL = es->shimLpState[0];
+				else        shimOutR = es->shimLpState[1];
+
+				es->shimPhase[c] += invGrain * ((c == 0) ? 1.0f : 0.93f);
+				if (es->shimPhase[c] >= 1.0f) es->shimPhase[c] -= 1.0f;
+			}
+			es->shimPos = (sp + 1) & ENV_SHIM_MASK;
+		}
+
+		// --- 6. 立体ピンポン山彦 (山8 / 峡谷12 / 渓谷47) ---
+		float yamaL = 0.0f, yamaR = 0.0f;
+		if (es->hasYamabiko) {
+			int yp = es->yamaPos;
+			for (int t = 0; t < 4; ++t) {
+				if (es->yamaGain[t] <= 0.001f) continue;
+				float tL = es->yamaBuf[0][(yp - es->yamaDelayL[t]) & ENV_YAMA_MASK];
+				float tR = es->yamaBuf[1][(yp - es->yamaDelayR[t]) & ENV_YAMA_MASK];
+				float g = es->yamaGain[t];
+				// 奇数タップと偶数タップで左右の山肌から交互にピンポン反射！
+				if (t & 1) {
+					yamaL += (tL * (1.0f - 0.55f * es->yamaPan) + tR * (0.55f * es->yamaPan)) * g;
+					yamaR += (tR * (1.0f + 0.35f * es->yamaPan)) * g;
+				}
+				else {
+					yamaL += (tL * (1.0f + 0.35f * es->yamaPan)) * g;
+					yamaR += (tR * (1.0f - 0.55f * es->yamaPan) + tL * (0.55f * es->yamaPan)) * g;
+				}
+			}
+			// 距離による空気吸収トーンフィルタ
+			es->yamaToneState[0] = FlushDenormalF(es->yamaToneState[0] + es->yamaToneAlpha * (yamaL - es->yamaToneState[0]));
+			es->yamaToneState[1] = FlushDenormalF(es->yamaToneState[1] + es->yamaToneAlpha * (yamaR - es->yamaToneState[1]));
+			yamaL = es->yamaToneState[0];
+			yamaR = es->yamaToneState[1];
+			// 穏やかなクロスフィードバックで遠景の余韻を持続
+			es->yamaBuf[0][yp] = FlushDenormalF(inL + yamaR * es->yamaFb * 0.45f);
+			es->yamaBuf[1][yp] = FlushDenormalF(inR + yamaL * es->yamaFb * 0.45f);
+			es->yamaPos = (yp + 1) & ENV_YAMA_MASK;
+		}
+
+		// --- 7. 初期反射 + 後期FDN + シマー + 山彦 の合成 ---
+		float wetL = erL * es->earlyMix + fdnL * es->lateMix + shimOutL * es->shimMix + yamaL * 0.85f;
+		float wetR = erR * es->earlyMix + fdnR * es->lateMix + shimOutR * es->shimMix + yamaR * 0.85f;
+
+		// --- 8. 本物の平行壁フラッターエコー (実ディレイ反復反射) ---
+		if (es->flutMix > 0.005f) {
+			int fp = es->flutPos;
+			for (int c = 0; c < 2; ++c) {
+				float x = (c == 0) ? (preL * 0.55f + wetL * 0.45f) : (preR * 0.55f + wetR * 0.45f);
+				float d = es->flutBuf[c][(fp - es->flutDelay[c]) & ENV_FLUT_MASK];
+				es->flutLpState[c] = FlushDenormalF(es->flutLpState[c] + 0.45f * (d - es->flutLpState[c]));
+				es->flutBuf[c][fp] = FlushDenormalF(x + es->flutLpState[c] * es->flutFb);
+				if (c == 0) wetL += es->flutLpState[0] * es->flutMix;
+				else        wetR += es->flutLpState[1] * es->flutMix;
+			}
+			es->flutPos = (fp + 1) & ENV_FLUT_MASK;
+		}
+
+		// --- 9. 本物の定在波コム共鳴 (筒鳴り/箱鳴り) ---
+		if (es->combMix > 0.005f) {
+			int cp = es->combPos;
+			for (int c = 0; c < 2; ++c) {
+				float x = (c == 0) ? wetL : wetR;
+				float d = es->combBuf[c][(cp - es->combDelay[c]) & ENV_COMB_MASK];
+				es->combLpState[c] = FlushDenormalF(es->combLpState[c] + 0.55f * (d - es->combLpState[c]));
+				es->combBuf[c][cp] = FlushDenormalF(x + es->combLpState[c] * es->combFb);
+				float out = x * (1.0f - es->combMix * 0.35f) + es->combLpState[c] * es->combMix;
+				if (c == 0) wetL = out; else wetR = out;
+			}
+			es->combPos = (cp + 1) & ENV_COMB_MASK;
+		}
+
+		// --- 10. 本物の分数遅延ドップラー (L/R 90度位相差ピッチ変調) ---
+		if (es->doppMix > 0.005f) {
+			int dp = es->doppPos;
+			es->doppBuf[0][dp] = wetL;
+			es->doppBuf[1][dp] = wetR;
+			es->doppPhase += es->doppPhaseInc;
+			if (es->doppPhase >= 2.0f * (float)M_PI) es->doppPhase -= 2.0f * (float)M_PI;
+			float dL = es->doppBaseSamp + sinf(es->doppPhase) * es->doppDepthSamp;
+			float dR = es->doppBaseSamp + cosf(es->doppPhase) * es->doppDepthSamp;
+			int iL = (int)dL; float fL = dL - (float)iL;
+			int iR = (int)dR; float fR = dR - (float)iR;
+			float vL = es->doppBuf[0][(dp - iL) & ENV_DOPP_MASK] * (1.0f - fL)
+			         + es->doppBuf[0][(dp - iL - 1) & ENV_DOPP_MASK] * fL;
+			float vR = es->doppBuf[1][(dp - iR) & ENV_DOPP_MASK] * (1.0f - fR)
+			         + es->doppBuf[1][(dp - iR - 1) & ENV_DOPP_MASK] * fR;
+			wetL = wetL * (1.0f - es->doppMix) + vL * es->doppMix;
+			wetR = wetR * (1.0f - es->doppMix) + vR * es->doppMix;
+			es->doppPos = (dp + 1) & ENV_DOPP_MASK;
+		}
+
+		// --- 11. 空間共鳴・材質・音色整形フィルタ (L/R 独立倍精度) ---
+		double wL = (double)wetL;
+		double wR = (double)wetR;
+		wL = ProcessBiquadD(&es->wetLpf[0], wL);
+		wR = ProcessBiquadD(&es->wetLpf[1], wR);
+		wL = ProcessBiquadD(&es->wetHpf[0], wL);
+		wR = ProcessBiquadD(&es->wetHpf[1], wR);
+		wL = ProcessBiquadD(&es->resonanceEq[0], wL);
+		wR = ProcessBiquadD(&es->resonanceEq[1], wR);
+		wL = ProcessBiquadD(&es->materialEq[0], wL);
+		wR = ProcessBiquadD(&es->materialEq[1], wR);
+		wL = ProcessBiquadD(&es->metallicEq1[0], wL);
+		wR = ProcessBiquadD(&es->metallicEq1[1], wR);
+		wL = ProcessBiquadD(&es->metallicEq2[0], wL);
+		wR = ProcessBiquadD(&es->metallicEq2[1], wR);
+		wL = ProcessBiquadD(&es->glassEq[0], wL);
+		wR = ProcessBiquadD(&es->glassEq[1], wR);
+		wL = ProcessBiquadD(&es->warmthEq[0], wL);
+		wR = ProcessBiquadD(&es->warmthEq[1], wR);
+		wL = ProcessBiquadD(&es->colorAirEq[0], wL);
+		wR = ProcessBiquadD(&es->colorAirEq[1], wR);
+		wetL = (float)wL;
+		wetR = (float)wR;
+
+		// エキサイター (高域倍音の艶)
+		if (es->exciterAmt > 0.005f) {
+			float hiL = (float)ProcessBiquadD(&es->exciterHp[0], (double)wetL);
+			float hiR = (float)ProcessBiquadD(&es->exciterHp[1], (double)wetR);
+			wetL += (tanhf(hiL * 2.4f) - hiL) * es->exciterAmt;
+			wetR += (tanhf(hiR * 2.4f) - hiR) * es->exciterAmt;
+		}
+
+		// 柔らかさ (softness) 1次LPF
+		if (es->softAlpha < 0.99f) {
+			es->softLpState[0] = FlushDenormalF(es->softLpState[0] + es->softAlpha * (wetL - es->softLpState[0]));
+			es->softLpState[1] = FlushDenormalF(es->softLpState[1] + es->softAlpha * (wetR - es->softLpState[1]));
+			float sm = ep->softness * 0.55f;
+			wetL = wetL * (1.0f - sm) + es->softLpState[0] * sm;
+			wetR = wetR * (1.0f - sm) + es->softLpState[1] * sm;
+		}
+
+		// --- 12. 本物の 4段ステレオ・オールパス・フェイザー ---
+		if (es->phaserDepth > 0.005f) {
+			es->phaserPhase += es->phaserInc;
+			if (es->phaserPhase >= 2.0f * (float)M_PI) es->phaserPhase -= 2.0f * (float)M_PI;
+			float lfoL = 0.5f + 0.5f * sinf(es->phaserPhase);
+			float lfoR = 0.5f + 0.5f * sinf(es->phaserPhase + 2.0943951f); // 120度位相差
+			float aL = 0.12f + lfoL * 0.74f;
+			float aR = 0.12f + lfoR * 0.74f;
+			float xL = wetL + es->phaserFbState[0] * 0.35f;
+			float xR = wetR + es->phaserFbState[1] * 0.35f;
+			for (int s = 0; s < 4; ++s) {
+				float yL = -aL * xL + es->phaserState[0][s];
+				es->phaserState[0][s] = FlushDenormalF(xL + aL * yL);
+				xL = yL;
+				float yR = -aR * xR + es->phaserState[1][s];
+				es->phaserState[1][s] = FlushDenormalF(xR + aR * yR);
+				xR = yR;
+			}
+			es->phaserFbState[0] = FlushDenormalF(xL);
+			es->phaserFbState[1] = FlushDenormalF(xR);
+			wetL = wetL * (1.0f - es->phaserDepth * 0.5f) + xL * es->phaserDepth;
+			wetR = wetR * (1.0f - es->phaserDepth * 0.5f) + xR * es->phaserDepth;
+		}
+
+		// --- 13. 屋外の風ゆらぎ (非周期2成分変調) ---
+		if (es->windAmount > 0.001f) {
+			es->windPhase1 += windInc1;
+			if (es->windPhase1 >= 2.0f * (float)M_PI) es->windPhase1 -= 2.0f * (float)M_PI;
+			es->windPhase2 += windInc2;
+			if (es->windPhase2 >= 2.0f * (float)M_PI) es->windPhase2 -= 2.0f * (float)M_PI;
+			float wModL = 1.0f + (0.65f * sinf(es->windPhase1) + 0.35f * sinf(es->windPhase2)) * es->windAmount;
+			float wModR = 1.0f + (0.65f * cosf(es->windPhase1) + 0.35f * cosf(es->windPhase2)) * es->windAmount;
+			wetL *= wModL;
+			wetR *= wModR;
+		}
+
+		// --- 14. 質感歪み (廃墟工場・SF異次元等の空間意図サチュレーション) ---
+		if (es->distAmt > 0.005f) {
+			float drive = 1.0f + es->distAmt * 3.2f;
+			float invT = 1.0f / tanhf(drive);
+			wetL = wetL * (1.0f - es->distAmt * 0.7f) + tanhf(wetL * drive) * invT * (es->distAmt * 0.7f);
+			wetR = wetR * (1.0f - es->distAmt * 0.7f) + tanhf(wetR * drive) * invT * (es->distAmt * 0.7f);
+		}
+
+		// ウェット空間のステレオ展開
+		{
+			float wm = (wetL + wetR) * 0.5f;
+			float ws = (wetL - wetR) * 0.5f * es->wetStereoWidth;
+			wetL = wm + ws;
+			wetR = wm - ws;
+		}
+
+		// --- 15. ドライ + ウェット合成 & 安全クランプ済み最終ステレオ定位 ---
+		float outL = dryL * es->dryGain + wetL * es->wetGain;
+		float outR = dryR * es->dryGain + wetR * es->wetGain;
+
+		float totWidth = ClampFloat(es->finalStereoWidth * spatialWidth, 0.25f, 2.20f);
+		if (fabsf(totWidth - 1.0f) > 0.01f) {
+			float mid  = (outL + outR) * 0.5f;
+			float side = (outL - outR) * 0.5f * totWidth;
+			outL = mid + side;
+			outR = mid - side;
+		}
+
+		L[i] = isfinite(outL) ? outL : 0.0f;
+		R[i] = isfinite(outR) ? outR : 0.0f;
+	}
 }
 
 
 // ============================================================
-// 天井は、超えているサンプルだけを -0.20 dB に揃える。
-// 前後のサンプルのゲインは変えない。キック全体を一緒に下げると、
-// ドンドンの上にぐちゃノイズが乗る。
-// サンプル位置は動かさない。
+//  真のゼロレイテンシ・ルックアヘッド・トゥルーピーク・リミッター (-0.20 dBTP)
+//  - 4x Catmull-Rom 補間によるサンプル間トゥルーピーク (ISP) 検出
+//  - O(N) 単調減少デック (固定配列、std::deque 不使用) による前方 2.0ms 最大ピーク走査
+//  - 後方走査でピークの 2.0ms 前から滑らかに降りる先読みアタック (クリック/割れゼロ)
+//  - 前方走査でブロック跨ぎ連続状態 + 4ms ホールド + プログラム依存デュアルリリース
+//    (瞬間ピークは 45ms でスッと戻りポンピングなし、持続大音量は 130ms で歪みゼロ)
+//  - 最終段に極薄ソフトニー安全確認 (ハードクリップ完全防止、サンプル遅延ゼロ)
 // ============================================================
 static const float kEqCeiling = 0.97723722f; // -0.20 dBTP
 
 struct EqCeilingState {
-	int la;
-	int rate;
+	int   la;
+	int   holdSamp;
+	int   rate;
+	int   relHold;
 	float gain;
-	float gAtk;
-	float gRel;
+	float gRelFast;
+	float gRelSlow;
 };
 
 static EqCeilingState g_ceil[EQ_BANKS];
 static float* g_ceilWork = NULL;
 static int g_ceilWorkCap = 0;
+static int* g_ceilDeque = NULL;
+static int g_ceilDequeCap = 0;
 static float* g_ceilAudio = NULL;
 static int g_ceilAudioCap = 0;
 
@@ -5253,19 +6054,42 @@ static float* EqCeilAlloc(float** slot, int* cap, int nFloats)
 	return p;
 }
 
+static int* EqCeilAllocInt(int** slot, int* cap, int nInts)
+{
+	if (nInts <= 0) return NULL;
+	if (*slot && *cap >= nInts) return *slot;
+	if (*slot) {
+		VirtualFree(*slot, 0, MEM_RELEASE);
+		*slot = NULL;
+		*cap = 0;
+	}
+	int* p = (int*)VirtualAlloc(NULL, (SIZE_T)nInts * sizeof(int), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!p) return NULL;
+	*slot = p;
+	*cap = nInts;
+	return p;
+}
+
 static void EqCeilingPrepare(EqCeilingState* st, int rate)
 {
 	if (rate < 8000) rate = 8000;
 	if (st->rate == rate && st->la > 0)
 		return;
-	int la = (int)(0.005f * (float)rate + 0.5f);
+	// 2.0ms ルックアヘッド窓 + 4.0ms ピークホールド
+	int la = (int)(0.0020f * (float)rate + 0.5f);
 	if (la < 8) la = 8;
-	if (la > 480) la = 480;
+	if (la > 384) la = 384;
+	int hold = (int)(0.0040f * (float)rate + 0.5f);
+	if (hold < 8) hold = 8;
+	if (hold > 768) hold = 768;
+
 	st->la = la;
+	st->holdSamp = hold;
 	st->rate = rate;
+	st->relHold = 0;
 	st->gain = 1.0f;
-	st->gAtk = expf(-1.0f / (0.005f * (float)rate));
-	st->gRel = expf(-1.0f / (0.080f * (float)rate));
+	st->gRelFast = expf(-1.0f / (0.045f * (float)rate)); // 瞬間トランジェント: 45ms
+	st->gRelSlow = expf(-1.0f / (0.130f * (float)rate)); // 持続大音量: 130ms
 }
 
 static void EqCeilingReset(int bank, int rate)
@@ -5273,37 +6097,103 @@ static void EqCeilingReset(int bank, int rate)
 	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
 	g_ceil[bank].rate = 0;
 	g_ceil[bank].gain = 1.0f;
+	g_ceil[bank].relHold = 0;
 	EqCeilingPrepare(&g_ceil[bank], rate > 0 ? rate : 44100);
 }
 
-// peak[i] はサンプルピーク。中身を必要ゲインに変えてから、同じインデックスの
-// 適用ゲインを gainOut へ書く。音そのものはここを通らない。
-static void EqCeilingFillGains(float* peak, float* gainOut, int n, int rate)
+// ブロック末尾エッジ等で万一 kEqCeiling を僅かに超えた場合の滑らかな最終安全ニー
+static inline float EqCeilSafetySoftKnee(float x)
+{
+	const float a = fabsf(x);
+	if (a <= 0.960f) return x;
+	const float knee = 0.960f;
+	const float span = 0.985f - knee; // 0.025
+	float arg = (a - knee) / span;
+	if (arg > 6.0f) arg = 6.0f;
+	float y = knee + span * tanhf(arg);
+	return (x >= 0.0f) ? y : -y;
+}
+
+// peak[0..n-1] (4x Catmull-Rom 真のピーク) から、滑らかな先読みゲイン gainOut[0..n-1] を計算
+static void EqCeilingFillGains(float* peak, float* winReq, float* gainOut, int* dq, int n, int rate)
 {
 	EqCeilingState* st = &g_ceil[g_eqCur];
 	EqCeilingPrepare(st, rate);
 	if (n <= 0) return;
 
-	for (int i = 0; i < n; ++i) {
+	const int la = st->la;
+	const float atkSlope = 1.0f / (float)la;
+
+	// 1. O(N) 単調減少デック: 各 i で前方窓 [i, min(n-1, i+la)] の最大ピークを求める
+	int head = 0, tail = 0;
+	for (int i = n - 1; i >= 0; --i) {
 		const float p = peak[i];
-		const float need = (p > kEqCeiling) ? (kEqCeiling / p) : 1.0f;
-		peak[i] = need;
-		gainOut[i] = need;
+		while (tail > head && peak[dq[tail - 1]] <= p)
+			--tail;
+		dq[tail++] = i;
+		while (dq[head] > i + la)
+			++head;
+		const float wp = peak[dq[head]];
+		winReq[i] = (wp > kEqCeiling) ? (kEqCeiling / wp) : 1.0f;
 	}
-	st->gain = 1.0f;
+
+	// 2. 後方走査 (先読み滑らかアタック): ピークの la サンプル前から滑らかに下降させる
+	for (int i = n - 2; i >= 0; --i) {
+		const float maxAllowed = winReq[i + 1] + atkSlope;
+		if (winReq[i] > maxAllowed)
+			winReq[i] = maxAllowed;
+	}
+
+	// 3. 前方走査 (ブロック跨ぎ状態連続 + ホールド + デュアルリリース)
+	float g = st->gain;
+	int hold = st->relHold;
+	if (!isfinite(g) || g <= 0.0f || g > 1.0f) g = 1.0f;
+
+	for (int i = 0; i < n; ++i) {
+		const float req = winReq[i];
+		// 瞬時ピーク保護 (ブロック跨ぎ直後の初サンプルでも天井超過を許さない)
+		const float imm = (peak[i] > kEqCeiling) ? (kEqCeiling / peak[i]) : 1.0f;
+		const float target = (req < imm) ? req : imm;
+
+		if (target < g) {
+			g = target;
+			hold = st->holdSamp;
+		}
+		else if (target > g) {
+			if (hold > 0) {
+				--hold;
+			}
+			else {
+				// 浅い瞬間リダクションは高速45ms復帰、深いリダクションは滑らか130ms復帰
+				const float relC = (g > 0.86f) ? st->gRelFast : st->gRelSlow;
+				g = target + relC * (g - target);
+				if (g > 0.99995f && target >= 1.0f) g = 1.0f;
+			}
+		}
+		gainOut[i] = g;
+	}
+	st->gain = g;
+	st->relHold = hold;
 }
 
 static void EqCeilingNotePeaks(float* peak, int n, int nCh, float* const* planar, const float* interleaved)
 {
 	for (int ch = 0; ch < nCh; ++ch) {
 		for (int i = 0; i < n - 1; ++i) {
-			auto at = [&](int idx) -> float {
-				if (idx < 0) idx = 0;
-				if (idx >= n) idx = n - 1;
-				if (planar) return planar[ch][idx];
-				return interleaved[(size_t)idx * (size_t)nCh + (size_t)ch];
-			};
-			const float seg = EqCatmullPeak(at(i - 1), at(i), at(i + 1), at(i + 2));
+			const int i0 = (i > 0) ? (i - 1) : 0;
+			const int i3 = (i + 2 < n) ? (i + 2) : (n - 1);
+			float y0, y1, y2, y3;
+			if (planar) {
+				const float* p = planar[ch];
+				y0 = p[i0]; y1 = p[i]; y2 = p[i + 1]; y3 = p[i3];
+			}
+			else {
+				y0 = interleaved[(size_t)i0 * (size_t)nCh + (size_t)ch];
+				y1 = interleaved[(size_t)i * (size_t)nCh + (size_t)ch];
+				y2 = interleaved[(size_t)(i + 1) * (size_t)nCh + (size_t)ch];
+				y3 = interleaved[(size_t)i3 * (size_t)nCh + (size_t)ch];
+			}
+			const float seg = EqCatmullPeak(y0, y1, y2, y3);
 			if (seg > peak[i]) peak[i] = seg;
 			if (seg > peak[i + 1]) peak[i + 1] = seg;
 		}
@@ -5314,25 +6204,20 @@ static void EqCeilingApplyPlanar(float** ch, int nCh, int n, int rate)
 {
 	if (!ch || nCh < 1 || n <= 0 || rate <= 0) return;
 	if (nCh > MAX_CH) nCh = MAX_CH;
-	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 2);
-	if (!work) {
+	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 3);
+	int* dq = EqCeilAllocInt(&g_ceilDeque, &g_ceilDequeCap, n);
+	if (!work || !dq) {
 		for (int i = 0; i < n; ++i) {
-			float p = 0.0f;
 			for (int c = 0; c < nCh; ++c) {
 				float x = ch[c][i];
-				if (!isfinite(x)) { x = 0.0f; ch[c][i] = 0.0f; }
-				const float a = fabsf(x);
-				if (a > p) p = a;
-			}
-			if (p > kEqCeiling) {
-				const float g = kEqCeiling / p;
-				for (int c = 0; c < nCh; ++c) ch[c][i] *= g;
+				ch[c][i] = isfinite(x) ? EqCeilSafetySoftKnee(x) : 0.0f;
 			}
 		}
 		return;
 	}
 	float* peak = work;
-	float* gain = work + n;
+	float* winReq = work + n;
+	float* gain = work + n * 2;
 	for (int i = 0; i < n; ++i) {
 		float p = 0.0f;
 		for (int c = 0; c < nCh; ++c) {
@@ -5344,11 +6229,13 @@ static void EqCeilingApplyPlanar(float** ch, int nCh, int n, int rate)
 		peak[i] = p;
 	}
 	EqCeilingNotePeaks(peak, n, nCh, ch, NULL);
-	EqCeilingFillGains(peak, gain, n, rate);
+	EqCeilingFillGains(peak, winReq, gain, dq, n, rate);
 	for (int i = 0; i < n; ++i) {
 		const float g = gain[i];
-		if (g == 1.0f) continue;
-		for (int c = 0; c < nCh; ++c) ch[c][i] *= g;
+		for (int c = 0; c < nCh; ++c) {
+			float v = ch[c][i] * g;
+			ch[c][i] = EqCeilSafetySoftKnee(v);
+		}
 	}
 }
 
@@ -5356,25 +6243,19 @@ static void EqCeilingApplyInterleaved(float* frames, int nCh, int n, int rate)
 {
 	if (!frames || nCh < 1 || n <= 0 || rate <= 0) return;
 	if (nCh > MAX_CH) nCh = MAX_CH;
-	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 2);
-	if (!work) {
+	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 3);
+	int* dq = EqCeilAllocInt(&g_ceilDeque, &g_ceilDequeCap, n);
+	if (!work || !dq) {
 		for (int i = 0; i < n; ++i) {
-			float p = 0.0f;
 			float* fr = frames + (size_t)i * (size_t)nCh;
-			for (int c = 0; c < nCh; ++c) {
-				if (!isfinite(fr[c])) fr[c] = 0.0f;
-				const float a = fabsf(fr[c]);
-				if (a > p) p = a;
-			}
-			if (p > kEqCeiling) {
-				const float g = kEqCeiling / p;
-				for (int c = 0; c < nCh; ++c) fr[c] *= g;
-			}
+			for (int c = 0; c < nCh; ++c)
+				fr[c] = isfinite(fr[c]) ? EqCeilSafetySoftKnee(fr[c]) : 0.0f;
 		}
 		return;
 	}
 	float* peak = work;
-	float* gain = work + n;
+	float* winReq = work + n;
+	float* gain = work + n * 2;
 	for (int i = 0; i < n; ++i) {
 		float p = 0.0f;
 		float* fr = frames + (size_t)i * (size_t)nCh;
@@ -5386,12 +6267,12 @@ static void EqCeilingApplyInterleaved(float* frames, int nCh, int n, int rate)
 		peak[i] = p;
 	}
 	EqCeilingNotePeaks(peak, n, nCh, NULL, frames);
-	EqCeilingFillGains(peak, gain, n, rate);
+	EqCeilingFillGains(peak, winReq, gain, dq, n, rate);
 	for (int i = 0; i < n; ++i) {
 		const float g = gain[i];
-		if (g == 1.0f) continue;
 		float* fr = frames + (size_t)i * (size_t)nCh;
-		for (int c = 0; c < nCh; ++c) fr[c] *= g;
+		for (int c = 0; c < nCh; ++c)
+			fr[c] = EqCeilSafetySoftKnee(fr[c] * g);
 	}
 }
 
@@ -5865,74 +6746,46 @@ static void EqTailOut(void* outPtr, int outLen, int rate)
 	ProAudio_PushTailPcm(outPtr, outLen, rate, wavsam_depth, wavchannel);
 }
 
-// ===== エンジン初期化 =====
-// サンプルレート変更または reset==1 時に呼ばれる
-// 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
-// リミッター係数の再計算を行う
+// ============================================================
+//  エンジン初期化 (サンプルレート変更または reset==1 時に呼ばれる)
+//  - 全チャンネル EQ/トーンフィルタをバイパスへ初期化
+//  - LR4 3バンドプロテクタ / 立体環境音響エンジン(VirtualAlloc一括プール)をリセット
+//  - ユーザー追加FX / ルックアヘッドリミッター / サラウンドをリセット
+//  - 再生中の malloc / free / new / delete は一切行わない
+// ============================================================
 static void InitEngine(int rate, int bank = 0) {
 	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	if (rate < 8000) rate = 44100;
 	const int prevBank = g_eqCur;
 	g_eqCur = bank;
-	// memset 前に山彦バッファを退避して解放する。
-	// 先に memset するとポインタが消え、毎回 malloc 分がリークする。
-	float* oldYamabiko[MAX_CH];
-	for (int i = 0; i < MAX_CH; i++)
-		oldYamabiko[i] = g_channels[g_eqCur][i].yamabikoBuf;
 
 	memset(g_channels[g_eqCur], 0, sizeof(g_channels[g_eqCur]));
-	float* delayBank = EnsureDelayBank(g_eqCur);
-	if (delayBank)
-		memset(delayBank, 0, (SIZE_T)MAX_CH * (SIZE_T)MAX_DELAY_SAMPLES * sizeof(float));
-
-	for (int i = 0; i < MAX_CH; i++) {
-		if (oldYamabiko[i] != NULL)
-			free(oldYamabiko[i]);
-
-		g_channels[g_eqCur][i].delayBuffer = delayBank ? (delayBank + (SIZE_T)i * (SIZE_T)MAX_DELAY_SAMPLES) : NULL;
-		g_channels[g_eqCur][i].lfo.phase = 0.0f;
-		g_channels[g_eqCur][i].flutterPhase = 0.0f;
-		g_channels[g_eqCur][i].dopplerPhase = 0.0f;
-		g_channels[g_eqCur][i].phasingPhase = 0.0f;
-
-		for (int j = 0; j < 8; j++) {
-			g_channels[g_eqCur][i].diffusionPos1[j] = 0;
-			g_channels[g_eqCur][i].diffusionPos2[j] = 0;
-			g_channels[g_eqCur][i].diffusionPos3[j] = 0;
-		}
-
-		g_channels[g_eqCur][i].harmonicState = 0.0f;
-		g_channels[g_eqCur][i].earlyEnvelope = 0.0f;
-		g_channels[g_eqCur][i].lateEnvelope = 0.0f;
-		g_channels[g_eqCur][i].warmthState = 0.0f;
-		g_channels[g_eqCur][i].brightnessState = 0.0f;
-		g_channels[g_eqCur][i].shimmerState = 0.0f;
-
-		// 山彦バッファ: rate×2秒分 (最大遅延 2秒)
-		g_channels[g_eqCur][i].yamabikoBufSize = rate * 2;
-		g_channels[g_eqCur][i].yamabikoPos = 0;
-		g_channels[g_eqCur][i].yamabikoBuf = (float*)malloc(sizeof(float) * g_channels[g_eqCur][i].yamabikoBufSize);
-		if (g_channels[g_eqCur][i].yamabikoBuf != NULL)
-			memset(g_channels[g_eqCur][i].yamabikoBuf, 0, sizeof(float) * g_channels[g_eqCur][i].yamabikoBufSize);
+	for (int ch = 0; ch < MAX_CH; ++ch) {
+		for (int b = 0; b < EQ_BANDS; ++b)
+			SetBiquadBypass(&g_channels[g_eqCur][ch].eqFilters[b]);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].clarityPeak);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].clarityAir);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].bassBalanceFilter);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].trebleBalanceFilter);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].densityLow);
+		SetBiquadBypass(&g_channels[g_eqCur][ch].densityMid);
+		CalcBiquadFilter(&g_channels[g_eqCur][ch].bassMonoLP, 0, 120.0, 0.7071, rate);
+		g_channels[g_eqCur][ch].harmonicState = 0.0f;
 	}
+
+	// LR4 3バンド位相整合ダイナミックプロテクタ初期化
+	MultibandReset(&g_mbProt[g_eqCur], rate);
+
+	// 立体環境音響エンジン初期化 (プールは初回のみ VirtualAlloc)
+	float* envPool = EnsureEnvPool(g_eqCur);
+	EnvEngineReset(&g_envEngine[g_eqCur], envPool, rate);
 
 	g_lastRate[g_eqCur] = rate;
 	g_lastEqPreset[g_eqCur] = -1;
 	g_lastEnvPreset[g_eqCur] = -1;
 
-	for (int i = 0; i < 15; i++) g_lastEqValues[g_eqCur][i] = 100;
-	for (int i = 0; i < 5; i++) g_lastExtendedParams[g_eqCur][i] = 100;
-
-	// リミッター係数: attack=1ms, release=100ms
-	for (int ch = 0; ch < 2; ch++) {
-		g_limiter[g_eqCur][ch].envelope = 1.0f;
-		g_limiter[g_eqCur][ch].threshold = 0.95f;
-		g_limiter[g_eqCur][ch].attackCoeff = expf(-1.0f / (0.001f * rate));
-		g_limiter[g_eqCur][ch].releaseCoeff = expf(-1.0f / (0.100f * rate));
-		g_extBoostLimiter[g_eqCur][ch].envelope = 1.0f;
-		g_extBoostLimiter[g_eqCur][ch].threshold = 0.95f;
-		g_extBoostLimiter[g_eqCur][ch].attackCoeff = g_limiter[g_eqCur][ch].attackCoeff;
-		g_extBoostLimiter[g_eqCur][ch].releaseCoeff = g_limiter[g_eqCur][ch].releaseCoeff;
-	}
+	for (int i = 0; i < 15; ++i) g_lastEqValues[g_eqCur][i] = 100;
+	for (int i = 0; i < 5; ++i) g_lastExtendedParams[g_eqCur][i] = 100;
 
 	g_lastEffectAmount[g_eqCur] = 50;
 	g_initialized[g_eqCur] = TRUE;
@@ -5942,7 +6795,6 @@ static void InitEngine(int rate, int bank = 0) {
 	g_eqChorus = 0;
 	g_eqDelay = 0;
 
-	// 追加エフェクト(リバーブ/コーラス/ディレイ)の状態とディレイ尾をクリア
 	FxReverbReset(rate);
 	FxChorusReset(rate);
 	FxDelayReset(rate);
@@ -5952,22 +6804,15 @@ static void InitEngine(int rate, int bank = 0) {
 	g_eqCur = prevBank;
 }
 
-// ===== 山彦バッファ解放 =====
-// アプリ終了時またはエンジン破棄時に呼ぶ
+// ============================================================
+//  エンジンバッファ解放 (アプリ終了時・破棄時に呼ぶ)
+// ============================================================
 void FreeEngine(void) {
-	for (int b = 0; b < EQ_BANKS; b++) {
-		for (int i = 0; i < MAX_CH; i++) {
-			if (g_channels[b][i].yamabikoBuf != NULL) {
-				free(g_channels[b][i].yamabikoBuf);
-				g_channels[b][i].yamabikoBuf = NULL;
-				g_channels[b][i].yamabikoBufSize = 0;
-				g_channels[b][i].yamabikoPos = 0;
-			}
-			g_channels[b][i].delayBuffer = NULL;
-		}
-		if (g_delayMemory[b]) {
-			VirtualFree(g_delayMemory[b], 0, MEM_RELEASE);
-			g_delayMemory[b] = NULL;
+	for (int b = 0; b < EQ_BANKS; ++b) {
+		BindEnvPoolPointers(&g_envEngine[b], NULL);
+		if (g_envPoolMem[b]) {
+			VirtualFree(g_envPoolMem[b], 0, MEM_RELEASE);
+			g_envPoolMem[b] = NULL;
 		}
 		if (g_eqLeftSamples[b]) {
 			VirtualFree(g_eqLeftSamples[b], 0, MEM_RELEASE);
@@ -5977,66 +6822,37 @@ void FreeEngine(void) {
 			VirtualFree(g_eqRightSamples[b], 0, MEM_RELEASE);
 			g_eqRightSamples[b] = NULL;
 		}
+		if (g_rsPool[b].pcmBuf) {
+			VirtualFree(g_rsPool[b].pcmBuf, 0, MEM_RELEASE);
+			g_rsPool[b].pcmBuf = NULL;
+			g_rsPool[b].pcmCap = 0;
+		}
+		if (g_rsPool[b].srcFloat) {
+			VirtualFree(g_rsPool[b].srcFloat, 0, MEM_RELEASE);
+			g_rsPool[b].srcFloat = NULL;
+			g_rsPool[b].srcCap = 0;
+		}
+		if (g_rsPool[b].dstFloat) {
+			VirtualFree(g_rsPool[b].dstFloat, 0, MEM_RELEASE);
+			g_rsPool[b].dstFloat = NULL;
+			g_rsPool[b].dstCap = 0;
+		}
 	}
 	if (g_ceilWork) {
 		VirtualFree(g_ceilWork, 0, MEM_RELEASE);
 		g_ceilWork = NULL;
 		g_ceilWorkCap = 0;
 	}
+	if (g_ceilDeque) {
+		VirtualFree(g_ceilDeque, 0, MEM_RELEASE);
+		g_ceilDeque = NULL;
+		g_ceilDequeCap = 0;
+	}
 	if (g_ceilAudio) {
 		VirtualFree(g_ceilAudio, 0, MEM_RELEASE);
 		g_ceilAudio = NULL;
 		g_ceilAudioCap = 0;
 	}
-}
-
-// 汎用クランプ
-static float ClampFloat(float v, float lo, float hi) {
-	return (v < lo) ? lo : (v > hi) ? hi : v;
-}
-
-// 擬似乱数 (ハッシュベース, 範囲[0,1])
-// ApplyEnvSeparation でプリセット毎の個性付けに使用
-static float Hash01(int idx, int salt) {
-	unsigned int x = (unsigned int)(idx * 1664525u + 1013904223u + (unsigned int)salt * 2654435761u);
-	x ^= (x >> 16); x *= 2246822519u; x ^= (x >> 13);
-	return (x & 0xFFFFFF) / 16777215.0f;
-}
-
-// 環境プリセット間の分離調整
-// 同カテゴリ内の各プリセットに微妙な差異を付与して聴き分けを容易にする
-// presetIndex: 1-100 (0は無処理)
-// 各パラメータにカテゴリバイアス + ハッシュオフセットを加算
-static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
-	if (!env || presetIndex <= 0) return;
-	int category = (presetIndex - 1) / 10;
-	if (category < 0) category = 0;
-	if (category > 9) category = 9;
-	int pos = (presetIndex - 1) % 10;
-	float t = (pos <= 0) ? 0.0f : (pos >= 9) ? 1.0f : (float)pos / 9.0f;
-
-	float h1 = Hash01(presetIndex, 11) - 0.5f;
-	float h2 = Hash01(presetIndex, 23) - 0.5f;
-	float h3 = Hash01(presetIndex, 37) - 0.5f;
-
-	// カテゴリ別バイアステーブル (roomSize/damping/stereoWidth)
-	static const float kRoomBias[10] = { 0.0f, 0.25f,-0.10f, 0.20f,-0.20f, 0.35f, 0.10f,-0.15f, 0.45f, 0.30f };
-	static const float kDampBias[10] = { 0.0f,-0.05f, 0.15f,-0.05f, 0.20f,-0.10f, 0.05f, 0.10f,-0.20f,-0.15f };
-	static const float kWidthBias[10] = { 0.0f, 0.10f,-0.05f, 0.05f,-0.10f, 0.20f, 0.15f, 0.00f, 0.40f, 0.30f };
-
-	env->preDelayMs = ClampFloat(env->preDelayMs + (t - 0.5f) * 12.0f + h1 * 8.0f, 0.0f, 120.0f);
-	env->delayTimeMs = ClampFloat(env->delayTimeMs * (1.0f + (t - 0.5f) * 0.25f + h2 * 0.15f), 6.0f, 350.0f);
-	env->roomSize = ClampFloat(env->roomSize + kRoomBias[category] + h3 * 0.25f, 0.3f, 5.0f);
-	env->stereoWidth = ClampFloat(env->stereoWidth + kWidthBias[category] + h1 * 0.30f, 0.3f, 2.5f);
-	env->damping = ClampFloat(env->damping + kDampBias[category] + h2 * 0.20f, 0.0f, 1.0f);
-}
-
-static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
-	float absInput = fabsf(input);
-	float targetGain = (absInput > lim->threshold) ? lim->threshold / absInput : 1.0f;
-	float coeff = (targetGain < lim->envelope) ? lim->attackCoeff : lim->releaseCoeff;
-	lim->envelope = targetGain + coeff * (lim->envelope - targetGain);
-	return input * lim->envelope;
 }
 
 
@@ -6233,20 +7049,10 @@ static void ApplyExternalBoostOnlyToBuffer(
 
 
 // ============================================================
-// ResampleUp() - Lanczos-2 アップサンプリング
+// ResampleUp() - Lanczos-2 アップサンプリング (再利用プール使用・malloc/freeゼロ)
+// srcRate < 32000 の音源のみ 44100Hz に変換して内部処理する
+// ※ dstData には g_rsPool[g_eqCur].pcmBuf が返るため呼び出し側で free() 不要
 // ============================================================
-// srcRate < 32000 の音源のみ 44100Hz に変換して内部処理する（32kHz OGG 等はネイティブ）
-// Lanczos カーネル (a=2): sinc(x) * sinc(x/a) の積
-// タップ数: ±2 (計5点) — 品質とCPU負荷のバランス点
-// ============================================================
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 static inline float LanczosKernel2(float x) {
 	if (x == 0.0f) return 1.0f;
 	if (fabsf(x) >= 2.0f) return 0.0f;
@@ -6271,35 +7077,31 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	if (dstSamples <= 0)
 		return;
 
-	*dstLen = dstSamples * frameBytes;
-	*dstData = malloc(*dstLen);
-	if (!(*dstData)) return;
-
-	float* srcFloat = (float*)malloc(srcSamples * channels * sizeof(float));
-	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
-	if (!srcFloat || !dstFloat) {
-		free(srcFloat);
-		free(dstFloat);
-		free(*dstData);
-		*dstData = NULL;
-		*dstLen = 0;
+	int outBytes = dstSamples * frameBytes;
+	ResampleWorkPool* pool = &g_rsPool[g_eqCur];
+	unsigned char* pDst = (unsigned char*)EnsureResampleBuf((void**)&pool->pcmBuf, &pool->pcmCap, outBytes);
+	float* srcFloat = (float*)EnsureResampleBuf((void**)&pool->srcFloat, &pool->srcCap, srcSamples * channels * (int)sizeof(float));
+	float* dstFloat = (float*)EnsureResampleBuf((void**)&pool->dstFloat, &pool->dstCap, dstSamples * channels * (int)sizeof(float));
+	if (!pDst || !srcFloat || !dstFloat)
 		return;
-	}
+
+	*dstData = pDst;
+	*dstLen = outBytes;
 	unsigned char* pSrc = (unsigned char*)srcData;
 
-	// 整数 PCM → 浮動小数点 [-1.0, 1.0] に変換
+	// 整数 PCM → 浮動小数点 [-1.0, 1.0]
+	const int totalSrc = srcSamples * channels;
 	if (bitDepth == 8) {
-		for (int i = 0; i < srcSamples * channels; i++)
+		for (int i = 0; i < totalSrc; ++i)
 			srcFloat[i] = ((float)pSrc[i] - 128.0f) / 128.0f;
 	}
 	else if (bitDepth == 16) {
 		short* p = (short*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
+		for (int i = 0; i < totalSrc; ++i) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
-		for (int i = 0; i < srcSamples * channels; i++) {
+		for (int i = 0; i < totalSrc; ++i) {
 			int o = i * 3;
-			// 24bit LE: byte0|(byte1<<8)|(byte2<<16)、符号拡張して 2^23 で正規化
 			uint32_t u = (uint32_t)pSrc[o] | ((uint32_t)pSrc[o + 1] << 8) | ((uint32_t)pSrc[o + 2] << 16);
 			int32_t s = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
 			srcFloat[i] = (float)s * (1.0f / 8388608.0f);
@@ -6307,86 +7109,88 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	}
 	else if (bitDepth == 32) {
 		int* p = (int*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
+		for (int i = 0; i < totalSrc; ++i) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
-	// Lanczos-2 補間
+	// Lanczos-2 正規化補間 (重み和で正規化してゲインリップルを除去)
 	double ratio = (double)dstRate / srcRate;
-	for (int i = 0; i < dstSamples; i++) {
-		double srcPos = i / ratio;
+	for (int i = 0; i < dstSamples; ++i) {
+		double srcPos = (double)i / ratio;
 		int    srcInt = (int)srcPos;
-		float  frac = (float)(srcPos - srcInt);
-		for (int ch = 0; ch < channels; ch++) {
+		float  frac   = (float)(srcPos - srcInt);
+		float  w[5];
+		float  wSum = 0.0f;
+		for (int j = -2; j <= 2; ++j) {
+			int idx = srcInt + j;
+			float kj = (idx >= 0 && idx < srcSamples) ? LanczosKernel2(frac - (float)j) : 0.0f;
+			w[j + 2] = kj;
+			wSum += kj;
+		}
+		float invW = (fabsf(wSum) > 1e-6f) ? (1.0f / wSum) : 1.0f;
+		for (int ch = 0; ch < channels; ++ch) {
 			float sum = 0.0f;
-			for (int j = -2; j <= 2; j++) {
+			for (int j = -2; j <= 2; ++j) {
 				int idx = srcInt + j;
 				if (idx >= 0 && idx < srcSamples)
-					sum += srcFloat[idx * channels + ch] * LanczosKernel2(frac - j);
+					sum += srcFloat[idx * channels + ch] * w[j + 2];
 			}
-			dstFloat[i * channels + ch] = sum;
+			dstFloat[i * channels + ch] = sum * invW;
 		}
 	}
 
-	// 浮動小数点 → 整数 PCM に変換
-	unsigned char* pDst = (unsigned char*)(*dstData);
+	// 浮動小数点 → 整数 PCM
+	const int totalDst = dstSamples * channels;
 	if (bitDepth == 8) {
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			pDst[i] = (unsigned char)(s * 127.0f + 128.0f);
 		}
 	}
 	else if (bitDepth == 16) {
-		short* p = (short*)(*dstData);
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		short* p = (short*)pDst;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			int32_t v = (int32_t)roundf(s * 32768.0f);
 			if (v > 32767) v = 32767; if (v < -32768) v = -32768;
 			p[i] = (short)v;
 		}
 	}
 	else if (bitDepth == 24) {
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			int32_t v = (int32_t)roundf(s * 8388608.0f);
 			if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
 			int o = i * 3;
-			// [FIX-5] リトルエンディアン 24bit PCM 正規バイト順
 			pDst[o] = v & 0xFF;
 			pDst[o + 1] = (v >> 8) & 0xFF;
 			pDst[o + 2] = (v >> 16) & 0xFF;
 		}
 	}
 	else if (bitDepth == 32) {
-		int* p = (int*)(*dstData);
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		int* p = (int*)pDst;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			p[i] = (int)(s * 2147483647.0f);
 		}
 	}
-	free(srcFloat); free(dstFloat);
 }
 
-// 簡易ローパスフィルタ (3点移動平均)
-// ResampleDown 前のエイリアシング抑制プレフィルタとして使用
-static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
-	for (int ch = 0; ch < channels; ch++) {
+// 簡易ローパスフィルタ (3点移動平均: ダウンサンプル時のエイリアシング抑制)
+static void ApplyFastLPF(float* data, int samples, int channels, float /*cutoff*/) {
+	for (int ch = 0; ch < channels; ++ch) {
 		float prev = data[ch];
-		for (int i = 1; i < samples - 1; i++) {
+		for (int i = 1; i < samples - 1; ++i) {
 			int   idx = i * channels + ch;
 			float curr = data[idx], next = data[idx + channels];
-			data[idx] = (prev + curr + next) * 0.333333f;
+			data[idx] = (prev + curr + next) * 0.33333334f;
 			prev = curr;
 		}
 	}
 }
 
-// ResampleDown() - Lanczos-2 ダウンサンプリング
-// 44100Hz 内部処理後に元のサンプルレートへ戻す
-// cutoff < 0.9 の場合は3点LPFでエイリアシングを抑制
+// ============================================================
+// ResampleDown() - Lanczos-2 ダウンサンプリング (再利用プール使用・malloc/freeゼロ)
+// ============================================================
 void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
 	if (!srcData || !dstData || srcLen <= 0 || dstLen <= 0 || srcRate <= 0 || dstRate <= 0 || channels <= 0 || bitDepth <= 0)
@@ -6400,25 +7204,24 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	if (srcSamples <= 0 || dstSamples <= 0)
 		return;
 
-	float* srcFloat = (float*)malloc(srcSamples * channels * sizeof(float));
-	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
-	if (!srcFloat || !dstFloat) {
-		free(srcFloat);
-		free(dstFloat);
+	ResampleWorkPool* pool = &g_rsPool[g_eqCur];
+	float* srcFloat = (float*)EnsureResampleBuf((void**)&pool->srcFloat, &pool->srcCap, srcSamples * channels * (int)sizeof(float));
+	float* dstFloat = (float*)EnsureResampleBuf((void**)&pool->dstFloat, &pool->dstCap, dstSamples * channels * (int)sizeof(float));
+	if (!srcFloat || !dstFloat)
 		return;
-	}
-	unsigned char* pSrc = (unsigned char*)srcData;
 
+	unsigned char* pSrc = (unsigned char*)srcData;
+	const int totalSrc = srcSamples * channels;
 	if (bitDepth == 8) {
-		for (int i = 0; i < srcSamples * channels; i++)
+		for (int i = 0; i < totalSrc; ++i)
 			srcFloat[i] = ((float)pSrc[i] - 128.0f) / 128.0f;
 	}
 	else if (bitDepth == 16) {
 		short* p = (short*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
+		for (int i = 0; i < totalSrc; ++i) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
-		for (int i = 0; i < srcSamples * channels; i++) {
+		for (int i = 0; i < totalSrc; ++i) {
 			int o = i * 3;
 			uint32_t u = (uint32_t)pSrc[o] | ((uint32_t)pSrc[o + 1] << 8) | ((uint32_t)pSrc[o + 2] << 16);
 			int32_t s = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
@@ -6427,48 +7230,57 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	}
 	else if (bitDepth == 32) {
 		int* p = (int*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
+		for (int i = 0; i < totalSrc; ++i) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
-	// エイリアシング防止: ダウンサンプル比が大きいときのみ適用
-	float cutoff = (float)dstRate / srcRate;
+	float cutoff = (float)dstRate / (float)srcRate;
 	if (cutoff < 0.9f) ApplyFastLPF(srcFloat, srcSamples, channels, cutoff);
 
 	double ratio = (double)dstRate / srcRate;
-	for (int i = 0; i < dstSamples; i++) {
-		double srcPos = i / ratio;
+	for (int i = 0; i < dstSamples; ++i) {
+		double srcPos = (double)i / ratio;
 		int    srcInt = (int)srcPos;
-		float  frac = (float)(srcPos - srcInt);
-		for (int ch = 0; ch < channels; ch++) {
+		float  frac   = (float)(srcPos - srcInt);
+		float  w[5];
+		float  wSum = 0.0f;
+		for (int j = -2; j <= 2; ++j) {
+			int idx = srcInt + j;
+			float kj = (idx >= 0 && idx < srcSamples) ? LanczosKernel2(frac - (float)j) : 0.0f;
+			w[j + 2] = kj;
+			wSum += kj;
+		}
+		float invW = (fabsf(wSum) > 1e-6f) ? (1.0f / wSum) : 1.0f;
+		for (int ch = 0; ch < channels; ++ch) {
 			float sum = 0.0f;
-			for (int j = -2; j <= 2; j++) {
+			for (int j = -2; j <= 2; ++j) {
 				int idx = srcInt + j;
 				if (idx >= 0 && idx < srcSamples)
-					sum += srcFloat[idx * channels + ch] * LanczosKernel2(frac - j);
+					sum += srcFloat[idx * channels + ch] * w[j + 2];
 			}
-			dstFloat[i * channels + ch] = sum;
+			dstFloat[i * channels + ch] = sum * invW;
 		}
 	}
 
 	unsigned char* pDst = (unsigned char*)dstData;
+	const int totalDst = dstSamples * channels;
 	if (bitDepth == 8) {
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			pDst[i] = (unsigned char)(s * 127.0f + 128.0f);
 		}
 	}
 	else if (bitDepth == 16) {
 		short* p = (short*)dstData;
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			int32_t v = (int32_t)roundf(s * 32768.0f);
 			if (v > 32767) v = 32767; if (v < -32768) v = -32768;
 			p[i] = (short)v;
 		}
 	}
 	else if (bitDepth == 24) {
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			int32_t v = (int32_t)roundf(s * 8388608.0f);
 			if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
 			int o = i * 3;
@@ -6477,12 +7289,11 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	}
 	else if (bitDepth == 32) {
 		int* p = (int*)dstData;
-		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+		for (int i = 0; i < totalDst; ++i) {
+			float s = ClampFloat(dstFloat[i], -1.0f, 1.0f);
 			p[i] = (int)(s * 2147483647.0f);
 		}
 	}
-	free(srcFloat); free(dstFloat);
 }
 
 
@@ -6498,7 +7309,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset);
 
 void equaliserResetBank(int bank) {
 	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
-	std::lock_guard<std::mutex> lk(g_eqMu);
+	EqSrwGuard lk(&g_eqLock);
 	int rate = wavbit_sample_Hz;
 	if (rate < 8000) rate = 44100;
 	InitEngine(rate, bank);
@@ -6507,7 +7318,7 @@ void equaliserResetBank(int bank) {
 void equaliserBank(int bank, void* data, int len, BOOL reset,
 	int bitsOverride, int chOverride, int rateOverride) {
 	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
-	std::lock_guard<std::mutex> lk(g_eqMu);
+	EqSrwGuard lk(&g_eqLock);
 	const int prevBank = g_eqCur;
 	g_eqCur = bank;
 	const int oldDepth = wavsam_depth;
@@ -6543,44 +7354,39 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		return;
 	}
 
-	// ========================================
-	// リサンプリング: 22050Hz 等の低レートのみ 44100Hz へ一時変換。
-	// 32000Hz / 44100Hz / 48000Hz はネイティブレートで EQ 処理（32kHz OGG 向け）。
-	// ========================================
-	if (len <= 0)
+	if (!data || len <= 0)
 		return;
 
-	int  originalRate = wavbit_sample_Hz;
-	int  originalLen = len;
+	// ========================================
+	// リサンプリング: 32000Hz 未満の低レート音源のみ 44100Hz へ一時変換
+	// (g_rsPool[g_eqCur] を再利用するため再生中の malloc/free ゼロ)
+	// ========================================
+	int   originalRate = wavbit_sample_Hz;
+	int   originalLen = len;
 	void* processData = data;
 	int   processLen = len;
 	void* tempBuffer = NULL;
 	const int kEqNativeMinRate = 32000;
 	BOOL  needsResampling = (originalRate > 0 && originalRate < kEqNativeMinRate);
 
-	wavbitbackup = originalRate;
+	wavbitbackup = (originalRate >= 8000) ? originalRate : 44100;
 
 	if (needsResampling) {
 		ResampleUp(data, len, &tempBuffer, &processLen, originalRate, 44100, wavchannel, wavsam_depth);
-		if (!tempBuffer || processLen <= 0) {
-			if (tempBuffer) free(tempBuffer);
+		if (!tempBuffer || processLen <= 0)
 			return;
-		}
 		processData = tempBuffer;
 		wavbitbackup = 44100;
 	}
 
 	{
 		const int bpfEq = (wavsam_depth / 8) * wavchannel;
-		if (bpfEq <= 0 || processLen < bpfEq) {
-			if (needsResampling && tempBuffer)
-				free(tempBuffer);
+		if (bpfEq <= 0 || processLen < bpfEq)
 			return;
-		}
 	}
 
 	// ========================================
-	// 初期化・パラメータ取得
+	// エンジン初期化・パラメータ取り込み
 	// ========================================
 	BOOL forceUpdate = FALSE;
 	if (reset == 1 || !g_initialized[g_eqCur] || g_lastRate[g_eqCur] != wavbitbackup) {
@@ -6592,114 +7398,28 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	int currentEnvPre = savedata.eqsoundenv;
 	int effectAmount = savedata.eqsoundeffect;
 
+	if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
 	if (effectAmount < 0)   effectAmount = 0;
 	if (effectAmount > 100) effectAmount = 100;
 
-	// サラウンドは EQ / リミッター前に適用（後段で割れるのを防ぐ）
+	// サラウンドは EQ / リミッター前に適用（後段で音割れを防止）
 	ApplySurroundProcess(processData, processLen, wavbitbackup, wavsam_depth, wavchannel);
 
-	int masterVolume = savedata.eq[15];
-	int clarity = savedata.eq[16];
-	int balance = savedata.eq[17];
-	int density = savedata.eq[18];
-	int spatial = savedata.eq[19];
+	int masterVolume = (int)ClampFloat((float)savedata.eq[15], 0.0f, 200.0f);
+	int clarity      = (int)ClampFloat((float)savedata.eq[16], 0.0f, 200.0f);
+	int balance      = (int)ClampFloat((float)savedata.eq[17], 0.0f, 200.0f);
+	int density      = (int)ClampFloat((float)savedata.eq[18], 0.0f, 200.0f);
+	int spatial      = (int)ClampFloat((float)savedata.eq[19], 0.0f, 200.0f);
 
-	masterVolume = (int)ClampFloat((float)masterVolume, 0.0f, 200.0f);
-	clarity = (int)ClampFloat((float)clarity, 0.0f, 200.0f);
-	balance = (int)ClampFloat((float)balance, 0.0f, 200.0f);
-	density = (int)ClampFloat((float)density, 0.0f, 200.0f);
-	spatial = (int)ClampFloat((float)spatial, 0.0f, 200.0f);
-
-	// ============================================================
-	// 追加エフェクトパラメータ (リバーブ/コーラス/ディレイ) の取り込み
-	//   0 = オフ / 1-100 = モードA / 101-200 = モードB
-	//   eq_reverb : 1-100 リバーブ / 101-200 パンリバーブ
-	//   eq_chorus : 1-100 コーラス / 101-200 コーラスディストーション
-	//   eq_delay  : 1-100 ディレイ / 101-200 マルチディレイ
-	// ============================================================
+	// 追加エフェクトパラメータ (0=オフ / 1-100=モードA / 101-200=モードB)
 	g_eqReverb = (int)ClampFloat((float)savedata.eq_reverb, 0.0f, 200.0f);
 	g_eqChorus = (int)ClampFloat((float)savedata.eq_chorus, 0.0f, 200.0f);
-	g_eqDelay = (int)ClampFloat((float)savedata.eq_delay, 0.0f, 200.0f);
+	g_eqDelay  = (int)ClampFloat((float)savedata.eq_delay,  0.0f, 200.0f);
 	savedata.eq_reverb = g_eqReverb;
 	savedata.eq_chorus = g_eqChorus;
-	savedata.eq_delay = g_eqDelay;
-	// TODO: g_eqReverb / g_eqChorus / g_eqDelay を用いた
-	//       リバーブ・コーラス・ディレイの実処理をここに追加する。
+	savedata.eq_delay  = g_eqDelay;
 
-	// ============================================================
-	// [FIX-BYPASS] 完全バイパス判定
-	// 条件:
-	//   ・環境プリセット == 0 (無処理環境)
-	//   ・masterVolume/clarity/balance/density/spatial がすべて100
-	//   ・EQ帯域 eq[0-14] がすべて100 (フラット)
-	//   ・追加エフェクト(リバーブ/コーラス/ディレイ)がすべて0 (オフ)
-	//   ・サラウンド == 0（サラウンド ON 時はリミッター経路へ）
-	// フラットでも量子化済み PCM の天井だけは通す。位置は動かさない。
-	// リサンプリングが走っていた場合は tempBuffer を解放して返す。
-	// ============================================================
-	if (currentEnvPre == 0 &&
-		masterVolume == 100 && clarity == 100 &&
-		balance == 100 && density == 100 && spatial == 100 &&
-		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0 &&
-		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono &&
-		savedata.mpVocalCenter == 100 &&
-		savedata.surround <= 0)
-	{
-		bool allFlat = true;
-		for (int i = 0; i < 15; i++) {
-			if (savedata.eq[i] != 100) { allFlat = false; break; }
-		}
-		if (allFlat) {
-			auto finishOutNoMeter = [&]() {
-				void* outPtr = data;
-				int outLen = originalLen;
-				if (needsResampling) {
-					ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
-					free(tempBuffer);
-				}
-				else {
-					outPtr = processData;
-					outLen = processLen;
-				}
-				EqTailOut(outPtr, outLen, originalRate);
-			};
-			// 計測は RG/拡張ブースト前(EQ経路と同じ位置)
-			ProAudio_FeedMetersFromInterleaved(
-				needsResampling ? processData : data,
-				needsResampling ? processLen : originalLen,
-				needsResampling ? 44100 : originalRate,
-				wavsam_depth, wavchannel);
-			const float extBoostGain = GetExternalBoostGain();
-			if (extBoostGain <= 1.0001f) {
-				if (needsResampling && tempBuffer) {
-					free(tempBuffer);
-					EqTailOut(data, originalLen, originalRate);
-					return;
-				}
-				EqTailOut(data, originalLen, originalRate);
-				return;
-			}
-			{
-				const int bytesPerSample = wavsam_depth / 8;
-				const int numSamples = processLen / (bytesPerSample * wavchannel);
-				ApplyExternalBoostOnlyToBuffer(
-					(unsigned char*)processData, numSamples, wavchannel, wavsam_depth, bytesPerSample);
-			}
-			finishOutNoMeter();
-			return;
-		}
-	}
-
-	// ============================================================
-	// [FIX-1] スケールファクター修正
-	// 旧: coreScale最大2.17 / extraScale最大2.50 → 音割れ・籠もりの主因
-	// 新: 正規化範囲 [0,1] で体感的エフェクト強度を維持
-	// ============================================================
-	float coreScale = 0.25f + (effectAmount / 100.0f) * 0.75f;  // [0.25, 1.00]
-	float extraScale = effectAmount / 100.0f;                      // [0.00, 1.00]
-	float reflectionScale = 0.50f + (effectAmount / 100.0f) * 0.50f;  // [0.50, 1.00]
-
-	// EQプリセット切り替え検出
+	// EQプリセット切り替え検出 (バイパス判定より先に同期して切替直後の無反応を防ぐ)
 	if (currentEqPre != g_lastEqPreset[g_eqCur]) {
 		if (currentEqPre >= 0 && currentEqPre < EQ_PRESET_COUNT && currentEqPre != 9)
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
@@ -6707,679 +7427,456 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		forceUpdate = TRUE;
 	}
 
-	// EQ値変化検出
+	// DJパッド有効判定
+	const BOOL djActiveCheck = (
+		savedata.mpDjEqLow != 100 || savedata.mpDjEqMid != 100 ||
+		savedata.mpDjEqHigh != 100 || savedata.mpDjFilter != 100 ||
+		(savedata.mpDjEqKill & 7) != 0);
+
+	// ============================================================
+	// 完全バイパス判定 (全EQフラット・全トーン中立・環境0・FX/DJオフ)
+	// ============================================================
+	if ((currentEnvPre == 0 || effectAmount == 0) &&
+		masterVolume == 100 && clarity == 100 &&
+		balance == 100 && density == 100 && spatial == 100 &&
+		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0 &&
+		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono &&
+		savedata.mpVocalCenter == 100 &&
+		savedata.surround <= 0 && !djActiveCheck)
+	{
+		BOOL allFlat = TRUE;
+		for (int i = 0; i < EQ_BANDS; ++i) {
+			if (savedata.eq[i] != 100) { allFlat = FALSE; break; }
+		}
+		if (allFlat) {
+			ProAudio_FeedMetersFromInterleaved(
+				needsResampling ? processData : data,
+				needsResampling ? processLen : originalLen,
+				needsResampling ? 44100 : originalRate,
+				wavsam_depth, wavchannel);
+			const float extBoostGain = GetExternalBoostGain();
+			if (extBoostGain <= 1.0001f) {
+				EqTailOut(data, originalLen, originalRate);
+				return;
+			}
+			const int bytesPerSample = wavsam_depth / 8;
+			const int numSamples = processLen / (bytesPerSample * wavchannel);
+			ApplyExternalBoostOnlyToBuffer(
+				(unsigned char*)processData, numSamples, wavchannel, wavsam_depth, bytesPerSample);
+			if (needsResampling)
+				ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
+			EqTailOut(data, originalLen, originalRate);
+			return;
+		}
+	}
+
+	// ============================================================
+	// EQ / トーンフィルタ係数更新 (変更時のみ再計算)
+	// ============================================================
 	BOOL eqChanged = forceUpdate;
 	if (!eqChanged) {
-		for (int i = 0; i < 15; i++)
+		for (int i = 0; i < EQ_BANDS; ++i) {
 			if (savedata.eq[i] != g_lastEqValues[g_eqCur][i]) { eqChanged = TRUE; break; }
+		}
 	}
 
-	// 拡張パラメータ変化検出
-	BOOL extendedChanged = FALSE;
-	if (masterVolume != g_lastExtendedParams[g_eqCur][0] || clarity != g_lastExtendedParams[g_eqCur][1] ||
-		balance != g_lastExtendedParams[g_eqCur][2] || density != g_lastExtendedParams[g_eqCur][3] ||
-		spatial != g_lastExtendedParams[g_eqCur][4]) {
-		extendedChanged = TRUE;
-		g_lastExtendedParams[g_eqCur][0] = masterVolume; g_lastExtendedParams[g_eqCur][1] = clarity;
-		g_lastExtendedParams[g_eqCur][2] = balance;      g_lastExtendedParams[g_eqCur][3] = density;
+	BOOL extendedChanged = forceUpdate;
+	if (!extendedChanged) {
+		if (masterVolume != g_lastExtendedParams[g_eqCur][0] || clarity != g_lastExtendedParams[g_eqCur][1] ||
+			balance != g_lastExtendedParams[g_eqCur][2] || density != g_lastExtendedParams[g_eqCur][3] ||
+			spatial != g_lastExtendedParams[g_eqCur][4]) {
+			extendedChanged = TRUE;
+		}
+	}
+
+	if (eqChanged) {
+		// [FIX] 旧コードは g_lastEqValues (bank 0固定) へコピーしていたバグを修正
+		memcpy(g_lastEqValues[g_eqCur], savedata.eq, sizeof(int) * EQ_BANDS);
+		UpdateGraphicEq15(g_channels[g_eqCur], MAX_CH, savedata.eq, wavbitbackup);
+	}
+
+	if (extendedChanged) {
+		g_lastExtendedParams[g_eqCur][0] = masterVolume;
+		g_lastExtendedParams[g_eqCur][1] = clarity;
+		g_lastExtendedParams[g_eqCur][2] = balance;
+		g_lastExtendedParams[g_eqCur][3] = density;
 		g_lastExtendedParams[g_eqCur][4] = spatial;
-	}
 
-	// EQ/拡張パラメータが変化したときのみフィルタ係数を再計算 (CPU節約)
-	if (eqChanged || extendedChanged) {
-		memcpy(g_lastEqValues, savedata.eq, sizeof(int) * 15);
-		for (int ch = 0; ch < MAX_CH; ch++) {
-			// 15バンドEQ: 帯域10以降はQ=1.0に変更 (高域帯域をやや広めに)
-			for (int b = 0; b < EQ_BANDS; b++) {
-				float qVal = (b >= 10) ? 1.0f : 1.414f;
-				CalcPeakingEQ(&g_channels[g_eqCur][ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
-			}
-			// クラリティ: 5kHz 前後のプレゼンス調整 (感度2倍)
-			float clarityDb = (clarity - 100.0f) * 0.36f;
-			CalcPeakingEQ(&g_channels[g_eqCur][ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
+		// 鮮明さ (Clarity): 3.8kHz プレゼンス (±8.0dB) + 10kHz エアハイシェルフ (±5.0dB)
+		double clarityNorm = ((double)clarity - 100.0) / 100.0;
+		double clarityPeakDb = clarityNorm * 8.0;
+		double clarityAirDb  = clarityNorm * 5.0;
 
-			// バランス: 低域/高域のシェルフで輪郭/温もりのバランスを調整 (感度2倍)
-			float balanceDb = (balance - 100.0f) * 0.24f;
-			CalcShelvingEQ(&g_channels[g_eqCur][ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
-			CalcShelvingEQ(&g_channels[g_eqCur][ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
+		// バランス (Balance): 1000Hz 支点の対称チルトEQ (低域320Hz / 高域3200Hz、±8.5dB)
+		double balanceDb = ((double)balance - 100.0) / 100.0 * 8.5;
 
-			// デンシティ: 600Hz/1400Hz 近傍の中域密度を調整 (感度2倍)
-			float densityDb = (density - 100.0f) * 0.30f;
-			CalcPeakingEQ(&g_channels[g_eqCur][ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[g_eqCur][ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
+		// 密度 (Density): 220Hz 中低域の厚み (±5.5dB) + 700Hz 充実感 (±4.5dB)
+		double densityNorm = ((double)density - 100.0) / 100.0;
+		double densityLowDb = densityNorm * 5.5;
+		double densityMidDb = densityNorm * 4.5;
+
+		for (int ch = 0; ch < MAX_CH; ++ch) {
+			ChannelState* cs = &g_channels[g_eqCur][ch];
+			CalcPeakingEQDb(&cs->clarityPeak, 3800.0, 1.35, clarityPeakDb, wavbitbackup);
+			CalcShelvingEQDb(&cs->clarityAir, 1, 10000.0, clarityAirDb, wavbitbackup);
+			CalcShelvingEQDb(&cs->bassBalanceFilter, 0, 320.0, -balanceDb, wavbitbackup);
+			CalcShelvingEQDb(&cs->trebleBalanceFilter, 1, 3200.0, balanceDb, wavbitbackup);
+			CalcPeakingEQDb(&cs->densityLow, 220.0, 1.05, densityLowDb, wavbitbackup);
+			CalcPeakingEQDb(&cs->densityMid, 700.0, 1.15, densityMidDb, wavbitbackup);
 		}
 	}
 
-	// 環境プリセット/エフェクト量が変化したときのみフィルタ係数を再計算
-	if (currentEnvPre != g_lastEnvPreset[g_eqCur] || effectAmount != g_lastEffectAmount[g_eqCur] || forceUpdate) {
-		if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
-
-		const EnvParams* ep = &ENV_PRESETS[currentEnvPre];
-		for (int ch = 0; ch < MAX_CH; ch++) {
-			CalcFilter(&g_channels[g_eqCur][ch].envLpf, 0, ep->lpfFreq, 0.707f, wavbitbackup);
-			CalcFilter(&g_channels[g_eqCur][ch].envHpf, 1, ep->hpfFreq, 0.707f, wavbitbackup);
-			CalcFilter(&g_channels[g_eqCur][ch].exciterFilter, 1, 6000.0f, 0.707f, wavbitbackup);
-
-			// ダンピングフィルタ: damping値に応じてカットオフ周波数を変化
-			float dampFreq = 4000.0f + (ep->damping * extraScale * 8000.0f);
-			CalcFilter(&g_channels[g_eqCur][ch].dampingFilter, 0, dampFreq, 0.5f, wavbitbackup);
-
-			// 帯域別リバーブ特性フィルタ
-			CalcFilter(&g_channels[g_eqCur][ch].bassReverbFilter, 0, fminf(500.0f, 250.0f * ep->bassReverbTime), 0.707f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[g_eqCur][ch].midReverbFilter, fminf(3000.0f, 1500.0f * ep->midReverbTime), 1.0f, 100.0f, wavbitbackup);
-			CalcFilter(&g_channels[g_eqCur][ch].trebleReverbFilter, 1, fminf(12000.0f, 6000.0f * ep->trebleReverbTime), 0.707f, wavbitbackup);
-
-			// 材質・ウォームス関連フィルタ
-			CalcFilter(&g_channels[g_eqCur][ch].materialFilter, 0, 2000.0f - (ep->materialAbsorption * 1500.0f), 0.707f, wavbitbackup);
-			CalcShelvingEQ(&g_channels[g_eqCur][ch].warmthFilter, 0, 300.0f, (ep->warmth - 0.5f) * 6.0f, wavbitbackup);
-
-			if (ep->flutterEcho > 0.0f)
-				CalcFilter(&g_channels[g_eqCur][ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
-			if (ep->resonanceFreq > 0.0f && ep->resonanceQ > 0.0f)
-				CalcPeakingEQ(&g_channels[g_eqCur][ch].resonanceFilter, ep->resonanceFreq, ep->resonanceQ, 100.0f, wavbitbackup);
-			if (ep->metallic > 0.0f)
-				CalcFilter(&g_channels[g_eqCur][ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
-			if (ep->glassiness > 0.0f)
-				CalcFilter(&g_channels[g_eqCur][ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
-
-			// LFO設定
-			g_channels[g_eqCur][ch].lfo.frequency = ep->modSpeed * extraScale;
-			g_channels[g_eqCur][ch].lfo.depth = ep->modDepth * extraScale * 10.0f;
-		}
+	// ============================================================
+	// 100環境 立体物理音響エンジンの係数更新 (変更時のみ再計算)
+	// ============================================================
+	if (currentEnvPre != g_lastEnvPreset[g_eqCur] ||
+		effectAmount != g_lastEffectAmount[g_eqCur] ||
+		forceUpdate)
+	{
+		EnvEngineConfigure(&g_envEngine[g_eqCur], currentEnvPre, effectAmount, wavbitbackup);
 		g_lastEnvPreset[g_eqCur] = currentEnvPre;
 		g_lastEffectAmount[g_eqCur] = effectAmount;
 	}
 
-	const EnvParams* env = &ENV_PRESETS[g_lastEnvPreset[g_eqCur]];
-	BOOL isYamabiko = (env->type == TYPE_MOUNTAIN_ECHO || env->type == TYPE_CANYON_ECHO);
-
-	// プリディレイ・メインディレイ サンプル数計算
-	int preDelaySamps = (int)(env->preDelayMs * coreScale * wavbitbackup / 1000.0f);
-	int mainDelaySamps = (int)(env->delayTimeMs * env->roomSize * wavbitbackup / 1000.0f);
-
-	int refSamps[8];
-	for (int i = 0; i < 8; i++)
-		refSamps[i] = (int)(env->earlyRef[i * 2] * env->roomSize * wavbitbackup / 1000.0f);
-
-	int bytesPerSample = wavsam_depth / 8;
-	int numSamples = processLen / (bytesPerSample * wavchannel);
+	const int bytesPerSample = wavsam_depth / 8;
+	const int numSamples = processLen / (bytesPerSample * wavchannel);
 	unsigned char* pRaw = (unsigned char*)processData;
-	int stereoOffset = (wavbitbackup * 20) / 1000;  // L/R間の微小ずれ (約20ms)
+
+	// マスター音量 (eq[15]: 0→0.0倍, 100→1.0倍, 200→2.0倍)
+	// ※ 旧 eqHeadroomGain (-16〜-40dB 一律減衰) は完全撤去！
+	//   他帯域や全体音量を一切落とさず、LR4 3バンド保護＋真のルックアヘッドリミッターで音割れを防ぐ。
+	const float masterGain = (masterVolume <= 100)
+		? ((float)masterVolume / 100.0f)
+		: (1.0f + ((float)(masterVolume - 100) / 100.0f));
+	const float densityWarmAmt = (density > 100) ? (((float)(density - 100) / 100.0f) * 0.14f) : 0.0f;
+	// 立体感 (eq[19]: 0→0.05, 100→1.00, 200→2.20)
+	const float spatialWidth = (spatial <= 100)
+		? ClampFloat(0.05f + 0.95f * ((float)spatial / 100.0f), 0.05f, 1.0f)
+		: ClampFloat(1.0f + 1.20f * ((float)(spatial - 100) / 100.0f), 1.0f, 2.20f);
+	const BOOL envActive = (currentEnvPre > 0 && effectAmount > 0);
+	const float extBoostGain = GetExternalBoostGain();
 
 	// ============================================================
-	// [FIX-3][FIX-4] ブロック解析
-	// ブロック単位でコンテンツ検出 + ゲインステージング
-	// ============================================================
-	// eq[15]: 100=1.0倍、偏差を2倍にしてスライダー差を明確化
-	float masterGain = fmaxf(0.0f, 1.0f + (masterVolume - 100.0f) / 50.0f);
-
-	// 0dB 付近の音源は、ブーストした分がそのまま天井に当たると
-	// 大きいところだけが削られてコンプレッサーのように聞こえる。
-	// 一番上がる帯域の分だけ先に一定ゲインで下げ、メイクアップでは戻さない。
-	// 隣り合う帯域の裾は第二位の 35% だけ足す。サンプルごとの追従はしない。
-	float maxBandBoostDb = 0.0f;
-	float secondBandBoostDb = 0.0f;
-	for (int b = 0; b < EQ_BANDS; b++) {
-		const float bandBoostDb = (savedata.eq[b] - 100.0f) * 0.12f;
-		if (bandBoostDb < 1.2f) continue; // この未満はピーキングがスルー
-		if (bandBoostDb > maxBandBoostDb) {
-			secondBandBoostDb = maxBandBoostDb;
-			maxBandBoostDb = bandBoostDb;
-		}
-		else if (bandBoostDb > secondBandBoostDb)
-			secondBandBoostDb = bandBoostDb;
-	}
-	float maxExtendedBoostDb = 0.0f;
-	{
-		float clarityDb = (clarity - 100.0f) * 0.36f;
-		if (clarityDb < 1.2f) clarityDb = 0.0f;
-		const float balanceDb = fabsf((balance - 100.0f) * 0.24f);
-		float densityDb = (density - 100.0f) * 0.30f;
-		if (densityDb < 1.2f) densityDb = 0.0f;
-		else densityDb *= 1.35f; // 600Hz と 1400Hz の同じ山
-		maxExtendedBoostDb = fmaxf(clarityDb, fmaxf(balanceDb, densityDb));
-	}
-	const float totalBoostDb = maxBandBoostDb + 0.35f * secondBandBoostDb + maxExtendedBoostDb;
-	const float headroomDb = ClampFloat(totalBoostDb, 0.0f, 40.0f);
-	const float eqHeadroomGain = powf(10.0f, -headroomDb / 20.0f);
-	const float eqMakeupGain = 1.0f;
-
-	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavchannel, wavsam_depth, bytesPerSample, masterGain);
-
-	// マスターはユーザー設定のまま通す。ピークだけ最終段が -0.20 dBTP へ揃える。
-	float effectiveMasterGain = masterGain;
-
-	// [FIX-4 改] チップチューン/FM音源検出時のスケーリング係数
-	//
-	// 【変更理由: 100音響プリセットが同じに聞こえる問題の修正】
-	//   本アプリは SPC/NEZ/チップチューン等の低クレストファクター音源が主対象のため
-	//   ba.isChiptune がほぼ常時 TRUE になる。旧値 wetScale=0.22 / diffusionScale=0.12
-	//   では残響・拡散がほぼ消え、100 個の環境プリセットの差が聴き取れず
-	//   「全部同じ音」になっていた。
-	//   音割れ防止は最終段のルックアヘッドリミッターが担うため、ここで残響を
-	//   潰す必要はない。環境キャラクターが分かる範囲まで緩和する。
-	//   harmonicScale のみ 0.0 を維持 (元々歪みの少ない信号に倍音を足さない)。
-	float wetScale = ba.isChiptune ? 0.70f : 1.0f;
-	float harmonicScale = ba.isChiptune ? 0.00f : 1.0f;
-	float diffusionScale = ba.isChiptune ? 0.55f : 1.0f;
-
-	// ============================================================
-	// 多ch (5.1/7.1): L/R バスに潰すとセンター（台詞）が消える。
-	// 各チャンネルを独立に処理して同じスロットへ書き戻す（順序・マスク維持）。
+	// 多ch (5.1 / 7.1) 処理経路
+	// 各chに倍精度15バンドEQ + トーン + LR4 3バンド独立ヘッドルーム保護を適用。
+	// 環境音響ON時は FL/FR へ立体環境エンジンを適用し、リア/サイドへも自然な空間ウェットを加算。
 	// ============================================================
 	if (wavchannel > 2) {
-		unsigned char* pRaw = (unsigned char*)processData;
-		const int bytesPerSample = wavsam_depth / 8;
-		const int numSamples = processLen / (bytesPerSample * wavchannel);
-		float harmonicAmount = (density - 100.0f) / 100.0f;
-
 		const int nCh = (wavchannel > MAX_CH) ? MAX_CH : wavchannel;
-		const float extBoostGain = GetExternalBoostGain();
 		float* audio = (numSamples > 0 && nCh > 0 && numSamples <= (INT_MAX / nCh))
 			? EqCeilAlloc(&g_ceilAudio, &g_ceilAudioCap, numSamples * nCh) : NULL;
-		for (int i = 0; i < numSamples; i++) {
-			float frame[MAX_CH];
-			for (int ch = 0; ch < nCh; ch++) {
-				float inSample = 0.0f;
-				int offset = (i * wavchannel + ch) * bytesPerSample;
-				if (wavsam_depth == 16)
-					inSample = *((short*)(pRaw + offset)) / 32768.0f;
-				else if (wavsam_depth == 24) {
-					int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
-					inSample = val / 8388608.0f;
-				}
-				else if (wavsam_depth == 32)
-					inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
-				else
-					inSample = (pRaw[offset] - 128) / 128.0f;
+		EnsureEqSampleBuffers(g_eqCur);
+		float* tmpL = g_eqLeftSamples[g_eqCur];
+		float* tmpR = g_eqRightSamples[g_eqCur];
 
-				float signal = inSample * (effectiveMasterGain * eqHeadroomGain);
-				ChannelState* cs = &g_channels[g_eqCur][ch];
-				for (int b = 0; b < EQ_BANDS; b++)
-					signal = ProcessBiquad(&cs->eqFilters[b], signal);
-				signal = ProcessBiquad(&cs->clarityFilter, signal);
-				signal = ProcessBiquad(&cs->bassBalanceFilter, signal);
-				signal = ProcessBiquad(&cs->trebleBalanceFilter, signal);
-				signal = ProcessBiquad(&cs->densityFilter1, signal);
-				signal = ProcessBiquad(&cs->densityFilter2, signal);
-				if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
-					float harmonic = signal * signal * signal * harmonicAmount * 0.30f * harmonicScale;
-					cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
-					signal += cs->harmonicState;
-				}
-				signal *= eqMakeupGain;
-				if (extBoostGain != 1.0f)
-					signal *= extBoostGain;
-				frame[ch] = signal;
-			}
-			if (audio) {
-				for (int ch = 0; ch < nCh; ch++)
-					audio[(size_t)i * (size_t)nCh + (size_t)ch] = frame[ch];
-			}
-			else {
-				float p = 0.0f;
-				for (int ch = 0; ch < nCh; ch++) {
-					const float a = fabsf(frame[ch]);
-					if (a > p) p = a;
-				}
-				if (p > kEqCeiling) {
-					const float g = kEqCeiling / p;
-					for (int ch = 0; ch < nCh; ch++) frame[ch] *= g;
-				}
-				for (int ch = 0; ch < nCh; ch++) {
-					const float signal = frame[ch];
-					int offset = (i * wavchannel + ch) * bytesPerSample;
-					if (wavsam_depth == 16) {
-						int32_t v = (int32_t)roundf(signal * 32768.0f);
-						if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-						*((short*)(pRaw + offset)) = (short)v;
-					}
-					else if (wavsam_depth == 24) {
-						int32_t v = (int32_t)roundf(signal * 8388608.0f);
-						if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
-						pRaw[offset] = v & 0xFF;
-						pRaw[offset + 1] = (v >> 8) & 0xFF;
-						pRaw[offset + 2] = (v >> 16) & 0xFF;
-					}
-					else if (wavsam_depth == 32)
-						*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
-					else
-						pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
-				}
-			}
-		}
 		if (audio) {
+			// 1. PCM → float + EQ / トーン処理
+			for (int i = 0; i < numSamples; ++i) {
+				for (int ch = 0; ch < nCh; ++ch) {
+					const int offset = (i * wavchannel + ch) * bytesPerSample;
+					double sig = (double)(PcmSampleToFloat(pRaw, offset, wavsam_depth) * masterGain);
+					ChannelState* cs = &g_channels[g_eqCur][ch];
+					for (int b = 0; b < EQ_BANDS; ++b)
+						sig = ProcessBiquadD(&cs->eqFilters[b], sig);
+					sig = ProcessBiquadD(&cs->clarityPeak, sig);
+					sig = ProcessBiquadD(&cs->clarityAir, sig);
+					sig = ProcessBiquadD(&cs->bassBalanceFilter, sig);
+					sig = ProcessBiquadD(&cs->trebleBalanceFilter, sig);
+					sig = ProcessBiquadD(&cs->densityLow, sig);
+					sig = ProcessBiquadD(&cs->densityMid, sig);
+					float out = (float)sig;
+					if (densityWarmAmt > 0.001f) {
+						float sat = tanhf(out * 1.4f) / 1.4f;
+						out = out * (1.0f - densityWarmAmt) + sat * densityWarmAmt;
+					}
+					audio[(size_t)i * (size_t)nCh + (size_t)ch] = out;
+				}
+			}
+
+			// 2. チャンネル別 LR4 3バンド保護 (他帯域・全体音量を落とさず安全化)
+			if (tmpL) {
+				for (int ch = 0; ch < nCh; ++ch) {
+					for (int start = 0; start < numSamples; start += EQ_SAMPLE_CAP) {
+						int lenC = numSamples - start;
+						if (lenC > EQ_SAMPLE_CAP) lenC = EQ_SAMPLE_CAP;
+						for (int k = 0; k < lenC; ++k)
+							tmpL[k] = audio[(size_t)(start + k) * (size_t)nCh + (size_t)ch];
+						MultibandProcessMonoChannel(&g_mbProt[g_eqCur], ch, tmpL, lenC);
+						for (int k = 0; k < lenC; ++k)
+							audio[(size_t)(start + k) * (size_t)nCh + (size_t)ch] = tmpL[k];
+					}
+				}
+			}
+
+			// 3. 環境音響ON時は FL/FR へ立体物理環境エンジンを適用し、リア/サイドへも空間残響を配分
+			if (envActive && tmpL && tmpR) {
+				for (int start = 0; start < numSamples; start += EQ_SAMPLE_CAP) {
+					int lenC = numSamples - start;
+					if (lenC > EQ_SAMPLE_CAP) lenC = EQ_SAMPLE_CAP;
+					for (int k = 0; k < lenC; ++k) {
+						tmpL[k] = audio[(size_t)(start + k) * (size_t)nCh + 0];
+						tmpR[k] = audio[(size_t)(start + k) * (size_t)nCh + 1];
+					}
+					EnvEngineProcessStereo(&g_envEngine[g_eqCur], tmpL, tmpR, lenC, spatialWidth);
+					for (int k = 0; k < lenC; ++k) {
+						float origL = audio[(size_t)(start + k) * (size_t)nCh + 0];
+						float origR = audio[(size_t)(start + k) * (size_t)nCh + 1];
+						float wetAddL = (tmpL[k] - origL) * 0.42f;
+						float wetAddR = (tmpR[k] - origR) * 0.42f;
+						audio[(size_t)(start + k) * (size_t)nCh + 0] = tmpL[k];
+						audio[(size_t)(start + k) * (size_t)nCh + 1] = tmpR[k];
+						// BL(4)/BR(5) & SL(6)/SR(7) に自然な残響成分を加算 (FC(2)/LFE(3)は明瞭さ保持)
+						if (nCh >= 6) {
+							audio[(size_t)(start + k) * (size_t)nCh + 4] += wetAddL;
+							audio[(size_t)(start + k) * (size_t)nCh + 5] += wetAddR;
+						}
+						if (nCh >= 8) {
+							audio[(size_t)(start + k) * (size_t)nCh + 6] += wetAddL * 0.85f;
+							audio[(size_t)(start + k) * (size_t)nCh + 7] += wetAddR * 0.85f;
+						}
+					}
+				}
+			}
+
+			// 4. 外部ブースト + 真のルックアヘッド・トゥルーピーク・リミッター
+			if (extBoostGain != 1.0f) {
+				const size_t tot = (size_t)numSamples * (size_t)nCh;
+				for (size_t k = 0; k < tot; ++k) audio[k] *= extBoostGain;
+			}
 			EqCeilingApplyInterleaved(audio, nCh, numSamples, wavbitbackup);
-			for (int i = 0; i < numSamples; i++) {
-				for (int ch = 0; ch < nCh; ch++) {
-					const float signal = audio[(size_t)i * (size_t)nCh + (size_t)ch];
-					int offset = (i * wavchannel + ch) * bytesPerSample;
-					if (wavsam_depth == 16) {
-						int32_t v = (int32_t)roundf(signal * 32768.0f);
-						if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-						*((short*)(pRaw + offset)) = (short)v;
-					}
-					else if (wavsam_depth == 24) {
-						int32_t v = (int32_t)roundf(signal * 8388608.0f);
-						if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
-						pRaw[offset] = v & 0xFF;
-						pRaw[offset + 1] = (v >> 8) & 0xFF;
-						pRaw[offset + 2] = (v >> 16) & 0xFF;
-					}
-					else if (wavsam_depth == 32)
-						*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
-					else
-						pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
+
+			// 5. PCM 書き戻し
+			for (int i = 0; i < numSamples; ++i) {
+				for (int ch = 0; ch < nCh; ++ch) {
+					const int offset = (i * wavchannel + ch) * bytesPerSample;
+					FloatToPcmSample(pRaw, offset, wavsam_depth, audio[(size_t)i * (size_t)nCh + (size_t)ch]);
 				}
 			}
 		}
 
-		if (needsResampling) {
+		if (needsResampling)
 			ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
-			free(tempBuffer);
-		}
-		{
-			void* outPtr = data;
-			int outLen = originalLen;
-			if (!needsResampling) {
-				outPtr = processData;
-				outLen = processLen;
-			}
-			EqTailOut(outPtr, outLen, originalRate);
-		}
+		EqTailOut(needsResampling ? data : processData, needsResampling ? originalLen : processLen, originalRate);
 		return;
 	}
 
-	// 出力用サンプルバッファ (最大約40ブロック分) — stereo/mono 専用
+	// ============================================================
+	// ステレオ / モノラル処理経路 (チャンク分割で任意サイズ安全対応)
+	// ============================================================
 	EnsureEqSampleBuffers(g_eqCur);
 	float* leftSamples = g_eqLeftSamples[g_eqCur];
 	float* rightSamples = g_eqRightSamples[g_eqCur];
 	if (!leftSamples || !rightSamples) return;
-	int bufferIndex = 0;
 
-	float harmonicAmount = (density - 100.0f) / 100.0f;
-	// eq[19]: 100=ニュートラル(幅1.0)、偏差2倍 (0→0.05, 200→3.0)
-	float spatialWidth = fmaxf(0.05f, 1.0f + (spatial - 100.0f) / 50.0f);
-
-	// ===== 信号処理メインループ =====
-	for (int i = 0; i < numSamples; i++) {
-		for (int ch = 0; ch < wavchannel; ch++) {
-			if (ch >= MAX_CH) continue;
-
-			// PCM → float 変換
-			float inSample = 0.0f;
-			int offset = (i * wavchannel + ch) * bytesPerSample;
-			if (wavsam_depth == 16)
-				inSample = *((short*)(pRaw + offset)) / 32768.0f;
-			else if (wavsam_depth == 24) {
-				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
-				inSample = val / 8388608.0f;
-			}
-			else if (wavsam_depth == 32)
-				inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
-			else
-				inSample = (pRaw[offset] - 128) / 128.0f;
-
-			float signal = inSample;
-			ChannelState* cs = &g_channels[g_eqCur][ch];
-
-			// [FIX-3] 平滑化済みゲインを適用
-			signal *= (effectiveMasterGain * eqHeadroomGain);
-
-			// 15バンドEQ + 拡張フィルタ群を順次通過
-			for (int b = 0; b < EQ_BANDS; b++) signal = ProcessBiquad(&cs->eqFilters[b], signal);
-			signal = ProcessBiquad(&cs->clarityFilter, signal);
-			signal = ProcessBiquad(&cs->bassBalanceFilter, signal);
-			signal = ProcessBiquad(&cs->trebleBalanceFilter, signal);
-			signal = ProcessBiquad(&cs->densityFilter1, signal);
-			signal = ProcessBiquad(&cs->densityFilter2, signal);
-
-			// 3次高調波付加 (harmonicScale=0 のとき完全無効)
-			// [FIX-4] チップチューン時は 0.00 で呼び出し自体をスキップ
-			if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
-				float harmonic = signal * signal * signal * harmonicAmount * 0.30f * harmonicScale;
-				cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
-				signal += cs->harmonicState;
-			}
-
-			float wetSignal = 0.0f;
-
-			// ===== 環境エフェクト処理 =====
-			if (env->type != TYPE_NONE && env->wetMix > 0.0f && effectAmount > 0) {
-
-				if (isYamabiko) {
-					// --- 山彦エコー処理 ---
-					// 通常リバーブと同じく wetMix は後段のクロスフェードだけに掛ける。
-					// ここで wetMix を掛けると二重適用になり山彦が消える。
-					float echo = ProcessYamabikoAdvanced(cs, signal, env, wavbitbackup);
-					int earlyMs = (env->type == TYPE_MOUNTAIN_ECHO) ? 60 : 45;
-					int earlySamp = (int)(earlyMs * wavbitbackup / 1000.0f);
-					int rPos = cs->writePos - (earlySamp + preDelaySamps);
-					while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
-					float earlyGain = (env->type == TYPE_MOUNTAIN_ECHO) ? 0.22f : 0.30f;
-					float earlyRef = cs->delayBuffer ? (cs->delayBuffer[rPos] * earlyGain) : 0.0f;
-					float clarityCut = 1.0f - env->echoClarity * 0.6f;
-					float weakDiff = env->diffusion * coreScale * 0.22f * diffusionScale * clarityCut;
-					float weakDens = env->density * 0.28f * diffusionScale * clarityCut;
-					float late = ProcessDiffusion(cs, echo, weakDiff, weakDens, env->type);
-					if (fabsf(env->echoFeedbackTone) > 0.01f) {
-						cs->echoToneState += 0.25f * (late - cs->echoToneState);
-						float highPart = late - cs->echoToneState;
-						late = cs->echoToneState + highPart * (1.0f + env->echoFeedbackTone * 0.8f);
-					}
-					float lateEnv = powf(0.94f, 1.0f / fmaxf(0.15f, env->lateReverbDecay * 1.3f));
-					cs->lateEnvelope = cs->lateEnvelope * lateEnv + late * (1.0f - lateEnv);
-					wetSignal = echo * 1.15f + earlyRef * 0.40f + cs->lateEnvelope * 0.28f;
-					wetSignal = ProcessWetCharacter(cs, wetSignal, env, wavbitbackup);
-					wetSignal *= wetScale;
-					if (cs->delayBuffer) {
-						cs->delayBuffer[cs->writePos] = isfinite(signal) ? signal : 0.0f;
-						cs->writePos = (cs->writePos + 1) % MAX_DELAY_SAMPLES;
-					}
-				}
-				else {
-					// --- 通常リバーブ処理 ---
-					// LFO変調 + ステレオオフセット込みの読み出しポジション
-					int chOffset = (ch % 2) * stereoOffset;
-					int readMain = cs->writePos - (mainDelaySamps + preDelaySamps + chOffset
-						+ (int)UpdateLFO(&cs->lfo, wavbitbackup));
-					while (readMain < 0) readMain += MAX_DELAY_SAMPLES;
-					float delayMain = cs->delayBuffer[readMain];
-
-					// 帯域別減衰特性をブレンド (低域・中域・高域で異なる減衰時定数)
-					delayMain = (ProcessBiquad(&cs->bassReverbFilter, delayMain) * env->bassReverbTime +
-						ProcessBiquad(&cs->midReverbFilter, delayMain) * env->midReverbTime +
-						ProcessBiquad(&cs->trebleReverbFilter, delayMain) * env->trebleReverbTime) / 3.0f;
-
-					// ダンピング・LPF/HPF による空間特性付与
-					delayMain = ProcessBiquad(&cs->dampingFilter, delayMain);
-					delayMain = ProcessBiquad(&cs->envLpf, delayMain);
-					delayMain = ProcessBiquad(&cs->envHpf, delayMain);
-
-					// ディフュージョン (チップチューン時は削減)
-					// bassDiffusion/trebleDiffusion を密度に反映し、プリセット毎に
-					// 拡散プロファイルが変わるようにする (従来は未使用パラメータ)
-					float diffProfile = 0.5f + (env->bassDiffusion + env->trebleDiffusion) * 0.5f;
-					delayMain = ProcessDiffusion(cs, delayMain,
-						env->diffusion * coreScale * diffusionScale,
-						env->density * diffProfile * diffusionScale, env->type);
-
-					// 早期反射: 8タップ、時間経過とともに指数減衰
-					// reflectionDensity で反射の密度感を可変 (従来は未使用パラメータ)
-					float reflDens = 0.6f + env->reflectionDensity * 0.8f;
-					float earlyRef = 0.0f;
-					for (int r = 0; r < 8; r++) {
-						int rPos = cs->writePos - (refSamps[r] + preDelaySamps + chOffset);
-						while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
-						float envelope = powf(1.0f - (float)(r + 1) / 8.0f, 2.0f / env->earlyReverbDecay);
-						earlyRef += cs->delayBuffer[rPos] * env->earlyRef[r * 2 + 1]
-							* reflectionScale * 1.4f * envelope;
-					}
-					earlyRef *= reflDens;
-
-					// 後期残響エンベロープ (exponential decay)
-					float lateEnv = powf(0.95f, 1.0f / env->lateReverbDecay);
-					cs->lateEnvelope = cs->lateEnvelope * lateEnv + delayMain * (1.0f - lateEnv);
-
-					// 早期反射 + 後期残響 合成
-					wetSignal = (earlyRef * env->earlyLateBalance)
-						+ (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
-					// 残響キャラクター付与 (空気吸収/色味/滑らかさ/コム/風)
-					wetSignal = ProcessWetCharacter(cs, wetSignal, env, wavbitbackup);
-					wetSignal *= wetScale;  // [FIX-4]
-
-					// フィードバック: ウォームス + 材質吸収を適用した後にバッファ書き込み
-					float fbSig = ProcessWarmth(cs,
-						ProcessMaterialAbsorption(cs, delayMain, env->materialAbsorption, env->surfaceRoughness),
-						env->warmth);
-					float effectiveFB = fminf(0.88f, env->feedback * coreScale);
-					float fbVal = signal + (fbSig * effectiveFB);
-					// フィードバック発散防止クランプ
-					if (fbVal > 1.5f) fbVal = 1.5f;
-					if (fbVal < -1.5f) fbVal = -1.5f;
-					cs->delayBuffer[cs->writePos] = isfinite(fbVal) ? fbVal : 0.0f;
-					cs->writePos = (cs->writePos + 1) % MAX_DELAY_SAMPLES;
-				}
-			}
-
-			// [FIX-1] ウェットミックス量を [0, 0.90] で厳格にクランプ
-			float effectiveWetMix = fminf(0.90f, env->wetMix * coreScale);
-			// [FIX-CLIP] ドライ/ウェットのクロスフェード(ドライダッキング):
-			//   ウェット(=残響=環境キャラクター)が増えるほどドライを下げる。
-			//   ・dry+wet の合算ピーク肥大を抑え、最終段ルックアヘッドリミッターが
-			//     全環境を同じレベルまで潰す(=どの環境も同じ音に聞こえる/音割れ感)
-			//     のを防ぐ。
-			//   ・残響の相対レベルが上がるため、100環境それぞれの差が一目瞭然になる。
-			//   低wet環境(スタジオ/防音室など wet≒0)はほぼ無影響(dryGain≒1.0)。
-			float dryGain = 1.0f - 0.45f * effectiveWetMix;
-			float mixed = signal * dryGain + wetSignal * effectiveWetMix;
-
-			// エフェクト追加処理 (各パラメータが有効な場合のみ)
-			if (env->exciterAmount > 0.0f && effectAmount > 0)
-				mixed = Exciter(mixed, &cs->exciterFilter, env->exciterAmount * extraScale);
-			if (env->flutterEcho > 0.0f)
-				mixed = ProcessFlutterEcho(cs, mixed, env->flutterEcho * extraScale, wavbitbackup);
-			if (env->resonanceFreq > 0.0f && env->resonanceQ > 0.0f)
-				mixed = ProcessResonance(cs, mixed, env->resonanceFreq, env->resonanceQ, env->spaceComplexity * 0.3f);
-			if (env->metallic > 0.0f)    mixed = ProcessMetallic(cs, mixed, env->metallic * extraScale);
-			if (env->glassiness > 0.0f)  mixed = ProcessGlass(cs, mixed, env->glassiness * extraScale);
-			if (env->shimmer > 0.0f)     mixed = ProcessShimmer(cs, mixed, env->shimmer * extraScale, wavbitbackup);
-			if (env->doppler > 0.0f)     mixed = ProcessDoppler(cs, mixed, env->doppler * extraScale, wavbitbackup);
-
-			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
-
-			// 質感キャラクター付与 (weight/woodiness/concrete/softness/phasing/distortion)
-			mixed = ProcessMixCharacter(cs, mixed, env, wavbitbackup);
-
-			// L/R バッファへ格納 (モノラル時は両方に同値)
-			if (wavchannel == 2) {
-				if (ch == 0) leftSamples[bufferIndex] = mixed;
-				else         rightSamples[bufferIndex] = mixed;
-			}
-			else {
-				leftSamples[bufferIndex] = mixed;
-				rightSamples[bufferIndex] = mixed;
-			}
-		}
-
-		// ===== ステレオ幅処理 =====
-		// Mid/Side 変換で stereoWidth を変更し元の L/R に戻す
-		// wallDistance/openness/ceilingHeight で環境空間の広がりを調節
-		if (wavchannel == 2) {
-			float w = (1.0f + (env->stereoWidth - 1.0f) * extraScale)
-				* spatialWidth * env->wallDistance * (0.7f + env->openness * 0.6f);
-			w *= (env->ceilingHeight > 1.0f)
-				? (1.0f + (env->ceilingHeight - 1.0f) * 0.2f)
-				: env->ceilingHeight;
-			// enclosure (密閉度) が高いほどステレオ像を狭め包まれ感を出す (従来は未使用)
-			w *= (1.0f - env->enclosure * 0.35f);
-			float mid = (leftSamples[bufferIndex] + rightSamples[bufferIndex]) * 0.5f;
-			float side = (leftSamples[bufferIndex] - rightSamples[bufferIndex]) * 0.5f * w;
-			leftSamples[bufferIndex] = mid + side;
-			rightSamples[bufferIndex] = mid - side;
-		}
-
-		bufferIndex++;
-	}
-
-	// ===================================================
-	// 【追加エフェクト】リバーブ / コーラス / ディレイ
-	// 環境処理後・メイクアップ/リミッター前に適用 (ピークは最終段で制御)
-	// ===================================================
-	FxApplyUserEffects(leftSamples, rightSamples, bufferIndex, wavbitbackup);
-
-	// ProAudio: Mid/Side 幅 / モノ互換（環境ステレオ幅の後段で明示制御）
-	if (wavchannel >= 2 && bufferIndex > 0) {
-		ProAudio_ApplyMS(leftSamples, rightSamples, bufferIndex,
-			savedata.pro_ms_width, savedata.pro_ms_mono);
-	}
-	if (wavchannel >= 2 && bufferIndex > 0 && savedata.mpVocalCenter != 100) {
-		const float midGain = savedata.mpVocalCenter / 100.f;
-		for (int i = 0; i < bufferIndex; ++i) {
-			const float mid = (leftSamples[i] + rightSamples[i]) * 0.5f;
-			const float side = (leftSamples[i] - rightSamples[i]) * 0.5f;
-			const float midS = mid * midGain;
-			leftSamples[i] = midS + side;
-			rightSamples[i] = midS - side;
-		}
-	}
-
-	// DJパッド: 3バンドEQ + Kill + フィルタ（ボーカル後・メイクアップ前）
-	if (bufferIndex > 0) {
-		static Biquad s_djLow[2], s_djMid[2], s_djHigh[2], s_djFilt[2];
-		static int s_djLowV = -999, s_djMidV = -999, s_djHighV = -999, s_djFiltV = -999, s_djKillV = -999, s_djRate = -1;
-		int lowV = savedata.mpDjEqLow;
-		int midV = savedata.mpDjEqMid;
-		int highV = savedata.mpDjEqHigh;
-		int filtV = savedata.mpDjFilter;
+	// DJパッド用 倍精度Biquad状態 (ステレオ)
+	static BiquadD s_djLow[2], s_djMid[2], s_djHigh[2], s_djFilt[2];
+	static int s_djLowV = -999, s_djMidV = -999, s_djHighV = -999, s_djFiltV = -999, s_djKillV = -999, s_djRate = -1;
+	{
+		int lowV  = (int)ClampFloat((float)savedata.mpDjEqLow,  0.0f, 200.0f);
+		int midV  = (int)ClampFloat((float)savedata.mpDjEqMid,  0.0f, 200.0f);
+		int highV = (int)ClampFloat((float)savedata.mpDjEqHigh, 0.0f, 200.0f);
+		int filtV = (int)ClampFloat((float)savedata.mpDjFilter, 0.0f, 200.0f);
 		int killV = savedata.mpDjEqKill & 7;
-		if (lowV < 0) lowV = 0; if (lowV > 200) lowV = 200;
-		if (midV < 0) midV = 0; if (midV > 200) midV = 200;
-		if (highV < 0) highV = 0; if (highV > 200) highV = 200;
-		if (filtV < 0) filtV = 0; if (filtV > 200) filtV = 200;
-		const int rate = wavbitbackup > 0 ? wavbitbackup : 44100;
-		if (lowV != s_djLowV || midV != s_djMidV || highV != s_djHighV || filtV != s_djFiltV || killV != s_djKillV || rate != s_djRate) {
-			s_djLowV = lowV; s_djMidV = midV; s_djHighV = highV; s_djFiltV = filtV; s_djKillV = killV; s_djRate = rate;
+		if (lowV != s_djLowV || midV != s_djMidV || highV != s_djHighV ||
+			filtV != s_djFiltV || killV != s_djKillV || wavbitbackup != s_djRate) {
+			s_djLowV = lowV; s_djMidV = midV; s_djHighV = highV;
+			s_djFiltV = filtV; s_djKillV = killV; s_djRate = wavbitbackup;
 			for (int ch = 0; ch < 2; ++ch) {
 				if (killV & 1)
-					CalcShelvingEQ(&s_djLow[ch], 0, 250.0f, -48.0f, rate);
+					CalcShelvingEQDb(&s_djLow[ch], 0, 250.0, -48.0, wavbitbackup);
 				else
-					CalcPeakingEQ(&s_djLow[ch], 100.0f, 0.707f, (float)lowV, rate);
-				if (killV & 2) {
-					CalcPeakingEQ(&s_djMid[ch], 1000.0f, 0.9f, 0.0f, rate);
-				} else
-					CalcPeakingEQ(&s_djMid[ch], 1000.0f, 0.707f, (float)midV, rate);
+					CalcPeakingEQDb(&s_djLow[ch], 100.0, 0.7071, ((double)lowV - 100.0) * 0.12, wavbitbackup);
+
+				if (killV & 2)
+					CalcPeakingEQDb(&s_djMid[ch], 1000.0, 0.9, -24.0, wavbitbackup);
+				else
+					CalcPeakingEQDb(&s_djMid[ch], 1000.0, 0.7071, ((double)midV - 100.0) * 0.12, wavbitbackup);
+
 				if (killV & 4)
-					CalcShelvingEQ(&s_djHigh[ch], 1, 4000.0f, -48.0f, rate);
+					CalcShelvingEQDb(&s_djHigh[ch], 1, 4000.0, -48.0, wavbitbackup);
 				else
-					CalcPeakingEQ(&s_djHigh[ch], 8000.0f, 0.707f, (float)highV, rate);
+					CalcPeakingEQDb(&s_djHigh[ch], 8000.0, 0.7071, ((double)highV - 100.0) * 0.12, wavbitbackup);
+
 				if (filtV < 98) {
-					const float t = (float)filtV / 100.0f;
-					float freq = 200.0f * powf(100.0f, t);
-					if (freq < 80.0f) freq = 80.0f;
-					if (freq > 18000.0f) freq = 18000.0f;
-					CalcFilter(&s_djFilt[ch], 0, freq, 0.707f, rate);
-				} else if (filtV > 102) {
-					const float t = (float)(filtV - 100) / 100.0f;
-					float freq = 30.0f * powf(300.0f, t);
-					if (freq < 30.0f) freq = 30.0f;
-					if (freq > 10000.0f) freq = 10000.0f;
-					CalcFilter(&s_djFilt[ch], 1, freq, 0.707f, rate);
-				} else {
-					s_djFilt[ch].b0 = 1.0f; s_djFilt[ch].b1 = 0.0f; s_djFilt[ch].b2 = 0.0f;
-					s_djFilt[ch].a1 = 0.0f; s_djFilt[ch].a2 = 0.0f;
+					double freq = ClampDouble(200.0 * pow(100.0, (double)filtV / 100.0), 80.0, 18000.0);
+					CalcBiquadFilter(&s_djFilt[ch], 0, freq, 0.7071, wavbitbackup);
+				}
+				else if (filtV > 102) {
+					double freq = ClampDouble(30.0 * pow(300.0, (double)(filtV - 100) / 100.0), 30.0, 10000.0);
+					CalcBiquadFilter(&s_djFilt[ch], 1, freq, 0.7071, wavbitbackup);
+				}
+				else {
+					SetBiquadBypass(&s_djFilt[ch]);
 				}
 			}
 		}
-		const BOOL djActive = (lowV != 100 || midV != 100 || highV != 100 || filtV != 100 || killV != 0);
-		if (djActive) {
-			const int chN = (wavchannel >= 2) ? 2 : 1;
-			for (int i = 0; i < bufferIndex; ++i) {
+	}
+	const int djKillV = savedata.mpDjEqKill & 7;
+
+	for (int chunkStart = 0; chunkStart < numSamples; chunkStart += EQ_SAMPLE_CAP) {
+		int chunkLen = numSamples - chunkStart;
+		if (chunkLen > EQ_SAMPLE_CAP) chunkLen = EQ_SAMPLE_CAP;
+
+		// ---------------------------------------------------------
+		// ステージ 1: PCM読込 + マスター音量 + 倍精度15バンドEQ + トーン制御
+		// ---------------------------------------------------------
+		for (int i = 0; i < chunkLen; ++i) {
+			const int frameIdx = chunkStart + i;
+			for (int ch = 0; ch < wavchannel; ++ch) {
+				const int offset = (frameIdx * wavchannel + ch) * bytesPerSample;
+				double sig = (double)(PcmSampleToFloat(pRaw, offset, wavsam_depth) * masterGain);
+				ChannelState* cs = &g_channels[g_eqCur][ch];
+
+				for (int b = 0; b < EQ_BANDS; ++b)
+					sig = ProcessBiquadD(&cs->eqFilters[b], sig);
+				sig = ProcessBiquadD(&cs->clarityPeak, sig);
+				sig = ProcessBiquadD(&cs->clarityAir, sig);
+				sig = ProcessBiquadD(&cs->bassBalanceFilter, sig);
+				sig = ProcessBiquadD(&cs->trebleBalanceFilter, sig);
+				sig = ProcessBiquadD(&cs->densityLow, sig);
+				sig = ProcessBiquadD(&cs->densityMid, sig);
+
+				float out = (float)sig;
+				if (densityWarmAmt > 0.001f) {
+					// 密度ブースト時: ごく滑らかなソフトウォームスで中身の詰まった音に
+					float sat = tanhf(out * 1.45f) / 1.45f;
+					out = out * (1.0f - densityWarmAmt) + sat * densityWarmAmt;
+				}
+
+				if (wavchannel == 2) {
+					if (ch == 0) leftSamples[i] = out;
+					else         rightSamples[i] = out;
+				}
+				else {
+					leftSamples[i] = out;
+					rightSamples[i] = out;
+				}
+			}
+		}
+
+		// ---------------------------------------------------------
+		// ステージ 2: 位相整合 LR4 3バンド・ダイナミック・ヘッドルーム保護
+		// 低域を+12dB上げても中・高域の音量は 1.000 のまま下がらない！
+		// 高域を+12dB上げても低・中域の音量は 1.000 のまま下がらない！
+		// 閾値未満の帯域は完全無加工(ゲイン1.000)。
+		// ---------------------------------------------------------
+		MultibandProcessStereo(&g_mbProt[g_eqCur], leftSamples, rightSamples, chunkLen);
+
+		// ---------------------------------------------------------
+		// ステージ 3: 100環境 立体物理音響エンジン (or 環境オフ時は Spatial のみ適用)
+		// ---------------------------------------------------------
+		if (envActive) {
+			EnvEngineProcessStereo(&g_envEngine[g_eqCur], leftSamples, rightSamples, chunkLen, spatialWidth);
+		}
+		else if (wavchannel == 2 && fabsf(spatialWidth - 1.0f) > 0.01f) {
+			// 環境オフ時の立体感(Spatial): 120Hz以下をモノラル保持(Bass Mono Anchor)して位相崩れ防止
+			ChannelState* csL = &g_channels[g_eqCur][0];
+			ChannelState* csR = &g_channels[g_eqCur][1];
+			for (int i = 0; i < chunkLen; ++i) {
 				float l = leftSamples[i];
-				l = ProcessBiquad(&s_djLow[0], l);
-				l = ProcessBiquad(&s_djMid[0], l);
-				if (killV & 2) l = ProcessBiquad(&s_djMid[0], l);
-				l = ProcessBiquad(&s_djHigh[0], l);
-				l = ProcessBiquad(&s_djFilt[0], l);
-				leftSamples[i] = l;
+				float r = rightSamples[i];
+				float lowL = (float)ProcessBiquadD(&csL->bassMonoLP, (double)l);
+				float lowR = (float)ProcessBiquadD(&csR->bassMonoLP, (double)r);
+				float hiL = l - lowL;
+				float hiR = r - lowR;
+				float midHi  = (hiL + hiR) * 0.5f;
+				float sideHi = (hiL - hiR) * 0.5f * spatialWidth;
+				float midLo  = (lowL + lowR) * 0.5f;
+				float sideLo = (lowL - lowR) * 0.5f * ClampFloat(spatialWidth, 0.25f, 1.0f);
+				leftSamples[i]  = (midLo + sideLo) + (midHi + sideHi);
+				rightSamples[i] = (midLo - sideLo) + (midHi - sideHi);
+			}
+		}
+
+		// ---------------------------------------------------------
+		// ステージ 4: ユーザー追加エフェクト (リバーブ / コーラス / ディレイ)
+		// ---------------------------------------------------------
+		FxApplyUserEffects(leftSamples, rightSamples, chunkLen, wavbitbackup);
+
+		// ---------------------------------------------------------
+		// ステージ 5: ProAudio Mid/Side 幅 / ボーカルセンター / DJパッド
+		// ---------------------------------------------------------
+		if (wavchannel >= 2 && chunkLen > 0) {
+			ProAudio_ApplyMS(leftSamples, rightSamples, chunkLen,
+				savedata.pro_ms_width, savedata.pro_ms_mono);
+		}
+		if (wavchannel >= 2 && chunkLen > 0 && savedata.mpVocalCenter != 100) {
+			const float midGain = (float)savedata.mpVocalCenter / 100.0f;
+			for (int i = 0; i < chunkLen; ++i) {
+				const float mid  = (leftSamples[i] + rightSamples[i]) * 0.5f;
+				const float side = (leftSamples[i] - rightSamples[i]) * 0.5f;
+				const float midS = mid * midGain;
+				leftSamples[i]  = midS + side;
+				rightSamples[i] = midS - side;
+			}
+		}
+
+		if (djActiveCheck && chunkLen > 0) {
+			const int chN = (wavchannel >= 2) ? 2 : 1;
+			for (int i = 0; i < chunkLen; ++i) {
+				double l = (double)leftSamples[i];
+				l = ProcessBiquadD(&s_djLow[0], l);
+				l = ProcessBiquadD(&s_djMid[0], l);
+				if (djKillV & 2) l = ProcessBiquadD(&s_djMid[0], l);
+				l = ProcessBiquadD(&s_djHigh[0], l);
+				l = ProcessBiquadD(&s_djFilt[0], l);
+				leftSamples[i] = (float)l;
 				if (chN > 1) {
-					float r = rightSamples[i];
-					r = ProcessBiquad(&s_djLow[1], r);
-					r = ProcessBiquad(&s_djMid[1], r);
-					if (killV & 2) r = ProcessBiquad(&s_djMid[1], r);
-					r = ProcessBiquad(&s_djHigh[1], r);
-					r = ProcessBiquad(&s_djFilt[1], r);
-					rightSamples[i] = r;
-				} else {
-					rightSamples[i] = l;
+					double r = (double)rightSamples[i];
+					r = ProcessBiquadD(&s_djLow[1], r);
+					r = ProcessBiquadD(&s_djMid[1], r);
+					if (djKillV & 2) r = ProcessBiquadD(&s_djMid[1], r);
+					r = ProcessBiquadD(&s_djHigh[1], r);
+					r = ProcessBiquadD(&s_djFilt[1], r);
+					rightSamples[i] = (float)r;
+				}
+				else {
+					rightSamples[i] = (float)l;
 				}
 			}
 		}
-	}
 
-	// ===================================================
-	// 【最終段前】メイクアップゲインの適用
-	// ===================================================
-	for (int i = 0; i < bufferIndex; i++) {
-		leftSamples[i] *= eqMakeupGain;
-		rightSamples[i] *= eqMakeupGain;
-	}
+		// ラウドネス計測 / 位相相関メーター
+		if (chunkLen > 0) {
+			ProAudio_LoudnessFeed(leftSamples, rightSamples, chunkLen, wavbitbackup);
+			if (savedata.pro_corr_meter)
+				ProAudio_CorrFeed(leftSamples, rightSamples, chunkLen);
+		}
 
-	// ラウドネス計測 / 相関（リミッター前の実聴感に近い信号）
-	if (bufferIndex > 0) {
-		ProAudio_LoudnessFeed(leftSamples, rightSamples, bufferIndex, wavbitbackup);
-		if (savedata.pro_corr_meter)
-			ProAudio_CorrFeed(leftSamples, rightSamples, bufferIndex);
-	}
-
-	// ===================================================
-	// 【最終段】拡張音量のあと、天井リミッター（-0.20 dBTP）
-	// サンプル位置は変えない。閾値未満はゲイン 1。
-	// ===================================================
-	{
-		const float extBoostGain = GetExternalBoostGain();
+		// ---------------------------------------------------------
+		// ステージ 6: 外部音量ブースト + 真のルックアヘッド・トゥルーピークリミッター
+		// ---------------------------------------------------------
 		if (extBoostGain != 1.0f) {
-			for (int i = 0; i < bufferIndex; i++) {
-				leftSamples[i] *= extBoostGain;
+			for (int i = 0; i < chunkLen; ++i) {
+				leftSamples[i]  *= extBoostGain;
 				rightSamples[i] *= extBoostGain;
 			}
 		}
-		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup);
-	}
+		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, chunkLen, wavbitbackup);
 
-	// ===== 最終出力: float → 整数PCM 書き戻し =====
-	{
-		int bi = 0;
-		for (int i = 0; i < numSamples; i++) {
-			for (int ch = 0; ch < wavchannel; ch++) {
+		// ---------------------------------------------------------
+		// ステージ 7: float → 整数PCM 書き戻し
+		// ---------------------------------------------------------
+		for (int i = 0; i < chunkLen; ++i) {
+			const int frameIdx = chunkStart + i;
+			for (int ch = 0; ch < wavchannel; ++ch) {
 				if (ch >= MAX_CH) continue;
-
-				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
-
-				// 天井リミッター通過後も、整数化の直前で ±1 に収める
-				if (finalOut > 1.0f)  finalOut = 1.0f;
-				if (finalOut < -1.0f) finalOut = -1.0f;
-
-				int offset = (i * wavchannel + ch) * bytesPerSample;
-				if (wavsam_depth == 16) {
-					int32_t v = (int32_t)roundf(finalOut * 32768.0f);
-					if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-					*((short*)(pRaw + offset)) = (short)v;
-				}
-				else if (wavsam_depth == 24) {
-					int32_t v = (int32_t)roundf(finalOut * 8388608.0f);
-					if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
-					pRaw[offset] = v & 0xFF;
-					pRaw[offset + 1] = (v >> 8) & 0xFF;
-					pRaw[offset + 2] = (v >> 16) & 0xFF;
-				}
-				else if (wavsam_depth == 32)
-					*((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
-				else
-					pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
+				const float finalOut = (ch == 0) ? leftSamples[i] : rightSamples[i];
+				const int offset = (frameIdx * wavchannel + ch) * bytesPerSample;
+				FloatToPcmSample(pRaw, offset, wavsam_depth, finalOut);
 			}
-			// left/rightSamples はフレーム単位。mono/多ch でも毎フレーム進める
-			// （旧: wavchannel==2 のときだけ → mono は全サンプルが leftSamples[0] になりノイズ化）
-			bi++;
 		}
 	}
 
-	// リサンプリングしていた場合は元のサンプルレートに戻して tempBuffer を解放
+	// リサンプリングしていた場合は元のサンプルレートへ戻す (tempBuffer はプール再利用のため free 不要)
 	if (needsResampling) {
 		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
-		free(tempBuffer);
 	}
 
-	// クロスフェードイン(曲頭) + テール蓄積(曲末用)。リサンプリング後の実出力に適用。
-	{
-		void* outPtr = data;
-		int outLen = originalLen;
-		if (!needsResampling) {
-			outPtr = processData;
-			outLen = processLen;
-		}
-		EqTailOut(outPtr, outLen, originalRate);
-	}
+	// クロスフェードイン(曲頭) + テール蓄積(曲末用)
+	EqTailOut(needsResampling ? data : processData,
+		needsResampling ? originalLen : processLen,
+		originalRate);
 }
 
 

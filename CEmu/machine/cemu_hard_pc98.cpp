@@ -1963,6 +1963,12 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 				opnaMode = 1;
 				s_pmd86Board = 1;
 			}
+			/* PMDPPZ（eveppz8）も A460 が FF だと INT0B を植えない。 */
+			if (_stricmp(ge->rom[i].type, "shell") == 0
+				&& _strnicmp(raw, "PMDPPZ", 6) == 0) {
+				opnaMode = 1;
+				s_pmd86Board = 1;
+			}
 			if (_stricmp(ge->rom[i].type, "shell") == 0
 				&& _strnicmp(raw, "P86DRV", 6) == 0)
 				opnaMode = 1;

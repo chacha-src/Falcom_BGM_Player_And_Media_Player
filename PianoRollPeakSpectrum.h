@@ -54,6 +54,9 @@ namespace PianoRollPeakSpectrum
 
             int m = 64;
             while (m < n) m <<= 1;
+            // 低音帯域(C3未満)を含む長窓のみ 2 倍ゼロ詰め(8192→16384)で周波数補間精度を高め、
+            // 近接したキックとベース基音(1〜2半音差)の主ローブ癒着を軽減する。
+            if (keyLo < 48 && m * 2 <= FFT_MAX) m <<= 1;
             Prepare(m);
             for (int i = 0; i < n; ++i) {
                 m_re[i] = windowed[i];
@@ -84,11 +87,11 @@ namespace PianoRollPeakSpectrum
             //    中域(350Hz〜3200Hz)の非ピークビンの 25% 分位点を基準フロアとし、
             //    中高域(key>=64)のみ局所(±6半音・最低32ビン)の 25% 分位点とブレンドする。
             memset(m_isPeakLobe, 0, (size_t)(half + 2));
-            for (int b = 2; b <= half - 2; ++b) {
+            const int lobeR = (resBins >= 1.5) ? 2 : 1;
+            for (int b = lobeR + 1; b <= half - lobeR - 1; ++b) {
                 if (m_pow[b] > m_pow[b - 1] && m_pow[b] >= m_pow[b + 1]) {
-                    m_isPeakLobe[b - 1] = 1;
-                    m_isPeakLobe[b] = 1;
-                    m_isPeakLobe[b + 1] = 1;
+                    for (int r = -lobeR; r <= lobeR; ++r)
+                        m_isPeakLobe[b + r] = 1;
                 }
             }
 
@@ -100,11 +103,34 @@ namespace PianoRollPeakSpectrum
             }
             const float midBandFloor = (gCnt > 8) ? SelectKth(m_sel, gCnt, gCnt / 4) : 0.0f;
 
+            // 低域(40〜350Hz)固有の雑音床も広帯域から推定する。激しい曲で中域の歪み・スネアが
+            // midBandFloor を押し上げても、低域側が静かならベース基音を自己マスクしない。
+            float lowBandFloor = midBandFloor;
+            if (keyLo < 64) {
+                int lCnt = 0;
+                const int bLowLo = (int)ceil(40.0 / binHz);
+                const int bLowHi = (int)floor(350.0 / binHz);
+                for (int b = (bLowLo > 3 ? bLowLo : 3); b <= (bLowHi < half - 2 ? bLowHi : half - 2) && lCnt < (FFT_MAX / 2); ++b) {
+                    if (!m_isPeakLobe[b]) m_sel[lCnt++] = m_pow[b];
+                }
+                if (lCnt >= 10) {
+                    lowBandFloor = SelectKth(m_sel, lCnt, lCnt / 5);
+                    if (midBandFloor > 0.0f) {
+                        if (lowBandFloor < midBandFloor * 0.35f) lowBandFloor = midBandFloor * 0.35f;
+                        if (lowBandFloor > midBandFloor * 1.05f) lowBandFloor = midBandFloor * 1.05f;
+                    }
+                }
+            }
+
             for (int k = 0; k < KEYS; ++k) {
                 if (k < 64) {
-                    // 低〜中低音(E4未満)はビン裾重なりによる自己マスクを防ぐため基準フロアを使用
-                    const float bandMul = (k < 48) ? 1.15f : 1.00f;
-                    m_noisePow[k] = midBandFloor * bandMul;
+                    if (k < 48) {
+                        m_noisePow[k] = lowBandFloor;
+                    }
+                    else {
+                        const float t = (float)(k - 48) / 16.0f;
+                        m_noisePow[k] = lowBandFloor * (1.0f - t) + midBandFloor * t;
+                    }
                     continue;
                 }
                 const double fc = (double)PianoKey::KeyHz(k) * tuneMul;
@@ -136,18 +162,42 @@ namespace PianoRollPeakSpectrum
                 // 高域で和音が密集しても基準フロアの 1.6 倍までに抑え、メロディ消失を防ぐ
                 if (midBandFloor > 0.0f && locFloor > midBandFloor * 1.6f)
                     locFloor = midBandFloor * 1.6f;
-                // C6 以上の床は中域の 0.45 倍で止める。緩めすぎると高域が雑音で満ちる。
-                const float floorMul = 0.45f;
+                // C6 以上の床は自然減衰に沿って緩やかに下げつつ、超高域のシンバル・ヒス雑音は通さない。
+                float floorMul = 0.44f;
+                if (k > 80) {
+                    floorMul = 0.44f - 0.12f * (float)(k - 80) / 27.0f;
+                    if (floorMul < 0.32f) floorMul = 0.32f;
+                }
                 if (locFloor < midBandFloor * floorMul)
                     locFloor = midBandFloor * floorMul;
                 m_noisePow[k] = locFloor;
+            }
+            // C5〜D#7 の第2〜第4倍音(4kHz〜9.2kHz)を観測できるよう超高域の雑音床も推定する
+            float superHiFloor1 = midBandFloor * 0.14f;
+            float superHiFloor2 = midBandFloor * 0.09f;
+            if (keyHi >= KEYS) {
+                auto bandFloorHz = [&](double f0, double f1, float minMul) -> float {
+                    int i0 = (int)floor(f0 / binHz);
+                    int i1 = (int)ceil(f1 / binHz);
+                    if (i0 < 2) i0 = 2;
+                    if (i1 > half - 2) i1 = half - 2;
+                    int cnt = 0;
+                    for (int b = i0; b <= i1 && cnt < (FFT_MAX / 2); ++b)
+                        if (!m_isPeakLobe[b]) m_sel[cnt++] = m_pow[b];
+                    float fl = (cnt >= 8) ? SelectKth(m_sel, cnt, cnt / 2) : (midBandFloor * minMul);
+                    if (fl < midBandFloor * minMul) fl = midBandFloor * minMul;
+                    return fl;
+                };
+                superHiFloor1 = bandFloorHz(3950.0, 6200.0, 0.14f);
+                superHiFloor2 = bandFloorHz(6200.0, 9400.0, 0.09f);
             }
             for (int k = keyLo; k < keyHi; ++k)
                 outFloor[k] = sqrtf(m_noisePow[k]) * magScale;
 
             // 2) 局所ピークの抽出 → サイドローブ除去 → 最も近い 1 つの鍵へ集約。
             const double fLo = (double)PianoKey::KeyHz(keyLo) * tuneMul * 0.97153;
-            const double fHi = (double)PianoKey::KeyHz(keyHi - 1) * tuneMul * 1.02930;
+            double fHi = (double)PianoKey::KeyHz(keyHi - 1) * tuneMul * 1.02930;
+            if (keyHi >= KEYS && fHi < 9200.0) fHi = 9200.0;
             int bLo = (int)floor(fLo / binHz) - 1;
             int bHi = (int)ceil(fHi / binHz) + 1;
             if (bLo < 2) bLo = 2;
@@ -158,8 +208,10 @@ namespace PianoRollPeakSpectrum
             for (int b = bLo; b <= bHi && np < PEAK_MAX; ++b) {
                 const float p = m_pow[b];
                 if (!(p > m_pow[b - 1] && p >= m_pow[b + 1])) continue;
-                const int kn = KeyOfHz((double)b * binHz, tuneSemis);
-                const float np0 = m_noisePow[kn];
+                const double bHz = (double)b * binHz;
+                const int kn = KeyOfHz(bHz, tuneSemis);
+                const float np0 = (bHz <= 4050.0) ? m_noisePow[kn]
+                    : ((bHz <= 6200.0) ? superHiFloor1 : superHiFloor2);
                 const float a = 10.0f * log10f(m_pow[b - 1] + 1.0e-30f);
                 const float c = 10.0f * log10f(p);
                 const float e = 10.0f * log10f(m_pow[b + 1] + 1.0e-30f);
@@ -173,10 +225,10 @@ namespace PianoRollPeakSpectrum
                 // 3 ビン積分値との大きい方を採る(割り当て先は単一鍵 k のみなので隣鍵へは漏れない)。
                 const float lobe = (m_pow[b - 1] + p + m_pow[b + 1]) / lobeNorm;
                 if (lobe > pkPow) pkPow = lobe;
-                // 高域の床は中域(350Hz–3.2kHz)からの借り物で、実音より高い。C6 以上に一番きつい S/N を掛けると高音が消える。
-                float snrMul = 0.85f;
+                // 高域の床は中域(350Hz–3.2kHz)下限クランプを含むため、C6 以上に過大な S/N を掛けない。
+                float snrMul = 0.82f;
                 if (kn < 60) snrMul = 0.70f;
-                else if (kn >= 84) snrMul = 1.00f;
+                else if (kn >= 84) snrMul = 0.78f;
                 const float snrNeed = snrLin * snrMul;
                 if (pkPow < 1.0e-20f || pkPow <= np0 * snrNeed) continue;
                 m_peakBin[np] = (float)b + delta;
@@ -201,11 +253,14 @@ namespace PianoRollPeakSpectrum
             for (int oi = 0; oi < np; ++oi) {
                 const int i = m_order[oi];
                 bool side = false;
+                const double hzI = (double)m_peakBin[i] * binHz;
+                const float minBinD = (hzI < 165.0) ? 1.05f : 1.50f;
                 for (int q = 0; q < nk && !side; ++q) {
                     const int j = m_kept[q];
                     const float d = fabsf(m_peakBin[i] - m_peakBin[j]) / (float)resBins;
-                    // 同一主ローブの割れ(1.5 ビン以内)は強い方だけ残す。残すと隣鍵が同時点灯する。
-                    if (d < 1.5f) { side = true; break; }
+                    // 同一主ローブの割れは強い方だけ残す。165Hz未満では1.5ビンが2〜3半音に及ぶため
+                    // 1.05ビンへ緩和し、半音未満の重複は直後の cents<55 で確実に防ぐ。
+                    if (d < minBinD) { side = true; break; }
                     if (d > 24.0f) continue;
                     float lim = m_peakPow[j] * slLin;
                     if (d > 2.5f) {

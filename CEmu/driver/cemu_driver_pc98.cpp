@@ -12,6 +12,10 @@ enum {
 
 /* TriggerPlay 直後の OPN IRQ 回数。休符でキーオンが無いだけの曲を、2 秒で頭に戻さない。 */
 static unsigned s_wdIrqAtTrigger;
+/* adndds の導入休符は PIT で進み OPN IRQ は増えない。再キックすると R48 の途中へ戻り、最初のノートに届かない。
+   最初のキーオン前の出力はキーオフのクリックだけで、休符の先頭窓が '.' になる。 */
+static int s_wdPitSong;
+static unsigned s_wdKeyAtTrigger;
 
 /* PC-98 ドライバ */
 CDriverPc98::CDriverPc98()
@@ -59,6 +63,7 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	wdReplays_ = 0;
 	wdEverActive_ = 0;
 	s_wdIrqAtTrigger = 0;
+	s_wdPitSong = (ge->archive[0] && _stricmp(ge->archive, "adndds_98") == 0) ? 1 : 0;
 
 	{
 		CEmuNp2Guard np2;
@@ -172,6 +177,10 @@ void CDriverPc98::WatchdogTick()
 		wdEverActive_ = 1;
 		return;
 	}
+	if (s_wdPitSong) {
+		wdEverActive_ = 1;
+		return;
+	}
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
 	if (loadOnly)
@@ -201,11 +210,14 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 		if (!loadOnly)
 			hw_->TriggerPlay(titleCode_);
 		s_wdIrqAtTrigger = hw_->opnIrqDeliverCount_;
+		s_wdKeyAtTrigger = hw_->opnKeyOnCount_;
 		triggered_ = 1;
 	}
 	hw_->BootPcmStopCapture();
 	const int want = frames;
 	const int drained = hw_->BootPcmDrain(stereo, frames);
+	if (s_wdPitSong && hw_->opnKeyOnCount_ == s_wdKeyAtTrigger && drained > 0)
+		memset(stereo, 0, (size_t)drained * 2u * sizeof(int16_t));
 	if (drained >= want)
 		return want;
 	if (drained > 0) {
@@ -238,7 +250,14 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 			}
 			cpuDebt_ -= (int64_t)(hw_->cpuCycles_ - start);
 		}
-		chip->Render(stereo + i * 2, 1);
+		if (s_wdPitSong && hw_->opnKeyOnCount_ == s_wdKeyAtTrigger) {
+			int16_t dump[2];
+			chip->Render(dump, 1);
+			stereo[i * 2] = 0;
+			stereo[i * 2 + 1] = 0;
+		} else {
+			chip->Render(stereo + i * 2, 1);
+		}
 		hw_->MixBeep(stereo + i * 2, 1);
 		if (opl) {
 			/* SOUND ORCHESTRA の売りは疑似ステレオ: OPL が左、YM2203 が右

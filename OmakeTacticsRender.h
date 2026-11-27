@@ -739,6 +739,22 @@ public:
 	void SetVeilMask(int on);
 	void SetTheme(int theme) { m_theme = theme; }
 	void SetSky(int wx, int hour) { m_wx = wx; m_hour = hour; }
+	void SetFloodPlane(float surfaceY, int on)
+	{
+		m_fcb.flood[0] = surfaceY;
+		m_fcb.flood[1] = on ? 1.f : 0.f;
+		float under = 0.f;
+		if (on) under = Clampf((surfaceY - m_eye.y) / 2.6f, 0.f, 1.f);
+		m_fcb.flood[2] = under;
+		m_fcb.flood[3] = 0.f;
+	}
+	void SetFieldGrade(float grav, float recoil, float fault, float frost)
+	{
+		m_fcb.field[0] = grav;
+		m_fcb.field[1] = recoil;
+		m_fcb.field[2] = fault;
+		m_fcb.field[3] = frost;
+	}
 	void SetScreenFx(float crit, float fairy, float lightning, float quake, float wet, BOOL cutScene, BOOL hasMarks, float hit = 0.f)
 	{
 		m_fcb.fxNow[0] = crit;
@@ -811,6 +827,12 @@ public:
 	// キューに積む描画へ深度を残す。SetDepthTest は直後の DrawStatic に届かない。
 	void SetDepthWant(BOOL on) { m_dsWant = on ? m_dsWrite : m_dsOff; if (m_ctx) m_ctx->OMSetDepthStencilState(m_dsWant, 0); }
 	void DrawWater();
+	void DrawWaterTris(const VtxS* v, int n, DWORD waterCol);
+	// 水没の水面。地形が変わるまで GPU 側のバッファを使い、毎フレーム組み直さない。
+	BOOL FloodMeshReady(unsigned key) const;
+	void UploadFloodMesh(unsigned key, const VtxS* v, int n);
+	void DrawFloodMesh(DWORD waterCol);
+	void DropFloodMesh();
 	void SetLiquidRipples(const float* rip, int n);
 	void SetStageId(int stage);
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
@@ -1201,6 +1223,10 @@ private:
 	ID3D11Buffer* m_cbBones;
 	ID3D11Buffer* m_vbHud;
 	ID3D11Buffer* m_vbDyn;
+	ID3D11Buffer* m_floodVB;
+	UINT m_floodN;
+	unsigned m_floodKey;
+	int m_floodLive;
 	ID3D11Buffer* m_vbInst;
 	ID3D11Buffer* m_ibQuad;
 	UINT m_vbDynBytes;
@@ -1309,6 +1335,8 @@ private:
 		float hole2[4]; // x=不透明帯の下端 y=他レイヤー透かし z=ゴーストパス w=周辺半径
 		float fxNow[4]; // x=クリティカル画面 y=妖精画面 z=稲妻光 w=地面跡有効
 		float fxMore[4]; // x=地面濡れ y=地震 z=カット中 w=ポートレート
+		float flood[4];  // x=水面の高さ y=有効 z=視点が水中
+		float field[4];  // x=高重力 y=低反発 z=断層の閃き w=凍土
 	} m_fcb;
 	M4 m_lightVP;
 	M4 m_refSavedInv;

@@ -306,12 +306,12 @@ private:
     float m_noiseSmoothed[KEY_COUNT];     // 同 IIR
     float m_fftSalRaw[KEY_COUNT];         // FFT 連続周波数の調波サリエンス
     float m_fftSalSmoothed[KEY_COUNT];    // 同 IIR
-    static constexpr int DET_PEAK_MAX = 80;
+    static constexpr int DET_PEAK_MAX = 160;
     float m_detPeakHz[DET_PEAK_MAX];
     float m_detPeakAmp[DET_PEAK_MAX];
     int   m_detPeakN = 0;
-    // 直近 2048 サンプル（約 46ms）の山。短いアルペジオを長い窓の平均から拾う。
-    static constexpr int BURST_MAX = 16;
+    // 直近 2048 サンプル（約 46ms）の山。高音アルペジオが低中音の強い峰16個で押し出されないよう十分な枠を確保する。
+    static constexpr int BURST_MAX = 64;
     float m_burstHz[BURST_MAX] = {};
     float m_burstAmp[BURST_MAX] = {};
     int   m_burstN = 0;

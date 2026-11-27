@@ -94,7 +94,7 @@ static MapSlot s_slot[32];
 static int s_nslot = 0;
 
 struct S3BinMap { const BYTE* view; DWORD bytes; int n; int tried; HANDLE file; HANDLE map; };
-static S3BinMap s_bins[3];
+static S3BinMap s_bins[4];
 
 void Soft3DReleaseBonusBins()
 {
@@ -102,7 +102,7 @@ void Soft3DReleaseBonusBins()
 		const BYTE* p = s_slot[i].p;
 		bool inside = false;
 		if (p && !s_slot[i].hFile) {
-			for (int b = 0; b < 3; b++) {
+			for (int b = 0; b < 4; b++) {
 				const BYTE* v = s_bins[b].view;
 				if (!v || v == (const BYTE*)1) continue;
 				if (p >= v && p < v + s_bins[b].bytes) { inside = true; break; }
@@ -113,7 +113,7 @@ void Soft3DReleaseBonusBins()
 		s_slot[s_nslot - 1] = MapSlot();
 		s_nslot--;
 	}
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 4; i++) {
 		if (s_bins[i].view && s_bins[i].view != (const BYTE*)1)
 			UnmapViewOfFile(s_bins[i].view);
 		if (s_bins[i].map) CloseHandle(s_bins[i].map);

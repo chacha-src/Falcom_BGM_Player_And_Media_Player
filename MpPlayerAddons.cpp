@@ -4335,20 +4335,22 @@ static void MpRemoteHandleRequest(SOCKET s)
 			const wchar_t* raw = MpRemoteEqEnvLabel(ei);
 			const BOOL isSep = (raw && wcsstr(raw, L"--[[") != NULL);
 			CStringW shown;
+			int optVal = -1;
 			if (isSep) {
 				shown = raw;
 			} else {
+				optVal = envNum++;
 				wchar_t nb[192];
-				_snwprintf_s(nb, _TRUNCATE, L"%03d.%s", envNum++, raw ? raw : L"?");
+				_snwprintf_s(nb, _TRUNCATE, L"%03d.%s", optVal, raw ? raw : L"?");
 				shown = nb;
 			}
 			CStringW esc;
 			MpRemoteEscHtml(shown, esc);
 			CStringW opt;
 			if (isSep)
-				opt.Format(L"<option value=\"%d\" disabled>%s</option>", ei, (LPCWSTR)esc);
+				opt.Format(L"<option value=\"-1\" disabled>%s</option>", (LPCWSTR)esc);
 			else
-				opt.Format(L"<option value=\"%d\">%s</option>", ei, (LPCWSTR)esc);
+				opt.Format(L"<option value=\"%d\">%s</option>", optVal, (LPCWSTR)esc);
 			page += opt;
 		}
 	}
@@ -5042,11 +5044,11 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			MpRemoteSyncEqUi();
 		}
 		break;
-	case 16: // eq env
+	case 16: // eq env (論理インデックス 0..100: ENV_PRESETS と1対1対応)
 		{
 			int p = (int)lParam;
 			if (p < 0) p = 0;
-			if (p >= MP_REMOTE_EQ_ENV_COUNT) p = MP_REMOTE_EQ_ENV_COUNT - 1;
+			if (p > 100) p = 100;
 			savedata.eqsoundenv = p;
 			MpPersistSavedataQuick();
 			MpRemoteSyncEqUi();

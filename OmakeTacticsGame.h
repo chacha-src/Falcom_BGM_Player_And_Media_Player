@@ -298,11 +298,16 @@ private:
 	void BeginTurn();
 	void TickField(float dt);
 	void CommitCollapse();
+	void CommitFault();
 	BOOL FieldHides(int ui) const;
 	BOOL VeilShows(int x, int z) const;
 	void PlayerSelectMove(int x, int z);
 	void StartMove(int ui, int tx, int tz, int nextPhase);
 	void UpdateMove(float dt);
+	void UpdateWarp(float dt);
+	void FinishAfterMove(int ui, int next);
+	void DrawGimmickEffects();
+	void DrawSpecialStage3D();
 	void OpenCommand();
 	BOOL HasAttackTarget(int ui) const;
 	BOOL ChestInRange(int ui, int x, int z) const;
@@ -315,6 +320,7 @@ private:
 	void FinishSeq();
 	void GrantFoeLoot(int ui, int coop);
 	void AwardExp();
+	int GrantChestExp(int ui, BOOL queueCard);
 	void FinishUnitTurn(int acted);
 	void RaiseStampede();
 	void ConfuseSelf(int ui);
@@ -342,6 +348,7 @@ private:
 	void PickSkillCursor(int skill);
 	void DrawTurnOrder();
 	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big, float* rx = 0, float* ry = 0, float* rw = 0, float* rh = 0);
+	void DrawPortraitBuffs(const Unit& u, float px, float py, float ps);
 	void DrawForecast(float* ox = 0, float* oy = 0, float* ow = 0, float* oh = 0);
 	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
 	void DrawMinimap(float x, float y, float s, int layer = 0);
@@ -737,7 +744,13 @@ private:
 	unsigned char m_seen[MAPN][MAPN];
 	float m_fieldClock;
 	float m_wave;
-	int m_waveStr, m_waveH, m_waveHit;
+	float m_faultPulse;
+	int m_waveStr, m_waveH, m_waveHit, m_waveDir;
+	int m_warpOn, m_warpUi, m_warpNext, m_warpColor;
+	float m_warpT;
+	V3 m_warpSrc, m_warpDst;
+	Buf<VtxP> m_fxRib;
+	Buf<VtxS> m_floodV;
 	Actor m_act[MAX_UNITS];
 	Phase m_phase, m_phaseBeforeMenu;
 	float m_phaseT;
@@ -796,8 +809,8 @@ private:
 	int m_strkN;
 	float m_stepL, m_stepTi;
 	struct Proj { int active; float t, launch, dur; int el, kind, arrow, self, style, skill; } m_proj;
-	struct TacLog { wchar_t s[80]; DWORD col; };
-	TacLog m_log[24];
+	struct TacLog { wchar_t s[160]; DWORD col; };
+	TacLog m_log[64];
 	int m_logN;
 	float m_orderBottom;
 	struct HudLay {
